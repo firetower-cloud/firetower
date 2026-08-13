@@ -6,13 +6,20 @@
 
 use anyhow::{Context, Result};
 use ft_core::{
-    Event, EventKind, Host, HostId, HostState, Repo, RepoId, Session, SessionId, SessionStatus,
-    WorkspaceSize,
+    Agent, AgentMode, AgentPresence, Event, EventKind, Host, HostId, HostState, Repo, RepoId,
+    Session, SessionId, SessionStatus, WorkspaceSize,
 };
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use sqlx::{Row, SqlitePool};
 use std::path::Path;
 use std::str::FromStr;
+
+/// What one host last said about one agent, and when.
+pub struct StoredPresence {
+    pub host: HostId,
+    pub found: AgentPresence,
+    pub checked_at: String,
+}
 
 #[derive(Clone)]
 pub struct Db {
@@ -170,6 +177,165 @@ impl Db {
         self.repo_by_remote(remote)
             .await?
             .context("repo vanished after insert")
+    }
+
+    // ── credentials ────────────────────────────────────────────────────
+
+    /// Note that a keychain entry exists. A flag, never the value.
+    pub async fn mark_credential(&self, scope: &str, name: &str) -> Result<()> {
+        sqlx::query("INSERT OR IGNORE INTO credentials (scope, name) VALUES (?, ?)")
+            .bind(scope)
+            .bind(name)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    pub async fn clear_credential(&self, scope: &str, name: &str) -> Result<()> {
+        sqlx::query("DELETE FROM credentials WHERE scope = ? AND name = ?")
+            .bind(scope)
+            .bind(name)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    /// Whether one is set, without reading it — which would be a blocking call
+    /// the operating system may gate behind a prompt.
+    pub async fn has_credential(&self, scope: &str, name: &str) -> Result<bool> {
+        let row = sqlx::query("SELECT 1 FROM credentials WHERE scope = ? AND name = ?")
+            .bind(scope)
+            .bind(name)
+            .fetch_optional(&self.pool)
+            .await?;
+        Ok(row.is_some())
+    }
+
+    // ── agents ─────────────────────────────────────────────────────────
+
+    /// How each configured agent authenticates. Kinds nobody has touched are
+    /// absent rather than present-and-empty.
+    pub async fn agent_modes(&self) -> Result<Vec<(Agent, AgentMode, bool, bool)>> {
+        let rows = sqlx::query("SELECT kind, mode, enabled, secret FROM agents")
+            .fetch_all(&self.pool)
+            .await?;
+
+        Ok(rows
+            .iter()
+            .filter_map(|r| {
+                let kind = Agent::from_name(&r.get::<String, _>("kind"))?;
+                let mode = match r.get::<String, _>("mode").as_str() {
+                    "Subscription" => AgentMode::Subscription,
+                    "ApiKey" => AgentMode::ApiKey,
+                    _ => AgentMode::NotNeeded,
+                };
+                // The fourth is whether a secret is set, never the secret.
+                Some((
+                    kind,
+                    mode,
+                    r.get::<i64, _>("enabled") != 0,
+                    r.get::<Option<String>, _>("secret").is_some(),
+                ))
+            })
+            .collect())
+    }
+
+    /// Configure an agent. `secret` of `None` clears whatever was there, so
+    /// switching modes never leaves the previous mode's value behind.
+    pub async fn set_agent_mode(
+        &self,
+        kind: Agent,
+        mode: AgentMode,
+        enabled: bool,
+        secret: Option<&str>,
+    ) -> Result<()> {
+        sqlx::query(
+            "INSERT INTO agents (kind, mode, enabled, secret, updated_at) VALUES (?, ?, ?, ?, ?)
+             ON CONFLICT(kind) DO UPDATE SET mode = excluded.mode,
+                                             enabled = excluded.enabled,
+                                             secret = excluded.secret,
+                                             updated_at = excluded.updated_at",
+        )
+        .bind(format!("{kind:?}"))
+        .bind(format!("{mode:?}"))
+        .bind(i64::from(enabled))
+        .bind(secret)
+        .bind(chrono::Utc::now().to_rfc3339())
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// The value an agent authenticates with, if it has one.
+    ///
+    /// Read only when a workspace is about to start. Nothing that renders a
+    /// screen should call this — see [`Db::agent_modes`] for what's set.
+    pub async fn agent_secret(&self, kind: Agent) -> Result<Option<String>> {
+        let row = sqlx::query("SELECT secret FROM agents WHERE kind = ?")
+            .bind(format!("{kind:?}"))
+            .fetch_optional(&self.pool)
+            .await?;
+        Ok(row.and_then(|r| r.get::<Option<String>, _>("secret")))
+    }
+
+    /// Back to unconfigured. The keychain entry is the caller's to remove.
+    pub async fn forget_agent(&self, kind: Agent) -> Result<()> {
+        sqlx::query("DELETE FROM agents WHERE kind = ?")
+            .bind(format!("{kind:?}"))
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    /// Remember what a host said, so the screen renders before we can ask again.
+    pub async fn record_presence(&self, host: &HostId, found: &[AgentPresence]) -> Result<()> {
+        let now = chrono::Utc::now().to_rfc3339();
+        for a in found {
+            sqlx::query(
+                "INSERT INTO agent_presence
+                     (host_id, kind, installed, version, logged_in, account, checked_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?)
+                 ON CONFLICT(host_id, kind) DO UPDATE SET installed = excluded.installed,
+                                                          version = excluded.version,
+                                                          logged_in = excluded.logged_in,
+                                                          account = excluded.account,
+                                                          checked_at = excluded.checked_at",
+            )
+            .bind(host.as_str())
+            .bind(format!("{:?}", a.kind))
+            .bind(i64::from(a.installed))
+            .bind(a.version.as_deref())
+            .bind(a.logged_in.map(i64::from))
+            .bind(a.account.as_deref())
+            .bind(&now)
+            .execute(&self.pool)
+            .await?;
+        }
+        Ok(())
+    }
+
+    /// Everything every host last reported.
+    pub async fn presence(&self) -> Result<Vec<StoredPresence>> {
+        let rows = sqlx::query("SELECT * FROM agent_presence")
+            .fetch_all(&self.pool)
+            .await?;
+
+        Ok(rows
+            .iter()
+            .filter_map(|r| {
+                Some(StoredPresence {
+                    host: HostId::from_stored(r.get::<String, _>("host_id")),
+                    found: AgentPresence {
+                        kind: Agent::from_name(&r.get::<String, _>("kind"))?,
+                        installed: r.get::<i64, _>("installed") != 0,
+                        version: r.get::<Option<String>, _>("version"),
+                        logged_in: r.get::<Option<i64>, _>("logged_in").map(|v| v != 0),
+                        account: r.get::<Option<String>, _>("account"),
+                    },
+                    checked_at: r.get::<String, _>("checked_at"),
+                })
+            })
+            .collect())
     }
 
     pub async fn repo_by_remote(&self, remote: &str) -> Result<Option<Repo>> {
@@ -341,10 +507,26 @@ impl Db {
     }
 
     pub async fn events_since(&self, since: i64) -> Result<Vec<Event>> {
+        self.events_since_for(since, None).await
+    }
+
+    /// Replay, optionally narrowed to one session.
+    ///
+    /// Narrowing in SQL rather than in the caller: a session's page wants tens
+    /// of rows and the log holds every event from every host.
+    pub async fn events_since_for(
+        &self,
+        since: i64,
+        session: Option<&SessionId>,
+    ) -> Result<Vec<Event>> {
+        // Numbered rather than positional: mixing `?` and `?1` makes SQLite
+        // reuse the first binding for both, which silently matches nothing.
         let rows = sqlx::query(
-            "SELECT id, session_id, payload, created_at FROM events WHERE id > ? ORDER BY id",
+            "SELECT id, session_id, payload, created_at FROM events
+             WHERE id > ?1 AND (?2 IS NULL OR session_id = ?2) ORDER BY id",
         )
         .bind(since)
+        .bind(session.map(|s| s.as_str()))
         .fetch_all(&self.pool)
         .await?;
 
@@ -571,6 +753,35 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn replay_can_be_narrowed_to_one_session() {
+        let db = Db::open_ephemeral().await.unwrap();
+        let host = db.ensure_host("localhost", None).await.unwrap();
+
+        let mine = SessionId::new();
+        let theirs = SessionId::new();
+        for (n, id) in [(1, &mine), (2, &theirs), (3, &mine)] {
+            db.record_event(
+                &host.id,
+                n,
+                id,
+                &EventKind::StatusChanged {
+                    status: SessionStatus::Working,
+                },
+                chrono::Utc::now(),
+            )
+            .await
+            .unwrap();
+        }
+
+        assert_eq!(db.events_since(0).await.unwrap().len(), 3);
+        assert_eq!(
+            db.events_since_for(0, Some(&mine)).await.unwrap().len(),
+            2,
+            "narrowing should return only that session's events"
+        );
+    }
+
+    #[tokio::test]
     async fn the_resume_cursor_only_moves_forward() {
         let db = db().await;
         let host = db.ensure_host("localhost", None).await.unwrap();
@@ -615,5 +826,96 @@ mod tests {
             .unwrap();
         assert_eq!(a.id, b.id);
         assert_eq!(db.repos().await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn configuring_an_agent_twice_updates_rather_than_duplicates() {
+        let db = Db::open_ephemeral().await.unwrap();
+        db.set_agent_mode(
+            Agent::ClaudeCode,
+            AgentMode::Subscription,
+            true,
+            Some("tok"),
+        )
+        .await
+        .unwrap();
+        db.set_agent_mode(Agent::ClaudeCode, AgentMode::ApiKey, true, Some("key"))
+            .await
+            .unwrap();
+
+        let modes = db.agent_modes().await.unwrap();
+        assert_eq!(modes.len(), 1);
+        assert_eq!(modes[0].1, AgentMode::ApiKey);
+        assert_eq!(
+            db.agent_secret(Agent::ClaudeCode).await.unwrap().as_deref(),
+            Some("key")
+        );
+    }
+
+    #[tokio::test]
+    async fn switching_mode_does_not_leave_the_old_secret_behind() {
+        let db = Db::open_ephemeral().await.unwrap();
+        db.set_agent_mode(Agent::ClaudeCode, AgentMode::ApiKey, true, Some("a-key"))
+            .await
+            .unwrap();
+
+        // Subscription carries a token of its own; the key must not survive as
+        // something a workspace could still be handed.
+        db.set_agent_mode(Agent::ClaudeCode, AgentMode::Subscription, true, None)
+            .await
+            .unwrap();
+
+        assert_eq!(db.agent_secret(Agent::ClaudeCode).await.unwrap(), None);
+        assert!(!db.agent_modes().await.unwrap()[0].3, "no secret is set");
+    }
+
+    #[tokio::test]
+    async fn an_unconfigured_agent_is_absent_not_defaulted() {
+        let db = Db::open_ephemeral().await.unwrap();
+        assert!(db.agent_modes().await.unwrap().is_empty());
+
+        db.set_agent_mode(Agent::Codex, AgentMode::ApiKey, true, Some("k"))
+            .await
+            .unwrap();
+        db.forget_agent(Agent::Codex).await.unwrap();
+        assert!(db.agent_modes().await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn presence_is_remembered_per_host_and_refreshed_in_place() {
+        let db = Db::open_ephemeral().await.unwrap();
+        let host = db.ensure_host("localhost", None).await.unwrap();
+
+        db.record_presence(
+            &host.id,
+            &[AgentPresence {
+                kind: Agent::ClaudeCode,
+                installed: false,
+                version: None,
+                logged_in: None,
+                account: None,
+            }],
+        )
+        .await
+        .unwrap();
+
+        db.record_presence(
+            &host.id,
+            &[AgentPresence {
+                kind: Agent::ClaudeCode,
+                installed: true,
+                version: Some("2.1.44".into()),
+                logged_in: Some(true),
+                account: Some("someone@example.com · max".into()),
+            }],
+        )
+        .await
+        .unwrap();
+
+        let seen = db.presence().await.unwrap();
+        assert_eq!(seen.len(), 1, "the second probe replaces the first");
+        assert!(seen[0].found.installed);
+        assert_eq!(seen[0].found.version.as_deref(), Some("2.1.44"));
+        assert_eq!(seen[0].found.logged_in, Some(true));
     }
 }

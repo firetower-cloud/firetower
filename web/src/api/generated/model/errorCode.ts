@@ -25,5 +25,6 @@ export const ErrorCode = {
   RepoUnreachable: 'RepoUnreachable',
   RepoUnusable: 'RepoUnusable',
   RepoInUse: 'RepoInUse',
+  ActionFailed: 'ActionFailed',
   Internal: 'Internal',
 } as const;

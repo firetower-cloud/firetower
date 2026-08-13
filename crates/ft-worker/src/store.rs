@@ -205,6 +205,45 @@ impl Store {
         Ok(())
     }
 
+    /// Correct the branch after git had to disambiguate it.
+    pub async fn set_branch(&self, session_id: &SessionId, branch: &str) -> Result<()> {
+        sqlx::query("UPDATE sessions SET branch = ?, updated_at = ? WHERE id = ?")
+            .bind(branch)
+            .bind(chrono::Utc::now().to_rfc3339())
+            .bind(session_id.as_str())
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    /// The branch a session's worktree is on. The worker may have had to
+    /// number it, so this is the authority, not what was asked for.
+    pub async fn branch_of(&self, session_id: &SessionId) -> Result<Option<String>> {
+        let row = sqlx::query("SELECT branch FROM sessions WHERE id = ?")
+            .bind(session_id.as_str())
+            .fetch_optional(&self.pool)
+            .await?;
+        Ok(row.map(|r| r.get::<String, _>("branch")))
+    }
+
+    /// The branch a session works on and the branch it started from.
+    pub async fn refs_of(&self, session_id: &SessionId) -> Result<Option<(String, String)>> {
+        let row = sqlx::query("SELECT branch, base FROM sessions WHERE id = ?")
+            .bind(session_id.as_str())
+            .fetch_optional(&self.pool)
+            .await?;
+        Ok(row.map(|r| (r.get::<String, _>("branch"), r.get::<String, _>("base"))))
+    }
+
+    /// Which repository a session came from, for finding its mirror again.
+    pub async fn repo_of(&self, session_id: &SessionId) -> Result<Option<String>> {
+        let row = sqlx::query("SELECT repo FROM sessions WHERE id = ?")
+            .bind(session_id.as_str())
+            .fetch_optional(&self.pool)
+            .await?;
+        Ok(row.map(|r| r.get::<String, _>("repo")))
+    }
+
     pub async fn workspace_path(&self, session_id: &SessionId) -> Result<Option<String>> {
         let row = sqlx::query("SELECT path FROM workspaces WHERE session_id = ?")
             .bind(session_id.as_str())
@@ -368,6 +407,41 @@ mod tests {
         assert_eq!(
             s.workspace_path(&id).await.unwrap().as_deref(),
             Some("/tmp/two")
+        );
+    }
+}
+
+#[cfg(test)]
+mod branch_tests {
+    use super::*;
+    use ft_core::WorkspaceSize;
+
+    #[tokio::test]
+    async fn the_branch_git_actually_used_is_what_gets_pushed() {
+        let store = Store::open_ephemeral().await.unwrap();
+        let id = SessionId::new();
+
+        store
+            .create_session(
+                &id,
+                "acme/backend",
+                "Hello",
+                "hello",
+                "agent/hello",
+                "main",
+                "Shell",
+                WorkspaceSize::Medium,
+            )
+            .await
+            .unwrap();
+
+        // git numbered it because the first name was taken
+        store.set_branch(&id, "agent/hello-2").await.unwrap();
+
+        assert_eq!(
+            store.branch_of(&id).await.unwrap().as_deref(),
+            Some("agent/hello-2"),
+            "the requested name would push over another session's branch"
         );
     }
 }

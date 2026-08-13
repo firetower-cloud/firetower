@@ -16,26 +16,14 @@ pub enum CodecError {
     Malformed(#[from] serde_json::Error),
 }
 
-/// Reads and writes frames over a split stream.
-pub struct Codec<R, W> {
+/// The reading half. Separable from the writing half so a peer can send while
+/// it is waiting to receive — a terminal streaming output is exactly that.
+pub struct FrameReader<R> {
     reader: BufReader<R>,
-    writer: W,
     line: String,
 }
 
-impl<R, W> Codec<R, W>
-where
-    R: tokio::io::AsyncRead + Unpin,
-    W: AsyncWrite + Unpin,
-{
-    pub fn new(reader: R, writer: W) -> Self {
-        Self {
-            reader: BufReader::new(reader),
-            writer,
-            line: String::new(),
-        }
-    }
-
+impl<R: tokio::io::AsyncRead + Unpin> FrameReader<R> {
     /// Next frame, or `Closed` when the other end goes away.
     ///
     /// Blank lines are skipped rather than treated as errors — a stream that
@@ -54,13 +42,55 @@ where
             return Ok(serde_json::from_str(trimmed)?);
         }
     }
+}
 
+/// The writing half.
+pub struct FrameWriter<W> {
+    writer: W,
+}
+
+impl<W: AsyncWrite + Unpin> FrameWriter<W> {
     pub async fn write<T: Serialize>(&mut self, frame: &T) -> Result<(), CodecError> {
         let mut buf = serde_json::to_vec(frame)?;
         buf.push(b'\n');
         self.writer.write_all(&buf).await?;
         self.writer.flush().await?;
         Ok(())
+    }
+}
+
+/// Reads and writes frames over a split stream.
+pub struct Codec<R, W> {
+    reader: FrameReader<R>,
+    writer: FrameWriter<W>,
+}
+
+impl<R, W> Codec<R, W>
+where
+    R: tokio::io::AsyncRead + Unpin,
+    W: AsyncWrite + Unpin,
+{
+    pub fn new(reader: R, writer: W) -> Self {
+        Self {
+            reader: FrameReader {
+                reader: BufReader::new(reader),
+                line: String::new(),
+            },
+            writer: FrameWriter { writer },
+        }
+    }
+
+    /// Take the halves apart, for a loop that reads and writes independently.
+    pub fn split(self) -> (FrameReader<R>, FrameWriter<W>) {
+        (self.reader, self.writer)
+    }
+
+    pub async fn read<T: DeserializeOwned>(&mut self) -> Result<T, CodecError> {
+        self.reader.read().await
+    }
+
+    pub async fn write<T: Serialize>(&mut self, frame: &T) -> Result<(), CodecError> {
+        self.writer.write(frame).await
     }
 }
 

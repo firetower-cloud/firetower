@@ -7,8 +7,15 @@
  */
 
 export * from './agent';
+export * from './agentMode';
+export * from './agentOnHost';
+export * from './agentPresence';
+export * from './agentView';
 export * from './apiError';
 export * from './bootstrap';
+export * from './commitRequest';
+export * from './configureAgent';
+export * from './done';
 export * from './errorCode';
 export * from './event';
 export * from './eventKind';
@@ -27,6 +34,8 @@ export * from './repo';
 export * from './repoId';
 export * from './session';
 export * from './sessionId';
+export * from './sessionPtyParams';
 export * from './sessionStatus';
 export * from './workspaceId';
 export * from './workspaceSize';
+export * from './workSummary';

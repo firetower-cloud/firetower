@@ -8,14 +8,17 @@
 //! Encoding is newline-delimited JSON: debuggable with `tee`, and behind
 //! [`Codec`] so a compact binary format is a later swap rather than a rewrite.
 
-use ft_core::{Agent, EventKind, SessionId, WorkspaceSize};
+use ft_core::{Agent, AgentPresence, EventKind, SessionId, WorkSummary, WorkspaceSize};
 use serde::{Deserialize, Serialize};
 
 /// Bumped when a frame changes shape incompatibly. Checked during the handshake.
-pub const PROTOCOL_VERSION: u32 = 2;
+pub const PROTOCOL_VERSION: u32 = 5;
 
 mod codec;
-pub use codec::{Codec, CodecError};
+pub use codec::{Codec, CodecError, FrameReader, FrameWriter};
+
+mod base64;
+pub use base64::{decode, encode};
 
 /// Correlates a request with its reply.
 ///
@@ -108,6 +111,19 @@ pub enum ToWorker {
     Stop {
         session_id: SessionId,
     },
+    /// Do something with the work a session produced.
+    RunAction {
+        req: ReqId,
+        session_id: SessionId,
+        action: Action,
+        /// Needed by anything that talks to the remote.
+        credential: Option<Credential>,
+    },
+    /// What is in this workspace that isn't safely elsewhere.
+    Summarize {
+        req: ReqId,
+        session_id: SessionId,
+    },
     /// Tear the workspace down.
     Destroy {
         session_id: SessionId,
@@ -116,6 +132,13 @@ pub enum ToWorker {
     /// Everything that happened since `seq`. Sent on every (re)connect.
     Resume {
         since: i64,
+    },
+    /// Which agents are on this host, and at what version?
+    ///
+    /// Asked of the worker for the same reason as everything else here: only
+    /// the machine that would run them knows what it has.
+    ProbeAgents {
+        req: ReqId,
     },
     /// Can this host reach this repository, and what is its default branch?
     ///
@@ -128,6 +151,16 @@ pub enum ToWorker {
         credential: Option<Credential>,
     },
     Ping,
+}
+
+/// The verbs that act on a session's work.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "action")]
+pub enum Action {
+    /// Kill the agent. The workspace and its branch stay.
+    Stop,
+    Commit { message: String },
+    Push,
 }
 
 /// Everything a worker needs to build a workspace. No control-plane concepts.
@@ -176,6 +209,21 @@ pub enum ToServer {
     },
     PtyClosed {
         session_id: SessionId,
+    },
+    /// How a [`ToWorker::RunAction`] ended.
+    ActionDone {
+        req: ReqId,
+        result: Result<String, String>,
+    },
+    /// The answer to [`ToWorker::Summarize`].
+    Summarized {
+        req: ReqId,
+        summary: WorkSummary,
+    },
+    /// The answer to [`ToWorker::ProbeAgents`].
+    AgentsProbed {
+        req: ReqId,
+        agents: Vec<AgentPresence>,
     },
     /// The answer to [`ToWorker::ProbeRemote`].
     RemoteProbed {

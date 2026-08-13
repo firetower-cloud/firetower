@@ -7,6 +7,7 @@
 
 use crate::askpass::Askpass;
 use anyhow::{bail, Context, Result};
+use ft_core::WorkSummary;
 use ft_proto::{Credential, ProbeFailure, RemoteInfo};
 use std::path::{Path, PathBuf};
 use tokio::process::Command;
@@ -33,7 +34,7 @@ impl GitRoot {
 
     /// `github.com-acme-backend.git` — flat, collision-free, and readable when
     /// you're looking at the directory wondering what's on disk.
-    fn mirror_path(&self, slug: &str) -> PathBuf {
+    pub fn mirror_path(&self, slug: &str) -> PathBuf {
         let flat: String = slug
             .chars()
             .map(|c| {
@@ -144,6 +145,24 @@ impl GitRoot {
         .await
         .with_context(|| format!("cloning {remote}"))?;
 
+        // `--mirror` sets `remote.origin.mirror`, and git then refuses any push
+        // that names a branch — which is every push we make. Dropping the flag
+        // keeps what the clone was for (the `+refs/*:refs/*` fetch refspec, so
+        // fetches actually move) and gives back an ordinary push.
+        run(
+            &self.mirrors,
+            "git",
+            &[
+                "--git-dir",
+                path.to_str().unwrap(),
+                "config",
+                "--unset",
+                "remote.origin.mirror",
+            ],
+        )
+        .await
+        .ok();
+
         Ok((path, true))
     }
 
@@ -194,8 +213,7 @@ impl GitRoot {
             {
                 Ok(_) => return Ok((dest, candidate)),
                 Err(e) => {
-                    let taken = e.to_string().contains("already exists");
-                    if !taken {
+                    if !name_is_taken(&e.to_string()) {
                         return Err(e)
                             .with_context(|| format!("creating worktree {candidate} from {base}"));
                     }
@@ -228,6 +246,85 @@ impl GitRoot {
         )
         .await?;
         Ok(())
+    }
+
+    /// What is in the workspace that isn't safely elsewhere yet.
+    ///
+    /// This is what makes ending a session a decision rather than a gamble:
+    /// uncommitted files and unpushed commits are exactly what would be lost.
+    pub async fn summary(&self, session_id: &str, branch: &str, base: &str) -> Result<WorkSummary> {
+        let dest = self.worktree_path(session_id);
+
+        let dirty = run(&dest, "git", &["status", "--porcelain"]).await?;
+        let uncommitted = dirty.lines().filter(|l| !l.trim().is_empty()).count() as u32;
+
+        // `@{upstream}` rather than `origin/<branch>`: these worktrees hang off
+        // a mirror, where fetched refs live under `refs/heads/*` and there is
+        // no `refs/remotes/origin/*` to compare against. The upstream is what
+        // the push actually set, so it is what knows.
+        let pushed = run(&dest, "git", &["rev-parse", "--verify", "@{upstream}"])
+            .await
+            .is_ok();
+
+        let range = if pushed {
+            "@{upstream}..HEAD".to_string()
+        } else {
+            // Never pushed: everything this session did is at risk.
+            format!("{base}..HEAD")
+        };
+
+        let ahead = run(&dest, "git", &["rev-list", "--count", &range])
+            .await
+            .ok()
+            .and_then(|c| c.trim().parse().ok())
+            .unwrap_or(0);
+
+        Ok(WorkSummary {
+            branch: branch.to_string(),
+            uncommitted,
+            ahead,
+            pushed,
+        })
+    }
+
+    /// Commit whatever the agent left behind, including new files.
+    pub async fn commit(&self, session_id: &str, message: &str) -> Result<String> {
+        let dest = self.worktree_path(session_id);
+
+        run(&dest, "git", &["add", "-A"]).await?;
+        let staged = run(&dest, "git", &["diff", "--cached", "--name-only"]).await?;
+        if staged.trim().is_empty() {
+            bail!("there is nothing to commit");
+        }
+
+        run(&dest, "git", &["commit", "-m", message]).await?;
+        let count = staged.lines().filter(|l| !l.trim().is_empty()).count();
+        Ok(format!(
+            "committed {count} {}",
+            if count == 1 { "file" } else { "files" }
+        ))
+    }
+
+    /// Send the branch to the remote, so the work survives the workspace.
+    pub async fn push(
+        &self,
+        session_id: &str,
+        branch: &str,
+        credential: Option<Credential>,
+    ) -> Result<String> {
+        let dest = self.worktree_path(session_id);
+        let env = cred_env(credential).await?;
+
+        run_env(
+            &dest,
+            "git",
+            &["push", "--set-upstream", "origin", branch],
+            &env.vars,
+        )
+        .await
+        .with_context(|| format!("pushing {branch}"))?;
+
+        Ok(format!("pushed {branch}"))
     }
 
     /// The unified diff of the work so far.
@@ -316,6 +413,17 @@ async fn run_env(
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }
 
+/// Whether git refused because this branch name is spoken for.
+///
+/// It has two ways of saying so and they are not interchangeable: a branch that
+/// merely exists, and a branch checked out by another worktree. Only matching
+/// the first meant a second session on the same prompt failed outright instead
+/// of taking the next number — which is the whole point of the loop.
+fn name_is_taken(error: &str) -> bool {
+    let e = error.to_ascii_lowercase();
+    e.contains("already exists") || e.contains("already used by worktree")
+}
+
 /// Turn git's stderr into something the interface can act on.
 ///
 /// Note that a private repository you have no access to and one that does not
@@ -359,6 +467,40 @@ mod tests {
     use tempfile::TempDir;
 
     #[tokio::test]
+    async fn work_can_be_pushed_back_to_where_it_came_from() {
+        let (origin_dir, remote) = origin().await;
+        let home = TempDir::new().unwrap();
+        let git = GitRoot::new(home.path());
+        let (mirror, _) = git
+            .ensure_mirror(&remote, "acme/backend", None)
+            .await
+            .unwrap();
+
+        let (dest, branch) = git
+            .add_worktree(&mirror, "agent/work", "main", "s_push")
+            .await
+            .unwrap();
+
+        tokio::fs::write(dest.join("new.txt"), "from the agent\n")
+            .await
+            .unwrap();
+        git.commit("s_push", "Add a file").await.unwrap();
+        git.push("s_push", &branch, None).await.unwrap();
+
+        // the branch reached the origin, which is what makes ending a session
+        // safe rather than destructive
+        let branches = run(origin_dir.path(), "git", &["branch", "--list", &branch])
+            .await
+            .unwrap();
+        assert!(branches.contains(&branch), "{branches:?}");
+
+        let after = git.summary("s_push", &branch, "main").await.unwrap();
+        assert_eq!(after.uncommitted, 0);
+        assert_eq!(after.ahead, 0, "nothing should be left behind");
+        assert!(after.pushed);
+    }
+
+    #[tokio::test]
     async fn a_warm_mirror_actually_picks_up_new_commits() {
         let (origin_dir, remote) = origin().await;
         let home = TempDir::new().unwrap();
@@ -391,6 +533,43 @@ mod tests {
             before, after,
             "a mirror that never moves means every session branches from stale work"
         );
+    }
+
+    #[test]
+    fn both_of_gits_ways_of_saying_taken_are_recognised() {
+        assert!(name_is_taken(
+            "fatal: a branch named 'agent/x' already exists"
+        ));
+        assert!(name_is_taken(
+            "fatal: 'agent/x' is already used by worktree at '/tmp/other'"
+        ));
+        // Anything else is a real failure and must not be retried away.
+        assert!(!name_is_taken("fatal: invalid reference: nonsense"));
+    }
+
+    #[tokio::test]
+    async fn a_live_worktree_holding_the_branch_does_not_fail_the_next_session() {
+        let (_origin, remote) = origin().await;
+        let home = TempDir::new().unwrap();
+        let git = GitRoot::new(home.path());
+        let (mirror, _) = git
+            .ensure_mirror(&remote, "acme/backend", None)
+            .await
+            .unwrap();
+
+        // The first session is still running, so its worktree still holds the
+        // branch — which is a different refusal from "the branch exists".
+        let (_, first) = git
+            .add_worktree(&mirror, "agent/hello", "main", "s_first")
+            .await
+            .unwrap();
+        assert_eq!(first, "agent/hello");
+
+        let (_, second) = git
+            .add_worktree(&mirror, "agent/hello", "main", "s_second")
+            .await
+            .unwrap();
+        assert_eq!(second, "agent/hello-2", "the second one takes a number");
     }
 
     #[tokio::test]

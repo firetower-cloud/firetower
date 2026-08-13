@@ -11,6 +11,7 @@ description = "The Firetower worker daemon: git, tmux, and the agent lifecycle."
 [dependencies]
 ft-core.workspace = true
 ft-proto.workspace = true
+portable-pty.workspace = true
 anyhow.workspace = true
 async-trait.workspace = true
 chrono.workspace = true

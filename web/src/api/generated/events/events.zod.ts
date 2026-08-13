@@ -13,7 +13,8 @@ import * as zod from 'zod';
 refresh, and the fallback when a stream can't be held open.
  */
 export const ListEventsQueryParams = zod.object({
-  "since": zod.int().describe('Last sequence number seen')
+  "since": zod.int().describe('Last sequence number seen'),
+  "sessionId": zod.string().optional().describe('Only this session\'s events')
 })
 
 export const ListEventsResponseItem = zod.object({

@@ -6,13 +6,6 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export type ListEventsParams = {
-/**
- * Last sequence number seen
- */
-since: number;
-/**
- * Only this session's events
- */
-sessionId?: string;
-};
+export interface Done {
+  detail: string;
+}

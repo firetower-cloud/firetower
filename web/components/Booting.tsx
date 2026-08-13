@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { Signal, KeyGlyph } from "./Signal";
-import { Bullet } from "./Terminal";
+import { Bullet } from "./Signal";
 
 /* Launching opens the session. What you land on is a workspace being built —
    the one moment where showing the machinery is the point, because it's how

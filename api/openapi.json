@@ -13,6 +13,142 @@
     "version": "0.1.0"
   },
   "paths": {
+    "/api/v1/agents": {
+      "get": {
+        "tags": [
+          "agents"
+        ],
+        "operationId": "list_agents",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/AgentView"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/agents/check": {
+      "post": {
+        "tags": [
+          "agents"
+        ],
+        "summary": "Re-ask every reachable host what it has.",
+        "description": "Hosts we can't reach are skipped rather than failing the request: their last\nanswer stays on screen, which is more useful than an error.",
+        "operationId": "check_agents",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/AgentView"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/agents/{kind}": {
+      "put": {
+        "tags": [
+          "agents"
+        ],
+        "summary": "Configure how an agent authenticates.",
+        "operationId": "configure_agent",
+        "parameters": [
+          {
+            "name": "kind",
+            "in": "path",
+            "description": "Agent kind",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConfigureAgent"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "agents"
+        ],
+        "summary": "Forget an agent's configuration and any credential with it.",
+        "operationId": "forget_agent",
+        "parameters": [
+          {
+            "name": "kind",
+            "in": "path",
+            "description": "Agent kind",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/bootstrap": {
       "get": {
         "tags": [
@@ -49,6 +185,15 @@
             "schema": {
               "type": "integer",
               "format": "int64"
+            }
+          },
+          {
+            "name": "sessionId",
+            "in": "query",
+            "description": "Only this session's events",
+            "required": false,
+            "schema": {
+              "type": "string"
             }
           }
         ],
@@ -575,6 +720,262 @@
           }
         }
       }
+    },
+    "/api/v1/sessions/{id}/commit": {
+      "post": {
+        "tags": [
+          "sessions"
+        ],
+        "summary": "Commit whatever the agent left uncommitted.",
+        "operationId": "commit_session",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Session id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CommitRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Done"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sessions/{id}/pty": {
+      "get": {
+        "tags": [
+          "sessions"
+        ],
+        "summary": "The terminal.",
+        "description": "A websocket rather than the event stream: this is the one thing in Firetower\nthat genuinely flows both ways, byte at a time, and where latency is felt.\n\nOutput arrives as binary frames of raw terminal bytes. Input goes back the\nsame way; a text frame is a control message, which today means resizing.",
+        "operationId": "session_pty",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Session id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cols",
+            "in": "query",
+            "description": "Terminal width",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "rows",
+            "in": "query",
+            "description": "Terminal height",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "101": {
+            "description": "Terminal stream"
+          }
+        }
+      }
+    },
+    "/api/v1/sessions/{id}/push": {
+      "post": {
+        "tags": [
+          "sessions"
+        ],
+        "summary": "Push the branch, so the work outlives the workspace.",
+        "operationId": "push_session",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Session id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Done"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sessions/{id}/stop": {
+      "post": {
+        "tags": [
+          "sessions"
+        ],
+        "summary": "Stop the agent. The workspace and its branch stay.",
+        "operationId": "stop_session",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Session id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Done"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sessions/{id}/work": {
+      "get": {
+        "tags": [
+          "sessions"
+        ],
+        "summary": "What is in this workspace that isn't safely elsewhere.",
+        "operationId": "session_work",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Session id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkSummary"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -587,6 +988,158 @@
           "Codex",
           "Shell"
         ]
+      },
+      "AgentMode": {
+        "type": "string",
+        "description": "How an agent proves who it is.",
+        "enum": [
+          "Subscription",
+          "ApiKey",
+          "NotNeeded"
+        ]
+      },
+      "AgentOnHost": {
+        "type": "object",
+        "required": [
+          "hostId",
+          "hostName",
+          "installed",
+          "coveredByToken"
+        ],
+        "properties": {
+          "account": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Which account this host spends against, when it will say."
+          },
+          "checkedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "When we last asked. Absent means never."
+          },
+          "coveredByToken": {
+            "type": "boolean",
+            "description": "Whether the token we hold applies to this host."
+          },
+          "hostId": {
+            "type": "string"
+          },
+          "hostName": {
+            "type": "string"
+          },
+          "installed": {
+            "type": "boolean"
+          },
+          "loggedIn": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "`None` when this agent can't be asked without being started, which is\nnot the same as being signed out."
+          },
+          "version": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "AgentPresence": {
+        "type": "object",
+        "description": "What a host reported about an agent, last time we asked.",
+        "required": [
+          "kind",
+          "installed"
+        ],
+        "properties": {
+          "account": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Who it's logged in as, when it will say. Shown so you can tell which\naccount a host is using before it starts spending against it."
+          },
+          "installed": {
+            "type": "boolean"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/Agent"
+          },
+          "loggedIn": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "`None` when the agent offers no way to ask without starting it."
+          },
+          "version": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Whatever the binary printed, when it's there."
+          }
+        }
+      },
+      "AgentView": {
+        "type": "object",
+        "description": "One agent kind, its configuration, and where it's actually present.\n\nJoined here rather than left to the interface: the screen shows one row per\nkind, so it should cost one request.",
+        "required": [
+          "kind",
+          "label",
+          "enabled",
+          "credentialSet",
+          "needsCredential",
+          "hosts"
+        ],
+        "properties": {
+          "credentialSet": {
+            "type": "boolean",
+            "description": "Whether a credential is held. Only ever true in `ApiKey` mode — a\nsubscription lives in the agent's own config on the host."
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "hosts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AgentOnHost"
+            }
+          },
+          "kind": {
+            "$ref": "#/components/schemas/Agent"
+          },
+          "label": {
+            "type": "string"
+          },
+          "mode": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AgentMode",
+                "description": "`None` until someone configures it."
+              }
+            ]
+          },
+          "needsCredential": {
+            "type": "boolean",
+            "description": "True when nothing needs configuring, which is only the plain shell."
+          },
+          "tokenCommand": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What to run locally to get a token, when this agent works that way."
+          }
+        }
       },
       "ApiError": {
         "type": "object",
@@ -622,6 +1175,50 @@
           }
         }
       },
+      "CommitRequest": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Defaults to the session's title, which is what the agent was asked for."
+          }
+        }
+      },
+      "ConfigureAgent": {
+        "type": "object",
+        "required": [
+          "mode"
+        ],
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "mode": {
+            "$ref": "#/components/schemas/AgentMode"
+          },
+          "secret": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The token from `claude setup-token`, or a metered API key — whichever\nthe mode calls for. Required for both; ignored for an agent that needs\nno credential."
+          }
+        }
+      },
+      "Done": {
+        "type": "object",
+        "required": [
+          "detail"
+        ],
+        "properties": {
+          "detail": {
+            "type": "string"
+          }
+        }
+      },
       "ErrorCode": {
         "type": "string",
         "description": "The catalogue is the type, so there is no separate list to keep in sync.",
@@ -638,6 +1235,7 @@
           "RepoUnreachable",
           "RepoUnusable",
           "RepoInUse",
+          "ActionFailed",
           "Internal"
         ]
       },
@@ -1225,6 +1823,37 @@
           "Failed",
           "Ended"
         ]
+      },
+      "WorkSummary": {
+        "type": "object",
+        "description": "What is in a workspace that isn't safely elsewhere yet.\n\nThe thing that makes ending a session a decision rather than a gamble.",
+        "required": [
+          "branch",
+          "uncommitted",
+          "ahead",
+          "pushed"
+        ],
+        "properties": {
+          "ahead": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Commits the remote hasn't got.",
+            "minimum": 0
+          },
+          "branch": {
+            "type": "string"
+          },
+          "pushed": {
+            "type": "boolean",
+            "description": "Whether this branch exists on the remote at all."
+          },
+          "uncommitted": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Files changed but not committed.",
+            "minimum": 0
+          }
+        }
       },
       "WorkspaceId": {
         "type": "string",

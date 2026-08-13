@@ -1,5 +1,5 @@
 import { Mark, Signal } from "@/components/Signal";
-import { Bullet } from "@/components/Terminal";
+import { Bullet } from "@/components/Signal";
 import { byId, working, elapsed } from "@/lib/data";
 
 const nav = byId("t-104")!;

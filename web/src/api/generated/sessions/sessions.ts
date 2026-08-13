@@ -27,8 +27,12 @@ import type {
 
 import type {
   ApiError,
+  CommitRequest,
+  Done,
   NewSession,
-  Session
+  Session,
+  SessionPtyParams,
+  WorkSummary
 } from '../model';
 
 import { http } from '../../http';
@@ -391,3 +395,470 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
       > => {
       return useMutation(getDestroySessionMutationOptions(options), queryClient);
     }
+    export const getCommitSessionUrl = (id: string,) => {
+
+
+
+
+  return `/api/v1/sessions/${id}/commit`
+}
+
+/**
+ * @summary Commit whatever the agent left uncommitted.
+ */
+export const commitSession = async (id: string,
+    commitRequest: CommitRequest, options?: Parameters<typeof http>[1]): Promise<Done> => {
+
+  return http<Done>(getCommitSessionUrl(id),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(commitRequest)
+  }
+);}
+
+
+
+
+
+export const getCommitSessionMutationOptions = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof commitSession>>, TError,{id: string;data: CommitRequest}, TContext>, request?: SecondParameter<typeof http>}
+): UseMutationOptions<Awaited<ReturnType<typeof commitSession>>, TError,{id: string;data: CommitRequest}, TContext> => {
+
+const mutationKey = ['commitSession'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof commitSession>>, {id: string;data: CommitRequest}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  commitSession(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CommitSessionMutationResult = NonNullable<Awaited<ReturnType<typeof commitSession>>>
+    export type CommitSessionMutationBody = CommitRequest
+    export type CommitSessionMutationError = ApiError
+
+    /**
+ * @summary Commit whatever the agent left uncommitted.
+ */
+export const useCommitSession = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof commitSession>>, TError,{id: string;data: CommitRequest}, TContext>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof commitSession>>,
+        TError,
+        {id: string;data: CommitRequest},
+        TContext
+      > => {
+      return useMutation(getCommitSessionMutationOptions(options), queryClient);
+    }
+    export const getSessionPtyUrl = (id: string,
+    params?: SessionPtyParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/v1/sessions/${id}/pty?${stringifiedParams}` : `/api/v1/sessions/${id}/pty`
+}
+
+/**
+ * A websocket rather than the event stream: this is the one thing in Firetower
+ * that genuinely flows both ways, byte at a time, and where latency is felt.
+ *
+ * Output arrives as binary frames of raw terminal bytes. Input goes back the
+ * same way; a text frame is a control message, which today means resizing.
+ * @summary The terminal.
+ */
+export const sessionPty = async (id: string,
+    params?: SessionPtyParams, options?: Parameters<typeof http>[1]): Promise<unknown> => {
+
+  return http<unknown>(getSessionPtyUrl(id,params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getSessionPtyQueryKey = (id: string,
+    params?: SessionPtyParams,) => {
+    return [
+    `/api/v1/sessions/${id}/pty`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getSessionPtyQueryOptions = <TData = Awaited<ReturnType<typeof sessionPty>>, TError = void>(id: string,
+    params?: SessionPtyParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof sessionPty>>, TError, TData>>, request?: SecondParameter<typeof http>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getSessionPtyQueryKey(id,params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof sessionPty>>> = ({ signal }) => sessionPty(id,params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: id !== null && id !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof sessionPty>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type SessionPtyQueryResult = NonNullable<Awaited<ReturnType<typeof sessionPty>>>
+export type SessionPtyQueryError = void
+
+
+export function useSessionPty<TData = Awaited<ReturnType<typeof sessionPty>>, TError = void>(
+ id: string,
+    params: undefined |  SessionPtyParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof sessionPty>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof sessionPty>>,
+          TError,
+          Awaited<ReturnType<typeof sessionPty>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useSessionPty<TData = Awaited<ReturnType<typeof sessionPty>>, TError = void>(
+ id: string,
+    params?: SessionPtyParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof sessionPty>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof sessionPty>>,
+          TError,
+          Awaited<ReturnType<typeof sessionPty>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useSessionPty<TData = Awaited<ReturnType<typeof sessionPty>>, TError = void>(
+ id: string,
+    params?: SessionPtyParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof sessionPty>>, TError, TData>>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary The terminal.
+ */
+
+export function useSessionPty<TData = Awaited<ReturnType<typeof sessionPty>>, TError = void>(
+ id: string,
+    params?: SessionPtyParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof sessionPty>>, TError, TData>>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getSessionPtyQueryOptions(id,params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+/**
+ * @summary The terminal.
+ */
+export const useSetSessionPtyQueryData = () => {
+  const queryClient = useQueryClient();
+  return (id: string,
+    params: SessionPtyParams | undefined,updater: Awaited<ReturnType<typeof sessionPty>> | undefined | ((old: Awaited<ReturnType<typeof sessionPty>> | undefined) => Awaited<ReturnType<typeof sessionPty>> | undefined)) => {
+    queryClient.setQueriesData<Awaited<ReturnType<typeof sessionPty>>>({ queryKey: getSessionPtyQueryKey(id,params) }, updater);
+  };
+}
+
+/**
+ * @summary The terminal.
+ */
+export const useGetSessionPtyQueryData = () => {
+  const queryClient = useQueryClient();
+  return (id: string,
+    params?: SessionPtyParams,) =>
+    queryClient.getQueryData<Awaited<ReturnType<typeof sessionPty>>>(getSessionPtyQueryKey(id,params));
+}
+
+
+export const getPushSessionUrl = (id: string,) => {
+
+
+
+
+  return `/api/v1/sessions/${id}/push`
+}
+
+/**
+ * @summary Push the branch, so the work outlives the workspace.
+ */
+export const pushSession = async (id: string, options?: Parameters<typeof http>[1]): Promise<Done> => {
+
+  return http<Done>(getPushSessionUrl(id),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getPushSessionMutationOptions = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof pushSession>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof http>}
+): UseMutationOptions<Awaited<ReturnType<typeof pushSession>>, TError,{id: string}, TContext> => {
+
+const mutationKey = ['pushSession'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof pushSession>>, {id: string}> = (props) => {
+          const {id} = props ?? {};
+
+          return  pushSession(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type PushSessionMutationResult = NonNullable<Awaited<ReturnType<typeof pushSession>>>
+
+    export type PushSessionMutationError = ApiError
+
+    /**
+ * @summary Push the branch, so the work outlives the workspace.
+ */
+export const usePushSession = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof pushSession>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof pushSession>>,
+        TError,
+        {id: string},
+        TContext
+      > => {
+      return useMutation(getPushSessionMutationOptions(options), queryClient);
+    }
+    export const getStopSessionUrl = (id: string,) => {
+
+
+
+
+  return `/api/v1/sessions/${id}/stop`
+}
+
+/**
+ * @summary Stop the agent. The workspace and its branch stay.
+ */
+export const stopSession = async (id: string, options?: Parameters<typeof http>[1]): Promise<Done> => {
+
+  return http<Done>(getStopSessionUrl(id),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getStopSessionMutationOptions = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof stopSession>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof http>}
+): UseMutationOptions<Awaited<ReturnType<typeof stopSession>>, TError,{id: string}, TContext> => {
+
+const mutationKey = ['stopSession'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof stopSession>>, {id: string}> = (props) => {
+          const {id} = props ?? {};
+
+          return  stopSession(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type StopSessionMutationResult = NonNullable<Awaited<ReturnType<typeof stopSession>>>
+
+    export type StopSessionMutationError = ApiError
+
+    /**
+ * @summary Stop the agent. The workspace and its branch stay.
+ */
+export const useStopSession = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof stopSession>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof stopSession>>,
+        TError,
+        {id: string},
+        TContext
+      > => {
+      return useMutation(getStopSessionMutationOptions(options), queryClient);
+    }
+    export const getSessionWorkUrl = (id: string,) => {
+
+
+
+
+  return `/api/v1/sessions/${id}/work`
+}
+
+/**
+ * @summary What is in this workspace that isn't safely elsewhere.
+ */
+export const sessionWork = async (id: string, options?: Parameters<typeof http>[1]): Promise<WorkSummary> => {
+
+  return http<WorkSummary>(getSessionWorkUrl(id),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getSessionWorkQueryKey = (id: string,) => {
+    return [
+    `/api/v1/sessions/${id}/work`
+    ] as const;
+    }
+
+
+export const getSessionWorkQueryOptions = <TData = Awaited<ReturnType<typeof sessionWork>>, TError = ApiError>(id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof sessionWork>>, TError, TData>>, request?: SecondParameter<typeof http>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getSessionWorkQueryKey(id);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof sessionWork>>> = ({ signal }) => sessionWork(id, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: id !== null && id !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof sessionWork>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type SessionWorkQueryResult = NonNullable<Awaited<ReturnType<typeof sessionWork>>>
+export type SessionWorkQueryError = ApiError
+
+
+export function useSessionWork<TData = Awaited<ReturnType<typeof sessionWork>>, TError = ApiError>(
+ id: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof sessionWork>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof sessionWork>>,
+          TError,
+          Awaited<ReturnType<typeof sessionWork>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useSessionWork<TData = Awaited<ReturnType<typeof sessionWork>>, TError = ApiError>(
+ id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof sessionWork>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof sessionWork>>,
+          TError,
+          Awaited<ReturnType<typeof sessionWork>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useSessionWork<TData = Awaited<ReturnType<typeof sessionWork>>, TError = ApiError>(
+ id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof sessionWork>>, TError, TData>>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary What is in this workspace that isn't safely elsewhere.
+ */
+
+export function useSessionWork<TData = Awaited<ReturnType<typeof sessionWork>>, TError = ApiError>(
+ id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof sessionWork>>, TError, TData>>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getSessionWorkQueryOptions(id,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+/**
+ * @summary What is in this workspace that isn't safely elsewhere.
+ */
+export const useSetSessionWorkQueryData = () => {
+  const queryClient = useQueryClient();
+  return (id: string,updater: Awaited<ReturnType<typeof sessionWork>> | undefined | ((old: Awaited<ReturnType<typeof sessionWork>> | undefined) => Awaited<ReturnType<typeof sessionWork>> | undefined)) => {
+    queryClient.setQueriesData<Awaited<ReturnType<typeof sessionWork>>>({ queryKey: getSessionWorkQueryKey(id) }, updater);
+  };
+}
+
+/**
+ * @summary What is in this workspace that isn't safely elsewhere.
+ */
+export const useGetSessionWorkQueryData = () => {
+  const queryClient = useQueryClient();
+  return (id: string,) =>
+    queryClient.getQueryData<Awaited<ReturnType<typeof sessionWork>>>(getSessionWorkQueryKey(id));
+}
+
+

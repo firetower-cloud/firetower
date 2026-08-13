@@ -1,0 +1,242 @@
+"use client";
+
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { useQueryClient } from "@tanstack/react-query";
+import {
+  useStopSession,
+  useCommitSession,
+  usePushSession,
+  useDestroySession,
+  useSessionWork,
+  getSessionWorkQueryKey,
+  getListSessionsQueryKey,
+  getGetSessionQueryKey,
+} from "@/src/api/generated/sessions/sessions";
+import type { Session } from "@/src/api/generated/model";
+import { ApiError } from "@/src/api/http";
+
+/**
+ * What you can do with what the agent produced.
+ *
+ * Ordered by what a session actually goes through: stop it, keep the work,
+ * send it somewhere, then throw the workspace away. Ending is last and apart,
+ * because it is the only one that destroys anything.
+ */
+export function SessionActions({ session }: { session: Session }) {
+  const [note, setNote] = useState<string | null>(null);
+  const [failed, setFailed] = useState<string | null>(null);
+  const [confirming, setConfirming] = useState(false);
+
+  const router = useRouter();
+  const queryClient = useQueryClient();
+
+  const ended = session.status === "Ended";
+  const running = session.status === "Working" || session.status === "Starting";
+
+  const { data: work } = useSessionWork(session.id, {
+    // Cheap, and it changes whenever the agent does something.
+    query: { refetchInterval: ended ? false : 5000, enabled: !ended },
+  });
+
+  const stop = useStopSession();
+  const commit = useCommitSession();
+  const push = usePushSession();
+  const destroy = useDestroySession();
+
+  const busy =
+    stop.isPending || commit.isPending || push.isPending || destroy.isPending;
+
+  const after = async (detail: string) => {
+    setNote(detail);
+    setFailed(null);
+    await queryClient.invalidateQueries({ queryKey: getSessionWorkQueryKey(session.id) });
+    await queryClient.invalidateQueries({ queryKey: getGetSessionQueryKey(session.id) });
+  };
+
+  const problem = (e: unknown) => {
+    setNote(null);
+    setFailed(e instanceof ApiError ? e.message : "That didn't work.");
+  };
+
+  if (ended) {
+    return (
+      <Panel>
+        <p className="text-[12.5px] text-mute">
+          This session has ended and its workspace was removed.
+        </p>
+      </Panel>
+    );
+  }
+
+  return (
+    <Panel>
+      <Work work={work} />
+
+      <div className="mt-3 flex flex-col gap-1.5">
+        {running && (
+          <Action
+            label="Stop the agent"
+            hint="Keeps the workspace and the branch"
+            onClick={() =>
+              stop.mutate({ id: session.id }, { onSuccess: (d) => after(d.detail), onError: problem })
+            }
+            disabled={busy}
+          />
+        )}
+
+        <Action
+          label="Commit"
+          hint={
+            work && work.uncommitted > 0
+              ? `${work.uncommitted} ${work.uncommitted === 1 ? "file" : "files"} not committed`
+              : "Nothing uncommitted"
+          }
+          onClick={() =>
+            commit.mutate(
+              { id: session.id, data: {} },
+              { onSuccess: (d) => after(d.detail), onError: problem },
+            )
+          }
+          disabled={busy || (work ? work.uncommitted === 0 : false)}
+        />
+
+        <Action
+          label="Push"
+          hint={
+            work
+              ? work.ahead > 0
+                ? `${work.ahead} ${work.ahead === 1 ? "commit" : "commits"} not pushed`
+                : "Up to date"
+              : undefined
+          }
+          onClick={() =>
+            push.mutate({ id: session.id }, { onSuccess: (d) => after(d.detail), onError: problem })
+          }
+          disabled={busy || (work ? work.ahead === 0 : false)}
+        />
+      </div>
+
+      {note && (
+        <p className="mt-3 rounded-[5px] border border-sage/25 bg-sage/[0.04] px-2.5 py-1.5 text-[11.5px] text-slate">
+          {note}
+        </p>
+      )}
+      {failed && (
+        <p className="mt-3 rounded-[5px] border border-ember/30 bg-ember/[0.05] px-2.5 py-1.5 text-[11.5px] text-bone">
+          {failed}
+        </p>
+      )}
+
+      <div className="mt-4 border-t border-line pt-3">
+        {!confirming ? (
+          <button
+            onClick={() => setConfirming(true)}
+            disabled={busy}
+            className="text-[12px] text-mute transition-colors hover:text-ember"
+          >
+            End session
+          </button>
+        ) : (
+          <div className="flex flex-col gap-2">
+            <p className="text-[11.5px] leading-[1.5] text-dim">
+              {atRisk(work)
+                ? "This removes the workspace. What hasn't been pushed is gone."
+                : "This removes the workspace. Everything is pushed."}
+            </p>
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() =>
+                  destroy.mutate(
+                    { id: session.id },
+                    {
+                      onSuccess: async () => {
+                        await queryClient.invalidateQueries({
+                          queryKey: getListSessionsQueryKey(),
+                        });
+                        router.push("/");
+                      },
+                      onError: problem,
+                    },
+                  )
+                }
+                disabled={busy}
+                className="rounded-[4px] bg-ember px-2.5 py-1 text-[11.5px] font-semibold text-[#1a0c04] transition-opacity hover:opacity-90 disabled:opacity-60"
+              >
+                {destroy.isPending ? "Ending…" : "End it"}
+              </button>
+              <button
+                onClick={() => setConfirming(false)}
+                className="text-[11.5px] text-mute transition-colors hover:text-text"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </Panel>
+  );
+}
+
+/** Whether ending this would lose something. */
+function atRisk(work?: { uncommitted: number; ahead: number }) {
+  return !work || work.uncommitted > 0 || work.ahead > 0;
+}
+
+function Work({ work }: { work?: { uncommitted: number; ahead: number; pushed: boolean } }) {
+  if (!work) {
+    return <p className="text-[11.5px] text-mute">Looking at the workspace…</p>;
+  }
+
+  const clean = work.uncommitted === 0 && work.ahead === 0;
+
+  return (
+    <div className="flex flex-col gap-1">
+      <div className="flex items-center gap-2">
+        <span
+          className={`h-1.5 w-1.5 rounded-full ${clean ? "bg-sage" : "bg-ember"}`}
+        />
+        <span className="text-[12.5px] text-dim">
+          {clean ? "Everything is pushed" : "Not everything is saved"}
+        </span>
+      </div>
+      <div className="pl-3.5 font-mono text-[11px] text-mute">
+        {work.uncommitted} uncommitted · {work.ahead} unpushed
+        {!work.pushed && " · branch not on the remote"}
+      </div>
+    </div>
+  );
+}
+
+function Action({
+  label,
+  hint,
+  onClick,
+  disabled,
+}: {
+  label: string;
+  hint?: string;
+  onClick: () => void;
+  disabled?: boolean;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      className="group flex flex-col items-start rounded-[5px] border border-line px-2.5 py-1.5 text-left transition-colors hover:border-ember/40 disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:border-line"
+    >
+      <span className="text-[12.5px] text-bone">{label}</span>
+      {hint && <span className="text-[11px] text-mute">{hint}</span>}
+    </button>
+  );
+}
+
+function Panel({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="border-t border-line pt-4">
+      <div className="eyebrow mb-2.5">The work</div>
+      {children}
+    </div>
+  );
+}

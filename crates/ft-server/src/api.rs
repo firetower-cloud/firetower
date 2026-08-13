@@ -7,9 +7,10 @@
 
 use crate::oauth::{self, RemoteRepo};
 use crate::providers::{self, PendingAuth, ProviderStatus};
-use crate::secrets::Secrets;
-use crate::AppState;
+use crate::secrets::{self, Secrets};
+use crate::{fleet, AppState};
 use axum::{
+    extract::ws::{Message, WebSocket, WebSocketUpgrade},
     extract::{Path, Query, State},
     http::StatusCode,
     response::sse::{self, Sse},
@@ -17,8 +18,8 @@ use axum::{
     Json,
 };
 use ft_core::{
-    session::title_from, Agent, Event, Host, NewSession, Repo, RepoId, Session, SessionId,
-    SessionStatus,
+    session::title_from, Agent, AgentMode, AgentPresence, Event, Host, NewSession, Repo, RepoId,
+    Session, SessionId, SessionStatus,
 };
 use ft_proto::{CreateWorkspace, Credential, ProbeFailure, ToWorker};
 use futures::{Stream, StreamExt};
@@ -58,6 +59,8 @@ pub enum ErrorCode {
     RepoUnusable,
     /// Disconnecting would orphan running work.
     RepoInUse,
+    /// The host tried and it didn't work — nothing to commit, push rejected.
+    ActionFailed,
     Internal,
 }
 
@@ -69,9 +72,11 @@ impl ErrorCode {
             Self::ProviderNotConfigured => StatusCode::NOT_IMPLEMENTED,
             Self::ProviderNotConnected | Self::RepoAccessDenied => StatusCode::UNAUTHORIZED,
             Self::RepoUnreachable | Self::RepoUnusable => StatusCode::BAD_REQUEST,
-            Self::NoCapacity | Self::HostUnreachable | Self::SessionEnded | Self::RepoInUse => {
-                StatusCode::CONFLICT
-            }
+            Self::NoCapacity
+            | Self::HostUnreachable
+            | Self::SessionEnded
+            | Self::RepoInUse
+            | Self::ActionFailed => StatusCode::CONFLICT,
             Self::Internal => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
@@ -118,6 +123,16 @@ pub struct Bootstrap {
 pub struct Since {
     #[serde(default)]
     pub since: i64,
+}
+
+/// Replay, optionally for a single session.
+#[derive(Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct Replay {
+    #[serde(default)]
+    pub since: i64,
+    #[serde(default)]
+    pub session_id: Option<String>,
 }
 
 #[utoipa::path(
@@ -180,13 +195,47 @@ impl Drop for Pending {
     }
 }
 
+/// What an agent needs in its environment to authenticate.
+///
+/// Resolved at the moment a workspace starts rather than stored alongside the
+/// secret: which variable carries it is a delivery detail, and freezing it into
+/// a row would make it a migration the day an agent changes its mind.
+async fn agent_env(state: &AppState, kind: Agent) -> Result<Vec<(String, String)>, ApiError> {
+    let Some((_, mode, _, _)) = state
+        .db
+        .agent_modes()
+        .await?
+        .into_iter()
+        .find(|(k, ..)| *k == kind)
+    else {
+        return Ok(Vec::new());
+    };
+
+    let Some(secret) = state.db.agent_secret(kind).await? else {
+        return Ok(Vec::new());
+    };
+
+    let variable = match mode {
+        AgentMode::Subscription => kind.token_setup().map(|(_, var)| var),
+        AgentMode::ApiKey => kind.api_key_var(),
+        AgentMode::NotNeeded => None,
+    };
+
+    Ok(variable
+        .map(|v| vec![(v.to_string(), secret)])
+        .unwrap_or_default())
+}
+
 /// The token that applies to a remote, if we hold one.
 ///
 /// A remote we have no token for isn't an error: local paths and self-hosted
 /// git work off whatever credentials the worker already has.
-fn credential_for(remote: &str) -> Option<Credential> {
+async fn credential_for(remote: &str) -> Option<Credential> {
     let provider = providers::for_remote(remote)?;
-    let secret = Secrets::get(provider.id).ok().flatten()?;
+    let secret = Secrets::get(secrets::GIT, provider.id)
+        .await
+        .ok()
+        .flatten()?;
     Some(Credential {
         username: provider.git_username.to_string(),
         secret,
@@ -199,18 +248,21 @@ fn credential_for(remote: &str) -> Option<Credential> {
 )]
 async fn list_providers(State(state): State<AppState>) -> ApiResult<Json<Vec<ProviderStatus>>> {
     let pending = state.pending.read().await;
-    Ok(Json(
-        providers::PROVIDERS
-            .iter()
-            .map(|p| ProviderStatus {
-                id: p.id.to_string(),
-                label: p.label.to_string(),
-                connected: Secrets::get(p.id).ok().flatten().is_some(),
-                configured: p.client_id().is_some(),
-                pending: pending.get(p.id).map(|p| p.auth.clone()),
-            })
-            .collect(),
-    ))
+
+    let mut out = Vec::new();
+    for p in providers::PROVIDERS {
+        out.push(ProviderStatus {
+            id: p.id.to_string(),
+            label: p.label.to_string(),
+            // The flag, not the token: reading the token is a blocking call the
+            // operating system may put behind a prompt, and this endpoint only
+            // renders a screen.
+            connected: state.db.has_credential(secrets::GIT, p.id).await?,
+            configured: p.client_id().is_some(),
+            pending: pending.get(p.id).map(|p| p.auth.clone()),
+        });
+    }
+    Ok(Json(out))
 }
 
 /// Start an authorization and begin waiting for it to be approved.
@@ -255,6 +307,7 @@ async fn authorize_provider(
     };
 
     let pending = state.pending.clone();
+    let db = state.db.clone();
     let device_code = started.device_code.clone();
     let mut interval = std::time::Duration::from_secs(started.interval.max(1));
     let provider_id = provider.id.to_string();
@@ -271,10 +324,12 @@ async fn authorize_provider(
                     interval += std::time::Duration::from_secs(5);
                 }
                 Ok(oauth::Poll::Approved(token)) => {
-                    if let Err(e) = Secrets::store(provider.id, &token) {
-                        tracing::error!("storing the {} token: {e:#}", provider.label);
-                    } else {
-                        tracing::info!("{} authorized", provider.label);
+                    match Secrets::store(secrets::GIT, provider.id, &token).await {
+                        Ok(()) => {
+                            let _ = db.mark_credential(secrets::GIT, provider.id).await;
+                            tracing::info!("{} authorized", provider.label);
+                        }
+                        Err(e) => tracing::error!("storing the {} token: {e:#}", provider.label),
                     }
                     pending.write().await.remove(&provider_id);
                     return;
@@ -314,8 +369,10 @@ async fn disconnect_provider(
 ) -> ApiResult<StatusCode> {
     let provider = providers::find(&id).ok_or_else(|| ApiError::not_found("provider"))?;
     state.pending.write().await.remove(provider.id);
-    Secrets::forget(provider.id)
+    Secrets::forget(secrets::GIT, provider.id)
+        .await
         .map_err(|e| ApiError::new(ErrorCode::Internal, format!("{e:#}")))?;
+    state.db.clear_credential(secrets::GIT, provider.id).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -332,7 +389,8 @@ async fn disconnect_provider(
 async fn list_provider_repos(Path(id): Path<String>) -> ApiResult<Json<Vec<RemoteRepo>>> {
     let provider = providers::find(&id).ok_or_else(|| ApiError::not_found("provider"))?;
 
-    let token = Secrets::get(provider.id)
+    let token = Secrets::get(secrets::GIT, provider.id)
+        .await
         .map_err(|e| ApiError::new(ErrorCode::Internal, format!("{e:#}")))?
         .ok_or_else(|| {
             ApiError::new(
@@ -345,6 +403,205 @@ async fn list_provider_repos(Path(id): Path<String>) -> ApiResult<Json<Vec<Remot
         .await
         .map(Json)
         .map_err(|e| ApiError::new(ErrorCode::Internal, format!("{e:#}")))
+}
+
+// ── agents ─────────────────────────────────────────────────────────────
+
+/// One agent kind, its configuration, and where it's actually present.
+///
+/// Joined here rather than left to the interface: the screen shows one row per
+/// kind, so it should cost one request.
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentView {
+    pub kind: Agent,
+    pub label: String,
+    /// `None` until someone configures it.
+    pub mode: Option<AgentMode>,
+    pub enabled: bool,
+    /// Whether a credential is held. Only ever true in `ApiKey` mode — a
+    /// subscription lives in the agent's own config on the host.
+    pub credential_set: bool,
+    /// True when nothing needs configuring, which is only the plain shell.
+    pub needs_credential: bool,
+    /// What to run locally to get a token, when this agent works that way.
+    pub token_command: Option<String>,
+    pub hosts: Vec<AgentOnHost>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentOnHost {
+    pub host_id: String,
+    pub host_name: String,
+    pub installed: bool,
+    pub version: Option<String>,
+    /// `None` when this agent can't be asked without being started, which is
+    /// not the same as being signed out.
+    pub logged_in: Option<bool>,
+    /// Which account this host spends against, when it will say.
+    pub account: Option<String>,
+    /// Whether the token we hold applies to this host.
+    pub covered_by_token: bool,
+    /// When we last asked. Absent means never.
+    pub checked_at: Option<String>,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ConfigureAgent {
+    pub mode: AgentMode,
+    /// The token from `claude setup-token`, or a metered API key — whichever
+    /// the mode calls for. Required for both; ignored for an agent that needs
+    /// no credential.
+    pub secret: Option<String>,
+    #[serde(default = "yes")]
+    pub enabled: bool,
+}
+
+fn yes() -> bool {
+    true
+}
+
+fn agent_from_path(kind: &str) -> Result<Agent, ApiError> {
+    Agent::from_name(kind).ok_or_else(|| ApiError::not_found("agent"))
+}
+
+#[utoipa::path(
+    get, path = "/api/v1/agents", tag = "agents",
+    responses((status = 200, body = Vec<AgentView>)),
+)]
+async fn list_agents(State(state): State<AppState>) -> ApiResult<Json<Vec<AgentView>>> {
+    let modes = state.db.agent_modes().await?;
+    let presence = state.db.presence().await?;
+    let hosts = state.db.hosts().await?;
+
+    let mut views = Vec::new();
+    for kind in Agent::all() {
+        let configured = modes.iter().find(|(k, ..)| *k == kind);
+
+        views.push(AgentView {
+            kind,
+            label: kind.label().to_string(),
+            mode: configured.map(|(_, m, ..)| *m),
+            enabled: configured.map(|(_, _, e, _)| *e).unwrap_or(true),
+            // Whether one is set, never the value itself.
+            credential_set: configured.map(|(.., set)| *set).unwrap_or(false),
+            needs_credential: kind.needs_credential(),
+            // What to run, and where. The command happens on your own machine
+            // because that is where a browser is.
+            token_command: kind.token_setup().map(|(cmd, _)| cmd.to_string()),
+            hosts: hosts
+                .iter()
+                .map(|h| {
+                    let seen = presence
+                        .iter()
+                        .find(|p| p.host == h.id && p.found.kind == kind);
+
+                    AgentOnHost {
+                        host_id: h.id.to_string(),
+                        host_name: h.name.clone(),
+                        installed: seen.map(|p| p.found.installed).unwrap_or(false),
+                        version: seen.and_then(|p| p.found.version.clone()),
+                        logged_in: seen.and_then(|p| p.found.logged_in),
+                        account: seen.and_then(|p| p.found.account.clone()),
+                        // A host is usable either because someone signed in
+                        // there, or because our token covers it. Different
+                        // facts, and the screen shows which.
+                        covered_by_token: configured
+                            .map(|(_, m, _, set)| *m == AgentMode::Subscription && *set)
+                            .unwrap_or(false),
+                        checked_at: seen.map(|p| p.checked_at.clone()),
+                    }
+                })
+                .collect(),
+        });
+    }
+
+    Ok(Json(views))
+}
+
+/// Configure how an agent authenticates.
+#[utoipa::path(
+    put, path = "/api/v1/agents/{kind}", tag = "agents",
+    params(("kind" = String, Path, description = "Agent kind")),
+    request_body = ConfigureAgent,
+    responses((status = 204), (status = 400, body = ApiError), (status = 404, body = ApiError)),
+)]
+async fn configure_agent(
+    State(state): State<AppState>,
+    Path(kind): Path<String>,
+    Json(req): Json<ConfigureAgent>,
+) -> ApiResult<StatusCode> {
+    let kind = agent_from_path(&kind)?;
+
+    if !kind.needs_credential() && req.mode != AgentMode::NotNeeded {
+        return Err(ApiError::new(
+            ErrorCode::InvalidRequest,
+            format!("{} has nothing to authenticate", kind.label()),
+        ));
+    }
+
+    let secret = req
+        .secret
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+
+    if matches!(req.mode, AgentMode::Subscription | AgentMode::ApiKey) && secret.is_none() {
+        return Err(ApiError::new(
+            ErrorCode::InvalidRequest,
+            match kind.token_setup() {
+                Some((command, _)) => format!("run `{command}` and paste what it prints"),
+                None => "that mode needs a key".to_string(),
+            },
+        ));
+    }
+
+    // Passing it through clears whatever the previous mode stored, so a key
+    // never lingers behind a subscription.
+    state
+        .db
+        .set_agent_mode(kind, req.mode, req.enabled, secret)
+        .await?;
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Forget an agent's configuration and any credential with it.
+#[utoipa::path(
+    delete, path = "/api/v1/agents/{kind}", tag = "agents",
+    params(("kind" = String, Path, description = "Agent kind")),
+    responses((status = 204), (status = 404, body = ApiError)),
+)]
+async fn forget_agent(
+    State(state): State<AppState>,
+    Path(kind): Path<String>,
+) -> ApiResult<StatusCode> {
+    let kind = agent_from_path(&kind)?;
+    state.db.forget_agent(kind).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Re-ask every reachable host what it has.
+///
+/// Hosts we can't reach are skipped rather than failing the request: their last
+/// answer stays on screen, which is more useful than an error.
+#[utoipa::path(
+    post, path = "/api/v1/agents/check", tag = "agents",
+    responses((status = 200, body = Vec<AgentView>)),
+)]
+async fn check_agents(State(state): State<AppState>) -> ApiResult<Json<Vec<AgentView>>> {
+    for host in state.db.hosts().await? {
+        if !state.fleet.is_connected(&host.id).await {
+            continue;
+        }
+        match state.fleet.probe_agents(&host.id).await {
+            Ok(found) => state.db.record_presence(&host.id, &found).await?,
+            Err(e) => tracing::warn!(host = %host.name, "asking about agents: {e:#}"),
+        }
+    }
+    list_agents(State(state)).await
 }
 
 // ── repositories ───────────────────────────────────────────────────────
@@ -469,7 +726,7 @@ async fn probe_repo(
     let host = probing_host(&state).await?;
     let info = state
         .fleet
-        .probe(&host, remote, credential_for(remote))
+        .probe(&host, remote, credential_for(remote).await)
         .await
         .map_err(|e| ApiError::new(ErrorCode::HostUnreachable, format!("{e:#}")))?
         .map_err(|f| probe_error(remote, f))?;
@@ -510,7 +767,7 @@ async fn create_repo(
     let host = probing_host(&state).await?;
     let info = state
         .fleet
-        .probe(&host, remote, credential_for(remote))
+        .probe(&host, remote, credential_for(remote).await)
         .await
         .map_err(|e| ApiError::new(ErrorCode::HostUnreachable, format!("{e:#}")))?
         .map_err(|f| probe_error(remote, f))?;
@@ -679,10 +936,12 @@ async fn create_session(
                 agent: req.agent,
                 size: req.size,
                 setup: repo.setup.clone(),
-                env: vec![],
+                // Resolved here, sent with the work, and held in memory on the
+                // host. Never written to a worker's disk.
+                env: agent_env(&state, req.agent).await?,
                 // Sent with the work rather than held by the host: the worker
                 // keeps it in memory for this session and writes it nowhere.
-                credential: credential_for(&repo.remote),
+                credential: credential_for(&repo.remote).await,
             })),
         )
         .await?;
@@ -734,14 +993,20 @@ async fn destroy_session(
 /// refresh, and the fallback when a stream can't be held open.
 #[utoipa::path(
     get, path = "/api/v1/events", tag = "events",
-    params(("since" = i64, Query, description = "Last sequence number seen")),
+    params(
+        ("since" = i64, Query, description = "Last sequence number seen"),
+        ("sessionId" = Option<String>, Query, description = "Only this session's events"),
+    ),
     responses((status = 200, body = Vec<Event>)),
 )]
 async fn list_events(
     State(state): State<AppState>,
-    Query(q): Query<Since>,
+    Query(q): Query<Replay>,
 ) -> ApiResult<Json<Vec<Event>>> {
-    Ok(Json(state.db.events_since(q.since).await?))
+    let session = q.session_id.map(SessionId::from_stored);
+    Ok(Json(
+        state.db.events_since_for(q.since, session.as_ref()).await?,
+    ))
 }
 
 /// The live feed.
@@ -792,6 +1057,248 @@ async fn stream_events(
     )
 }
 
+// ── what you do with a session's work ──────────────────────────────────
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CommitRequest {
+    /// Defaults to the session's title, which is what the agent was asked for.
+    pub message: Option<String>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct Done {
+    pub detail: String,
+}
+
+/// The session, its host, and the credential its remote needs.
+async fn session_context(
+    state: &AppState,
+    id: &SessionId,
+) -> Result<(Session, ft_core::HostId), ApiError> {
+    let session = state
+        .db
+        .session(id)
+        .await?
+        .ok_or_else(|| ApiError::not_found("session"))?;
+
+    if session.status == SessionStatus::Ended {
+        return Err(ApiError::new(
+            ErrorCode::SessionEnded,
+            "that session has ended",
+        ));
+    }
+
+    let host = session.host_id.clone();
+    if !state.fleet.is_connected(&host).await {
+        return Err(ApiError::new(
+            ErrorCode::HostUnreachable,
+            "the host running this session isn't responding",
+        ));
+    }
+    Ok((session, host))
+}
+
+async fn act(
+    state: &AppState,
+    id: &SessionId,
+    action: ft_proto::Action,
+) -> ApiResult<Json<Done>> {
+    let (session, host) = session_context(state, id).await?;
+
+    // Only the remote needs one, and only some of these touch it.
+    let credential = match state.db.repo_by_slug(&session.repo).await? {
+        Some(repo) => credential_for(&repo.remote).await,
+        None => None,
+    };
+
+    match state
+        .fleet
+        .run_action(&host, id, action, credential)
+        .await
+        .map_err(|e| ApiError::new(ErrorCode::HostUnreachable, format!("{e:#}")))?
+    {
+        Ok(detail) => Ok(Json(Done { detail })),
+        Err(why) => Err(ApiError::new(ErrorCode::ActionFailed, why)),
+    }
+}
+
+/// Stop the agent. The workspace and its branch stay.
+#[utoipa::path(
+    post, path = "/api/v1/sessions/{id}/stop", tag = "sessions",
+    params(("id" = String, Path, description = "Session id")),
+    responses((status = 200, body = Done), (status = 404, body = ApiError), (status = 409, body = ApiError)),
+)]
+async fn stop_session(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> ApiResult<Json<Done>> {
+    act(&state, &SessionId::from_stored(id), ft_proto::Action::Stop).await
+}
+
+/// Commit whatever the agent left uncommitted.
+#[utoipa::path(
+    post, path = "/api/v1/sessions/{id}/commit", tag = "sessions",
+    params(("id" = String, Path, description = "Session id")),
+    request_body = CommitRequest,
+    responses((status = 200, body = Done), (status = 404, body = ApiError), (status = 409, body = ApiError)),
+)]
+async fn commit_session(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(req): Json<CommitRequest>,
+) -> ApiResult<Json<Done>> {
+    let id = SessionId::from_stored(id);
+    let message = match req.message.as_deref().map(str::trim).filter(|m| !m.is_empty()) {
+        Some(m) => m.to_string(),
+        None => state
+            .db
+            .session(&id)
+            .await?
+            .map(|s| s.title)
+            .unwrap_or_else(|| "Work from a Firetower session".into()),
+    };
+
+    act(&state, &id, ft_proto::Action::Commit { message }).await
+}
+
+/// Push the branch, so the work outlives the workspace.
+#[utoipa::path(
+    post, path = "/api/v1/sessions/{id}/push", tag = "sessions",
+    params(("id" = String, Path, description = "Session id")),
+    responses((status = 200, body = Done), (status = 404, body = ApiError), (status = 409, body = ApiError)),
+)]
+async fn push_session(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> ApiResult<Json<Done>> {
+    act(&state, &SessionId::from_stored(id), ft_proto::Action::Push).await
+}
+
+/// What is in this workspace that isn't safely elsewhere.
+#[utoipa::path(
+    get, path = "/api/v1/sessions/{id}/work", tag = "sessions",
+    params(("id" = String, Path, description = "Session id")),
+    responses((status = 200, body = ft_core::WorkSummary), (status = 404, body = ApiError)),
+)]
+async fn session_work(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> ApiResult<Json<ft_core::WorkSummary>> {
+    let id = SessionId::from_stored(id);
+    let (_, host) = session_context(&state, &id).await?;
+
+    state
+        .fleet
+        .summarize(&host, &id)
+        .await
+        .map(Json)
+        .map_err(|e| ApiError::new(ErrorCode::HostUnreachable, format!("{e:#}")))
+}
+
+/// The terminal.
+///
+/// A websocket rather than the event stream: this is the one thing in Firetower
+/// that genuinely flows both ways, byte at a time, and where latency is felt.
+///
+/// Output arrives as binary frames of raw terminal bytes. Input goes back the
+/// same way; a text frame is a control message, which today means resizing.
+#[utoipa::path(
+    get, path = "/api/v1/sessions/{id}/pty", tag = "sessions",
+    params(
+        ("id" = String, Path, description = "Session id"),
+        ("cols" = Option<u16>, Query, description = "Terminal width"),
+        ("rows" = Option<u16>, Query, description = "Terminal height"),
+    ),
+    responses((status = 101, description = "Terminal stream")),
+)]
+async fn session_pty(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Query(size): Query<TerminalSize>,
+    upgrade: WebSocketUpgrade,
+) -> Response {
+    let id = SessionId::from_stored(id);
+    upgrade.on_upgrade(move |socket| drive_terminal(socket, state, id, size))
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct TerminalSize {
+    pub cols: Option<u16>,
+    pub rows: Option<u16>,
+}
+
+/// What a browser can say about its terminal, beyond typing into it.
+#[derive(Debug, Deserialize)]
+#[serde(tag = "t", rename_all = "camelCase")]
+enum FromViewer {
+    Resize { cols: u16, rows: u16 },
+}
+
+async fn drive_terminal(
+    mut socket: WebSocket,
+    state: AppState,
+    session_id: SessionId,
+    size: TerminalSize,
+) {
+    let Ok(Some(session)) = state.db.session(&session_id).await else {
+        let _ = socket
+            .send(Message::Text("no such session".to_string().into()))
+            .await;
+        return;
+    };
+
+    let host = session.host_id;
+    let (cols, rows) = (size.cols.unwrap_or(120), size.rows.unwrap_or(32));
+
+    let mut output = match state.fleet.watch(&host, &session_id, cols, rows).await {
+        Ok(rx) => rx,
+        Err(e) => {
+            let _ = socket.send(Message::Text(format!("{e:#}").into())).await;
+            return;
+        }
+    };
+
+    loop {
+        tokio::select! {
+            // Output first: a burst from the agent should reach the screen
+            // before we go looking for keystrokes.
+            biased;
+
+            received = output.recv() => match received {
+                Ok(fleet::Terminal::Data(bytes)) => {
+                    if socket.send(Message::Binary(bytes.into())).await.is_err() {
+                        break;
+                    }
+                }
+                Ok(fleet::Terminal::Closed) => break,
+                // Lagging means the viewer couldn't keep up and frames were
+                // dropped. The screen is now wrong in a way that redrawing
+                // can't fix, so end it rather than show a corrupted terminal.
+                Err(_) => break,
+            },
+
+            incoming = socket.recv() => match incoming {
+                Some(Ok(Message::Binary(bytes))) => {
+                    if state.fleet.send_input(&host, &session_id, &bytes).await.is_err() {
+                        break;
+                    }
+                }
+                Some(Ok(Message::Text(text))) => {
+                    if let Ok(FromViewer::Resize { cols, rows }) = serde_json::from_str(&text) {
+                        let _ = state.fleet.resize(&host, &session_id, cols, rows).await;
+                    }
+                }
+                Some(Ok(_)) => {}
+                Some(Err(_)) | None => break,
+            },
+        }
+    }
+
+    state.fleet.unwatch(&host, &session_id).await;
+}
+
 /// Registered so the generated client gets a type and a validator for the
 /// stream, even though no path returns one. The schema document doubles as a
 /// type registry rather than only a list of paths.
@@ -806,7 +1313,10 @@ async fn stream_events(
         ft_core::HostState,
         ProviderStatus,
         PendingAuth,
-        RemoteRepo
+        RemoteRepo,
+        AgentMode,
+        AgentPresence,
+        ft_core::WorkSummary
     ))
 )]
 pub struct ApiDoc;
@@ -818,6 +1328,9 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(list_repos, create_repo))
         .routes(routes!(delete_repo))
         .routes(routes!(probe_repo))
+        .routes(routes!(list_agents))
+        .routes(routes!(configure_agent, forget_agent))
+        .routes(routes!(check_agents))
         .routes(routes!(list_providers))
         .routes(routes!(authorize_provider))
         .routes(routes!(disconnect_provider))
@@ -826,6 +1339,11 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(get_session, destroy_session))
         .routes(routes!(list_events))
         .routes(routes!(stream_events))
+        .routes(routes!(session_pty))
+        .routes(routes!(stop_session))
+        .routes(routes!(commit_session))
+        .routes(routes!(push_session))
+        .routes(routes!(session_work))
 }
 
 #[cfg(test)]

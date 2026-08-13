@@ -6,13 +6,15 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export type ListEventsParams = {
+export type SessionPtyParams = {
 /**
- * Last sequence number seen
+ * Terminal width
+ * @minimum 0
  */
-since: number;
+cols?: number;
 /**
- * Only this session's events
+ * Terminal height
+ * @minimum 0
  */
-sessionId?: string;
+rows?: number;
 };

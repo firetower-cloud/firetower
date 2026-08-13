@@ -8,20 +8,28 @@
 use anyhow::{Context, Result};
 use ft_core::{EventKind, SessionId, SessionStatus};
 use ft_proto::{Codec, CodecError, CreateWorkspace, ToServer, ToWorker, PROTOCOL_VERSION};
+use std::collections::HashMap;
 use std::path::PathBuf;
 use tokio::io::{AsyncRead, AsyncWrite};
+use tokio::sync::{mpsc, Mutex};
 
+pub mod agents;
 pub mod askpass;
+pub mod attach;
 pub mod git;
 pub mod store;
+pub mod tmux;
 
 use git::GitRoot;
 use store::Store;
+use tmux::Tmux;
 
 /// Everything a worker needs to do its job on one machine.
 pub struct Worker {
     store: Store,
     git: GitRoot,
+    /// One terminal attachment per session, however many people are watching.
+    attached: Mutex<HashMap<String, attach::Attachment>>,
 }
 
 impl Worker {
@@ -31,6 +39,7 @@ impl Worker {
         Ok(Self {
             store: Store::open(&root.join("worker.db")).await?,
             git: GitRoot::new(&root),
+            attached: Mutex::new(HashMap::new()),
         })
     }
 
@@ -43,9 +52,9 @@ impl Worker {
         R: AsyncRead + Unpin,
         W: AsyncWrite + Unpin,
     {
-        let mut codec = Codec::new(reader, writer);
+        let (mut inbound, mut outbound) = Codec::new(reader, writer).split();
 
-        match codec.read::<ToWorker>().await {
+        match inbound.read::<ToWorker>().await {
             Ok(ToWorker::Hello { protocol, .. }) if protocol == PROTOCOL_VERSION => {}
             Ok(ToWorker::Hello { protocol, .. }) => {
                 anyhow::bail!(
@@ -57,7 +66,7 @@ impl Worker {
             Err(e) => return Err(e.into()),
         }
 
-        codec
+        outbound
             .write(&ToServer::Hello {
                 protocol: PROTOCOL_VERSION,
                 worker_version: env!("CARGO_PKG_VERSION").to_string(),
@@ -67,47 +76,62 @@ impl Worker {
             })
             .await?;
 
-        loop {
-            let frame = match codec.read::<ToWorker>().await {
-                Ok(f) => f,
-                Err(CodecError::Closed) => {
-                    tracing::info!("control plane disconnected; sessions keep running");
-                    return Ok(());
-                }
-                Err(CodecError::Malformed(e)) => {
-                    // One bad frame shouldn't take down a worker that has live
-                    // sessions on it. Say so and carry on.
-                    tracing::warn!("ignoring malformed frame: {e}");
-                    continue;
-                }
-                Err(e) => return Err(e.into()),
-            };
+        // Everything the worker says goes through here. A terminal streams
+        // output while we're still waiting on the next command, which a single
+        // read-then-write loop can't express.
+        let (out, mut pending) = mpsc::channel::<ToServer>(1024);
 
-            match self.handle(frame, &mut codec).await {
-                Ok(true) => {}
-                Ok(false) => return Ok(()),
-                Err(e) => {
-                    tracing::error!("{e:#}");
-                    codec
-                        .write(&ToServer::Error {
-                            session_id: None,
-                            code: "Internal".into(),
-                            message: format!("{e:#}"),
-                        })
-                        .await?;
+        loop {
+            tokio::select! {
+                // Bias towards draining output: a burst of terminal bytes
+                // should reach the viewer before we go looking for more work.
+                biased;
+
+                Some(frame) = pending.recv() => {
+                    outbound.write(&frame).await?;
+                }
+
+                incoming = inbound.read::<ToWorker>() => {
+                    let frame = match incoming {
+                        Ok(f) => f,
+                        Err(CodecError::Closed) => {
+                            // Say the last of what we know before going quiet.
+                            while let Ok(frame) = pending.try_recv() {
+                                outbound.write(&frame).await?;
+                            }
+                            tracing::info!("control plane disconnected; sessions keep running");
+                            return Ok(());
+                        }
+                        Err(CodecError::Malformed(e)) => {
+                            // One bad frame shouldn't take down a worker that
+                            // has live sessions on it. Say so and carry on.
+                            tracing::warn!("ignoring malformed frame: {e}");
+                            continue;
+                        }
+                        Err(e) => return Err(e.into()),
+                    };
+
+                    match self.handle(frame, &out).await {
+                        Ok(true) => {}
+                        Ok(false) => return Ok(()),
+                        Err(e) => {
+                            tracing::error!("{e:#}");
+                            let _ = out.send(ToServer::Error {
+                                session_id: None,
+                                code: "Internal".into(),
+                                message: format!("{e:#}"),
+                            }).await;
+                        }
+                    }
                 }
             }
         }
     }
 
     /// Returns `false` when the worker should stop serving.
-    async fn handle<R, W>(&self, frame: ToWorker, codec: &mut Codec<R, W>) -> Result<bool>
-    where
-        R: AsyncRead + Unpin,
-        W: AsyncWrite + Unpin,
-    {
+    async fn handle(&self, frame: ToWorker, out: &mpsc::Sender<ToServer>) -> Result<bool> {
         match frame {
-            ToWorker::Ping => codec.write(&ToServer::Pong).await?,
+            ToWorker::Ping => out.send(ToServer::Pong).await?,
 
             ToWorker::Hello { .. } => {
                 tracing::warn!("a second Hello arrived; ignoring it");
@@ -119,15 +143,19 @@ impl Worker {
                 let missed = self.store.events_since(since).await?;
                 tracing::info!("replaying {} events after {since}", missed.len());
                 for e in missed {
-                    codec
-                        .write(&ToServer::Event {
-                            seq: e.seq,
-                            session_id: e.session_id,
-                            kind: e.kind,
-                            at: e.at,
-                        })
-                        .await?;
+                    out.send(ToServer::Event {
+                        seq: e.seq,
+                        session_id: e.session_id,
+                        kind: e.kind,
+                        at: e.at,
+                    })
+                    .await?;
                 }
+            }
+
+            ToWorker::ProbeAgents { req } => {
+                let agents = agents::probe().await;
+                out.send(ToServer::AgentsProbed { req, agents }).await?;
             }
 
             // Answering this needs the credentials and the network of the
@@ -139,17 +167,17 @@ impl Worker {
                 credential,
             } => {
                 let result = self.git.probe(&remote, credential).await;
-                codec.write(&ToServer::RemoteProbed { req, result }).await?;
+                out.send(ToServer::RemoteProbed { req, result }).await?;
             }
 
             ToWorker::CreateWorkspace(spec) => {
                 let session_id = spec.session_id.clone();
-                if let Err(e) = self.create_workspace(*spec, codec).await {
+                if let Err(e) = self.create_workspace(*spec, out).await {
                     let kind = EventKind::Failed {
                         code: "SetupFailed".into(),
                         message: format!("{e:#}"),
                     };
-                    self.emit(&session_id, kind, codec).await?;
+                    self.emit(&session_id, kind, out).await?;
                     self.store
                         .set_status(&session_id, SessionStatus::Failed)
                         .await?;
@@ -158,13 +186,29 @@ impl Worker {
                         EventKind::StatusChanged {
                             status: SessionStatus::Failed,
                         },
-                        codec,
+                        out,
                     )
                     .await?;
                 }
             }
 
             ToWorker::Destroy { session_id, .. } => {
+                // Everything goes: the agent, its terminal, and the worktree.
+                self.attached.lock().await.remove(session_id.as_str());
+                // Whatever was worth keeping should already have been pushed.
+                Tmux::for_session(session_id.as_str()).kill().await?;
+
+                // The worktree is registered against its mirror, so removing it
+                // means finding the mirror the session was cut from.
+                if let Some(slug) = self.store.repo_of(&session_id).await? {
+                    let mirror = self.git.mirror_path(&slug);
+                    if let Err(e) = self.git.remove_worktree(&mirror, session_id.as_str()).await {
+                        // Worth saying out loud: a worktree left behind is disk
+                        // that never comes back on its own.
+                        tracing::error!(session = %session_id, "removing the worktree: {e:#}");
+                    }
+                }
+
                 self.store
                     .set_status(&session_id, SessionStatus::Ended)
                     .await?;
@@ -173,22 +217,87 @@ impl Worker {
                     EventKind::StatusChanged {
                         status: SessionStatus::Ended,
                     },
-                    codec,
+                    out,
                 )
                 .await?;
             }
 
-            // Terminal attachment lands in the next milestone; acknowledging the
-            // frame rather than erroring keeps the control plane's contract honest.
-            ToWorker::PtyOpen { session_id, .. }
-            | ToWorker::PtyClose { session_id }
-            | ToWorker::PtyInput { session_id, .. }
-            | ToWorker::PtyResize { session_id, .. } => {
-                tracing::debug!("terminal frames are not wired up yet ({session_id})");
+            ToWorker::PtyOpen {
+                session_id,
+                cols,
+                rows,
+            } => {
+                if let Err(e) = self.open_terminal(&session_id, cols, rows, out).await {
+                    tracing::warn!(session = %session_id, "attaching: {e:#}");
+                    out.send(ToServer::Error {
+                        session_id: Some(session_id.clone()),
+                        code: "TerminalUnavailable".into(),
+                        message: format!("{e:#}"),
+                    })
+                    .await?;
+                    out.send(ToServer::PtyClosed { session_id }).await?;
+                }
+            }
+
+            ToWorker::PtyInput { session_id, data } => {
+                // Typed characters, verbatim — including the ones that mean
+                // "stop", which is half the reason a terminal is the interface.
+                if let Some(bytes) = ft_proto::decode(&data) {
+                    if let Some(a) = self.attached.lock().await.get(session_id.as_str()) {
+                        if let Err(e) = a.write(&bytes) {
+                            tracing::warn!(session = %session_id, "sending input: {e:#}");
+                        }
+                    }
+                }
+            }
+
+            ToWorker::PtyResize {
+                session_id,
+                cols,
+                rows,
+            } => {
+                if let Some(a) = self.attached.lock().await.get(session_id.as_str()) {
+                    if let Err(e) = a.resize(cols, rows) {
+                        tracing::warn!(session = %session_id, "resizing: {e:#}");
+                    }
+                }
+            }
+
+            ToWorker::PtyClose { session_id } => {
+                // Dropping the attachment detaches. The agent is tmux's child,
+                // so nobody watching it is what it needs to keep working.
+                self.attached.lock().await.remove(session_id.as_str());
+            }
+
+            ToWorker::RunAction {
+                req,
+                session_id,
+                action,
+                credential,
+            } => {
+                let result = self
+                    .run_action(&session_id, action, credential, out)
+                    .await
+                    .map_err(|e| format!("{e:#}"));
+                out.send(ToServer::ActionDone { req, result }).await?;
+            }
+
+            ToWorker::Summarize { req, session_id } => {
+                match self.summarize(&session_id).await {
+                    Ok(summary) => out.send(ToServer::Summarized { req, summary }).await?,
+                    Err(e) => {
+                        tracing::warn!(session = %session_id, "summarising: {e:#}");
+                        out.send(ToServer::ActionDone {
+                            req,
+                            result: Err(format!("{e:#}")),
+                        })
+                        .await?;
+                    }
+                }
             }
 
             ToWorker::Reply { session_id, .. } | ToWorker::Stop { session_id } => {
-                tracing::debug!("agent control is not wired up yet ({session_id})");
+                tracing::debug!("superseded by RunAction ({session_id})");
             }
         }
         Ok(true)
@@ -198,15 +307,11 @@ impl Worker {
     ///
     /// The narration is the point: it's what the interface shows while you wait,
     /// and what tells you *where* it broke when it breaks.
-    async fn create_workspace<R, W>(
+    async fn create_workspace(
         &self,
         spec: CreateWorkspace,
-        codec: &mut Codec<R, W>,
-    ) -> Result<()>
-    where
-        R: AsyncRead + Unpin,
-        W: AsyncWrite + Unpin,
-    {
+        out: &mpsc::Sender<ToServer>,
+    ) -> Result<()> {
         let id = spec.session_id.clone();
         let title = ft_core::session::title_from(&spec.prompt);
 
@@ -229,7 +334,7 @@ impl Worker {
                 repo: spec.repo_slug.clone(),
                 prompt: spec.prompt.clone(),
             },
-            codec,
+            out,
         )
         .await?;
 
@@ -249,7 +354,7 @@ impl Worker {
                     format!("from the mirror · {:.1}s", started.elapsed().as_secs_f32())
                 },
             },
-            codec,
+            out,
         )
         .await?;
 
@@ -259,12 +364,17 @@ impl Worker {
             .await
             .context("cutting the worktree")?;
 
-        self.emit(&id, EventKind::WorktreeAdded { branch }, codec)
+        // Two sessions from one prompt want the same name, so git may have
+        // numbered it. What is on disk is the authority — pushing the name we
+        // asked for would push somebody else's branch.
+        self.store.set_branch(&id, &branch).await?;
+
+        self.emit(&id, EventKind::WorktreeAdded { branch }, out)
             .await?;
 
-        let tmux_session = format!("firetower-{}", id.as_str());
+        let tmux = Tmux::for_session(id.as_str());
         self.store
-            .record_workspace(&id, path.to_str().unwrap_or_default(), &tmux_session)
+            .record_workspace(&id, path.to_str().unwrap_or_default(), tmux.name())
             .await?;
 
         let (cpus, mem) = spec.size.resources();
@@ -273,7 +383,7 @@ impl Worker {
             EventKind::WorkspaceStarted {
                 detail: format!("{cpus} CPU / {} GB", mem / 1024),
             },
-            codec,
+            out,
         )
         .await?;
 
@@ -300,10 +410,27 @@ impl Worker {
                 EventKind::SetupFinished {
                     detail: format!("{setup} · {:.1}s", started.elapsed().as_secs_f32()),
                 },
-                codec,
+                out,
             )
             .await?;
         }
+
+        // The agent runs under tmux so it outlives this worker, this
+        // connection, and the laptop that started it.
+        tmux.start(&path, &spec.agent.launch(&spec.prompt), &spec.env)
+            .await
+            .with_context(|| format!("starting {}", spec.agent.label()))?;
+
+        self.emit(
+            &id,
+            EventKind::TmuxOpened {
+                name: tmux.name().to_string(),
+            },
+            out,
+        )
+        .await?;
+        self.emit(&id, EventKind::AgentLaunched { agent: spec.agent }, out)
+            .await?;
 
         self.store.set_status(&id, SessionStatus::Working).await?;
         self.emit(
@@ -311,34 +438,143 @@ impl Worker {
             EventKind::StatusChanged {
                 status: SessionStatus::Working,
             },
-            codec,
+            out,
         )
         .await?;
 
         Ok(())
     }
 
+    /// Do something with the work a session produced.
+    async fn run_action(
+        &self,
+        session_id: &SessionId,
+        action: ft_proto::Action,
+        credential: Option<ft_proto::Credential>,
+        out: &mpsc::Sender<ToServer>,
+    ) -> Result<String> {
+        let branch = self
+            .store
+            .branch_of(session_id)
+            .await?
+            .context("this session has no branch")?;
+
+        match action {
+            ft_proto::Action::Stop => {
+                // The workspace and the branch stay; only the agent goes. What
+                // it produced is still there to look at, commit, or push.
+                self.attached.lock().await.remove(session_id.as_str());
+                Tmux::for_session(session_id.as_str()).kill().await?;
+
+                self.store
+                    .set_status(session_id, SessionStatus::HandedBack)
+                    .await?;
+                self.emit(
+                    session_id,
+                    EventKind::StatusChanged {
+                        status: SessionStatus::HandedBack,
+                    },
+                    out,
+                )
+                .await?;
+
+                Ok("stopped".to_string())
+            }
+
+            ft_proto::Action::Commit { message } => {
+                self.git.commit(session_id.as_str(), &message).await
+            }
+
+            ft_proto::Action::Push => {
+                self.git
+                    .push(session_id.as_str(), &branch, credential)
+                    .await
+            }
+        }
+    }
+
+    async fn summarize(&self, session_id: &SessionId) -> Result<ft_core::WorkSummary> {
+        let (branch, base) = self
+            .store
+            .refs_of(session_id)
+            .await?
+            .context("this session has no branch")?;
+        self.git.summary(session_id.as_str(), &branch, &base).await
+    }
+
+    /// Attach to a session's terminal.
+    ///
+    /// No scrollback is sent first, though it looks like it should be: `tmux
+    /// attach` enters the alternate screen and clears it, so anything written
+    /// beforehand is wiped a few milliseconds later — and until it is, it lands
+    /// as a staircase, because captured lines end in `\n` and a raw terminal
+    /// needs `\r\n` to return to column zero.
+    ///
+    /// tmux redraws the pane itself on attach, which is the same content by a
+    /// shorter route. History above the visible screen stays reachable through
+    /// tmux's own copy mode, since every key reaches it.
+    async fn open_terminal(
+        &self,
+        session_id: &SessionId,
+        cols: u16,
+        rows: u16,
+        out: &mpsc::Sender<ToServer>,
+    ) -> Result<()> {
+        let tmux = Tmux::for_session(session_id.as_str());
+        if !tmux.exists().await {
+            anyhow::bail!("nothing is running for this session");
+        }
+
+        // Reuse a live attachment rather than replacing it. Two viewers share
+        // one, and tearing the old one down would send its dying client's
+        // "[lost tty]" to everyone still watching — which is what a second tab,
+        // or a development double-mount, would do on every open.
+        {
+            let attached = self.attached.lock().await;
+            if let Some(existing) = attached.get(session_id.as_str()) {
+                if existing.is_alive() {
+                    // The last repaint went to whoever was watching then, so
+                    // ask for another one on behalf of whoever just arrived.
+                    let _ = existing.repaint(cols.max(20), rows.max(5));
+                    return Ok(());
+                }
+            }
+        }
+        self.attached.lock().await.remove(session_id.as_str());
+
+        let attachment = attach::Attachment::open(
+            tmux.name(),
+            session_id.clone(),
+            cols.max(20),
+            rows.max(5),
+            out.clone(),
+        )?;
+
+        self.attached
+            .lock()
+            .await
+            .insert(session_id.to_string(), attachment);
+
+        Ok(())
+    }
+
     /// Record then send. Durable before it leaves, so a crash between the two
     /// costs a replayed event rather than a lost one.
-    async fn emit<R, W>(
+    async fn emit(
         &self,
         session_id: &SessionId,
         kind: EventKind,
-        codec: &mut Codec<R, W>,
-    ) -> Result<()>
-    where
-        R: AsyncRead + Unpin,
-        W: AsyncWrite + Unpin,
-    {
+        out: &mpsc::Sender<ToServer>,
+    ) -> Result<()> {
         let stored = self.store.append(session_id, &kind).await?;
-        codec
-            .write(&ToServer::Event {
-                seq: stored.seq,
-                session_id: stored.session_id,
-                kind: stored.kind,
-                at: stored.at,
-            })
-            .await?;
+        out.send(ToServer::Event {
+            seq: stored.seq,
+            session_id: stored.session_id,
+            kind: stored.kind,
+            at: stored.at,
+        })
+        .await
+        .map_err(|_| anyhow::anyhow!("nobody is listening for events"))?;
         Ok(())
     }
 
@@ -379,6 +615,11 @@ mod tests {
             .filter(|l| !l.trim().is_empty())
             .map(|l| serde_json::from_str(l).unwrap())
             .collect()
+    }
+
+    /// Kill whatever a test started, so a run never leaves agents behind.
+    async fn cleanup(id: &SessionId) {
+        let _ = tmux::Tmux::for_session(id.as_str()).kill().await;
     }
 
     fn hello() -> ToWorker {
@@ -426,7 +667,9 @@ mod tests {
             base: "main".into(),
             branch: "agent/fix-retries".into(),
             prompt: "Fix retry handling for Stripe webhooks".into(),
-            agent: Agent::ClaudeCode,
+            // A shell, not a real agent: these tests should not launch
+            // anything that talks to a network or expects a subscription.
+            agent: Agent::Shell,
             size: WorkspaceSize::Medium,
             setup: setup.map(str::to_string),
             env: vec![],
@@ -489,9 +732,13 @@ mod tests {
                 "Fetched the repository",
                 "Added a worktree",
                 "Started the workspace",
+                "Opened tmux",
+                "Launched the agent",
                 "Status",
             ]
         );
+
+        cleanup(&id).await;
     }
 
     #[tokio::test]
@@ -508,6 +755,50 @@ mod tests {
         assert_eq!(
             worker.store().status_of(&id).await.unwrap(),
             Some(SessionStatus::Working)
+        );
+        assert!(
+            tmux::Tmux::for_session(id.as_str()).exists().await,
+            "the agent should be running under tmux"
+        );
+
+        cleanup(&id).await;
+    }
+
+    #[tokio::test]
+    async fn destroying_a_session_takes_the_agent_with_it() {
+        let (_origin, remote) = origin().await;
+        let home = TempDir::new().unwrap();
+        let worker = Worker::open(home.path()).await.unwrap();
+        let id = SessionId::new();
+
+        exchange(&worker, vec![hello(), spec(&remote, &id, None)]).await;
+        assert!(tmux::Tmux::for_session(id.as_str()).exists().await);
+        let path = worker.store().workspace_path(&id).await.unwrap().unwrap();
+        assert!(std::path::Path::new(&path).exists());
+
+        exchange(
+            &worker,
+            vec![
+                hello(),
+                ToWorker::Destroy {
+                    session_id: id.clone(),
+                    force: false,
+                },
+            ],
+        )
+        .await;
+
+        assert!(
+            !tmux::Tmux::for_session(id.as_str()).exists().await,
+            "ending a session should leave nothing running"
+        );
+        assert!(
+            !std::path::Path::new(&path).exists(),
+            "ending a session should reclaim the worktree, not leak it"
+        );
+        assert_eq!(
+            worker.store().status_of(&id).await.unwrap(),
+            Some(SessionStatus::Ended)
         );
     }
 
@@ -554,6 +845,8 @@ mod tests {
 
         let path = worker.store().workspace_path(&id).await.unwrap().unwrap();
         assert!(std::path::Path::new(&path).join("setup-ran.txt").exists());
+
+        cleanup(&id).await;
     }
 
     #[tokio::test]
@@ -565,6 +858,7 @@ mod tests {
 
         // the laptop was awake for this
         exchange(&worker, vec![hello(), spec(&remote, &id, None)]).await;
+        cleanup(&id).await;
         let head = worker.store().head().await.unwrap();
         assert!(head > 0);
 

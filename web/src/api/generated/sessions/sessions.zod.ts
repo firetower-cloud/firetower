@@ -75,3 +75,85 @@ export const DestroySessionParams = zod.object({
 
 export const DestroySessionResponse = zod.void()
 
+/**
+ * @summary Commit whatever the agent left uncommitted.
+ */
+export const CommitSessionParams = zod.object({
+  "id": zod.string().describe('Session id')
+})
+
+export const CommitSessionBody = zod.object({
+  "message": zod.string().nullish().describe('Defaults to the session\'s title, which is what the agent was asked for.')
+})
+
+export const CommitSessionResponse = zod.object({
+  "detail": zod.string()
+})
+
+/**
+ * A websocket rather than the event stream: this is the one thing in Firetower
+ * that genuinely flows both ways, byte at a time, and where latency is felt.
+ *
+ * Output arrives as binary frames of raw terminal bytes. Input goes back the
+ * same way; a text frame is a control message, which today means resizing.
+ * @summary The terminal.
+ */
+export const SessionPtyParams = zod.object({
+  "id": zod.string().describe('Session id')
+})
+
+export const sessionPtyQueryColsMin = 0;
+
+export const sessionPtyQueryRowsMin = 0;
+
+
+
+export const SessionPtyQueryParams = zod.object({
+  "cols": zod.int().min(sessionPtyQueryColsMin).optional().describe('Terminal width'),
+  "rows": zod.int().min(sessionPtyQueryRowsMin).optional().describe('Terminal height')
+})
+
+export const SessionPtyResponse = zod.void()
+
+/**
+ * @summary Push the branch, so the work outlives the workspace.
+ */
+export const PushSessionParams = zod.object({
+  "id": zod.string().describe('Session id')
+})
+
+export const PushSessionResponse = zod.object({
+  "detail": zod.string()
+})
+
+/**
+ * @summary Stop the agent. The workspace and its branch stay.
+ */
+export const StopSessionParams = zod.object({
+  "id": zod.string().describe('Session id')
+})
+
+export const StopSessionResponse = zod.object({
+  "detail": zod.string()
+})
+
+/**
+ * @summary What is in this workspace that isn't safely elsewhere.
+ */
+export const SessionWorkParams = zod.object({
+  "id": zod.string().describe('Session id')
+})
+
+export const sessionWorkResponseAheadMin = 0;
+
+export const sessionWorkResponseUncommittedMin = 0;
+
+
+
+export const SessionWorkResponse = zod.object({
+  "ahead": zod.int().min(sessionWorkResponseAheadMin).describe('Commits the remote hasn\'t got.'),
+  "branch": zod.string(),
+  "pushed": zod.boolean().describe('Whether this branch exists on the remote at all.'),
+  "uncommitted": zod.int().min(sessionWorkResponseUncommittedMin).describe('Files changed but not committed.')
+}).describe('What is in a workspace that isn\'t safely elsewhere yet.\n\nThe thing that makes ending a session a decision rather than a gamble.')
+
