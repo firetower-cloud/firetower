@@ -1,0 +1,16 @@
+[package]
+name = "ft-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Firetower domain types and the session state machine."
+
+[dependencies]
+serde.workspace = true
+thiserror.workspace = true
+ulid.workspace = true
+chrono.workspace = true
+utoipa.workspace = true

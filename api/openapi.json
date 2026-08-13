@@ -1,0 +1,1243 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Firetower",
+    "description": "The Firetower control plane: API, scheduling, and worker transports.",
+    "contact": {
+      "name": "Westlabs LLC"
+    },
+    "license": {
+      "name": "AGPL-3.0-only",
+      "identifier": "AGPL-3.0-only"
+    },
+    "version": "0.1.0"
+  },
+  "paths": {
+    "/api/v1/bootstrap": {
+      "get": {
+        "tags": [
+          "meta"
+        ],
+        "operationId": "bootstrap",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Bootstrap"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/events": {
+      "get": {
+        "tags": [
+          "events"
+        ],
+        "summary": "Replay. The live feed is the event stream; this is the backfill after a hard\nrefresh, and the fallback when a stream can't be held open.",
+        "operationId": "list_events",
+        "parameters": [
+          {
+            "name": "since",
+            "in": "query",
+            "description": "Last sequence number seen",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Event"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/events/stream": {
+      "get": {
+        "tags": [
+          "events"
+        ],
+        "summary": "The live feed.",
+        "description": "Server-sent events rather than a socket: the data only ever flows down, and\nthe browser then supplies reconnection and replay for free. Each event\ncarries its sequence number as the SSE id, so a client that drops picks up\nexactly where it left off via `Last-Event-ID` — the resume cursor is the\nplatform's problem, not ours.",
+        "operationId": "stream_events",
+        "responses": {
+          "200": {
+            "description": "text/event-stream of SessionEvent"
+          }
+        }
+      }
+    },
+    "/api/v1/hosts": {
+      "get": {
+        "tags": [
+          "hosts"
+        ],
+        "operationId": "list_hosts",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Host"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/providers": {
+      "get": {
+        "tags": [
+          "providers"
+        ],
+        "operationId": "list_providers",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ProviderStatus"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/providers/{id}": {
+      "delete": {
+        "tags": [
+          "providers"
+        ],
+        "summary": "Sign out: forget the token and stop any authorization still waiting.",
+        "operationId": "disconnect_provider",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Provider id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/providers/{id}/authorize": {
+      "post": {
+        "tags": [
+          "providers"
+        ],
+        "summary": "Start an authorization and begin waiting for it to be approved.",
+        "description": "Returns immediately with the code to show. The waiting happens here rather\nthan in the browser so that closing the tab doesn't abandon it.",
+        "operationId": "authorize_provider",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Provider id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PendingAuth"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/providers/{id}/repos": {
+      "get": {
+        "tags": [
+          "providers"
+        ],
+        "summary": "What the authorized account can see. This is the picker's data.",
+        "operationId": "list_provider_repos",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Provider id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/RemoteRepo"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/repos": {
+      "get": {
+        "tags": [
+          "repos"
+        ],
+        "operationId": "list_repos",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Repo"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "repos"
+        ],
+        "operationId": "create_repo",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewRepo"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Repo"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/repos/probe": {
+      "post": {
+        "tags": [
+          "repos"
+        ],
+        "summary": "Can we reach it, and what is it called?",
+        "description": "Answered by a worker, because the worker is what holds the credentials and\nwhat will do the clone. Anything decided here would be a guess about someone\nelse's network.",
+        "operationId": "probe_repo",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProbeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProbeResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/repos/{id}": {
+      "delete": {
+        "tags": [
+          "repos"
+        ],
+        "summary": "Disconnect a repository.",
+        "description": "Refuses while sessions are still running on it — silently orphaning live\nwork is worse than making someone finish or stop it first. The on-disk\nmirror is a cache and stays; it is not this button's business.",
+        "operationId": "delete_repo",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Repository id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sessions": {
+      "get": {
+        "tags": [
+          "sessions"
+        ],
+        "operationId": "list_sessions",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Session"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "sessions"
+        ],
+        "operationId": "create_session",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewSession"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Session"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "repository is not connected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "no host can take it",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sessions/{id}": {
+      "get": {
+        "tags": [
+          "sessions"
+        ],
+        "operationId": "get_session",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Session id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Session"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "sessions"
+        ],
+        "operationId": "destroy_session",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Session id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": ""
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Agent": {
+        "type": "string",
+        "description": "Which agent runs inside a workspace.\n\nSerialised as the variant name — see the wire conventions in the brief: a\nfield takes the consumer's casing, an enum value stays the symbol it is.",
+        "enum": [
+          "ClaudeCode",
+          "Codex",
+          "Shell"
+        ]
+      },
+      "ApiError": {
+        "type": "object",
+        "description": "Every non-success response, so failures are as typed as everything else.",
+        "required": [
+          "code",
+          "message"
+        ],
+        "properties": {
+          "code": {
+            "$ref": "#/components/schemas/ErrorCode"
+          },
+          "message": {
+            "type": "string",
+            "description": "For humans and logs. The interface should switch on `code` and write its\nown copy — only it knows the context and what to offer next."
+          }
+        }
+      },
+      "Bootstrap": {
+        "type": "object",
+        "description": "What the web application needs before it can do anything else.",
+        "required": [
+          "version",
+          "eventsPath"
+        ],
+        "properties": {
+          "eventsPath": {
+            "type": "string",
+            "description": "Where the event stream lives. Config, never assumed same-origin — which\nis what lets one bundle serve localhost and a hosted deployment alike."
+          },
+          "version": {
+            "type": "string"
+          }
+        }
+      },
+      "ErrorCode": {
+        "type": "string",
+        "description": "The catalogue is the type, so there is no separate list to keep in sync.",
+        "enum": [
+          "InvalidRequest",
+          "NotFound",
+          "NoCapacity",
+          "HostUnreachable",
+          "RepoNotConnected",
+          "SessionEnded",
+          "ProviderNotConfigured",
+          "ProviderNotConnected",
+          "RepoAccessDenied",
+          "RepoUnreachable",
+          "RepoUnusable",
+          "RepoInUse",
+          "Internal"
+        ]
+      },
+      "Event": {
+        "type": "object",
+        "description": "Something that happened, recorded by the worker that it happened on.\n\nSessions are a projection of these, never the other way round.",
+        "required": [
+          "seq",
+          "sessionId",
+          "kind",
+          "at"
+        ],
+        "properties": {
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/EventKind"
+          },
+          "seq": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Monotonic per worker. This is the resume cursor."
+          },
+          "sessionId": {
+            "$ref": "#/components/schemas/SessionId"
+          }
+        }
+      },
+      "EventKind": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "repo",
+              "prompt",
+              "type"
+            ],
+            "properties": {
+              "prompt": {
+                "type": "string"
+              },
+              "repo": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "SessionCreated"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "host",
+              "detail",
+              "type"
+            ],
+            "properties": {
+              "detail": {
+                "type": "string"
+              },
+              "host": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "HostSelected"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "detail",
+              "type"
+            ],
+            "properties": {
+              "detail": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "RepoFetched"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "branch",
+              "type"
+            ],
+            "properties": {
+              "branch": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "WorktreeAdded"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "detail",
+              "type"
+            ],
+            "properties": {
+              "detail": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "WorkspaceStarted"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "detail",
+              "type"
+            ],
+            "properties": {
+              "detail": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "SetupFinished"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "name",
+              "type"
+            ],
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "TmuxOpened"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "agent",
+              "type"
+            ],
+            "properties": {
+              "agent": {
+                "$ref": "#/components/schemas/Agent"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "AgentLaunched"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "status",
+              "type"
+            ],
+            "properties": {
+              "status": {
+                "$ref": "#/components/schemas/SessionStatus"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "StatusChanged"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "code",
+              "message",
+              "type"
+            ],
+            "properties": {
+              "code": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "Failed"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "Host": {
+        "type": "object",
+        "description": "A machine that can run workspaces.",
+        "required": [
+          "id",
+          "name",
+          "state"
+        ],
+        "properties": {
+          "cpus": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
+          "id": {
+            "$ref": "#/components/schemas/HostId"
+          },
+          "memoryMb": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "name": {
+            "type": "string",
+            "description": "What the user calls it. `localhost` is a real host, not a special case."
+          },
+          "sshTarget": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`None` for the local host — there is nothing to connect to."
+          },
+          "state": {
+            "$ref": "#/components/schemas/HostState"
+          },
+          "workerVersion": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "HostId": {
+        "type": "string",
+        "description": "Identifies a host."
+      },
+      "HostState": {
+        "type": "string",
+        "enum": [
+          "Online",
+          "Unreachable",
+          "Draining"
+        ]
+      },
+      "NewRepo": {
+        "type": "object",
+        "description": "Connect a repository. Nothing is cloned until a session needs it.",
+        "required": [
+          "slug",
+          "remote"
+        ],
+        "properties": {
+          "defaultBranch": {
+            "type": "string"
+          },
+          "remote": {
+            "type": "string",
+            "description": "Anything git can clone: a URL, or a path for a local repository."
+          },
+          "setup": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Runs once per session, before the agent starts."
+          },
+          "slug": {
+            "type": "string",
+            "description": "`acme/backend`"
+          }
+        }
+      },
+      "NewSession": {
+        "type": "object",
+        "description": "What the API accepts to launch one.",
+        "required": [
+          "repoId",
+          "prompt"
+        ],
+        "properties": {
+          "agent": {
+            "$ref": "#/components/schemas/Agent"
+          },
+          "hostId": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/HostId",
+                "description": "Omit to let the scheduler choose."
+              }
+            ]
+          },
+          "prompt": {
+            "type": "string"
+          },
+          "repoId": {
+            "$ref": "#/components/schemas/RepoId"
+          },
+          "size": {
+            "$ref": "#/components/schemas/WorkspaceSize"
+          }
+        }
+      },
+      "PendingAuth": {
+        "type": "object",
+        "description": "A device authorization waiting for someone to approve it in a browser.",
+        "required": [
+          "userCode",
+          "verificationUri"
+        ],
+        "properties": {
+          "userCode": {
+            "type": "string",
+            "description": "The short code to type. Shown, not clicked."
+          },
+          "verificationUri": {
+            "type": "string",
+            "description": "Where to type it."
+          }
+        }
+      },
+      "ProbeRequest": {
+        "type": "object",
+        "required": [
+          "remote"
+        ],
+        "properties": {
+          "remote": {
+            "type": "string",
+            "description": "A URL or a path on the host that will do the cloning."
+          }
+        }
+      },
+      "ProbeResponse": {
+        "type": "object",
+        "description": "What we learned by actually reaching for the repository.",
+        "required": [
+          "slug",
+          "defaultBranch"
+        ],
+        "properties": {
+          "defaultBranch": {
+            "type": "string",
+            "description": "Read from the remote rather than assumed."
+          },
+          "slug": {
+            "type": "string",
+            "description": "Derived from the remote, and editable before saving."
+          }
+        }
+      },
+      "ProviderStatus": {
+        "type": "object",
+        "description": "What the interface shows on the connect screen.",
+        "required": [
+          "id",
+          "label",
+          "connected",
+          "configured"
+        ],
+        "properties": {
+          "configured": {
+            "type": "boolean",
+            "description": "False when nobody has registered an application for this build, which is\na setup problem rather than something the person using it did wrong."
+          },
+          "connected": {
+            "type": "boolean",
+            "description": "We hold a token for it."
+          },
+          "id": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "pending": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/PendingAuth",
+                "description": "Set while an authorization is in flight."
+              }
+            ]
+          }
+        }
+      },
+      "RemoteRepo": {
+        "type": "object",
+        "description": "A repository the authorized account can see.",
+        "required": [
+          "slug",
+          "remote",
+          "defaultBranch",
+          "private"
+        ],
+        "properties": {
+          "defaultBranch": {
+            "type": "string"
+          },
+          "private": {
+            "type": "boolean"
+          },
+          "pushedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Most recently pushed first is the order people actually want."
+          },
+          "remote": {
+            "type": "string",
+            "description": "The https URL, since a token authenticates over https."
+          },
+          "slug": {
+            "type": "string",
+            "description": "`acme/backend`"
+          }
+        }
+      },
+      "Repo": {
+        "type": "object",
+        "description": "A repository Firetower can cut worktrees from.",
+        "required": [
+          "id",
+          "slug",
+          "remote",
+          "defaultBranch"
+        ],
+        "properties": {
+          "defaultBranch": {
+            "type": "string"
+          },
+          "id": {
+            "$ref": "#/components/schemas/RepoId"
+          },
+          "remote": {
+            "type": "string",
+            "description": "Where the worker clones from."
+          },
+          "setup": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Runs once per session before the agent starts."
+          },
+          "slug": {
+            "type": "string",
+            "description": "`acme/backend`"
+          }
+        }
+      },
+      "RepoId": {
+        "type": "string",
+        "description": "Identifies a connected repository."
+      },
+      "Session": {
+        "type": "object",
+        "description": "A line of work with a conversation attached and a branch at the end.",
+        "required": [
+          "id",
+          "repo",
+          "title",
+          "prompt",
+          "branch",
+          "base",
+          "agent",
+          "size",
+          "status",
+          "hostId",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "agent": {
+            "$ref": "#/components/schemas/Agent"
+          },
+          "base": {
+            "type": "string"
+          },
+          "branch": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "hostId": {
+            "$ref": "#/components/schemas/HostId"
+          },
+          "id": {
+            "$ref": "#/components/schemas/SessionId"
+          },
+          "prompt": {
+            "type": "string"
+          },
+          "repo": {
+            "type": "string"
+          },
+          "size": {
+            "$ref": "#/components/schemas/WorkspaceSize"
+          },
+          "status": {
+            "$ref": "#/components/schemas/SessionStatus"
+          },
+          "title": {
+            "type": "string",
+            "description": "Short, derived from the prompt — the prompt itself lives in the transcript."
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "workspaceId": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/WorkspaceId"
+              }
+            ]
+          }
+        }
+      },
+      "SessionId": {
+        "type": "string",
+        "description": "Identifies a session — the unit of work you talk to."
+      },
+      "SessionStatus": {
+        "type": "string",
+        "enum": [
+          "Starting",
+          "Working",
+          "NeedsYou",
+          "HandedBack",
+          "Failed",
+          "Ended"
+        ]
+      },
+      "WorkspaceId": {
+        "type": "string",
+        "description": "Identifies a workspace — the compute a session runs on."
+      },
+      "WorkspaceSize": {
+        "type": "string",
+        "enum": [
+          "Small",
+          "Medium",
+          "Large"
+        ]
+      }
+    }
+  }
+}

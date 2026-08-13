@@ -1,0 +1,30 @@
+[package]
+name = "ft-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Firetower — run coding agents on your own servers."
+
+[[bin]]
+name = "firetower"
+path = "src/main.rs"
+
+[features]
+default = ["server"]
+# Dropping this builds the small artifact that gets copied to a host: no axum,
+# no database, no embedded web application.
+server = ["dep:ft-server"]
+
+[dependencies]
+ft-core.workspace = true
+ft-worker.workspace = true
+ft-server = { workspace = true, optional = true }
+anyhow.workspace = true
+clap.workspace = true
+dotenvy.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true

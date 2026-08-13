@@ -1,0 +1,170 @@
+@import "tailwindcss";
+
+@theme {
+  /* ── Ground: warm ash, not neutral black ──────────────────── */
+  --color-ground: #0c0b0a;
+  --color-panel: #131211;
+  --color-raise: #1a1816;
+  --color-line: #262320;
+  --color-line-soft: #1c1a18;
+
+  /* ── Text ─────────────────────────────────────────────────── */
+  --color-mute: #6b645d;
+  --color-dim: #948c83;
+  --color-text: #cfc8bf;
+  --color-bone: #f4f0e9;
+
+  /* ── Signals: only ember is allowed to be loud ────────────── */
+  --color-ember: #ff6b2c;
+  --color-ember-soft: #ff9a6b;
+  --color-ember-deep: #7a3417;
+  --color-slate: #7d8f99;
+  --color-sage: #8fae86;
+  --color-brick: #c9584b;
+
+  --font-sans: var(--font-archivo), ui-sans-serif, system-ui, sans-serif;
+  --font-narrow: var(--font-archivo-narrow), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-jetbrains), ui-monospace, "SF Mono", monospace;
+
+  --radius: 6px;
+}
+
+@layer base {
+  html {
+    background: var(--color-ground);
+    color-scheme: dark;
+  }
+
+  body {
+    background: var(--color-ground);
+    color: var(--color-text);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    font-feature-settings: "cv05" 1;
+  }
+
+  ::selection {
+    background: color-mix(in srgb, var(--color-ember) 30%, transparent);
+    color: var(--color-bone);
+  }
+
+  :focus-visible {
+    outline: 1px solid var(--color-ember);
+    outline-offset: 2px;
+  }
+
+  ::-webkit-scrollbar {
+    width: 9px;
+    height: 9px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--color-line);
+    border-radius: 99px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: #33302c;
+  }
+}
+
+@layer components {
+  /* Instrument-panel label: the map-legend voice of the UI */
+  .eyebrow {
+    font-family: var(--font-narrow);
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--color-mute);
+  }
+
+  .hairline {
+    border-color: var(--color-line);
+  }
+
+  .panel {
+    background: var(--color-panel);
+    border: 1px solid var(--color-line);
+    border-radius: var(--radius);
+  }
+}
+
+/* ── The one loud thing: an agent waiting on you ───────────── */
+@keyframes ember-pulse {
+  0%,
+  100% {
+    opacity: 0.32;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.08;
+    transform: scale(1.9);
+  }
+}
+
+@keyframes breathe {
+  0%,
+  100% {
+    opacity: 0.5;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@keyframes stem-rise {
+  from {
+    transform: scaleY(0);
+    opacity: 0;
+  }
+  to {
+    transform: scaleY(1);
+    opacity: 1;
+  }
+}
+
+@keyframes caret {
+  0%,
+  49% {
+    opacity: 1;
+  }
+  50%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes drift {
+  from {
+    background-position: 0 0;
+  }
+  to {
+    background-position: 240px 0;
+  }
+}
+
+.ember-pulse {
+  animation: ember-pulse 3.2s ease-in-out infinite;
+}
+.breathe {
+  animation: breathe 2.6s ease-in-out infinite;
+}
+.stem-rise {
+  transform-origin: bottom;
+  animation: stem-rise 700ms cubic-bezier(0.16, 1, 0.3, 1) backwards;
+}
+.caret {
+  animation: caret 1.05s step-end infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}

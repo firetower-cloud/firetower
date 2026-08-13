@@ -1,0 +1,12 @@
+/target
+/api/openapi.json.tmp
+node_modules
+.next
+/web/out
+.env
+# ...but the template is the documentation of what can go in one.
+!.env.example
+*.db
+*.db-shm
+*.db-wal
+.DS_Store

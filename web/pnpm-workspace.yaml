@@ -1,0 +1,8 @@
+# pnpm blocks dependency install scripts by default. Approving them here means
+# the decision is reviewed and in version control, rather than re-prompted on
+# every clone.
+allowBuilds:
+  # native resolver, via eslint-config-next
+  unrs-resolver: true
+  # the bundler orval runs on
+  esbuild: true
