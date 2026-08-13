@@ -7,7 +7,7 @@
 //! laptop and on a server with no inbound ports.
 
 use crate::providers::Provider;
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use utoipa::ToSchema;
@@ -234,6 +234,60 @@ pub async fn list_repos(provider: &Provider, token: &str) -> Result<Vec<RemoteRe
     }
 
     Ok(out)
+}
+
+/// Open a pull request, and hand back where to read it.
+///
+/// Not a git operation — this talks to the host's API, so it belongs on the
+/// control plane with the token, exactly like listing repositories does.
+pub async fn open_pull_request(
+    provider: &Provider,
+    token: &str,
+    slug: &str,
+    head: &str,
+    base: &str,
+    title: &str,
+    body: &str,
+) -> Result<String> {
+    #[derive(Deserialize)]
+    struct Created {
+        html_url: Option<String>,
+        message: Option<String>,
+    }
+
+    let response = client()?
+        .post(format!("{}/repos/{slug}/pulls", provider.api_base))
+        .bearer_auth(token)
+        .header("accept", "application/vnd.github+json")
+        .json(&serde_json::json!({
+            "title": title,
+            "head": head,
+            "base": base,
+            "body": body,
+        }))
+        .send()
+        .await
+        .with_context(|| format!("asking {} to open a pull request", provider.label))?;
+
+    let status = response.status();
+    let created: Created = response
+        .json()
+        .await
+        .context("reading the pull request response")?;
+
+    if let Some(url) = created.html_url {
+        return Ok(url);
+    }
+
+    // The host's own words are more useful than ours: "no commits between",
+    // "already exists", and "not found" all need different things from you.
+    bail!(
+        "{}: {}",
+        status,
+        created
+            .message
+            .unwrap_or_else(|| "the host refused without saying why".into())
+    )
 }
 
 #[cfg(test)]

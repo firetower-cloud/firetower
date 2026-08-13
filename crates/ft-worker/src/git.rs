@@ -48,8 +48,9 @@ impl GitRoot {
         self.mirrors.join(format!("{flat}.git"))
     }
 
-    pub fn worktree_path(&self, session_id: &str) -> PathBuf {
-        self.worktrees.join(session_id)
+    /// Where a named workspace lives.
+    pub fn worktree_path(&self, name: &str) -> PathBuf {
+        self.worktrees.join(name)
     }
 
     /// Can we reach this repository, and what is its default branch?
@@ -68,7 +69,9 @@ impl GitRoot {
             ProbeFailure::Unreachable
         })?;
 
-        let args = ["ls-remote", "--symref", remote, "HEAD"];
+        // No `HEAD` argument: naming a ref restricts the output to that ref,
+        // and the branch list has to come out of this same call.
+        let args = ["ls-remote", "--symref", remote];
         let probe = run_env(Path::new("."), "git", &args, &env.vars);
 
         let output = match tokio::time::timeout(PROBE_TIMEOUT, probe).await {
@@ -86,8 +89,17 @@ impl GitRoot {
             .unwrap_or("main")
             .to_string();
 
+        let mut branches: Vec<String> = output
+            .lines()
+            .filter_map(|l| l.split_once("\trefs/heads/"))
+            .map(|(_, name)| name.trim().to_string())
+            .collect();
+        branches.sort();
+        branches.dedup();
+
         Ok(RemoteInfo {
             default_branch,
+            branches,
             // No object lines means no commits, so there is nothing to branch
             // from — worth saying now rather than failing during the clone.
             empty: !output
@@ -110,6 +122,9 @@ impl GitRoot {
         let env = cred_env(credential).await?;
 
         if path.join("HEAD").exists() {
+            // Repairs a mirror made by an older build as well as configuring a
+            // new one; setting it is idempotent.
+            self.set_refspec(&path).await?;
             run_env(
                 &self.mirrors,
                 "git",
@@ -131,39 +146,65 @@ impl GitRoot {
             .await
             .with_context(|| format!("creating {}", self.mirrors.display()))?;
 
-        // `--mirror` rather than `--bare`: a bare clone records no fetch
-        // refspec, so every later `fetch` is a no-op and the mirror silently
-        // freezes at the moment it was cloned. Sessions would then branch from
-        // whatever was true the first time anyone used the repository, which
-        // surfaces days later as a baffling conflict rather than an error.
         run_env(
             &self.mirrors,
             "git",
-            &["clone", "--mirror", remote, path.to_str().unwrap()],
+            &["clone", "--bare", remote, path.to_str().unwrap()],
             &env.vars,
         )
         .await
         .with_context(|| format!("cloning {remote}"))?;
 
-        // `--mirror` sets `remote.origin.mirror`, and git then refuses any push
-        // that names a branch — which is every push we make. Dropping the flag
-        // keeps what the clone was for (the `+refs/*:refs/*` fetch refspec, so
-        // fetches actually move) and gives back an ordinary push.
-        run(
+        self.set_refspec(&path).await?;
+
+        // A bare clone puts the remote's branches in `refs/heads/*` and creates
+        // no remote-tracking refs at all. One fetch with the refspec now set
+        // populates `refs/remotes/origin/*`, so the first session branches from
+        // the same place as every session after it.
+        run_env(
             &self.mirrors,
             "git",
             &[
                 "--git-dir",
                 path.to_str().unwrap(),
+                "fetch",
+                "--prune",
+                "origin",
+            ],
+            &env.vars,
+        )
+        .await
+        .with_context(|| format!("fetching {slug} after cloning"))?;
+
+        Ok((path, true))
+    }
+
+    /// Fetch the remote's branches into `refs/remotes/origin/*`.
+    ///
+    /// A bare clone configures no refspec at all, so every later fetch is a
+    /// no-op and the mirror silently freezes at the moment it was made. The
+    /// obvious repair — cloning with `--mirror` — is worse: that maps
+    /// `+refs/*:refs/*`, so fetching tries to overwrite local branches, and git
+    /// refuses outright as soon as one of them is checked out by a worktree.
+    /// One live session would break every session after it.
+    ///
+    /// The ordinary refspec is the answer. Remote branches land somewhere that
+    /// never collides with the branches sessions work on.
+    async fn set_refspec(&self, mirror: &Path) -> Result<()> {
+        run(
+            &self.mirrors,
+            "git",
+            &[
+                "--git-dir",
+                mirror.to_str().unwrap(),
                 "config",
-                "--unset",
-                "remote.origin.mirror",
+                "remote.origin.fetch",
+                "+refs/heads/*:refs/remotes/origin/*",
             ],
         )
         .await
-        .ok();
-
-        Ok((path, true))
+        .context("configuring the mirror's fetch")?;
+        Ok(())
     }
 
     /// Cut a worktree on a new branch from `base`.
@@ -178,14 +219,36 @@ impl GitRoot {
         mirror: &Path,
         branch: &str,
         base: &str,
-        session_id: &str,
+        workspace: &str,
     ) -> Result<(PathBuf, String)> {
-        let dest = self.worktree_path(session_id);
+        let dest = self.worktree_path(workspace);
         tokio::fs::create_dir_all(&self.worktrees).await?;
 
         if dest.exists() {
             bail!("a worktree already exists at {}", dest.display());
         }
+
+        // `origin/main` rather than `main`: the local ref is whatever the clone
+        // saw once, while the remote-tracking one is what the last fetch found.
+        let remote_base = format!("origin/{base}");
+        let base = if run(
+            &self.worktrees,
+            "git",
+            &[
+                "--git-dir",
+                mirror.to_str().unwrap(),
+                "rev-parse",
+                "--verify",
+                &remote_base,
+            ],
+        )
+        .await
+        .is_ok()
+        {
+            remote_base.as_str()
+        } else {
+            base
+        };
 
         let mut last_error = None;
         for attempt in 1..=20u32 {
@@ -227,8 +290,8 @@ impl GitRoot {
     }
 
     /// Remove a worktree and forget it. Safe to call when it's already gone.
-    pub async fn remove_worktree(&self, mirror: &Path, session_id: &str) -> Result<()> {
-        let dest = self.worktree_path(session_id);
+    pub async fn remove_worktree(&self, mirror: &Path, name: &str) -> Result<()> {
+        let dest = self.worktree_path(name);
         if !dest.exists() {
             return Ok(());
         }
@@ -252,17 +315,16 @@ impl GitRoot {
     ///
     /// This is what makes ending a session a decision rather than a gamble:
     /// uncommitted files and unpushed commits are exactly what would be lost.
-    pub async fn summary(&self, session_id: &str, branch: &str, base: &str) -> Result<WorkSummary> {
-        let dest = self.worktree_path(session_id);
+    pub async fn summary(&self, dest: &Path, branch: &str, base: &str) -> Result<WorkSummary> {
 
-        let dirty = run(&dest, "git", &["status", "--porcelain"]).await?;
+        let dirty = run(dest, "git", &["status", "--porcelain"]).await?;
         let uncommitted = dirty.lines().filter(|l| !l.trim().is_empty()).count() as u32;
 
         // `@{upstream}` rather than `origin/<branch>`: these worktrees hang off
         // a mirror, where fetched refs live under `refs/heads/*` and there is
         // no `refs/remotes/origin/*` to compare against. The upstream is what
         // the push actually set, so it is what knows.
-        let pushed = run(&dest, "git", &["rev-parse", "--verify", "@{upstream}"])
+        let pushed = run(dest, "git", &["rev-parse", "--verify", "@{upstream}"])
             .await
             .is_ok();
 
@@ -273,7 +335,7 @@ impl GitRoot {
             format!("{base}..HEAD")
         };
 
-        let ahead = run(&dest, "git", &["rev-list", "--count", &range])
+        let ahead = run(dest, "git", &["rev-list", "--count", &range])
             .await
             .ok()
             .and_then(|c| c.trim().parse().ok())
@@ -288,16 +350,14 @@ impl GitRoot {
     }
 
     /// Commit whatever the agent left behind, including new files.
-    pub async fn commit(&self, session_id: &str, message: &str) -> Result<String> {
-        let dest = self.worktree_path(session_id);
-
-        run(&dest, "git", &["add", "-A"]).await?;
-        let staged = run(&dest, "git", &["diff", "--cached", "--name-only"]).await?;
+    pub async fn commit(&self, dest: &Path, message: &str) -> Result<String> {
+        run(dest, "git", &["add", "-A"]).await?;
+        let staged = run(dest, "git", &["diff", "--cached", "--name-only"]).await?;
         if staged.trim().is_empty() {
             bail!("there is nothing to commit");
         }
 
-        run(&dest, "git", &["commit", "-m", message]).await?;
+        run(dest, "git", &["commit", "-m", message]).await?;
         let count = staged.lines().filter(|l| !l.trim().is_empty()).count();
         Ok(format!(
             "committed {count} {}",
@@ -308,15 +368,14 @@ impl GitRoot {
     /// Send the branch to the remote, so the work survives the workspace.
     pub async fn push(
         &self,
-        session_id: &str,
+        dest: &Path,
         branch: &str,
         credential: Option<Credential>,
     ) -> Result<String> {
-        let dest = self.worktree_path(session_id);
         let env = cred_env(credential).await?;
 
         run_env(
-            &dest,
+            dest,
             "git",
             &["push", "--set-upstream", "origin", branch],
             &env.vars,
@@ -331,11 +390,42 @@ impl GitRoot {
     ///
     /// Computed here rather than on the control plane: less traffic, and it
     /// works when the laptop has no clone of the repository at all.
-    pub async fn diff(&self, session_id: &str, base: &str) -> Result<String> {
-        let dest = self.worktree_path(session_id);
-        let out = run(&dest, "git", &["diff", &format!("{base}...HEAD")]).await?;
-        let unstaged = run(&dest, "git", &["diff"]).await?;
-        Ok(format!("{out}{unstaged}"))
+    pub async fn diff(&self, dest: &Path, base: &str) -> Result<String> {
+        let out = run(dest, "git", &["diff", &format!("{base}...HEAD")]).await?;
+        let unstaged = run(dest, "git", &["diff"]).await?;
+        let untracked = self.untracked_diff(dest).await.unwrap_or_default();
+        Ok(format!("{out}{unstaged}{untracked}"))
+    }
+
+    /// New files, which `git diff` says nothing about until they are tracked.
+    ///
+    /// An agent's first act is often to create something, and a diff that
+    /// silently omits new files is worse than no diff — it looks complete.
+    ///
+    /// Done by comparing each against nothing rather than with `add -N`, which
+    /// would write intent-to-add entries into an index the agent is also using.
+    async fn untracked_diff(&self, dest: &Path) -> Result<String> {
+        let listed = run(
+            dest,
+            "git",
+            &["ls-files", "--others", "--exclude-standard"],
+        )
+        .await?;
+
+        let mut out = String::new();
+        for path in listed.lines().map(str::trim).filter(|p| !p.is_empty()) {
+            // `--no-index` exits 1 when the files differ, which here is always.
+            let shown = Command::new("git")
+                .args(["diff", "--no-index", "--", "/dev/null", path])
+                .current_dir(dest)
+                .output()
+                .await;
+
+            if let Ok(shown) = shown {
+                out.push_str(&String::from_utf8_lossy(&shown.stdout));
+            }
+        }
+        Ok(out)
     }
 }
 
@@ -484,8 +574,8 @@ mod tests {
         tokio::fs::write(dest.join("new.txt"), "from the agent\n")
             .await
             .unwrap();
-        git.commit("s_push", "Add a file").await.unwrap();
-        git.push("s_push", &branch, None).await.unwrap();
+        git.commit(&dest, "Add a file").await.unwrap();
+        git.push(&dest, &branch, None).await.unwrap();
 
         // the branch reached the origin, which is what makes ending a session
         // safe rather than destructive
@@ -494,10 +584,62 @@ mod tests {
             .unwrap();
         assert!(branches.contains(&branch), "{branches:?}");
 
-        let after = git.summary("s_push", &branch, "main").await.unwrap();
+        let after = git.summary(&dest, &branch, "main").await.unwrap();
         assert_eq!(after.uncommitted, 0);
         assert_eq!(after.ahead, 0, "nothing should be left behind");
         assert!(after.pushed);
+    }
+
+    #[tokio::test]
+    async fn a_fresh_mirror_has_something_to_branch_from() {
+        let (_origin, remote) = origin().await;
+        let home = TempDir::new().unwrap();
+        let git = GitRoot::new(home.path());
+
+        let (mirror, _) = git
+            .ensure_mirror(&remote, "acme/backend", None)
+            .await
+            .unwrap();
+
+        // The very first session branches from this, so it has to exist before
+        // anyone has fetched a second time.
+        run(&mirror, "git", &["rev-parse", "--verify", "origin/main"])
+            .await
+            .expect("a fresh mirror should have remote-tracking refs");
+    }
+
+    #[tokio::test]
+    async fn fetching_works_while_a_session_holds_a_branch() {
+        let (origin_dir, remote) = origin().await;
+        let home = TempDir::new().unwrap();
+        let git = GitRoot::new(home.path());
+        let (mirror, _) = git
+            .ensure_mirror(&remote, "acme/backend", None)
+            .await
+            .unwrap();
+
+        // One session is live and holding its branch checked out.
+        git.add_worktree(&mirror, "agent/busy", "main", "s_busy")
+            .await
+            .unwrap();
+
+        // Someone pushes, and a second session starts. Fetching must not refuse
+        // just because the first session exists.
+        tokio::fs::write(origin_dir.path().join("more.txt"), "more\n")
+            .await
+            .unwrap();
+        run(origin_dir.path(), "git", &["add", "."]).await.unwrap();
+        run(origin_dir.path(), "git", &["commit", "-m", "more"])
+            .await
+            .unwrap();
+
+        git.ensure_mirror(&remote, "acme/backend", None)
+            .await
+            .expect("a live worktree must not block fetching");
+
+        git.add_worktree(&mirror, "agent/next", "main", "s_next")
+            .await
+            .expect("a second session should still start");
     }
 
     #[tokio::test]
@@ -510,7 +652,7 @@ mod tests {
             .ensure_mirror(&remote, "acme/backend", None)
             .await
             .unwrap();
-        let before = run(&mirror, "git", &["rev-parse", "main"]).await.unwrap();
+        let before = run(&mirror, "git", &["rev-parse", "origin/main"]).await.unwrap();
 
         // someone pushes
         let origin_path = origin_dir.path();
@@ -528,7 +670,7 @@ mod tests {
             .unwrap();
         assert!(!cloned, "the second call should fetch, not clone");
 
-        let after = run(&mirror, "git", &["rev-parse", "main"]).await.unwrap();
+        let after = run(&mirror, "git", &["rev-parse", "origin/main"]).await.unwrap();
         assert_ne!(
             before, after,
             "a mirror that never moves means every session branches from stale work"
@@ -581,6 +723,7 @@ mod tests {
         let info = git.probe(&remote, None).await.unwrap();
         assert_eq!(info.default_branch, "trunk", "assuming main is the bug");
         assert!(!info.empty);
+        assert_eq!(info.branches, vec!["trunk"], "sessions pick from these");
     }
 
     #[tokio::test]
@@ -841,7 +984,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            git.diff("s_diff", "main").await.unwrap(),
+            git.diff(&tree, "main").await.unwrap(),
             "",
             "nothing changed yet"
         );
@@ -849,7 +992,31 @@ mod tests {
         tokio::fs::write(tree.join("README.md"), "# fixture\nedited\n")
             .await
             .unwrap();
-        let diff = git.diff("s_diff", "main").await.unwrap();
+        let diff = git.diff(&tree, "main").await.unwrap();
         assert!(diff.contains("+edited"), "{diff}");
+    }
+
+    #[tokio::test]
+    async fn a_file_the_agent_created_shows_up_in_the_diff() {
+        let (_origin, remote) = origin().await;
+        let home = TempDir::new().unwrap();
+        let git = GitRoot::new(home.path());
+        let (mirror, _) = git
+            .ensure_mirror(&remote, "acme/backend", None)
+            .await
+            .unwrap();
+        let (tree, _) = git
+            .add_worktree(&mirror, "agent/new-file", "main", "s_new")
+            .await
+            .unwrap();
+
+        // Untracked, which is what every file an agent writes starts out as.
+        tokio::fs::write(tree.join("NOTES.md"), "written by the agent\n")
+            .await
+            .unwrap();
+
+        let diff = git.diff(&tree, "main").await.unwrap();
+        assert!(diff.contains("NOTES.md"), "a new file must not be invisible");
+        assert!(diff.contains("+written by the agent"), "{diff}");
     }
 }

@@ -59,3 +59,18 @@ export const DeleteRepoParams = zod.object({
 
 export const DeleteRepoResponse = zod.void()
 
+/**
+ * Asked of the remote rather than read from a cached list: a branch pushed a
+ * minute ago should be offerable, and the probe that answers this is the same
+ * one that validated the repository in the first place.
+ * @summary The branches a session can start from.
+ */
+export const RepoBranchesParams = zod.object({
+  "id": zod.string().describe('Repository id')
+})
+
+export const RepoBranchesResponse = zod.object({
+  "branches": zod.array(zod.string()),
+  "defaultBranch": zod.string()
+})
+

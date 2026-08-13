@@ -27,6 +27,8 @@ export const ListSessionsResponse = zod.array(ListSessionsResponseItem)
 
 export const CreateSessionBody = zod.object({
   "agent": zod.enum(['ClaudeCode', 'Codex', 'Shell']).optional().describe('Which agent runs inside a workspace.\n\nSerialised as the variant name — see the wire conventions in the brief: a\nfield takes the consumer\'s casing, an enum value stays the symbol it is.'),
+  "base": zod.string().nullish().describe('The branch to start from. Omit for the repository\'s default.'),
+  "branch": zod.string().nullish().describe('The branch the agent works on. Omit to derive one from the prompt.\n\nNamed by whoever starts the session, because this is what ends up on a\npull request and a machine-written slug is a poor thing to live with.'),
   "hostId": zod.union([zod.null(),zod.string().describe('Omit to let the scheduler choose.')]).optional(),
   "prompt": zod.string(),
   "repoId": zod.string().describe('Identifies a connected repository.'),
@@ -76,19 +78,27 @@ export const DestroySessionParams = zod.object({
 export const DestroySessionResponse = zod.void()
 
 /**
- * @summary Commit whatever the agent left uncommitted.
+ * Split on the server: it is a pure function over text that is easy to get
+ * subtly wrong, and doing it once here beats doing it in every client.
+ * @summary What this session changed, file by file.
  */
-export const CommitSessionParams = zod.object({
+export const SessionDiffParams = zod.object({
   "id": zod.string().describe('Session id')
 })
 
-export const CommitSessionBody = zod.object({
-  "message": zod.string().nullish().describe('Defaults to the session\'s title, which is what the agent was asked for.')
-})
+export const sessionDiffResponseAddedMin = 0;
 
-export const CommitSessionResponse = zod.object({
-  "detail": zod.string()
-})
+export const sessionDiffResponseRemovedMin = 0;
+
+
+
+export const SessionDiffResponseItem = zod.object({
+  "added": zod.int().min(sessionDiffResponseAddedMin),
+  "patch": zod.string().describe('The hunks, as git printed them.'),
+  "path": zod.string(),
+  "removed": zod.int().min(sessionDiffResponseRemovedMin)
+}).describe('One file\'s worth of a unified diff.')
+export const SessionDiffResponse = zod.array(SessionDiffResponseItem)
 
 /**
  * A websocket rather than the event stream: this is the one thing in Firetower
@@ -114,6 +124,24 @@ export const SessionPtyQueryParams = zod.object({
 })
 
 export const SessionPtyResponse = zod.void()
+
+/**
+ * An API call to the git host rather than a git operation, so it happens here
+ * with the token we already hold — the same shape as listing repositories.
+ * @summary Open a pull request for this session's branch.
+ */
+export const OpenPullRequestParams = zod.object({
+  "id": zod.string().describe('Session id')
+})
+
+export const OpenPullRequestBody = zod.object({
+  "body": zod.string().nullish().describe('Defaults to the session\'s prompt.'),
+  "title": zod.string().nullish().describe('Written by whoever opens it.')
+})
+
+export const OpenPullRequestResponse = zod.object({
+  "url": zod.string()
+})
 
 /**
  * @summary Push the branch, so the work outlives the workspace.

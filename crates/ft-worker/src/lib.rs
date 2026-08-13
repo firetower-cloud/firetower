@@ -202,7 +202,20 @@ impl Worker {
                 // means finding the mirror the session was cut from.
                 if let Some(slug) = self.store.repo_of(&session_id).await? {
                     let mirror = self.git.mirror_path(&slug);
-                    if let Err(e) = self.git.remove_worktree(&mirror, session_id.as_str()).await {
+                    // Named by whoever started it, so the directory is whatever
+                    // the path we recorded ends with.
+                    let name = self
+                        .store
+                        .workspace_path(&session_id)
+                        .await?
+                        .and_then(|p| {
+                            std::path::Path::new(&p)
+                                .file_name()
+                                .map(|n| n.to_string_lossy().to_string())
+                        })
+                        .unwrap_or_else(|| session_id.to_string());
+
+                    if let Err(e) = self.git.remove_worktree(&mirror, &name).await {
                         // Worth saying out loud: a worktree left behind is disk
                         // that never comes back on its own.
                         tracing::error!(session = %session_id, "removing the worktree: {e:#}");
@@ -360,7 +373,7 @@ impl Worker {
 
         let (path, branch) = self
             .git
-            .add_worktree(&mirror, &spec.branch, &spec.base, id.as_str())
+            .add_worktree(&mirror, &spec.branch, &spec.base, &spec.workspace)
             .await
             .context("cutting the worktree")?;
 
@@ -445,6 +458,18 @@ impl Worker {
         Ok(())
     }
 
+    /// Where a session's workspace is, as recorded when it was built.
+    ///
+    /// Read rather than recomputed: the directory is named by whoever started
+    /// the session, so there is nothing to derive it from.
+    async fn workspace_of(&self, session_id: &SessionId) -> Result<PathBuf> {
+        self.store
+            .workspace_path(session_id)
+            .await?
+            .map(PathBuf::from)
+            .context("this session has no workspace")
+    }
+
     /// Do something with the work a session produced.
     async fn run_action(
         &self,
@@ -482,13 +507,24 @@ impl Worker {
             }
 
             ft_proto::Action::Commit { message } => {
-                self.git.commit(session_id.as_str(), &message).await
+                let dest = self.workspace_of(session_id).await?;
+                self.git.commit(&dest, &message).await
             }
 
             ft_proto::Action::Push => {
-                self.git
-                    .push(session_id.as_str(), &branch, credential)
-                    .await
+                let dest = self.workspace_of(session_id).await?;
+                self.git.push(&dest, &branch, credential).await
+            }
+
+            ft_proto::Action::Diff => {
+                let dest = self.workspace_of(session_id).await?;
+                let base = self
+                    .store
+                    .refs_of(session_id)
+                    .await?
+                    .map(|(_, base)| base)
+                    .unwrap_or_else(|| "HEAD".to_string());
+                self.git.diff(&dest, &base).await
             }
         }
     }
@@ -499,7 +535,8 @@ impl Worker {
             .refs_of(session_id)
             .await?
             .context("this session has no branch")?;
-        self.git.summary(session_id.as_str(), &branch, &base).await
+        let dest = self.workspace_of(session_id).await?;
+        self.git.summary(&dest, &branch, &base).await
     }
 
     /// Attach to a session's terminal.
@@ -672,6 +709,7 @@ mod tests {
             agent: Agent::Shell,
             size: WorkspaceSize::Medium,
             setup: setup.map(str::to_string),
+            workspace: id.as_str().to_string(),
             env: vec![],
             credential: None,
         }))

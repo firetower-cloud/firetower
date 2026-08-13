@@ -2,27 +2,57 @@
 
 import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { useListRepos } from "@/src/api/generated/repos/repos";
+import { useListRepos, useRepoBranches } from "@/src/api/generated/repos/repos";
+import { useListAgents } from "@/src/api/generated/agents/agents";
+import type { Agent, AgentView } from "@/src/api/generated/model";
 import {
   useCreateSession,
   getListSessionsQueryKey,
 } from "@/src/api/generated/sessions/sessions";
 import { useQueryClient } from "@tanstack/react-query";
-import { KeyGlyph } from "./Signal";
 
-const AGENTS = ["Claude Code", "Codex", "Shell"];
-const SIZES = ["Small · 1 CPU / 2 GB", "Medium · 2 CPU / 4 GB", "Large · 4 CPU / 8 GB"];
+/**
+ * Whether this agent could actually run a session right now.
+ *
+ * Installed somewhere, and either needing no credential or having one — either
+ * a token we hold or a host already signed in. Offering an agent that cannot
+ * start is offering a failure.
+ */
+function usable(agent: AgentView) {
+  const installed = agent.hosts.some((h) => h.installed);
+  const authenticated =
+    !agent.needsCredential ||
+    agent.credentialSet ||
+    agent.hosts.some((h) => h.loggedIn);
+  return installed && authenticated;
+}
 
 export function Composer() {
   const [open, setOpen] = useState(false);
   const [text, setText] = useState("");
   const [repoId, setRepoId] = useState<string>("");
+  const [agent, setAgent] = useState<Agent | "">("");
+  const [base, setBase] = useState<string>("");
+  const [branch, setBranch] = useState<string>("");
   const ta = useRef<HTMLTextAreaElement>(null);
   const router = useRouter();
   const queryClient = useQueryClient();
 
   const { data: repos = [] } = useListRepos();
   const repo = repos.find((r) => r.id === repoId) ?? repos[0];
+
+  const { data: agents = [] } = useListAgents();
+  const choices = agents.filter(usable);
+  // Fall back to whatever is usable rather than to a hard-coded name, so the
+  // chip can never offer something that would fail to start.
+  const chosenAgent = (agent || choices[0]?.kind) as Agent | undefined;
+
+  // Only ask once the composer is open — it reaches the remote.
+  const { data: branchInfo } = useRepoBranches(repo?.id ?? "", {
+    query: { enabled: open && !!repo },
+  });
+  const branches = branchInfo?.branches ?? [];
+  const chosenBase = base || branchInfo?.defaultBranch || repo?.defaultBranch || "main";
 
   const create = useCreateSession({
     mutation: {
@@ -39,8 +69,16 @@ export function Composer() {
 
   /* Launching opens the session — you land on the workspace being built. */
   const launch = () => {
-    if (!text.trim() || !repo || create.isPending) return;
-    create.mutate({ data: { repoId: repo.id, prompt: text.trim(), agent: "ClaudeCode" } });
+    if (!text.trim() || !repo || !chosenAgent || create.isPending) return;
+    create.mutate({
+      data: {
+        repoId: repo.id,
+        prompt: text.trim(),
+        agent: chosenAgent,
+        base: chosenBase,
+        branch: branch.trim() || undefined,
+      },
+    });
   };
 
   return (
@@ -77,17 +115,37 @@ export function Composer() {
               onChange={(slug) => setRepoId(repos.find((r) => r.slug === slug)?.id ?? "")}
               options={repos.map((r) => r.slug)}
             />
-            <Chip glyph="branch" value={repo?.defaultBranch ?? "main"} options={[repo?.defaultBranch ?? "main"]} />
-            <Chip glyph="agent" value="Claude Code" options={AGENTS} />
-            <Chip glyph="size" value="Medium · 2 CPU / 4 GB" options={SIZES} />
-            <Chip glyph="host" value="auto" options={["auto"]} />
-            <Chip glyph="cred" value="Max plan" options={["Max plan", "API key"]} />
+            <Chip
+              glyph="branch"
+              value={chosenBase}
+              onChange={setBase}
+              options={branches.length ? branches : [chosenBase]}
+            />
+            <label className="flex items-center gap-1.5 rounded-[5px] border border-line bg-panel py-1 pr-2 pl-2 text-[12px] text-dim transition-colors focus-within:border-ember/40 hover:border-[#3a3631]">
+              <span className="text-mute">⎇</span>
+              <input
+                value={branch}
+                onChange={(e) => setBranch(e.target.value)}
+                placeholder={suggestion(text)}
+                spellCheck={false}
+                className="w-[190px] bg-transparent font-mono text-[11.5px] text-bone placeholder:text-mute focus:outline-none"
+              />
+            </label>
+
+            <Chip
+              glyph="agent"
+              value={label(chosenAgent, choices)}
+              onChange={(name) =>
+                setAgent(choices.find((c) => c.label === name)?.kind ?? "")
+              }
+              options={choices.map((c) => c.label)}
+            />
 
             <div className="ml-auto flex items-center gap-3">
               <span className="font-mono text-[10px] text-mute">⌘⏎</span>
               <button
                 onClick={launch}
-                disabled={!text.trim() || !repo || create.isPending}
+                disabled={!text.trim() || !repo || !chosenAgent || create.isPending}
                 className="rounded-[5px] bg-ember px-3.5 py-1.5 text-[12.5px] font-semibold text-[#1a0c04] transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:bg-line disabled:text-mute"
               >
                 {create.isPending ? "Opening…" : "Launch"}
@@ -104,8 +162,9 @@ export function Composer() {
           )}
 
           <p className="mt-2.5 border-t border-line pt-2.5 text-[11.5px] text-mute">
-            Opens the session so you can watch it start. Firetower names the branch from your
-            prompt and destroys the workspace once it&apos;s pushed.
+            {choices.length === 0
+              ? "No agent is ready. Connect one on the Agents screen first."
+              : "Opens the session so you can watch it start. Firetower names the branch from your prompt; the workspace stays until you end the session."}
           </p>
         </div>
       )}
@@ -113,13 +172,33 @@ export function Composer() {
   );
 }
 
+/**
+ * What the branch would be called if you leave it alone.
+ *
+ * Shown as a placeholder rather than filled in, so the field stays yours to
+ * type in and the fallback is visible without being in the way.
+ */
+function suggestion(prompt: string) {
+  const slug = prompt
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .split("-")
+    .filter(Boolean)
+    .slice(0, 5)
+    .join("-");
+  return slug ? `agent/${slug}` : "branch name";
+}
+
+/** What to show for the chosen agent, before the list has loaded. */
+function label(kind: Agent | undefined, choices: AgentView[]) {
+  return choices.find((c) => c.kind === kind)?.label ?? "no agent ready";
+}
+
 const GLYPHS: Record<string, React.ReactNode> = {
   repo: "▣",
   branch: "⑂",
   agent: "◈",
-  size: "▤",
-  host: "⌂",
-  cred: <KeyGlyph size={10} />,
 };
 
 function Chip({

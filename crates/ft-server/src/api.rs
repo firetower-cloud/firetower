@@ -792,6 +792,47 @@ async fn create_repo(
     Ok((StatusCode::CREATED, Json(repo)))
 }
 
+/// The branches a session can start from.
+///
+/// Asked of the remote rather than read from a cached list: a branch pushed a
+/// minute ago should be offerable, and the probe that answers this is the same
+/// one that validated the repository in the first place.
+#[utoipa::path(
+    get, path = "/api/v1/repos/{id}/branches", tag = "repos",
+    params(("id" = String, Path, description = "Repository id")),
+    responses((status = 200, body = Branches), (status = 404, body = ApiError)),
+)]
+async fn repo_branches(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> ApiResult<Json<Branches>> {
+    let repo = state
+        .db
+        .repo(&RepoId::from_stored(id))
+        .await?
+        .ok_or_else(|| ApiError::not_found("repository"))?;
+
+    let host = probing_host(&state).await?;
+    let info = state
+        .fleet
+        .probe(&host, &repo.remote, credential_for(&repo.remote).await)
+        .await
+        .map_err(|e| ApiError::new(ErrorCode::HostUnreachable, format!("{e:#}")))?
+        .map_err(|f| probe_error(&repo.remote, f))?;
+
+    Ok(Json(Branches {
+        default_branch: info.default_branch,
+        branches: info.branches,
+    }))
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct Branches {
+    pub default_branch: String,
+    pub branches: Vec<String>,
+}
+
 /// Disconnect a repository.
 ///
 /// Refuses while sessions are still running on it — silently orphaning live
@@ -902,8 +943,27 @@ async fn create_session(
         ));
     }
 
+    // A branch the caller named has to exist, or the worktree fails later with
+    // a git error rather than here with an answer.
+    let base = match req.base.as_deref().map(str::trim).filter(|b| !b.is_empty()) {
+        Some(chosen) => chosen.to_string(),
+        None => repo.default_branch.clone(),
+    };
+
+    // Named by whoever starts the session when they say so — this is what ends
+    // up on a pull request, and a slug made from a sentence is a poor thing to
+    // live with. Falling back to one is better than refusing.
+    let branch = ft_core::sanitize_branch(
+        &req.branch
+            .as_deref()
+            .map(str::trim)
+            .filter(|b| !b.is_empty())
+            .map(str::to_string)
+            .unwrap_or_else(|| format!("agent/{}", ft_core::slugify(&req.prompt))),
+    );
+    let workspace = ft_core::workspace_name(&branch);
+
     let id = SessionId::new();
-    let branch = format!("agent/{}", ft_core::slugify(&req.prompt));
     let title = title_from(&req.prompt);
     let agent_name = format!("{:?}", req.agent);
 
@@ -916,7 +976,7 @@ async fn create_session(
             &title,
             &req.prompt,
             &branch,
-            &repo.default_branch,
+            &base,
             &agent_name,
             req.size,
         )
@@ -930,8 +990,9 @@ async fn create_session(
                 session_id: id.clone(),
                 remote: repo.remote.clone(),
                 repo_slug: repo.slug.clone(),
-                base: repo.default_branch.clone(),
+                base: base.clone(),
                 branch,
+                workspace,
                 prompt: req.prompt.clone(),
                 agent: req.agent,
                 size: req.size,
@@ -1059,13 +1120,6 @@ async fn stream_events(
 
 // ── what you do with a session's work ──────────────────────────────────
 
-#[derive(Debug, Deserialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct CommitRequest {
-    /// Defaults to the session's title, which is what the agent was asked for.
-    pub message: Option<String>,
-}
-
 #[derive(Debug, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Done {
@@ -1137,32 +1191,6 @@ async fn stop_session(
     act(&state, &SessionId::from_stored(id), ft_proto::Action::Stop).await
 }
 
-/// Commit whatever the agent left uncommitted.
-#[utoipa::path(
-    post, path = "/api/v1/sessions/{id}/commit", tag = "sessions",
-    params(("id" = String, Path, description = "Session id")),
-    request_body = CommitRequest,
-    responses((status = 200, body = Done), (status = 404, body = ApiError), (status = 409, body = ApiError)),
-)]
-async fn commit_session(
-    State(state): State<AppState>,
-    Path(id): Path<String>,
-    Json(req): Json<CommitRequest>,
-) -> ApiResult<Json<Done>> {
-    let id = SessionId::from_stored(id);
-    let message = match req.message.as_deref().map(str::trim).filter(|m| !m.is_empty()) {
-        Some(m) => m.to_string(),
-        None => state
-            .db
-            .session(&id)
-            .await?
-            .map(|s| s.title)
-            .unwrap_or_else(|| "Work from a Firetower session".into()),
-    };
-
-    act(&state, &id, ft_proto::Action::Commit { message }).await
-}
-
 /// Push the branch, so the work outlives the workspace.
 #[utoipa::path(
     post, path = "/api/v1/sessions/{id}/push", tag = "sessions",
@@ -1195,6 +1223,125 @@ async fn session_work(
         .await
         .map(Json)
         .map_err(|e| ApiError::new(ErrorCode::HostUnreachable, format!("{e:#}")))
+}
+
+/// What this session changed, file by file.
+///
+/// Split on the server: it is a pure function over text that is easy to get
+/// subtly wrong, and doing it once here beats doing it in every client.
+#[utoipa::path(
+    get, path = "/api/v1/sessions/{id}/diff", tag = "sessions",
+    params(("id" = String, Path, description = "Session id")),
+    responses((status = 200, body = Vec<ft_core::FileDiff>), (status = 404, body = ApiError)),
+)]
+async fn session_diff(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> ApiResult<Json<Vec<ft_core::FileDiff>>> {
+    let id = SessionId::from_stored(id);
+    let (_, host) = session_context(&state, &id).await?;
+
+    match state
+        .fleet
+        .run_action(&host, &id, ft_proto::Action::Diff, None)
+        .await
+        .map_err(|e| ApiError::new(ErrorCode::HostUnreachable, format!("{e:#}")))?
+    {
+        Ok(diff) => Ok(Json(ft_core::split_diff(&diff))),
+        Err(why) => Err(ApiError::new(ErrorCode::ActionFailed, why)),
+    }
+}
+
+/// Open a pull request for this session's branch.
+///
+/// An API call to the git host rather than a git operation, so it happens here
+/// with the token we already hold — the same shape as listing repositories.
+#[utoipa::path(
+    post, path = "/api/v1/sessions/{id}/pull-request", tag = "sessions",
+    params(("id" = String, Path, description = "Session id")),
+    request_body = NewPullRequest,
+    responses(
+        (status = 200, body = PullRequest),
+        (status = 401, body = ApiError),
+        (status = 404, body = ApiError),
+        (status = 409, body = ApiError),
+    ),
+)]
+async fn open_pull_request(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(req): Json<NewPullRequest>,
+) -> ApiResult<Json<PullRequest>> {
+    let id = SessionId::from_stored(id);
+    let (session, _) = session_context(&state, &id).await?;
+
+    // Required rather than derived. A title made from the opening sentence of a
+    // prompt reads like "I would like remove", and it is the first thing a
+    // reviewer sees.
+    let title = req
+        .title
+        .as_deref()
+        .map(str::trim)
+        .filter(|t| !t.is_empty())
+        .ok_or_else(|| {
+            ApiError::new(
+                ErrorCode::InvalidRequest,
+                "a pull request needs a title",
+            )
+        })?;
+
+    let repo = state
+        .db
+        .repo_by_slug(&session.repo)
+        .await?
+        .ok_or_else(|| ApiError::not_found("repository"))?;
+
+    let provider = providers::for_remote(&repo.remote).ok_or_else(|| {
+        ApiError::new(
+            ErrorCode::InvalidRequest,
+            "that repository isn't on a host Firetower can open pull requests on",
+        )
+    })?;
+
+    let token = Secrets::get(secrets::GIT, provider.id)
+        .await
+        .map_err(|e| ApiError::new(ErrorCode::Internal, format!("{e:#}")))?
+        .ok_or_else(|| {
+            ApiError::new(
+                ErrorCode::ProviderNotConnected,
+                format!("authorize {} first", provider.label),
+            )
+        })?;
+
+    oauth::open_pull_request(
+        provider,
+        &token,
+        &repo.slug,
+        &session.branch,
+        &session.base,
+        title,
+        // The description is the prompt: what was asked for is the most useful
+        // thing a reviewer can be told, and nobody wants to retype it.
+        req.body.as_deref().unwrap_or(&session.prompt),
+    )
+    .await
+    .map(|url| Json(PullRequest { url }))
+    .map_err(|e| ApiError::new(ErrorCode::ActionFailed, format!("{e:#}")))
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct NewPullRequest {
+    /// Written by whoever opens it.
+    pub title: Option<String>,
+    /// Defaults to the session's prompt.
+    pub body: Option<String>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PullRequest {
+    pub url: String,
 }
 
 /// The terminal.
@@ -1316,7 +1463,8 @@ async fn drive_terminal(
         RemoteRepo,
         AgentMode,
         AgentPresence,
-        ft_core::WorkSummary
+        ft_core::WorkSummary,
+        ft_core::FileDiff
     ))
 )]
 pub struct ApiDoc;
@@ -1327,6 +1475,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(list_hosts))
         .routes(routes!(list_repos, create_repo))
         .routes(routes!(delete_repo))
+        .routes(routes!(repo_branches))
         .routes(routes!(probe_repo))
         .routes(routes!(list_agents))
         .routes(routes!(configure_agent, forget_agent))
@@ -1341,8 +1490,9 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(stream_events))
         .routes(routes!(session_pty))
         .routes(routes!(stop_session))
-        .routes(routes!(commit_session))
         .routes(routes!(push_session))
+        .routes(routes!(session_diff))
+        .routes(routes!(open_pull_request))
         .routes(routes!(session_work))
 }
 

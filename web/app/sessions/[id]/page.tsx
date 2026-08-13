@@ -1,12 +1,14 @@
 "use client";
 
 import { useParams } from "next/navigation";
+import { useState } from "react";
 import Link from "next/link";
 import { useGetSession } from "@/src/api/generated/sessions/sessions";
 import { useListEvents } from "@/src/api/generated/events/events";
 import { Signal } from "@/components/Signal";
 import { Terminal } from "@/components/Terminal";
 import { SessionActions } from "@/components/SessionActions";
+import { Diff } from "@/components/Diff";
 import { elapsed, minutesSince, STATUS_LABEL } from "@/src/api/view";
 import { ApiError } from "@/src/api/http";
 
@@ -16,8 +18,11 @@ import { ApiError } from "@/src/api/http";
  * Client-side on purpose: session ids don't exist when the interface is built,
  * so nothing here can be pre-rendered per session.
  */
+type Tab = "Terminal" | "Changes";
+
 export default function SessionPage() {
   const { id } = useParams<{ id: string }>();
+  const [tab, setTab] = useState<Tab>("Terminal");
 
   const { data: session, isLoading, error } = useGetSession(id);
   const { data: events = [] } = useListEvents(
@@ -79,8 +84,31 @@ export default function SessionPage() {
       </header>
 
       <div className="grid min-h-0 flex-1 grid-cols-[1fr_320px]">
-        <section className="min-w-0 overflow-hidden border-r border-line p-6">
-          <Terminal sessionId={session.id} />
+        <section className="flex min-w-0 flex-col overflow-hidden border-r border-line p-6">
+          <div className="mb-3 flex gap-1">
+            {(["Terminal", "Changes"] as Tab[]).map((t) => (
+              <button
+                key={t}
+                onClick={() => setTab(t)}
+                className={`rounded-[5px] px-2.5 py-1 text-[12px] transition-colors ${
+                  tab === t ? "bg-raise text-bone" : "text-mute hover:text-text"
+                }`}
+              >
+                {t}
+              </button>
+            ))}
+          </div>
+
+          {/* Both stay mounted: switching tabs shouldn't drop the terminal
+              connection and lose everything on screen. */}
+          <div className="min-h-0 flex-1">
+            <div className={`h-full ${tab === "Terminal" ? "" : "hidden"}`}>
+              <Terminal sessionId={session.id} />
+            </div>
+            <div className={`h-full ${tab === "Changes" ? "" : "hidden"}`}>
+              <Diff sessionId={session.id} />
+            </div>
+          </div>
         </section>
 
         <aside className="min-h-0 overflow-y-auto p-5">

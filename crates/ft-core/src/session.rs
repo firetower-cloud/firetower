@@ -35,6 +35,15 @@ pub struct NewSession {
     /// Omit to let the scheduler choose.
     #[serde(default)]
     pub host_id: Option<HostId>,
+    /// The branch to start from. Omit for the repository's default.
+    #[serde(default)]
+    pub base: Option<String>,
+    /// The branch the agent works on. Omit to derive one from the prompt.
+    ///
+    /// Named by whoever starts the session, because this is what ends up on a
+    /// pull request and a machine-written slug is a poor thing to live with.
+    #[serde(default)]
+    pub branch: Option<String>,
     #[serde(default)]
     pub size: WorkspaceSize,
 }
@@ -152,5 +161,75 @@ mod tests {
     fn sizes_map_to_resources() {
         assert_eq!(WorkspaceSize::Medium.resources(), (2, 4096));
         assert_eq!(WorkspaceSize::default(), WorkspaceSize::Medium);
+    }
+}
+
+
+/// Make a branch name git will accept, keeping it recognisable.
+///
+/// Named by a person, so it arrives with spaces, capitals and the occasional
+/// stray slash. This keeps the shape they typed and removes what git refuses.
+pub fn sanitize_branch(name: &str) -> String {
+    let mut out = String::with_capacity(name.len());
+    let mut last_dash = false;
+
+    for c in name.trim().chars() {
+        let keep = match c {
+            'a'..='z' | '0'..='9' | '/' | '_' | '.' => c,
+            'A'..='Z' => c.to_ascii_lowercase(),
+            _ => '-',
+        };
+        // git rejects a doubled slash and a run of dashes reads badly
+        if keep == '-' || keep == '/' {
+            if last_dash {
+                continue;
+            }
+            last_dash = true;
+        } else {
+            last_dash = false;
+        }
+        out.push(keep);
+    }
+
+    let out = out.trim_matches(['-', '/', '.'].as_slice()).to_string();
+    if out.is_empty() {
+        "work".to_string()
+    } else {
+        out
+    }
+}
+
+/// A directory name for a workspace, from its branch.
+///
+/// Flat, because worktrees all live side by side and a slash would nest them.
+pub fn workspace_name(branch: &str) -> String {
+    sanitize_branch(branch).replace('/', "-")
+}
+
+#[cfg(test)]
+mod naming_tests {
+    use super::*;
+
+    #[test]
+    fn a_typed_branch_name_keeps_its_shape() {
+        assert_eq!(sanitize_branch("Fix retry handling"), "fix-retry-handling");
+        assert_eq!(sanitize_branch("feature/payments"), "feature/payments");
+        assert_eq!(sanitize_branch("  spaced  out  "), "spaced-out");
+    }
+
+    #[test]
+    fn what_git_would_refuse_is_removed() {
+        // Doubled slashes, leading and trailing punctuation, and characters
+        // that are not allowed in a ref at all.
+        assert_eq!(sanitize_branch("a//b"), "a/b");
+        assert_eq!(sanitize_branch("/leading/"), "leading");
+        assert_eq!(sanitize_branch("what?! now"), "what-now");
+        assert_eq!(sanitize_branch("   "), "work", "never empty");
+    }
+
+    #[test]
+    fn a_workspace_is_a_flat_directory() {
+        assert_eq!(workspace_name("feature/payments"), "feature-payments");
+        assert!(!workspace_name("a/b/c").contains('/'), "must not nest");
     }
 }

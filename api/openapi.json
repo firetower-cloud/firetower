@@ -577,6 +577,49 @@
         }
       }
     },
+    "/api/v1/repos/{id}/branches": {
+      "get": {
+        "tags": [
+          "repos"
+        ],
+        "summary": "The branches a session can start from.",
+        "description": "Asked of the remote rather than read from a cached list: a branch pushed a\nminute ago should be offerable, and the probe that answers this is the same\none that validated the repository in the first place.",
+        "operationId": "repo_branches",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Repository id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Branches"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/sessions": {
       "get": {
         "tags": [
@@ -721,13 +764,14 @@
         }
       }
     },
-    "/api/v1/sessions/{id}/commit": {
-      "post": {
+    "/api/v1/sessions/{id}/diff": {
+      "get": {
         "tags": [
           "sessions"
         ],
-        "summary": "Commit whatever the agent left uncommitted.",
-        "operationId": "commit_session",
+        "summary": "What this session changed, file by file.",
+        "description": "Split on the server: it is a pure function over text that is easy to get\nsubtly wrong, and doing it once here beats doing it in every client.",
+        "operationId": "session_diff",
         "parameters": [
           {
             "name": "id",
@@ -739,38 +783,21 @@
             }
           }
         ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CommitRequest"
-              }
-            }
-          },
-          "required": true
-        },
         "responses": {
           "200": {
             "description": "",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Done"
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/FileDiff"
+                  }
                 }
               }
             }
           },
           "404": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          },
-          "409": {
             "description": "",
             "content": {
               "application/json": {
@@ -827,6 +854,79 @@
         "responses": {
           "101": {
             "description": "Terminal stream"
+          }
+        }
+      }
+    },
+    "/api/v1/sessions/{id}/pull-request": {
+      "post": {
+        "tags": [
+          "sessions"
+        ],
+        "summary": "Open a pull request for this session's branch.",
+        "description": "An API call to the git host rather than a git operation, so it happens here\nwith the token we already hold — the same shape as listing repositories.",
+        "operationId": "open_pull_request",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Session id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewPullRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PullRequest"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
           }
         }
       }
@@ -1175,15 +1275,21 @@
           }
         }
       },
-      "CommitRequest": {
+      "Branches": {
         "type": "object",
+        "required": [
+          "defaultBranch",
+          "branches"
+        ],
         "properties": {
-          "message": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "Defaults to the session's title, which is what the agent was asked for."
+          "branches": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "defaultBranch": {
+            "type": "string"
           }
         }
       },
@@ -1462,6 +1568,35 @@
           }
         ]
       },
+      "FileDiff": {
+        "type": "object",
+        "description": "One file's worth of a unified diff.",
+        "required": [
+          "path",
+          "added",
+          "removed",
+          "patch"
+        ],
+        "properties": {
+          "added": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "patch": {
+            "type": "string",
+            "description": "The hunks, as git printed them."
+          },
+          "path": {
+            "type": "string"
+          },
+          "removed": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          }
+        }
+      },
       "Host": {
         "type": "object",
         "description": "A machine that can run workspaces.",
@@ -1524,6 +1659,25 @@
           "Draining"
         ]
       },
+      "NewPullRequest": {
+        "type": "object",
+        "properties": {
+          "body": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Defaults to the session's prompt."
+          },
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Written by whoever opens it."
+          }
+        }
+      },
       "NewRepo": {
         "type": "object",
         "description": "Connect a repository. Nothing is cloned until a session needs it.",
@@ -1562,6 +1716,20 @@
         "properties": {
           "agent": {
             "$ref": "#/components/schemas/Agent"
+          },
+          "base": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The branch to start from. Omit for the repository's default."
+          },
+          "branch": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The branch the agent works on. Omit to derive one from the prompt.\n\nNamed by whoever starts the session, because this is what ends up on a\npull request and a machine-written slug is a poor thing to live with."
           },
           "hostId": {
             "oneOf": [
@@ -1667,6 +1835,17 @@
                 "description": "Set while an authorization is in flight."
               }
             ]
+          }
+        }
+      },
+      "PullRequest": {
+        "type": "object",
+        "required": [
+          "url"
+        ],
+        "properties": {
+          "url": {
+            "type": "string"
           }
         }
       },

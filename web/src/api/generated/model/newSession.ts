@@ -15,6 +15,19 @@ import type { WorkspaceSize } from './workspaceSize';
  */
 export interface NewSession {
   agent?: Agent;
+  /**
+     * The branch to start from. Omit for the repository's default.
+     * @nullable
+     */
+  base?: string | null;
+  /**
+     * The branch the agent works on. Omit to derive one from the prompt.
+     *
+     * Named by whoever starts the session, because this is what ends up on a
+     * pull request and a machine-written slug is a poor thing to live with.
+     * @nullable
+     */
+  branch?: string | null;
   hostId?: null | HostId;
   prompt: string;
   repoId: RepoId;

@@ -27,6 +27,7 @@ import type {
 
 import type {
   ApiError,
+  Branches,
   NewRepo,
   ProbeRequest,
   ProbeResponse,
@@ -370,3 +371,123 @@ export const useDeleteRepo = <TError = ApiError,
       > => {
       return useMutation(getDeleteRepoMutationOptions(options), queryClient);
     }
+    export const getRepoBranchesUrl = (id: string,) => {
+
+
+
+
+  return `/api/v1/repos/${id}/branches`
+}
+
+/**
+ * Asked of the remote rather than read from a cached list: a branch pushed a
+ * minute ago should be offerable, and the probe that answers this is the same
+ * one that validated the repository in the first place.
+ * @summary The branches a session can start from.
+ */
+export const repoBranches = async (id: string, options?: Parameters<typeof http>[1]): Promise<Branches> => {
+
+  return http<Branches>(getRepoBranchesUrl(id),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getRepoBranchesQueryKey = (id: string,) => {
+    return [
+    `/api/v1/repos/${id}/branches`
+    ] as const;
+    }
+
+
+export const getRepoBranchesQueryOptions = <TData = Awaited<ReturnType<typeof repoBranches>>, TError = ApiError>(id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof repoBranches>>, TError, TData>>, request?: SecondParameter<typeof http>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getRepoBranchesQueryKey(id);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof repoBranches>>> = ({ signal }) => repoBranches(id, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: id !== null && id !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof repoBranches>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type RepoBranchesQueryResult = NonNullable<Awaited<ReturnType<typeof repoBranches>>>
+export type RepoBranchesQueryError = ApiError
+
+
+export function useRepoBranches<TData = Awaited<ReturnType<typeof repoBranches>>, TError = ApiError>(
+ id: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof repoBranches>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof repoBranches>>,
+          TError,
+          Awaited<ReturnType<typeof repoBranches>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useRepoBranches<TData = Awaited<ReturnType<typeof repoBranches>>, TError = ApiError>(
+ id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof repoBranches>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof repoBranches>>,
+          TError,
+          Awaited<ReturnType<typeof repoBranches>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useRepoBranches<TData = Awaited<ReturnType<typeof repoBranches>>, TError = ApiError>(
+ id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof repoBranches>>, TError, TData>>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary The branches a session can start from.
+ */
+
+export function useRepoBranches<TData = Awaited<ReturnType<typeof repoBranches>>, TError = ApiError>(
+ id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof repoBranches>>, TError, TData>>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getRepoBranchesQueryOptions(id,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+/**
+ * @summary The branches a session can start from.
+ */
+export const useSetRepoBranchesQueryData = () => {
+  const queryClient = useQueryClient();
+  return (id: string,updater: Awaited<ReturnType<typeof repoBranches>> | undefined | ((old: Awaited<ReturnType<typeof repoBranches>> | undefined) => Awaited<ReturnType<typeof repoBranches>> | undefined)) => {
+    queryClient.setQueriesData<Awaited<ReturnType<typeof repoBranches>>>({ queryKey: getRepoBranchesQueryKey(id) }, updater);
+  };
+}
+
+/**
+ * @summary The branches a session can start from.
+ */
+export const useGetRepoBranchesQueryData = () => {
+  const queryClient = useQueryClient();
+  return (id: string,) =>
+    queryClient.getQueryData<Awaited<ReturnType<typeof repoBranches>>>(getRepoBranchesQueryKey(id));
+}
+
+

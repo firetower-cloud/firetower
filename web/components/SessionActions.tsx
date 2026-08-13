@@ -5,8 +5,8 @@ import { useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   useStopSession,
-  useCommitSession,
   usePushSession,
+  useOpenPullRequest,
   useDestroySession,
   useSessionWork,
   getSessionWorkQueryKey,
@@ -39,13 +39,17 @@ export function SessionActions({ session }: { session: Session }) {
     query: { refetchInterval: ended ? false : 5000, enabled: !ended },
   });
 
+  const [prUrl, setPrUrl] = useState<string | null>(null);
+  const [titling, setTitling] = useState(false);
+  const [title, setTitle] = useState("");
+
   const stop = useStopSession();
-  const commit = useCommitSession();
   const push = usePushSession();
+  const pullRequest = useOpenPullRequest();
   const destroy = useDestroySession();
 
   const busy =
-    stop.isPending || commit.isPending || push.isPending || destroy.isPending;
+    stop.isPending || push.isPending || pullRequest.isPending || destroy.isPending;
 
   const after = async (detail: string) => {
     setNote(detail);
@@ -53,6 +57,19 @@ export function SessionActions({ session }: { session: Session }) {
     await queryClient.invalidateQueries({ queryKey: getSessionWorkQueryKey(session.id) });
     await queryClient.invalidateQueries({ queryKey: getGetSessionQueryKey(session.id) });
   };
+
+  const submitPr = () =>
+    pullRequest.mutate(
+      { id: session.id, data: { title: title.trim() } },
+      {
+        onSuccess: (r) => {
+          setPrUrl(r.url);
+          setFailed(null);
+          setTitling(false);
+        },
+        onError: problem,
+      },
+    );
 
   const problem = (e: unknown) => {
     setNote(null);
@@ -73,6 +90,8 @@ export function SessionActions({ session }: { session: Session }) {
     <Panel>
       <Work work={work} />
 
+      {/* Committing is the agent's job. It knows what it changed and why, and
+          a message written from a branch name reads like one. */}
       <div className="mt-3 flex flex-col gap-1.5">
         {running && (
           <Action
@@ -86,27 +105,11 @@ export function SessionActions({ session }: { session: Session }) {
         )}
 
         <Action
-          label="Commit"
-          hint={
-            work && work.uncommitted > 0
-              ? `${work.uncommitted} ${work.uncommitted === 1 ? "file" : "files"} not committed`
-              : "Nothing uncommitted"
-          }
-          onClick={() =>
-            commit.mutate(
-              { id: session.id, data: {} },
-              { onSuccess: (d) => after(d.detail), onError: problem },
-            )
-          }
-          disabled={busy || (work ? work.uncommitted === 0 : false)}
-        />
-
-        <Action
-          label="Push"
+          label={work && work.ahead > 0 ? `Push ${work.ahead}` : "Push"}
           hint={
             work
               ? work.ahead > 0
-                ? `${work.ahead} ${work.ahead === 1 ? "commit" : "commits"} not pushed`
+                ? `${work.ahead} ${work.ahead === 1 ? "commit" : "commits"} waiting`
                 : "Up to date"
               : undefined
           }
@@ -115,7 +118,60 @@ export function SessionActions({ session }: { session: Session }) {
           }
           disabled={busy || (work ? work.ahead === 0 : false)}
         />
+
+        {!titling ? (
+          <Action
+            label="Open pull request"
+            hint={work && !work.pushed ? "Push the branch first" : session.branch}
+            onClick={() => {
+              setTitle(fromBranch(session.branch));
+              setTitling(true);
+            }}
+            disabled={busy || (work ? !work.pushed : true)}
+          />
+        ) : (
+          <div className="rounded-[5px] border border-ember/40 px-2.5 py-2">
+            <label className="eyebrow">Pull request title</label>
+            <input
+              autoFocus
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && title.trim() && submitPr()}
+              placeholder="What this changes"
+              className="mt-1.5 w-full bg-transparent text-[12.5px] text-bone placeholder:text-mute focus:outline-none"
+            />
+            <p className="mt-1 text-[11px] text-mute">
+              Your prompt becomes the description.
+            </p>
+            <div className="mt-2 flex items-center gap-3">
+              <button
+                onClick={submitPr}
+                disabled={!title.trim() || pullRequest.isPending}
+                className="rounded-[4px] bg-ember px-2.5 py-1 text-[11.5px] font-semibold text-[#1a0c04] transition-opacity hover:opacity-90 disabled:opacity-50"
+              >
+                {pullRequest.isPending ? "Opening…" : "Open it"}
+              </button>
+              <button
+                onClick={() => setTitling(false)}
+                className="text-[11.5px] text-mute transition-colors hover:text-text"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
       </div>
+
+      {prUrl && (
+        <a
+          href={prUrl}
+          target="_blank"
+          rel="noopener"
+          className="mt-3 block truncate rounded-[5px] border border-sage/25 bg-sage/[0.04] px-2.5 py-1.5 font-mono text-[11px] text-sage hover:underline"
+        >
+          {prUrl.replace(/^https?:\/\//, "")}
+        </a>
+      )}
 
       {note && (
         <p className="mt-3 rounded-[5px] border border-sage/25 bg-sage/[0.04] px-2.5 py-1.5 text-[11.5px] text-slate">
@@ -177,6 +233,18 @@ export function SessionActions({ session }: { session: Session }) {
       </div>
     </Panel>
   );
+}
+
+/**
+ * A first draft of a title, from the branch you named.
+ *
+ * Better than the prompt: you chose the branch deliberately, whereas a title
+ * sliced off the front of a sentence reads like one.
+ */
+function fromBranch(branch: string) {
+  const last = branch.split("/").pop() ?? branch;
+  const words = last.replace(/[-_]+/g, " ").trim();
+  return words.charAt(0).toUpperCase() + words.slice(1);
 }
 
 /** Whether ending this would lose something. */

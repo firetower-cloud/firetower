@@ -53,6 +53,10 @@ impl std::fmt::Debug for Credential {
 pub struct RemoteInfo {
     /// Read from HEAD's symref rather than assumed to be `main`.
     pub default_branch: String,
+    /// Every branch on the remote, so a session can start from one that isn't
+    /// the default. Comes free with the same `ls-remote`.
+    #[serde(default)]
+    pub branches: Vec<String>,
     /// Whether it has any commits. A repository with none has no branch to
     /// work from, which is worth saying plainly rather than failing at clone.
     pub empty: bool,
@@ -161,6 +165,8 @@ pub enum Action {
     Stop,
     Commit { message: String },
     Push,
+    /// Everything this session changed, as a unified diff.
+    Diff,
 }
 
 /// Everything a worker needs to build a workspace. No control-plane concepts.
@@ -173,6 +179,9 @@ pub struct CreateWorkspace {
     pub repo_slug: String,
     pub base: String,
     pub branch: String,
+    /// Directory name for the worktree. Readable, so someone on the host can
+    /// tell what they're looking at.
+    pub workspace: String,
     pub prompt: String,
     pub agent: Agent,
     pub size: WorkspaceSize,
@@ -271,6 +280,7 @@ mod tests {
         for result in [
             Ok(RemoteInfo {
                 default_branch: "trunk".into(),
+                branches: vec!["trunk".into()],
                 empty: false,
             }),
             Err(ProbeFailure::Denied),

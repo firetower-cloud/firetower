@@ -1,138 +1,95 @@
 "use client";
 
 import { useState } from "react";
-import { DIFF_HUNKS, type FileChange } from "@/lib/data";
+import { useSessionDiff } from "@/src/api/generated/sessions/sessions";
+import { ApiError } from "@/src/api/http";
 
-export function Diff({ files }: { files: FileChange[] }) {
-  const [active, setActive] = useState(0);
+/**
+ * What the agent changed, one file at a time.
+ *
+ * A list beside a patch rather than one long scroll: the question is almost
+ * always "what did it touch", and only then "what did it do to this one".
+ */
+export function Diff({ sessionId }: { sessionId: string }) {
+  const [selected, setSelected] = useState<string | null>(null);
+
+  const { data: files = [], isLoading, error } = useSessionDiff(sessionId, {
+    query: { refetchInterval: 8000 },
+  });
+
+  if (isLoading) {
+    return <Empty>Reading the workspace…</Empty>;
+  }
+
+  if (error) {
+    return (
+      <Empty>
+        {error instanceof ApiError ? error.message : "Couldn't read the changes."}
+      </Empty>
+    );
+  }
+
+  if (files.length === 0) {
+    return <Empty>Nothing has changed yet.</Empty>;
+  }
+
+  const file = files.find((f) => f.path === selected) ?? files[0];
 
   return (
-    <div className="flex h-full min-h-0">
-      <div className="w-[236px] shrink-0 overflow-y-auto border-r border-line bg-panel py-2">
-        {files.map((f, i) => (
-          <button
-            key={f.path}
-            onClick={() => setActive(i)}
-            className={`flex w-full items-center gap-2 px-3 py-[5px] text-left transition-colors ${
-              active === i ? "bg-raise" : "hover:bg-raise/50"
-            }`}
-          >
-            <span
-              className={`font-mono text-[10px] ${
-                f.mode === "A" ? "text-sage" : f.mode === "D" ? "text-brick" : "text-mute"
+    <div className="grid h-full min-h-0 grid-cols-[220px_1fr] overflow-hidden rounded-[6px] border border-line">
+      <ul className="min-h-0 overflow-y-auto border-r border-line bg-panel py-1">
+        {files.map((f) => (
+          <li key={f.path}>
+            <button
+              onClick={() => setSelected(f.path)}
+              className={`flex w-full items-baseline gap-2 px-2.5 py-1.5 text-left transition-colors ${
+                f.path === file.path ? "bg-raise" : "hover:bg-raise/60"
               }`}
             >
-              {f.mode}
-            </span>
-            <span
-              className={`flex-1 truncate font-mono text-[11.5px] ${
-                active === i ? "text-bone" : "text-dim"
-              }`}
-              dir="rtl"
-            >
-              {f.path}
-            </span>
-            <span className="font-mono text-[10px] text-sage">+{f.add}</span>
-            {f.del > 0 && <span className="font-mono text-[10px] text-brick">−{f.del}</span>}
-          </button>
+              <span
+                className="min-w-0 flex-1 truncate font-mono text-[11.5px] text-dim"
+                title={f.path}
+              >
+                {/* The end of a path identifies it; the start rarely does. */}
+                {f.path.split("/").slice(-2).join("/")}
+              </span>
+              <span className="shrink-0 font-mono text-[10px] text-sage">+{f.added}</span>
+              <span className="shrink-0 font-mono text-[10px] text-brick">−{f.removed}</span>
+            </button>
+          </li>
         ))}
-      </div>
+      </ul>
 
-      <div className="min-w-0 flex-1 overflow-y-auto bg-[#0a0908]">
-        {DIFF_HUNKS.map((h, i) => (
-          <Hunk key={i} header={h.header} lines={h.lines} />
-        ))}
-        <div className="px-5 py-6 text-center text-[11.5px] text-mute">
-          Showing 2 of 8 changed files
+      <div className="min-h-0 overflow-auto bg-[#0f0e0d]">
+        <div className="sticky top-0 border-b border-line bg-[#0f0e0d] px-3 py-1.5">
+          <span className="font-mono text-[11px] text-slate">{file.path}</span>
         </div>
+        <pre className="px-3 py-2 font-mono text-[11.5px] leading-[1.6]">
+          {file.patch.split("\n").map((line, i) => (
+            <div key={i} className={colour(line)}>
+              {line || " "}
+            </div>
+          ))}
+        </pre>
       </div>
     </div>
   );
 }
 
-function Hunk({
-  header,
-  lines,
-}: {
-  header: string;
-  lines: { t: string; n: (number | null)[]; s: string }[];
-}) {
-  const [asking, setAsking] = useState(false);
-  const [sent, setSent] = useState(false);
+/** Added, removed, and the scaffolding around them. */
+function colour(line: string) {
+  if (line.startsWith("+++") || line.startsWith("---")) return "text-mute";
+  if (line.startsWith("+")) return "bg-sage/[0.07] text-sage";
+  if (line.startsWith("-")) return "bg-brick/[0.07] text-brick";
+  if (line.startsWith("@@")) return "text-ember/70";
+  if (line.startsWith("diff --git") || line.startsWith("index ")) return "text-mute";
+  return "text-dim";
+}
 
+function Empty({ children }: { children: React.ReactNode }) {
   return (
-    <div className="group/hunk border-b border-line">
-      <div className="flex items-center justify-between bg-panel px-4 py-1.5">
-        <span className="truncate font-mono text-[11px] text-slate">{header}</span>
-        <button
-          onClick={() => setAsking((v) => !v)}
-          className="shrink-0 rounded-[4px] border border-line px-2 py-0.5 font-narrow text-[10px] font-semibold tracking-[0.1em] text-mute uppercase opacity-0 transition-opacity group-hover/hunk:opacity-100 hover:border-ember hover:text-ember focus-visible:opacity-100"
-        >
-          Ask about this
-        </button>
-      </div>
-
-      <div className="font-mono text-[12px] leading-[1.65]">
-        {lines.map((l, i) => (
-          <div
-            key={i}
-            className={`flex ${
-              l.t === "+"
-                ? "bg-sage/[0.07]"
-                : l.t === "-"
-                  ? "bg-brick/[0.07]"
-                  : ""
-            }`}
-          >
-            <span className="w-11 shrink-0 pr-2 text-right text-[10.5px] text-mute/60 select-none">
-              {l.n[0] ?? ""}
-            </span>
-            <span className="w-11 shrink-0 pr-2 text-right text-[10.5px] text-mute/60 select-none">
-              {l.n[1] ?? ""}
-            </span>
-            <span
-              className={`w-4 shrink-0 select-none ${
-                l.t === "+" ? "text-sage" : l.t === "-" ? "text-brick" : "text-mute/40"
-              }`}
-            >
-              {l.t.trim() || " "}
-            </span>
-            <span
-              className={`whitespace-pre ${
-                l.t === "+" ? "text-[#bcd2b5]" : l.t === "-" ? "text-[#e0a79f]" : "text-dim"
-              }`}
-            >
-              {l.s}
-            </span>
-          </div>
-        ))}
-      </div>
-
-      {asking && (
-        <div className="border-t border-line bg-panel px-4 py-3">
-          {sent ? (
-            <div className="flex items-center gap-2 font-mono text-[11.5px] text-ember">
-              <span className="breathe h-1.5 w-1.5 rounded-full bg-current" />
-              Sent into the live session with the file and line range attached.
-            </div>
-          ) : (
-            <div className="flex items-center gap-2">
-              <input
-                autoFocus
-                placeholder="Why full jitter here rather than equal jitter?"
-                onKeyDown={(e) => e.key === "Enter" && setSent(true)}
-                className="flex-1 rounded-[5px] border border-line bg-ground px-2.5 py-1.5 text-[12.5px] text-bone placeholder:text-mute focus:border-ember focus:outline-none"
-              />
-              <button
-                onClick={() => setSent(true)}
-                className="rounded-[5px] bg-ember px-3 py-1.5 text-[12px] font-semibold text-[#1a0c04]"
-              >
-                Send
-              </button>
-            </div>
-          )}
-        </div>
-      )}
+    <div className="flex h-full items-center justify-center rounded-[6px] border border-dashed border-line">
+      <p className="text-[12.5px] text-mute">{children}</p>
     </div>
   );
 }

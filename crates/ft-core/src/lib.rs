@@ -12,7 +12,10 @@ pub mod session;
 mod status;
 
 pub use ids::{HostId, RepoId, SessionId, WorkspaceId};
-pub use session::{slugify, title_from, NewSession, Session, Workspace, WorkspaceSize};
+pub use session::{
+    sanitize_branch, slugify, title_from, workspace_name, NewSession, Session, Workspace,
+    WorkspaceSize,
+};
 pub use status::{SessionStatus, TransitionError};
 
 /// Which agent runs inside a workspace.
@@ -295,5 +298,113 @@ mod launch_tests {
     fn a_shell_gets_no_prompt_and_no_empty_argument() {
         assert_eq!(Agent::Shell.launch("anything"), "bash");
         assert_eq!(Agent::ClaudeCode.launch("   "), "claude");
+    }
+}
+
+/// One file's worth of a unified diff.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct FileDiff {
+    pub path: String,
+    pub added: u32,
+    pub removed: u32,
+    /// The hunks, as git printed them.
+    pub patch: String,
+}
+
+/// Split a unified diff into files.
+///
+/// Done here rather than in the browser: it is a pure function over text, it is
+/// the sort of thing that gets subtly wrong, and a test is cheap.
+pub fn split_diff(diff: &str) -> Vec<FileDiff> {
+    let mut files = Vec::new();
+
+    for chunk in diff.split("\ndiff --git ") {
+        let chunk = chunk.trim_start_matches("diff --git ").trim_end();
+        if chunk.is_empty() {
+            continue;
+        }
+
+        // `+++ b/path` is the name after the change, which is the one to show.
+        // A deleted file has `+++ /dev/null`, so fall back to the old name.
+        let path = chunk
+            .lines()
+            .find_map(|l| l.strip_prefix("+++ b/"))
+            .or_else(|| chunk.lines().find_map(|l| l.strip_prefix("--- a/")))
+            .unwrap_or_else(|| chunk.lines().next().unwrap_or("unknown"))
+            .to_string();
+
+        let mut added = 0;
+        let mut removed = 0;
+        for line in chunk.lines() {
+            // `+++` and `---` are the header, not content.
+            if line.starts_with("+++") || line.starts_with("---") {
+                continue;
+            }
+            match line.as_bytes().first() {
+                Some(b'+') => added += 1,
+                Some(b'-') => removed += 1,
+                _ => {}
+            }
+        }
+
+        files.push(FileDiff {
+            path,
+            added,
+            removed,
+            patch: format!("diff --git {chunk}"),
+        });
+    }
+
+    files
+}
+
+#[cfg(test)]
+mod diff_tests {
+    use super::*;
+
+    const SAMPLE: &str = "diff --git a/README.md b/README.md\n\
+index 1..2 100644\n\
+--- a/README.md\n\
++++ b/README.md\n\
+@@ -1,2 +1,3 @@\n\
+ # fixture\n\
++a new line\n\
+-an old line\n\
+diff --git a/src/main.rs b/src/main.rs\n\
+index 3..4 100644\n\
+--- a/src/main.rs\n\
++++ b/src/main.rs\n\
+@@ -1 +1,2 @@\n\
++fn extra() {}\n";
+
+    #[test]
+    fn a_diff_splits_into_its_files() {
+        let files = split_diff(SAMPLE);
+        assert_eq!(files.len(), 2);
+        assert_eq!(files[0].path, "README.md");
+        assert_eq!(files[1].path, "src/main.rs");
+    }
+
+    #[test]
+    fn the_counts_ignore_the_header_lines() {
+        // `---` and `+++` name the file; counting them would add one to every
+        // file in every diff.
+        let files = split_diff(SAMPLE);
+        assert_eq!((files[0].added, files[0].removed), (1, 1));
+        assert_eq!((files[1].added, files[1].removed), (1, 0));
+    }
+
+    #[test]
+    fn each_file_keeps_a_patch_that_still_reads_as_a_diff() {
+        let files = split_diff(SAMPLE);
+        assert!(files[1].patch.starts_with("diff --git a/src/main.rs"));
+        assert!(files[1].patch.contains("+fn extra() {}"));
+    }
+
+    #[test]
+    fn nothing_changed_is_no_files_rather_than_one_empty_one() {
+        assert!(split_diff("").is_empty());
+        assert!(split_diff("\n").is_empty());
     }
 }

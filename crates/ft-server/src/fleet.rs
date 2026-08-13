@@ -116,6 +116,24 @@ impl Fleet {
         let (tx, mut rx) = mpsc::channel::<ToWorker>(64);
         self.workers.write().await.insert(host_id.to_string(), tx);
 
+        // Ask what this host has as soon as it turns up. Waiting for someone to
+        // press a button means a fresh install reports no agents at all, which
+        // reads as "nothing works" rather than "nobody has looked yet".
+        {
+            let fleet = self.clone();
+            let host = host_id.clone();
+            tokio::spawn(async move {
+                match fleet.probe_agents(&host).await {
+                    Ok(found) => {
+                        if let Err(e) = fleet.db.record_presence(&host, &found).await {
+                            tracing::warn!(host = %host, "recording agents: {e:#}");
+                        }
+                    }
+                    Err(e) => tracing::warn!(host = %host, "asking about agents: {e:#}"),
+                }
+            });
+        }
+
         let db = self.db.clone();
         let events = self.events.clone();
         let workers = self.workers.clone();

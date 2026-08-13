@@ -6,10 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export interface CommitRequest {
-  /**
-     * Defaults to the session's title, which is what the agent was asked for.
-     * @nullable
-     */
-  message?: string | null;
+export interface Branches {
+  branches: string[];
+  defaultBranch: string;
 }

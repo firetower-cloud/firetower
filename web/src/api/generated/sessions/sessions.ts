@@ -27,9 +27,11 @@ import type {
 
 import type {
   ApiError,
-  CommitRequest,
   Done,
+  FileDiff,
+  NewPullRequest,
   NewSession,
+  PullRequest,
   Session,
   SessionPtyParams,
   WorkSummary
@@ -395,26 +397,27 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
       > => {
       return useMutation(getDestroySessionMutationOptions(options), queryClient);
     }
-    export const getCommitSessionUrl = (id: string,) => {
+    export const getSessionDiffUrl = (id: string,) => {
 
 
 
 
-  return `/api/v1/sessions/${id}/commit`
+  return `/api/v1/sessions/${id}/diff`
 }
 
 /**
- * @summary Commit whatever the agent left uncommitted.
+ * Split on the server: it is a pure function over text that is easy to get
+ * subtly wrong, and doing it once here beats doing it in every client.
+ * @summary What this session changed, file by file.
  */
-export const commitSession = async (id: string,
-    commitRequest: CommitRequest, options?: Parameters<typeof http>[1]): Promise<Done> => {
+export const sessionDiff = async (id: string, options?: Parameters<typeof http>[1]): Promise<FileDiff[]> => {
 
-  return http<Done>(getCommitSessionUrl(id),
+  return http<FileDiff[]>(getSessionDiffUrl(id),
   {
     ...options,
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
-    body: JSON.stringify(commitRequest)
+    method: 'GET'
+
+
   }
 );}
 
@@ -422,51 +425,98 @@ export const commitSession = async (id: string,
 
 
 
-export const getCommitSessionMutationOptions = <TError = ApiError,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof commitSession>>, TError,{id: string;data: CommitRequest}, TContext>, request?: SecondParameter<typeof http>}
-): UseMutationOptions<Awaited<ReturnType<typeof commitSession>>, TError,{id: string;data: CommitRequest}, TContext> => {
-
-const mutationKey = ['commitSession'];
-const {mutation: mutationOptions, request: requestOptions} = options ?
-      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
-      options
-      : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, request: undefined};
-
-
-
-
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof commitSession>>, {id: string;data: CommitRequest}> = (props) => {
-          const {id,data} = props ?? {};
-
-          return  commitSession(id,data,requestOptions)
-        }
-
-
-
-
-
-
-  return  { mutationFn, ...mutationOptions }}
-
-    export type CommitSessionMutationResult = NonNullable<Awaited<ReturnType<typeof commitSession>>>
-    export type CommitSessionMutationBody = CommitRequest
-    export type CommitSessionMutationError = ApiError
-
-    /**
- * @summary Commit whatever the agent left uncommitted.
- */
-export const useCommitSession = <TError = ApiError,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof commitSession>>, TError,{id: string;data: CommitRequest}, TContext>, request?: SecondParameter<typeof http>}
- , queryClient?: QueryClient): UseMutationResult<
-        Awaited<ReturnType<typeof commitSession>>,
-        TError,
-        {id: string;data: CommitRequest},
-        TContext
-      > => {
-      return useMutation(getCommitSessionMutationOptions(options), queryClient);
+export const getSessionDiffQueryKey = (id: string,) => {
+    return [
+    `/api/v1/sessions/${id}/diff`
+    ] as const;
     }
-    export const getSessionPtyUrl = (id: string,
+
+
+export const getSessionDiffQueryOptions = <TData = Awaited<ReturnType<typeof sessionDiff>>, TError = ApiError>(id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof sessionDiff>>, TError, TData>>, request?: SecondParameter<typeof http>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getSessionDiffQueryKey(id);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof sessionDiff>>> = ({ signal }) => sessionDiff(id, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: id !== null && id !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof sessionDiff>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type SessionDiffQueryResult = NonNullable<Awaited<ReturnType<typeof sessionDiff>>>
+export type SessionDiffQueryError = ApiError
+
+
+export function useSessionDiff<TData = Awaited<ReturnType<typeof sessionDiff>>, TError = ApiError>(
+ id: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof sessionDiff>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof sessionDiff>>,
+          TError,
+          Awaited<ReturnType<typeof sessionDiff>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useSessionDiff<TData = Awaited<ReturnType<typeof sessionDiff>>, TError = ApiError>(
+ id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof sessionDiff>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof sessionDiff>>,
+          TError,
+          Awaited<ReturnType<typeof sessionDiff>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useSessionDiff<TData = Awaited<ReturnType<typeof sessionDiff>>, TError = ApiError>(
+ id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof sessionDiff>>, TError, TData>>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary What this session changed, file by file.
+ */
+
+export function useSessionDiff<TData = Awaited<ReturnType<typeof sessionDiff>>, TError = ApiError>(
+ id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof sessionDiff>>, TError, TData>>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getSessionDiffQueryOptions(id,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+/**
+ * @summary What this session changed, file by file.
+ */
+export const useSetSessionDiffQueryData = () => {
+  const queryClient = useQueryClient();
+  return (id: string,updater: Awaited<ReturnType<typeof sessionDiff>> | undefined | ((old: Awaited<ReturnType<typeof sessionDiff>> | undefined) => Awaited<ReturnType<typeof sessionDiff>> | undefined)) => {
+    queryClient.setQueriesData<Awaited<ReturnType<typeof sessionDiff>>>({ queryKey: getSessionDiffQueryKey(id) }, updater);
+  };
+}
+
+/**
+ * @summary What this session changed, file by file.
+ */
+export const useGetSessionDiffQueryData = () => {
+  const queryClient = useQueryClient();
+  return (id: string,) =>
+    queryClient.getQueryData<Awaited<ReturnType<typeof sessionDiff>>>(getSessionDiffQueryKey(id));
+}
+
+
+export const getSessionPtyUrl = (id: string,
     params?: SessionPtyParams,) => {
   const normalizedParams = new URLSearchParams();
 
@@ -605,7 +655,80 @@ export const useGetSessionPtyQueryData = () => {
 }
 
 
-export const getPushSessionUrl = (id: string,) => {
+export const getOpenPullRequestUrl = (id: string,) => {
+
+
+
+
+  return `/api/v1/sessions/${id}/pull-request`
+}
+
+/**
+ * An API call to the git host rather than a git operation, so it happens here
+ * with the token we already hold — the same shape as listing repositories.
+ * @summary Open a pull request for this session's branch.
+ */
+export const openPullRequest = async (id: string,
+    newPullRequest: NewPullRequest, options?: Parameters<typeof http>[1]): Promise<PullRequest> => {
+
+  return http<PullRequest>(getOpenPullRequestUrl(id),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(newPullRequest)
+  }
+);}
+
+
+
+
+
+export const getOpenPullRequestMutationOptions = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof openPullRequest>>, TError,{id: string;data: NewPullRequest}, TContext>, request?: SecondParameter<typeof http>}
+): UseMutationOptions<Awaited<ReturnType<typeof openPullRequest>>, TError,{id: string;data: NewPullRequest}, TContext> => {
+
+const mutationKey = ['openPullRequest'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof openPullRequest>>, {id: string;data: NewPullRequest}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  openPullRequest(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type OpenPullRequestMutationResult = NonNullable<Awaited<ReturnType<typeof openPullRequest>>>
+    export type OpenPullRequestMutationBody = NewPullRequest
+    export type OpenPullRequestMutationError = ApiError
+
+    /**
+ * @summary Open a pull request for this session's branch.
+ */
+export const useOpenPullRequest = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof openPullRequest>>, TError,{id: string;data: NewPullRequest}, TContext>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof openPullRequest>>,
+        TError,
+        {id: string;data: NewPullRequest},
+        TContext
+      > => {
+      return useMutation(getOpenPullRequestMutationOptions(options), queryClient);
+    }
+    export const getPushSessionUrl = (id: string,) => {
 
 
 
