@@ -24,12 +24,17 @@ use tokio::task::JoinHandle;
 pub struct Askpass {
     dir: tempfile::TempDir,
     socket: PathBuf,
+    /// What `GIT_ASKPASS` points at — a script, not the binary.
+    bridge: PathBuf,
     server: JoinHandle<()>,
 }
 
 impl Askpass {
     /// Start serving `credential` to whatever connects, until dropped.
-    pub async fn start(credential: Credential) -> Result<Self> {
+    ///
+    /// `helper` is the program that knows how to reach the socket — our own
+    /// binary. It is not what `GIT_ASKPASS` points at: see below.
+    pub async fn start(credential: Credential, helper: &Path) -> Result<Self> {
         // 0700 by construction, so the socket isn't world-connectable.
         let dir = tempfile::Builder::new()
             .prefix("firetower-cred-")
@@ -39,6 +44,26 @@ impl Askpass {
 
         let listener =
             UnixListener::bind(&socket).with_context(|| format!("binding {}", socket.display()))?;
+
+        // git runs `$GIT_ASKPASS "<prompt>"` — no subcommand, ever. Pointing it
+        // straight at our binary means the prompt arrives where a subcommand
+        // name is expected, and the program exits with a usage error rather
+        // than answering. This one-line script bridges git's contract to ours.
+        let bridge = dir.path().join("askpass");
+        tokio::fs::write(
+            &bridge,
+            format!("#!/bin/sh\nexec {} askpass \"$@\"\n", helper.display()),
+        )
+        .await
+        .context("writing the askpass bridge")?;
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            tokio::fs::set_permissions(&bridge, std::fs::Permissions::from_mode(0o700))
+                .await
+                .context("making the askpass bridge executable")?;
+        }
 
         let server = tokio::spawn(async move {
             // git asks twice — once for the username, once for the password —
@@ -54,15 +79,15 @@ impl Askpass {
         Ok(Self {
             dir,
             socket,
+            bridge,
             server,
         })
     }
 
-    /// What to put in git's environment so it asks us. `helper` is the program
-    /// git will call — our own binary, which knows how to reach this socket.
-    pub fn env(&self, helper: &Path) -> Vec<(String, String)> {
+    /// What to put in git's environment so it asks us.
+    pub fn env(&self) -> Vec<(String, String)> {
         vec![
-            ("GIT_ASKPASS".into(), helper.display().to_string()),
+            ("GIT_ASKPASS".into(), self.bridge.display().to_string()),
             (
                 super::askpass::SOCKET_VAR.into(),
                 self.socket.display().to_string(),
@@ -146,10 +171,10 @@ mod tests {
             secret: "s3cret".into(),
         };
         let helper = PathBuf::from("/nonexistent");
-        let server = Askpass::start(credential).await.unwrap();
+        let server = Askpass::start(credential, &helper).await.unwrap();
 
         // stand in for git, which sets this before calling the helper
-        std::env::set_var(SOCKET_VAR, server.env(&helper)[1].1.clone());
+        std::env::set_var(SOCKET_VAR, server.env()[1].1.clone());
 
         let user = respond_as_helper("Username for 'https://example.com': ")
             .await
@@ -170,7 +195,9 @@ mod tests {
         };
         let path;
         {
-            let server = Askpass::start(credential).await.unwrap();
+            let server = Askpass::start(credential, Path::new("/nonexistent"))
+                .await
+                .unwrap();
             path = server.path().to_path_buf();
             assert!(path.join("sock").exists());
         }

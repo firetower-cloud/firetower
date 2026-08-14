@@ -73,11 +73,11 @@ impl Store {
     pub async fn create_session(
         &self,
         id: &SessionId,
-        repo: &str,
+        repo: Option<&str>,
         title: &str,
         prompt: &str,
-        branch: &str,
-        base: &str,
+        branch: Option<&str>,
+        base: Option<&str>,
         agent: &str,
         size: ft_core::WorkspaceSize,
     ) -> Result<()> {
@@ -223,7 +223,7 @@ impl Store {
             .bind(session_id.as_str())
             .fetch_optional(&self.pool)
             .await?;
-        Ok(row.map(|r| r.get::<String, _>("branch")))
+        Ok(row.and_then(|r| r.get::<Option<String>, _>("branch")))
     }
 
     /// The branch a session works on and the branch it started from.
@@ -232,7 +232,15 @@ impl Store {
             .bind(session_id.as_str())
             .fetch_optional(&self.pool)
             .await?;
-        Ok(row.map(|r| (r.get::<String, _>("branch"), r.get::<String, _>("base"))))
+        Ok(row.and_then(|r| {
+            match (
+                r.get::<Option<String>, _>("branch"),
+                r.get::<Option<String>, _>("base"),
+            ) {
+                (Some(branch), Some(base)) => Some((branch, base)),
+                _ => None,
+            }
+        }))
     }
 
     /// Which repository a session came from, for finding its mirror again.
@@ -241,7 +249,7 @@ impl Store {
             .bind(session_id.as_str())
             .fetch_optional(&self.pool)
             .await?;
-        Ok(row.map(|r| r.get::<String, _>("repo")))
+        Ok(row.and_then(|r| r.get::<Option<String>, _>("repo")))
     }
 
     pub async fn workspace_path(&self, session_id: &SessionId) -> Result<Option<String>> {
@@ -265,11 +273,11 @@ mod tests {
         let id = SessionId::new();
         s.create_session(
             &id,
-            "acme/backend",
+            Some("acme/backend"),
             "Fix retries",
             "Fix retries",
-            "agent/fix",
-            "main",
+            Some("agent/fix"),
+            Some("main"),
             "ClaudeCode",
             ft_core::WorkspaceSize::Medium,
         )
@@ -424,11 +432,11 @@ mod branch_tests {
         store
             .create_session(
                 &id,
-                "acme/backend",
+                Some("acme/backend"),
                 "Hello",
                 "hello",
-                "agent/hello",
-                "main",
+                Some("agent/hello"),
+                Some("main"),
                 "Shell",
                 WorkspaceSize::Medium,
             )

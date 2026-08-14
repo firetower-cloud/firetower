@@ -15,13 +15,96 @@ export const listHostsResponseMemoryMbMin = 0;
 
 
 export const ListHostsResponseItem = zod.object({
+  "compute": zod.union([zod.object({
+  "type": zod.enum(['Local'])
+}).describe('A worker as a child process here. Inherits your environment, and its\nworkspaces are directories you can open.'),zod.object({
+  "image": zod.string(),
+  "name": zod.string(),
+  "type": zod.enum(['Container'])
+}).describe('A worker in a container here. Linux, and isolated from your machine.\n\nReached with `docker exec` rather than ssh: the same bidirectional pipe\nwithout an sshd, a key, or a host key to verify.'),zod.object({
+  "host_key": zod.string().nullish().describe('Recorded when the host is added, checked on every connection. A\nmachine that answers with a different key is not the one we trusted.'),
+  "target": zod.string(),
+  "type": zod.enum(['Server'])
+}).describe('A worker on another machine. What a real deployment looks like.')]).describe('Where an agent can run.\n\nThree kinds, and they are not a ladder — each is the right answer sometimes.\nPoking at a repository by hand wants the first; leaving an agent running for\nan hour wants the third.'),
   "cpus": zod.int().min(listHostsResponseCpusMin).nullish(),
+  "drained": zod.boolean().optional().describe('Finishing what it has, taking nothing new. Separate from being\nunreachable: a draining host is still online and still working.'),
   "id": zod.string().describe('Identifies a host.'),
   "memoryMb": zod.int().min(listHostsResponseMemoryMbMin).nullish(),
   "name": zod.string().describe('What the user calls it. `localhost` is a real host, not a special case.'),
-  "sshTarget": zod.string().nullish().describe('`None` for the local host — there is nothing to connect to.'),
   "state": zod.enum(['Online', 'Unreachable', 'Draining']),
   "workerVersion": zod.string().nullish()
 }).describe('A machine that can run workspaces.')
 export const ListHostsResponse = zod.array(ListHostsResponseItem)
+
+/**
+ * Connecting happens straight away rather than on the next restart, so a
+ * mistake in an address is a message here instead of a host that silently
+ * never works.
+ * @summary Add somewhere for agents to run.
+ */
+export const CreateHostBody = zod.object({
+  "compute": zod.union([zod.object({
+  "type": zod.enum(['Local'])
+}).describe('A worker as a child process here. Inherits your environment, and its\nworkspaces are directories you can open.'),zod.object({
+  "image": zod.string(),
+  "name": zod.string(),
+  "type": zod.enum(['Container'])
+}).describe('A worker in a container here. Linux, and isolated from your machine.\n\nReached with `docker exec` rather than ssh: the same bidirectional pipe\nwithout an sshd, a key, or a host key to verify.'),zod.object({
+  "host_key": zod.string().nullish().describe('Recorded when the host is added, checked on every connection. A\nmachine that answers with a different key is not the one we trusted.'),
+  "target": zod.string(),
+  "type": zod.enum(['Server'])
+}).describe('A worker on another machine. What a real deployment looks like.')]).describe('Where an agent can run.\n\nThree kinds, and they are not a ladder — each is the right answer sometimes.\nPoking at a repository by hand wants the first; leaving an agent running for\nan hour wants the third.'),
+  "name": zod.string().nullish().describe('What you\'ll call it. Defaults to something derived from the kind.')
+})
+
+export const createHostResponseCpusMin = 0;
+
+export const createHostResponseMemoryMbMin = 0;
+
+
+
+export const CreateHostResponse = zod.object({
+  "compute": zod.union([zod.object({
+  "type": zod.enum(['Local'])
+}).describe('A worker as a child process here. Inherits your environment, and its\nworkspaces are directories you can open.'),zod.object({
+  "image": zod.string(),
+  "name": zod.string(),
+  "type": zod.enum(['Container'])
+}).describe('A worker in a container here. Linux, and isolated from your machine.\n\nReached with `docker exec` rather than ssh: the same bidirectional pipe\nwithout an sshd, a key, or a host key to verify.'),zod.object({
+  "host_key": zod.string().nullish().describe('Recorded when the host is added, checked on every connection. A\nmachine that answers with a different key is not the one we trusted.'),
+  "target": zod.string(),
+  "type": zod.enum(['Server'])
+}).describe('A worker on another machine. What a real deployment looks like.')]).describe('Where an agent can run.\n\nThree kinds, and they are not a ladder — each is the right answer sometimes.\nPoking at a repository by hand wants the first; leaving an agent running for\nan hour wants the third.'),
+  "cpus": zod.int().min(createHostResponseCpusMin).nullish(),
+  "drained": zod.boolean().optional().describe('Finishing what it has, taking nothing new. Separate from being\nunreachable: a draining host is still online and still working.'),
+  "id": zod.string().describe('Identifies a host.'),
+  "memoryMb": zod.int().min(createHostResponseMemoryMbMin).nullish(),
+  "name": zod.string().describe('What the user calls it. `localhost` is a real host, not a special case.'),
+  "state": zod.enum(['Online', 'Unreachable', 'Draining']),
+  "workerVersion": zod.string().nullish()
+}).describe('A machine that can run workspaces.')
+
+/**
+ * Refuses while sessions are running on it, and says which — the same rule as
+ * disconnecting a repository, for the same reason.
+ * @summary Forget a host.
+ */
+export const DeleteHostParams = zod.object({
+  "id": zod.string().describe('Host id')
+})
+
+export const DeleteHostResponse = zod.void()
+
+/**
+ * @summary Stop sending work here, or start again.
+ */
+export const DrainHostParams = zod.object({
+  "id": zod.string().describe('Host id')
+})
+
+export const DrainHostBody = zod.object({
+  "drained": zod.boolean()
+})
+
+export const DrainHostResponse = zod.void()
 

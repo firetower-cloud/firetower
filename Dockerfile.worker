@@ -1,0 +1,47 @@
+# A worker, built for Linux.
+#
+# It builds the binary rather than copying one in: the host you develop on is
+# probably macOS, and a Mach-O executable in a Linux container fails with
+# `exec format error` at the least helpful possible moment.
+#
+# No sshd. Firetower reaches a local container with `docker exec`, which is the
+# same bidirectional pipe without a daemon, a key, or a host key to verify.
+
+FROM rust:1-bookworm AS build
+WORKDIR /src
+
+# The whole workspace: the worker is one crate of several and the binary that
+# runs is ft-cli.
+COPY Cargo.toml Cargo.lock ./
+COPY crates ./crates
+COPY migrations ./migrations
+
+RUN cargo build --release -p ft-cli
+
+FROM debian:bookworm-slim
+
+# What a worker actually uses: git for repositories, tmux so agents outlive the
+# connection, ca-certificates so it can reach a git host over https.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        git tmux ca-certificates curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# An agent, so a container host is somewhere work can actually run. Without one
+# it can only start a shell, which makes it a demonstration rather than compute.
+#
+# Node is here for the agent, not for Firetower.
+RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && npm install -g @anthropic-ai/claude-code \
+    && npm cache clean --force \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=build /src/target/release/firetower /usr/local/bin/firetower
+
+# Where this worker keeps its mirrors, worktrees and event log.
+RUN mkdir -p /var/lib/firetower/worker
+VOLUME /var/lib/firetower
+
+# Nothing to serve: the control plane runs `docker exec … worker --stdio` when
+# it wants to talk. This just has to stay alive.
+CMD ["sleep", "infinity"]

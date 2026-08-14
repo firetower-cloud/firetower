@@ -1,0 +1,28 @@
+# Everything needed to work on Firetower, so a clone needs Docker and nothing
+# else.
+#
+# It is also the closest thing to what a worker actually runs on: Firetower's
+# work happens on Linux hosts while development tends to happen on macOS, and
+# that gap has already cost us three times — /proc visibility, a bash builtin
+# macOS doesn't ship, and tmux handling its environment differently.
+FROM rust:1-bookworm
+
+# git and tmux are what a worker uses; the rest is what building needs.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        git tmux openssh-client ca-certificates curl pkg-config \
+    && rm -rf /var/lib/apt/lists/*
+
+# Node for the interface, pinned by the same version the lockfile expects.
+RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && rm -rf /var/lib/apt/lists/* \
+    && corepack enable
+
+RUN cargo install just --locked
+
+WORKDIR /workspace
+
+# Cargo's registry and the build directory are volumes in compose, so a rebuild
+# after an edit doesn't start from nothing.
+ENV CARGO_HOME=/cargo
+ENV CARGO_TARGET_DIR=/target

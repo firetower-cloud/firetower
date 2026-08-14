@@ -97,6 +97,44 @@ fn quote(text: &str) -> String {
     format!("'{}'", text.replace('\'', r"'\''"))
 }
 
+/// Where an agent can run.
+///
+/// Three kinds, and they are not a ladder — each is the right answer sometimes.
+/// Poking at a repository by hand wants the first; leaving an agent running for
+/// an hour wants the third.
+// The wire convention holds here too: an enum value stays the symbol it is,
+// and only fields take the consumer's casing.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(tag = "type", rename_all_fields = "camelCase")]
+pub enum Compute {
+    /// A worker as a child process here. Inherits your environment, and its
+    /// workspaces are directories you can open.
+    Local,
+    /// A worker in a container here. Linux, and isolated from your machine.
+    ///
+    /// Reached with `docker exec` rather than ssh: the same bidirectional pipe
+    /// without an sshd, a key, or a host key to verify.
+    Container { image: String, name: String },
+    /// A worker on another machine. What a real deployment looks like.
+    Server {
+        target: String,
+        /// Recorded when the host is added, checked on every connection. A
+        /// machine that answers with a different key is not the one we trusted.
+        host_key: Option<String>,
+    },
+}
+
+impl Compute {
+    /// What to call this kind on screen.
+    pub fn label(&self) -> &'static str {
+        match self {
+            Compute::Local => "local",
+            Compute::Container { .. } => "container",
+            Compute::Server { .. } => "server",
+        }
+    }
+}
+
 /// A machine that can run workspaces.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
@@ -105,8 +143,11 @@ pub struct Host {
     /// What the user calls it. `localhost` is a real host, not a special case.
     pub name: String,
     pub state: HostState,
-    /// `None` for the local host — there is nothing to connect to.
-    pub ssh_target: Option<String>,
+    pub compute: Compute,
+    /// Finishing what it has, taking nothing new. Separate from being
+    /// unreachable: a draining host is still online and still working.
+    #[serde(default)]
+    pub drained: bool,
     pub cpus: Option<u32>,
     pub memory_mb: Option<u64>,
     pub worker_version: Option<String>,

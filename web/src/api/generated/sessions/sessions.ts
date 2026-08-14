@@ -28,7 +28,9 @@ import type {
 import type {
   ApiError,
   Done,
+  EndedAll,
   FileDiff,
+  ListSessionsParams,
   NewPullRequest,
   NewSession,
   PullRequest,
@@ -59,17 +61,30 @@ const withQueryKey = <T extends object, K>(query: T, queryKey: K): T & { queryKe
   return result;
 };
 
-export const getListSessionsUrl = () => {
+export const getListSessionsUrl = (params?: ListSessionsParams,) => {
+  const normalizedParams = new URLSearchParams();
 
+  Object.entries(params || {}).forEach(([key, value]) => {
 
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
 
+  const stringifiedParams = normalizedParams.toString();
 
-  return `/api/v1/sessions`
+  return stringifiedParams.length > 0 ? `/api/v1/sessions?${stringifiedParams}` : `/api/v1/sessions`
 }
 
-export const listSessions = async ( options?: Parameters<typeof http>[1]): Promise<Session[]> => {
+/**
+ * Without `limit` this returns everything, which is what the dashboard wants —
+ * it has to see every running session to say anything true about the fleet.
+ * With one, it pages.
+ * @summary Sessions, newest first.
+ */
+export const listSessions = async (params?: ListSessionsParams, options?: Parameters<typeof http>[1]): Promise<Session[]> => {
 
-  return http<Session[]>(getListSessionsUrl(),
+  return http<Session[]>(getListSessionsUrl(params),
   {
     ...options,
     method: 'GET'
@@ -82,23 +97,23 @@ export const listSessions = async ( options?: Parameters<typeof http>[1]): Promi
 
 
 
-export const getListSessionsQueryKey = () => {
+export const getListSessionsQueryKey = (params?: ListSessionsParams,) => {
     return [
-    `/api/v1/sessions`
+    `/api/v1/sessions`, ...(params ? [params] : [])
     ] as const;
     }
 
 
-export const getListSessionsQueryOptions = <TData = Awaited<ReturnType<typeof listSessions>>, TError = unknown>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listSessions>>, TError, TData>>, request?: SecondParameter<typeof http>}
+export const getListSessionsQueryOptions = <TData = Awaited<ReturnType<typeof listSessions>>, TError = unknown>(params?: ListSessionsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listSessions>>, TError, TData>>, request?: SecondParameter<typeof http>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
 
-  const queryKey =  queryOptions?.queryKey ?? getListSessionsQueryKey();
+  const queryKey =  queryOptions?.queryKey ?? getListSessionsQueryKey(params);
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof listSessions>>> = ({ signal }) => listSessions({ signal, ...requestOptions });
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listSessions>>> = ({ signal }) => listSessions(params, { signal, ...requestOptions });
 
 
 
@@ -112,7 +127,7 @@ export type ListSessionsQueryError = unknown
 
 
 export function useListSessions<TData = Awaited<ReturnType<typeof listSessions>>, TError = unknown>(
-  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listSessions>>, TError, TData>> & Pick<
+ params: undefined |  ListSessionsParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listSessions>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof listSessions>>,
           TError,
@@ -122,7 +137,7 @@ export function useListSessions<TData = Awaited<ReturnType<typeof listSessions>>
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useListSessions<TData = Awaited<ReturnType<typeof listSessions>>, TError = unknown>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listSessions>>, TError, TData>> & Pick<
+ params?: ListSessionsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listSessions>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof listSessions>>,
           TError,
@@ -132,16 +147,19 @@ export function useListSessions<TData = Awaited<ReturnType<typeof listSessions>>
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useListSessions<TData = Awaited<ReturnType<typeof listSessions>>, TError = unknown>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listSessions>>, TError, TData>>, request?: SecondParameter<typeof http>}
+ params?: ListSessionsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listSessions>>, TError, TData>>, request?: SecondParameter<typeof http>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Sessions, newest first.
+ */
 
 export function useListSessions<TData = Awaited<ReturnType<typeof listSessions>>, TError = unknown>(
-  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listSessions>>, TError, TData>>, request?: SecondParameter<typeof http>}
+ params?: ListSessionsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listSessions>>, TError, TData>>, request?: SecondParameter<typeof http>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
-  const queryOptions = getListSessionsQueryOptions(options)
+  const queryOptions = getListSessionsQueryOptions(params,options)
 
   const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 
@@ -150,17 +168,23 @@ export function useListSessions<TData = Awaited<ReturnType<typeof listSessions>>
 
 
 
+/**
+ * @summary Sessions, newest first.
+ */
 export const useSetListSessionsQueryData = () => {
   const queryClient = useQueryClient();
-  return (updater: Awaited<ReturnType<typeof listSessions>> | undefined | ((old: Awaited<ReturnType<typeof listSessions>> | undefined) => Awaited<ReturnType<typeof listSessions>> | undefined)) => {
-    queryClient.setQueriesData<Awaited<ReturnType<typeof listSessions>>>({ queryKey: getListSessionsQueryKey() }, updater);
+  return (params: ListSessionsParams | undefined,updater: Awaited<ReturnType<typeof listSessions>> | undefined | ((old: Awaited<ReturnType<typeof listSessions>> | undefined) => Awaited<ReturnType<typeof listSessions>> | undefined)) => {
+    queryClient.setQueriesData<Awaited<ReturnType<typeof listSessions>>>({ queryKey: getListSessionsQueryKey(params) }, updater);
   };
 }
 
+/**
+ * @summary Sessions, newest first.
+ */
 export const useGetListSessionsQueryData = () => {
   const queryClient = useQueryClient();
-  return () =>
-    queryClient.getQueryData<Awaited<ReturnType<typeof listSessions>>>(getListSessionsQueryKey());
+  return (params?: ListSessionsParams,) =>
+    queryClient.getQueryData<Awaited<ReturnType<typeof listSessions>>>(getListSessionsQueryKey(params));
 }
 
 
@@ -227,6 +251,79 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
         TContext
       > => {
       return useMutation(getCreateSessionMutationOptions(options), queryClient);
+    }
+    export const getEndAllSessionsUrl = () => {
+
+
+
+
+  return `/api/v1/sessions/end-all`
+}
+
+/**
+ * Destructive in the same way as ending one, multiplied — every workspace goes
+ * and anything unpushed with it. The count comes back so the interface can say
+ * what it did rather than guess.
+ * @summary End every session that is still running.
+ */
+export const endAllSessions = async ( options?: Parameters<typeof http>[1]): Promise<EndedAll> => {
+
+  return http<EndedAll>(getEndAllSessionsUrl(),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getEndAllSessionsMutationOptions = <TError = unknown,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof endAllSessions>>, TError,void, TContext>, request?: SecondParameter<typeof http>}
+): UseMutationOptions<Awaited<ReturnType<typeof endAllSessions>>, TError,void, TContext> => {
+
+const mutationKey = ['endAllSessions'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof endAllSessions>>, void> = () => {
+
+
+          return  endAllSessions(requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type EndAllSessionsMutationResult = NonNullable<Awaited<ReturnType<typeof endAllSessions>>>
+
+    export type EndAllSessionsMutationError = unknown
+
+    /**
+ * @summary End every session that is still running.
+ */
+export const useEndAllSessions = <TError = unknown,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof endAllSessions>>, TError,void, TContext>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof endAllSessions>>,
+        TError,
+        void,
+        TContext
+      > => {
+      return useMutation(getEndAllSessionsMutationOptions(options), queryClient);
     }
     export const getGetSessionUrl = (id: string,) => {
 

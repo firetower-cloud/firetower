@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 
+export * from './accessEntry';
 export * from './agent';
 export * from './agentMode';
 export * from './agentOnHost';
@@ -14,16 +15,22 @@ export * from './agentView';
 export * from './apiError';
 export * from './bootstrap';
 export * from './branches';
+export * from './compute';
 export * from './configureAgent';
 export * from './done';
+export * from './drain';
+export * from './endedAll';
 export * from './errorCode';
 export * from './event';
 export * from './eventKind';
 export * from './fileDiff';
+export * from './heldSecret';
 export * from './host';
 export * from './hostId';
 export * from './hostState';
 export * from './listEventsParams';
+export * from './listSessionsParams';
+export * from './newHost';
 export * from './newPullRequest';
 export * from './newRepo';
 export * from './newSession';
@@ -33,12 +40,15 @@ export * from './probeResponse';
 export * from './providerStatus';
 export * from './pullRequest';
 export * from './remoteRepo';
+export * from './replaceSecret';
 export * from './repo';
 export * from './repoId';
+export * from './revealedSecret';
 export * from './session';
 export * from './sessionId';
 export * from './sessionPtyParams';
 export * from './sessionStatus';
+export * from './vaultView';
 export * from './workspaceId';
 export * from './workspaceSize';
 export * from './workSummary';

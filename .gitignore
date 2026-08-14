@@ -10,3 +10,9 @@ node_modules
 *.db-shm
 *.db-wal
 .DS_Store
+
+# The compose stack keeps its state here, including the key every stored
+# credential is encrypted with. It must never be committed.
+/.firetower
+# The ssh key pair the dev worker container is reached with.
+/.dev

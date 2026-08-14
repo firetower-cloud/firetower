@@ -17,13 +17,22 @@ import type { WorkspaceSize } from './workspaceSize';
  */
 export interface Session {
   agent: Agent;
-  base: string;
-  branch: string;
+  /** @nullable */
+  base?: string | null;
+  /**
+     * Absent along with the repository — there is nothing to branch.
+     * @nullable
+     */
+  branch?: string | null;
   createdAt: string;
   hostId: HostId;
   id: SessionId;
   prompt: string;
-  repo: string;
+  /**
+     * `None` for a bare agent: a workspace with nothing checked out.
+     * @nullable
+     */
+  repo?: string | null;
   size: WorkspaceSize;
   status: SessionStatus;
   /** Short, derived from the prompt — the prompt itself lives in the transcript. */

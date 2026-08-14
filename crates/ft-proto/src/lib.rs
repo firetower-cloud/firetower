@@ -12,7 +12,13 @@ use ft_core::{Agent, AgentPresence, EventKind, SessionId, WorkSummary, Workspace
 use serde::{Deserialize, Serialize};
 
 /// Bumped when a frame changes shape incompatibly. Checked during the handshake.
-pub const PROTOCOL_VERSION: u32 = 5;
+///
+/// 6 — `CreateWorkspace` gathered the checkout into an optional `RepoSpec`, so
+/// a session can have no repository. An older worker accepts the handshake and
+/// then cannot parse the frame, which is a session that hangs in `Starting`
+/// with nothing recorded. That is precisely what this number exists to stop,
+/// and it only works if it is bumped.
+pub const PROTOCOL_VERSION: u32 = 6;
 
 mod codec;
 pub use codec::{Codec, CodecError, FrameReader, FrameWriter};
@@ -163,7 +169,9 @@ pub enum ToWorker {
 pub enum Action {
     /// Kill the agent. The workspace and its branch stay.
     Stop,
-    Commit { message: String },
+    Commit {
+        message: String,
+    },
     Push,
     /// Everything this session changed, as a unified diff.
     Diff,
@@ -173,12 +181,10 @@ pub enum Action {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateWorkspace {
     pub session_id: SessionId,
-    /// Where to clone from, if the mirror is cold.
-    pub remote: String,
-    /// `acme/backend` — used for the mirror directory name.
-    pub repo_slug: String,
-    pub base: String,
-    pub branch: String,
+    /// `None` for a bare agent: make a directory, start the agent, clone
+    /// nothing. Everything about a checkout lives in here so that "no
+    /// repository" is one absent value rather than four empty strings.
+    pub repo: Option<RepoSpec>,
     /// Directory name for the worktree. Readable, so someone on the host can
     /// tell what they're looking at.
     pub workspace: String,
@@ -191,6 +197,18 @@ pub struct CreateWorkspace {
     pub env: Vec<(String, String)>,
     /// For the clone, and held in memory for this session's later pushes.
     pub credential: Option<Credential>,
+}
+
+/// What to check out, when there is something to check out.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RepoSpec {
+    /// Where to clone from, if the mirror is cold.
+    pub remote: String,
+    /// `acme/backend` — used for the mirror directory name.
+    pub slug: String,
+    pub base: String,
+    pub branch: String,
 }
 
 /// Worker to control plane.

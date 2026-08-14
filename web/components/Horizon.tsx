@@ -124,7 +124,8 @@ function Stem({
             show ? "opacity-100" : "opacity-0"
           }`}
         >
-          {session.repo.split("/")[1]}
+          {/* The last part identifies it; a bare agent has none. */}
+          {session.repo?.split("/").pop() ?? "no repo"}
         </div>
 
         <span className={`relative flex items-center justify-center ${tone}`}>
@@ -156,7 +157,7 @@ function Stem({
       </div>
 
       <span className="sr-only">
-        {session.repo} — {session.name} — {STATUS_LABEL[session.status]}
+        {session.repo ?? "no repository"} — {session.name} — {STATUS_LABEL[session.status]}
       </span>
     </Link>
   );

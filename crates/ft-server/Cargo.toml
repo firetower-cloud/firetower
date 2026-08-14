@@ -25,10 +25,14 @@ tracing.workspace = true
 utoipa.workspace = true
 utoipa-axum.workspace = true
 futures.workspace = true
-keyring.workspace = true
+chacha20poly1305.workspace = true
+hmac.workspace = true
+sha2.workspace = true
+zeroize.workspace = true
 reqwest.workspace = true
 ulid.workspace = true
 tokio-stream = { version = "0.1", features = ["sync"] }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+tempfile.workspace = true

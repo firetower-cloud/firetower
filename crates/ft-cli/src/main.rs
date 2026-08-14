@@ -34,6 +34,17 @@ enum Command {
         /// Serve the API only; the web application runs on its own dev server.
         #[arg(long, env = "FIRETOWER_DEV")]
         dev: bool,
+
+        /// Where the control plane keeps its state.
+        ///
+        /// Postgres, and not optional: everything the control plane owns lives
+        /// there. `just dev` starts one; the compose file is the other way.
+        #[arg(
+            long,
+            env = "DATABASE_URL",
+            default_value = "postgres://firetower:firetower@localhost:5433/firetower"
+        )]
+        database_url: String,
     },
 
     /// Run the worker daemon. Frames on stdin and stdout.
@@ -109,9 +120,21 @@ async fn main() -> Result<()> {
         }
 
         other => {
-            let (port, dev) = match other {
-                Some(Command::Serve { port, dev }) => (port, dev),
-                _ => (4400, std::env::var("FIRETOWER_DEV").is_ok()),
+            // `firetower` with no subcommand serves, so the defaults have to
+            // match what clap would have produced for `serve`.
+            let (port, dev, database_url) = match other {
+                Some(Command::Serve {
+                    port,
+                    dev,
+                    database_url,
+                }) => (port, dev, database_url),
+                _ => (
+                    4400,
+                    std::env::var("FIRETOWER_DEV").is_ok(),
+                    std::env::var("DATABASE_URL").unwrap_or_else(|_| {
+                        "postgres://firetower:firetower@localhost:5433/firetower".to_string()
+                    }),
+                ),
             };
 
             init_tracing(false, dev);
@@ -128,7 +151,13 @@ async fn main() -> Result<()> {
             }
             eprintln!();
 
-            ft_server::run(ft_server::Config { home, port, dev }).await
+            ft_server::run(ft_server::Config {
+                home,
+                port,
+                dev,
+                database_url,
+            })
+            .await
         }
     }
 }

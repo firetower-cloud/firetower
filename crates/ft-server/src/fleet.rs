@@ -71,6 +71,33 @@ impl Fleet {
         self.events.subscribe()
     }
 
+    /// The transport a host's kind implies.
+    ///
+    /// The worker is identical in all three cases and cannot tell which it is
+    /// behind — that indifference is what lets one binary serve a child
+    /// process, a container, and a server on the other side of the world.
+    pub fn transport_for(
+        host: &ft_core::Host,
+        home: &std::path::Path,
+    ) -> Result<Arc<dyn Transport>> {
+        Ok(match &host.compute {
+            ft_core::Compute::Local => {
+                Arc::new(crate::transport::LocalTransport::new(home.join("worker"))?)
+            }
+            ft_core::Compute::Container { name, .. } => {
+                Arc::new(crate::transport::DockerTransport {
+                    container: name.clone(),
+                    // Inside the container, not on this machine.
+                    root: std::path::PathBuf::from("/var/lib/firetower/worker"),
+                })
+            }
+            ft_core::Compute::Server { target, .. } => Arc::new(crate::transport::SshTransport {
+                target: target.clone(),
+                root: std::path::PathBuf::from("/var/lib/firetower/worker"),
+            }),
+        })
+    }
+
     /// Connect to a host, handshake, and start serving its frames.
     ///
     /// The first thing sent after the handshake is a resume request, so anything
@@ -472,11 +499,7 @@ impl Fleet {
     }
 
     /// What is in a session's workspace that isn't safely elsewhere.
-    pub async fn summarize(
-        &self,
-        host_id: &HostId,
-        session_id: &SessionId,
-    ) -> Result<WorkSummary> {
+    pub async fn summarize(&self, host_id: &HostId, session_id: &SessionId) -> Result<WorkSummary> {
         let req = ulid::Ulid::new().to_string();
         let (tx, rx) = oneshot::channel();
         self.probes

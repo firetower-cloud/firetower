@@ -101,7 +101,7 @@ function Authorize({
         <ul className="mt-4 flex flex-col gap-2">
           {[
             "No password or token is typed here.",
-            "The token is kept in your system keychain, never in a file.",
+            "The token is encrypted before it is stored, and every read of it is logged.",
             "Servers running your sessions never store it.",
           ].map((line) => (
             <li key={line} className="flex gap-2.5 text-[12.5px] text-slate">

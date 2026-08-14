@@ -250,6 +250,147 @@
             }
           }
         }
+      },
+      "post": {
+        "tags": [
+          "hosts"
+        ],
+        "summary": "Add somewhere for agents to run.",
+        "description": "Connecting happens straight away rather than on the next restart, so a\nmistake in an address is a message here instead of a host that silently\nnever works.",
+        "operationId": "create_host",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewHost"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Host"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/hosts/{id}": {
+      "delete": {
+        "tags": [
+          "hosts"
+        ],
+        "summary": "Forget a host.",
+        "description": "Refuses while sessions are running on it, and says which — the same rule as\ndisconnecting a repository, for the same reason.",
+        "operationId": "delete_host",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Host id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/hosts/{id}/drain": {
+      "post": {
+        "tags": [
+          "hosts"
+        ],
+        "summary": "Stop sending work here, or start again.",
+        "operationId": "drain_host",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Host id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Drain"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/api/v1/providers": {
@@ -620,12 +761,208 @@
         }
       }
     },
+    "/api/v1/secrets": {
+      "get": {
+        "tags": [
+          "secrets"
+        ],
+        "summary": "What is stored, and every time it was touched.",
+        "description": "No endpoint returns a stored value. There is no route that reads one out —\na credential leaves this process by being handed to the worker that is\nabout to use it, and no other way.",
+        "operationId": "list_secrets",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VaultView"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/secrets/{scope}/{name}": {
+      "put": {
+        "tags": [
+          "secrets"
+        ],
+        "summary": "Replace a credential with a new one.",
+        "description": "Only for a name that already exists. Storing under an arbitrary name would\nlet this screen fill up with values nothing ever reads — what a credential is\n*for* is decided where it is used, not here.",
+        "operationId": "replace_secret",
+        "parameters": [
+          {
+            "name": "scope",
+            "in": "path",
+            "description": "Secret scope",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Secret name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReplaceSecret"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "secrets"
+        ],
+        "summary": "Remove a credential.",
+        "description": "Whatever used it goes back to having none — an agent shows as needing one\nagain, a git host shows as not authorized. The log entry stays.",
+        "operationId": "remove_secret",
+        "parameters": [
+          {
+            "name": "scope",
+            "in": "path",
+            "description": "Secret scope",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Secret name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/api/v1/secrets/{scope}/{name}/reveal": {
+      "post": {
+        "tags": [
+          "secrets"
+        ],
+        "summary": "Put a credential on screen.",
+        "description": "A `POST` because it changes something: it writes a `Reveal` into the access\nlog, which is what makes this defensible at all. A `GET` would also sit in\nbrowser history and proxy logs, which a credential shouldn't.\n\nThis is the one route that hands a stored value back, and it exists because\na credential you cannot inspect is one you cannot verify or copy elsewhere.\nThe cost is real: anything that can reach this API can read every token\nhere, and the log is what is left to notice it.",
+        "operationId": "reveal_secret",
+        "parameters": [
+          {
+            "name": "scope",
+            "in": "path",
+            "description": "Secret scope",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Secret name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RevealedSecret"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/sessions": {
       "get": {
         "tags": [
           "sessions"
         ],
+        "summary": "Sessions, newest first.",
+        "description": "Without `limit` this returns everything, which is what the dashboard wants —\nit has to see every running session to say anything true about the fleet.\nWith one, it pages.",
         "operationId": "list_sessions",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "How many to return",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "description": "Continue after this id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "",
@@ -684,6 +1021,28 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sessions/end-all": {
+      "post": {
+        "tags": [
+          "sessions"
+        ],
+        "summary": "End every session that is still running.",
+        "description": "Destructive in the same way as ending one, multiplied — every workspace goes\nand anything unpushed with it. The count comes back so the interface can say\nwhat it did rather than guess.",
+        "operationId": "end_all_sessions",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EndedAll"
                 }
               }
             }
@@ -1080,6 +1439,41 @@
   },
   "components": {
     "schemas": {
+      "AccessEntry": {
+        "type": "object",
+        "description": "One line of the access log.",
+        "required": [
+          "id",
+          "scope",
+          "name",
+          "action",
+          "reason",
+          "at"
+        ],
+        "properties": {
+          "action": {
+            "type": "string",
+            "description": "`Write`, `Read`, `Delete`, or `Failed`."
+          },
+          "at": {
+            "type": "string"
+          },
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "name": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string",
+            "description": "What the credential was wanted for, in words."
+          },
+          "scope": {
+            "type": "string"
+          }
+        }
+      },
       "Agent": {
         "type": "string",
         "description": "Which agent runs inside a workspace.\n\nSerialised as the variant name — see the wire conventions in the brief: a\nfield takes the consumer's casing, an enum value stays the symbol it is.",
@@ -1293,6 +1687,75 @@
           }
         }
       },
+      "Compute": {
+        "oneOf": [
+          {
+            "type": "object",
+            "description": "A worker as a child process here. Inherits your environment, and its\nworkspaces are directories you can open.",
+            "required": [
+              "type"
+            ],
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "Local"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "A worker in a container here. Linux, and isolated from your machine.\n\nReached with `docker exec` rather than ssh: the same bidirectional pipe\nwithout an sshd, a key, or a host key to verify.",
+            "required": [
+              "image",
+              "name",
+              "type"
+            ],
+            "properties": {
+              "image": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "Container"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "A worker on another machine. What a real deployment looks like.",
+            "required": [
+              "target",
+              "type"
+            ],
+            "properties": {
+              "host_key": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Recorded when the host is added, checked on every connection. A\nmachine that answers with a different key is not the one we trusted."
+              },
+              "target": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "Server"
+                ]
+              }
+            }
+          }
+        ],
+        "description": "Where an agent can run.\n\nThree kinds, and they are not a ladder — each is the right answer sometimes.\nPoking at a repository by hand wants the first; leaving an agent running for\nan hour wants the third."
+      },
       "ConfigureAgent": {
         "type": "object",
         "required": [
@@ -1322,6 +1785,37 @@
         "properties": {
           "detail": {
             "type": "string"
+          }
+        }
+      },
+      "Drain": {
+        "type": "object",
+        "required": [
+          "drained"
+        ],
+        "properties": {
+          "drained": {
+            "type": "boolean"
+          }
+        }
+      },
+      "EndedAll": {
+        "type": "object",
+        "required": [
+          "ended",
+          "unreachable"
+        ],
+        "properties": {
+          "ended": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "unreachable": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Left alone because their host wasn't answering.",
+            "minimum": 0
           }
         }
       },
@@ -1597,15 +2091,35 @@
           }
         }
       },
+      "HeldSecret": {
+        "type": "object",
+        "description": "A credential Firetower holds. Its name, and nothing else.",
+        "required": [
+          "scope",
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "scope": {
+            "type": "string"
+          }
+        }
+      },
       "Host": {
         "type": "object",
         "description": "A machine that can run workspaces.",
         "required": [
           "id",
           "name",
-          "state"
+          "state",
+          "compute"
         ],
         "properties": {
+          "compute": {
+            "$ref": "#/components/schemas/Compute"
+          },
           "cpus": {
             "type": [
               "integer",
@@ -1613,6 +2127,10 @@
             ],
             "format": "int32",
             "minimum": 0
+          },
+          "drained": {
+            "type": "boolean",
+            "description": "Finishing what it has, taking nothing new. Separate from being\nunreachable: a draining host is still online and still working."
           },
           "id": {
             "$ref": "#/components/schemas/HostId"
@@ -1628,13 +2146,6 @@
           "name": {
             "type": "string",
             "description": "What the user calls it. `localhost` is a real host, not a special case."
-          },
-          "sshTarget": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "`None` for the local host — there is nothing to connect to."
           },
           "state": {
             "$ref": "#/components/schemas/HostState"
@@ -1658,6 +2169,24 @@
           "Unreachable",
           "Draining"
         ]
+      },
+      "NewHost": {
+        "type": "object",
+        "required": [
+          "compute"
+        ],
+        "properties": {
+          "compute": {
+            "$ref": "#/components/schemas/Compute"
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What you'll call it. Defaults to something derived from the kind."
+          }
+        }
       },
       "NewPullRequest": {
         "type": "object",
@@ -1710,7 +2239,6 @@
         "type": "object",
         "description": "What the API accepts to launch one.",
         "required": [
-          "repoId",
           "prompt"
         ],
         "properties": {
@@ -1746,7 +2274,15 @@
             "type": "string"
           },
           "repoId": {
-            "$ref": "#/components/schemas/RepoId"
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/RepoId",
+                "description": "Omit for a bare agent: a workspace with nothing checked out."
+              }
+            ]
           },
           "size": {
             "$ref": "#/components/schemas/WorkspaceSize"
@@ -1882,6 +2418,18 @@
           }
         }
       },
+      "ReplaceSecret": {
+        "type": "object",
+        "required": [
+          "value"
+        ],
+        "properties": {
+          "value": {
+            "type": "string",
+            "description": "What to store from now on. The previous value is not recoverable."
+          }
+        }
+      },
       "Repo": {
         "type": "object",
         "description": "A repository Firetower can cut worktrees from.",
@@ -1919,16 +2467,33 @@
         "type": "string",
         "description": "Identifies a connected repository."
       },
+      "RevealedSecret": {
+        "type": "object",
+        "description": "A value, on its way to a person who asked for it.",
+        "required": [
+          "scope",
+          "name",
+          "value"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "scope": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          }
+        }
+      },
       "Session": {
         "type": "object",
         "description": "A line of work with a conversation attached and a branch at the end.",
         "required": [
           "id",
-          "repo",
           "title",
           "prompt",
-          "branch",
-          "base",
           "agent",
           "size",
           "status",
@@ -1941,10 +2506,17 @@
             "$ref": "#/components/schemas/Agent"
           },
           "base": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "branch": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Absent along with the repository — there is nothing to branch."
           },
           "createdAt": {
             "type": "string",
@@ -1960,7 +2532,11 @@
             "type": "string"
           },
           "repo": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`None` for a bare agent: a workspace with nothing checked out."
           },
           "size": {
             "$ref": "#/components/schemas/WorkspaceSize"
@@ -2002,6 +2578,45 @@
           "Failed",
           "Ended"
         ]
+      },
+      "VaultView": {
+        "type": "object",
+        "required": [
+          "rootKey",
+          "held",
+          "access",
+          "intact"
+        ],
+        "properties": {
+          "access": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AccessEntry"
+            }
+          },
+          "brokenAt": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "The first entry that doesn't follow from the one before it, if any."
+          },
+          "held": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/HeldSecret"
+            }
+          },
+          "intact": {
+            "type": "boolean",
+            "description": "Whether the log's chain of digests still holds end to end."
+          },
+          "rootKey": {
+            "type": "string",
+            "description": "Where the key that unlocks all of this lives — in words, never the key."
+          }
+        }
       },
       "WorkSummary": {
         "type": "object",

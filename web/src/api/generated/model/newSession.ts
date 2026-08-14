@@ -30,6 +30,6 @@ export interface NewSession {
   branch?: string | null;
   hostId?: null | HostId;
   prompt: string;
-  repoId: RepoId;
+  repoId?: null | RepoId;
   size?: WorkspaceSize;
 }

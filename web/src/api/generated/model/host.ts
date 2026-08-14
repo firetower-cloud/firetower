@@ -5,6 +5,7 @@
  * The Firetower control plane: API, scheduling, and worker transports.
  * OpenAPI spec version: 0.1.0
  */
+import type { Compute } from './compute';
 import type { HostId } from './hostId';
 import type { HostState } from './hostState';
 
@@ -12,11 +13,17 @@ import type { HostState } from './hostState';
  * A machine that can run workspaces.
  */
 export interface Host {
+  compute: Compute;
   /**
      * @minimum 0
      * @nullable
      */
   cpus?: number | null;
+  /**
+     * Finishing what it has, taking nothing new. Separate from being
+     * unreachable: a draining host is still online and still working.
+     */
+  drained?: boolean;
   id: HostId;
   /**
      * @minimum 0
@@ -25,11 +32,6 @@ export interface Host {
   memoryMb?: number | null;
   /** What the user calls it. `localhost` is a real host, not a special case. */
   name: string;
-  /**
-     * `None` for the local host — there is nothing to connect to.
-     * @nullable
-     */
-  sshTarget?: string | null;
   state: HostState;
   /** @nullable */
   workerVersion?: string | null;

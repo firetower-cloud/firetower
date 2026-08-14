@@ -149,9 +149,47 @@ narrower — change `scopes` in `providers.rs`.
 
 #### Where the token goes
 
-Into your system keychain, never the database and never a file. Workers are
-handed it per operation and hold it in memory only, so a server that runs your
-sessions never stores your git credentials — see `crates/ft-worker/src/askpass.rs`.
+Into the secret store — see below. Workers are handed it per operation and hold
+it in memory only, so a server that runs your sessions never stores your git
+credentials; see `crates/ft-worker/src/askpass.rs`.
+
+### Secrets
+
+Every credential Firetower holds — a git host's token, an agent's token — is
+encrypted in the database. The Secrets screen shows what is held and every time
+it was touched, and lets you show, replace or remove one.
+
+Showing a credential is logged as `Reveal`, separately from a session using it.
+Worth knowing what that costs: anything that can reach the API can read every
+token, so the log is what is left to notice it happening.
+
+The shape is ordinary envelope encryption. Each secret gets a key of its own;
+that key encrypts the value; a **root key** encrypts that key. Both layers are
+bound to the secret's scope, name and version, so a row moved to another name or
+restored from before a rotation fails to open instead of quietly handing back the
+wrong credential. The cipher is XChaCha20-Poly1305.
+
+**The root key is not in the database.** It comes from one of two places:
+
+```sh
+# 1. an environment variable — for containers, servers, anything with a key
+#    manager in front of it. Nothing is written to disk.
+FIRETOWER_ROOT_KEY=<base64, 32 bytes>
+
+# 2. otherwise ~/.firetower/root.key, mode 0600, created on first run.
+```
+
+Back it up separately from the database. A database backup on its own opens
+nothing, which is the point — and losing the key means adding every credential
+again, which is the same point from the other side.
+
+Reads are logged with the reason they happened, and each entry carries a
+fingerprint of the one before it, keyed with the root key. Editing or deleting a
+row directly in the database breaks the chain, and the Secrets screen says so.
+
+Not the system keychain, which was the first design: a keychain belongs to one
+machine and one signed-in human, and Firetower hands credentials to workers on
+other machines and to containers with no desktop session at all.
 
 ### Working on it
 

@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 import {
+  useMutation,
   useQuery,
   useQueryClient
 } from '@tanstack/react-query';
@@ -13,16 +14,22 @@ import type {
   DataTag,
   DefinedInitialDataOptions,
   DefinedUseQueryResult,
+  MutationFunction,
   QueryClient,
   QueryFunction,
   QueryKey,
   UndefinedInitialDataOptions,
+  UseMutationOptions,
+  UseMutationResult,
   UseQueryOptions,
   UseQueryResult
 } from '@tanstack/react-query';
 
 import type {
-  Host
+  ApiError,
+  Drain,
+  Host,
+  NewHost
 } from '../model';
 
 import { http } from '../../http';
@@ -152,3 +159,219 @@ export const useGetListHostsQueryData = () => {
 }
 
 
+export const getCreateHostUrl = () => {
+
+
+
+
+  return `/api/v1/hosts`
+}
+
+/**
+ * Connecting happens straight away rather than on the next restart, so a
+ * mistake in an address is a message here instead of a host that silently
+ * never works.
+ * @summary Add somewhere for agents to run.
+ */
+export const createHost = async (newHost: NewHost, options?: Parameters<typeof http>[1]): Promise<Host> => {
+
+  return http<Host>(getCreateHostUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(newHost)
+  }
+);}
+
+
+
+
+
+export const getCreateHostMutationOptions = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createHost>>, TError,{data: NewHost}, TContext>, request?: SecondParameter<typeof http>}
+): UseMutationOptions<Awaited<ReturnType<typeof createHost>>, TError,{data: NewHost}, TContext> => {
+
+const mutationKey = ['createHost'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createHost>>, {data: NewHost}> = (props) => {
+          const {data} = props ?? {};
+
+          return  createHost(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateHostMutationResult = NonNullable<Awaited<ReturnType<typeof createHost>>>
+    export type CreateHostMutationBody = NewHost
+    export type CreateHostMutationError = ApiError
+
+    /**
+ * @summary Add somewhere for agents to run.
+ */
+export const useCreateHost = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createHost>>, TError,{data: NewHost}, TContext>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof createHost>>,
+        TError,
+        {data: NewHost},
+        TContext
+      > => {
+      return useMutation(getCreateHostMutationOptions(options), queryClient);
+    }
+    export const getDeleteHostUrl = (id: string,) => {
+
+
+
+
+  return `/api/v1/hosts/${id}`
+}
+
+/**
+ * Refuses while sessions are running on it, and says which — the same rule as
+ * disconnecting a repository, for the same reason.
+ * @summary Forget a host.
+ */
+export const deleteHost = async (id: string, options?: Parameters<typeof http>[1]): Promise<void> => {
+
+  return http<void>(getDeleteHostUrl(id),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+
+export const getDeleteHostMutationOptions = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteHost>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof http>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteHost>>, TError,{id: string}, TContext> => {
+
+const mutationKey = ['deleteHost'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteHost>>, {id: string}> = (props) => {
+          const {id} = props ?? {};
+
+          return  deleteHost(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteHostMutationResult = NonNullable<Awaited<ReturnType<typeof deleteHost>>>
+
+    export type DeleteHostMutationError = ApiError
+
+    /**
+ * @summary Forget a host.
+ */
+export const useDeleteHost = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteHost>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof deleteHost>>,
+        TError,
+        {id: string},
+        TContext
+      > => {
+      return useMutation(getDeleteHostMutationOptions(options), queryClient);
+    }
+    export const getDrainHostUrl = (id: string,) => {
+
+
+
+
+  return `/api/v1/hosts/${id}/drain`
+}
+
+/**
+ * @summary Stop sending work here, or start again.
+ */
+export const drainHost = async (id: string,
+    drain: Drain, options?: Parameters<typeof http>[1]): Promise<void> => {
+
+  return http<void>(getDrainHostUrl(id),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(drain)
+  }
+);}
+
+
+
+
+
+export const getDrainHostMutationOptions = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof drainHost>>, TError,{id: string;data: Drain}, TContext>, request?: SecondParameter<typeof http>}
+): UseMutationOptions<Awaited<ReturnType<typeof drainHost>>, TError,{id: string;data: Drain}, TContext> => {
+
+const mutationKey = ['drainHost'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof drainHost>>, {id: string;data: Drain}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  drainHost(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DrainHostMutationResult = NonNullable<Awaited<ReturnType<typeof drainHost>>>
+    export type DrainHostMutationBody = Drain
+    export type DrainHostMutationError = ApiError
+
+    /**
+ * @summary Stop sending work here, or start again.
+ */
+export const useDrainHost = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof drainHost>>, TError,{id: string;data: Drain}, TContext>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof drainHost>>,
+        TError,
+        {id: string;data: Drain},
+        TContext
+      > => {
+      return useMutation(getDrainHostMutationOptions(options), queryClient);
+    }

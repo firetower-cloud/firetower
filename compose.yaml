@@ -1,0 +1,70 @@
+# The whole stack. `just dev` uses the database from here; `docker compose up`
+# runs everything in containers.
+#
+# Nothing in this file is a secret. Postgres credentials come from .env, which
+# is gitignored, with .env.example beside it.
+
+name: firetower
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-firetower}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-firetower}
+      POSTGRES_DB: ${POSTGRES_DB:-firetower}
+    ports:
+      # 5433 on purpose: 5432 is usually already taken by something local, and
+      # a port conflict at start-up is a confusing way to learn that.
+      - "${POSTGRES_PORT:-5433}:5432"
+    volumes:
+      - postgres:/var/lib/postgresql/data
+    healthcheck:
+      # Everything else waits for this, so it has to mean "ready for queries"
+      # rather than "the process started".
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-firetower} -d ${POSTGRES_DB:-firetower}"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  firetower:
+    build:
+      context: .
+      dockerfile: Dockerfile.development
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-firetower}:${POSTGRES_PASSWORD:-firetower}@postgres:5432/${POSTGRES_DB:-firetower}
+      FIRETOWER_HOME: /workspace/.firetower
+      # Passed through rather than baked in — see the README.
+      FIRETOWER_GITHUB_CLIENT_ID: ${FIRETOWER_GITHUB_CLIENT_ID:-}
+      # The key every stored credential is encrypted with. Left unset, one is
+      # created under FIRETOWER_HOME above — which is a bind mount, so it
+      # survives rebuilding the container. Set it to supply your own.
+      FIRETOWER_ROOT_KEY: ${FIRETOWER_ROOT_KEY:-}
+    volumes:
+      - .:/workspace
+      - cargo:/cargo
+      - target:/target
+      # The worker container is reached over ssh with this key.
+      - ./.dev/ssh:/root/.ssh:ro
+    ports:
+      - "4400:4400"
+      - "3000:3000"
+    command: just dev
+    profiles: ["full"]
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    volumes:
+      # Only the public half; the control plane keeps the private key.
+      - ./.dev/ssh/id_ed25519.pub:/root/.ssh/authorized_keys:ro
+    profiles: ["full"]
+
+volumes:
+  postgres:
+  cargo:
+  target:

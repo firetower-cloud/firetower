@@ -7,7 +7,7 @@
 
 use crate::oauth::{self, RemoteRepo};
 use crate::providers::{self, PendingAuth, ProviderStatus};
-use crate::secrets::{self, Secrets};
+use crate::vault;
 use crate::{fleet, AppState};
 use axum::{
     extract::ws::{Message, WebSocket, WebSocketUpgrade},
@@ -146,6 +146,219 @@ async fn bootstrap() -> Json<Bootstrap> {
     })
 }
 
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct NewHost {
+    /// What you'll call it. Defaults to something derived from the kind.
+    pub name: Option<String>,
+    pub compute: ft_core::Compute,
+}
+
+/// Add somewhere for agents to run.
+///
+/// Connecting happens straight away rather than on the next restart, so a
+/// mistake in an address is a message here instead of a host that silently
+/// never works.
+#[utoipa::path(
+    post, path = "/api/v1/hosts", tag = "hosts",
+    request_body = NewHost,
+    responses((status = 201, body = Host), (status = 400, body = ApiError), (status = 409, body = ApiError)),
+)]
+async fn create_host(
+    State(state): State<AppState>,
+    Json(req): Json<NewHost>,
+) -> ApiResult<(StatusCode, Json<Host>)> {
+    let name = match req.name.as_deref().map(str::trim).filter(|n| !n.is_empty()) {
+        Some(given) => given.to_string(),
+        None => match &req.compute {
+            ft_core::Compute::Local => "localhost".to_string(),
+            ft_core::Compute::Container { name, .. } => name.clone(),
+            // `root@fire-01` is an address; `fire-01` is what you call it.
+            ft_core::Compute::Server { target, .. } => target
+                .rsplit('@')
+                .next()
+                .unwrap_or(target)
+                .split(':')
+                .next()
+                .unwrap_or(target)
+                .to_string(),
+        },
+    };
+
+    // This machine is registered at start-up and always present. Adding a
+    // second one would be two workers over the same directories.
+    if req.compute == ft_core::Compute::Local {
+        return Err(ApiError::new(
+            ErrorCode::InvalidRequest,
+            "this machine is always available and doesn't need adding",
+        ));
+    }
+
+    if state.db.host_by_name(&name).await?.is_some() {
+        return Err(ApiError::new(
+            ErrorCode::InvalidRequest,
+            format!("there is already a host called {name}"),
+        ));
+    }
+
+    if let ft_core::Compute::Container { image, name } = &req.compute {
+        start_container(image, name)
+            .await
+            .map_err(|e| ApiError::new(ErrorCode::HostUnreachable, format!("{e:#}")))?;
+    }
+
+    let host = state.db.ensure_host(&name, req.compute).await?;
+
+    // Connect now, so a bad address is a message rather than a silence.
+    let transport = fleet::Fleet::transport_for(&host, &state.home)
+        .map_err(|e| ApiError::new(ErrorCode::Internal, format!("{e:#}")))?;
+
+    if let Err(e) = state.fleet.connect(host.id.clone(), transport).await {
+        state.db.delete_host(&host.id).await?;
+        return Err(ApiError::new(
+            ErrorCode::HostUnreachable,
+            format!("couldn't reach it: {e:#}"),
+        ));
+    }
+
+    let host = state
+        .db
+        .host_by_name(&name)
+        .await?
+        .ok_or_else(|| ApiError::not_found("host"))?;
+
+    Ok((StatusCode::CREATED, Json(host)))
+}
+
+/// Bring up a worker container, or reuse the one that's already running.
+///
+/// Firetower owns the lifecycle of containers it creates. One it didn't create
+/// is left alone rather than silently adopted.
+async fn start_container(image: &str, name: &str) -> anyhow::Result<()> {
+    use anyhow::Context;
+    use tokio::process::Command;
+
+    // Checked before running anything, because Docker's own answer is to try
+    // pulling from a registry this image was never published to — and "pull
+    // access denied" sends you looking for a login you don't need.
+    let present = Command::new("docker")
+        .args(["image", "inspect", image])
+        .output()
+        .await
+        .context("is Docker running?")?;
+
+    if !present.status.success() {
+        anyhow::bail!(
+            "the worker image {image} hasn't been built yet. Run `just worker-image` \
+             — it takes a few minutes the first time and is cached after."
+        );
+    }
+
+    let running = Command::new("docker")
+        .args(["inspect", "-f", "{{.State.Running}}", name])
+        .output()
+        .await
+        .context("is Docker running?")?;
+
+    match String::from_utf8_lossy(&running.stdout).trim() {
+        "true" => return Ok(()),
+        "false" => {
+            Command::new("docker")
+                .args(["start", name])
+                .output()
+                .await?;
+            return Ok(());
+        }
+        _ => {}
+    }
+
+    let created = Command::new("docker")
+        .args(["run", "-d", "--name", name, image, "sleep", "infinity"])
+        .output()
+        .await
+        .context("starting the worker container")?;
+
+    if !created.status.success() {
+        anyhow::bail!(
+            "docker refused: {}",
+            String::from_utf8_lossy(&created.stderr).trim()
+        );
+    }
+    Ok(())
+}
+
+/// Stop sending work here, or start again.
+#[utoipa::path(
+    post, path = "/api/v1/hosts/{id}/drain", tag = "hosts",
+    params(("id" = String, Path, description = "Host id")),
+    request_body = Drain,
+    responses((status = 204), (status = 404, body = ApiError)),
+)]
+async fn drain_host(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(req): Json<Drain>,
+) -> ApiResult<StatusCode> {
+    let id = ft_core::HostId::from_stored(id);
+    state.db.set_drained(&id, req.drained).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct Drain {
+    pub drained: bool,
+}
+
+/// Forget a host.
+///
+/// Refuses while sessions are running on it, and says which — the same rule as
+/// disconnecting a repository, for the same reason.
+#[utoipa::path(
+    delete, path = "/api/v1/hosts/{id}", tag = "hosts",
+    params(("id" = String, Path, description = "Host id")),
+    responses((status = 204), (status = 404, body = ApiError), (status = 409, body = ApiError)),
+)]
+async fn delete_host(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> ApiResult<StatusCode> {
+    let id = ft_core::HostId::from_stored(id);
+    let hosts = state.db.hosts().await?;
+    let host = hosts
+        .iter()
+        .find(|h| h.id == id)
+        .ok_or_else(|| ApiError::not_found("host"))?;
+
+    // Removing it would leave a fresh install with nowhere to run anything,
+    // and it comes straight back on the next start anyway.
+    if host.compute == ft_core::Compute::Local {
+        return Err(ApiError::new(
+            ErrorCode::InvalidRequest,
+            "this machine is always available and can't be removed",
+        ));
+    }
+
+    let live = state.db.live_sessions_on(&id).await?;
+    if !live.is_empty() {
+        return Err(ApiError::new(
+            ErrorCode::RepoInUse,
+            format!(
+                "{} still has {} running: {}",
+                host.name,
+                if live.len() == 1 {
+                    "a session".to_string()
+                } else {
+                    format!("{} sessions", live.len())
+                },
+                live.join(", ")
+            ),
+        ));
+    }
+
+    state.db.delete_host(&id).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
 #[utoipa::path(
     get, path = "/api/v1/hosts", tag = "hosts",
     responses((status = 200, body = Vec<Host>)),
@@ -200,8 +413,12 @@ impl Drop for Pending {
 /// Resolved at the moment a workspace starts rather than stored alongside the
 /// secret: which variable carries it is a delivery detail, and freezing it into
 /// a row would make it a migration the day an agent changes its mind.
-async fn agent_env(state: &AppState, kind: Agent) -> Result<Vec<(String, String)>, ApiError> {
-    let Some((_, mode, _, _)) = state
+async fn agent_env(
+    state: &AppState,
+    kind: Agent,
+    session: &SessionId,
+) -> Result<Vec<(String, String)>, ApiError> {
+    let Some((_, mode, _)) = state
         .db
         .agent_modes()
         .await?
@@ -211,34 +428,64 @@ async fn agent_env(state: &AppState, kind: Agent) -> Result<Vec<(String, String)
         return Ok(Vec::new());
     };
 
-    let Some(secret) = state.db.agent_secret(kind).await? else {
-        return Ok(Vec::new());
-    };
-
     let variable = match mode {
         AgentMode::Subscription => kind.token_setup().map(|(_, var)| var),
         AgentMode::ApiKey => kind.api_key_var(),
         AgentMode::NotNeeded => None,
     };
+    // Ask for the variable first: an agent with nothing to carry a token in is
+    // not a reason to open the vault, and every open is a line in its log.
+    let Some(variable) = variable else {
+        return Ok(Vec::new());
+    };
 
-    Ok(variable
-        .map(|v| vec![(v.to_string(), secret)])
-        .unwrap_or_default())
+    let Some(secret) = state
+        .vault
+        .get(
+            vault::AGENT,
+            &agent_key(kind),
+            &format!("starting {session} with {}", kind.label()),
+        )
+        .await?
+    else {
+        return Ok(Vec::new());
+    };
+
+    Ok(vec![(variable.to_string(), secret.to_string())])
+}
+
+/// How an agent is named in the vault — the same spelling the database uses.
+fn agent_key(kind: Agent) -> String {
+    format!("{kind:?}")
+}
+
+/// How a mode reads in the access log, which is written for a person.
+fn mode_words(mode: AgentMode) -> &'static str {
+    match mode {
+        AgentMode::Subscription => "a subscription token",
+        AgentMode::ApiKey => "a metered API key",
+        AgentMode::NotNeeded => "no credential",
+    }
 }
 
 /// The token that applies to a remote, if we hold one.
 ///
 /// A remote we have no token for isn't an error: local paths and self-hosted
 /// git work off whatever credentials the worker already has.
-async fn credential_for(remote: &str) -> Option<Credential> {
+async fn credential_for(state: &AppState, remote: &str, why: &str) -> Option<Credential> {
     let provider = providers::for_remote(remote)?;
-    let secret = Secrets::get(secrets::GIT, provider.id)
+    let secret = state
+        .vault
+        .get(vault::GIT, provider.id, why)
         .await
+        // A credential that will not open is a real failure, but not this
+        // caller's to report: it is logged where it happens, and here it means
+        // the same as having none.
         .ok()
         .flatten()?;
     Some(Credential {
         username: provider.git_username.to_string(),
-        secret,
+        secret: secret.to_string(),
     })
 }
 
@@ -257,7 +504,7 @@ async fn list_providers(State(state): State<AppState>) -> ApiResult<Json<Vec<Pro
             // The flag, not the token: reading the token is a blocking call the
             // operating system may put behind a prompt, and this endpoint only
             // renders a screen.
-            connected: state.db.has_credential(secrets::GIT, p.id).await?,
+            connected: state.vault.holds(vault::GIT, p.id).await?,
             configured: p.client_id().is_some(),
             pending: pending.get(p.id).map(|p| p.auth.clone()),
         });
@@ -307,7 +554,7 @@ async fn authorize_provider(
     };
 
     let pending = state.pending.clone();
-    let db = state.db.clone();
+    let vault = state.vault.clone();
     let device_code = started.device_code.clone();
     let mut interval = std::time::Duration::from_secs(started.interval.max(1));
     let provider_id = provider.id.to_string();
@@ -324,11 +571,16 @@ async fn authorize_provider(
                     interval += std::time::Duration::from_secs(5);
                 }
                 Ok(oauth::Poll::Approved(token)) => {
-                    match Secrets::store(secrets::GIT, provider.id, &token).await {
-                        Ok(()) => {
-                            let _ = db.mark_credential(secrets::GIT, provider.id).await;
-                            tracing::info!("{} authorized", provider.label);
-                        }
+                    match vault
+                        .put(
+                            vault::GIT,
+                            provider.id,
+                            &token,
+                            &format!("{} authorized in a browser", provider.label),
+                        )
+                        .await
+                    {
+                        Ok(()) => tracing::info!("{} authorized", provider.label),
                         Err(e) => tracing::error!("storing the {} token: {e:#}", provider.label),
                     }
                     pending.write().await.remove(&provider_id);
@@ -369,10 +621,10 @@ async fn disconnect_provider(
 ) -> ApiResult<StatusCode> {
     let provider = providers::find(&id).ok_or_else(|| ApiError::not_found("provider"))?;
     state.pending.write().await.remove(provider.id);
-    Secrets::forget(secrets::GIT, provider.id)
-        .await
-        .map_err(|e| ApiError::new(ErrorCode::Internal, format!("{e:#}")))?;
-    state.db.clear_credential(secrets::GIT, provider.id).await?;
+    state
+        .vault
+        .forget(vault::GIT, provider.id, "signed out of the git host")
+        .await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -386,12 +638,16 @@ async fn disconnect_provider(
         (status = 404, body = ApiError),
     ),
 )]
-async fn list_provider_repos(Path(id): Path<String>) -> ApiResult<Json<Vec<RemoteRepo>>> {
+async fn list_provider_repos(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> ApiResult<Json<Vec<RemoteRepo>>> {
     let provider = providers::find(&id).ok_or_else(|| ApiError::not_found("provider"))?;
 
-    let token = Secrets::get(secrets::GIT, provider.id)
-        .await
-        .map_err(|e| ApiError::new(ErrorCode::Internal, format!("{e:#}")))?
+    let token = state
+        .vault
+        .get(vault::GIT, provider.id, "listing repositories to pick from")
+        .await?
         .ok_or_else(|| {
             ApiError::new(
                 ErrorCode::ProviderNotConnected,
@@ -479,14 +735,17 @@ async fn list_agents(State(state): State<AppState>) -> ApiResult<Json<Vec<AgentV
     let mut views = Vec::new();
     for kind in Agent::all() {
         let configured = modes.iter().find(|(k, ..)| *k == kind);
+        // The vault answers whether one is set without decrypting anything, so
+        // rendering this screen never touches a credential.
+        let credential_set = state.vault.holds(vault::AGENT, &agent_key(kind)).await?;
 
         views.push(AgentView {
             kind,
             label: kind.label().to_string(),
             mode: configured.map(|(_, m, ..)| *m),
-            enabled: configured.map(|(_, _, e, _)| *e).unwrap_or(true),
+            enabled: configured.map(|(_, _, e)| *e).unwrap_or(true),
             // Whether one is set, never the value itself.
-            credential_set: configured.map(|(.., set)| *set).unwrap_or(false),
+            credential_set,
             needs_credential: kind.needs_credential(),
             // What to run, and where. The command happens on your own machine
             // because that is where a browser is.
@@ -509,9 +768,9 @@ async fn list_agents(State(state): State<AppState>) -> ApiResult<Json<Vec<AgentV
                         // there, or because our token covers it. Different
                         // facts, and the screen shows which.
                         covered_by_token: configured
-                            .map(|(_, m, _, set)| *m == AgentMode::Subscription && *set)
+                            .map(|(_, m, _)| *m == AgentMode::Subscription && credential_set)
                             .unwrap_or(false),
-                        checked_at: seen.map(|p| p.checked_at.clone()),
+                        checked_at: seen.map(|p| p.checked_at.to_rfc3339()),
                     }
                 })
                 .collect(),
@@ -558,12 +817,33 @@ async fn configure_agent(
         ));
     }
 
-    // Passing it through clears whatever the previous mode stored, so a key
-    // never lingers behind a subscription.
-    state
-        .db
-        .set_agent_mode(kind, req.mode, req.enabled, secret)
-        .await?;
+    state.db.set_agent_mode(kind, req.mode, req.enabled).await?;
+
+    // Whatever the previous mode stored goes, so an API key never lingers
+    // behind a subscription as something a workspace could still be handed.
+    match secret {
+        Some(value) => {
+            state
+                .vault
+                .put(
+                    vault::AGENT,
+                    &agent_key(kind),
+                    value,
+                    &format!("{} configured with {}", kind.label(), mode_words(req.mode)),
+                )
+                .await?
+        }
+        None => {
+            state
+                .vault
+                .forget(
+                    vault::AGENT,
+                    &agent_key(kind),
+                    &format!("{} no longer authenticates", kind.label()),
+                )
+                .await?
+        }
+    }
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -580,6 +860,14 @@ async fn forget_agent(
 ) -> ApiResult<StatusCode> {
     let kind = agent_from_path(&kind)?;
     state.db.forget_agent(kind).await?;
+    state
+        .vault
+        .forget(
+            vault::AGENT,
+            &agent_key(kind),
+            &format!("{} was removed", kind.label()),
+        )
+        .await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -604,6 +892,197 @@ async fn check_agents(State(state): State<AppState>) -> ApiResult<Json<Vec<Agent
     list_agents(State(state)).await
 }
 
+// ── secrets ────────────────────────────────────────────────────────────
+
+/// A credential Firetower holds. Its name, and nothing else.
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct HeldSecret {
+    pub scope: String,
+    pub name: String,
+}
+
+/// One line of the access log.
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AccessEntry {
+    pub id: i64,
+    pub scope: String,
+    pub name: String,
+    /// `Write`, `Read`, `Delete`, or `Failed`.
+    pub action: String,
+    /// What the credential was wanted for, in words.
+    pub reason: String,
+    pub at: String,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct VaultView {
+    /// Where the key that unlocks all of this lives — in words, never the key.
+    pub root_key: String,
+    pub held: Vec<HeldSecret>,
+    pub access: Vec<AccessEntry>,
+    /// Whether the log's chain of digests still holds end to end.
+    pub intact: bool,
+    /// The first entry that doesn't follow from the one before it, if any.
+    pub broken_at: Option<i64>,
+}
+
+/// What is stored, and every time it was touched.
+///
+/// Names and history only. A value comes back from exactly one route, which is
+/// `reveal_secret` below, and that one writes to the log before it answers.
+#[utoipa::path(
+    get, path = "/api/v1/secrets", tag = "secrets",
+    responses((status = 200, body = VaultView)),
+)]
+async fn list_secrets(State(state): State<AppState>) -> ApiResult<Json<VaultView>> {
+    let (intact, broken_at) = match state.vault.verify().await? {
+        vault::Verification::Intact { .. } => (true, None),
+        vault::Verification::Broken { at } => (false, Some(at)),
+    };
+
+    Ok(Json(VaultView {
+        root_key: state.key_source.to_string(),
+        held: state
+            .vault
+            .names()
+            .await?
+            .into_iter()
+            .map(|(scope, name)| HeldSecret { scope, name })
+            .collect(),
+        access: state
+            .vault
+            .access(100)
+            .await?
+            .into_iter()
+            .map(|a| AccessEntry {
+                id: a.id,
+                scope: a.scope,
+                name: a.name,
+                action: a.action,
+                reason: a.reason,
+                at: a.at.to_rfc3339(),
+            })
+            .collect(),
+        intact,
+        broken_at,
+    }))
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ReplaceSecret {
+    /// What to store from now on. The previous value is not recoverable.
+    pub value: String,
+}
+
+/// A value, on its way to a person who asked for it.
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct RevealedSecret {
+    pub scope: String,
+    pub name: String,
+    pub value: String,
+}
+
+/// Put a credential on screen.
+///
+/// A `POST` because it changes something: it writes a `Reveal` into the access
+/// log, which is what makes this defensible at all. A `GET` would also sit in
+/// browser history and proxy logs, which a credential shouldn't.
+///
+/// This is the one route that hands a stored value back, and it exists because
+/// a credential you cannot inspect is one you cannot verify or copy elsewhere.
+/// The cost is real: anything that can reach this API can read every token
+/// here, and the log is what is left to notice it.
+#[utoipa::path(
+    post, path = "/api/v1/secrets/{scope}/{name}/reveal", tag = "secrets",
+    params(
+        ("scope" = String, Path, description = "Secret scope"),
+        ("name" = String, Path, description = "Secret name"),
+    ),
+    responses((status = 200, body = RevealedSecret), (status = 404, body = ApiError)),
+)]
+async fn reveal_secret(
+    State(state): State<AppState>,
+    Path((scope, name)): Path<(String, String)>,
+) -> ApiResult<Json<RevealedSecret>> {
+    let value = state
+        .vault
+        .reveal(&scope, &name, "shown on the Secrets screen")
+        .await?
+        .ok_or_else(|| ApiError::not_found("secret"))?;
+
+    Ok(Json(RevealedSecret {
+        scope,
+        name,
+        value: value.to_string(),
+    }))
+}
+
+/// Replace a credential with a new one.
+///
+/// Only for a name that already exists. Storing under an arbitrary name would
+/// let this screen fill up with values nothing ever reads — what a credential is
+/// *for* is decided where it is used, not here.
+#[utoipa::path(
+    put, path = "/api/v1/secrets/{scope}/{name}", tag = "secrets",
+    params(
+        ("scope" = String, Path, description = "Secret scope"),
+        ("name" = String, Path, description = "Secret name"),
+    ),
+    request_body = ReplaceSecret,
+    responses((status = 204), (status = 400, body = ApiError), (status = 404, body = ApiError)),
+)]
+async fn replace_secret(
+    State(state): State<AppState>,
+    Path((scope, name)): Path<(String, String)>,
+    Json(req): Json<ReplaceSecret>,
+) -> ApiResult<StatusCode> {
+    let value = req.value.trim();
+    if value.is_empty() {
+        return Err(ApiError::new(
+            ErrorCode::InvalidRequest,
+            "paste the new value, or remove this credential instead",
+        ));
+    }
+
+    if !state.vault.holds(&scope, &name).await? {
+        return Err(ApiError::not_found("secret"));
+    }
+
+    state
+        .vault
+        .put(&scope, &name, value, "replaced on the Secrets screen")
+        .await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Remove a credential.
+///
+/// Whatever used it goes back to having none — an agent shows as needing one
+/// again, a git host shows as not authorized. The log entry stays.
+#[utoipa::path(
+    delete, path = "/api/v1/secrets/{scope}/{name}", tag = "secrets",
+    params(
+        ("scope" = String, Path, description = "Secret scope"),
+        ("name" = String, Path, description = "Secret name"),
+    ),
+    responses((status = 204)),
+)]
+async fn remove_secret(
+    State(state): State<AppState>,
+    Path((scope, name)): Path<(String, String)>,
+) -> ApiResult<StatusCode> {
+    state
+        .vault
+        .forget(&scope, &name, "removed on the Secrets screen")
+        .await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
 // ── repositories ───────────────────────────────────────────────────────
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -621,6 +1100,11 @@ pub struct ProbeResponse {
     pub slug: String,
     /// Read from the remote rather than assumed.
     pub default_branch: String,
+}
+
+/// Whether a remote is a directory here rather than something reachable.
+fn is_local_path(remote: &str) -> bool {
+    remote.starts_with('/') || remote.starts_with('.') || remote.starts_with('~')
 }
 
 /// `https://host/acme/backend.git` and `git@host:acme/backend.git` both give
@@ -726,7 +1210,11 @@ async fn probe_repo(
     let host = probing_host(&state).await?;
     let info = state
         .fleet
-        .probe(&host, remote, credential_for(remote).await)
+        .probe(
+            &host,
+            remote,
+            credential_for(&state, remote, &format!("checking {remote}")).await,
+        )
         .await
         .map_err(|e| ApiError::new(ErrorCode::HostUnreachable, format!("{e:#}")))?
         .map_err(|f| probe_error(remote, f))?;
@@ -767,7 +1255,11 @@ async fn create_repo(
     let host = probing_host(&state).await?;
     let info = state
         .fleet
-        .probe(&host, remote, credential_for(remote).await)
+        .probe(
+            &host,
+            remote,
+            credential_for(&state, remote, &format!("connecting {remote}")).await,
+        )
         .await
         .map_err(|e| ApiError::new(ErrorCode::HostUnreachable, format!("{e:#}")))?
         .map_err(|f| probe_error(remote, f))?;
@@ -815,7 +1307,16 @@ async fn repo_branches(
     let host = probing_host(&state).await?;
     let info = state
         .fleet
-        .probe(&host, &repo.remote, credential_for(&repo.remote).await)
+        .probe(
+            &host,
+            &repo.remote,
+            credential_for(
+                &state,
+                &repo.remote,
+                &format!("listing branches of {}", repo.slug),
+            )
+            .await,
+        )
         .await
         .map_err(|e| ApiError::new(ErrorCode::HostUnreachable, format!("{e:#}")))?
         .map_err(|f| probe_error(&repo.remote, f))?;
@@ -875,12 +1376,90 @@ async fn delete_repo(
     Ok(StatusCode::NO_CONTENT)
 }
 
+/// Sessions, newest first.
+///
+/// Without `limit` this returns everything, which is what the dashboard wants —
+/// it has to see every running session to say anything true about the fleet.
+/// With one, it pages.
 #[utoipa::path(
     get, path = "/api/v1/sessions", tag = "sessions",
+    params(
+        ("limit" = Option<u32>, Query, description = "How many to return"),
+        ("before" = Option<String>, Query, description = "Continue after this id"),
+    ),
     responses((status = 200, body = Vec<Session>)),
 )]
-async fn list_sessions(State(state): State<AppState>) -> ApiResult<Json<Vec<Session>>> {
-    Ok(Json(state.db.sessions().await?))
+async fn list_sessions(
+    State(state): State<AppState>,
+    Query(page): Query<Page>,
+) -> ApiResult<Json<Vec<Session>>> {
+    Ok(Json(
+        state
+            .db
+            .sessions_page(page.limit, page.before.as_deref())
+            .await?,
+    ))
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct Page {
+    #[serde(default)]
+    pub limit: Option<u32>,
+    #[serde(default)]
+    pub before: Option<String>,
+}
+
+/// End every session that is still running.
+///
+/// Destructive in the same way as ending one, multiplied — every workspace goes
+/// and anything unpushed with it. The count comes back so the interface can say
+/// what it did rather than guess.
+#[utoipa::path(
+    post, path = "/api/v1/sessions/end-all", tag = "sessions",
+    responses((status = 200, body = EndedAll)),
+)]
+async fn end_all_sessions(State(state): State<AppState>) -> ApiResult<Json<EndedAll>> {
+    let live = state.db.live_sessions().await?;
+
+    let mut ended = 0;
+    let mut unreachable = 0;
+
+    for session in live {
+        // A host we can't talk to keeps its sessions; marking them ended here
+        // would be a lie the next reconnect corrects.
+        if !state.fleet.is_connected(&session.host_id).await {
+            unreachable += 1;
+            continue;
+        }
+
+        match state
+            .fleet
+            .send(
+                &session.host_id,
+                ToWorker::Destroy {
+                    session_id: session.id.clone(),
+                    force: true,
+                },
+            )
+            .await
+        {
+            Ok(()) => ended += 1,
+            Err(e) => {
+                tracing::warn!(session = %session.id, "ending: {e:#}");
+                unreachable += 1;
+            }
+        }
+    }
+
+    Ok(Json(EndedAll { ended, unreachable }))
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct EndedAll {
+    pub ended: u32,
+    /// Left alone because their host wasn't answering.
+    pub unreachable: u32,
 }
 
 #[utoipa::path(
@@ -920,21 +1499,36 @@ async fn create_session(
         ));
     }
 
-    let repo = state.db.repo(&req.repo_id).await?.ok_or_else(|| {
-        ApiError::new(
-            ErrorCode::RepoNotConnected,
-            "that repository isn't connected",
-        )
-    })?;
+    // No repository is a bare agent: a workspace with nothing checked out.
+    let repo = match &req.repo_id {
+        None => None,
+        Some(id) => Some(state.db.repo(id).await?.ok_or_else(|| {
+            ApiError::new(
+                ErrorCode::RepoNotConnected,
+                "that repository isn't connected",
+            )
+        })?),
+    };
 
     // Scheduling is the control plane's job — it is the only thing that sees
     // every host. Today there is one, so this is the whole scheduler.
     let hosts = state.db.hosts().await?;
     let host = match &req.host_id {
+        // Named explicitly, so a drained one is still refused below rather
+        // than silently swapped for another.
         Some(id) => hosts.iter().find(|h| &h.id == id),
-        None => hosts.iter().find(|h| h.state == ft_core::HostState::Online),
+        None => hosts
+            .iter()
+            .find(|h| h.state == ft_core::HostState::Online && !h.drained),
     }
     .ok_or_else(|| ApiError::new(ErrorCode::NoCapacity, "no host is available to take this"))?;
+
+    if host.drained {
+        return Err(ApiError::new(
+            ErrorCode::NoCapacity,
+            format!("{} is draining and isn't taking new work", host.name),
+        ));
+    }
 
     if !state.fleet.is_connected(&host.id).await {
         return Err(ApiError::new(
@@ -943,28 +1537,61 @@ async fn create_session(
         ));
     }
 
+    // A path is a path on *this* machine. Anywhere else it is a directory that
+    // doesn't exist, and the session would fail several steps later with a git
+    // error that says nothing about why.
+    if repo
+        .as_ref()
+        .is_some_and(|r| is_local_path(&r.remote) && host.compute != ft_core::Compute::Local)
+    {
+        return Err(ApiError::new(
+            ErrorCode::InvalidRequest,
+            format!(
+                "{} is a folder on this machine, so it can only run on this machine. \
+                 Connect it by URL to use it on {}.",
+                repo.as_ref().map(|r| r.remote.as_str()).unwrap_or_default(),
+                host.name
+            ),
+        ));
+    }
+
     // A branch the caller named has to exist, or the worktree fails later with
     // a git error rather than here with an answer.
-    let base = match req.base.as_deref().map(str::trim).filter(|b| !b.is_empty()) {
-        Some(chosen) => chosen.to_string(),
-        None => repo.default_branch.clone(),
-    };
-
-    // Named by whoever starts the session when they say so — this is what ends
-    // up on a pull request, and a slug made from a sentence is a poor thing to
-    // live with. Falling back to one is better than refusing.
-    let branch = ft_core::sanitize_branch(
-        &req.branch
+    // Everything about a checkout is absent together, so "no repository" is one
+    // missing value rather than four empty strings.
+    let checkout = repo.as_ref().map(|repo| {
+        let base = req
+            .base
             .as_deref()
             .map(str::trim)
             .filter(|b| !b.is_empty())
             .map(str::to_string)
-            .unwrap_or_else(|| format!("agent/{}", ft_core::slugify(&req.prompt))),
-    );
-    let workspace = ft_core::workspace_name(&branch);
+            .unwrap_or_else(|| repo.default_branch.clone());
+
+        let branch = ft_core::sanitize_branch(
+            &req.branch
+                .as_deref()
+                .map(str::trim)
+                .filter(|b| !b.is_empty())
+                .map(str::to_string)
+                .unwrap_or_else(|| format!("agent/{}", ft_core::slugify(&req.prompt))),
+        );
+
+        (repo, base, branch)
+    });
+
+    // Named by whoever starts the session when they say so — this is what ends
+    // up on a pull request, and a slug made from a sentence is a poor thing to
+    // live with. Falling back to one is better than refusing.
 
     let id = SessionId::new();
     let title = title_from(&req.prompt);
+
+    // Named after the branch when there is one; after the session otherwise.
+    let workspace = checkout
+        .as_ref()
+        .map(|(_, _, branch)| ft_core::workspace_name(branch))
+        .unwrap_or_else(|| id.as_str().to_string());
     let agent_name = format!("{:?}", req.agent);
 
     state
@@ -972,11 +1599,11 @@ async fn create_session(
         .insert_session(
             &id,
             &host.id,
-            &repo.slug,
+            repo.as_ref().map(|r| r.slug.as_str()),
             &title,
             &req.prompt,
-            &branch,
-            &base,
+            checkout.as_ref().map(|(_, _, b)| b.as_str()),
+            checkout.as_ref().map(|(_, b, _)| b.as_str()),
             &agent_name,
             req.size,
         )
@@ -988,21 +1615,31 @@ async fn create_session(
             &host.id,
             ToWorker::CreateWorkspace(Box::new(CreateWorkspace {
                 session_id: id.clone(),
-                remote: repo.remote.clone(),
-                repo_slug: repo.slug.clone(),
-                base: base.clone(),
-                branch,
+                repo: checkout
+                    .as_ref()
+                    .map(|(repo, base, branch)| ft_proto::RepoSpec {
+                        remote: repo.remote.clone(),
+                        slug: repo.slug.clone(),
+                        base: base.clone(),
+                        branch: branch.clone(),
+                    }),
                 workspace,
                 prompt: req.prompt.clone(),
                 agent: req.agent,
                 size: req.size,
-                setup: repo.setup.clone(),
+                setup: repo.as_ref().and_then(|r| r.setup.clone()),
                 // Resolved here, sent with the work, and held in memory on the
                 // host. Never written to a worker's disk.
-                env: agent_env(&state, req.agent).await?,
+                env: agent_env(&state, req.agent, &id).await?,
                 // Sent with the work rather than held by the host: the worker
                 // keeps it in memory for this session and writes it nowhere.
-                credential: credential_for(&repo.remote).await,
+                credential: match repo.as_ref() {
+                    Some(r) => {
+                        credential_for(&state, &r.remote, &format!("starting {id} on {}", r.slug))
+                            .await
+                    }
+                    None => None,
+                },
             })),
         )
         .await?;
@@ -1154,16 +1791,24 @@ async fn session_context(
     Ok((session, host))
 }
 
-async fn act(
-    state: &AppState,
-    id: &SessionId,
-    action: ft_proto::Action,
-) -> ApiResult<Json<Done>> {
+async fn act(state: &AppState, id: &SessionId, action: ft_proto::Action) -> ApiResult<Json<Done>> {
     let (session, host) = session_context(state, id).await?;
 
-    // Only the remote needs one, and only some of these touch it.
-    let credential = match state.db.repo_by_slug(&session.repo).await? {
-        Some(repo) => credential_for(&repo.remote).await,
+    // Committing and pushing are about a checkout. Stopping isn't.
+    if session.repo.is_none() && !matches!(action, ft_proto::Action::Stop) {
+        return Err(ApiError::new(
+            ErrorCode::InvalidRequest,
+            "this session has no repository, so there is nothing to commit or push",
+        ));
+    }
+
+    // Only the remote needs one, and only some of these touch it. A bare agent
+    // has no remote at all.
+    let credential = match session.repo.as_deref() {
+        Some(slug) => match state.db.repo_by_slug(slug).await? {
+            Some(repo) => credential_for(state, &repo.remote, &format!("{action:?} on {id}")).await,
+            None => None,
+        },
         None => None,
     };
 
@@ -1215,7 +1860,14 @@ async fn session_work(
     Path(id): Path<String>,
 ) -> ApiResult<Json<ft_core::WorkSummary>> {
     let id = SessionId::from_stored(id);
-    let (_, host) = session_context(&state, &id).await?;
+    let (session, host) = session_context(&state, &id).await?;
+
+    if session.repo.is_none() {
+        return Err(ApiError::new(
+            ErrorCode::InvalidRequest,
+            "this session has no repository, so there is nothing to summarise",
+        ));
+    }
 
     state
         .fleet
@@ -1283,16 +1935,18 @@ async fn open_pull_request(
         .as_deref()
         .map(str::trim)
         .filter(|t| !t.is_empty())
-        .ok_or_else(|| {
-            ApiError::new(
-                ErrorCode::InvalidRequest,
-                "a pull request needs a title",
-            )
-        })?;
+        .ok_or_else(|| ApiError::new(ErrorCode::InvalidRequest, "a pull request needs a title"))?;
+
+    let slug = session.repo.as_deref().ok_or_else(|| {
+        ApiError::new(
+            ErrorCode::InvalidRequest,
+            "this session has no repository, so there is nothing to open",
+        )
+    })?;
 
     let repo = state
         .db
-        .repo_by_slug(&session.repo)
+        .repo_by_slug(slug)
         .await?
         .ok_or_else(|| ApiError::not_found("repository"))?;
 
@@ -1303,9 +1957,14 @@ async fn open_pull_request(
         )
     })?;
 
-    let token = Secrets::get(secrets::GIT, provider.id)
-        .await
-        .map_err(|e| ApiError::new(ErrorCode::Internal, format!("{e:#}")))?
+    let token = state
+        .vault
+        .get(
+            vault::GIT,
+            provider.id,
+            &format!("opening a pull request for {}", repo.slug),
+        )
+        .await?
         .ok_or_else(|| {
             ApiError::new(
                 ErrorCode::ProviderNotConnected,
@@ -1317,8 +1976,8 @@ async fn open_pull_request(
         provider,
         &token,
         &repo.slug,
-        &session.branch,
-        &session.base,
+        session.branch.as_deref().unwrap_or_default(),
+        session.base.as_deref().unwrap_or_default(),
         title,
         // The description is the prompt: what was asked for is the most useful
         // thing a reviewer can be told, and nobody wants to retype it.
@@ -1464,7 +2123,8 @@ async fn drive_terminal(
         AgentMode,
         AgentPresence,
         ft_core::WorkSummary,
-        ft_core::FileDiff
+        ft_core::FileDiff,
+        ft_core::Compute
     ))
 )]
 pub struct ApiDoc;
@@ -1472,7 +2132,9 @@ pub struct ApiDoc;
 pub fn router() -> OpenApiRouter<AppState> {
     OpenApiRouter::with_openapi(ApiDoc::openapi())
         .routes(routes!(bootstrap))
-        .routes(routes!(list_hosts))
+        .routes(routes!(list_hosts, create_host))
+        .routes(routes!(delete_host))
+        .routes(routes!(drain_host))
         .routes(routes!(list_repos, create_repo))
         .routes(routes!(delete_repo))
         .routes(routes!(repo_branches))
@@ -1480,11 +2142,15 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(list_agents))
         .routes(routes!(configure_agent, forget_agent))
         .routes(routes!(check_agents))
+        .routes(routes!(list_secrets))
+        .routes(routes!(replace_secret, remove_secret))
+        .routes(routes!(reveal_secret))
         .routes(routes!(list_providers))
         .routes(routes!(authorize_provider))
         .routes(routes!(disconnect_provider))
         .routes(routes!(list_provider_repos))
         .routes(routes!(list_sessions, create_session))
+        .routes(routes!(end_all_sessions))
         .routes(routes!(get_session, destroy_session))
         .routes(routes!(list_events))
         .routes(routes!(stream_events))
@@ -1499,6 +2165,14 @@ pub fn router() -> OpenApiRouter<AppState> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_folder_here_is_told_apart_from_a_remote() {
+        assert!(is_local_path("/Users/kevin/code/backend"));
+        assert!(is_local_path("./backend"));
+        assert!(!is_local_path("https://github.com/acme/backend.git"));
+        assert!(!is_local_path("git@github.com:acme/backend.git"));
+    }
 
     #[test]
     fn a_slug_comes_out_of_whatever_shape_the_remote_is() {

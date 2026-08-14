@@ -42,12 +42,19 @@ utoipa = { version = "5", features = ["axum_extras", "chrono"] }
 utoipa-axum = "0.2"
 
 # data
+# Postgres for the control plane, SQLite for a worker's own log — a worker is
+# a binary dropped onto a server, and requiring a database beside it would undo
+# the thing that makes adding a host easy.
 sqlx = { version = "0.8", default-features = false, features = [
   "runtime-tokio",
+  "tls-rustls",
+  "postgres",
   "sqlite",
   "migrate",
   "chrono",
   "macros",
+  "json",
+  "uuid",
 ] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -61,7 +68,15 @@ mime_guess = "2"
 portable-pty = "0.9"
 
 # secrets
-keyring = { version = "3", features = ["apple-native", "linux-native", "windows-native"] }
+# Envelope encryption for the vault: a root key wraps a key per secret, and
+# every ciphertext is bound to the name it is stored under. XChaCha20-Poly1305
+# for its 24-byte nonce — random nonces stop being a birthday-bound worry.
+chacha20poly1305 = "0.10"
+# The access log is a chain of keyed digests, so rewriting history needs the
+# root key and not merely a connection to the database.
+hmac = "0.12"
+sha2 = "0.10"
+zeroize = { version = "1", features = ["zeroize_derive"] }
 
 # talking to git hosts: their device-flow and repository endpoints
 reqwest = { version = "0.12", default-features = false, features = [

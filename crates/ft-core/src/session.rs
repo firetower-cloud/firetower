@@ -9,12 +9,14 @@ use utoipa::ToSchema;
 #[serde(rename_all = "camelCase")]
 pub struct Session {
     pub id: SessionId,
-    pub repo: String,
+    /// `None` for a bare agent: a workspace with nothing checked out.
+    pub repo: Option<String>,
     /// Short, derived from the prompt — the prompt itself lives in the transcript.
     pub title: String,
     pub prompt: String,
-    pub branch: String,
-    pub base: String,
+    /// Absent along with the repository — there is nothing to branch.
+    pub branch: Option<String>,
+    pub base: Option<String>,
     pub agent: Agent,
     pub size: WorkspaceSize,
     pub status: SessionStatus,
@@ -28,7 +30,9 @@ pub struct Session {
 #[derive(Debug, Clone, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct NewSession {
-    pub repo_id: RepoId,
+    /// Omit for a bare agent: a workspace with nothing checked out.
+    #[serde(default)]
+    pub repo_id: Option<RepoId>,
     pub prompt: String,
     #[serde(default = "default_agent")]
     pub agent: Agent,
@@ -163,7 +167,6 @@ mod tests {
         assert_eq!(WorkspaceSize::default(), WorkspaceSize::Medium);
     }
 }
-
 
 /// Make a branch name git will accept, keeping it recognisable.
 ///

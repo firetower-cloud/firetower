@@ -8,15 +8,30 @@
 import * as zod from 'zod';
 
 
+/**
+ * Without `limit` this returns everything, which is what the dashboard wants —
+ * it has to see every running session to say anything true about the fleet.
+ * With one, it pages.
+ * @summary Sessions, newest first.
+ */
+export const listSessionsQueryLimitMin = 0;
+
+
+
+export const ListSessionsQueryParams = zod.object({
+  "limit": zod.int().min(listSessionsQueryLimitMin).optional().describe('How many to return'),
+  "before": zod.string().optional().describe('Continue after this id')
+})
+
 export const ListSessionsResponseItem = zod.object({
   "agent": zod.enum(['ClaudeCode', 'Codex', 'Shell']).describe('Which agent runs inside a workspace.\n\nSerialised as the variant name — see the wire conventions in the brief: a\nfield takes the consumer\'s casing, an enum value stays the symbol it is.'),
-  "base": zod.string(),
-  "branch": zod.string(),
+  "base": zod.string().nullish(),
+  "branch": zod.string().nullish().describe('Absent along with the repository — there is nothing to branch.'),
   "createdAt": zod.iso.datetime({"offset":true}),
   "hostId": zod.string().describe('Identifies a host.'),
   "id": zod.string().describe('Identifies a session — the unit of work you talk to.'),
   "prompt": zod.string(),
-  "repo": zod.string(),
+  "repo": zod.string().nullish().describe('`None` for a bare agent: a workspace with nothing checked out.'),
   "size": zod.enum(['Small', 'Medium', 'Large']),
   "status": zod.enum(['Starting', 'Working', 'NeedsYou', 'HandedBack', 'Failed', 'Ended']),
   "title": zod.string().describe('Short, derived from the prompt — the prompt itself lives in the transcript.'),
@@ -31,19 +46,19 @@ export const CreateSessionBody = zod.object({
   "branch": zod.string().nullish().describe('The branch the agent works on. Omit to derive one from the prompt.\n\nNamed by whoever starts the session, because this is what ends up on a\npull request and a machine-written slug is a poor thing to live with.'),
   "hostId": zod.union([zod.null(),zod.string().describe('Omit to let the scheduler choose.')]).optional(),
   "prompt": zod.string(),
-  "repoId": zod.string().describe('Identifies a connected repository.'),
+  "repoId": zod.union([zod.null(),zod.string().describe('Omit for a bare agent: a workspace with nothing checked out.')]).optional(),
   "size": zod.enum(['Small', 'Medium', 'Large']).optional()
 }).describe('What the API accepts to launch one.')
 
 export const CreateSessionResponse = zod.object({
   "agent": zod.enum(['ClaudeCode', 'Codex', 'Shell']).describe('Which agent runs inside a workspace.\n\nSerialised as the variant name — see the wire conventions in the brief: a\nfield takes the consumer\'s casing, an enum value stays the symbol it is.'),
-  "base": zod.string(),
-  "branch": zod.string(),
+  "base": zod.string().nullish(),
+  "branch": zod.string().nullish().describe('Absent along with the repository — there is nothing to branch.'),
   "createdAt": zod.iso.datetime({"offset":true}),
   "hostId": zod.string().describe('Identifies a host.'),
   "id": zod.string().describe('Identifies a session — the unit of work you talk to.'),
   "prompt": zod.string(),
-  "repo": zod.string(),
+  "repo": zod.string().nullish().describe('`None` for a bare agent: a workspace with nothing checked out.'),
   "size": zod.enum(['Small', 'Medium', 'Large']),
   "status": zod.enum(['Starting', 'Working', 'NeedsYou', 'HandedBack', 'Failed', 'Ended']),
   "title": zod.string().describe('Short, derived from the prompt — the prompt itself lives in the transcript.'),
@@ -51,19 +66,36 @@ export const CreateSessionResponse = zod.object({
   "workspaceId": zod.union([zod.null(),zod.string().describe('Identifies a workspace — the compute a session runs on.')]).optional()
 }).describe('A line of work with a conversation attached and a branch at the end.')
 
+/**
+ * Destructive in the same way as ending one, multiplied — every workspace goes
+ * and anything unpushed with it. The count comes back so the interface can say
+ * what it did rather than guess.
+ * @summary End every session that is still running.
+ */
+export const endAllSessionsResponseEndedMin = 0;
+
+export const endAllSessionsResponseUnreachableMin = 0;
+
+
+
+export const EndAllSessionsResponse = zod.object({
+  "ended": zod.int().min(endAllSessionsResponseEndedMin),
+  "unreachable": zod.int().min(endAllSessionsResponseUnreachableMin).describe('Left alone because their host wasn\'t answering.')
+})
+
 export const GetSessionParams = zod.object({
   "id": zod.string().describe('Session id')
 })
 
 export const GetSessionResponse = zod.object({
   "agent": zod.enum(['ClaudeCode', 'Codex', 'Shell']).describe('Which agent runs inside a workspace.\n\nSerialised as the variant name — see the wire conventions in the brief: a\nfield takes the consumer\'s casing, an enum value stays the symbol it is.'),
-  "base": zod.string(),
-  "branch": zod.string(),
+  "base": zod.string().nullish(),
+  "branch": zod.string().nullish().describe('Absent along with the repository — there is nothing to branch.'),
   "createdAt": zod.iso.datetime({"offset":true}),
   "hostId": zod.string().describe('Identifies a host.'),
   "id": zod.string().describe('Identifies a session — the unit of work you talk to.'),
   "prompt": zod.string(),
-  "repo": zod.string(),
+  "repo": zod.string().nullish().describe('`None` for a bare agent: a workspace with nothing checked out.'),
   "size": zod.enum(['Small', 'Medium', 'Large']),
   "status": zod.enum(['Starting', 'Working', 'NeedsYou', 'HandedBack', 'Failed', 'Ended']),
   "title": zod.string().describe('Short, derived from the prompt — the prompt itself lives in the transcript.'),

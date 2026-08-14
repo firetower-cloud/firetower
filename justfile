@@ -22,6 +22,7 @@ doctor:
     check node        "node --version"        "brew install node"
     check pnpm        "pnpm --version"        "brew install pnpm"
     check cargo-watch "cargo-watch --version" "cargo install cargo-watch"
+    check docker      "docker --version"      "https://docs.docker.com/get-docker"
     echo
     [ $missing -eq 0 ] || { echo "  Install what's missing, then run just doctor again."; exit 1; }
     echo "  Everything's here. Run: just setup"
@@ -38,13 +39,35 @@ setup:
         echo "  wrote .env — see 'Connecting repositories' in the README"
     fi
 
+# Start the database and wait until it will actually answer.
+db:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    docker compose up -d postgres
+    printf '  waiting for postgres'
+    for _ in $(seq 1 60); do
+        if docker compose exec -T postgres pg_isready -q 2>/dev/null; then
+            echo " — ready"
+            exit 0
+        fi
+        printf '.'
+        sleep 1
+    done
+    echo
+    echo "  postgres did not come up. Try: docker compose logs postgres"
+    exit 1
+
+# Everything in containers, the way a server would run it.
+up:
+    docker compose --profile full up --build
+
 # Control plane and web application, both with reload.
 #
 # Whichever half exits first takes the other down, so a crash is visible
 # immediately rather than leaving you with half a running system and the error
 # scrolled off the top. Only our own children are killed — `kill 0` would take
 # the calling shell with it.
-dev:
+dev: db
     #!/usr/bin/env bash
     set -uo pipefail
     pids=()
@@ -84,11 +107,16 @@ build:
     pnpm --dir web build
     cargo build --release
 
+# The image a container host runs. Slow the first time, cached after.
+worker-image:
+    docker build -f Dockerfile.worker -t firetower/worker:dev .
+
 # The small static binary that gets copied to a host.
 build-worker:
     cargo build --release --no-default-features --target x86_64-unknown-linux-musl
 
-test:
+# The database tests need Postgres; `just db` is enough to satisfy them.
+test: db
     cargo test --workspace
     cd web && pnpm tsc --noEmit
 
@@ -100,4 +128,5 @@ lint:
 # Start fresh. The control plane's database is a cache — it rebuilds from
 # the workers on reconnect.
 reset:
-    rm -rf ~/.firetower/firetower.db*
+    docker compose down -v
+    rm -rf ~/.firetower/worker

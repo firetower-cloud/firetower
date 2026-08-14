@@ -80,6 +80,53 @@ impl Transport for LocalTransport {
 ///
 /// Not wired up yet — it exists here so the shape of the trait is settled by a
 /// second implementation rather than by one.
+/// A worker in a container on this machine.
+///
+/// `docker exec` gives the same bidirectional pipe an ssh session does, with no
+/// sshd to run, no key to manage and no host key to verify. The worker cannot
+/// tell the difference — which is the whole point of the transport being an
+/// abstraction.
+pub struct DockerTransport {
+    pub container: String,
+    pub root: std::path::PathBuf,
+}
+
+#[async_trait]
+impl Transport for DockerTransport {
+    fn describe(&self) -> String {
+        format!("docker exec {}", self.container)
+    }
+
+    async fn connect(&self) -> Result<Connection> {
+        let mut child = Command::new("docker")
+            .arg("exec")
+            // Interactive without a tty: frames are bytes, and a tty would
+            // helpfully translate newlines and corrupt them.
+            .arg("-i")
+            .arg(&self.container)
+            .arg("firetower")
+            .arg("worker")
+            .arg("--stdio")
+            .arg("--root")
+            .arg(&self.root)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::inherit())
+            .kill_on_drop(true)
+            .spawn()
+            .with_context(|| format!("connecting to container {}", self.container))?;
+
+        let stdout = child.stdout.take().context("docker stdout was not piped")?;
+        let stdin = child.stdin.take().context("docker stdin was not piped")?;
+
+        Ok(Connection {
+            reader: Box::new(stdout),
+            writer: Box::new(stdin),
+            _child: Some(child),
+        })
+    }
+}
+
 pub struct SshTransport {
     pub target: String,
     pub root: std::path::PathBuf,
@@ -93,6 +140,18 @@ impl Transport for SshTransport {
 
     async fn connect(&self) -> Result<Connection> {
         let mut child = Command::new("ssh")
+            // Without these, adding a host that isn't there hangs instead of
+            // failing: ssh waits on a password prompt nobody can answer, or on
+            // a TCP connection that will never be refused.
+            .arg("-o")
+            .arg("BatchMode=yes")
+            .arg("-o")
+            .arg("ConnectTimeout=10")
+            // A host that answers with a different key is not the one we
+            // trusted. Accepting it silently is how credentials reach the
+            // wrong machine.
+            .arg("-o")
+            .arg("StrictHostKeyChecking=accept-new")
             .arg(&self.target)
             .arg("firetower")
             .arg("worker")

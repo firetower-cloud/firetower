@@ -41,6 +41,16 @@ const NAV = [
     ),
   },
   {
+    href: "/secrets",
+    label: "Secrets",
+    icon: (
+      <>
+        <rect x="2.8" y="6.2" width="8.4" height="6" rx="1.2" strokeWidth="1.3" />
+        <path d="M4.8 6.2V4.4a2.2 2.2 0 014.4 0v1.8" strokeWidth="1.3" strokeLinecap="round" />
+      </>
+    ),
+  },
+  {
     href: "/compute",
     label: "Compute",
     icon: (

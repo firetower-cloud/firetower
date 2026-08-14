@@ -27,6 +27,14 @@ impl SessionStatus {
     ///
     /// All three of these mean the same thing to the person using Firetower:
     /// it stopped being useful without you. That's why they share an inbox.
+    /// Whether this session still has something running behind it.
+    ///
+    /// `Ended` was cleaned up and `Failed` never got going — neither holds a
+    /// workspace, an agent, or a claim on the host it was scheduled to.
+    pub fn is_finished(&self) -> bool {
+        matches!(self, Self::Ended | Self::Failed)
+    }
+
     pub fn needs_you(&self) -> bool {
         matches!(self, Self::NeedsYou | Self::HandedBack | Self::Failed)
     }
@@ -170,6 +178,28 @@ mod tests {
     fn in_flight_and_needs_you_are_disjoint() {
         for s in [Starting, Working, NeedsYou, HandedBack, Failed, Ended] {
             assert!(!(s.in_flight() && s.needs_you()), "{s:?} cannot be both");
+        }
+    }
+}
+
+#[cfg(test)]
+mod finished_tests {
+    use super::*;
+
+    #[test]
+    fn a_failed_session_holds_nothing() {
+        // It never got a workspace, so it must not block removing the host or
+        // the repository it was scheduled against.
+        assert!(SessionStatus::Failed.is_finished());
+        assert!(SessionStatus::Ended.is_finished());
+
+        for still_going in [
+            SessionStatus::Starting,
+            SessionStatus::Working,
+            SessionStatus::NeedsYou,
+            SessionStatus::HandedBack,
+        ] {
+            assert!(!still_going.is_finished(), "{still_going:?}");
         }
     }
 }

@@ -35,8 +35,12 @@ export function SessionActions({ session }: { session: Session }) {
   const running = session.status === "Working" || session.status === "Starting";
 
   const { data: work } = useSessionWork(session.id, {
-    // Cheap, and it changes whenever the agent does something.
-    query: { refetchInterval: ended ? false : 5000, enabled: !ended },
+    // Cheap, and it changes whenever the agent does something. Skipped without
+    // a repository: there is no checkout to summarise.
+    query: {
+      refetchInterval: ended ? false : 5000,
+      enabled: !ended && session.repo != null,
+    },
   });
 
   const [prUrl, setPrUrl] = useState<string | null>(null);
@@ -86,9 +90,21 @@ export function SessionActions({ session }: { session: Session }) {
     );
   }
 
+
+  // A bare agent has no checkout, so committing, pushing and opening a pull
+  // request are not things that could happen here. Absent beats
+  // present-and-failing.
+  const checkout = session.repo != null;
+
   return (
     <Panel>
-      <Work work={work} />
+      {checkout ? (
+        <Work work={work} />
+      ) : (
+        <p className="text-[12.5px] leading-[1.5] text-mute">
+          No repository — nothing is checked out, so there is nothing to push.
+        </p>
+      )}
 
       {/* Committing is the agent's job. It knows what it changed and why, and
           a message written from a branch name reads like one. */}
@@ -96,7 +112,7 @@ export function SessionActions({ session }: { session: Session }) {
         {running && (
           <Action
             label="Stop the agent"
-            hint="Keeps the workspace and the branch"
+            hint={checkout ? "Keeps the workspace and the branch" : "Keeps the workspace"}
             onClick={() =>
               stop.mutate({ id: session.id }, { onSuccess: (d) => after(d.detail), onError: problem })
             }
@@ -104,6 +120,7 @@ export function SessionActions({ session }: { session: Session }) {
           />
         )}
 
+        {checkout && (
         <Action
           label={work && work.ahead > 0 ? `Push ${work.ahead}` : "Push"}
           hint={
@@ -118,13 +135,14 @@ export function SessionActions({ session }: { session: Session }) {
           }
           disabled={busy || (work ? work.ahead === 0 : false)}
         />
+        )}
 
-        {!titling ? (
+        {!checkout ? null : !titling ? (
           <Action
             label="Open pull request"
-            hint={work && !work.pushed ? "Push the branch first" : session.branch}
+            hint={work && !work.pushed ? "Push the branch first" : (session.branch ?? undefined)}
             onClick={() => {
-              setTitle(fromBranch(session.branch));
+              setTitle(fromBranch(session.branch ?? ""));
               setTitling(true);
             }}
             disabled={busy || (work ? !work.pushed : true)}
@@ -196,7 +214,7 @@ export function SessionActions({ session }: { session: Session }) {
         ) : (
           <div className="flex flex-col gap-2">
             <p className="text-[11.5px] leading-[1.5] text-dim">
-              {atRisk(work)
+              {checkout && atRisk(work)
                 ? "This removes the workspace. What hasn't been pushed is gone."
                 : "This removes the workspace. Everything is pushed."}
             </p>

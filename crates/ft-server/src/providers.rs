@@ -10,7 +10,7 @@ use utoipa::ToSchema;
 
 /// Everything that differs between one git host and another.
 pub struct Provider {
-    /// Stable identifier, used in URLs and as the keychain account name.
+    /// Stable identifier, used in URLs and as the name in the secret store.
     pub id: &'static str,
     /// What it's called in the interface.
     pub label: &'static str,

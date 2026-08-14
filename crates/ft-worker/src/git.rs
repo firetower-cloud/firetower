@@ -316,7 +316,6 @@ impl GitRoot {
     /// This is what makes ending a session a decision rather than a gamble:
     /// uncommitted files and unpushed commits are exactly what would be lost.
     pub async fn summary(&self, dest: &Path, branch: &str, base: &str) -> Result<WorkSummary> {
-
         let dirty = run(dest, "git", &["status", "--porcelain"]).await?;
         let uncommitted = dirty.lines().filter(|l| !l.trim().is_empty()).count() as u32;
 
@@ -405,12 +404,7 @@ impl GitRoot {
     /// Done by comparing each against nothing rather than with `add -N`, which
     /// would write intent-to-add entries into an index the agent is also using.
     async fn untracked_diff(&self, dest: &Path) -> Result<String> {
-        let listed = run(
-            dest,
-            "git",
-            &["ls-files", "--others", "--exclude-standard"],
-        )
-        .await?;
+        let listed = run(dest, "git", &["ls-files", "--others", "--exclude-standard"]).await?;
 
         let mut out = String::new();
         for path in listed.lines().map(str::trim).filter(|p| !p.is_empty()) {
@@ -464,8 +458,8 @@ async fn cred_env(credential: Option<Credential>) -> Result<CredEnv> {
     };
 
     let helper = std::env::current_exe().context("locating this binary for git to call back")?;
-    let serving = Askpass::start(credential).await?;
-    vars.extend(serving.env(&helper));
+    let serving = Askpass::start(credential, &helper).await?;
+    vars.extend(serving.env());
 
     Ok(CredEnv {
         vars,
@@ -652,7 +646,9 @@ mod tests {
             .ensure_mirror(&remote, "acme/backend", None)
             .await
             .unwrap();
-        let before = run(&mirror, "git", &["rev-parse", "origin/main"]).await.unwrap();
+        let before = run(&mirror, "git", &["rev-parse", "origin/main"])
+            .await
+            .unwrap();
 
         // someone pushes
         let origin_path = origin_dir.path();
@@ -670,7 +666,9 @@ mod tests {
             .unwrap();
         assert!(!cloned, "the second call should fetch, not clone");
 
-        let after = run(&mirror, "git", &["rev-parse", "origin/main"]).await.unwrap();
+        let after = run(&mirror, "git", &["rev-parse", "origin/main"])
+            .await
+            .unwrap();
         assert_ne!(
             before, after,
             "a mirror that never moves means every session branches from stale work"
@@ -1016,7 +1014,10 @@ mod tests {
             .unwrap();
 
         let diff = git.diff(&tree, "main").await.unwrap();
-        assert!(diff.contains("NOTES.md"), "a new file must not be invisible");
+        assert!(
+            diff.contains("NOTES.md"),
+            "a new file must not be invisible"
+        );
         assert!(diff.contains("+written by the agent"), "{diff}");
     }
 }

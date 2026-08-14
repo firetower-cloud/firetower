@@ -4,7 +4,8 @@ import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useListRepos, useRepoBranches } from "@/src/api/generated/repos/repos";
 import { useListAgents } from "@/src/api/generated/agents/agents";
-import type { Agent, AgentView } from "@/src/api/generated/model";
+import { useListHosts } from "@/src/api/generated/hosts/hosts";
+import type { Agent, AgentView, Host } from "@/src/api/generated/model";
 import {
   useCreateSession,
   getListSessionsQueryKey,
@@ -12,19 +13,33 @@ import {
 import { useQueryClient } from "@tanstack/react-query";
 
 /**
- * Whether this agent could actually run a session right now.
+ * Whether this agent could run on this particular host.
  *
- * Installed somewhere, and either needing no credential or having one — either
- * a token we hold or a host already signed in. Offering an agent that cannot
- * start is offering a failure.
+ * Authentication is per host, not global: a subscription lives in the agent's
+ * own config on the machine it was signed in on, so one host being logged in
+ * says nothing about another. Only a token we hold travels.
+ *
+ * Getting this wrong offered a container that had no credentials at all,
+ * because a laptop elsewhere happened to be signed in.
  */
-function usable(agent: AgentView) {
-  const installed = agent.hosts.some((h) => h.installed);
-  const authenticated =
-    !agent.needsCredential ||
-    agent.credentialSet ||
-    agent.hosts.some((h) => h.loggedIn);
-  return installed && authenticated;
+function canRun(agent: AgentView, hostId: string) {
+  const here = agent.hosts.find((h) => h.hostId === hostId);
+  if (!here?.installed) return false;
+  if (!agent.needsCredential) return true;
+
+  // Either this host is signed in itself, or we have a token to give it.
+  return here.loggedIn === true || agent.credentialSet;
+}
+
+/**
+ * What the chip shows for an agent, given the machine that's chosen.
+ *
+ * Marked rather than hidden: disappearing from a dropdown looks like the thing
+ * doesn't exist, and leaves nowhere to learn what is missing.
+ */
+function agentLabel(agent: AgentView, runsHere: boolean) {
+  if (runsHere) return agent.label;
+  return `${agent.label} · unavailable here`;
 }
 
 export function Composer() {
@@ -34,18 +49,39 @@ export function Composer() {
   const [agent, setAgent] = useState<Agent | "">("");
   const [base, setBase] = useState<string>("");
   const [branch, setBranch] = useState<string>("");
+  const [hostId, setHostId] = useState<string>("");
   const ta = useRef<HTMLTextAreaElement>(null);
   const router = useRouter();
   const queryClient = useQueryClient();
 
   const { data: repos = [] } = useListRepos();
-  const repo = repos.find((r) => r.id === repoId) ?? repos[0];
+
+  // "No repository" is a real choice, not an empty state: an agent with a
+  // workspace and nothing checked out.
+  const NONE = "No repository";
+  const repo = repoId === NONE ? undefined : (repos.find((r) => r.id === repoId) ?? repos[0]);
 
   const { data: agents = [] } = useListAgents();
-  const choices = agents.filter(usable);
-  // Fall back to whatever is usable rather than to a hard-coded name, so the
-  // chip can never offer something that would fail to start.
-  const chosenAgent = (agent || choices[0]?.kind) as Agent | undefined;
+  const { data: allHosts = [] } = useListHosts();
+
+  // Where first, then what. The machine decides which agents are available —
+  // an agent is software installed on a particular host, so asking the other
+  // way round means the machine you picked can vanish from its own list.
+  const hosts = allHosts.filter((h) => h.state === "Online" && !h.drained);
+  const host = hosts.find((h) => h.id === hostId) ?? hosts[0];
+
+  /** Whether this agent could run on the host that's currently chosen. */
+  const runsHere = (a: AgentView) => (host ? canRun(a, host.id) : false);
+
+  // Every agent, in the order they'd be useful, each labelled with what the
+  // chosen machine can actually do with it.
+  const choices = [...agents].sort(
+    (a, b) => Number(runsHere(b)) - Number(runsHere(a)),
+  );
+  const chosenAgent = (agent ||
+    choices.find(runsHere)?.kind ||
+    choices[0]?.kind) as Agent | undefined;
+  const chosen = choices.find((c) => c.kind === chosenAgent);
 
   // Only ask once the composer is open — it reaches the remote.
   const { data: branchInfo } = useRepoBranches(repo?.id ?? "", {
@@ -69,14 +105,16 @@ export function Composer() {
 
   /* Launching opens the session — you land on the workspace being built. */
   const launch = () => {
-    if (!text.trim() || !repo || !chosenAgent || create.isPending) return;
+    if (!text.trim() || !chosenAgent || create.isPending) return;
     create.mutate({
       data: {
-        repoId: repo.id,
+        repoId: repo?.id,
         prompt: text.trim(),
         agent: chosenAgent,
-        base: chosenBase,
-        branch: branch.trim() || undefined,
+        // Everything about a checkout goes together, or none of it does.
+        base: repo ? chosenBase : undefined,
+        branch: repo ? branch.trim() || undefined : undefined,
+        hostId: host?.id,
       },
     });
   };
@@ -102,7 +140,7 @@ export function Composer() {
           className="flex-1 resize-none bg-transparent text-[14px] leading-6 text-bone placeholder:text-mute focus:outline-none"
         />
         {!open && (
-          <span className="mt-0.5 font-mono text-[11px] text-mute">{repo?.slug ?? "no repository"}</span>
+          <span className="mt-0.5 font-mono text-[11px] text-mute">{repo?.slug ?? NONE}</span>
         )}
       </div>
 
@@ -111,16 +149,21 @@ export function Composer() {
           <div className="flex flex-wrap items-center gap-1.5">
             <Chip
               glyph="repo"
-              value={repo?.slug ?? "none"}
-              onChange={(slug) => setRepoId(repos.find((r) => r.slug === slug)?.id ?? "")}
-              options={repos.map((r) => r.slug)}
+              value={repo?.slug ?? NONE}
+              onChange={(slug) =>
+                setRepoId(slug === NONE ? NONE : (repos.find((r) => r.slug === slug)?.id ?? ""))
+              }
+              options={[...repos.map((r) => r.slug), NONE]}
             />
+            {repo && (
             <Chip
               glyph="branch"
               value={chosenBase}
               onChange={setBase}
               options={branches.length ? branches : [chosenBase]}
             />
+            )}
+            {repo && (
             <label className="flex items-center gap-1.5 rounded-[5px] border border-line bg-panel py-1 pr-2 pl-2 text-[12px] text-dim transition-colors focus-within:border-ember/40 hover:border-[#3a3631]">
               <span className="text-mute">⎇</span>
               <input
@@ -131,21 +174,39 @@ export function Composer() {
                 className="w-[190px] bg-transparent font-mono text-[11.5px] text-bone placeholder:text-mute focus:outline-none"
               />
             </label>
+            )}
+
+            {/* Every machine that's up. Nothing here is filtered by which
+                agent you picked — that would hide the thing you just added. */}
+            <Chip
+              glyph="host"
+              value={where(host)}
+              onChange={(name) => setHostId(hosts.find((h) => where(h) === name)?.id ?? "")}
+              options={hosts.length ? hosts.map((h) => where(h)) : ["nowhere to run"]}
+            />
 
             <Chip
               glyph="agent"
-              value={label(chosenAgent, choices)}
+              value={chosen ? agentLabel(chosen, runsHere(chosen)) : "no agent"}
               onChange={(name) =>
-                setAgent(choices.find((c) => c.label === name)?.kind ?? "")
+                setAgent(
+                  choices.find((c) => agentLabel(c, runsHere(c)) === name)?.kind ?? "",
+                )
               }
-              options={choices.map((c) => c.label)}
+              options={choices.map((c) => agentLabel(c, runsHere(c)))}
             />
 
             <div className="ml-auto flex items-center gap-3">
               <span className="font-mono text-[10px] text-mute">⌘⏎</span>
               <button
                 onClick={launch}
-                disabled={!text.trim() || !repo || !chosenAgent || create.isPending}
+                disabled={
+                  !text.trim() ||
+                  !host ||
+                  !chosen ||
+                  !runsHere(chosen) ||
+                  create.isPending
+                }
                 className="rounded-[5px] bg-ember px-3.5 py-1.5 text-[12.5px] font-semibold text-[#1a0c04] transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:bg-line disabled:text-mute"
               >
                 {create.isPending ? "Opening…" : "Launch"}
@@ -162,9 +223,19 @@ export function Composer() {
           )}
 
           <p className="mt-2.5 border-t border-line pt-2.5 text-[11.5px] text-mute">
-            {choices.length === 0
-              ? "No agent is ready. Connect one on the Agents screen first."
-              : "Opens the session so you can watch it start. Firetower names the branch from your prompt; the workspace stays until you end the session."}
+            {hosts.length === 0
+              ? "No machine is online. Add compute first."
+              : !chosen
+                ? "No agent to run. Install one on a host."
+                : !runsHere(chosen)
+                  ? `${where(host)} can't run ${chosen.label} — ${
+                      chosen.hosts.find((h) => h.hostId === host?.id)?.installed
+                        ? "it has no credentials there. Give it a token on the Agents screen; this machine being signed in doesn't cover other hosts."
+                        : "it isn't installed there."
+                    }`
+                  : repo
+                    ? "Opens the session so you can watch it start. The workspace stays until you end the session."
+                    : "A workspace with nothing checked out — the agent starts where you put it and clones nothing."}
           </p>
         </div>
       )}
@@ -191,14 +262,25 @@ function suggestion(prompt: string) {
 }
 
 /** What to show for the chosen agent, before the list has loaded. */
-function label(kind: Agent | undefined, choices: AgentView[]) {
-  return choices.find((c) => c.kind === kind)?.label ?? "no agent ready";
+
+/**
+ * What to call a host in the picker.
+ *
+ * "this machine" rather than `localhost`, because where a session runs is a
+ * meaningfully different answer and a hostname doesn't say it.
+ */
+function where(host?: Host) {
+  if (!host) return "nowhere to run";
+  return host.compute.type === "Local" ? "this machine" : host.name;
 }
+
+
 
 const GLYPHS: Record<string, React.ReactNode> = {
   repo: "▣",
   branch: "⑂",
   agent: "◈",
+  host: "⌂",
 };
 
 function Chip({

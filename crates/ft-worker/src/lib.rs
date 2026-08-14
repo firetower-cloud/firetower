@@ -104,8 +104,20 @@ impl Worker {
                         }
                         Err(CodecError::Malformed(e)) => {
                             // One bad frame shouldn't take down a worker that
-                            // has live sessions on it. Say so and carry on.
+                            // has live sessions on it — but swallowing it in a
+                            // log nobody reads is how a session sits in
+                            // `Starting` forever. Say it upward too.
                             tracing::warn!("ignoring malformed frame: {e}");
+                            let _ = out
+                                .send(ToServer::Error {
+                                    session_id: None,
+                                    code: "MalformedFrame".into(),
+                                    message: format!(
+                                        "this worker couldn't read a frame — it is probably \
+                                         older than the control plane: {e}"
+                                    ),
+                                })
+                                .await;
                             continue;
                         }
                         Err(e) => return Err(e.into()),
@@ -295,19 +307,17 @@ impl Worker {
                 out.send(ToServer::ActionDone { req, result }).await?;
             }
 
-            ToWorker::Summarize { req, session_id } => {
-                match self.summarize(&session_id).await {
-                    Ok(summary) => out.send(ToServer::Summarized { req, summary }).await?,
-                    Err(e) => {
-                        tracing::warn!(session = %session_id, "summarising: {e:#}");
-                        out.send(ToServer::ActionDone {
-                            req,
-                            result: Err(format!("{e:#}")),
-                        })
-                        .await?;
-                    }
+            ToWorker::Summarize { req, session_id } => match self.summarize(&session_id).await {
+                Ok(summary) => out.send(ToServer::Summarized { req, summary }).await?,
+                Err(e) => {
+                    tracing::warn!(session = %session_id, "summarising: {e:#}");
+                    out.send(ToServer::ActionDone {
+                        req,
+                        result: Err(format!("{e:#}")),
+                    })
+                    .await?;
                 }
-            }
+            },
 
             ToWorker::Reply { session_id, .. } | ToWorker::Stop { session_id } => {
                 tracing::debug!("superseded by RunAction ({session_id})");
@@ -331,11 +341,11 @@ impl Worker {
         self.store
             .create_session(
                 &id,
-                &spec.repo_slug,
+                spec.repo.as_ref().map(|r| r.slug.as_str()),
                 &title,
                 &spec.prompt,
-                &spec.branch,
-                &spec.base,
+                spec.repo.as_ref().map(|r| r.branch.as_str()),
+                spec.repo.as_ref().map(|r| r.base.as_str()),
                 &format!("{:?}", spec.agent),
                 spec.size,
             )
@@ -344,46 +354,64 @@ impl Worker {
         self.emit(
             &id,
             EventKind::SessionCreated {
-                repo: spec.repo_slug.clone(),
+                repo: spec
+                    .repo
+                    .as_ref()
+                    .map(|r| r.slug.clone())
+                    .unwrap_or_else(|| "no repository".into()),
                 prompt: spec.prompt.clone(),
             },
             out,
         )
         .await?;
 
-        let started = std::time::Instant::now();
-        let (mirror, cloned) = self
-            .git
-            .ensure_mirror(&spec.remote, &spec.repo_slug, spec.credential.clone())
-            .await
-            .context("preparing the repository mirror")?;
+        // A bare agent gets a directory and nothing else: no mirror, no
+        // worktree, no branch. It is somewhere to work rather than a checkout.
+        let path = match &spec.repo {
+            None => {
+                let path = self.git.worktree_path(&spec.workspace);
+                tokio::fs::create_dir_all(&path)
+                    .await
+                    .with_context(|| format!("creating {}", path.display()))?;
+                path
+            }
+            Some(repo) => {
+                let started = std::time::Instant::now();
+                let (mirror, cloned) = self
+                    .git
+                    .ensure_mirror(&repo.remote, &repo.slug, spec.credential.clone())
+                    .await
+                    .context("preparing the repository mirror")?;
 
-        self.emit(
-            &id,
-            EventKind::RepoFetched {
-                detail: if cloned {
-                    format!("cloned · {:.1}s", started.elapsed().as_secs_f32())
-                } else {
-                    format!("from the mirror · {:.1}s", started.elapsed().as_secs_f32())
-                },
-            },
-            out,
-        )
-        .await?;
+                self.emit(
+                    &id,
+                    EventKind::RepoFetched {
+                        detail: if cloned {
+                            format!("cloned · {:.1}s", started.elapsed().as_secs_f32())
+                        } else {
+                            format!("from the mirror · {:.1}s", started.elapsed().as_secs_f32())
+                        },
+                    },
+                    out,
+                )
+                .await?;
 
-        let (path, branch) = self
-            .git
-            .add_worktree(&mirror, &spec.branch, &spec.base, &spec.workspace)
-            .await
-            .context("cutting the worktree")?;
+                let (path, branch) = self
+                    .git
+                    .add_worktree(&mirror, &repo.branch, &repo.base, &spec.workspace)
+                    .await
+                    .context("cutting the worktree")?;
 
-        // Two sessions from one prompt want the same name, so git may have
-        // numbered it. What is on disk is the authority — pushing the name we
-        // asked for would push somebody else's branch.
-        self.store.set_branch(&id, &branch).await?;
+                // Two sessions from one prompt want the same name, so git may have
+                // numbered it. What is on disk is the authority — pushing the name we
+                // asked for would push somebody else's branch.
+                self.store.set_branch(&id, &branch).await?;
 
-        self.emit(&id, EventKind::WorktreeAdded { branch }, out)
-            .await?;
+                self.emit(&id, EventKind::WorktreeAdded { branch }, out)
+                    .await?;
+                path
+            }
+        };
 
         let tmux = Tmux::for_session(id.as_str());
         self.store
@@ -478,11 +506,14 @@ impl Worker {
         credential: Option<ft_proto::Credential>,
         out: &mpsc::Sender<ToServer>,
     ) -> Result<String> {
-        let branch = self
-            .store
-            .branch_of(session_id)
-            .await?
-            .context("this session has no branch")?;
+        // Looked up per action rather than up front: stopping an agent has
+        // nothing to do with a branch, and a bare agent has none at all.
+        let branch = || async {
+            self.store
+                .branch_of(session_id)
+                .await?
+                .context("this session has no branch")
+        };
 
         match action {
             ft_proto::Action::Stop => {
@@ -513,7 +544,7 @@ impl Worker {
 
             ft_proto::Action::Push => {
                 let dest = self.workspace_of(session_id).await?;
-                self.git.push(&dest, &branch, credential).await
+                self.git.push(&dest, &branch().await?, credential).await
             }
 
             ft_proto::Action::Diff => {
@@ -699,10 +730,12 @@ mod tests {
     fn spec(remote: &str, id: &SessionId, setup: Option<&str>) -> ToWorker {
         ToWorker::CreateWorkspace(Box::new(CreateWorkspace {
             session_id: id.clone(),
-            remote: remote.to_string(),
-            repo_slug: "acme/backend".into(),
-            base: "main".into(),
-            branch: "agent/fix-retries".into(),
+            repo: Some(ft_proto::RepoSpec {
+                remote: remote.to_string(),
+                slug: "acme/backend".into(),
+                base: "main".into(),
+                branch: "agent/fix-retries".into(),
+            }),
             prompt: "Fix retry handling for Stripe webhooks".into(),
             // A shell, not a real agent: these tests should not launch
             // anything that talks to a network or expects a subscription.
@@ -774,6 +807,56 @@ mod tests {
                 "Launched the agent",
                 "Status",
             ]
+        );
+
+        cleanup(&id).await;
+    }
+
+    #[tokio::test]
+    async fn a_bare_agent_gets_a_workspace_with_nothing_in_it() {
+        // No repository: somewhere to work, no mirror, no worktree, no branch.
+        let home = TempDir::new().unwrap();
+        let worker = Worker::open(home.path()).await.unwrap();
+        let id = SessionId::new();
+
+        let out = exchange(
+            &worker,
+            vec![
+                hello(),
+                ToWorker::CreateWorkspace(Box::new(CreateWorkspace {
+                    session_id: id.clone(),
+                    repo: None,
+                    prompt: "poke around".into(),
+                    agent: Agent::Shell,
+                    size: WorkspaceSize::Medium,
+                    setup: None,
+                    workspace: id.as_str().to_string(),
+                    env: vec![],
+                    credential: None,
+                })),
+            ],
+        )
+        .await;
+
+        let labels: Vec<&str> = out
+            .iter()
+            .filter_map(|f| match f {
+                ToServer::Event { kind, .. } => Some(kind.label()),
+                _ => None,
+            })
+            .collect();
+
+        assert!(
+            !labels.contains(&"Fetched the repository") && !labels.contains(&"Added a worktree"),
+            "nothing should be cloned: {labels:?}"
+        );
+        assert!(labels.contains(&"Launched the agent"), "{labels:?}");
+
+        let path = worker.store().workspace_path(&id).await.unwrap().unwrap();
+        assert!(std::path::Path::new(&path).exists(), "it still needs a cwd");
+        assert!(
+            worker.store().branch_of(&id).await.unwrap().is_none(),
+            "there is no branch without a repository"
         );
 
         cleanup(&id).await;
