@@ -27,6 +27,7 @@ import type {
 
 import type {
   ApiError,
+  DeleteHostParams,
   Drain,
   Host,
   NewHost
@@ -232,22 +233,35 @@ export const useCreateHost = <TError = ApiError,
       > => {
       return useMutation(getCreateHostMutationOptions(options), queryClient);
     }
-    export const getDeleteHostUrl = (id: string,) => {
+    export const getDeleteHostUrl = (id: string,
+    params?: DeleteHostParams,) => {
+  const normalizedParams = new URLSearchParams();
 
+  Object.entries(params || {}).forEach(([key, value]) => {
 
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
 
+  const stringifiedParams = normalizedParams.toString();
 
-  return `/api/v1/hosts/${id}`
+  return stringifiedParams.length > 0 ? `/api/v1/hosts/${id}?${stringifiedParams}` : `/api/v1/hosts/${id}`
 }
 
 /**
- * Refuses while sessions are running on it, and says which — the same rule as
- * disconnecting a repository, for the same reason.
- * @summary Forget a host.
+ * Refuses while sessions are running unless `force`, in which case they are
+ * told to end first — an agent that gets to shut down leaves its worktree and
+ * tmux session behind cleanly, rather than having the floor pulled out.
+ *
+ * A container Firetower started is Firetower's to stop. One it merely found
+ * running is not, and start-up says as much when it adopts nothing.
+ * @summary Forget a host, and take its container with it.
  */
-export const deleteHost = async (id: string, options?: Parameters<typeof http>[1]): Promise<void> => {
+export const deleteHost = async (id: string,
+    params?: DeleteHostParams, options?: Parameters<typeof http>[1]): Promise<void> => {
 
-  return http<void>(getDeleteHostUrl(id),
+  return http<void>(getDeleteHostUrl(id,params),
   {
     ...options,
     method: 'DELETE'
@@ -261,8 +275,8 @@ export const deleteHost = async (id: string, options?: Parameters<typeof http>[1
 
 
 export const getDeleteHostMutationOptions = <TError = ApiError,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteHost>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof http>}
-): UseMutationOptions<Awaited<ReturnType<typeof deleteHost>>, TError,{id: string}, TContext> => {
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteHost>>, TError,{id: string;params?: DeleteHostParams}, TContext>, request?: SecondParameter<typeof http>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteHost>>, TError,{id: string;params?: DeleteHostParams}, TContext> => {
 
 const mutationKey = ['deleteHost'];
 const {mutation: mutationOptions, request: requestOptions} = options ?
@@ -274,10 +288,10 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteHost>>, {id: string}> = (props) => {
-          const {id} = props ?? {};
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteHost>>, {id: string;params?: DeleteHostParams}> = (props) => {
+          const {id,params} = props ?? {};
 
-          return  deleteHost(id,requestOptions)
+          return  deleteHost(id,params,requestOptions)
         }
 
 
@@ -292,14 +306,14 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type DeleteHostMutationError = ApiError
 
     /**
- * @summary Forget a host.
+ * @summary Forget a host, and take its container with it.
  */
 export const useDeleteHost = <TError = ApiError,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteHost>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof http>}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteHost>>, TError,{id: string;params?: DeleteHostParams}, TContext>, request?: SecondParameter<typeof http>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof deleteHost>>,
         TError,
-        {id: string},
+        {id: string;params?: DeleteHostParams},
         TContext
       > => {
       return useMutation(getDeleteHostMutationOptions(options), queryClient);

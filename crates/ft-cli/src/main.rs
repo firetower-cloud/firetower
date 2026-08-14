@@ -107,9 +107,11 @@ async fn main() -> Result<()> {
 
             anyhow::ensure!(stdio, "the worker only speaks over stdio; pass --stdio");
 
-            let worker = ft_worker::Worker::open(&root)
-                .await
-                .with_context(|| format!("opening the worker at {}", root.display()))?;
+            let worker = std::sync::Arc::new(
+                ft_worker::Worker::open(&root)
+                    .await
+                    .with_context(|| format!("opening the worker at {}", root.display()))?,
+            );
 
             tracing::info!(root = %root.display(), "worker ready");
             worker

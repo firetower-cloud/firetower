@@ -6,7 +6,7 @@
 //! hosted control plane later can drive the identical binary.
 
 use anyhow::{Context, Result};
-use ft_core::{EventKind, SessionId, SessionStatus};
+use ft_core::{EventKind, SessionId, SessionStatus, Step};
 use ft_proto::{Codec, CodecError, CreateWorkspace, ToServer, ToWorker, PROTOCOL_VERSION};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -16,6 +16,7 @@ use tokio::sync::{mpsc, Mutex};
 pub mod agents;
 pub mod askpass;
 pub mod attach;
+pub mod first_run;
 pub mod git;
 pub mod store;
 pub mod tmux;
@@ -47,7 +48,11 @@ impl Worker {
     ///
     /// The handshake happens first and refuses a version mismatch loudly, since
     /// a silently incompatible worker is far worse than one that won't start.
-    pub async fn serve<R, W>(&self, reader: R, writer: W) -> Result<()>
+    /// Speak frames until the control plane goes away.
+    ///
+    /// Takes `Arc<Self>` because the work a frame asks for does not happen on
+    /// this loop — see below.
+    pub async fn serve<R, W>(self: std::sync::Arc<Self>, reader: R, writer: W) -> Result<()>
     where
         R: AsyncRead + Unpin,
         W: AsyncWrite + Unpin,
@@ -81,6 +86,10 @@ impl Worker {
         // read-then-write loop can't express.
         let (out, mut pending) = mpsc::channel::<ToServer>(1024);
 
+        // Work that is happening off this loop. Held so that a disconnect can
+        // wait for it rather than dropping a half-built workspace on the floor.
+        let mut running = tokio::task::JoinSet::new();
+
         loop {
             tokio::select! {
                 // Bias towards draining output: a burst of terminal bytes
@@ -95,7 +104,19 @@ impl Worker {
                     let frame = match incoming {
                         Ok(f) => f,
                         Err(CodecError::Closed) => {
-                            // Say the last of what we know before going quiet.
+                            // Finish what is already under way before going
+                            // quiet. Returning here instead would drop the
+                            // tasks — and a workspace abandoned halfway through
+                            // its clone is worse than one that finishes with
+                            // nobody listening. What it says is written out as
+                            // it says it, so a control plane that reconnects
+                            // has it waiting in the log.
+                            while !running.is_empty() {
+                                tokio::select! {
+                                    Some(frame) = pending.recv() => outbound.write(&frame).await?,
+                                    _ = running.join_next() => {}
+                                }
+                            }
                             while let Ok(frame) = pending.try_recv() {
                                 outbound.write(&frame).await?;
                             }
@@ -122,6 +143,32 @@ impl Worker {
                         }
                         Err(e) => return Err(e.into()),
                     };
+
+                    // Anything that takes real time runs on its own task.
+                    //
+                    // Handling it here instead means this loop stops: for as
+                    // long as a workspace is being built, nothing is written
+                    // out and nothing is read in. A repository that takes eight
+                    // minutes to clone therefore made the worker mute and deaf
+                    // for eight minutes — every event it recorded sat in the
+                    // channel, the session looked frozen, and it could not even
+                    // be told to stop. The connection stays perfectly healthy
+                    // throughout, which is what makes it so hard to see.
+                    if takes_a_while(&frame) {
+                        let worker = self.clone();
+                        let out = out.clone();
+                        running.spawn(async move {
+                            if let Err(e) = worker.handle(frame, &out).await {
+                                tracing::error!("{e:#}");
+                                let _ = out.send(ToServer::Error {
+                                    session_id: None,
+                                    code: "Internal".into(),
+                                    message: format!("{e:#}"),
+                                }).await;
+                            }
+                        });
+                        continue;
+                    }
 
                     match self.handle(frame, &out).await {
                         Ok(true) => {}
@@ -369,6 +416,14 @@ impl Worker {
         // worktree, no branch. It is somewhere to work rather than a checkout.
         let path = match &spec.repo {
             None => {
+                self.emit(
+                    &id,
+                    EventKind::StepStarted {
+                        step: Step::Workspace,
+                    },
+                    out,
+                )
+                .await?;
                 let path = self.git.worktree_path(&spec.workspace);
                 tokio::fs::create_dir_all(&path)
                     .await
@@ -376,12 +431,47 @@ impl Worker {
                 path
             }
             Some(repo) => {
+                self.emit(&id, EventKind::StepStarted { step: Step::Fetch }, out)
+                    .await?;
                 let started = std::time::Instant::now();
-                let (mirror, cloned) = self
-                    .git
-                    .ensure_mirror(&repo.remote, &repo.slug, spec.credential.clone())
-                    .await
-                    .context("preparing the repository mirror")?;
+
+                // git's progress goes into a slot rather than down a channel:
+                // the callback is synchronous and emitting is not, so the loop
+                // below does the emitting, on this task, where `out` lives.
+                let latest = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
+                let report = {
+                    let latest = latest.clone();
+                    move |line: String| *latest.lock().unwrap() = line
+                };
+
+                let mirroring = self.git.ensure_mirror(
+                    &repo.remote,
+                    &repo.slug,
+                    spec.credential.clone(),
+                    Some(&report),
+                );
+                tokio::pin!(mirroring);
+
+                // Often enough to look alive, rarely enough that a fetch isn't
+                // also a way to fill the event log.
+                let mut said = String::new();
+                let (mirror, cloned) = loop {
+                    tokio::select! {
+                        done = &mut mirroring => break done.context("preparing the repository mirror")?,
+                        _ = tokio::time::sleep(std::time::Duration::from_millis(900)) => {
+                            let line = latest.lock().unwrap().clone();
+                            if !line.is_empty() && line != said {
+                                said = line.clone();
+                                self.emit(
+                                    &id,
+                                    EventKind::StepProgress { step: Step::Fetch, detail: line },
+                                    out,
+                                )
+                                .await?;
+                            }
+                        }
+                    }
+                };
 
                 self.emit(
                     &id,
@@ -396,6 +486,14 @@ impl Worker {
                 )
                 .await?;
 
+                self.emit(
+                    &id,
+                    EventKind::StepStarted {
+                        step: Step::Worktree,
+                    },
+                    out,
+                )
+                .await?;
                 let (path, branch) = self
                     .git
                     .add_worktree(&mirror, &repo.branch, &repo.base, &spec.workspace)
@@ -429,6 +527,8 @@ impl Worker {
         .await?;
 
         if let Some(setup) = spec.setup.as_deref().filter(|s| !s.trim().is_empty()) {
+            self.emit(&id, EventKind::StepStarted { step: Step::Setup }, out)
+                .await?;
             let started = std::time::Instant::now();
             let output = tokio::process::Command::new("sh")
                 .arg("-lc")
@@ -455,6 +555,20 @@ impl Worker {
             )
             .await?;
         }
+
+        // Answer what the agent would otherwise stop and ask. Best effort: a
+        // question in the pane is a worse first session, but it is one someone
+        // can answer — refusing to launch over it would not be.
+        if let Some(first_run) = spec.agent.first_run(&path.to_string_lossy()) {
+            if let Some(home) = std::env::var_os("HOME").map(std::path::PathBuf::from) {
+                if let Err(e) = first_run::settle(&home, &first_run).await {
+                    tracing::warn!("{}: {e:#}", spec.agent.label());
+                }
+            }
+        }
+
+        self.emit(&id, EventKind::StepStarted { step: Step::Launch }, out)
+            .await?;
 
         // The agent runs under tmux so it outlives this worker, this
         // connection, and the laptop that started it.
@@ -661,6 +775,29 @@ fn num_cpus() -> u32 {
         .unwrap_or(1)
 }
 
+/// Whether this frame does work, as opposed to answering from memory.
+///
+/// The slow ones clone repositories, run setup commands, talk to a git host, or
+/// tear a workspace down. None of them need to be in step with the frames
+/// around them: each carries its own session or request id, and the control
+/// plane matches answers up by that rather than by arrival order.
+///
+/// The rest are cheap and stay in order deliberately — terminal input has to
+/// arrive in the sequence it was typed, and a replay has to finish before the
+/// events that follow it.
+fn takes_a_while(frame: &ToWorker) -> bool {
+    matches!(
+        frame,
+        ToWorker::CreateWorkspace(_)
+            | ToWorker::Destroy { .. }
+            | ToWorker::Stop { .. }
+            | ToWorker::RunAction { .. }
+            | ToWorker::Summarize { .. }
+            | ToWorker::ProbeRemote { .. }
+            | ToWorker::ProbeAgents { .. }
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -668,7 +805,7 @@ mod tests {
     use tempfile::TempDir;
 
     /// Drive a worker over an in-memory pipe, the way the control plane does.
-    async fn exchange(worker: &Worker, frames: Vec<ToWorker>) -> Vec<ToServer> {
+    async fn exchange(worker: &std::sync::Arc<Worker>, frames: Vec<ToWorker>) -> Vec<ToServer> {
         let mut input = Vec::new();
         for f in frames {
             input.extend_from_slice(&serde_json::to_vec(&f).unwrap());
@@ -676,7 +813,7 @@ mod tests {
         }
 
         let mut output = Vec::new();
-        worker.serve(&input[..], &mut output).await.unwrap();
+        worker.clone().serve(&input[..], &mut output).await.unwrap();
 
         String::from_utf8_lossy(&output)
             .lines()
@@ -751,7 +888,7 @@ mod tests {
     #[tokio::test]
     async fn the_handshake_comes_first() {
         let home = TempDir::new().unwrap();
-        let worker = Worker::open(home.path()).await.unwrap();
+        let worker = std::sync::Arc::new(Worker::open(home.path()).await.unwrap());
         let out = exchange(&worker, vec![hello(), ToWorker::Ping]).await;
 
         assert!(matches!(
@@ -767,7 +904,7 @@ mod tests {
     #[tokio::test]
     async fn a_protocol_mismatch_refuses_loudly() {
         let home = TempDir::new().unwrap();
-        let worker = Worker::open(home.path()).await.unwrap();
+        let worker = std::sync::Arc::new(Worker::open(home.path()).await.unwrap());
 
         let input = serde_json::to_vec(&ToWorker::Hello {
             protocol: 99,
@@ -783,7 +920,7 @@ mod tests {
     async fn building_a_workspace_narrates_every_step() {
         let (_origin, remote) = origin().await;
         let home = TempDir::new().unwrap();
-        let worker = Worker::open(home.path()).await.unwrap();
+        let worker = std::sync::Arc::new(Worker::open(home.path()).await.unwrap());
         let id = SessionId::new();
 
         let out = exchange(&worker, vec![hello(), spec(&remote, &id, None)]).await;
@@ -796,13 +933,19 @@ mod tests {
             })
             .collect();
 
+        // Every step says it has begun before it does the work, which is the
+        // whole point: a fetch that takes minutes should be visible while it
+        // takes them, not only once it is over.
         assert_eq!(
             labels,
             vec![
                 "Session created",
+                "Fetching the repository",
                 "Fetched the repository",
+                "Creating the worktree",
                 "Added a worktree",
                 "Started the workspace",
+                "Starting the agent",
                 "Opened tmux",
                 "Launched the agent",
                 "Status",
@@ -812,11 +955,95 @@ mod tests {
         cleanup(&id).await;
     }
 
+    /// The plan and the narration have to agree, or the checklist ticks off
+    /// steps that never appear and waits forever on ones that did.
+    #[tokio::test]
+    async fn every_planned_step_is_both_started_and_finished() {
+        let (_origin, remote) = origin().await;
+        let home = TempDir::new().unwrap();
+        let worker = std::sync::Arc::new(Worker::open(home.path()).await.unwrap());
+        let id = SessionId::new();
+
+        let out = exchange(&worker, vec![hello(), spec(&remote, &id, None)]).await;
+
+        let kinds: Vec<&EventKind> = out
+            .iter()
+            .filter_map(|f| match f {
+                ToServer::Event { kind, .. } => Some(kind),
+                _ => None,
+            })
+            .collect();
+
+        for step in ft_core::Step::plan(true, false) {
+            assert!(
+                kinds
+                    .iter()
+                    .any(|k| matches!(k, EventKind::StepStarted { step: s } if *s == step)),
+                "{step:?} never said it had started"
+            );
+            assert!(
+                kinds
+                    .iter()
+                    .any(|k| ft_core::Step::completed_by(k) == Some(step)),
+                "{step:?} never finished"
+            );
+        }
+
+        cleanup(&id).await;
+    }
+
+    /// The bug that made every long session look frozen: while a workspace was
+    /// being built, the worker answered nothing and heard nothing.
+    ///
+    /// A slow build here is a repository whose setup script sleeps. Everything
+    /// the worker says during it — and its answer to a question asked in the
+    /// middle — has to come out anyway.
+    #[tokio::test]
+    async fn a_slow_build_does_not_stop_the_worker_talking() {
+        let (_origin, remote) = origin().await;
+        let home = TempDir::new().unwrap();
+        let worker = std::sync::Arc::new(Worker::open(home.path()).await.unwrap());
+        let id = SessionId::new();
+
+        let mut build = spec(&remote, &id, None);
+        if let ToWorker::CreateWorkspace(ref mut c) = build {
+            c.setup = Some("sleep 2".into());
+        }
+
+        // The Ping arrives while the build is still sleeping. Before this was
+        // fixed its Pong waited for the build to finish; now it overtakes it.
+        let out = exchange(&worker, vec![hello(), build, ToWorker::Ping]).await;
+
+        let order: Vec<usize> = out
+            .iter()
+            .enumerate()
+            .filter(|(_, f)| {
+                matches!(f, ToServer::Pong)
+                    || matches!(
+                        f,
+                        ToServer::Event {
+                            kind: EventKind::AgentLaunched { .. },
+                            ..
+                        }
+                    )
+            })
+            .map(|(i, _)| i)
+            .collect();
+
+        assert_eq!(order.len(), 2, "expected a Pong and a launch");
+        assert!(
+            order[0] < order[1],
+            "the Pong should not have waited for the build"
+        );
+
+        cleanup(&id).await;
+    }
+
     #[tokio::test]
     async fn a_bare_agent_gets_a_workspace_with_nothing_in_it() {
         // No repository: somewhere to work, no mirror, no worktree, no branch.
         let home = TempDir::new().unwrap();
-        let worker = Worker::open(home.path()).await.unwrap();
+        let worker = std::sync::Arc::new(Worker::open(home.path()).await.unwrap());
         let id = SessionId::new();
 
         let out = exchange(
@@ -866,7 +1093,7 @@ mod tests {
     async fn a_built_workspace_is_a_real_checkout() {
         let (_origin, remote) = origin().await;
         let home = TempDir::new().unwrap();
-        let worker = Worker::open(home.path()).await.unwrap();
+        let worker = std::sync::Arc::new(Worker::open(home.path()).await.unwrap());
         let id = SessionId::new();
 
         exchange(&worker, vec![hello(), spec(&remote, &id, None)]).await;
@@ -889,7 +1116,7 @@ mod tests {
     async fn destroying_a_session_takes_the_agent_with_it() {
         let (_origin, remote) = origin().await;
         let home = TempDir::new().unwrap();
-        let worker = Worker::open(home.path()).await.unwrap();
+        let worker = std::sync::Arc::new(Worker::open(home.path()).await.unwrap());
         let id = SessionId::new();
 
         exchange(&worker, vec![hello(), spec(&remote, &id, None)]).await;
@@ -927,7 +1154,7 @@ mod tests {
     async fn a_failing_setup_script_fails_the_session_and_says_where() {
         let (_origin, remote) = origin().await;
         let home = TempDir::new().unwrap();
-        let worker = Worker::open(home.path()).await.unwrap();
+        let worker = std::sync::Arc::new(Worker::open(home.path()).await.unwrap());
         let id = SessionId::new();
 
         let out = exchange(&worker, vec![hello(), spec(&remote, &id, Some("exit 1"))]).await;
@@ -952,7 +1179,7 @@ mod tests {
     async fn a_setup_script_runs_inside_the_worktree() {
         let (_origin, remote) = origin().await;
         let home = TempDir::new().unwrap();
-        let worker = Worker::open(home.path()).await.unwrap();
+        let worker = std::sync::Arc::new(Worker::open(home.path()).await.unwrap());
         let id = SessionId::new();
 
         exchange(
@@ -974,7 +1201,7 @@ mod tests {
     async fn resume_replays_what_a_sleeping_laptop_missed() {
         let (_origin, remote) = origin().await;
         let home = TempDir::new().unwrap();
-        let worker = Worker::open(home.path()).await.unwrap();
+        let worker = std::sync::Arc::new(Worker::open(home.path()).await.unwrap());
         let id = SessionId::new();
 
         // the laptop was awake for this
@@ -999,7 +1226,7 @@ mod tests {
     #[tokio::test]
     async fn a_malformed_frame_does_not_kill_a_worker_with_live_sessions() {
         let home = TempDir::new().unwrap();
-        let worker = Worker::open(home.path()).await.unwrap();
+        let worker = std::sync::Arc::new(Worker::open(home.path()).await.unwrap());
 
         let mut input = serde_json::to_vec(&hello()).unwrap();
         input.push(b'\n');
@@ -1008,7 +1235,7 @@ mod tests {
         input.push(b'\n');
 
         let mut output = Vec::new();
-        worker.serve(&input[..], &mut output).await.unwrap();
+        worker.clone().serve(&input[..], &mut output).await.unwrap();
 
         assert!(
             String::from_utf8_lossy(&output).contains("Pong"),

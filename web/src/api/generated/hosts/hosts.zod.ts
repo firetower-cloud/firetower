@@ -85,12 +85,20 @@ export const CreateHostResponse = zod.object({
 }).describe('A machine that can run workspaces.')
 
 /**
- * Refuses while sessions are running on it, and says which — the same rule as
- * disconnecting a repository, for the same reason.
- * @summary Forget a host.
+ * Refuses while sessions are running unless `force`, in which case they are
+ * told to end first — an agent that gets to shut down leaves its worktree and
+ * tmux session behind cleanly, rather than having the floor pulled out.
+ *
+ * A container Firetower started is Firetower's to stop. One it merely found
+ * running is not, and start-up says as much when it adopts nothing.
+ * @summary Forget a host, and take its container with it.
  */
 export const DeleteHostParams = zod.object({
   "id": zod.string().describe('Host id')
+})
+
+export const DeleteHostQueryParams = zod.object({
+  "force": zod.boolean().optional().describe('End running sessions instead of refusing')
 })
 
 export const DeleteHostResponse = zod.void()

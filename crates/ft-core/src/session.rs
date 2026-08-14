@@ -22,6 +22,13 @@ pub struct Session {
     pub status: SessionStatus,
     pub host_id: HostId,
     pub workspace_id: Option<WorkspaceId>,
+    /// What this session is going to do, in order, decided when it was created.
+    ///
+    /// Here rather than inferred from events so the screen has something to
+    /// show before the worker has said a word — the difference between "this
+    /// is fetching a repository" and a blank page.
+    #[serde(default)]
+    pub steps: Vec<crate::Step>,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub updated_at: chrono::DateTime<chrono::Utc>,
 }

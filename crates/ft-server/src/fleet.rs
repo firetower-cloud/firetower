@@ -534,4 +534,14 @@ impl Fleet {
     pub async fn is_connected(&self, host_id: &HostId) -> bool {
         self.workers.read().await.contains_key(&host_id.to_string())
     }
+
+    /// Stop talking to a host, deliberately.
+    ///
+    /// Dropping the sender closes the channel, which ends the task pumping
+    /// frames to it. Without this, removing a host leaves that task to discover
+    /// the far end has gone by failing — which works, but logs an error for
+    /// something we did on purpose.
+    pub async fn disconnect(&self, host_id: &HostId) {
+        self.workers.write().await.remove(&host_id.to_string());
+    }
 }

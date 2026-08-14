@@ -18,7 +18,7 @@ use serde::{Deserialize, Serialize};
 /// then cannot parse the frame, which is a session that hangs in `Starting`
 /// with nothing recorded. That is precisely what this number exists to stop,
 /// and it only works if it is bumped.
-pub const PROTOCOL_VERSION: u32 = 6;
+pub const PROTOCOL_VERSION: u32 = 7;
 
 mod codec;
 pub use codec::{Codec, CodecError, FrameReader, FrameWriter};

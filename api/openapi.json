@@ -307,8 +307,8 @@
         "tags": [
           "hosts"
         ],
-        "summary": "Forget a host.",
-        "description": "Refuses while sessions are running on it, and says which — the same rule as\ndisconnecting a repository, for the same reason.",
+        "summary": "Forget a host, and take its container with it.",
+        "description": "Refuses while sessions are running unless `force`, in which case they are\ntold to end first — an agent that gets to shut down leaves its worktree and\ntmux session behind cleanly, rather than having the floor pulled out.\n\nA container Firetower started is Firetower's to stop. One it merely found\nrunning is not, and start-up says as much when it adopts nothing.",
         "operationId": "delete_host",
         "parameters": [
           {
@@ -318,6 +318,15 @@
             "required": true,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "force",
+            "in": "query",
+            "description": "End running sessions instead of refusing",
+            "required": false,
+            "schema": {
+              "type": "boolean"
             }
           }
         ],
@@ -767,7 +776,7 @@
           "secrets"
         ],
         "summary": "What is stored, and every time it was touched.",
-        "description": "No endpoint returns a stored value. There is no route that reads one out —\na credential leaves this process by being handed to the worker that is\nabout to use it, and no other way.",
+        "description": "Names and history only. A value comes back from exactly one route, which is\n`reveal_secret` below, and that one writes to the log before it answers.",
         "operationId": "list_secrets",
         "responses": {
           "200": {
@@ -1914,6 +1923,48 @@
           },
           {
             "type": "object",
+            "description": "A step is under way. Every other event here is a *completion*, which is\nwhy a session that spent eight minutes fetching a repository looked\nfrozen: nothing had happened yet, so nothing had been said.",
+            "required": [
+              "step",
+              "type"
+            ],
+            "properties": {
+              "step": {
+                "$ref": "#/components/schemas/Step"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "StepStarted"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "How a step is getting on, while it is still going. Sent sparingly — one\nline replacing the last, not a log.",
+            "required": [
+              "step",
+              "detail",
+              "type"
+            ],
+            "properties": {
+              "detail": {
+                "type": "string"
+              },
+              "step": {
+                "$ref": "#/components/schemas/Step"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "StepProgress"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
             "required": [
               "detail",
               "type"
@@ -2544,6 +2595,13 @@
           "status": {
             "$ref": "#/components/schemas/SessionStatus"
           },
+          "steps": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Step"
+            },
+            "description": "What this session is going to do, in order, decided when it was created.\n\nHere rather than inferred from events so the screen has something to\nshow before the worker has said a word — the difference between \"this\nis fetching a repository\" and a blank page."
+          },
           "title": {
             "type": "string",
             "description": "Short, derived from the prompt — the prompt itself lives in the transcript."
@@ -2577,6 +2635,17 @@
           "HandedBack",
           "Failed",
           "Ended"
+        ]
+      },
+      "Step": {
+        "type": "string",
+        "description": "One stage of bringing a session up.\n\nThe point of naming them is that the whole list is knowable *before* any of\nit runs — so a session can show what it is going to do the moment it is\ncreated, rather than assembling a shape out of events as they arrive. A step\nnobody has reached yet is still worth showing.",
+        "enum": [
+          "Fetch",
+          "Worktree",
+          "Workspace",
+          "Setup",
+          "Launch"
         ]
       },
       "VaultView": {

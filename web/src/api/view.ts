@@ -51,6 +51,22 @@ export const IN_FLIGHT: SessionStatus[] = ["Starting", "Working"];
 export const needsYou = (s: { status: SessionStatus }) => NEEDS_YOU.includes(s.status);
 export const inFlight = (s: { status: SessionStatus }) => IN_FLIGHT.includes(s.status);
 
+/**
+ * Whether a session is still going — anything that isn't over, one way or the
+ * other. A screen watching one of these has a reason to keep looking.
+ */
+export const unfinished = (s: { status: SessionStatus }) =>
+  s.status !== "Ended" && s.status !== "Failed";
+
+/**
+ * Whether a session still holds something on its host — a worktree, a tmux
+ * session, an agent process. The same line, drawn for a different reason:
+ * `Failed` holds nothing, which is why it doesn't stand in the way of removing
+ * a host. The control plane draws it in the same place; if these two disagree,
+ * a screen says a host is busy while the API says it's idle.
+ */
+export const holdsHost = unfinished;
+
 /** What the interface calls each state. Exhaustive by construction. */
 export const STATUS_LABEL: Record<SessionStatus, string> = {
   Starting: "Starting up",

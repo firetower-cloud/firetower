@@ -5,11 +5,12 @@ import { useState } from "react";
 import Link from "next/link";
 import { useGetSession } from "@/src/api/generated/sessions/sessions";
 import { useListEvents } from "@/src/api/generated/events/events";
+import { Steps, STEP_EVENTS } from "@/components/Steps";
 import { Signal } from "@/components/Signal";
 import { Terminal } from "@/components/Terminal";
 import { SessionActions } from "@/components/SessionActions";
 import { Diff } from "@/components/Diff";
-import { elapsed, minutesSince, STATUS_LABEL } from "@/src/api/view";
+import { elapsed, minutesSince, unfinished, STATUS_LABEL } from "@/src/api/view";
 import { ApiError } from "@/src/api/http";
 
 /**
@@ -24,11 +25,22 @@ export default function SessionPage() {
   const { id } = useParams<{ id: string }>();
   const [tab, setTab] = useState<Tab>("Terminal");
 
-  const { data: session, isLoading, error } = useGetSession(id);
+  // The stream is how this stays live, and it is fast. It is not, however,
+  // something to bet the page on: a stream that silently stops leaves a session
+  // frozen mid-build with no way to tell, which is exactly what it looked like.
+  // So while a session is still going, ask as well. Once it is over, stop —
+  // there is nothing left to learn.
+  const { data: session, isLoading, error } = useGetSession(id, {
+    query: {
+      refetchInterval: (query) =>
+        query.state.data && unfinished(query.state.data) ? 2_000 : false,
+    },
+  });
+
+  const busy = !!session && unfinished(session);
   const { data: events = [] } = useListEvents(
     { since: 0, sessionId: id },
-    // The event stream keeps this fresh; polling on top would be noise.
-    { query: { refetchInterval: false } },
+    { query: { refetchInterval: busy ? 1_500 : false } },
   );
 
   if (isLoading) {
@@ -103,7 +115,7 @@ export default function SessionPage() {
               connection and lose everything on screen. */}
           <div className="min-h-0 flex-1">
             <div className={`h-full ${tab === "Terminal" ? "" : "hidden"}`}>
-              <Terminal sessionId={session.id} />
+              <Terminal sessionId={session.id} live={busy} />
             </div>
             <div className={`h-full ${tab === "Changes" ? "" : "hidden"}`}>
               <Diff sessionId={session.id} />
@@ -114,9 +126,15 @@ export default function SessionPage() {
         <aside className="min-h-0 overflow-y-auto p-5">
           <SessionActions session={session} />
 
+          <div className="eyebrow mt-5 mb-3">Bringing it up</div>
+          <Steps session={session} events={events} />
+
           <div className="eyebrow mt-5 mb-3">Activity</div>
           <ol className="flex flex-col gap-2.5">
-            {events.map((e) => (
+            {/* What the checklist above already says, without saying it twice. */}
+            {events
+              .filter((e) => !STEP_EVENTS.has((e.kind as { type?: string }).type ?? ""))
+              .map((e) => (
               <li key={e.seq} className="flex gap-2.5">
                 <span className="mt-[6px] h-[3px] w-[3px] shrink-0 rounded-full bg-mute" />
                 <span className="min-w-0">
@@ -128,7 +146,7 @@ export default function SessionPage() {
               </li>
             ))}
             {events.length === 0 && (
-              <li className="text-[12px] text-mute">Nothing recorded yet.</li>
+              <li className="text-[12px] text-mute">Waiting for the host to answer.</li>
             )}
           </ol>
         </aside>

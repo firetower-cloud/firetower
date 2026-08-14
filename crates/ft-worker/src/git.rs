@@ -117,6 +117,7 @@ impl GitRoot {
         remote: &str,
         slug: &str,
         credential: Option<Credential>,
+        progress: Option<Progress<'_>>,
     ) -> Result<(PathBuf, bool)> {
         let path = self.mirror_path(slug);
         let env = cred_env(credential).await?;
@@ -125,17 +126,18 @@ impl GitRoot {
             // Repairs a mirror made by an older build as well as configuring a
             // new one; setting it is idempotent.
             self.set_refspec(&path).await?;
-            run_env(
+            transferring(
                 &self.mirrors,
-                "git",
                 &[
                     "--git-dir",
                     path.to_str().unwrap(),
                     "fetch",
                     "--all",
                     "--prune",
+                    "--progress",
                 ],
                 &env.vars,
+                progress,
             )
             .await
             .with_context(|| format!("fetching {slug}"))?;
@@ -146,11 +148,17 @@ impl GitRoot {
             .await
             .with_context(|| format!("creating {}", self.mirrors.display()))?;
 
-        run_env(
+        transferring(
             &self.mirrors,
-            "git",
-            &["clone", "--bare", remote, path.to_str().unwrap()],
+            &[
+                "clone",
+                "--bare",
+                "--progress",
+                remote,
+                path.to_str().unwrap(),
+            ],
             &env.vars,
+            progress,
         )
         .await
         .with_context(|| format!("cloning {remote}"))?;
@@ -161,17 +169,18 @@ impl GitRoot {
         // no remote-tracking refs at all. One fetch with the refspec now set
         // populates `refs/remotes/origin/*`, so the first session branches from
         // the same place as every session after it.
-        run_env(
+        transferring(
             &self.mirrors,
-            "git",
             &[
                 "--git-dir",
                 path.to_str().unwrap(),
                 "fetch",
                 "--prune",
+                "--progress",
                 "origin",
             ],
             &env.vars,
+            progress,
         )
         .await
         .with_context(|| format!("fetching {slug} after cloning"))?;
@@ -473,28 +482,208 @@ async fn run_env(
     args: &[&str],
     env: &[(String, String)],
 ) -> Result<String> {
+    run_watched(cwd, program, args, env, None).await
+}
+
+/// A git command that moves data: retried once when the network drops it, and
+/// never allowed to run forever.
+///
+/// `curl 92`, `early EOF` and `unexpected disconnect` are the network giving up
+/// partway through, not the server saying no. They are worth one more attempt —
+/// a repository that doesn't exist, or that we can't read, says so the first
+/// time and says the same thing every time after, so those are not retried.
+async fn transferring(
+    cwd: &Path,
+    args: &[&str],
+    env: &[(String, String)],
+    progress: Option<Progress<'_>>,
+) -> Result<String> {
+    // Generous, because a first clone of a large repository legitimately takes
+    // minutes. It exists so that a stalled transfer eventually becomes an error
+    // someone can read rather than a session that waits forever.
+    const CEILING: std::time::Duration = std::time::Duration::from_secs(30 * 60);
+
+    let mut last = match attempt(cwd, args, env, progress, CEILING).await {
+        Ok(out) => return Ok(out),
+        Err(e) => e,
+    };
+
+    if !is_transient(&last.to_string()) {
+        return Err(last);
+    }
+
+    if let Some(report) = progress {
+        report("the connection dropped — trying once more".to_string());
+    }
+    tracing::warn!("retrying git after a dropped transfer: {last:#}");
+    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+
+    match attempt(cwd, args, env, progress, CEILING).await {
+        Ok(out) => Ok(out),
+        Err(e) => {
+            last = e;
+            Err(last)
+        }
+    }
+}
+
+async fn attempt(
+    cwd: &Path,
+    args: &[&str],
+    env: &[(String, String)],
+    progress: Option<Progress<'_>>,
+    ceiling: std::time::Duration,
+) -> Result<String> {
+    match tokio::time::timeout(ceiling, run_watched(cwd, "git", args, env, progress)).await {
+        Ok(result) => result,
+        Err(_) => bail!("git gave up after {} minutes", ceiling.as_secs() / 60),
+    }
+}
+
+/// Whether the network dropped it, as opposed to the far end refusing.
+fn is_transient(error: &str) -> bool {
+    let e = error.to_ascii_lowercase();
+    [
+        "early eof",
+        "unexpected disconnect",
+        "rpc failed",
+        "connection reset",
+        "the remote end hung up",
+        "operation timed out",
+        "could not read from remote repository",
+    ]
+    .iter()
+    .any(|marker| e.contains(marker))
+}
+
+/// What a long git command says about itself while it runs.
+///
+/// `git` writes progress to stderr as carriage-return-separated lines —
+/// "Receiving objects:  61% (1234/2000)". Reading them as they arrive is the
+/// difference between a fetch that looks frozen for eight minutes and one that
+/// is visibly downloading something large.
+pub type Progress<'a> = &'a (dyn Fn(String) + Send + Sync);
+
+async fn run_watched(
+    cwd: &Path,
+    program: &str,
+    args: &[&str],
+    env: &[(String, String)],
+    progress: Option<Progress<'_>>,
+) -> Result<String> {
+    use tokio::io::AsyncReadExt;
+
     let mut command = Command::new(program);
     command
         .args(args)
-        .current_dir(if cwd.exists() { cwd } else { Path::new(".") });
+        .current_dir(if cwd.exists() { cwd } else { Path::new(".") })
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
     for (k, v) in env {
         command.env(k, v);
     }
 
-    let output = command
-        .output()
-        .await
+    let mut child = command
+        .spawn()
         .with_context(|| format!("running {program}"))?;
 
-    if !output.status.success() {
+    let mut out = child.stdout.take().context("no stdout")?;
+    let mut err = child.stderr.take().context("no stderr")?;
+
+    // Both pipes are drained concurrently. Reading one at a time deadlocks the
+    // moment the other fills its buffer, which for a chatty clone is quickly.
+    let stdout = async {
+        let mut buf = Vec::new();
+        let _ = out.read_to_end(&mut buf).await;
+        buf
+    };
+
+    let stderr = async {
+        let mut collected = Vec::new();
+        let mut line = Vec::new();
+        let mut byte = [0u8; 1];
+
+        while err.read_exact(&mut byte).await.is_ok() {
+            collected.push(byte[0]);
+            // Progress lines end in \r and overwrite each other; ordinary
+            // messages end in \n. Both terminate a line for our purposes.
+            if byte[0] == b'\r' || byte[0] == b'\n' {
+                if let Some(report) = progress {
+                    let text = String::from_utf8_lossy(&line).trim().to_string();
+                    if !text.is_empty() {
+                        report(text);
+                    }
+                }
+                line.clear();
+            } else {
+                line.push(byte[0]);
+            }
+        }
+        collected
+    };
+
+    let (stdout, stderr) = tokio::join!(stdout, stderr);
+    let status = child.wait().await.context("waiting for git")?;
+
+    if !status.success() {
         bail!(
             "{program} {} failed: {}",
             args.join(" "),
-            String::from_utf8_lossy(&output.stderr).trim()
+            what_went_wrong(&String::from_utf8_lossy(&stderr))
         );
     }
 
-    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    Ok(String::from_utf8_lossy(&stdout).to_string())
+}
+
+/// The part of git's stderr worth showing someone.
+///
+/// Asking for `--progress` means stderr is mostly progress: hundreds of
+/// carriage-return-separated counters that overwrite each other on a terminal
+/// and pile up in a buffer anywhere else. One failed fetch produced an
+/// eighteen-thousand-character message, of which four lines mattered — and
+/// those four were at the end, past everything a person would give up reading.
+///
+/// So progress is dropped and the tail is kept. If nothing survives the filter,
+/// the raw tail is better than saying nothing at all.
+fn what_went_wrong(stderr: &str) -> String {
+    const KEEP: usize = 8;
+
+    let lines: Vec<&str> = stderr
+        .split(['\r', '\n'])
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !is_progress(line))
+        .collect();
+
+    if lines.is_empty() {
+        return stderr
+            .trim()
+            .chars()
+            .rev()
+            .take(400)
+            .collect::<String>()
+            .chars()
+            .rev()
+            .collect();
+    }
+
+    lines[lines.len().saturating_sub(KEEP)..].join("\n")
+}
+
+/// A counter, not a message.
+fn is_progress(line: &str) -> bool {
+    let l = line.trim_start_matches("remote: ");
+    [
+        "Enumerating objects",
+        "Counting objects",
+        "Compressing objects",
+        "Receiving objects",
+        "Resolving deltas",
+        "Updating files",
+        "Cloning into",
+    ]
+    .iter()
+    .any(|marker| l.starts_with(marker))
 }
 
 /// Whether git refused because this branch name is spoken for.
@@ -546,6 +735,88 @@ fn classify(stderr: &str) -> ProbeFailure {
 }
 
 #[cfg(test)]
+mod message_tests {
+    use super::what_went_wrong;
+
+    /// The real one: 18,526 characters of counters wrapped around four useful
+    /// lines, sent to a screen that has to render it next to a step.
+    #[test]
+    fn progress_is_dropped_and_the_failure_is_kept() {
+        let mut noise = String::from("remote: Enumerating objects: 1132, done.\n");
+        for percent in 0..100 {
+            noise.push_str(&format!(
+                "remote: Counting objects: {percent}% (7/633)        \r"
+            ));
+            noise.push_str(&format!(
+                "Receiving objects:  {percent}% (24/1132), 5.00 MiB\r"
+            ));
+        }
+        noise.push_str(
+            "error: RPC failed; curl 56 Recv failure: Connection reset by peer\n\
+             error: 5484 bytes of body are still expected\n\
+             fatal: early EOF\n\
+             fatal: fetch-pack: invalid index-pack output\n",
+        );
+
+        let shown = what_went_wrong(&noise);
+
+        assert!(shown.len() < 400, "still {} characters", shown.len());
+        assert!(shown.contains("Connection reset by peer"));
+        assert!(shown.contains("fatal: early EOF"));
+        assert!(!shown.contains("Counting objects"));
+        assert!(!shown.contains("Receiving objects"));
+    }
+
+    #[test]
+    fn a_short_refusal_survives_intact() {
+        let refused = "remote: Repository not found.\nfatal: repository not found";
+        assert_eq!(what_went_wrong(refused), refused);
+    }
+
+    /// Nothing but progress, and it still failed. Saying nothing would be worse
+    /// than saying something unhelpful.
+    #[test]
+    fn something_is_always_said() {
+        let only_noise = "Receiving objects: 50% (1/2)\rReceiving objects: 99% (1/2)\r";
+        assert!(!what_went_wrong(only_noise).is_empty());
+    }
+}
+
+#[cfg(test)]
+mod retry_tests {
+    use super::is_transient;
+
+    /// The failure that cost a real session: a dropped transfer, which is worth
+    /// trying again.
+    #[test]
+    fn a_dropped_transfer_is_worth_retrying() {
+        for message in [
+            "error: RPC failed; curl 92 HTTP/2 stream 7 was not closed cleanly: CANCEL (err 8)\n             fatal: early EOF",
+            "fetch-pack: unexpected disconnect while reading sideband packet",
+            "fatal: the remote end hung up unexpectedly",
+            "Connection reset by peer",
+            "ssh: connect to host example.com port 22: Operation timed out",
+        ] {
+            assert!(is_transient(message), "should retry: {message}");
+        }
+    }
+
+    /// A refusal says the same thing every time. Retrying it wastes a minute
+    /// and tells the person nothing new.
+    #[test]
+    fn a_refusal_is_not() {
+        for message in [
+            "remote: Repository not found.",
+            "fatal: Authentication failed for 'https://github.com/acme/backend.git/'",
+            "error: pathspec 'nope' did not match any file(s) known to git",
+            "fatal: destination path already exists and is not an empty directory",
+        ] {
+            assert!(!is_transient(message), "should not retry: {message}");
+        }
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use tempfile::TempDir;
@@ -556,7 +827,7 @@ mod tests {
         let home = TempDir::new().unwrap();
         let git = GitRoot::new(home.path());
         let (mirror, _) = git
-            .ensure_mirror(&remote, "acme/backend", None)
+            .ensure_mirror(&remote, "acme/backend", None, None)
             .await
             .unwrap();
 
@@ -591,7 +862,7 @@ mod tests {
         let git = GitRoot::new(home.path());
 
         let (mirror, _) = git
-            .ensure_mirror(&remote, "acme/backend", None)
+            .ensure_mirror(&remote, "acme/backend", None, None)
             .await
             .unwrap();
 
@@ -608,7 +879,7 @@ mod tests {
         let home = TempDir::new().unwrap();
         let git = GitRoot::new(home.path());
         let (mirror, _) = git
-            .ensure_mirror(&remote, "acme/backend", None)
+            .ensure_mirror(&remote, "acme/backend", None, None)
             .await
             .unwrap();
 
@@ -627,7 +898,7 @@ mod tests {
             .await
             .unwrap();
 
-        git.ensure_mirror(&remote, "acme/backend", None)
+        git.ensure_mirror(&remote, "acme/backend", None, None)
             .await
             .expect("a live worktree must not block fetching");
 
@@ -643,7 +914,7 @@ mod tests {
         let git = GitRoot::new(home.path());
 
         let (mirror, _) = git
-            .ensure_mirror(&remote, "acme/backend", None)
+            .ensure_mirror(&remote, "acme/backend", None, None)
             .await
             .unwrap();
         let before = run(&mirror, "git", &["rev-parse", "origin/main"])
@@ -661,7 +932,7 @@ mod tests {
             .unwrap();
 
         let (mirror, cloned) = git
-            .ensure_mirror(&remote, "acme/backend", None)
+            .ensure_mirror(&remote, "acme/backend", None, None)
             .await
             .unwrap();
         assert!(!cloned, "the second call should fetch, not clone");
@@ -693,7 +964,7 @@ mod tests {
         let home = TempDir::new().unwrap();
         let git = GitRoot::new(home.path());
         let (mirror, _) = git
-            .ensure_mirror(&remote, "acme/backend", None)
+            .ensure_mirror(&remote, "acme/backend", None, None)
             .await
             .unwrap();
 
@@ -832,14 +1103,14 @@ mod tests {
         let git = GitRoot::new(home.path());
 
         let (path, cloned) = git
-            .ensure_mirror(&remote, "acme/backend", None)
+            .ensure_mirror(&remote, "acme/backend", None, None)
             .await
             .unwrap();
         assert!(cloned, "a cold mirror has to clone");
         assert!(path.join("HEAD").exists());
 
         let (again, cloned) = git
-            .ensure_mirror(&remote, "acme/backend", None)
+            .ensure_mirror(&remote, "acme/backend", None, None)
             .await
             .unwrap();
         assert!(!cloned, "a warm mirror fetches instead");
@@ -861,7 +1132,7 @@ mod tests {
         let git = GitRoot::new(home.path());
 
         let (mirror, _) = git
-            .ensure_mirror(&remote, "acme/backend", None)
+            .ensure_mirror(&remote, "acme/backend", None, None)
             .await
             .unwrap();
         let (tree, branch_used) = git
@@ -887,7 +1158,7 @@ mod tests {
         let home = TempDir::new().unwrap();
         let git = GitRoot::new(home.path());
         let (mirror, _) = git
-            .ensure_mirror(&remote, "acme/backend", None)
+            .ensure_mirror(&remote, "acme/backend", None, None)
             .await
             .unwrap();
 
@@ -916,7 +1187,7 @@ mod tests {
         let home = TempDir::new().unwrap();
         let git = GitRoot::new(home.path());
         let (mirror, _) = git
-            .ensure_mirror(&remote, "acme/backend", None)
+            .ensure_mirror(&remote, "acme/backend", None, None)
             .await
             .unwrap();
 
@@ -942,7 +1213,7 @@ mod tests {
         let home = TempDir::new().unwrap();
         let git = GitRoot::new(home.path());
         let (mirror, _) = git
-            .ensure_mirror(&remote, "acme/backend", None)
+            .ensure_mirror(&remote, "acme/backend", None, None)
             .await
             .unwrap();
         git.add_worktree(&mirror, "agent/gone", "main", "s_gone")
@@ -960,7 +1231,7 @@ mod tests {
         let home = TempDir::new().unwrap();
         let git = GitRoot::new(home.path());
         let err = git
-            .ensure_mirror("/definitely/not/a/repo", "acme/nope", None)
+            .ensure_mirror("/definitely/not/a/repo", "acme/nope", None, None)
             .await
             .unwrap_err();
         let msg = format!("{err:#}");
@@ -973,7 +1244,7 @@ mod tests {
         let home = TempDir::new().unwrap();
         let git = GitRoot::new(home.path());
         let (mirror, _) = git
-            .ensure_mirror(&remote, "acme/backend", None)
+            .ensure_mirror(&remote, "acme/backend", None, None)
             .await
             .unwrap();
         let (tree, _) = git
@@ -1000,7 +1271,7 @@ mod tests {
         let home = TempDir::new().unwrap();
         let git = GitRoot::new(home.path());
         let (mirror, _) = git
-            .ensure_mirror(&remote, "acme/backend", None)
+            .ensure_mirror(&remote, "acme/backend", None, None)
             .await
             .unwrap();
         let (tree, _) = git

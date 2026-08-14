@@ -7,6 +7,7 @@
  */
 import type { Agent } from './agent';
 import type { SessionStatus } from './sessionStatus';
+import type { Step } from './step';
 
 export type EventKind = {
   prompt: string;
@@ -16,6 +17,13 @@ export type EventKind = {
   detail: string;
   host: string;
   type: 'HostSelected';
+} | {
+  step: Step;
+  type: 'StepStarted';
+} | {
+  detail: string;
+  step: Step;
+  type: 'StepProgress';
 } | {
   detail: string;
   type: 'RepoFetched';

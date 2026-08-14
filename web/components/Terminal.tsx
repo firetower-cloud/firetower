@@ -15,12 +15,25 @@ type State = "connecting" | "live" | "closed";
  * arrow keys, tab completion and `Ctrl-C` all reach the agent. That's the point
  * — you're driving the CLI, not talking to a wrapper around it.
  */
-export function Terminal({ sessionId }: { sessionId: string }) {
+export function Terminal({ sessionId, live }: { sessionId: string; live: boolean }) {
   const host = useRef<HTMLDivElement>(null);
   const [state, setState] = useState<State>("connecting");
+  /** Bumping this re-runs the effect below, which is one whole new attachment. */
+  const [attempt, setAttempt] = useState(0);
+
+  // A session that is still starting has no agent to attach to yet, so the
+  // first attempt is refused — correctly. Waiting for the agent and trying
+  // again is this component's job; it used to be the person's, by reloading
+  // the page, which is not a thing anyone should have to work out.
+  useEffect(() => {
+    if (state !== "closed" || !live) return;
+    const again = setTimeout(() => setAttempt((n) => n + 1), 1_500);
+    return () => clearTimeout(again);
+  }, [state, live]);
 
   useEffect(() => {
     if (!host.current) return;
+    setState("connecting");
 
     let disposed = false;
     let socket: WebSocket | null = null;
@@ -112,7 +125,7 @@ export function Terminal({ sessionId }: { sessionId: string }) {
       disposed = true;
       cleanup();
     };
-  }, [sessionId]);
+  }, [sessionId, attempt]);
 
   return (
     <div className="flex h-full flex-col overflow-hidden rounded-[6px] border border-line bg-[#0f0e0d]">
@@ -131,7 +144,7 @@ export function Terminal({ sessionId }: { sessionId: string }) {
         </span>
         {state === "closed" && (
           <button
-            onClick={() => window.location.reload()}
+            onClick={() => setAttempt((n) => n + 1)}
             className="ml-auto text-[11px] text-mute transition-colors hover:text-ember"
           >
             Reconnect

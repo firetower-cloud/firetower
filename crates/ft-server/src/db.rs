@@ -170,6 +170,22 @@ impl Db {
         Ok(rows.iter().map(|r| r.get::<String, _>("title")).collect())
     }
 
+    /// The same sessions, by id — for telling a worker to end them rather than
+    /// for telling a person which they are.
+    pub async fn live_session_ids_on(&self, id: &HostId) -> Result<Vec<SessionId>> {
+        let rows =
+            sqlx::query("SELECT id FROM sessions WHERE host_id = $1 AND status NOT IN ($2, $3)")
+                .bind(id.as_str())
+                .bind(format!("{:?}", SessionStatus::Ended))
+                .bind(format!("{:?}", SessionStatus::Failed))
+                .fetch_all(&self.pool)
+                .await?;
+        Ok(rows
+            .iter()
+            .map(|r| SessionId::from_stored(r.get::<String, _>("id")))
+            .collect())
+    }
+
     pub async fn host_by_name(&self, name: &str) -> Result<Option<Host>> {
         let row = sqlx::query("SELECT * FROM hosts WHERE name = $1")
             .bind(name)
@@ -432,12 +448,14 @@ impl Db {
         base: Option<&str>,
         agent: &str,
         size: WorkspaceSize,
+        steps: &[ft_core::Step],
     ) -> Result<()> {
         let now = chrono::Utc::now();
         sqlx::query(
             "INSERT INTO sessions
-               (id, host_id, repo, title, prompt, branch, base, agent, size, status, created_at, updated_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'Starting', $10, $11)",
+               (id, host_id, repo, title, prompt, branch, base, agent, size, status,
+                steps, created_at, updated_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'Starting', $10, $11, $12)",
         )
         .bind(id.as_str())
         .bind(host_id.as_str())
@@ -448,6 +466,7 @@ impl Db {
         .bind(base)
         .bind(agent)
         .bind(serde_json::to_string(&size)?.trim_matches('"').to_string())
+        .bind(serde_json::to_value(steps)?)
         .bind(now)
         .bind(now)
         .execute(&self.pool)
@@ -647,6 +666,9 @@ fn session_from_row(r: sqlx::postgres::PgRow) -> Result<Session> {
             .context("decoding session status")?,
         host_id: HostId::from_stored(r.get::<String, _>("host_id")),
         workspace_id: None,
+        // Sessions created before steps were recorded have none, which renders
+        // as the activity list it always did rather than as an empty checklist.
+        steps: serde_json::from_value(r.get("steps")).unwrap_or_default(),
         created_at: r.get("created_at"),
         updated_at: r.get("updated_at"),
     })
@@ -735,6 +757,7 @@ mod tests {
             Some("main"),
             "Shell",
             WorkspaceSize::Medium,
+            &ft_core::Step::plan(true, false),
         )
         .await
         .unwrap();
@@ -799,6 +822,7 @@ mod tests {
             Some("main"),
             "ClaudeCode",
             WorkspaceSize::Medium,
+            &ft_core::Step::plan(true, false),
         )
         .await
         .unwrap();
@@ -841,6 +865,7 @@ mod tests {
             Some("main"),
             "ClaudeCode",
             WorkspaceSize::Medium,
+            &ft_core::Step::plan(true, false),
         )
         .await
         .unwrap();
@@ -879,6 +904,7 @@ mod tests {
             Some("main"),
             "ClaudeCode",
             WorkspaceSize::Medium,
+            &ft_core::Step::plan(true, false),
         )
         .await
         .unwrap();
@@ -913,6 +939,7 @@ mod tests {
             None,
             "Shell",
             WorkspaceSize::Medium,
+            &ft_core::Step::plan(true, false),
         )
         .await
         .unwrap();
@@ -940,6 +967,7 @@ mod tests {
                 Some("main"),
                 "Shell",
                 WorkspaceSize::Medium,
+                &ft_core::Step::plan(true, false),
             )
             .await
             .unwrap();
@@ -1021,6 +1049,7 @@ mod tests {
             Some("main"),
             "Shell",
             WorkspaceSize::Medium,
+            &ft_core::Step::plan(true, false),
         )
         .await
         .unwrap();

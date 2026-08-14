@@ -63,9 +63,8 @@ export const getListSecretsUrl = () => {
 }
 
 /**
- * No endpoint returns a stored value. There is no route that reads one out —
- * a credential leaves this process by being handed to the worker that is
- * about to use it, and no other way.
+ * Names and history only. A value comes back from exactly one route, which is
+ * `reveal_secret` below, and that one writes to the log before it answers.
  * @summary What is stored, and every time it was touched.
  */
 export const listSecrets = async ( options?: Parameters<typeof http>[1]): Promise<VaultView> => {

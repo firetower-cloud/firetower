@@ -12,6 +12,7 @@ import { useListSessions } from "@/src/api/generated/sessions/sessions";
 import { useListAgents } from "@/src/api/generated/agents/agents";
 import type { Host } from "@/src/api/generated/model";
 import { AddCompute } from "@/components/AddCompute";
+import { holdsHost } from "@/src/api/view";
 import { ApiError } from "@/src/api/http";
 
 /**
@@ -61,7 +62,7 @@ export default function Compute() {
           <HostRow
             key={h.id}
             host={h}
-            running={sessions.filter((s) => s.hostId === h.id && s.status !== "Ended").length}
+            running={sessions.filter((s) => s.hostId === h.id && holdsHost(s)).length}
             agents={agents
               .filter((a) => a.hosts.some((x) => x.hostId === h.id && x.installed))
               .map((a) => a.label)}
@@ -150,10 +151,13 @@ function HostRow({
           <button
             onClick={() => {
               onProblem(null);
-              // Its finished sessions go too — they are a record of what a
-              // worker reported, and the worker is what's being removed.
-              if (!confirm(`Remove ${host.name}? Its session history goes with it.`)) return;
-              remove.mutate({ id: host.id }, { onSuccess: refresh, onError: failed });
+              if (!confirm(removalWarning(host, running))) return;
+              // Anything still running was named in the warning above, so this
+              // is already the answer to "and end them?".
+              remove.mutate(
+                { id: host.id, params: { force: running > 0 } },
+                { onSuccess: refresh, onError: failed },
+              );
             }}
             className="text-[11.5px] text-mute transition-colors hover:text-ember"
           >
@@ -178,6 +182,28 @@ function HostRow({
         </span>
       </div>
     </div>
+  );
+}
+
+/**
+ * Everything that goes, said once, before it goes.
+ *
+ * A host with work on it is a different decision from an idle one, so it is a
+ * different sentence — not the same prompt followed by an error you then have
+ * to confirm past.
+ */
+function removalWarning(host: Host, running: number) {
+  const container = host.compute.type === "Container";
+  const machine = container
+    ? `Its container is stopped and removed, and its session history goes with it.`
+    : `Its session history goes with it. The machine itself is left alone.`;
+
+  if (running === 0) return `Remove ${host.name}? ${machine}`;
+
+  return (
+    `Remove ${host.name}? ${running} ${running === 1 ? "session is" : "sessions are"} ` +
+    `still running there. They're ended first, and anything unpushed goes with them. ` +
+    machine
   );
 }
 

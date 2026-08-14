@@ -9,6 +9,7 @@ import type { Agent } from './agent';
 import type { HostId } from './hostId';
 import type { SessionId } from './sessionId';
 import type { SessionStatus } from './sessionStatus';
+import type { Step } from './step';
 import type { WorkspaceId } from './workspaceId';
 import type { WorkspaceSize } from './workspaceSize';
 
@@ -35,6 +36,14 @@ export interface Session {
   repo?: string | null;
   size: WorkspaceSize;
   status: SessionStatus;
+  /**
+     * What this session is going to do, in order, decided when it was created.
+     *
+     * Here rather than inferred from events so the screen has something to
+     * show before the worker has said a word — the difference between "this
+     * is fetching a repository" and a blank page.
+     */
+  steps?: Step[];
   /** Short, derived from the prompt — the prompt itself lives in the transcript. */
   title: string;
   updatedAt: string;

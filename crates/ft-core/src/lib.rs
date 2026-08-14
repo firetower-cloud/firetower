@@ -226,6 +226,67 @@ impl Agent {
             Agent::Shell => None,
         }
     }
+
+    /// What a home directory this agent has never run in needs, so that it
+    /// starts working instead of asking questions.
+    ///
+    /// A CLI written for a person at a keyboard has a first run: pick a theme,
+    /// pick how you sign in, confirm you trust this folder. Every one of those
+    /// is reasonable in a terminal and useless here — nobody is watching the
+    /// pane when a session starts, and the first screen offers to sign you in
+    /// even though the token was handed over and works. It reads as broken
+    /// authentication and isn't.
+    ///
+    /// A fresh home is not a container thing. A server added over ssh has one
+    /// too, which is why this is answered by the worker on whatever host it is
+    /// about to launch on rather than baked into an image.
+    ///
+    /// Returns where the answers go, relative to the home directory, and what
+    /// they are. See [`FirstRun`] for how they are applied — additively, and
+    /// never over something already there.
+    pub fn first_run(&self, workspace: &str) -> Option<FirstRun> {
+        match self {
+            Agent::ClaudeCode => Some(FirstRun {
+                file: ".claude.json",
+                answers: vec![
+                    // Skips the theme picker and the "select login method"
+                    // screen — the one that reads as a rejected token.
+                    (vec!["hasCompletedOnboarding".into()], true),
+                    // And the folder it is about to work in is one Firetower
+                    // just checked out, so the trust prompt has one answer.
+                    (
+                        vec![
+                            "projects".into(),
+                            workspace.to_string(),
+                            "hasTrustDialogAccepted".into(),
+                        ],
+                        true,
+                    ),
+                ],
+            }),
+            // Not because they don't have one, but because nobody has worked
+            // out what it wants. An unanswered first run costs a keypress.
+            Agent::Codex | Agent::Shell => None,
+        }
+    }
+}
+
+/// Questions to answer in an agent's own configuration before it runs.
+///
+/// This reaches into another program's private file, which is worth being
+/// honest about: the shape is undocumented and can change under us. What that
+/// costs if it does is the first-run prompt coming back — visible, and harmless
+/// next to the alternative, which is every new host greeting you with a login
+/// screen you can't act on.
+///
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FirstRun {
+    /// Relative to the home directory of whoever runs the agent.
+    pub file: &'static str,
+    /// Each answer is the path of keys to walk and the value at the end of it.
+    /// Everything asked so far is a yes, hence `bool`; widen it when something
+    /// needs otherwise.
+    pub answers: Vec<(Vec<String>, bool)>,
 }
 
 /// A repository Firetower can cut worktrees from.
@@ -273,16 +334,119 @@ pub struct Event {
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 #[serde(tag = "type")]
 pub enum EventKind {
-    SessionCreated { repo: String, prompt: String },
-    HostSelected { host: String, detail: String },
-    RepoFetched { detail: String },
-    WorktreeAdded { branch: String },
-    WorkspaceStarted { detail: String },
-    SetupFinished { detail: String },
-    TmuxOpened { name: String },
-    AgentLaunched { agent: Agent },
-    StatusChanged { status: SessionStatus },
-    Failed { code: String, message: String },
+    SessionCreated {
+        repo: String,
+        prompt: String,
+    },
+    HostSelected {
+        host: String,
+        detail: String,
+    },
+    /// A step is under way. Every other event here is a *completion*, which is
+    /// why a session that spent eight minutes fetching a repository looked
+    /// frozen: nothing had happened yet, so nothing had been said.
+    StepStarted {
+        step: Step,
+    },
+    /// How a step is getting on, while it is still going. Sent sparingly — one
+    /// line replacing the last, not a log.
+    StepProgress {
+        step: Step,
+        detail: String,
+    },
+    RepoFetched {
+        detail: String,
+    },
+    WorktreeAdded {
+        branch: String,
+    },
+    WorkspaceStarted {
+        detail: String,
+    },
+    SetupFinished {
+        detail: String,
+    },
+    TmuxOpened {
+        name: String,
+    },
+    AgentLaunched {
+        agent: Agent,
+    },
+    StatusChanged {
+        status: SessionStatus,
+    },
+    Failed {
+        code: String,
+        message: String,
+    },
+}
+
+/// One stage of bringing a session up.
+///
+/// The point of naming them is that the whole list is knowable *before* any of
+/// it runs — so a session can show what it is going to do the moment it is
+/// created, rather than assembling a shape out of events as they arrive. A step
+/// nobody has reached yet is still worth showing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub enum Step {
+    /// Clone or refresh the mirror. The long one, and the one that fails.
+    Fetch,
+    /// Cut this session's own branch and worktree from it.
+    Worktree,
+    /// A plain directory, for an agent running without a repository.
+    Workspace,
+    /// The repository's own setup command, if it has one.
+    Setup,
+    /// Start the agent under tmux.
+    Launch,
+}
+
+impl Step {
+    /// What the screen calls it, in the present tense — these are read while
+    /// they are happening.
+    pub fn label(&self) -> &'static str {
+        match self {
+            Step::Fetch => "Fetching the repository",
+            Step::Worktree => "Creating the worktree",
+            Step::Workspace => "Making the workspace",
+            Step::Setup => "Running setup",
+            Step::Launch => "Starting the agent",
+        }
+    }
+
+    /// Everything this session will do, in order.
+    ///
+    /// Decided once, when the session is created, from what it was asked for.
+    /// A bare agent has no repository to fetch and nothing to branch from; a
+    /// repository without a setup command skips that too. Showing a step that
+    /// will never run is its own kind of lie.
+    pub fn plan(has_repo: bool, has_setup: bool) -> Vec<Step> {
+        let mut steps = if has_repo {
+            vec![Step::Fetch, Step::Worktree]
+        } else {
+            vec![Step::Workspace]
+        };
+        if has_setup {
+            steps.push(Step::Setup);
+        }
+        steps.push(Step::Launch);
+        steps
+    }
+
+    /// The step an event finishes, for a screen matching one to the other.
+    ///
+    /// Here rather than in the interface so that adding an event and forgetting
+    /// to tick a step off is a change in one place.
+    pub fn completed_by(event: &EventKind) -> Option<Step> {
+        match event {
+            EventKind::RepoFetched { .. } => Some(Step::Fetch),
+            EventKind::WorktreeAdded { .. } => Some(Step::Worktree),
+            EventKind::WorkspaceStarted { .. } => Some(Step::Workspace),
+            EventKind::SetupFinished { .. } => Some(Step::Setup),
+            EventKind::AgentLaunched { .. } => Some(Step::Launch),
+            _ => None,
+        }
+    }
 }
 
 impl EventKind {
@@ -291,6 +455,10 @@ impl EventKind {
         match self {
             EventKind::SessionCreated { .. } => "Session created",
             EventKind::HostSelected { .. } => "Picked a host",
+            // Its own name, so the activity log reads as a sequence of things
+            // starting rather than a column of the word "started".
+            EventKind::StepStarted { step } => step.label(),
+            EventKind::StepProgress { step, .. } => step.label(),
             EventKind::RepoFetched { .. } => "Fetched the repository",
             EventKind::WorktreeAdded { .. } => "Added a worktree",
             EventKind::WorkspaceStarted { .. } => "Started the workspace",
@@ -300,6 +468,93 @@ impl EventKind {
             EventKind::StatusChanged { .. } => "Status",
             EventKind::Failed { .. } => "Failed",
         }
+    }
+}
+
+#[cfg(test)]
+mod step_tests {
+    use super::*;
+
+    #[test]
+    fn the_plan_matches_what_the_session_will_actually_do() {
+        assert_eq!(
+            Step::plan(true, true),
+            vec![Step::Fetch, Step::Worktree, Step::Setup, Step::Launch]
+        );
+        assert_eq!(
+            Step::plan(true, false),
+            vec![Step::Fetch, Step::Worktree, Step::Launch]
+        );
+        // No repository: nothing to fetch, nothing to branch from.
+        assert_eq!(
+            Step::plan(false, false),
+            vec![Step::Workspace, Step::Launch]
+        );
+        assert_eq!(
+            Step::plan(false, true),
+            vec![Step::Workspace, Step::Setup, Step::Launch]
+        );
+    }
+
+    #[test]
+    fn every_plan_ends_by_starting_the_agent() {
+        for (repo, setup) in [(true, true), (true, false), (false, true), (false, false)] {
+            assert_eq!(Step::plan(repo, setup).last(), Some(&Step::Launch));
+        }
+    }
+
+    /// Every step has to be tickable by something, or the checklist waits on it
+    /// forever.
+    #[test]
+    fn each_step_has_an_event_that_finishes_it() {
+        let finishers = [
+            EventKind::RepoFetched {
+                detail: String::new(),
+            },
+            EventKind::WorktreeAdded {
+                branch: String::new(),
+            },
+            EventKind::WorkspaceStarted {
+                detail: String::new(),
+            },
+            EventKind::SetupFinished {
+                detail: String::new(),
+            },
+            EventKind::AgentLaunched {
+                agent: Agent::Shell,
+            },
+        ];
+
+        for step in [
+            Step::Fetch,
+            Step::Worktree,
+            Step::Workspace,
+            Step::Setup,
+            Step::Launch,
+        ] {
+            assert!(
+                finishers
+                    .iter()
+                    .any(|e| Step::completed_by(e) == Some(step)),
+                "nothing finishes {step:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_event_that_is_not_a_completion_ticks_nothing_off() {
+        assert_eq!(
+            Step::completed_by(&EventKind::StepStarted { step: Step::Fetch }),
+            None,
+            "starting a step is not finishing it"
+        );
+        assert_eq!(
+            Step::completed_by(&EventKind::Failed {
+                code: "SetupFailed".into(),
+                message: "no".into()
+            }),
+            None
+        );
     }
 }
 

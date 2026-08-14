@@ -309,18 +309,36 @@ pub struct Drain {
     pub drained: bool,
 }
 
-/// Forget a host.
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct Removal {
+    /// Take the host with whatever is running on it.
+    ///
+    /// Off by default, so removing a host you forgot was busy asks first.
+    #[serde(default)]
+    pub force: bool,
+}
+
+/// Forget a host, and take its container with it.
 ///
-/// Refuses while sessions are running on it, and says which — the same rule as
-/// disconnecting a repository, for the same reason.
+/// Refuses while sessions are running unless `force`, in which case they are
+/// told to end first — an agent that gets to shut down leaves its worktree and
+/// tmux session behind cleanly, rather than having the floor pulled out.
+///
+/// A container Firetower started is Firetower's to stop. One it merely found
+/// running is not, and start-up says as much when it adopts nothing.
 #[utoipa::path(
     delete, path = "/api/v1/hosts/{id}", tag = "hosts",
-    params(("id" = String, Path, description = "Host id")),
+    params(
+        ("id" = String, Path, description = "Host id"),
+        ("force" = Option<bool>, Query, description = "End running sessions instead of refusing"),
+    ),
     responses((status = 204), (status = 404, body = ApiError), (status = 409, body = ApiError)),
 )]
 async fn delete_host(
     State(state): State<AppState>,
     Path(id): Path<String>,
+    Query(req): Query<Removal>,
 ) -> ApiResult<StatusCode> {
     let id = ft_core::HostId::from_stored(id);
     let hosts = state.db.hosts().await?;
@@ -339,24 +357,80 @@ async fn delete_host(
     }
 
     let live = state.db.live_sessions_on(&id).await?;
-    if !live.is_empty() {
+    if !live.is_empty() && !req.force {
         return Err(ApiError::new(
             ErrorCode::RepoInUse,
             format!(
-                "{} still has {} running: {}",
+                "{} still has {} running: {}. Remove it anyway to end {}.",
                 host.name,
                 if live.len() == 1 {
                     "a session".to_string()
                 } else {
                     format!("{} sessions", live.len())
                 },
-                live.join(", ")
+                live.join(", "),
+                if live.len() == 1 { "it" } else { "them" }
             ),
         ));
     }
 
+    // Ask before taking the floor away. Each one gets to tear down its own
+    // worktree and tmux session; a container about to be removed doesn't care,
+    // but a server does — that host keeps running afterwards.
+    for session in state.db.live_session_ids_on(&id).await? {
+        if !state.fleet.is_connected(&id).await {
+            break;
+        }
+        if let Err(e) = state
+            .fleet
+            .send(
+                &id,
+                ToWorker::Destroy {
+                    session_id: session.clone(),
+                    force: true,
+                },
+            )
+            .await
+        {
+            tracing::warn!(%session, "ending before removing the host: {e:#}");
+        }
+    }
+
+    // Ours on purpose: the transport is about to stop working, and an error
+    // logged for something we did deliberately reads like a fault.
+    state.fleet.disconnect(&id).await;
+
+    if let ft_core::Compute::Container { name, .. } = &host.compute {
+        if let Err(e) = remove_container(name).await {
+            // The row still goes. A container we couldn't remove is a mess on
+            // the Docker side, not a reason to keep a host nobody wants.
+            tracing::warn!(container = %name, "removing: {e:#}");
+        }
+    }
+
+    // Its sessions and events go with it — they are a record of what that
+    // worker reported, and the worker is what is being removed.
     state.db.delete_host(&id).await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// Stop and remove a worker container, and the anonymous volume holding its
+/// worktrees. Absent is success — the wanted state is "not there".
+async fn remove_container(name: &str) -> anyhow::Result<()> {
+    use anyhow::Context;
+    use tokio::process::Command;
+
+    let removed = Command::new("docker")
+        .args(["rm", "--force", "--volumes", name])
+        .output()
+        .await
+        .context("is Docker running?")?;
+
+    let stderr = String::from_utf8_lossy(&removed.stderr);
+    if !removed.status.success() && !stderr.contains("No such container") {
+        anyhow::bail!("docker refused: {}", stderr.trim());
+    }
+    Ok(())
 }
 
 #[utoipa::path(
@@ -1594,6 +1668,15 @@ async fn create_session(
         .unwrap_or_else(|| id.as_str().to_string());
     let agent_name = format!("{:?}", req.agent);
 
+    // Decided here, before the worker has been asked to do any of it, so the
+    // session page has the whole shape of the work the moment it loads.
+    let steps = ft_core::Step::plan(
+        repo.is_some(),
+        repo.as_ref()
+            .and_then(|r| r.setup.as_deref())
+            .is_some_and(|s| !s.trim().is_empty()),
+    );
+
     state
         .db
         .insert_session(
@@ -1606,6 +1689,7 @@ async fn create_session(
             checkout.as_ref().map(|(_, b, _)| b.as_str()),
             &agent_name,
             req.size,
+            &steps,
         )
         .await?;
 
