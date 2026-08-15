@@ -4,7 +4,7 @@
 
 Firetower is a control plane for coding agents. Give it a server you can SSH into and a repository, describe some work, and it picks a host, cuts a branch, makes a worktree, starts tmux, launches the agent, and keeps it running. Attach from a browser or a phone, answer questions, review the diff, ship the branch, destroy the workspace.
 
-It runs on your own machine. One binary, one directory, no account.
+It runs on your own machine. No account.
 
 ```
 $ firetower
@@ -23,16 +23,17 @@ That's why the dashboard is an inbox rather than a fleet monitor, and why a sess
 
 ## Status
 
-Early. The first milestone runs sessions on your own machine, which is the whole system with the network taken out of it:
+Early, but the loop is closed. A session can run on this machine, in a container, or on a server you SSH into. You attach in the browser, answer it, review the diff, and ship the branch. It does not need a repository — an agent can start in an empty workspace.
 
 - [x] Control plane, worker daemon, and the protocol between them
-- [x] Repository mirrors and per-session worktrees
-- [x] An event log on the worker, so a session survives your laptop sleeping
+- [x] This machine, a container here, and a server over SSH
+- [x] Repository mirrors, per-session worktrees, and sessions with no repository
+- [x] An event log on the worker, so a session survives the laptop sleeping
+- [x] The agent's terminal in the browser
+- [x] Encrypted credentials, and whether each agent is present on a host
+- [x] Diff, push, and opening a pull request
 - [x] HTTP API with a generated contract
-- [ ] tmux and the terminal in the browser
-- [ ] Credentials and agent status
-- [ ] Diff, push, pull request
-- [ ] Remote hosts over SSH
+- [ ] A hosted control plane — the worker still never dials out
 
 ## Requirements
 
@@ -41,6 +42,7 @@ Early. The first milestone runs sessions on your own machine, which is the whole
 | **Rust** 1.90+ | Builds everything. `rustup` handles the rest — the toolchain is pinned. |
 | **git** | Mirrors and worktrees. Already on most machines. |
 | **tmux** | Holds the agent's terminal. This is the piece that keeps a session alive after you disconnect, so it isn't optional. |
+| **Docker** | Postgres for the control plane, and a container host if you add one. |
 | **Node 22+ and pnpm** | Builds the web application. |
 | **[just](https://github.com/casey/just)** | Task runner. Every command below assumes it. |
 | **cargo-watch** | Rebuilds the control plane on save. Only needed for `just dev`. |
@@ -57,6 +59,8 @@ curl -fsSL https://get.pnpm.io/install.sh | sh -
 cargo install just cargo-watch
 ```
 
+Docker too, however you normally install it. `just doctor` will say if it isn't there.
+
 ## Running it
 
 ```sh
@@ -64,10 +68,12 @@ git clone https://github.com/westlabs/firetower
 cd firetower
 just doctor     # checks you have the tools
 just setup      # installs dependencies, once
-cargo run
+just dev        # Postgres, control plane on :4400, interface on :3000
 ```
 
-State lives in `~/.firetower`. Delete it and Firetower rebuilds what it can by reconnecting to your hosts — the control plane's database is a cache, not the source of truth.
+Open `http://localhost:3000`. `just dev` starts Postgres with the rest — you don't start the database by hand.
+
+Workers keep what happened on the host they run on (locally that's `~/.firetower`). The control plane's cache is Postgres. Drop the database and it rebuilds from the workers on reconnect; `just reset` wipes both.
 
 ### Connecting repositories
 
@@ -199,6 +205,7 @@ The web application has its own dev server, so development runs two processes:
 just dev        # control plane on :4400, web application on :3000
 just test
 just gen        # regenerate the API contract and the typed client
+just worker-image   # after a protocol change, or containers fail the handshake
 ```
 
 While developing, the interface and the control plane are two processes on two
@@ -207,8 +214,11 @@ ports, so the interface has to be told where the API is. That lives in
 instead of reaching the control plane, that file is why — the interface is
 asking itself.
 
-In production there's one process and the API is same-origin, so none of this
-applies.
+Don't edit Rust while a local session is cloning: `cargo watch` restarts the
+control plane, which kills the local worker as its child and abandons the
+fetch. If you change the shape of a protocol frame, bump `PROTOCOL_VERSION` in
+`ft-proto` and rebuild the worker image — an old container fails the handshake
+with the stream closing.
 
 The web application is pinned to pnpm. Running `npm install` in `web/` would
 produce a second lockfile, so `packageManager` refuses it.
@@ -231,7 +241,7 @@ produce a second lockfile, so `packageManager` refuses it.
 
 **Workers are authoritative.** They record what happened before reporting it, so closing your laptop costs nothing: when it comes back, it asks for everything since the last thing it saw.
 
-**The worker never opens a port.** It reads frames from stdin and writes them to stdout, so who dials is a transport detail — a child process today, `ssh host firetower worker --stdio` next, something else later. The daemon can't tell the difference.
+**The worker never opens a port.** It reads frames from stdin and writes them to stdout, so who dials is a transport detail — a child process, `docker exec -i`, or `ssh host firetower worker --stdio`. The daemon can't tell the difference.
 
 `localhost` is a real host, not a special case. It appears in the fleet, runs sessions, and can be drained.
 
