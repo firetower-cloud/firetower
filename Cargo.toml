@@ -6,7 +6,8 @@ members = ["crates/*"]
 default-members = ["crates/ft-cli"]
 
 [workspace.package]
-version = "0.1.0"
+# The one version. Every crate inherits it, and the release rewrites this line.
+version = "0.1.0" # x-release-please-version
 edition = "2021"
 rust-version = "1.85"
 license = "AGPL-3.0-only"

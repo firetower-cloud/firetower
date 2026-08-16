@@ -6,17 +6,18 @@
 
   "packages": {
     ".": {
-      "release-type": "rust",
+      "release-type": "simple",
       "package-name": "firetower",
       "changelog-path": "CHANGELOG.md",
 
       "extra-files": [
+        "Cargo.toml",
+        "deploy/firetower-worker.yml",
         {
           "type": "json",
           "path": "web/package.json",
           "jsonpath": "$.version"
-        },
-        "deploy/firetower-worker.yml"
+        }
       ]
     }
   }
