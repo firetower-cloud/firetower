@@ -62,6 +62,23 @@ impl Connection {
     }
 }
 
+#[cfg(test)]
+impl Connection {
+    /// A connection with no process behind it, for tests that need a worker
+    /// that answers without one existing.
+    pub(crate) fn piped(
+        reader: Box<dyn AsyncRead + Send + Unpin>,
+        writer: Box<dyn AsyncWrite + Send + Unpin>,
+    ) -> Self {
+        Self {
+            reader,
+            writer,
+            child: None,
+            tail: None,
+        }
+    }
+}
+
 /// Read a child's stderr into a ring, and into the log on the way past.
 ///
 /// Both are needed: a worker's own tracing belongs in the log, and an error

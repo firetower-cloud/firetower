@@ -10,10 +10,8 @@ import type { Cause } from './cause';
 /**
  * Why a connection didn't happen, in terms of what to do about it.
  *
- * `stream closed` is true and useless: it describes our end of a pipe rather
- * than the machine at the other end of it. Every cause below is a different
- * ten-second fix, and telling them apart is the whole difference between a
- * message someone acts on and a bug report we receive.
+ * Each cause has a different fix, and the failure they arrive as — a closed
+ * stream — distinguishes none of them.
  */
 export interface Diagnosis {
   at: string;
@@ -21,15 +19,14 @@ export interface Diagnosis {
   /**
      * What the far end actually said, verbatim.
      *
-     * Always kept, including when we recognised the cause: our summary is a
-     * guess about someone else's machine, and the raw text is what gets
-     * pasted into an issue when the guess is wrong.
+     * Kept even when the cause is recognised: the summary is an inference
+     * about another machine, and this is what survives it being wrong.
      * @nullable
      */
   detail?: string | null;
   /**
      * What to run, when there is something to run. Shown with a copy button,
-     * so it has to be the whole command and nothing else.
+     * so it must be the whole command and nothing else.
      * @nullable
      */
   remedy?: string | null;

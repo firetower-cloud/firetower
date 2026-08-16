@@ -56,11 +56,45 @@ pub struct ProbeResponse {
     pub slug: String,
     /// Read from the remote rather than assumed.
     pub default_branch: String,
+    /// True when only this machine could clone it — an ssh remote or a path.
+    #[serde(default)]
+    pub only_here: bool,
 }
 
 /// Whether a remote is a directory here rather than something reachable.
 pub(super) fn is_local_path(remote: &str) -> bool {
     remote.starts_with('/') || remote.starts_with('.') || remote.starts_with('~')
+}
+
+/// Whether every host could clone this, or only this one.
+///
+/// A token Firetower holds is sent with the work, so an https remote clones
+/// anywhere with a route to it. Two shapes can't use one:
+///
+/// - `git@host:acme/thing` authenticates with an ssh key. Yours is on this
+///   machine and travels nowhere, and git never asks the askpass helper, so the
+///   token we attach is quietly ignored.
+/// - a path is a directory that exists here and nowhere else.
+///
+/// Both clone perfectly on this machine and fail on every other one, so the
+/// difference is worth saying at the moment a URL is pasted rather than during
+/// a clone half an hour later.
+pub(super) fn only_here(remote: &str) -> bool {
+    let remote = remote.trim();
+    if is_local_path(remote) {
+        return true;
+    }
+    if remote.starts_with("ssh://") {
+        return true;
+    }
+    // `git@host:path` — an `@` and a `:` before any `/`, which is the scp-like
+    // form and not a URL.
+    match remote.split_once('@') {
+        Some((_, rest)) => rest
+            .split_once(':')
+            .is_some_and(|(host, _)| !host.contains('/')),
+        None => false,
+    }
 }
 
 /// `https://host/acme/backend.git` and `git@host:acme/backend.git` both give
@@ -92,7 +126,17 @@ fn slug_from_remote(remote: &str) -> String {
 }
 
 /// Turn a refusal into something worth reading.
-fn probe_error(remote: &str, failure: ProbeFailure) -> ApiError {
+/// Which host was asked, for a message that would otherwise be about nothing
+/// in particular. The answer depends entirely on the machine that gave it —
+/// its network, its credentials, its git — so a failure has to name it.
+fn asked(host: &ft_core::Host) -> String {
+    match host.compute {
+        ft_core::Compute::Local => "this machine".to_string(),
+        _ => host.name.clone(),
+    }
+}
+
+fn probe_error(remote: &str, failure: ProbeFailure, host: &ft_core::Host) -> ApiError {
     match failure {
         ProbeFailure::Denied => ApiError::new(
             ErrorCode::RepoAccessDenied,
@@ -107,9 +151,16 @@ fn probe_error(remote: &str, failure: ProbeFailure) -> ApiError {
                 ),
             },
         ),
+        // The bucket everything unrecognised falls into, so it is also where a
+        // probe that timed out and a connection that dropped mid-question end
+        // up. Naming the host is the difference between looking at the right
+        // machine and looking at your own.
         ProbeFailure::Unreachable => ApiError::new(
             ErrorCode::RepoUnreachable,
-            format!("couldn't reach {remote}"),
+            format!(
+                "{} couldn't reach {remote}. If it works from a terminal there,                  check the control plane's log for what git said.",
+                asked(host)
+            ),
         ),
         ProbeFailure::NotARepository => ApiError::new(
             ErrorCode::RepoUnusable,
@@ -117,24 +168,29 @@ fn probe_error(remote: &str, failure: ProbeFailure) -> ApiError {
         ),
         ProbeFailure::GitMissing => ApiError::new(
             ErrorCode::RepoUnreachable,
-            "git isn't installed on that host".to_string(),
+            format!("git isn't installed on {}", asked(host)),
         ),
     }
 }
 
-/// Pick the host that would do the cloning.
-async fn probing_host(state: &AppState) -> Result<ft_core::HostId, ApiError> {
-    let hosts = state.db.hosts().await?;
-    let host = hosts
-        .iter()
-        .find(|h| h.state == ft_core::HostState::Online)
-        .ok_or_else(|| {
-            ApiError::new(
-                ErrorCode::HostUnreachable,
-                "no host is available to check the repository",
-            )
-        })?;
-    Ok(host.id.clone())
+/// This machine, when it can answer.
+///
+/// Always this one and never a server. A repository belongs to no host — every
+/// host clones it with the same provider token — so which machine looks is
+/// arbitrary, and picking a remote one made the same paste succeed or fail for
+/// reasons that had nothing to do with the repository. This is also the only
+/// machine where a local path means anything.
+///
+/// `None` when it isn't reachable. That is not a refusal: saving a URL does not
+/// need a worker, and the caller carries on without one.
+async fn local_host(state: &AppState) -> Option<ft_core::Host> {
+    state
+        .db
+        .hosts()
+        .await
+        .ok()?
+        .into_iter()
+        .find(|h| h.compute == ft_core::Compute::Local && h.state == ft_core::HostState::Online)
 }
 
 /// Can we reach it, and what is it called?
@@ -163,17 +219,22 @@ pub(super) async fn probe_repo(
         ));
     }
 
-    let host = probing_host(&state).await?;
+    let host = local_host(&state).await.ok_or_else(|| {
+        ApiError::new(
+            ErrorCode::HostUnreachable,
+            "this machine's worker isn't running, so nothing can read the remote",
+        )
+    })?;
     let info = state
         .fleet
         .probe(
-            &host,
+            &host.id,
             remote,
             credential_for(&state, remote, &format!("checking {remote}")).await,
         )
         .await
         .map_err(|e| ApiError::new(ErrorCode::HostUnreachable, format!("{e:#}")))?
-        .map_err(|f| probe_error(remote, f))?;
+        .map_err(|f| probe_error(remote, f, &host))?;
 
     if info.empty {
         return Err(ApiError::new(
@@ -185,6 +246,7 @@ pub(super) async fn probe_repo(
     Ok(Json(ProbeResponse {
         slug: slug_from_remote(remote),
         default_branch: info.default_branch,
+        only_here: only_here(remote),
     }))
 }
 
@@ -205,26 +267,50 @@ pub(super) async fn create_repo(
         ));
     }
 
-    // Proving it works before saving it is the whole point. A row written from
-    // two unchecked strings turns into a session that dies during clone, long
-    // after anyone could connect the failure to what they typed.
-    let host = probing_host(&state).await?;
-    let info = state
-        .fleet
-        .probe(
-            &host,
-            remote,
-            credential_for(&state, remote, &format!("connecting {remote}")).await,
-        )
-        .await
-        .map_err(|e| ApiError::new(ErrorCode::HostUnreachable, format!("{e:#}")))?
-        .map_err(|f| probe_error(remote, f))?;
+    // Looked at when something can look, and saved either way.
+    //
+    // Reading the remote catches a typo while the person who made it is still
+    // on the form, and it is where the trunk's real name comes from. Neither is
+    // worth refusing to record a URL over: the row is a URL, and a session that
+    // clones it later answers the same question against the machine that
+    // actually matters.
+    let mut trunk = None;
 
-    if info.empty {
-        return Err(ApiError::new(
-            ErrorCode::RepoUnusable,
-            format!("{remote} has no commits yet, so there's nothing to branch from"),
-        ));
+    if let Some(host) = local_host(&state).await {
+        match state
+            .fleet
+            .probe(
+                &host.id,
+                remote,
+                credential_for(&state, remote, &format!("connecting {remote}")).await,
+            )
+            .await
+        {
+            Ok(Ok(info)) => {
+                if info.empty {
+                    return Err(ApiError::new(
+                        ErrorCode::RepoUnusable,
+                        format!("{remote} has no commits yet, so there's nothing to branch from"),
+                    ));
+                }
+                trunk = Some(info.default_branch);
+            }
+
+            // Facts about what was typed, and true from any machine.
+            Ok(Err(f @ (ProbeFailure::NotARepository | ProbeFailure::Denied))) => {
+                return Err(probe_error(remote, f, &host))
+            }
+
+            // Facts about this machine right now — a network that is down, a
+            // worker that stopped answering. Neither says anything about the
+            // repository, so the URL is kept and read later.
+            Ok(Err(f)) => {
+                tracing::info!(remote, ?f, "saving without checking it");
+            }
+            Err(e) => {
+                tracing::info!(remote, "saving without checking it: {e:#}");
+            }
+        }
     }
 
     let slug = match req.slug.trim() {
@@ -234,7 +320,7 @@ pub(super) async fn create_repo(
 
     let repo = state
         .db
-        .ensure_repo(&slug, remote, &info.default_branch, req.setup.as_deref())
+        .ensure_repo(&slug, remote, trunk.as_deref(), req.setup.as_deref())
         .await?;
 
     Ok((StatusCode::CREATED, Json(repo)))
@@ -260,11 +346,16 @@ pub(super) async fn repo_branches(
         .await?
         .ok_or_else(|| ApiError::not_found("repository"))?;
 
-    let host = probing_host(&state).await?;
+    let host = local_host(&state).await.ok_or_else(|| {
+        ApiError::new(
+            ErrorCode::HostUnreachable,
+            "this machine's worker isn't running, so nothing can read the remote",
+        )
+    })?;
     let info = state
         .fleet
         .probe(
-            &host,
+            &host.id,
             &repo.remote,
             credential_for(
                 &state,
@@ -275,7 +366,7 @@ pub(super) async fn repo_branches(
         )
         .await
         .map_err(|e| ApiError::new(ErrorCode::HostUnreachable, format!("{e:#}")))?
-        .map_err(|f| probe_error(&repo.remote, f))?;
+        .map_err(|f| probe_error(&repo.remote, f, &host))?;
 
     Ok(Json(Branches {
         default_branch: info.default_branch,
@@ -358,15 +449,91 @@ mod tests {
         }
     }
 
+    fn somewhere(name: &str, compute: ft_core::Compute) -> ft_core::Host {
+        ft_core::Host {
+            id: ft_core::HostId::new(),
+            name: name.into(),
+            state: ft_core::HostState::Online,
+            compute,
+            drained: false,
+            cpus: None,
+            memory_mb: None,
+            worker_version: None,
+            diagnosis: None,
+            reconnecting: false,
+        }
+    }
+
     #[test]
     fn a_refusal_on_a_known_host_points_at_authorizing_it() {
-        let e = probe_error("https://github.com/acme/private.git", ProbeFailure::Denied);
+        let e = probe_error(
+            "https://github.com/acme/private.git",
+            ProbeFailure::Denied,
+            &somewhere("localhost", ft_core::Compute::Local),
+        );
         assert!(e.message.contains("authorize"), "{}", e.message);
     }
 
     #[test]
     fn a_refusal_anywhere_else_points_at_the_credentials_already_there() {
-        let e = probe_error("/Users/kevin/code/backend", ProbeFailure::Denied);
+        let e = probe_error(
+            "/Users/kevin/code/backend",
+            ProbeFailure::Denied,
+            &somewhere("localhost", ft_core::Compute::Local),
+        );
         assert!(e.message.contains("ls-remote"), "{}", e.message);
+    }
+
+    /// The answer depends entirely on the machine that gave it — its network,
+    /// its credentials, its git. A failure that doesn't say which machine sends
+    /// you to check the wrong one, which is exactly what happened.
+    #[test]
+    fn a_failure_says_which_machine_was_asked() {
+        let e = probe_error(
+            "https://github.com/acme/thing.git",
+            ProbeFailure::Unreachable,
+            &somewhere(
+                "fire-01",
+                ft_core::Compute::Server {
+                    host: "fire-01".into(),
+                    user: None,
+                    port: None,
+                    identity_file: None,
+                    host_key: None,
+                    container: None,
+                },
+            ),
+        );
+        assert!(e.message.contains("fire-01"), "{}", e.message);
+
+        let here = probe_error(
+            "https://github.com/acme/thing.git",
+            ProbeFailure::Unreachable,
+            &somewhere("localhost", ft_core::Compute::Local),
+        );
+        assert!(here.message.contains("this machine"), "{}", here.message);
+    }
+}
+
+#[cfg(test)]
+mod portability_tests {
+    use super::only_here;
+
+    /// The token Firetower holds is sent with the work, so an https remote is
+    /// the same everywhere. These two are not, and both look like they are.
+    #[test]
+    fn an_ssh_remote_and_a_path_only_work_on_this_machine() {
+        assert!(only_here("git@github.com:acme/thing.git"));
+        assert!(only_here("ssh://git@github.com/acme/thing.git"));
+        assert!(only_here("/Users/kevin/code/thing"));
+        assert!(only_here("~/code/thing"));
+        assert!(only_here("./thing"));
+    }
+
+    #[test]
+    fn an_https_remote_travels() {
+        assert!(!only_here("https://github.com/acme/thing.git"));
+        assert!(!only_here("https://user@github.com/acme/thing.git"));
+        assert!(!only_here("http://internal.example/acme/thing.git"));
     }
 }

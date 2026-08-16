@@ -274,7 +274,7 @@ impl Db {
         &self,
         slug: &str,
         remote: &str,
-        default_branch: &str,
+        default_branch: Option<&str>,
         setup: Option<&str>,
     ) -> Result<Repo> {
         if let Some(existing) = self.repo_by_remote(remote).await? {
@@ -438,6 +438,19 @@ impl Db {
             .fetch_optional(&self.pool)
             .await?;
         Ok(row.map(repo_from_row))
+    }
+
+    /// Record the trunk once something has read the remote.
+    ///
+    /// A repository connected while nothing could answer has none, and the
+    /// first session to clone it finds out.
+    pub async fn set_default_branch(&self, id: &RepoId, branch: &str) -> Result<()> {
+        sqlx::query("UPDATE repos SET default_branch = $1 WHERE id = $2")
+            .bind(branch)
+            .bind(id.as_str())
+            .execute(&self.pool)
+            .await?;
+        Ok(())
     }
 
     pub async fn repo(&self, id: &RepoId) -> Result<Option<Repo>> {
@@ -663,6 +676,8 @@ fn host_from_row(r: sqlx::postgres::PgRow) -> Result<Host> {
         diagnosis: r
             .get::<Option<serde_json::Value>, _>("diagnosis")
             .and_then(|v| serde_json::from_value(v).ok()),
+        // Answered by the fleet, which is the only thing that knows.
+        reconnecting: false,
     })
 }
 
@@ -1162,11 +1177,11 @@ mod tests {
     async fn repositories_are_deduplicated_by_slug() {
         let db = db().await;
         let a = db
-            .ensure_repo("acme/backend", "git@x:acme/backend", "main", None)
+            .ensure_repo("acme/backend", "git@x:acme/backend", Some("main"), None)
             .await
             .unwrap();
         let b = db
-            .ensure_repo("acme/backend", "git@x:acme/backend", "main", None)
+            .ensure_repo("acme/backend", "git@x:acme/backend", Some("main"), None)
             .await
             .unwrap();
         assert_eq!(a.id, b.id);

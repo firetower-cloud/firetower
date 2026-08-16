@@ -12,6 +12,8 @@
 export interface ProbeResponse {
   /** Read from the remote rather than assumed. */
   defaultBranch: string;
+  /** True when only this machine could clone it — an ssh remote or a path. */
+  onlyHere?: boolean;
   /** Derived from the remote, and editable before saving. */
   slug: string;
 }

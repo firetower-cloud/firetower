@@ -4,7 +4,11 @@ import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useListRepos, useRepoBranches } from "@/src/api/generated/repos/repos";
 import { useListAgents } from "@/src/api/generated/agents/agents";
-import { useListHosts } from "@/src/api/generated/hosts/hosts";
+import {
+  useListHosts,
+  useConnectHost,
+  getListHostsQueryKey,
+} from "@/src/api/generated/hosts/hosts";
 import type { Agent, AgentView, Host } from "@/src/api/generated/model";
 import {
   useCreateSession,
@@ -67,8 +71,18 @@ export function Composer() {
   // Where first, then what. The machine decides which agents are available —
   // an agent is software installed on a particular host, so asking the other
   // way round means the machine you picked can vanish from its own list.
-  const hosts = allHosts.filter((h) => h.state === "Online" && !h.drained);
-  const host = hosts.find((h) => h.id === hostId) ?? hosts[0];
+  //
+  // A host that isn't answering stays on the list. Removing it says "you have
+  // no compute", which is a different thing from "we can't see your compute
+  // this second" and sends you off to add a machine you already own.
+  const hosts = allHosts.filter((h) => !h.drained);
+  const host =
+    hosts.find((h) => h.id === hostId) ??
+    hosts.find((h) => h.state === "Online") ??
+    hosts[0];
+
+  // Reconnecting counts: the launch waits for it, and it is usually seconds.
+  const usable = (h?: Host) => !!h && (h.state === "Online" || h.reconnecting);
 
   /** Whether this agent could run on the host that's currently chosen. */
   const runsHere = (a: AgentView) => (host ? canRun(a, host.id) : false);
@@ -88,7 +102,13 @@ export function Composer() {
     query: { enabled: open && !!repo },
   });
   const branches = branchInfo?.branches ?? [];
-  const chosenBase = base || branchInfo?.defaultBranch || repo?.defaultBranch || "main";
+
+  // What we know, never a guess. A repository connected while nothing could
+  // read it has no trunk yet, and sending `main` on its behalf is how you
+  // branch from the wrong place in a repository that calls it something else —
+  // the host doing the clone works it out instead.
+  const knownBase = base || branchInfo?.defaultBranch || repo?.defaultBranch;
+  const chosenBase = knownBase ?? "its default branch";
 
   const create = useCreateSession({
     mutation: {
@@ -112,7 +132,7 @@ export function Composer() {
         prompt: text.trim(),
         agent: chosenAgent,
         // Everything about a checkout goes together, or none of it does.
-        base: repo ? chosenBase : undefined,
+        base: repo ? knownBase : undefined,
         branch: repo ? branch.trim() || undefined : undefined,
         hostId: host?.id,
       },
@@ -180,9 +200,11 @@ export function Composer() {
                 agent you picked — that would hide the thing you just added. */}
             <Chip
               glyph="host"
-              value={where(host)}
-              onChange={(name) => setHostId(hosts.find((h) => where(h) === name)?.id ?? "")}
-              options={hosts.length ? hosts.map((h) => where(h)) : ["nowhere to run"]}
+              value={picked(host)}
+              onChange={(name) =>
+                setHostId(hosts.find((h) => picked(h) === name)?.id ?? "")
+              }
+              options={hosts.length ? hosts.map((h) => picked(h)) : ["nowhere to run"]}
             />
 
             <Chip
@@ -202,14 +224,18 @@ export function Composer() {
                 onClick={launch}
                 disabled={
                   !text.trim() ||
-                  !host ||
+                  !usable(host) ||
                   !chosen ||
                   !runsHere(chosen) ||
                   create.isPending
                 }
                 className="rounded-[5px] bg-ember px-3.5 py-1.5 text-[12.5px] font-semibold text-[#1a0c04] transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:bg-line disabled:text-mute"
               >
-                {create.isPending ? "Opening…" : "Launch"}
+                {create.isPending
+                  ? host?.state === "Online"
+                    ? "Opening…"
+                    : `Waiting for ${where(host)}…`
+                  : "Launch"}
               </button>
             </div>
           </div>
@@ -222,9 +248,11 @@ export function Composer() {
             </p>
           )}
 
+          {host && host.state !== "Online" && <Absent host={host} />}
+
           <p className="mt-2.5 border-t border-line pt-2.5 text-[11.5px] text-mute">
             {hosts.length === 0
-              ? "No machine is online. Add compute first."
+              ? "You have no compute. Add a machine first."
               : !chosen
                 ? "No agent to run. Install one on a host."
                 : !runsHere(chosen)
@@ -272,6 +300,59 @@ function suggestion(prompt: string) {
 function where(host?: Host) {
   if (!host) return "nowhere to run";
   return host.compute.type === "Local" ? "this machine" : host.name;
+}
+
+/** The same name, plus what we can see of the machine. */
+function picked(host?: Host) {
+  if (!host) return "nowhere to run";
+  if (host.state === "Online") return where(host);
+  return `${where(host)} — ${host.reconnecting ? "reconnecting" : "unreachable"}`;
+}
+
+/**
+ * A machine you own that we can't see.
+ *
+ * Says which of the two it is, because they need different things from you: one
+ * resolves itself in seconds, the other is waiting on you to fix something.
+ */
+function Absent({ host }: { host: Host }) {
+  const queryClient = useQueryClient();
+  const connect = useConnectHost();
+
+  const retry = () =>
+    connect.mutate(
+      { id: host.id },
+      {
+        onSuccess: () =>
+          queryClient.invalidateQueries({ queryKey: getListHostsQueryKey() }),
+      },
+    );
+
+  return (
+    <div className="mt-2.5 flex items-start gap-3 border-t border-line pt-2.5">
+      <p className="flex-1 text-[11.5px] leading-[1.5] text-mute">
+        {host.reconnecting ? (
+          <>
+            {where(host)} isn&apos;t answering — trying it again.
+            {host.diagnosis && ` ${host.diagnosis.summary}`} Launching waits up to
+            30 seconds for it.
+          </>
+        ) : (
+          <>
+            {where(host)} isn&apos;t answering.
+            {host.diagnosis && ` ${host.diagnosis.summary}`}
+          </>
+        )}
+      </p>
+      <button
+        onClick={retry}
+        disabled={connect.isPending}
+        className="shrink-0 rounded-[5px] border border-line px-2 py-1 text-[11.5px] text-dim transition-colors hover:border-[#3a3631] hover:text-text disabled:text-mute"
+      >
+        {connect.isPending ? "Trying…" : "Try now"}
+      </button>
+    </div>
+  );
 }
 
 

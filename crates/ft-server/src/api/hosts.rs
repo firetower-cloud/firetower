@@ -87,10 +87,9 @@ pub(super) async fn create_host(
     // A host that didn't answer is kept, not discarded. Most reasons a first
     // connection fails are fixable on the machine — no worker installed, no
     // container running, the wrong key — and deleting the row would mean
-    // retyping the form to retry. It is stored `Unreachable` with a diagnosis.
-    if let Err(e) = state.fleet.connect(host.id.clone(), transport).await {
-        tracing::info!(host = %host.name, "added but not yet reachable: {e:#}");
-    }
+    // retyping the form to retry. It is stored `Unreachable` with a diagnosis,
+    // and the supervisor keeps trying, so fixing the machine is enough.
+    state.fleet.supervise(host.id.clone(), transport).await;
 
     let host = state
         .db
@@ -98,7 +97,7 @@ pub(super) async fn create_host(
         .await?
         .ok_or_else(|| ApiError::not_found("host"))?;
 
-    Ok((StatusCode::CREATED, Json(host)))
+    Ok((StatusCode::CREATED, Json(seen(&state, host).await)))
 }
 
 /// Tidy what was typed into something worth storing, or say what is wrong with
@@ -271,7 +270,7 @@ pub(super) async fn delete_host(
 
     // Ours on purpose: the transport is about to stop working, and an error
     // logged for something we did deliberately reads like a fault.
-    state.fleet.disconnect(&id).await;
+    state.fleet.stop_supervising(&id).await;
 
     if let ft_core::Compute::Container { name, .. } = &host.compute {
         if let Err(e) = container::remove(name).await {
@@ -292,7 +291,54 @@ pub(super) async fn delete_host(
     responses((status = 200, body = Vec<Host>)),
 )]
 pub(super) async fn list_hosts(State(state): State<AppState>) -> ApiResult<Json<Vec<Host>>> {
-    Ok(Json(state.db.hosts().await?))
+    let mut hosts = Vec::new();
+    for host in state.db.hosts().await? {
+        hosts.push(seen(&state, host).await);
+    }
+    Ok(Json(hosts))
+}
+
+/// Fill in what only the live fleet knows.
+///
+/// Whether a host is being retried is not a fact about the row — it is a fact
+/// about this process — so it is answered here rather than stored and left to
+/// go stale across a restart.
+async fn seen(state: &AppState, mut host: Host) -> Host {
+    host.reconnecting =
+        host.state != ft_core::HostState::Online && state.fleet.is_supervised(&host.id).await;
+    host
+}
+
+/// Try a host again now, instead of waiting out the backoff.
+///
+/// The supervisor would get there on its own; this is for the moment just after
+/// you have fixed the machine and would rather not wait.
+#[utoipa::path(
+    post, path = "/api/v1/hosts/{id}/connect", tag = "hosts",
+    params(("id" = String, Path, description = "Host id")),
+    responses((status = 202), (status = 404, body = ApiError)),
+)]
+pub(super) async fn connect_host(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> ApiResult<StatusCode> {
+    let id = ft_core::HostId::from_stored(id);
+    state
+        .db
+        .host_by_id(&id)
+        .await?
+        .ok_or_else(|| ApiError::not_found("host"))?;
+
+    if !state.fleet.try_now(&id).await {
+        return Err(ApiError::new(
+            ErrorCode::Internal,
+            "nothing is keeping that host connected",
+        ));
+    }
+
+    // Accepted, not done: the attempt happens on the supervisor's own task and
+    // its result arrives as the host's state changing.
+    Ok(StatusCode::ACCEPTED)
 }
 
 #[cfg(test)]

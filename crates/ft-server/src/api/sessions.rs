@@ -21,6 +21,12 @@ use ft_proto::{CreateWorkspace, ToWorker};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
+/// How long a launch will wait for a host that is on its way back.
+///
+/// Long enough for a network to change hands or a laptop to wake, short enough
+/// that "it didn't work" arrives while you still remember asking for it.
+const RECONNECT_GRACE: std::time::Duration = std::time::Duration::from_secs(30);
+
 /// Sessions, newest first.
 ///
 /// Without `limit` this returns everything, which is what the dashboard wants —
@@ -175,11 +181,32 @@ pub(super) async fn create_session(
         ));
     }
 
+    // A host that has just dropped is usually seconds from being back — a wifi
+    // handover, a laptop waking, a container restarting. Refusing the work in
+    // that window is refusing it for a reason that has already stopped being
+    // true by the time the message is read.
+    //
+    // So we wait, but only for a host something is actively trying to reach. A
+    // host nobody is reconnecting is not coming back on its own, and waiting on
+    // it would be a promise rather than a delay.
     if !state.fleet.is_connected(&host.id).await {
-        return Err(ApiError::new(
-            ErrorCode::HostUnreachable,
-            format!("{} isn't responding", host.name),
-        ));
+        let coming_back = state.fleet.is_supervised(&host.id).await
+            && state
+                .fleet
+                .wait_until_connected(&host.id, RECONNECT_GRACE)
+                .await;
+
+        if !coming_back {
+            let why = state
+                .db
+                .host_by_id(&host.id)
+                .await?
+                .and_then(|h| h.diagnosis)
+                .map(|d| d.summary)
+                .unwrap_or_else(|| format!("{} isn't responding", host.name));
+
+            return Err(ApiError::new(ErrorCode::HostUnreachable, why));
+        }
     }
 
     // A path is a path on *this* machine. Anywhere else it is a directory that
@@ -200,6 +227,39 @@ pub(super) async fn create_session(
         ));
     }
 
+    // The trunk, for a repository nobody has read yet.
+    //
+    // A repository can be connected while no worker is reachable, so its trunk
+    // may still be unknown. Here it is knowable: this host is connected by now,
+    // and it is the machine about to do the cloning. Learned once and written
+    // back, so the next session doesn't ask again.
+    let trunk = match repo.as_ref() {
+        Some(r) if r.default_branch.is_none() && req.base.is_none() => {
+            let found = state
+                .fleet
+                .probe(
+                    &host.id,
+                    &r.remote,
+                    credential_for(&state, &r.remote, &format!("reading {}", r.slug)).await,
+                )
+                .await
+                .map_err(|e| ApiError::new(ErrorCode::HostUnreachable, format!("{e:#}")))?
+                .map_err(|f| {
+                    ApiError::new(
+                        ErrorCode::RepoUnreachable,
+                        format!("{} couldn't read {}: {f:?}", host.name, r.remote),
+                    )
+                })?;
+
+            state
+                .db
+                .set_default_branch(&r.id, &found.default_branch)
+                .await?;
+            Some(found.default_branch)
+        }
+        _ => None,
+    };
+
     // A branch the caller named has to exist, or the worktree fails later with
     // a git error rather than here with an answer.
     // Everything about a checkout is absent together, so "no repository" is one
@@ -211,7 +271,11 @@ pub(super) async fn create_session(
             .map(str::trim)
             .filter(|b| !b.is_empty())
             .map(str::to_string)
-            .unwrap_or_else(|| repo.default_branch.clone());
+            .or_else(|| trunk.clone())
+            .or_else(|| repo.default_branch.clone())
+            // Only reachable with a repository, a host that answered, and no
+            // trunk from either — which the arm above rules out.
+            .unwrap_or_else(|| "main".to_string());
 
         let branch = ft_core::sanitize_branch(
             &req.branch

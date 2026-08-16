@@ -76,8 +76,20 @@ impl GitRoot {
 
         let output = match tokio::time::timeout(PROBE_TIMEOUT, probe).await {
             Ok(Ok(out)) => out,
-            Ok(Err(e)) => return Err(classify(&format!("{e:#}"))),
-            Err(_) => return Err(ProbeFailure::Unreachable),
+            Ok(Err(e)) => {
+                // What git said, kept where someone can read it. The frame
+                // carries a category and nothing else, and `Unreachable` is
+                // also where everything unrecognised lands — so without this
+                // line a failure we have no case for is indistinguishable from
+                // a network that is genuinely down.
+                let said = format!("{e:#}");
+                tracing::warn!(remote, "ls-remote failed: {said}");
+                return Err(classify(&said));
+            }
+            Err(_) => {
+                tracing::warn!(remote, "ls-remote gave up after {PROBE_TIMEOUT:?}");
+                return Err(ProbeFailure::Unreachable);
+            }
         };
 
         // ref: refs/heads/trunk\tHEAD

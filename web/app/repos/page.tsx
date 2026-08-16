@@ -54,7 +54,7 @@ export default function Repos() {
               <div className="flex items-center gap-3">
                 <span className="font-mono text-[13.5px] text-bone">{r.slug}</span>
                 <span className="rounded-[4px] border border-line px-1.5 py-0.5 font-mono text-[10.5px] text-slate">
-                  ⑂ {r.defaultBranch}
+                  {r.defaultBranch ? `⑂ ${r.defaultBranch}` : "not read yet"}
                 </span>
                 <span className="ml-auto font-mono text-[11px] text-mute">
                   {count} {count === 1 ? "session" : "sessions"}

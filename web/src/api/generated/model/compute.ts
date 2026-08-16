@@ -21,20 +21,13 @@ export type Compute = {
   type: 'Container';
 } | {
   /**
-     * The container the worker runs in on that machine, when it runs in
-     * one. Absent runs the binary on the host itself.
+     * The container the worker runs in on that machine. Absent runs the
+     * binary on the host itself, for a machine whose image already has it.
      *
-     * Two shapes, one field. A machine you already use gets a container,
-     * so nothing of ours lands on it and removing it is `docker rm`. A
-     * machine built to be a worker has Firetower in its image and needs no
-     * second layer. Neither is reached by putting an sshd in a container:
-     * that means a key inside the image, a published port, and a host key
-     * that changes every time it is recreated. We ssh to the machine, and
-     * `docker exec` from there.
-     *
-     * `default` so rows stored before this existed still read; not
-     * skipped when absent, because the contract and the wire have to name
-     * the same fields — see the test at the bottom of this file.
+     * Reached by ssh-ing to the machine and running `docker exec` there,
+     * never by ssh-ing into the container — that would need a key inside
+     * the image, a published port, and a host key that changes on every
+     * recreate.
      * @nullable
      */
   container?: string | null;

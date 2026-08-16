@@ -11,7 +11,14 @@ import type { RepoId } from './repoId';
  * A repository Firetower can cut worktrees from.
  */
 export interface Repo {
-  defaultBranch: string;
+  /**
+     * The trunk, once something has read the remote.
+     *
+     * Absent until then: a repository can be connected while no worker is
+     * reachable, and the first session to clone it fills this in.
+     * @nullable
+     */
+  defaultBranch?: string | null;
   id: RepoId;
   /** Where the worker clones from. */
   remote: string;

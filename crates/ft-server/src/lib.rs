@@ -101,12 +101,11 @@ pub async fn run(config: Config) -> Result<()> {
         };
 
         // A host we can't reach isn't fatal: its sessions stay visible, marked
-        // unreachable, and the interface still works.
-        if let Err(e) = fleet.connect(host.id.clone(), transport).await {
-            tracing::warn!(host = %host.name, "not reachable at start-up: {e:#}");
-        } else {
-            tracing::info!(host = %host.name, kind = host.compute.label(), "connected");
-        }
+        // unreachable, and the interface still works. The supervisor keeps
+        // trying in the background, so start-up waits for one attempt and no
+        // more.
+        fleet.supervise(host.id.clone(), transport).await;
+        tracing::info!(host = %host.name, kind = host.compute.label(), "supervised");
     }
 
     let state = AppState {

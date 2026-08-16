@@ -9,7 +9,7 @@ import * as zod from 'zod';
 
 
 export const ListReposResponseItem = zod.object({
-  "defaultBranch": zod.string(),
+  "defaultBranch": zod.string().nullish().describe('The trunk, once something has read the remote.\n\nAbsent until then: a repository can be connected while no worker is\nreachable, and the first session to clone it fills this in.'),
   "id": zod.string().describe('Identifies a connected repository.'),
   "remote": zod.string().describe('Where the worker clones from.'),
   "setup": zod.string().nullish().describe('Runs once per session before the agent starts.'),
@@ -24,7 +24,7 @@ export const CreateRepoBody = zod.object({
 }).describe('Connect a repository. Nothing is cloned until a session needs it.\n\nNo default branch here on purpose. Connecting reaches for the remote anyway,\nand what it answers with is the truth — a branch named by the caller was\naccepted and then ignored, which is worse than not asking.')
 
 export const CreateRepoResponse = zod.object({
-  "defaultBranch": zod.string(),
+  "defaultBranch": zod.string().nullish().describe('The trunk, once something has read the remote.\n\nAbsent until then: a repository can be connected while no worker is\nreachable, and the first session to clone it fills this in.'),
   "id": zod.string().describe('Identifies a connected repository.'),
   "remote": zod.string().describe('Where the worker clones from.'),
   "setup": zod.string().nullish().describe('Runs once per session before the agent starts.'),
@@ -43,6 +43,7 @@ export const ProbeRepoBody = zod.object({
 
 export const ProbeRepoResponse = zod.object({
   "defaultBranch": zod.string().describe('Read from the remote rather than assumed.'),
+  "onlyHere": zod.boolean().optional().describe('True when only this machine could clone it — an ssh remote or a path.'),
   "slug": zod.string().describe('Derived from the remote, and editable before saving.')
 }).describe('What we learned by actually reaching for the repository.')
 

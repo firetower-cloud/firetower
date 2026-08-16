@@ -362,6 +362,13 @@ pub struct Host {
     /// Why it isn't answering, when it isn't. Cleared as soon as it does.
     #[serde(default)]
     pub diagnosis: Option<Diagnosis>,
+    /// Whether we are still trying to reach it.
+    ///
+    /// A fact about the running control plane rather than about the host, so it
+    /// is answered per request and never stored. Distinguishes a machine on its
+    /// way back from one nobody is looking for.
+    #[serde(default)]
+    pub reconnecting: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
@@ -581,7 +588,12 @@ pub struct Repo {
     pub slug: String,
     /// Where the worker clones from.
     pub remote: String,
-    pub default_branch: String,
+    /// The trunk, once something has read the remote.
+    ///
+    /// Absent until then: a repository can be connected while no worker is
+    /// reachable, and the first session to clone it fills this in.
+    #[serde(default)]
+    pub default_branch: Option<String>,
     /// Runs once per session before the agent starts.
     pub setup: Option<String>,
 }

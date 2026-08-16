@@ -21,6 +21,27 @@ use tokio::sync::{broadcast, mpsc, oneshot, RwLock};
 /// itself stopped answering.
 const PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
+/// How often to provoke an answer when nothing else is being said.
+const HEARTBEAT: std::time::Duration = std::time::Duration::from_secs(20);
+
+/// How long a worker may say nothing at all before the connection is treated as
+/// dead. Comfortably more than two heartbeats, so one lost frame is not enough.
+const SILENCE: std::time::Duration = std::time::Duration::from_secs(50);
+
+/// The longest gap between attempts to reach a host.
+///
+/// The cap matters more than the growth: a machine that comes back should be
+/// noticed within a minute, and one that is genuinely gone shouldn't be
+/// hammered.
+const RETRY_CAP: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// The shortest gap when the last failure was something a human has to fix.
+///
+/// A refused key or a changed host key will not resolve itself, so there is
+/// nothing to gain by asking every second — but we keep asking, because the
+/// human may well be fixing it right now.
+const RETRY_FLOOR_HUMAN: std::time::Duration = std::time::Duration::from_secs(30);
+
 use crate::transport::Transport;
 
 /// A session's terminal, as it reaches a viewer.
@@ -41,6 +62,16 @@ enum Waiting {
     Summary(oneshot::Sender<WorkSummary>),
 }
 
+/// A request waiting on an answer, and which host owes it.
+///
+/// The host matters when a connection ends: only the requests that were sent
+/// down *that* connection are lost. Failing the rest would mean one host
+/// dropping takes down work happening on every other one.
+struct Asked {
+    host: String,
+    waiting: Waiting,
+}
+
 #[derive(Clone)]
 pub struct Fleet {
     db: Db,
@@ -49,10 +80,58 @@ pub struct Fleet {
     events: broadcast::Sender<Event>,
     /// Requests waiting for their answer. Most frames are one-way and correlate
     /// on a session; a probe has no session, so it correlates on its own id.
-    probes: Arc<RwLock<HashMap<ReqId, Waiting>>>,
+    probes: Arc<RwLock<HashMap<ReqId, Asked>>>,
     /// Live terminals, one broadcast per session. The worker holds a single
     /// attachment; this is where it fans out to however many are watching.
     terminals: Arc<RwLock<HashMap<String, broadcast::Sender<Terminal>>>>,
+    /// One per host we are keeping connected, whether or not it is answering.
+    ///
+    /// A host is in here from the moment it is added until it is removed, which
+    /// is what tells "we are trying and it isn't answering yet" apart from "we
+    /// stopped trying". Dropping the sender ends its supervisor.
+    supervised: Arc<RwLock<HashMap<String, mpsc::Sender<Nudge>>>>,
+}
+
+/// A word to a supervisor between attempts.
+enum Nudge {
+    /// Stop waiting out the backoff and try now.
+    TryNow,
+}
+
+/// How long to wait before the next attempt.
+///
+/// Doubles to a cap, with a little noise on top. The noise is what stops a
+/// laptop waking up from putting every host on the same schedule for the rest
+/// of the day — they all fail together, so without it they all retry together,
+/// forever.
+fn backoff(attempt: u32, cause: Option<ft_core::Cause>) -> std::time::Duration {
+    if attempt == 0 {
+        return std::time::Duration::ZERO;
+    }
+
+    let doubled = std::time::Duration::from_secs(1) * 2u32.saturating_pow(attempt.min(6) - 1);
+    let mut wait = doubled.min(RETRY_CAP);
+
+    if matches!(
+        cause,
+        Some(ft_core::Cause::AuthRefused)
+            | Some(ft_core::Cause::HostKeyChanged)
+            | Some(ft_core::Cause::ProtocolMismatch)
+    ) {
+        wait = wait.max(RETRY_FLOOR_HUMAN);
+    }
+
+    // Up to a fifth longer. Cheap, and enough to break a lockstep.
+    //
+    // The modulus is prime on purpose. The clock reports nanoseconds but only
+    // moves in microseconds, so every reading is a multiple of 1000 — take it
+    // modulo anything that divides 1000 and the answer is always the same
+    // number, which is jitter that does nothing at all.
+    let spread = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.subsec_nanos() % 199)
+        .unwrap_or(0);
+    wait + (wait / 1000) * spread
 }
 
 impl Fleet {
@@ -64,6 +143,7 @@ impl Fleet {
             events,
             probes: Arc::new(RwLock::new(HashMap::new())),
             terminals: Arc::new(RwLock::new(HashMap::new())),
+            supervised: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
@@ -127,11 +207,171 @@ impl Fleet {
         }
     }
 
+    /// Keep a host connected for as long as it exists.
+    ///
+    /// One task per host, holding the statement "this should be connected".
+    /// It connects, serves until the connection ends, waits, and tries again —
+    /// so a laptop that slept, a wifi that changed and a server that rebooted
+    /// all heal on their own instead of needing the control plane restarted.
+    ///
+    /// Returns once the first attempt has been made, so a host added by hand
+    /// can report what happened while someone is still looking at the form.
+    /// Retrying carries on in the background either way.
+    pub async fn supervise(&self, host_id: HostId, transport: Arc<dyn Transport>) {
+        // Already ours. Two supervisors on one host would be two connections
+        // racing to register in the same slot.
+        if self
+            .supervised
+            .read()
+            .await
+            .contains_key(&host_id.to_string())
+        {
+            return;
+        }
+
+        let (nudge, mut nudged) = mpsc::channel::<Nudge>(1);
+        self.supervised
+            .write()
+            .await
+            .insert(host_id.to_string(), nudge);
+
+        let (first, waited) = oneshot::channel::<()>();
+        let fleet = self.clone();
+
+        tokio::spawn(async move {
+            let mut first = Some(first);
+            let mut attempt: u32 = 0;
+
+            loop {
+                // The supervisor outlives any one connection, so a host removed
+                // while we were sleeping has to be noticed here.
+                if !fleet
+                    .supervised
+                    .read()
+                    .await
+                    .contains_key(&host_id.to_string())
+                {
+                    break;
+                }
+
+                let outcome = fleet
+                    .connect(host_id.clone(), transport.clone(), &mut first)
+                    .await;
+
+                // Fires here only when the attempt failed before the handshake;
+                // a connection that came up already reported itself.
+                if let Some(tell) = first.take() {
+                    let _ = tell.send(());
+                }
+
+                match outcome {
+                    // Served and ended. Whatever went wrong is over, so the
+                    // next failure starts counting from the beginning again.
+                    Ok(()) => attempt = 0,
+                    Err(e) => {
+                        attempt = attempt.saturating_add(1);
+                        tracing::debug!(host = %host_id, attempt, "not reachable: {e:#}");
+                    }
+                }
+
+                let cause = fleet
+                    .db
+                    .host_by_id(&host_id)
+                    .await
+                    .ok()
+                    .flatten()
+                    .and_then(|h| h.diagnosis)
+                    .map(|d| d.cause);
+
+                let wait = backoff(attempt, cause);
+                tracing::debug!(host = %host_id, "next attempt in {:?}", wait);
+
+                tokio::select! {
+                    _ = tokio::time::sleep(wait) => {}
+                    // Someone pressed reconnect, or the supervisor was dropped.
+                    got = nudged.recv() => match got {
+                        Some(Nudge::TryNow) => {}
+                        None => break,
+                    },
+                }
+            }
+
+            tracing::debug!(host = %host_id, "no longer supervised");
+        });
+
+        // The first attempt, and no more than that: a host that is down should
+        // not hold up start-up or a form.
+        let _ = waited.await;
+    }
+
+    /// Stop keeping a host connected, and drop the connection it has.
+    ///
+    /// Without this a removed host keeps a supervisor reconnecting to something
+    /// that no longer exists, and adding it again would make a second one.
+    pub async fn stop_supervising(&self, host_id: &HostId) {
+        self.supervised.write().await.remove(&host_id.to_string());
+        self.disconnect(host_id).await;
+    }
+
+    /// Try again now rather than waiting out the backoff.
+    ///
+    /// Returns whether there was a supervisor to tell.
+    pub async fn try_now(&self, host_id: &HostId) -> bool {
+        let supervised = self.supervised.read().await;
+        match supervised.get(&host_id.to_string()) {
+            Some(tx) => {
+                // A full channel already has an attempt queued, which is the
+                // same outcome as adding another.
+                let _ = tx.try_send(Nudge::TryNow);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Whether we are still trying to reach this host.
+    ///
+    /// True from being added until being removed, including while it is down.
+    /// This is what tells "on its way back" apart from "nobody is looking".
+    pub async fn is_supervised(&self, host_id: &HostId) -> bool {
+        self.supervised
+            .read()
+            .await
+            .contains_key(&host_id.to_string())
+    }
+
+    /// Wait for a host to answer, up to `limit`.
+    ///
+    /// For work that arrives in the gap between a connection dropping and the
+    /// supervisor rebuilding it — usually seconds, and worth waiting out rather
+    /// than refusing.
+    pub async fn wait_until_connected(&self, host_id: &HostId, limit: std::time::Duration) -> bool {
+        let until = std::time::Instant::now() + limit;
+        loop {
+            if self.is_connected(host_id).await {
+                return true;
+            }
+            if std::time::Instant::now() >= until || !self.is_supervised(host_id).await {
+                return false;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+        }
+    }
+
     /// Connect to a host, handshake, and start serving its frames.
     ///
     /// The first thing sent after the handshake is a resume request, so anything
     /// that happened while we were away arrives before anything new.
-    pub async fn connect(&self, host_id: HostId, transport: Arc<dyn Transport>) -> Result<()> {
+    /// `ready` is fired as soon as the handshake resolves, because this call
+    /// then goes on to serve the connection and does not return until it ends.
+    /// Waiting for the return value to learn whether a host answered would mean
+    /// waiting for it to stop answering.
+    async fn connect(
+        &self,
+        host_id: HostId,
+        transport: Arc<dyn Transport>,
+        ready: &mut Option<oneshot::Sender<()>>,
+    ) -> Result<()> {
         let compute = self.compute_of(&host_id).await;
 
         let mut conn = match transport.connect().await {
@@ -215,6 +455,11 @@ impl Fleet {
         let (tx, mut rx) = mpsc::channel::<ToWorker>(64);
         self.workers.write().await.insert(host_id.to_string(), tx);
 
+        // Reachable from here on, so whoever was waiting to hear can stop.
+        if let Some(tell) = ready.take() {
+            let _ = tell.send(());
+        }
+
         // Ask what this host has as soon as it turns up. Waiting for someone to
         // press a button means a fresh install reports no agents at all, which
         // reads as "nothing works" rather than "nobody has looked yet".
@@ -239,13 +484,41 @@ impl Fleet {
         let probes = self.probes.clone();
         let terminals = self.terminals.clone();
 
-        tokio::spawn(async move {
+        {
             // conn is moved in so the child process outlives this scope
             let mut conn = conn;
             let mut codec = Codec::new(&mut conn.reader, &mut conn.writer);
 
+            // A connection can die without ever failing a read. A laptop that
+            // slept, a network that changed underneath us: the socket goes
+            // quiet rather than closed, and a loop waiting for a frame waits
+            // for one that is never coming while the host still looks healthy.
+            //
+            // So the silence is timed. Anything inbound counts as proof of
+            // life; a Ping is only there to provoke one when nothing else is
+            // happening.
+            let mut beat = tokio::time::interval(HEARTBEAT);
+            beat.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            let mut last_heard = std::time::Instant::now();
+
             loop {
+                if last_heard.elapsed() > SILENCE {
+                    tracing::warn!(
+                        host = %host_id,
+                        "no answer for {}s; treating the connection as dead",
+                        SILENCE.as_secs(),
+                    );
+                    break;
+                }
+
                 tokio::select! {
+                    _ = beat.tick() => {
+                        if let Err(e) = codec.write(&ToWorker::Ping).await {
+                            tracing::warn!(host = %host_id, "heartbeat: {e}");
+                            break;
+                        }
+                    }
+
                     outbound = rx.recv() => match outbound {
                         Some(frame) => {
                             if let Err(e) = codec.write(&frame).await {
@@ -256,7 +529,12 @@ impl Fleet {
                         None => break,
                     },
 
-                    inbound = codec.read::<ToServer>() => match inbound {
+                    inbound = codec.read::<ToServer>() => {
+                        // Any frame is proof of life, whatever it says.
+                        if inbound.is_ok() {
+                            last_heard = std::time::Instant::now();
+                        }
+                        match inbound {
                         Ok(ToServer::Event { seq, session_id, kind, at }) => {
                             if let Err(e) = db.record_event(&host_id, seq, &session_id, &kind, at).await {
                                 tracing::error!("recording event: {e:#}");
@@ -269,7 +547,7 @@ impl Fleet {
                             // The receiver is gone when the request timed out
                             // or the browser navigated away.
                             match probes.write().await.remove(&req) {
-                                Some(Waiting::Remote(reply)) => { let _ = reply.send(result); }
+                                Some(Asked { waiting: Waiting::Remote(reply), .. }) => { let _ = reply.send(result); }
                                 Some(other) => { probes.write().await.insert(req, other); }
                                 None => tracing::debug!("a probe answer arrived after its request gave up"),
                             }
@@ -289,24 +567,24 @@ impl Fleet {
                         }
                         Ok(ToServer::ActionDone { req, result }) => {
                             match probes.write().await.remove(&req) {
-                                Some(Waiting::Action(reply)) => { let _ = reply.send(result); }
+                                Some(Asked { waiting: Waiting::Action(reply), .. }) => { let _ = reply.send(result); }
                                 // A summary that failed comes back as an action
                                 // error, since there is no summary to send.
-                                Some(Waiting::Summary(_)) => {}
+                                Some(Asked { waiting: Waiting::Summary(_), .. }) => {}
                                 Some(other) => { probes.write().await.insert(req, other); }
                                 None => tracing::debug!("an action finished after its request gave up"),
                             }
                         }
                         Ok(ToServer::Summarized { req, summary }) => {
                             match probes.write().await.remove(&req) {
-                                Some(Waiting::Summary(reply)) => { let _ = reply.send(summary); }
+                                Some(Asked { waiting: Waiting::Summary(reply), .. }) => { let _ = reply.send(summary); }
                                 Some(other) => { probes.write().await.insert(req, other); }
                                 None => tracing::debug!("a summary arrived after its request gave up"),
                             }
                         }
                         Ok(ToServer::AgentsProbed { req, agents }) => {
                             match probes.write().await.remove(&req) {
-                                Some(Waiting::Agents(reply)) => { let _ = reply.send(agents); }
+                                Some(Asked { waiting: Waiting::Agents(reply), .. }) => { let _ = reply.send(agents); }
                                 Some(other) => { probes.write().await.insert(req, other); }
                                 None => tracing::debug!("an agent probe answered after its request gave up"),
                             }
@@ -323,16 +601,30 @@ impl Fleet {
                             tracing::error!(host = %host_id, "reading from worker: {e}");
                             break;
                         }
+                        }
                     },
                 }
             }
 
             // Sessions on this host keep running; we just can't see them.
             workers.write().await.remove(&host_id.to_string());
-            // Anything still waiting on this worker will never hear back, so
-            // fail it now rather than leaving the interface spinning.
-            for (_, waiting) in probes.write().await.drain() {
-                match waiting {
+            // Anything still waiting on *this* worker will never hear back, so
+            // fail it now rather than leaving the interface spinning. Requests
+            // sent to other hosts are untouched: they are still on connections
+            // that are still up, and failing them here would make one machine
+            // dropping look like every machine dropping.
+            let mine: Vec<ReqId> = {
+                let held = probes.read().await;
+                held.iter()
+                    .filter(|(_, asked)| asked.host == host_id.to_string())
+                    .map(|(req, _)| req.clone())
+                    .collect()
+            };
+            for req in mine {
+                let Some(asked) = probes.write().await.remove(&req) else {
+                    continue;
+                };
+                match asked.waiting {
                     Waiting::Remote(reply) => {
                         let _ = reply.send(Err(ProbeFailure::Unreachable));
                     }
@@ -345,7 +637,7 @@ impl Fleet {
                 }
             }
             let _ = db.mark_host_unreachable(&host_id).await;
-        });
+        }
 
         Ok(())
     }
@@ -374,10 +666,13 @@ impl Fleet {
     ) -> Result<Result<RemoteInfo, ProbeFailure>> {
         let req = ulid::Ulid::new().to_string();
         let (tx, rx) = oneshot::channel();
-        self.probes
-            .write()
-            .await
-            .insert(req.clone(), Waiting::Remote(tx));
+        self.probes.write().await.insert(
+            req.clone(),
+            Asked {
+                host: host_id.to_string(),
+                waiting: Waiting::Remote(tx),
+            },
+        );
 
         let sent = self
             .send(
@@ -411,10 +706,13 @@ impl Fleet {
     pub async fn probe_agents(&self, host_id: &HostId) -> Result<Vec<AgentPresence>> {
         let req = ulid::Ulid::new().to_string();
         let (tx, rx) = oneshot::channel();
-        self.probes
-            .write()
-            .await
-            .insert(req.clone(), Waiting::Agents(tx));
+        self.probes.write().await.insert(
+            req.clone(),
+            Asked {
+                host: host_id.to_string(),
+                waiting: Waiting::Agents(tx),
+            },
+        );
 
         if let Err(e) = self
             .send(host_id, ToWorker::ProbeAgents { req: req.clone() })
@@ -538,10 +836,13 @@ impl Fleet {
     ) -> Result<Result<String, String>> {
         let req = ulid::Ulid::new().to_string();
         let (tx, rx) = oneshot::channel();
-        self.probes
-            .write()
-            .await
-            .insert(req.clone(), Waiting::Action(tx));
+        self.probes.write().await.insert(
+            req.clone(),
+            Asked {
+                host: host_id.to_string(),
+                waiting: Waiting::Action(tx),
+            },
+        );
 
         if let Err(e) = self
             .send(
@@ -574,10 +875,13 @@ impl Fleet {
     pub async fn summarize(&self, host_id: &HostId, session_id: &SessionId) -> Result<WorkSummary> {
         let req = ulid::Ulid::new().to_string();
         let (tx, rx) = oneshot::channel();
-        self.probes
-            .write()
-            .await
-            .insert(req.clone(), Waiting::Summary(tx));
+        self.probes.write().await.insert(
+            req.clone(),
+            Asked {
+                host: host_id.to_string(),
+                waiting: Waiting::Summary(tx),
+            },
+        );
 
         if let Err(e) = self
             .send(
@@ -615,5 +919,220 @@ impl Fleet {
     /// something we did on purpose.
     pub async fn disconnect(&self, host_id: &HostId) {
         self.workers.write().await.remove(&host_id.to_string());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::Db;
+    use crate::transport::Connection;
+
+    /// A machine that is never there.
+    struct Never;
+
+    #[async_trait::async_trait]
+    impl Transport for Never {
+        fn describe(&self) -> String {
+            "a host that isn't there".to_string()
+        }
+        async fn connect(&self) -> Result<Connection> {
+            anyhow::bail!("ssh: connect to host fire-01 port 22: Connection timed out")
+        }
+    }
+
+    async fn fleet() -> (Fleet, HostId) {
+        let db = Db::open_for_test().await.unwrap();
+        let host = db
+            .ensure_host("fire-01", ft_core::Compute::Local)
+            .await
+            .unwrap();
+        (Fleet::new(db), host.id)
+    }
+
+    #[test]
+    fn waiting_grows_and_then_stops_growing() {
+        let plain = |n| backoff(n, None);
+
+        assert_eq!(plain(0), std::time::Duration::ZERO, "the first try is now");
+        assert!(
+            plain(1) < plain(3),
+            "a host that keeps failing is asked less"
+        );
+        assert!(
+            plain(20) <= RETRY_CAP + RETRY_CAP / 5,
+            "a machine that comes back should be noticed within about a minute"
+        );
+    }
+
+    /// A key nobody accepted is not going to start being accepted a second
+    /// later, and each attempt is a process.
+    #[test]
+    fn a_failure_needing_a_human_is_asked_about_less_often() {
+        let soon = backoff(1, None);
+        let later = backoff(1, Some(ft_core::Cause::AuthRefused));
+        assert!(later > soon, "{later:?} should be longer than {soon:?}");
+        assert!(later >= RETRY_FLOOR_HUMAN);
+    }
+
+    /// Every host fails at the same moment when a laptop sleeps. Without a
+    /// spread they then retry in lockstep for as long as they are down.
+    #[test]
+    fn waiting_is_not_identical_every_time() {
+        let mut seen = std::collections::HashSet::new();
+        for _ in 0..50 {
+            seen.insert(backoff(6, None).as_nanos());
+            std::thread::sleep(std::time::Duration::from_micros(50));
+        }
+        assert!(seen.len() > 1, "every wait was exactly the same length");
+    }
+
+    /// The point of the supervisor: a host that didn't answer is still ours,
+    /// and something is still trying. That is what the interface reads to tell
+    /// "on its way back" from "nobody is looking".
+    #[tokio::test]
+    async fn a_host_that_never_answers_is_still_being_tried() {
+        let (fleet, host) = fleet().await;
+
+        fleet.supervise(host.clone(), Arc::new(Never)).await;
+
+        assert!(fleet.is_supervised(&host).await);
+        assert!(!fleet.is_connected(&host).await);
+
+        let said = fleet.db.host_by_id(&host).await.unwrap().unwrap();
+        assert_eq!(said.state, ft_core::HostState::Unreachable);
+        assert!(said.diagnosis.is_some(), "it should have said why");
+
+        fleet.stop_supervising(&host).await;
+        assert!(!fleet.is_supervised(&host).await);
+    }
+
+    /// Two supervisors on one host would be two connections racing to register
+    /// in the same slot, and only one of them would be reachable.
+    #[tokio::test]
+    async fn supervising_twice_is_supervising_once() {
+        let (fleet, host) = fleet().await;
+
+        fleet.supervise(host.clone(), Arc::new(Never)).await;
+        fleet.supervise(host.clone(), Arc::new(Never)).await;
+
+        assert_eq!(fleet.supervised.read().await.len(), 1);
+        fleet.stop_supervising(&host).await;
+    }
+
+    /// Waiting for a host nobody is trying to reach would be waiting forever
+    /// for a promise that was never made.
+    #[tokio::test]
+    async fn nothing_waits_on_a_host_that_is_not_being_tried() {
+        let (fleet, host) = fleet().await;
+
+        let began = std::time::Instant::now();
+        let came_back = fleet
+            .wait_until_connected(&host, std::time::Duration::from_secs(30))
+            .await;
+
+        assert!(!came_back);
+        assert!(
+            began.elapsed() < std::time::Duration::from_secs(1),
+            "it should not have waited out the whole grace period"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_host_nobody_supervises_cannot_be_asked_to_try_now() {
+        let (fleet, host) = fleet().await;
+        assert!(!fleet.try_now(&host).await);
+
+        fleet.supervise(host.clone(), Arc::new(Never)).await;
+        assert!(fleet.try_now(&host).await);
+        fleet.stop_supervising(&host).await;
+    }
+}
+
+#[cfg(test)]
+mod supervisor_tests {
+    use super::*;
+    use crate::db::Db;
+    use crate::transport::Connection;
+
+    /// A worker that answers, and keeps the connection open afterwards.
+    struct Alive {
+        once: std::sync::Mutex<Option<Connection>>,
+    }
+
+    impl Alive {
+        fn new() -> Arc<Self> {
+            let (ours, theirs) = tokio::io::duplex(4096);
+
+            tokio::spawn(async move {
+                let (r, w) = tokio::io::split(theirs);
+                let mut codec = Codec::new(r, w);
+                while let Ok(frame) = codec.read::<ToWorker>().await {
+                    let answer = match frame {
+                        ToWorker::Hello { .. } => Some(ToServer::Hello {
+                            protocol: PROTOCOL_VERSION,
+                            worker_version: "0.1.0".to_string(),
+                            arch: "test".to_string(),
+                            cpus: 1,
+                            memory_mb: 0,
+                        }),
+                        ToWorker::Ping => Some(ToServer::Pong),
+                        _ => None,
+                    };
+                    if let Some(answer) = answer {
+                        if codec.write(&answer).await.is_err() {
+                            break;
+                        }
+                    }
+                }
+            });
+
+            let (r, w) = tokio::io::split(ours);
+            Arc::new(Self {
+                once: std::sync::Mutex::new(Some(Connection::piped(Box::new(r), Box::new(w)))),
+            })
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl Transport for Alive {
+        fn describe(&self) -> String {
+            "a worker that answers".to_string()
+        }
+        async fn connect(&self) -> Result<Connection> {
+            self.once
+                .lock()
+                .unwrap()
+                .take()
+                .context("this fake worker can only be connected to once")
+        }
+    }
+
+    /// Serving a connection happens inside `connect`, so it only returns when
+    /// the connection *ends*. Waiting for that to learn whether a host answered
+    /// means waiting for it to stop answering — which held up start-up at the
+    /// first host that worked, and left everything after it unsupervised.
+    #[tokio::test]
+    async fn supervising_returns_while_the_host_is_still_connected() {
+        let db = Db::open_for_test().await.unwrap();
+        let host = db
+            .ensure_host("fire-01", ft_core::Compute::Local)
+            .await
+            .unwrap();
+        let fleet = Fleet::new(db);
+
+        tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            fleet.supervise(host.id.clone(), Alive::new()),
+        )
+        .await
+        .expect("it must not wait for the connection to end");
+
+        assert!(
+            fleet.is_connected(&host.id).await,
+            "it should have come back with the host connected, not disconnected"
+        );
+
+        fleet.stop_supervising(&host.id).await;
     }
 }

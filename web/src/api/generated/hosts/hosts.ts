@@ -324,6 +324,78 @@ export const useDeleteHost = <TError = ApiError,
       > => {
       return useMutation(getDeleteHostMutationOptions(options), queryClient);
     }
+    export const getConnectHostUrl = (id: string,) => {
+
+
+
+
+  return `/api/v1/hosts/${id}/connect`
+}
+
+/**
+ * The supervisor would get there on its own; this is for the moment just after
+ * you have fixed the machine and would rather not wait.
+ * @summary Try a host again now, instead of waiting out the backoff.
+ */
+export const connectHost = async (id: string, options?: Parameters<typeof http>[1]): Promise<void> => {
+
+  return http<void>(getConnectHostUrl(id),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getConnectHostMutationOptions = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof connectHost>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof http>}
+): UseMutationOptions<Awaited<ReturnType<typeof connectHost>>, TError,{id: string}, TContext> => {
+
+const mutationKey = ['connectHost'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof connectHost>>, {id: string}> = (props) => {
+          const {id} = props ?? {};
+
+          return  connectHost(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ConnectHostMutationResult = NonNullable<Awaited<ReturnType<typeof connectHost>>>
+
+    export type ConnectHostMutationError = ApiError
+
+    /**
+ * @summary Try a host again now, instead of waiting out the backoff.
+ */
+export const useConnectHost = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof connectHost>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof connectHost>>,
+        TError,
+        {id: string},
+        TContext
+      > => {
+      return useMutation(getConnectHostMutationOptions(options), queryClient);
+    }
     export const getDrainHostUrl = (id: string,) => {
 
 

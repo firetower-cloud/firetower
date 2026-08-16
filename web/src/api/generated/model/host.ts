@@ -34,6 +34,14 @@ export interface Host {
   memoryMb?: number | null;
   /** What the user calls it. `localhost` is a real host, not a special case. */
   name: string;
+  /**
+     * Whether we are still trying to reach it.
+     *
+     * A fact about the running control plane rather than about the host, so it
+     * is answered per request and never stored. Distinguishes a machine on its
+     * way back from one nobody is looking for.
+     */
+  reconnecting?: boolean;
   state: HostState;
   /** @nullable */
   workerVersion?: string | null;
