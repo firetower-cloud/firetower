@@ -61,16 +61,6 @@ const NAV = [
       </>
     ),
   },
-  {
-    href: "/mobile",
-    label: "On your phone",
-    icon: (
-      <>
-        <rect x="3.5" y="1.5" width="7" height="11" rx="1.4" strokeWidth="1.3" />
-        <path d="M6.4 10.6h1.2" strokeWidth="1.3" strokeLinecap="round" />
-      </>
-    ),
-  },
 ];
 
 export function Shell({ children }: { children: React.ReactNode }) {
