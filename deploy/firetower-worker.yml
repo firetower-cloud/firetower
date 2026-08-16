@@ -13,7 +13,7 @@ services:
     # Rewritten when a version is cut, so this always names a release that
     # exists. Before the first release, use `:edge` — built from every push to
     # main.
-    image: ghcr.io/firetower-cloud/firetower-worker:0.1.0 # x-release-please-version
+    image: ghcr.io/firetower-cloud/firetower-worker:0.2.0 # x-release-please-version
     container_name: firetower-worker
 
     # Comes back after a reboot, and after Docker restarts.
