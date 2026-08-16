@@ -16,3 +16,5 @@ node_modules
 /.firetower
 # The ssh key pair the dev worker container is reached with.
 /.dev
+
+/.claude-memory.md
