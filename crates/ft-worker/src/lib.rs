@@ -33,6 +33,12 @@ pub struct Worker {
     attached: Mutex<HashMap<String, attach::Attachment>>,
 }
 
+/// How many frames may be queued for the control plane at once.
+///
+/// Anything that can produce more than this in one go has to run off the serve
+/// loop — see [`takes_a_while`].
+const OUTBOUND: usize = 1024;
+
 impl Worker {
     /// Open (or create) the worker's state under `root`.
     pub async fn open(root: impl Into<PathBuf>) -> Result<Self> {
@@ -84,7 +90,7 @@ impl Worker {
         // Everything the worker says goes through here. A terminal streams
         // output while we're still waiting on the next command, which a single
         // read-then-write loop can't express.
-        let (out, mut pending) = mpsc::channel::<ToServer>(1024);
+        let (out, mut pending) = mpsc::channel::<ToServer>(OUTBOUND);
 
         // Work that is happening off this loop. Held so that a disconnect can
         // wait for it rather than dropping a half-built workspace on the floor.
@@ -795,6 +801,12 @@ fn takes_a_while(frame: &ToWorker) -> bool {
             | ToWorker::Summarize { .. }
             | ToWorker::ProbeRemote { .. }
             | ToWorker::ProbeAgents { .. }
+            // Not because replaying is slow, but because it is unbounded: a
+            // worker with a long history sends more events than the outbound
+            // channel holds. Handled on the loop, the send that fills the
+            // channel blocks the same loop that drains it, and the worker goes
+            // silent for good with the connection still open.
+            | ToWorker::Resume { .. }
     )
 }
 
@@ -832,6 +844,64 @@ mod tests {
             protocol: PROTOCOL_VERSION,
             client_version: "test".into(),
         }
+    }
+
+    /// A worker with a longer history than it can hold in flight.
+    ///
+    /// Replaying used to happen on the serve loop, so the send that filled the
+    /// outbound channel blocked the only task that drains it. The worker went
+    /// silent with the connection still open, the control plane recorded
+    /// nothing, and every reconnect replayed the same events into the same
+    /// deadlock.
+    #[tokio::test]
+    async fn a_history_longer_than_the_channel_still_replays() {
+        let home = TempDir::new().unwrap();
+        let worker = std::sync::Arc::new(Worker::open(home.path()).await.unwrap());
+
+        let session = SessionId::new();
+        worker
+            .store
+            .create_session(
+                &session,
+                None,
+                "A long one",
+                "do a thing",
+                None,
+                None,
+                "Shell",
+                WorkspaceSize::Small,
+            )
+            .await
+            .unwrap();
+
+        let count = OUTBOUND + 100;
+        for _ in 0..count {
+            worker
+                .store
+                .append(
+                    &session,
+                    &EventKind::StepProgress {
+                        step: ft_core::Step::Fetch,
+                        detail: "counting objects".into(),
+                    },
+                )
+                .await
+                .unwrap();
+        }
+
+        let out = tokio::time::timeout(
+            std::time::Duration::from_secs(30),
+            exchange(&worker, vec![hello(), ToWorker::Resume { since: 0 }]),
+        )
+        .await
+        .expect("replaying must not wedge the worker");
+
+        let replayed = out
+            .iter()
+            .filter(|f| matches!(f, ToServer::Event { .. }))
+            .count();
+
+        assert_eq!(replayed, count, "every event should have been sent");
     }
 
     async fn origin() -> (TempDir, String) {
