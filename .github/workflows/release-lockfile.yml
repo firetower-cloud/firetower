@@ -1,0 +1,49 @@
+# Keep Cargo.lock with the version that changed it.
+#
+# The release rewrites `[workspace.package] version` as text, and only cargo can
+# write the matching entries in the lock. Without this they land in different
+# commits: the release says 0.2.0, the lock still says 0.1.0, and it is whoever
+# runs cargo next who finds their tree dirty for a reason that has nothing to do
+# with what they were working on.
+#
+# Nothing is broken while they disagree — `cargo build` fixes it silently. It
+# becomes a hard failure the day anything builds with `--locked`, which is the
+# usual price of asking for a reproducible build.
+name: release lockfile
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    # Only the release's own pull request. Every other branch owns its lockfile.
+    if: startsWith(github.head_ref, 'release-please--')
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+
+      # `--workspace` is doing real work here: it rewrites our own crates'
+      # versions and nothing else. A bare `cargo update` would also pull in new
+      # third-party releases, which is a change nobody asked for arriving inside
+      # a commit that claims to be a version bump.
+      - run: cargo update --workspace --quiet
+
+      - name: commit it if it moved
+        run: |
+          if git diff --quiet -- Cargo.lock; then
+            echo "already in step"
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Cargo.lock
+          git commit -m "chore: refresh Cargo.lock"
+          git push
