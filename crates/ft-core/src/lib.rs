@@ -104,8 +104,15 @@ fn quote(text: &str) -> String {
 /// an hour wants the third.
 // The wire convention holds here too: an enum value stays the symbol it is,
 // and only fields take the consumer's casing.
+//
+// Casing is asked for per variant rather than once with `rename_all_fields`,
+// which reads better but only serde understands. The schema generator ignores
+// it and emits the Rust names, so the contract — and every client built from
+// it — would disagree with the wire about a field nobody checks by hand. Both
+// understand a variant asking for itself. See the test at the bottom of this
+// file, which is what keeps that true.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
-#[serde(tag = "type", rename_all_fields = "camelCase")]
+#[serde(tag = "type")]
 pub enum Compute {
     /// A worker as a child process here. Inherits your environment, and its
     /// workspaces are directories you can open.
@@ -114,13 +121,47 @@ pub enum Compute {
     ///
     /// Reached with `docker exec` rather than ssh: the same bidirectional pipe
     /// without an sshd, a key, or a host key to verify.
+    #[serde(rename_all = "camelCase")]
     Container { image: String, name: String },
     /// A worker on another machine. What a real deployment looks like.
+    ///
+    /// Held as the parts of an ssh destination rather than one string, because
+    /// each part is a separate decision: the address is the machine, the user is
+    /// the account work runs as, and the key is which of several you keep.
+    /// Assembling them is [`Compute::ssh_destination`]'s job.
+    #[serde(rename_all = "camelCase")]
     Server {
-        target: String,
-        /// Recorded when the host is added, checked on every connection. A
-        /// machine that answers with a different key is not the one we trusted.
+        /// A hostname, an address, or a name from your ssh config.
+        host: String,
+        /// Who to connect as.
+        ///
+        /// Absent leaves it to ssh, which is what keeps a name from your ssh
+        /// config working on its own — that file may already say, and repeating
+        /// it here badly is worse than not repeating it.
+        user: Option<String>,
+        /// Absent is whatever ssh would use: 22, or what the config says.
+        port: Option<u16>,
+        /// Which private key to authenticate with, as a path on the machine
+        /// running the control plane.
+        ///
+        /// The path, never the key. A private key is the one credential
+        /// Firetower has no reason to hold: ssh reads the file itself, and only
+        /// this machine ever dials out. Absent lets ssh choose, which means the
+        /// agent and then the usual names in `~/.ssh`.
+        identity_file: Option<String>,
+        /// Recorded when the host is added. Not yet checked against what the
+        /// machine answers with — connecting trusts a key it hasn't seen before
+        /// and remembers it, so this is a record rather than a guarantee.
         host_key: Option<String>,
+        /// The container the worker runs in on that machine. Absent runs the
+        /// binary on the host itself, for a machine whose image already has it.
+        ///
+        /// Reached by ssh-ing to the machine and running `docker exec` there,
+        /// never by ssh-ing into the container — that would need a key inside
+        /// the image, a published port, and a host key that changes on every
+        /// recreate.
+        #[serde(default)]
+        container: Option<String>,
     },
 }
 
@@ -132,6 +173,173 @@ impl Compute {
             Compute::Container { .. } => "container",
             Compute::Server { .. } => "server",
         }
+    }
+
+    /// What to hand ssh as the destination: `user@host`, or the host by itself
+    /// when nobody named a user.
+    ///
+    /// `None` for the kinds that aren't reached over a network at all.
+    pub fn ssh_destination(&self) -> Option<String> {
+        match self {
+            Compute::Server { host, user, .. } => Some(match user {
+                Some(user) => format!("{user}@{host}"),
+                None => host.clone(),
+            }),
+            Compute::Local | Compute::Container { .. } => None,
+        }
+    }
+}
+
+/// An ssh destination, pulled apart.
+///
+/// Firetower asks for the pieces separately, since it has to pass a port and a
+/// key as their own flags anyway. But `root@203.0.113.44` is what fingers type
+/// and what every other tool takes, so it is understood in the address field
+/// rather than rejected there.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Destination {
+    pub user: Option<String>,
+    pub host: String,
+    pub port: Option<u16>,
+}
+
+/// Read whatever someone typed into an address field.
+///
+/// Forgiving on purpose, and lossless: whatever isn't recognised stays in the
+/// host, where ssh will have its own opinion about it. Nothing here validates
+/// — that belongs to whoever is about to dial.
+pub fn parse_destination(typed: &str) -> Destination {
+    let typed = typed.trim();
+    // The same thing written as a URL, which is how a provider's console tends
+    // to offer it.
+    let typed = typed.strip_prefix("ssh://").unwrap_or(typed);
+
+    let (user, rest) = match typed.split_once('@') {
+        Some((user, rest)) if !user.is_empty() && !rest.is_empty() => {
+            (Some(user.to_string()), rest)
+        }
+        _ => (None, typed),
+    };
+
+    let (host, port) = split_port(rest);
+
+    Destination {
+        user,
+        host: host.to_string(),
+        port,
+    }
+}
+
+/// Split a trailing `:port`, leaving an IPv6 address intact.
+fn split_port(rest: &str) -> (&str, Option<u16>) {
+    // `[::1]:2222` is the one way to write an address and a port together
+    // without ambiguity, so it is the one place brackets mean anything.
+    if let Some(after) = rest.strip_prefix('[') {
+        if let Some((address, tail)) = after.split_once(']') {
+            return (address, tail.strip_prefix(':').and_then(|p| p.parse().ok()));
+        }
+    }
+
+    // Elsewhere a colon is only a port when there is exactly one of them. An
+    // IPv6 address written bare has several, and splitting on the first would
+    // quietly hand back a truncated address.
+    match rest.split_once(':') {
+        Some((host, port)) if !port.contains(':') => match port.parse() {
+            Ok(port) => (host, Some(port)),
+            // Not a port, so it was never a separator. Keep what was typed.
+            Err(_) => (rest, None),
+        },
+        _ => (rest, None),
+    }
+}
+
+#[cfg(test)]
+mod destination_tests {
+    use super::*;
+
+    #[test]
+    fn a_bare_address_is_just_a_host() {
+        assert_eq!(
+            parse_destination("203.0.113.44"),
+            Destination {
+                user: None,
+                host: "203.0.113.44".into(),
+                port: None
+            }
+        );
+    }
+
+    #[test]
+    fn a_pasted_destination_comes_apart() {
+        assert_eq!(
+            parse_destination("  root@203.0.113.44:2222  "),
+            Destination {
+                user: Some("root".into()),
+                host: "203.0.113.44".into(),
+                port: Some(2222)
+            }
+        );
+        assert_eq!(
+            parse_destination("ssh://root@fire-01").user.as_deref(),
+            Some("root")
+        );
+    }
+
+    #[test]
+    fn a_name_from_the_ssh_config_survives_untouched() {
+        // The whole point of leaving the user absent: that file may already say.
+        let parsed = parse_destination("fire-01");
+        assert_eq!(parsed.host, "fire-01");
+        assert!(parsed.user.is_none() && parsed.port.is_none());
+    }
+
+    #[test]
+    fn an_ipv6_address_is_not_mistaken_for_a_port() {
+        // Splitting on the first colon here would store a different machine.
+        assert_eq!(parse_destination("fe80::1").host, "fe80::1");
+        assert_eq!(parse_destination("::1").host, "::1");
+
+        let bracketed = parse_destination("root@[fe80::1]:2222");
+        assert_eq!(bracketed.host, "fe80::1");
+        assert_eq!(bracketed.port, Some(2222));
+    }
+
+    #[test]
+    fn something_that_is_not_a_port_stays_part_of_the_host() {
+        // Lossless: ssh gets what was typed and can say what's wrong with it.
+        assert_eq!(
+            parse_destination("fire-01:production").host,
+            "fire-01:production"
+        );
+    }
+
+    #[test]
+    fn a_destination_is_assembled_from_the_parts() {
+        let named = Compute::Server {
+            host: "203.0.113.44".into(),
+            user: Some("deploy".into()),
+            port: None,
+            identity_file: None,
+            host_key: None,
+            container: None,
+        };
+        assert_eq!(
+            named.ssh_destination().as_deref(),
+            Some("deploy@203.0.113.44")
+        );
+
+        let anonymous = Compute::Server {
+            host: "fire-01".into(),
+            user: None,
+            port: None,
+            identity_file: None,
+            host_key: None,
+            container: None,
+        };
+        assert_eq!(anonymous.ssh_destination().as_deref(), Some("fire-01"));
+
+        // Nothing to dial, so there is nothing to assemble.
+        assert!(Compute::Local.ssh_destination().is_none());
     }
 }
 
@@ -151,6 +359,9 @@ pub struct Host {
     pub cpus: Option<u32>,
     pub memory_mb: Option<u64>,
     pub worker_version: Option<String>,
+    /// Why it isn't answering, when it isn't. Cleared as soon as it does.
+    #[serde(default)]
+    pub diagnosis: Option<Diagnosis>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
@@ -161,6 +372,78 @@ pub enum HostState {
     Unreachable,
     /// Finishing what it has, accepting nothing new.
     Draining,
+}
+
+/// Why a connection didn't happen, in terms of what to do about it.
+///
+/// Each cause has a different fix, and the failure they arrive as — a closed
+/// stream — distinguishes none of them.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct Diagnosis {
+    pub cause: Cause,
+    /// One sentence, written for whoever is looking at the screen.
+    pub summary: String,
+    /// What to run, when there is something to run. Shown with a copy button,
+    /// so it must be the whole command and nothing else.
+    #[serde(default)]
+    pub remedy: Option<String>,
+    /// What the far end actually said, verbatim.
+    ///
+    /// Kept even when the cause is recognised: the summary is an inference
+    /// about another machine, and this is what survives it being wrong.
+    #[serde(default)]
+    pub detail: Option<String>,
+    pub at: chrono::DateTime<chrono::Utc>,
+}
+
+/// What went wrong, at the granularity of what fixes it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub enum Cause {
+    /// We got there, and there is no `firetower` to run.
+    WorkerMissing,
+    /// We got there, and there is no `docker` to run it with.
+    DockerMissing,
+    /// Docker is installed and this account may not talk to it.
+    DockerDenied,
+    /// Docker answered, and the container isn't running.
+    ContainerMissing,
+    /// The machine is there and refused us.
+    AuthRefused,
+    /// Nothing answered at that address.
+    Unreachable,
+    /// Something answered, and it isn't who it was last time.
+    HostKeyChanged,
+    /// It spoke, and we don't speak the same version.
+    ProtocolMismatch,
+    /// Unrecognised. `detail` carries the whole answer.
+    Unknown,
+}
+
+impl Diagnosis {
+    pub fn new(cause: Cause, summary: impl Into<String>) -> Self {
+        Self {
+            cause,
+            summary: summary.into(),
+            remedy: None,
+            detail: None,
+            at: chrono::Utc::now(),
+        }
+    }
+
+    pub fn with_remedy(mut self, remedy: impl Into<String>) -> Self {
+        self.remedy = Some(remedy.into());
+        self
+    }
+
+    pub fn with_detail(mut self, detail: impl Into<String>) -> Self {
+        let detail = detail.into();
+        let detail = detail.trim();
+        if !detail.is_empty() {
+            self.detail = Some(detail.to_string());
+        }
+        self
+    }
 }
 
 /// How an agent proves who it is.
@@ -702,5 +985,84 @@ index 3..4 100644\n\
     fn nothing_changed_is_no_files_rather_than_one_empty_one() {
         assert!(split_diff("").is_empty());
         assert!(split_diff("\n").is_empty());
+    }
+}
+
+#[cfg(test)]
+mod contract_tests {
+    use super::*;
+    use utoipa::PartialSchema;
+
+    /// The contract has to name a field the way serde writes it.
+    ///
+    /// Nothing else checks this. The document is generated from these types, the
+    /// client is generated from the document, and both steps succeed on a name
+    /// that is simply wrong — so the first thing to notice is a value arriving
+    /// as `undefined` in a browser, a long way from the cause.
+    ///
+    /// Worth having for tagged enums in particular, where the casing has to be
+    /// asked for per variant: it is easy to add a fourth kind, give it a
+    /// two-word field, and not know that only half the toolchain heard you.
+    #[test]
+    fn the_contract_names_fields_the_way_serde_writes_them() {
+        let schema = serde_json::to_value(Compute::schema()).expect("the schema serialises");
+
+        for kind in [
+            Compute::Local,
+            Compute::Container {
+                image: "firetower/worker:dev".into(),
+                name: "firetower-worker".into(),
+            },
+            Compute::Server {
+                host: "203.0.113.44".into(),
+                user: Some("root".into()),
+                port: None,
+                identity_file: None,
+                host_key: None,
+                container: None,
+            },
+        ] {
+            let written = serde_json::to_value(&kind).expect("a kind serialises");
+            let tag = written["type"].as_str().expect("every kind is tagged");
+
+            let mut on_the_wire: Vec<&str> = written
+                .as_object()
+                .expect("a kind is an object")
+                .keys()
+                .map(String::as_str)
+                .collect();
+            on_the_wire.sort_unstable();
+
+            let mut described = described_fields(&schema, tag);
+            described.sort_unstable();
+
+            assert_eq!(
+                on_the_wire, described,
+                "the contract and the wire disagree about {tag}"
+            );
+        }
+    }
+
+    /// The fields the schema gives one variant of a tagged enum.
+    fn described_fields<'a>(schema: &'a serde_json::Value, tag: &str) -> Vec<&'a str> {
+        let variants = schema["oneOf"]
+            .as_array()
+            .expect("a tagged enum is described as a choice of objects");
+
+        let variant = variants
+            .iter()
+            .find(|variant| {
+                variant["properties"]["type"]["enum"]
+                    .as_array()
+                    .is_some_and(|tags| tags.iter().any(|t| t == tag))
+            })
+            .unwrap_or_else(|| panic!("nothing in the schema is tagged {tag}"));
+
+        variant["properties"]
+            .as_object()
+            .expect("a variant describes its fields")
+            .keys()
+            .map(String::as_str)
+            .collect()
     }
 }

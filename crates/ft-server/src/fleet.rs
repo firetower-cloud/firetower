@@ -91,11 +91,40 @@ impl Fleet {
                     root: std::path::PathBuf::from("/var/lib/firetower/worker"),
                 })
             }
-            ft_core::Compute::Server { target, .. } => Arc::new(crate::transport::SshTransport {
-                target: target.clone(),
-                root: std::path::PathBuf::from("/var/lib/firetower/worker"),
+            ft_core::Compute::Server {
+                port,
+                identity_file,
+                container,
+                ..
+            } => Arc::new(crate::transport::SshTransport {
+                // Assembled by the type that holds the parts, so there is one
+                // answer to what `user@host` means.
+                destination: host
+                    .compute
+                    .ssh_destination()
+                    .context("a server host has somewhere to dial")?,
+                port: *port,
+                identity_file: identity_file.clone(),
+                container: container.clone(),
+                // Inside a container, the path the image creates. On the
+                // machine itself, the worker's own default: that account may
+                // have no way to write under /var/lib.
+                root: container
+                    .as_ref()
+                    .map(|_| std::path::PathBuf::from("/var/lib/firetower/worker")),
             }),
         })
+    }
+
+    /// What kind of machine a host is, for wording an error about it.
+    ///
+    /// A host that has vanished is not worth failing a diagnosis over: the
+    /// wording degrades, the message still arrives.
+    async fn compute_of(&self, host_id: &HostId) -> ft_core::Compute {
+        match self.db.host_by_id(host_id).await {
+            Ok(Some(host)) => host.compute,
+            _ => ft_core::Compute::Local,
+        }
     }
 
     /// Connect to a host, handshake, and start serving its frames.
@@ -103,21 +132,37 @@ impl Fleet {
     /// The first thing sent after the handshake is a resume request, so anything
     /// that happened while we were away arrives before anything new.
     pub async fn connect(&self, host_id: HostId, transport: Arc<dyn Transport>) -> Result<()> {
-        let mut conn = transport
-            .connect()
-            .await
-            .with_context(|| format!("connecting via {}", transport.describe()))?;
+        let compute = self.compute_of(&host_id).await;
+
+        let mut conn = match transport.connect().await {
+            Ok(conn) => conn,
+            Err(e) => {
+                // Nothing started, so there is no stderr to read; the error is
+                // already in the right words.
+                let told = ft_core::Diagnosis::new(ft_core::Cause::Unknown, format!("{e:#}"));
+                self.db.record_diagnosis(&host_id, &told).await?;
+                return Err(e).with_context(|| format!("connecting via {}", transport.describe()));
+            }
+        };
 
         let mut codec = Codec::new(&mut conn.reader, &mut conn.writer);
 
-        codec
+        // A command that was never going to run is often gone before this
+        // write lands, making it a broken pipe rather than a closed stream.
+        // Both mean the same thing and both need the same explanation.
+        let greeting = codec
             .write(&ToWorker::Hello {
                 protocol: PROTOCOL_VERSION,
                 client_version: env!("CARGO_PKG_VERSION").to_string(),
             })
-            .await?;
+            .await;
 
-        match codec.read::<ToServer>().await {
+        let handshake = match greeting {
+            Ok(()) => codec.read::<ToServer>().await,
+            Err(e) => Err(e),
+        };
+
+        match handshake {
             Ok(ToServer::Hello {
                 protocol,
                 worker_version,
@@ -126,15 +171,42 @@ impl Fleet {
                 ..
             }) => {
                 if protocol != PROTOCOL_VERSION {
-                    anyhow::bail!("worker speaks protocol {protocol}, we speak {PROTOCOL_VERSION}");
+                    // Recoverable: the worker needs upgrading, so the message
+                    // names both versions and what to run.
+                    let told =
+                        crate::diagnose::protocol_mismatch(protocol, PROTOCOL_VERSION, &compute);
+                    self.db.record_diagnosis(&host_id, &told).await?;
+                    anyhow::bail!("{}", told.summary);
                 }
+                // Online, so the last failure no longer applies.
                 self.db
                     .mark_host_online(&host_id, &worker_version, cpus, memory_mb)
                     .await?;
                 tracing::info!(host = %host_id, version = %worker_version, "worker online");
             }
             Ok(_) => anyhow::bail!("worker replied with something other than Hello"),
-            Err(e) => return Err(e).context("waiting for the worker handshake"),
+            Err(e) => {
+                // The codec borrows both halves; reading the child's stderr
+                // needs them back, and only this arm is done with them.
+                drop(codec);
+
+                // A closed frame stream says nothing about why. The stderr the
+                // far end wrote before it went does.
+                let said = conn.stderr_tail();
+                let status = conn.exit_status().await;
+                let told = crate::diagnose::from_output(&said, status, &compute);
+
+                tracing::warn!(
+                    host = %host_id,
+                    cause = ?told.cause,
+                    status = ?status,
+                    "handshake failed: {}",
+                    told.summary,
+                );
+
+                self.db.record_diagnosis(&host_id, &told).await?;
+                return Err(e).context(told.summary);
+            }
         }
 
         let since = self.db.last_seq(&host_id).await?;

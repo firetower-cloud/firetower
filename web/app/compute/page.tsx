@@ -207,14 +207,29 @@ function removalWarning(host: Host, running: number) {
   );
 }
 
-/** How the control plane talks to this host — the honest answer, not a guess. */
+/**
+ * How the control plane talks to this host — the honest answer, not a guess.
+ *
+ * The server case is assembled from the parts rather than stored as typed, so
+ * this is the line that shows which key and which port a connection is really
+ * using. That is the whole question when one of them is wrong.
+ */
 function reach(host: Host) {
   switch (host.compute.type) {
     case "Local":
       return "a child process, no network";
     case "Container":
       return `docker exec ${host.compute.name}`;
-    case "Server":
-      return `ssh ${host.compute.target}`;
+    case "Server": {
+      const { host: address, user, port, identityFile } = host.compute;
+      return [
+        "ssh",
+        port ? `-p ${port}` : null,
+        identityFile ? `-i ${identityFile}` : null,
+        user ? `${user}@${address}` : address,
+      ]
+        .filter(Boolean)
+        .join(" ");
+    }
   }
 }

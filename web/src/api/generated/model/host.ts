@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { Compute } from './compute';
+import type { Diagnosis } from './diagnosis';
 import type { HostId } from './hostId';
 import type { HostState } from './hostState';
 
@@ -19,6 +20,7 @@ export interface Host {
      * @nullable
      */
   cpus?: number | null;
+  diagnosis?: null | Diagnosis;
   /**
      * Finishing what it has, taking nothing new. Separate from being
      * unreachable: a draining host is still online and still working.

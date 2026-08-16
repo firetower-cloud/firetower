@@ -194,6 +194,14 @@ impl Db {
         row.map(host_from_row).transpose()
     }
 
+    pub async fn host_by_id(&self, id: &HostId) -> Result<Option<Host>> {
+        let row = sqlx::query("SELECT * FROM hosts WHERE id = $1")
+            .bind(id.as_str())
+            .fetch_optional(&self.pool)
+            .await?;
+        row.map(host_from_row).transpose()
+    }
+
     pub async fn hosts(&self) -> Result<Vec<Host>> {
         sqlx::query("SELECT * FROM hosts ORDER BY created_at")
             .fetch_all(&self.pool)
@@ -210,9 +218,11 @@ impl Db {
         cpus: u32,
         memory_mb: u64,
     ) -> Result<()> {
+        // The diagnosis goes with it: it described a machine that is now
+        // answering, and a stale one sends someone to fix what works.
         sqlx::query(
             "UPDATE hosts SET state = 'Online', worker_version = $1, cpus = $2, memory_mb = $3,
-                              last_seen_at = $4 WHERE id = $5",
+                              last_seen_at = $4, diagnosis = NULL WHERE id = $5",
         )
         .bind(version)
         .bind(cpus as i64)
@@ -228,6 +238,19 @@ impl Db {
     /// running work look as though it had disappeared.
     pub async fn mark_host_unreachable(&self, id: &HostId) -> Result<()> {
         sqlx::query("UPDATE hosts SET state = 'Unreachable' WHERE id = $1")
+            .bind(id.as_str())
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    /// Record why a host isn't answering, and mark it as not answering.
+    ///
+    /// Stored rather than returned once, so a host that failed unattended can
+    /// still say why later.
+    pub async fn record_diagnosis(&self, id: &HostId, told: &ft_core::Diagnosis) -> Result<()> {
+        sqlx::query("UPDATE hosts SET state = 'Unreachable', diagnosis = $1 WHERE id = $2")
+            .bind(serde_json::to_value(told)?)
             .bind(id.as_str())
             .execute(&self.pool)
             .await?;
@@ -635,6 +658,11 @@ fn host_from_row(r: sqlx::postgres::PgRow) -> Result<Host> {
         cpus: r.get::<Option<i32>, _>("cpus").map(|v| v as u32),
         memory_mb: r.get::<Option<i64>, _>("memory_mb").map(|v| v as u64),
         worker_version: r.get("worker_version"),
+        // A diagnosis that no longer parses is not worth failing the row
+        // over; connecting again regenerates it.
+        diagnosis: r
+            .get::<Option<serde_json::Value>, _>("diagnosis")
+            .and_then(|v| serde_json::from_value(v).ok()),
     })
 }
 
@@ -700,8 +728,12 @@ mod tests {
             .ensure_host(
                 "fire-01",
                 Compute::Server {
-                    target: "root@203.0.113.44".into(),
+                    host: "203.0.113.44".into(),
+                    user: Some("root".into()),
+                    port: Some(2222),
+                    identity_file: Some("~/.ssh/fire".into()),
                     host_key: None,
+                    container: None,
                 },
             )
             .await
@@ -712,7 +744,19 @@ mod tests {
             Compute::Local,
             "there is nothing to connect to locally"
         );
-        assert!(matches!(remote.compute, Compute::Server { .. }));
+        // Every part of a destination has to survive the trip: one missing
+        // field is a host that connects to a different machine, or to none.
+        assert_eq!(
+            remote.compute,
+            Compute::Server {
+                host: "203.0.113.44".into(),
+                user: Some("root".into()),
+                port: Some(2222),
+                identity_file: Some("~/.ssh/fire".into()),
+                host_key: None,
+                container: None,
+            }
+        );
         assert_eq!(db.hosts().await.unwrap().len(), 2);
     }
 
@@ -805,6 +849,53 @@ mod tests {
         let online = db.host_by_name("localhost").await.unwrap().unwrap();
         assert_eq!(online.state, HostState::Online);
         assert_eq!(online.cpus, Some(8));
+    }
+
+    /// A failure that nobody was watching still has to be readable later.
+    #[tokio::test]
+    async fn why_a_host_failed_outlives_the_attempt() {
+        let db = db().await;
+        let host = db.ensure_host("fire-01", Compute::Local).await.unwrap();
+        assert!(host.diagnosis.is_none(), "nothing has failed yet");
+
+        let told = ft_core::Diagnosis::new(
+            ft_core::Cause::WorkerMissing,
+            "Firetower isn't installed on that machine.",
+        )
+        .with_detail("bash: firetower: command not found");
+        db.record_diagnosis(&host.id, &told).await.unwrap();
+
+        let stored = db.host_by_id(&host.id).await.unwrap().unwrap();
+        assert_eq!(stored.state, HostState::Unreachable);
+        let found = stored.diagnosis.expect("it said why");
+        assert_eq!(found.cause, ft_core::Cause::WorkerMissing);
+        assert_eq!(
+            found.detail.as_deref(),
+            Some("bash: firetower: command not found"),
+            "the raw text is what gets pasted into an issue"
+        );
+    }
+
+    /// And stops saying it once it stops being true.
+    #[tokio::test]
+    async fn a_host_that_comes_back_stops_explaining_itself() {
+        let db = db().await;
+        let host = db.ensure_host("fire-01", Compute::Local).await.unwrap();
+
+        db.record_diagnosis(
+            &host.id,
+            &ft_core::Diagnosis::new(ft_core::Cause::Unreachable, "Nothing answered."),
+        )
+        .await
+        .unwrap();
+
+        db.mark_host_online(&host.id, "0.1.0", 4, 8192)
+            .await
+            .unwrap();
+
+        let back = db.host_by_id(&host.id).await.unwrap().unwrap();
+        assert_eq!(back.state, HostState::Online);
+        assert!(back.diagnosis.is_none(), "it is answering");
     }
 
     #[tokio::test]

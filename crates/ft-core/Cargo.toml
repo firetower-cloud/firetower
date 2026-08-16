@@ -14,3 +14,7 @@ thiserror.workspace = true
 ulid.workspace = true
 chrono.workspace = true
 utoipa.workspace = true
+
+[dev-dependencies]
+# Only the tests need to look at what a type turns into on the wire.
+serde_json.workspace = true

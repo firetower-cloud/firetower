@@ -8,9 +8,12 @@
 
 /**
  * Connect a repository. Nothing is cloned until a session needs it.
+ *
+ * No default branch here on purpose. Connecting reaches for the remote anyway,
+ * and what it answers with is the truth — a branch named by the caller was
+ * accepted and then ignored, which is worse than not asking.
  */
 export interface NewRepo {
-  defaultBranch?: string;
   /** Anything git can clone: a URL, or a path for a local repository. */
   remote: string;
   /**

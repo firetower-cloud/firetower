@@ -8,6 +8,8 @@
 import * as zod from 'zod';
 
 
+export const listHostsResponseComputeThreePortMin = 0;
+
 export const listHostsResponseCpusMin = 0;
 
 export const listHostsResponseMemoryMbMin = 0;
@@ -22,11 +24,22 @@ export const ListHostsResponseItem = zod.object({
   "name": zod.string(),
   "type": zod.enum(['Container'])
 }).describe('A worker in a container here. Linux, and isolated from your machine.\n\nReached with `docker exec` rather than ssh: the same bidirectional pipe\nwithout an sshd, a key, or a host key to verify.'),zod.object({
-  "host_key": zod.string().nullish().describe('Recorded when the host is added, checked on every connection. A\nmachine that answers with a different key is not the one we trusted.'),
-  "target": zod.string(),
-  "type": zod.enum(['Server'])
-}).describe('A worker on another machine. What a real deployment looks like.')]).describe('Where an agent can run.\n\nThree kinds, and they are not a ladder — each is the right answer sometimes.\nPoking at a repository by hand wants the first; leaving an agent running for\nan hour wants the third.'),
+  "container": zod.string().nullish().describe('The container the worker runs in on that machine, when it runs in\none. Absent runs the binary on the host itself.\n\nTwo shapes, one field. A machine you already use gets a container,\nso nothing of ours lands on it and removing it is `docker rm`. A\nmachine built to be a worker has Firetower in its image and needs no\nsecond layer. Neither is reached by putting an sshd in a container:\nthat means a key inside the image, a published port, and a host key\nthat changes every time it is recreated. We ssh to the machine, and\n`docker exec` from there.\n\n`default` so rows stored before this existed still read; not\nskipped when absent, because the contract and the wire have to name\nthe same fields — see the test at the bottom of this file.'),
+  "host": zod.string().describe('A hostname, an address, or a name from your ssh config.'),
+  "hostKey": zod.string().nullish().describe('Recorded when the host is added. Not yet checked against what the\nmachine answers with — connecting trusts a key it hasn\'t seen before\nand remembers it, so this is a record rather than a guarantee.'),
+  "identityFile": zod.string().nullish().describe('Which private key to authenticate with, as a path on the machine\nrunning the control plane.\n\nThe path, never the key. A private key is the one credential\nFiretower has no reason to hold: ssh reads the file itself, and only\nthis machine ever dials out. Absent lets ssh choose, which means the\nagent and then the usual names in `~\/.ssh`.'),
+  "port": zod.int().min(listHostsResponseComputeThreePortMin).nullish().describe('Absent is whatever ssh would use: 22, or what the config says.'),
+  "type": zod.enum(['Server']),
+  "user": zod.string().nullish().describe('Who to connect as.\n\nAbsent leaves it to ssh, which is what keeps a name from your ssh\nconfig working on its own — that file may already say, and repeating\nit here badly is worse than not repeating it.')
+}).describe('A worker on another machine. What a real deployment looks like.\n\nHeld as the parts of an ssh destination rather than one string, because\neach part is a separate decision: the address is the machine, the user is\nthe account work runs as, and the key is which of several you keep.\nAssembling them is [`Compute::ssh_destination`]\'s job.')]).describe('Where an agent can run.\n\nThree kinds, and they are not a ladder — each is the right answer sometimes.\nPoking at a repository by hand wants the first; leaving an agent running for\nan hour wants the third.'),
   "cpus": zod.int().min(listHostsResponseCpusMin).nullish(),
+  "diagnosis": zod.union([zod.null(),zod.object({
+  "at": zod.iso.datetime({"offset":true}),
+  "cause": zod.enum(['WorkerMissing', 'DockerMissing', 'DockerDenied', 'ContainerMissing', 'AuthRefused', 'Unreachable', 'HostKeyChanged', 'ProtocolMismatch', 'Unknown']).describe('What went wrong, at the granularity of what fixes it.'),
+  "detail": zod.string().nullish().describe('What the far end actually said, verbatim.\n\nAlways kept, including when we recognised the cause: our summary is a\nguess about someone else\'s machine, and the raw text is what gets\npasted into an issue when the guess is wrong.'),
+  "remedy": zod.string().nullish().describe('What to run, when there is something to run. Shown with a copy button,\nso it has to be the whole command and nothing else.'),
+  "summary": zod.string().describe('One sentence, written for whoever is looking at the screen.')
+}).describe('Why it isn\'t answering, when it isn\'t. Cleared the moment it does.\n\nKept on the row rather than returned once, because the person who reads\nit is usually not the person who pressed the button — a host that failed\novernight has to still be able to say why in the morning.')]).optional(),
   "drained": zod.boolean().optional().describe('Finishing what it has, taking nothing new. Separate from being\nunreachable: a draining host is still online and still working.'),
   "id": zod.string().describe('Identifies a host.'),
   "memoryMb": zod.int().min(listHostsResponseMemoryMbMin).nullish(),
@@ -40,8 +53,18 @@ export const ListHostsResponse = zod.array(ListHostsResponseItem)
  * Connecting happens straight away rather than on the next restart, so a
  * mistake in an address is a message here instead of a host that silently
  * never works.
+ *
+ * A host that doesn't answer is still created, and comes back `Unreachable`
+ * with a `diagnosis` saying why and what to run. That is not the same as the
+ * request failing: what someone typed was accepted, and the machine at the
+ * other end has something to fix. Only what we can rule out from here —
+ * an empty address, a key that isn't a key, a name already taken — is a 400.
  * @summary Add somewhere for agents to run.
  */
+export const createHostBodyComputeThreePortMin = 0;
+
+
+
 export const CreateHostBody = zod.object({
   "compute": zod.union([zod.object({
   "type": zod.enum(['Local'])
@@ -50,12 +73,18 @@ export const CreateHostBody = zod.object({
   "name": zod.string(),
   "type": zod.enum(['Container'])
 }).describe('A worker in a container here. Linux, and isolated from your machine.\n\nReached with `docker exec` rather than ssh: the same bidirectional pipe\nwithout an sshd, a key, or a host key to verify.'),zod.object({
-  "host_key": zod.string().nullish().describe('Recorded when the host is added, checked on every connection. A\nmachine that answers with a different key is not the one we trusted.'),
-  "target": zod.string(),
-  "type": zod.enum(['Server'])
-}).describe('A worker on another machine. What a real deployment looks like.')]).describe('Where an agent can run.\n\nThree kinds, and they are not a ladder — each is the right answer sometimes.\nPoking at a repository by hand wants the first; leaving an agent running for\nan hour wants the third.'),
+  "container": zod.string().nullish().describe('The container the worker runs in on that machine, when it runs in\none. Absent runs the binary on the host itself.\n\nTwo shapes, one field. A machine you already use gets a container,\nso nothing of ours lands on it and removing it is `docker rm`. A\nmachine built to be a worker has Firetower in its image and needs no\nsecond layer. Neither is reached by putting an sshd in a container:\nthat means a key inside the image, a published port, and a host key\nthat changes every time it is recreated. We ssh to the machine, and\n`docker exec` from there.\n\n`default` so rows stored before this existed still read; not\nskipped when absent, because the contract and the wire have to name\nthe same fields — see the test at the bottom of this file.'),
+  "host": zod.string().describe('A hostname, an address, or a name from your ssh config.'),
+  "hostKey": zod.string().nullish().describe('Recorded when the host is added. Not yet checked against what the\nmachine answers with — connecting trusts a key it hasn\'t seen before\nand remembers it, so this is a record rather than a guarantee.'),
+  "identityFile": zod.string().nullish().describe('Which private key to authenticate with, as a path on the machine\nrunning the control plane.\n\nThe path, never the key. A private key is the one credential\nFiretower has no reason to hold: ssh reads the file itself, and only\nthis machine ever dials out. Absent lets ssh choose, which means the\nagent and then the usual names in `~\/.ssh`.'),
+  "port": zod.int().min(createHostBodyComputeThreePortMin).nullish().describe('Absent is whatever ssh would use: 22, or what the config says.'),
+  "type": zod.enum(['Server']),
+  "user": zod.string().nullish().describe('Who to connect as.\n\nAbsent leaves it to ssh, which is what keeps a name from your ssh\nconfig working on its own — that file may already say, and repeating\nit here badly is worse than not repeating it.')
+}).describe('A worker on another machine. What a real deployment looks like.\n\nHeld as the parts of an ssh destination rather than one string, because\neach part is a separate decision: the address is the machine, the user is\nthe account work runs as, and the key is which of several you keep.\nAssembling them is [`Compute::ssh_destination`]\'s job.')]).describe('Where an agent can run.\n\nThree kinds, and they are not a ladder — each is the right answer sometimes.\nPoking at a repository by hand wants the first; leaving an agent running for\nan hour wants the third.'),
   "name": zod.string().nullish().describe('What you\'ll call it. Defaults to something derived from the kind.')
 })
+
+export const createHostResponseComputeThreePortMin = 0;
 
 export const createHostResponseCpusMin = 0;
 
@@ -71,11 +100,22 @@ export const CreateHostResponse = zod.object({
   "name": zod.string(),
   "type": zod.enum(['Container'])
 }).describe('A worker in a container here. Linux, and isolated from your machine.\n\nReached with `docker exec` rather than ssh: the same bidirectional pipe\nwithout an sshd, a key, or a host key to verify.'),zod.object({
-  "host_key": zod.string().nullish().describe('Recorded when the host is added, checked on every connection. A\nmachine that answers with a different key is not the one we trusted.'),
-  "target": zod.string(),
-  "type": zod.enum(['Server'])
-}).describe('A worker on another machine. What a real deployment looks like.')]).describe('Where an agent can run.\n\nThree kinds, and they are not a ladder — each is the right answer sometimes.\nPoking at a repository by hand wants the first; leaving an agent running for\nan hour wants the third.'),
+  "container": zod.string().nullish().describe('The container the worker runs in on that machine, when it runs in\none. Absent runs the binary on the host itself.\n\nTwo shapes, one field. A machine you already use gets a container,\nso nothing of ours lands on it and removing it is `docker rm`. A\nmachine built to be a worker has Firetower in its image and needs no\nsecond layer. Neither is reached by putting an sshd in a container:\nthat means a key inside the image, a published port, and a host key\nthat changes every time it is recreated. We ssh to the machine, and\n`docker exec` from there.\n\n`default` so rows stored before this existed still read; not\nskipped when absent, because the contract and the wire have to name\nthe same fields — see the test at the bottom of this file.'),
+  "host": zod.string().describe('A hostname, an address, or a name from your ssh config.'),
+  "hostKey": zod.string().nullish().describe('Recorded when the host is added. Not yet checked against what the\nmachine answers with — connecting trusts a key it hasn\'t seen before\nand remembers it, so this is a record rather than a guarantee.'),
+  "identityFile": zod.string().nullish().describe('Which private key to authenticate with, as a path on the machine\nrunning the control plane.\n\nThe path, never the key. A private key is the one credential\nFiretower has no reason to hold: ssh reads the file itself, and only\nthis machine ever dials out. Absent lets ssh choose, which means the\nagent and then the usual names in `~\/.ssh`.'),
+  "port": zod.int().min(createHostResponseComputeThreePortMin).nullish().describe('Absent is whatever ssh would use: 22, or what the config says.'),
+  "type": zod.enum(['Server']),
+  "user": zod.string().nullish().describe('Who to connect as.\n\nAbsent leaves it to ssh, which is what keeps a name from your ssh\nconfig working on its own — that file may already say, and repeating\nit here badly is worse than not repeating it.')
+}).describe('A worker on another machine. What a real deployment looks like.\n\nHeld as the parts of an ssh destination rather than one string, because\neach part is a separate decision: the address is the machine, the user is\nthe account work runs as, and the key is which of several you keep.\nAssembling them is [`Compute::ssh_destination`]\'s job.')]).describe('Where an agent can run.\n\nThree kinds, and they are not a ladder — each is the right answer sometimes.\nPoking at a repository by hand wants the first; leaving an agent running for\nan hour wants the third.'),
   "cpus": zod.int().min(createHostResponseCpusMin).nullish(),
+  "diagnosis": zod.union([zod.null(),zod.object({
+  "at": zod.iso.datetime({"offset":true}),
+  "cause": zod.enum(['WorkerMissing', 'DockerMissing', 'DockerDenied', 'ContainerMissing', 'AuthRefused', 'Unreachable', 'HostKeyChanged', 'ProtocolMismatch', 'Unknown']).describe('What went wrong, at the granularity of what fixes it.'),
+  "detail": zod.string().nullish().describe('What the far end actually said, verbatim.\n\nAlways kept, including when we recognised the cause: our summary is a\nguess about someone else\'s machine, and the raw text is what gets\npasted into an issue when the guess is wrong.'),
+  "remedy": zod.string().nullish().describe('What to run, when there is something to run. Shown with a copy button,\nso it has to be the whole command and nothing else.'),
+  "summary": zod.string().describe('One sentence, written for whoever is looking at the screen.')
+}).describe('Why it isn\'t answering, when it isn\'t. Cleared the moment it does.\n\nKept on the row rather than returned once, because the person who reads\nit is usually not the person who pressed the button — a host that failed\novernight has to still be able to say why in the morning.')]).optional(),
   "drained": zod.boolean().optional().describe('Finishing what it has, taking nothing new. Separate from being\nunreachable: a draining host is still online and still working.'),
   "id": zod.string().describe('Identifies a host.'),
   "memoryMb": zod.int().min(createHostResponseMemoryMbMin).nullish(),

@@ -21,11 +21,57 @@ export type Compute = {
   type: 'Container';
 } | {
   /**
-     * Recorded when the host is added, checked on every connection. A
-     * machine that answers with a different key is not the one we trusted.
+     * The container the worker runs in on that machine, when it runs in
+     * one. Absent runs the binary on the host itself.
+     *
+     * Two shapes, one field. A machine you already use gets a container,
+     * so nothing of ours lands on it and removing it is `docker rm`. A
+     * machine built to be a worker has Firetower in its image and needs no
+     * second layer. Neither is reached by putting an sshd in a container:
+     * that means a key inside the image, a published port, and a host key
+     * that changes every time it is recreated. We ssh to the machine, and
+     * `docker exec` from there.
+     *
+     * `default` so rows stored before this existed still read; not
+     * skipped when absent, because the contract and the wire have to name
+     * the same fields — see the test at the bottom of this file.
      * @nullable
      */
-  host_key?: string | null;
-  target: string;
+  container?: string | null;
+  /** A hostname, an address, or a name from your ssh config. */
+  host: string;
+  /**
+     * Recorded when the host is added. Not yet checked against what the
+     * machine answers with — connecting trusts a key it hasn't seen before
+     * and remembers it, so this is a record rather than a guarantee.
+     * @nullable
+     */
+  hostKey?: string | null;
+  /**
+     * Which private key to authenticate with, as a path on the machine
+     * running the control plane.
+     *
+     * The path, never the key. A private key is the one credential
+     * Firetower has no reason to hold: ssh reads the file itself, and only
+     * this machine ever dials out. Absent lets ssh choose, which means the
+     * agent and then the usual names in `~/.ssh`.
+     * @nullable
+     */
+  identityFile?: string | null;
+  /**
+     * Absent is whatever ssh would use: 22, or what the config says.
+     * @minimum 0
+     * @nullable
+     */
+  port?: number | null;
   type: 'Server';
+  /**
+     * Who to connect as.
+     *
+     * Absent leaves it to ssh, which is what keeps a name from your ssh
+     * config working on its own — that file may already say, and repeating
+     * it here badly is worse than not repeating it.
+     * @nullable
+     */
+  user?: string | null;
 };

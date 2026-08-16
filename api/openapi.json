@@ -256,7 +256,7 @@
           "hosts"
         ],
         "summary": "Add somewhere for agents to run.",
-        "description": "Connecting happens straight away rather than on the next restart, so a\nmistake in an address is a message here instead of a host that silently\nnever works.",
+        "description": "Connecting happens straight away rather than on the next restart, so a\nmistake in an address is a message here instead of a host that silently\nnever works.\n\nA host that doesn't answer is still created, and comes back `Unreachable`\nwith a `diagnosis` saying why and what to run. That is not the same as the\nrequest failing: what someone typed was accepted, and the machine at the\nother end has something to fix. Only what we can rule out from here —\nan empty address, a key that isn't a key, a name already taken — is a 400.",
         "operationId": "create_host",
         "requestBody": {
           "content": {
@@ -1696,6 +1696,21 @@
           }
         }
       },
+      "Cause": {
+        "type": "string",
+        "description": "What went wrong, at the granularity of what fixes it.",
+        "enum": [
+          "WorkerMissing",
+          "DockerMissing",
+          "DockerDenied",
+          "ContainerMissing",
+          "AuthRefused",
+          "Unreachable",
+          "HostKeyChanged",
+          "ProtocolMismatch",
+          "Unknown"
+        ]
+      },
       "Compute": {
         "oneOf": [
           {
@@ -1738,27 +1753,58 @@
           },
           {
             "type": "object",
-            "description": "A worker on another machine. What a real deployment looks like.",
+            "description": "A worker on another machine. What a real deployment looks like.\n\nHeld as the parts of an ssh destination rather than one string, because\neach part is a separate decision: the address is the machine, the user is\nthe account work runs as, and the key is which of several you keep.\nAssembling them is [`Compute::ssh_destination`]'s job.",
             "required": [
-              "target",
+              "host",
               "type"
             ],
             "properties": {
-              "host_key": {
+              "container": {
                 "type": [
                   "string",
                   "null"
                 ],
-                "description": "Recorded when the host is added, checked on every connection. A\nmachine that answers with a different key is not the one we trusted."
+                "description": "The container the worker runs in on that machine, when it runs in\none. Absent runs the binary on the host itself.\n\nTwo shapes, one field. A machine you already use gets a container,\nso nothing of ours lands on it and removing it is `docker rm`. A\nmachine built to be a worker has Firetower in its image and needs no\nsecond layer. Neither is reached by putting an sshd in a container:\nthat means a key inside the image, a published port, and a host key\nthat changes every time it is recreated. We ssh to the machine, and\n`docker exec` from there.\n\n`default` so rows stored before this existed still read; not\nskipped when absent, because the contract and the wire have to name\nthe same fields — see the test at the bottom of this file."
               },
-              "target": {
-                "type": "string"
+              "host": {
+                "type": "string",
+                "description": "A hostname, an address, or a name from your ssh config."
+              },
+              "hostKey": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Recorded when the host is added. Not yet checked against what the\nmachine answers with — connecting trusts a key it hasn't seen before\nand remembers it, so this is a record rather than a guarantee."
+              },
+              "identityFile": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Which private key to authenticate with, as a path on the machine\nrunning the control plane.\n\nThe path, never the key. A private key is the one credential\nFiretower has no reason to hold: ssh reads the file itself, and only\nthis machine ever dials out. Absent lets ssh choose, which means the\nagent and then the usual names in `~/.ssh`."
+              },
+              "port": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "format": "int32",
+                "description": "Absent is whatever ssh would use: 22, or what the config says.",
+                "minimum": 0
               },
               "type": {
                 "type": "string",
                 "enum": [
                   "Server"
                 ]
+              },
+              "user": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Who to connect as.\n\nAbsent leaves it to ssh, which is what keeps a name from your ssh\nconfig working on its own — that file may already say, and repeating\nit here badly is worse than not repeating it."
               }
             }
           }
@@ -1783,6 +1829,42 @@
               "null"
             ],
             "description": "The token from `claude setup-token`, or a metered API key — whichever\nthe mode calls for. Required for both; ignored for an agent that needs\nno credential."
+          }
+        }
+      },
+      "Diagnosis": {
+        "type": "object",
+        "description": "Why a connection didn't happen, in terms of what to do about it.\n\n`stream closed` is true and useless: it describes our end of a pipe rather\nthan the machine at the other end of it. Every cause below is a different\nten-second fix, and telling them apart is the whole difference between a\nmessage someone acts on and a bug report we receive.",
+        "required": [
+          "cause",
+          "summary",
+          "at"
+        ],
+        "properties": {
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "cause": {
+            "$ref": "#/components/schemas/Cause"
+          },
+          "detail": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What the far end actually said, verbatim.\n\nAlways kept, including when we recognised the cause: our summary is a\nguess about someone else's machine, and the raw text is what gets\npasted into an issue when the guess is wrong."
+          },
+          "remedy": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What to run, when there is something to run. Shown with a copy button,\nso it has to be the whole command and nothing else."
+          },
+          "summary": {
+            "type": "string",
+            "description": "One sentence, written for whoever is looking at the screen."
           }
         }
       },
@@ -2179,6 +2261,17 @@
             "format": "int32",
             "minimum": 0
           },
+          "diagnosis": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Diagnosis",
+                "description": "Why it isn't answering, when it isn't. Cleared the moment it does.\n\nKept on the row rather than returned once, because the person who reads\nit is usually not the person who pressed the button — a host that failed\novernight has to still be able to say why in the morning."
+              }
+            ]
+          },
           "drained": {
             "type": "boolean",
             "description": "Finishing what it has, taking nothing new. Separate from being\nunreachable: a draining host is still online and still working."
@@ -2260,15 +2353,12 @@
       },
       "NewRepo": {
         "type": "object",
-        "description": "Connect a repository. Nothing is cloned until a session needs it.",
+        "description": "Connect a repository. Nothing is cloned until a session needs it.\n\nNo default branch here on purpose. Connecting reaches for the remote anyway,\nand what it answers with is the truth — a branch named by the caller was\naccepted and then ignored, which is worse than not asking.",
         "required": [
           "slug",
           "remote"
         ],
         "properties": {
-          "defaultBranch": {
-            "type": "string"
-          },
           "remote": {
             "type": "string",
             "description": "Anything git can clone: a URL, or a path for a local repository."

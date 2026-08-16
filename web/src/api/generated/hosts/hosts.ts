@@ -172,6 +172,12 @@ export const getCreateHostUrl = () => {
  * Connecting happens straight away rather than on the next restart, so a
  * mistake in an address is a message here instead of a host that silently
  * never works.
+ *
+ * A host that doesn't answer is still created, and comes back `Unreachable`
+ * with a `diagnosis` saying why and what to run. That is not the same as the
+ * request failing: what someone typed was accepted, and the machine at the
+ * other end has something to fix. Only what we can rule out from here —
+ * an empty address, a key that isn't a key, a name already taken — is a 400.
  * @summary Add somewhere for agents to run.
  */
 export const createHost = async (newHost: NewHost, options?: Parameters<typeof http>[1]): Promise<Host> => {

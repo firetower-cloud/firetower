@@ -9,7 +9,9 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 pub mod api;
+mod container;
 pub mod db;
+pub mod diagnose;
 pub mod fleet;
 pub mod oauth;
 pub mod providers;

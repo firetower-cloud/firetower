@@ -18,11 +18,10 @@ export const ListReposResponseItem = zod.object({
 export const ListReposResponse = zod.array(ListReposResponseItem)
 
 export const CreateRepoBody = zod.object({
-  "defaultBranch": zod.string().optional(),
   "remote": zod.string().describe('Anything git can clone: a URL, or a path for a local repository.'),
   "setup": zod.string().nullish().describe('Runs once per session, before the agent starts.'),
   "slug": zod.string().describe('`acme\/backend`')
-}).describe('Connect a repository. Nothing is cloned until a session needs it.')
+}).describe('Connect a repository. Nothing is cloned until a session needs it.\n\nNo default branch here on purpose. Connecting reaches for the remote anyway,\nand what it answers with is the truth — a branch named by the caller was\naccepted and then ignored, which is worse than not asking.')
 
 export const CreateRepoResponse = zod.object({
   "defaultBranch": zod.string(),
