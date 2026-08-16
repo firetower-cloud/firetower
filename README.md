@@ -77,34 +77,100 @@ Workers keep what happened on the host they run on (locally that's `~/.firetower
 
 ### Adding a server
 
-A server is a machine you already have, running the worker in a container.
-Firetower installs nothing on it: you start the container, and it connects by
-ssh-ing to the machine and running `docker exec` there — so there is no sshd in
-the container, no key inside it, and no port to open.
+A server is a machine you already have. Firetower reaches it over ssh with the
+key you already use, runs the worker there, and installs nothing you didn't put
+there.
+
+You need two things on that machine: an ssh account, and the worker container.
+Everything the worker uses is inside that container — git, tmux, Node and an
+agent — so there is nothing else to set up.
+
+#### Start the worker
 
 On the machine:
+
+```sh
+docker run -d --name firetower-worker \
+  --restart unless-stopped \
+  -v firetower:/var/lib/firetower \
+  ghcr.io/firetower-cloud/firetower-worker:latest \
+  sleep infinity
+```
+
+The container does nothing on its own. Firetower ssh-es to the machine and runs
+`docker exec` when it wants to talk, so there is no sshd in the image, no key
+inside it, and no port to open.
+
+If you'd rather keep it in a file, there is a compose file — it needs the Compose
+plugin, which a plain Docker install doesn't always have:
 
 ```sh
 curl -O https://raw.githubusercontent.com/firetower-cloud/firetower/main/deploy/firetower-worker.yml
 docker compose -f firetower-worker.yml up -d
 ```
 
-Then add it in Firetower with its address, the account to ssh as, and the
-container name (`firetower-worker`). What it needs from that machine is Docker,
-an ssh account, and nothing else — git, tmux and the agent are in the image.
+Check that the account you'll connect as can reach Docker, because Firetower will
+be that account:
 
-**There are no secrets in that file.** What an agent authenticates with is held
-by the control plane and handed to a session as it starts, so a fresh container
-needs no login and the compose file is safe to paste anywhere.
+```sh
+docker ps
+```
 
-A machine built specifically to be a worker can skip the container and have
-Firetower in its own image instead; leave the container name empty and it runs
-the binary on the host.
+If that says permission denied, add the account to the `docker` group
+(`sudo usermod -aG docker $USER`) and log back in.
 
-Upgrading is `docker compose pull && docker compose up -d`. Repositories,
-worktrees and the event log are on a volume and survive it — **running sessions
-do not**, because recreating the container takes the tmux server with it. Drain
-the host first.
+#### Add it in Firetower
+
+**Compute → Add compute → A server**, then the address, the account to ssh as,
+the private key, and the container name — `firetower-worker`, already filled in.
+
+If it doesn't connect, the host is added anyway and says what to fix. Sort the
+machine out and press **Try now**; there is nothing to re-add.
+
+**There are no secrets in the compose file, and there never will be.** What an
+agent authenticates with is held by the control plane and handed to a session as
+it starts, so a fresh container needs no login and the file is safe to paste
+anywhere.
+
+#### If your provider builds the VM from our image
+
+Some providers let you create a VM by naming a container image instead of an
+operating system. That works, and there is still nothing to install.
+
+Once the VM is up, ssh in and run:
+
+```sh
+docker ps
+```
+
+**If you see a container** running the worker image, the provider named it — copy
+that name into the container field when you add the host.
+
+**If there is no `docker` command** and git and tmux are already there, you are
+inside the worker itself. Add the host and leave the container field **empty**.
+
+#### Upgrading
+
+Pull the new image and start the container again:
+
+```sh
+docker pull ghcr.io/firetower-cloud/firetower-worker:latest
+docker rm -f firetower-worker
+docker run -d --name firetower-worker \
+  --restart unless-stopped \
+  -v firetower:/var/lib/firetower \
+  ghcr.io/firetower-cloud/firetower-worker:latest \
+  sleep infinity
+```
+
+Removing the container is safe because the volume is what holds anything worth
+keeping: repositories, worktrees, the event log and the agent's own directory.
+**Running sessions are not** — recreating the container takes the tmux server
+with it, so drain the host first.
+
+`latest` is the newest release. Firetower compares its own version against each
+worker's on every connection and says when they have drifted, so name a version
+instead — `:0.2.0` — if you would rather decide when a worker moves.
 
 ### Connecting repositories
 

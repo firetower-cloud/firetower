@@ -12,7 +12,6 @@
 
       "extra-files": [
         "Cargo.toml",
-        "deploy/firetower-worker.yml",
         {
           "type": "json",
           "path": "web/package.json",

@@ -10,10 +10,10 @@
 # control plane and handed over per session.
 services:
   worker:
-    # Rewritten when a version is cut, so this always names a release that
-    # exists. Before the first release, use `:edge` — built from every push to
-    # main.
-    image: ghcr.io/firetower-cloud/firetower-worker:0.2.0 # x-release-please-version
+    # The newest release. Pin a version here — `:0.2.0` — if you would rather
+    # decide when a worker moves; Firetower compares its own version against
+    # each worker's and says when they have drifted either way.
+    image: ghcr.io/firetower-cloud/firetower-worker:latest
     container_name: firetower-worker
 
     # Comes back after a reboot, and after Docker restarts.
