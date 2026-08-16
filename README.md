@@ -75,6 +75,37 @@ Open `http://localhost:3000`. `just dev` starts Postgres with the rest — you d
 
 Workers keep what happened on the host they run on (locally that's `~/.firetower`). The control plane's cache is Postgres. Drop the database and it rebuilds from the workers on reconnect; `just reset` wipes both.
 
+### Adding a server
+
+A server is a machine you already have, running the worker in a container.
+Firetower installs nothing on it: you start the container, and it connects by
+ssh-ing to the machine and running `docker exec` there — so there is no sshd in
+the container, no key inside it, and no port to open.
+
+On the machine:
+
+```sh
+curl -O https://raw.githubusercontent.com/firetower-cloud/firetower/main/deploy/firetower-worker.yml
+docker compose -f firetower-worker.yml up -d
+```
+
+Then add it in Firetower with its address, the account to ssh as, and the
+container name (`firetower-worker`). What it needs from that machine is Docker,
+an ssh account, and nothing else — git, tmux and the agent are in the image.
+
+**There are no secrets in that file.** What an agent authenticates with is held
+by the control plane and handed to a session as it starts, so a fresh container
+needs no login and the compose file is safe to paste anywhere.
+
+A machine built specifically to be a worker can skip the container and have
+Firetower in its own image instead; leave the container name empty and it runs
+the binary on the host.
+
+Upgrading is `docker compose pull && docker compose up -d`. Repositories,
+worktrees and the event log are on a volume and survive it — **running sessions
+do not**, because recreating the container takes the tmux server with it. Drain
+the host first.
+
 ### Connecting repositories
 
 Pasting a URL or a path works with no setup: the worker uses whatever git

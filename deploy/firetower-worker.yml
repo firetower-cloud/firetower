@@ -1,0 +1,32 @@
+# A Firetower worker, on a machine you own.
+#
+#   docker compose -f firetower-worker.yml up -d
+#
+# Then add the machine in Firetower: its address, the account to ssh as, and
+# the container name below. Firetower reaches this by ssh-ing to the machine and
+# running `docker exec` here — so this needs no ports, no keys, and no sshd.
+#
+# No secrets belong here. What an agent authenticates with is held by the
+# control plane and handed over per session.
+services:
+  worker:
+    # Rewritten when a version is cut, so this always names a release that
+    # exists. Before the first release, use `:edge` — built from every push to
+    # main.
+    image: ghcr.io/firetower-cloud/firetower-worker:0.1.0 # x-release-please-version
+    container_name: firetower-worker
+
+    # Comes back after a reboot, and after Docker restarts.
+    restart: unless-stopped
+
+    volumes:
+      # Repository mirrors, worktrees, the event log and the agent's own
+      # directory — everything that has to survive recreating the container.
+      - firetower:/var/lib/firetower
+
+    # Nothing listens. Work happens in `docker exec`, in tmux sessions that
+    # outlive the connection.
+    command: ["sleep", "infinity"]
+
+volumes:
+  firetower:

@@ -109,7 +109,16 @@ build:
 
 # The image a container host runs. Slow the first time, cached after.
 worker-image:
-    docker build -f Dockerfile.worker -t firetower/worker:dev .
+    docker build -f Dockerfile.worker --build-arg VERSION=dev -t firetower/worker:dev .
+
+# Both architectures, the way the workflow builds them.
+#
+# Loads nothing: a manifest with two platforms in it can't live in a local image
+# store. This is for finding out that the cross-compile broke here rather than
+# in CI ten minutes later.
+worker-image-check:
+    docker buildx build -f Dockerfile.worker \
+        --platform linux/amd64,linux/arm64 --build-arg VERSION=dev .
 
 # The small static binary that gets copied to a host.
 build-worker:

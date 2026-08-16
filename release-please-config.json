@@ -1,0 +1,23 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+
+  "bump-minor-pre-major": true,
+  "bump-patch-for-minor-pre-major": false,
+
+  "packages": {
+    ".": {
+      "release-type": "rust",
+      "package-name": "firetower",
+      "changelog-path": "CHANGELOG.md",
+
+      "extra-files": [
+        {
+          "type": "json",
+          "path": "web/package.json",
+          "jsonpath": "$.version"
+        },
+        "deploy/firetower-worker.yml"
+      ]
+    }
+  }
+}

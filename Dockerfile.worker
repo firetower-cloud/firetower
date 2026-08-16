@@ -4,11 +4,57 @@
 # probably macOS, and a Mach-O executable in a Linux container fails with
 # `exec format error` at the least helpful possible moment.
 #
-# No sshd. Firetower reaches a local container with `docker exec`, which is the
-# same bidirectional pipe without a daemon, a key, or a host key to verify.
+# No sshd. A container here is reached with `docker exec`, and a container on a
+# server is reached by ssh-ing to that machine and running `docker exec` there.
+# Either way there is no daemon, no key inside the image, no published port, and
+# no host key that changes every time the container is recreated.
 
-FROM rust:1-bookworm AS build
+# Cross-compiled, not emulated. `--platform=$BUILDPLATFORM` pins this stage to
+# the machine doing the building, so an arm64 image is compiled at full speed on
+# an amd64 runner rather than instruction-by-instruction under QEMU.
+FROM --platform=$BUILDPLATFORM rust:1-bookworm AS build
 WORKDIR /src
+
+# Both set by buildx: what we are running on, and what we are building for.
+# `amd64`/`arm64` is Docker's spelling; Rust and gcc each have their own.
+ARG BUILDARCH
+ARG TARGETARCH
+
+# A toolchain for the foreign architecture, and only then.
+#
+# Both parts are needed: the compiler and the target's libc headers. Without
+# `libc6-dev-*-cross` gcc is present and `#include <stdlib.h>` is not, which
+# surfaces as a C error inside a dependency rather than anything about
+# cross-compiling.
+#
+# Conditional because Debian's own gcc already provides the triplet-prefixed
+# name for the native architecture, and the `-cross` libc for the architecture
+# in use conflicts with the real one.
+RUN if [ "$BUILDARCH" != "$TARGETARCH" ]; then \
+        apt-get update && case "$TARGETARCH" in \
+            amd64) apt-get install -y --no-install-recommends \
+                       gcc-x86-64-linux-gnu libc6-dev-amd64-cross ;; \
+            arm64) apt-get install -y --no-install-recommends \
+                       gcc-aarch64-linux-gnu libc6-dev-arm64-cross ;; \
+            *) echo "no cross toolchain known for $TARGETARCH" >&2; exit 1 ;; \
+        esac && rm -rf /var/lib/apt/lists/*; \
+    fi
+
+# One place that knows the mapping, read by the steps after it.
+RUN case "$TARGETARCH" in \
+        amd64) echo x86_64-unknown-linux-gnu  > /target ;; \
+        arm64) echo aarch64-unknown-linux-gnu > /target ;; \
+        *) echo "no Rust target known for $TARGETARCH" >&2; exit 1 ;; \
+    esac \
+    && rustup target add "$(cat /target)"
+
+# Read per target by Cargo, so naming both leaves the native case untouched.
+ENV CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc \
+    CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=x86_64-linux-gnu-gcc
+# And the C compiler, for the crates that build C: SQLite is bundled and ring
+# compiles its own primitives. `cc` reads the target-suffixed form.
+ENV CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc \
+    CC_x86_64_unknown_linux_gnu=x86_64-linux-gnu-gcc
 
 # The whole workspace: the worker is one crate of several and the binary that
 # runs is ft-cli.
@@ -16,7 +62,11 @@ COPY Cargo.toml Cargo.lock ./
 COPY crates ./crates
 COPY migrations ./migrations
 
-RUN cargo build --release -p ft-cli
+RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
+    --mount=type=cache,target=/src/target,sharing=locked \
+    cargo build --release -p ft-cli --target "$(cat /target)" \
+    # Out of the cache mount, which does not survive the layer.
+    && cp "target/$(cat /target)/release/firetower" /firetower
 
 FROM debian:bookworm-slim
 
@@ -36,12 +86,29 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && npm cache clean --force \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=build /src/target/release/firetower /usr/local/bin/firetower
+COPY --from=build /firetower /usr/local/bin/firetower
 
 # Where this worker keeps its mirrors, worktrees and event log.
 RUN mkdir -p /var/lib/firetower/worker
 VOLUME /var/lib/firetower
 
-# Nothing to serve: the control plane runs `docker exec … worker --stdio` when
-# it wants to talk. This just has to stay alive.
+# The agent's own directory, on the volume.
+#
+# Not for credentials: the token arrives per session in the frame that starts a
+# workspace and is never written here. This holds what an agent accumulates by
+# being used — first-run answers, caches — so recreating the container to
+# upgrade it doesn't start from nothing.
+ENV HOME=/var/lib/firetower/home
+RUN mkdir -p "$HOME"
+
+# Readable without starting anything. The control plane compares it with its
+# own and reports a drift.
+ARG VERSION=0.0.0-dev
+LABEL org.opencontainers.image.version="$VERSION" \
+      org.opencontainers.image.title="Firetower worker" \
+      org.opencontainers.image.source="https://github.com/firetower-cloud/firetower" \
+      org.opencontainers.image.licenses="AGPL-3.0-only"
+
+# Nothing to serve: a caller runs `… worker --stdio` in here when it wants to.
+# This only has to stay alive.
 CMD ["sleep", "infinity"]

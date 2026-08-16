@@ -1,0 +1,39 @@
+name: release
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  please:
+    runs-on: ubuntu-latest
+    outputs:
+      # Only true on the run where a release PR was merged and the tag cut.
+      released: ${{ steps.release.outputs.release_created }}
+      tag: ${{ steps.release.outputs.tag_name }}
+      version: ${{ steps.release.outputs.version }}
+    steps:
+      - uses: googleapis/release-please-action@v4
+        id: release
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+  # Called, not triggered. The tag above is pushed with this workflow's own
+  # token, and GitHub does not let that start another workflow — so a
+  # `on: push: tags` job would never run, leaving a release with no image.
+  # Calling it directly also avoids needing a personal access token.
+  image:
+    needs: please
+    if: needs.please.outputs.released == 'true'
+    uses: ./.github/workflows/worker-image.yml
+    permissions:
+      contents: read
+      packages: write
+    with:
+      ref: ${{ needs.please.outputs.tag }}
+      version: ${{ needs.please.outputs.version }}
