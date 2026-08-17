@@ -61,6 +61,16 @@ pub const PROVIDERS: &[Provider] = &[Provider {
     scopes: "repo",
     git_username: "x-access-token",
     git_host: "github.com",
+    // Empty means every install has to register its own application before it
+    // can authorize GitHub — a five-minute job the README apologises for at
+    // length, and a place people give up.
+    //
+    // This is the one line to change to end that. A device-flow client id is
+    // public by design and has no paired secret, so a Firetower-owned one can
+    // ship in the source and in the image; `FIRETOWER_GITHUB_CLIENT_ID` still
+    // overrides it for anyone who would rather use their own. What it costs is
+    // that the approval screen shows our application's name, and its rate
+    // limit is shared.
     client_id: "",
 }];
 

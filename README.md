@@ -35,45 +35,158 @@ Early, but the loop is closed. A session can run on this machine, in a container
 - [x] HTTP API with a generated contract
 - [ ] A hosted control plane — the worker still never dials out
 
-## Requirements
-
-| | Why |
-|---|---|
-| **Rust** 1.90+ | Builds everything. `rustup` handles the rest — the toolchain is pinned. |
-| **git** | Mirrors and worktrees. Already on most machines. |
-| **tmux** | Holds the agent's terminal. This is the piece that keeps a session alive after you disconnect, so it isn't optional. |
-| **Docker** | Postgres for the control plane, and a container host if you add one. |
-| **Node 22+ and pnpm** | Builds the web application. |
-| **[just](https://github.com/casey/just)** | Task runner. Every command below assumes it. |
-| **cargo-watch** | Rebuilds the control plane on save. Only needed for `just dev`. |
-
-```sh
-# macOS
-brew install rust tmux node pnpm just
-cargo install cargo-watch
-
-# Debian / Ubuntu — pnpm and just aren't in apt
-sudo apt install tmux
-curl -fsSL https://sh.rustup.rs | sh
-curl -fsSL https://get.pnpm.io/install.sh | sh -
-cargo install just cargo-watch
-```
-
-Docker too, however you normally install it. `just doctor` will say if it isn't there.
-
 ## Running it
 
+Docker, and nothing else. Everything is in one image: the control plane, the
+interface compiled into the binary, and what a session needs to run.
+
 ```sh
-git clone https://github.com/westlabs/firetower
-cd firetower
-just doctor     # checks you have the tools
-just setup      # installs dependencies, once
-just dev        # Postgres, control plane on :4400, interface on :3000
+curl -O https://raw.githubusercontent.com/firetower-cloud/firetower/main/deploy/firetower.yml
+curl -O https://raw.githubusercontent.com/firetower-cloud/firetower/main/deploy/Caddyfile
+curl -o .env https://raw.githubusercontent.com/firetower-cloud/firetower/main/deploy/.env.example
+
+# fill in POSTGRES_PASSWORD, and FIRETOWER_ROOT_KEY if you want the key off disk
+docker compose -f firetower.yml up -d
 ```
 
-Open `http://localhost:3000`. `just dev` starts Postgres with the rest — you don't start the database by hand.
+Then read the log. The first start prints a URL with a token in it — open it
+once and the browser keeps it:
 
-Workers keep what happened on the host they run on (locally that's `~/.firetower`). The control plane's cache is Postgres. Drop the database and it rebuilds from the workers on reconnect; `just reset` wipes both.
+```sh
+docker compose -f firetower.yml logs firetower
+```
+
+```
+  Open this once — it carries the token, and the browser keeps it:
+  http://localhost/?t=n86MTx6U7boikRAhGsWv4Ho9y5EnbeI6bRpl57zX
+```
+
+**Sessions run in that container**, the same way they run on a laptop: the
+control plane starts a worker as a child process and `localhost` is a real host
+in the fleet. To run them somewhere else instead, add that machine over ssh —
+see below — and drain `localhost`.
+
+**Only Caddy publishes a port.** The control plane holds every credential
+Firetower has and is reachable from nothing but the proxy in front of it, which
+matters more than the certificate does.
+
+### Putting it on a domain
+
+With no `DOMAIN` set, Firetower serves plain HTTP on port 80 — right for
+something you only reach from that machine. Naming a domain is what turns on
+HTTPS, and Caddy does the rest: it gets a certificate, renews it, and redirects
+80 to 443.
+
+**1. Point a domain at the machine.** An `A` record for
+`firetower.example.com` to its public address, and `AAAA` if it has IPv6. Check
+it before starting anything:
+
+```sh
+dig +short firetower.example.com
+```
+
+That should print the machine's address. Propagation is minutes, not instant.
+
+**2. Open 80 and 443.** Both. Port 80 is not optional even though nothing is
+served on it — it is how Let's Encrypt proves you own the name. On a VPS, the
+provider's firewall is the one people forget.
+
+**3. Set the domain** in `.env`:
+
+```sh
+DOMAIN=firetower.example.com
+FIRETOWER_PUBLIC_URL=https://firetower.example.com
+```
+
+**4. Start it, then wait.** The first certificate takes 5–30 seconds. Until it
+arrives the browser shows a TLS error, which looks like a broken deployment and
+is not. `docker compose -f firetower.yml logs -f caddy` says
+`certificate obtained successfully`.
+
+**5. If it doesn't work**, the log says which of four things happened:
+
+| In the caddy log | What it means |
+| --- | --- |
+| `no such host`, NXDOMAIN | DNS isn't pointing here yet |
+| timeout or refused on the challenge | port 80 is blocked upstream |
+| `too many certificates already issued` | rate limit — see below |
+| `unauthorized` on the challenge | the name resolves somewhere else |
+
+**6. Use the staging CA while fixing DNS.** Failed validations are limited to
+five per hostname per hour, and it is easy to burn that. Let's Encrypt's
+staging endpoint issues untrusted certificates with far looser limits: add
+`acme_ca https://acme-staging-v02.api.letsencrypt.org/directory` to a global
+block in the `Caddyfile`, prove the pipeline works, then take it out.
+
+**No public domain?** Port 80 has to be reachable, so a machine behind CGNAT or
+a closed firewall cannot use this path. Caddy can prove ownership through your
+DNS provider's API instead, which needs a plugin compiled into it — open an
+issue and we'll document it.
+
+**Expiry warnings.** Let's Encrypt emails before a renewal that has started
+failing. To get them, add `email you@example.com` to a global block at the top
+of the `Caddyfile`.
+
+### Backups
+
+Two things, and they must be kept apart:
+
+```sh
+docker compose -f firetower.yml exec postgres pg_dump -U firetower firetower > firetower.sql
+docker compose -f firetower.yml exec firetower cat /var/lib/firetower/root.key
+```
+
+The database holds every credential, sealed. The root key is what opens them.
+A backup of the database on its own opens nothing — that is the entire point,
+and storing the key beside it gives it away. Losing the key means adding every
+credential again.
+
+The worker's repositories and worktrees are not a backup target: they rebuild.
+
+### Upgrading
+
+```sh
+docker compose -f firetower.yml pull
+docker compose -f firetower.yml up -d
+```
+
+Migrations run at start-up. **Drain a host before recreating its container** —
+recreating takes the tmux server with it, and running sessions go too.
+
+### Already running a proxy?
+
+Delete the `caddy` service, publish `4400` from the `firetower` service, and
+point your proxy at it. Two things it has to do that some proxies do not by
+default: forward the `Upgrade` and `Connection` headers, or the terminal will
+not attach; and not buffer responses, or the session list freezes until
+something else forces a flush (nginx: `proxy_buffering off`).
+
+If you trust a header for identity, make sure 4400 is reachable from nothing
+but the proxy — see **Who may use it** below.
+
+### Who may use it
+
+Firetower is not open to whoever reaches the port. There are two ways in and a
+deployment picks one:
+
+**A token.** Generated on the first start, kept at `/var/lib/firetower/token`,
+printed once in a URL. Set `FIRETOWER_TOKEN` to supply your own or to rotate:
+change it, restart, and the old one stops working.
+
+**A header from a proxy that already authenticates** — Cloudflare Access,
+Authelia, oauth2-proxy, Caddy's `forward_auth`:
+
+```sh
+FIRETOWER_TRUSTED_PROXY_HEADER=X-Forwarded-Email
+FIRETOWER_TRUSTED_PROXY=172.16.0.0/12
+```
+
+The header is believed only from an address in that list, and setting one
+without the other stops start-up — a deployment that thinks it is
+authenticated and is not would test perfectly, because the tester sets the
+header too.
+
+Firetower refuses to listen on anything but loopback with neither configured.
 
 ### Adding a server
 
@@ -294,34 +407,6 @@ Not the system keychain, which was the first design: a keychain belongs to one
 machine and one signed-in human, and Firetower hands credentials to workers on
 other machines and to containers with no desktop session at all.
 
-### Working on it
-
-The web application has its own dev server, so development runs two processes:
-
-```sh
-just dev        # control plane on :4400, web application on :3000
-just test
-just gen        # regenerate the API contract and the typed client
-just worker-image   # after a protocol change, or containers fail the handshake
-```
-
-While developing, the interface and the control plane are two processes on two
-ports, so the interface has to be told where the API is. That lives in
-`web/.env.development`, which is committed. If every request 404s from Next
-instead of reaching the control plane, that file is why — the interface is
-asking itself.
-
-Don't edit Rust while a local session is cloning: `cargo watch` restarts the
-control plane, which kills the local worker as its child and abandons the
-fetch. If you change the shape of a protocol frame, bump `PROTOCOL_VERSION` in
-`ft-proto` and rebuild the worker image — an old container fails the handshake
-with the stream closing.
-
-The web application is pinned to pnpm. Running `npm install` in `web/` would
-produce a second lockfile, so `packageManager` refuses it.
-
-`.env.example` is for contributors. Nobody running Firetower needs one.
-
 ## How it fits together
 
 ```
@@ -341,6 +426,11 @@ produce a second lockfile, so `packageManager` refuses it.
 **The worker never opens a port.** It reads frames from stdin and writes them to stdout, so who dials is a transport detail — a child process, `docker exec -i`, or `ssh host firetower worker --stdio`. The daemon can't tell the difference.
 
 `localhost` is a real host, not a special case. It appears in the fleet, runs sessions, and can be drained.
+
+## Working on it
+
+Building Firetower rather than running it is a different set of tools and
+a different set of commands. They live in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Licence
 
