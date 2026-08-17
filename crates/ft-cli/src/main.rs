@@ -42,7 +42,19 @@ enum Command {
         bind: std::net::IpAddr,
 
         /// Serve the API only; the web application runs on its own dev server.
-        #[arg(long, env = "FIRETOWER_DEV")]
+        ///
+        /// A flag on the command line, and a value in the environment. Both,
+        /// because `just dev` passes `--dev` while a compose file or a shell
+        /// writes `FIRETOWER_DEV=1` — and clap's own bool parser accepts
+        /// neither `1` nor a bare flag once it is told to read a value.
+        #[arg(
+            long,
+            env = "FIRETOWER_DEV",
+            default_value = "false",
+            default_missing_value = "true",
+            num_args = 0..=1,
+            value_parser = truthy,
+        )]
         dev: bool,
 
         /// Where the control plane keeps its state.
@@ -237,6 +249,16 @@ async fn ready(port: u16) -> Result<()> {
     let status = head.lines().next().unwrap_or_default();
     anyhow::ensure!(status.contains(" 200"), "the control plane said: {status}");
     Ok(())
+}
+
+/// `1` and `true` mean the same thing to whoever writes an environment
+/// variable, and clap's own bool parser accepts only one of them.
+fn truthy(value: &str) -> Result<bool, String> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "1" | "true" | "yes" | "on" => Ok(true),
+        "0" | "false" | "no" | "off" | "" => Ok(false),
+        other => Err(format!("expected true or false, got {other:?}")),
+    }
 }
 
 /// One obvious directory beats correctness about which of three system folders

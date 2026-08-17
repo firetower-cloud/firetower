@@ -216,13 +216,40 @@ impl Db {
         row.map(host_from_row).transpose()
     }
 
+    /// Every host, skipping any row this build cannot understand.
+    ///
+    /// One unreadable row used to fail the whole query, which meant it failed
+    /// start-up: the control plane would not boot at all because of one host,
+    /// and the message — `decoding compute` — named neither the host nor the
+    /// fact that the other ones were fine.
+    ///
+    /// A row gets that way by being written by a different build: a version
+    /// that knew a kind of compute this one doesn't, or a downgrade. Refusing
+    /// to start is the worst available answer. Skipping it loudly means the
+    /// fleet keeps working and the row is still there to be looked at.
     pub async fn hosts(&self) -> Result<Vec<Host>> {
-        sqlx::query("SELECT * FROM hosts ORDER BY created_at")
+        Ok(sqlx::query("SELECT * FROM hosts ORDER BY created_at")
             .fetch_all(&self.pool)
             .await?
             .into_iter()
-            .map(host_from_row)
-            .collect()
+            .filter_map(|row| {
+                let id: String = row.get("id");
+                let name: String = row.get("name");
+                match host_from_row(row) {
+                    Ok(host) => Some(host),
+                    Err(e) => {
+                        tracing::error!(
+                            host = %name,
+                            id = %id,
+                            "this build cannot read that host, so it is being left out of the \
+                             fleet: {e:#}. It was probably written by a different version. \
+                             Nothing has been deleted."
+                        );
+                        None
+                    }
+                }
+            })
+            .collect())
     }
 
     pub async fn mark_host_online(
@@ -1265,5 +1292,35 @@ mod tests {
         assert!(seen[0].found.installed);
         assert_eq!(seen[0].found.version.as_deref(), Some("2.1.44"));
         assert_eq!(seen[0].found.logged_in, Some(true));
+    }
+
+    /// The failure that stopped a control plane from booting: a host row
+    /// written by a build that knew a kind of compute this one does not.
+    #[tokio::test]
+    async fn a_host_this_build_cannot_read_is_skipped_rather_than_fatal() {
+        let db = Db::open_for_test().await.unwrap();
+        let keep = db.ensure_host("localhost", Compute::Local).await.unwrap();
+
+        // What a newer version would have left behind.
+        sqlx::query(
+            "INSERT INTO hosts (id, name, compute, state, created_at)
+             VALUES ($1, $2, $3, $4, $5)",
+        )
+        .bind("h_fromthefuture")
+        .bind("mystery")
+        .bind(serde_json::json!({ "type": "SomethingElse", "port": 9 }))
+        .bind("Unreachable")
+        .bind(chrono::Utc::now())
+        .execute(db.pool())
+        .await
+        .unwrap();
+
+        let hosts = db
+            .hosts()
+            .await
+            .expect("one unreadable row must not fail the query");
+
+        assert_eq!(hosts.len(), 1, "the readable host is still there");
+        assert_eq!(hosts[0].id, keep.id);
     }
 }
