@@ -6,7 +6,7 @@
 #   # edit .env
 #   docker compose -f firetower.yml up -d
 #
-# Then read the log: the first start prints a URL with a token in it.
+# Then read the log: the first start prints an administrator to sign in as.
 #
 #   docker compose -f firetower.yml logs firetower
 #
@@ -54,9 +54,10 @@ services:
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-firetower}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-firetower}
 
-      # Who may use this Firetower. Left empty, one is generated on the first
-      # start and printed in the log with a URL you can open.
-      FIRETOWER_TOKEN: ${FIRETOWER_TOKEN:-}
+      # The administrator, made before anything listens. Left empty, one is
+      # made anyway and its password printed once in the log.
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      ADMIN_INITIAL_PASSWORD: ${ADMIN_INITIAL_PASSWORD:-}
 
       # What every stored credential is sealed with. Left empty, a key is
       # written to the volume below — which works, and means the volume is now
@@ -67,9 +68,6 @@ services:
       # start. This process listens on 4400 in here and has no way to know it
       # is reached on 443 through Caddy.
       FIRETOWER_PUBLIC_URL: ${FIRETOWER_PUBLIC_URL:-http://localhost}
-
-      # Yours, if you would rather not use ours.
-      FIRETOWER_GITHUB_CLIENT_ID: ${FIRETOWER_GITHUB_CLIENT_ID:-}
     volumes:
       # The root key, the token, and everything the worker on this machine
       # keeps: repository mirrors, worktrees, the event log, and the agent's

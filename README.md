@@ -49,17 +49,23 @@ curl -o .env https://raw.githubusercontent.com/firetower-cloud/firetower/main/de
 docker compose -f firetower.yml up -d
 ```
 
-Then read the log. The first start prints a URL with a token in it — open it
-once and the browser keeps it:
+Then read the log. The first start makes an administrator and prints the
+password once — set `ADMIN_INITIAL_PASSWORD` in `.env` beforehand if you would
+rather choose it:
 
 ```sh
 docker compose -f firetower.yml logs firetower
 ```
 
 ```
-  Open this once — it carries the token, and the browser keeps it:
-  http://localhost/?t=n86MTx6U7boikRAhGsWv4Ho9y5EnbeI6bRpl57zX
+  There was no administrator, so one was made:
+
+    username  admin
+    password  velvet-timber-harbor-332
 ```
+
+Sign in with it and Firetower asks you to replace it — the one it printed was
+in a log, and the one you might have set is in a file.
 
 **Sessions run in that container**, the same way they run on a laptop: the
 control plane starts a worker as a child process and `localhost` is a real host
@@ -169,12 +175,25 @@ but the proxy — see **Who may use it** below.
 Firetower is not open to whoever reaches the port. There are two ways in and a
 deployment picks one:
 
-**A token.** Generated on the first start, kept at `/var/lib/firetower/token`,
-printed once in a URL. Set `FIRETOWER_TOKEN` to supply your own or to rotate:
-change it, restart, and the old one stops working.
+**Signing in.** The administrator is created before anything is listening —
+from `ADMIN_USERNAME` and `ADMIN_INITIAL_PASSWORD`, or invented and printed
+once. There is deliberately no moment where a fresh Firetower on a public
+address is unclaimed, waiting for whoever reaches it first to become its owner.
 
-**A header from a proxy that already authenticates** — Cloudflare Access,
-Authelia, oauth2-proxy, Caddy's `forward_auth`:
+Either way you are asked to replace that password on the first sign-in, and
+until you do, the account can do nothing else. Afterwards the variables are
+ignored, so editing an unrelated line of your `.env` cannot reset it. Changing
+a password signs out every browser, including the one that changed it.
+
+Forgotten it? There is no reset email, and one supported way back in:
+
+```sh
+docker compose -f firetower.yml exec firetower firetower passwd admin
+```
+
+**Or a header from a proxy that already authenticates** — Cloudflare Access,
+Authelia, oauth2-proxy, Caddy's `forward_auth`. It has to name somebody who
+exists here, so a misconfigured proxy cannot admit a stranger as themselves:
 
 ```sh
 FIRETOWER_TRUSTED_PROXY_HEADER=X-Forwarded-Email
@@ -186,7 +205,8 @@ without the other stops start-up — a deployment that thinks it is
 authenticated and is not would test perfectly, because the tester sets the
 header too.
 
-Firetower refuses to listen on anything but loopback with neither configured.
+Firetower refuses to listen on anything but loopback with authentication turned
+off.
 
 ### Adding a server
 
@@ -291,11 +311,14 @@ Pasting a URL or a path works with no setup: the worker uses whatever git
 credentials the machine already has, so if `git ls-remote <url>` works in your
 terminal, it works here.
 
-To authorize GitHub instead and pick from a list of your repositories, this
-build needs an application to authorize *as*. Registering one is a five-minute
-job you do once.
+To authorize GitHub instead and pick from a list of your repositories,
+Firetower needs an application to authorize *as*. **It asks you for one when you
+need it** — the setup wizard offers it, skippably, and the connect-a-repository
+screen offers it again at the moment you press *Authorize GitHub* with none
+registered. Both walk through the four steps below, and what you paste is kept
+in the database and works immediately, with no restart and nothing in a file.
 
-#### Registering the application
+The steps, for reference:
 
 1. Go to **[github.com/settings/applications/new][new-oauth]** — or navigate
    there: your avatar → Settings → Developer settings → OAuth Apps → New OAuth
@@ -315,42 +338,18 @@ job you do once.
    application**.
 
    Don't skip this. It's off by default, it's below the fold, and without it
-   every authorization fails with *"GitHub rejected this build's application
-   identifier"* — the same message you'd get from a wrong identifier, because
+   every authorization fails with the same error as a wrong identifier, because
    GitHub answers both with a 404.
 
-5. Copy the **Client ID** from the top of that page.
+5. Copy the **Client ID** from the top of that page, and paste it into
+   Firetower.
 
    Ignore the client secret. This flow doesn't use one, and it shouldn't be
-   pasted anywhere.
+   pasted anywhere. A device-flow client ID is public by design — there is no
+   paired secret, which is exactly why this flow suits a program that ships as
+   source.
 
 [new-oauth]: https://github.com/settings/applications/new
-
-#### Where the client ID goes
-
-In `.env`:
-
-```sh
-cp .env.example .env
-# then fill in
-FIRETOWER_GITHUB_CLIENT_ID=Ov23li…
-```
-
-Restart Firetower and the connect screen offers **Authorize GitHub**.
-
-Two locations are read, nearest first:
-
-| File | For |
-| --- | --- |
-| `./.env` | a checkout you're working in |
-| `~/.firetower/.env` | an installed copy with no checkout |
-
-Real environment variables beat both, so `FIRETOWER_GITHUB_CLIENT_ID=… firetower`
-still wins for a one-off.
-
-`.env` is gitignored. Nothing that goes in it is secret — a device-flow client
-ID is public by design, with no paired secret — but the file is per-install, so
-it stays out of version control.
 
 #### Why an OAuth App and not a GitHub App
 

@@ -42,9 +42,14 @@ just dev        # Postgres, control plane on :4400, interface on :3000
 Open `http://localhost:3000`. `just dev` starts Postgres with the rest — you
 don't start the database by hand.
 
-The first start prints a URL carrying a token. Open that once; the browser
-keeps it. Authentication is on in development too, so there is one way in
-rather than a second, untested one that only exists in production.
+The first start makes an administrator and prints its password once. Sign in
+with it and Firetower asks you to replace it. Authentication is on in
+development too — there is one way in rather than a second, untested one that
+only exists in production, and in development it matters *more*: the API sets
+`access-control-allow-origin: *` so the interface on :3000 can reach it, which
+means any page you visit could otherwise read your vault from your own browser.
+
+Locked out? `cargo run -p ft-cli -- passwd admin`.
 
 Workers keep what happened on the host they run on (locally that's
 `~/.firetower`). The control plane's cache is Postgres. Drop the database and
