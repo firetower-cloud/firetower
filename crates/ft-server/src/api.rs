@@ -72,6 +72,9 @@ pub enum ErrorCode {
     RepoInUse,
     /// The host tried and it didn't work — nothing to commit, push rejected.
     ActionFailed,
+    /// No token, the wrong one, or a proxy header from somewhere we don't
+    /// believe. The interface asks for a token rather than reporting a fault.
+    Unauthorized,
     Internal,
 }
 
@@ -81,7 +84,9 @@ impl ErrorCode {
             Self::InvalidRequest => StatusCode::BAD_REQUEST,
             Self::NotFound | Self::RepoNotConnected => StatusCode::NOT_FOUND,
             Self::ProviderNotConfigured => StatusCode::NOT_IMPLEMENTED,
-            Self::ProviderNotConnected | Self::RepoAccessDenied => StatusCode::UNAUTHORIZED,
+            Self::ProviderNotConnected | Self::RepoAccessDenied | Self::Unauthorized => {
+                StatusCode::UNAUTHORIZED
+            }
             Self::RepoUnreachable | Self::RepoUnusable => StatusCode::BAD_REQUEST,
             Self::NoCapacity
             | Self::HostUnreachable

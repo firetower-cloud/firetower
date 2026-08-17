@@ -40,6 +40,20 @@ impl Db {
         Self::migrated(pool).await
     }
 
+    /// Whether the database will answer, for `/readyz`.
+    ///
+    /// A real query rather than inspecting the pool: a pool can hold a
+    /// connection that Postgres closed on its side, and reporting ready on the
+    /// strength of a handle is how a container passes its health check while
+    /// failing every request.
+    pub async fn ping(&self) -> Result<()> {
+        sqlx::query("SELECT 1")
+            .execute(&self.pool)
+            .await
+            .context("the database did not answer")?;
+        Ok(())
+    }
+
     /// For the vault, which owns its own tables but not its own connection —
     /// one pool, so a secret written while a session starts is in the same
     /// transaction discipline as everything else.

@@ -9,6 +9,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 pub mod api;
+pub mod auth;
 mod container;
 pub mod db;
 pub mod diagnose;
@@ -49,6 +50,11 @@ pub struct Config {
     pub home: PathBuf,
     /// Where the control plane's database lives.
     pub database_url: String,
+    /// What to listen on. Loopback unless someone says otherwise — a default
+    /// that is wrong in a container is better than one that is wrong on a
+    /// laptop, because the container is configured deliberately and the laptop
+    /// is not.
+    pub bind: std::net::IpAddr,
     pub port: u16,
     /// In development the web application is served by its own dev server, so
     /// this process serves the API and permits its origin.
@@ -58,6 +64,23 @@ pub struct Config {
 /// Start the control plane: open the cache, register `localhost` as a host,
 /// connect its worker, and serve.
 pub async fn run(config: Config) -> Result<()> {
+    // Before the database, because this is the check that can refuse to start
+    // and it should refuse before it has done anything.
+    let (policy, token_source) = auth::load(&config.home).await?;
+
+    if !config.bind.is_loopback() && policy.is_open() {
+        anyhow::bail!(
+            "refusing to listen on {} with no authentication. Anything that can reach that \
+             address could read every credential in the vault.\n\n\
+             Unset {} to have a token generated, supply one in {}, or put a proxy in front \
+             that authenticates and name its header in {}.",
+            config.bind,
+            auth::MODE_ENV,
+            auth::TOKEN_ENV,
+            auth::HEADER_ENV,
+        );
+    }
+
     let db = Db::open(&config.database_url).await?;
     let fleet = Fleet::new(db.clone());
 
@@ -116,22 +139,72 @@ pub async fn run(config: Config) -> Result<()> {
         home: config.home.clone(),
         pending: Default::default(),
     };
-    let app = build_router(state, config.dev);
+    announce(&policy, &token_source, &config);
 
-    let addr = std::net::SocketAddr::from(([127, 0, 0, 1], config.port));
+    let app = build_router(state, config.dev, policy);
+
+    let addr = std::net::SocketAddr::new(config.bind, config.port);
     let listener = tokio::net::TcpListener::bind(addr)
         .await
         .with_context(|| format!("binding {addr} — is Firetower already running?"))?;
 
     tracing::info!("listening on http://{addr}");
-    axum::serve(listener, app).await.context("serving")?;
+
+    // `into_make_service_with_connect_info` rather than the plain router: the
+    // trusted-proxy header is only believed from certain addresses, and without
+    // this there is no address to check it against.
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+    )
+    .await
+    .context("serving")?;
     Ok(())
 }
 
-fn build_router(state: AppState, dev: bool) -> axum::Router {
-    let (router, _api) = api::router().with_state(state).split_for_parts();
+/// Say how to get in, exactly once, at the only moment it is needed.
+///
+/// The token goes in a URL on the first start and never again: after that the
+/// browser has it, and a credential printed on every restart ends up in
+/// whatever collects the logs.
+fn announce(policy: &auth::Policy, source: &auth::Source, config: &Config) {
+    tracing::info!(source = %source, "authentication: {}", policy.describe());
 
-    let mut app = router.layer(tower_http::trace::TraceLayer::new_for_http());
+    let first_start = matches!(source, auth::Source::NewFile(_));
+    if !first_start && !config.dev {
+        return;
+    }
+
+    let Some(token) = policy.url_token() else {
+        return;
+    };
+
+    // In development the interface is on its own port, so the URL that works is
+    // the dev server's rather than this one's.
+    let port = if config.dev { 3000 } else { config.port };
+
+    eprintln!();
+    eprintln!("  Open this once — it carries the token, and the browser keeps it:");
+    eprintln!("  http://localhost:{port}/?t={token}");
+    if first_start {
+        eprintln!();
+        eprintln!("  It is also in {}/token", config.home.display());
+    }
+    eprintln!();
+}
+
+fn build_router(state: AppState, dev: bool, policy: auth::Policy) -> axum::Router {
+    let (router, _api) = api::router().with_state(state.clone()).split_for_parts();
+
+    // Only the API. Whether the machine is up is not a secret, and a health
+    // check that needs a credential is a health check that stops working the
+    // day the credential is rotated.
+    let api = router.layer(axum::middleware::from_fn_with_state(policy, auth::require));
+
+    let mut app = axum::Router::new()
+        .merge(api)
+        .merge(operational(state))
+        .layer(tower_http::trace::TraceLayer::new_for_http());
 
     if dev {
         // The web application is on its own port while developing.
@@ -144,6 +217,35 @@ fn build_router(state: AppState, dev: bool) -> axum::Router {
     }
 
     app
+}
+
+/// Liveness and readiness, deliberately outside the API contract.
+///
+/// They are for whatever restarts containers, not for the interface, and
+/// putting them in the generated document would hand the web application two
+/// operations it has no use for.
+fn operational(state: AppState) -> axum::Router {
+    use axum::routing::get;
+
+    axum::Router::new()
+        // Up. Says nothing about whether it can work — that is the other one.
+        .route("/healthz", get(|| async { "ok" }))
+        // Up *and* able to answer. The distinction matters to a load balancer:
+        // a control plane whose database has gone should stop being sent
+        // requests without being killed and restarted into the same failure.
+        .route(
+            "/readyz",
+            get(|axum::extract::State(state): axum::extract::State<AppState>| async move {
+                match state.db.ping().await {
+                    Ok(()) => (axum::http::StatusCode::OK, "ready"),
+                    Err(e) => {
+                        tracing::warn!("not ready: {e:#}");
+                        (axum::http::StatusCode::SERVICE_UNAVAILABLE, "database")
+                    }
+                }
+            }),
+        )
+        .with_state(state)
 }
 
 #[cfg(test)]

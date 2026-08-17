@@ -31,6 +31,16 @@ enum Command {
         #[arg(long, env = "FIRETOWER_PORT", default_value_t = 4400)]
         port: u16,
 
+        /// What address to listen on.
+        ///
+        /// Loopback by default, which is the only safe default for a program
+        /// holding every credential you own. A container has to say
+        /// `0.0.0.0` — and if it does that with no authentication configured,
+        /// Firetower refuses to start rather than serving the vault to whoever
+        /// asks.
+        #[arg(long, env = "FIRETOWER_BIND", default_value = "127.0.0.1")]
+        bind: std::net::IpAddr,
+
         /// Serve the API only; the web application runs on its own dev server.
         #[arg(long, env = "FIRETOWER_DEV")]
         dev: bool,
@@ -124,14 +134,19 @@ async fn main() -> Result<()> {
         other => {
             // `firetower` with no subcommand serves, so the defaults have to
             // match what clap would have produced for `serve`.
-            let (port, dev, database_url) = match other {
+            let (port, bind, dev, database_url) = match other {
                 Some(Command::Serve {
                     port,
+                    bind,
                     dev,
                     database_url,
-                }) => (port, dev, database_url),
+                }) => (port, bind, dev, database_url),
                 _ => (
                     4400,
+                    std::env::var("FIRETOWER_BIND")
+                        .ok()
+                        .and_then(|v| v.parse().ok())
+                        .unwrap_or(std::net::IpAddr::from([127, 0, 0, 1])),
                     std::env::var("FIRETOWER_DEV").is_ok(),
                     std::env::var("DATABASE_URL").unwrap_or_else(|_| {
                         "postgres://firetower:firetower@localhost:5433/firetower".to_string()
@@ -147,7 +162,14 @@ async fn main() -> Result<()> {
 
             eprintln!();
             eprintln!("  Firetower");
-            eprintln!("  http://localhost:{port}");
+            // What someone can actually type. A bound address of 0.0.0.0 is
+            // not a URL, and printing it as one sends people to a page that
+            // never loads.
+            if bind.is_loopback() {
+                eprintln!("  http://localhost:{port}");
+            } else {
+                eprintln!("  listening on {bind}:{port}");
+            }
             if dev {
                 eprintln!("  api only — the web application is on its own port");
             }
@@ -156,6 +178,7 @@ async fn main() -> Result<()> {
             ft_server::run(ft_server::Config {
                 home,
                 port,
+                bind,
                 dev,
                 database_url,
             })
