@@ -13,7 +13,6 @@ pub mod auth;
 mod container;
 pub mod db;
 pub mod diagnose;
-pub mod dock;
 pub mod fleet;
 pub mod oauth;
 pub mod providers;
@@ -46,9 +45,6 @@ pub struct AppState {
     /// In memory on purpose: an authorization nobody finished should not
     /// survive a restart, and there is nothing here worth persisting.
     pub pending: Arc<tokio::sync::RwLock<std::collections::HashMap<String, api::Pending>>>,
-    /// Where workers that dial in arrive, and where the transports waiting for
-    /// them are parked.
-    pub dock: dock::Dock,
 }
 
 pub struct Config {
@@ -61,15 +57,6 @@ pub struct Config {
     /// is not.
     pub bind: std::net::IpAddr,
     pub port: u16,
-    /// Whether this machine is itself somewhere sessions can run.
-    ///
-    /// True on a workstation, where it is the whole point. False in a
-    /// container, where the control plane holds every credential and agents
-    /// belong somewhere that does not — an agent sharing a filesystem with the
-    /// root key is the arrangement this project went out of its way to avoid.
-    pub local_host: bool,
-    /// What to call the worker that dials in, when one is configured.
-    pub worker_name: String,
     /// In development the web application is served by its own dev server, so
     /// this process serves the API and permits its origin.
     pub dev: bool,
@@ -121,28 +108,15 @@ pub async fn run(config: Config) -> Result<()> {
 
     // localhost is a real host. It appears in the fleet, runs sessions, and can
     // be drained — the only thing it skips is the network.
-    // This machine is registered on a workstation, where a fresh install then
-    // has somewhere to run without anyone configuring anything. Not in a
-    // container: there it would be an agent living beside the vault, and it
-    // would come back every restart however often it was deleted.
-    if config.local_host {
-        db.ensure_host("localhost", ft_core::Compute::Local).await?;
-    }
-
-    // A worker this deployment was told to expect. The compose file's sidecar
-    // is exactly this: no port opened towards it, no socket mounted, nothing
-    // dialled out — it arrives on its own with a token they both hold.
-    if let Some(token) = worker_token() {
-        ensure_dialed_host(&db, &config.worker_name, &token).await?;
-    }
-
-    let dock = dock::Dock::new();
+    // This machine is always registered. A fresh install has somewhere to run
+    // without anyone configuring anything; it can be removed deliberately.
+    db.ensure_host("localhost", ft_core::Compute::Local).await?;
 
     // Every host, not just this one. A control plane that only reconnected to
     // itself would silently lose every server you added the moment it
     // restarted — and restarting is meant to cost nothing.
     for host in db.hosts().await? {
-        let transport = match Fleet::transport_for(&host, &config.home, &dock).await {
+        let transport = match Fleet::transport_for(&host, &config.home) {
             Ok(t) => t,
             Err(e) => {
                 tracing::error!(host = %host.name, "no transport: {e:#}");
@@ -165,7 +139,6 @@ pub async fn run(config: Config) -> Result<()> {
         key_source,
         home: config.home.clone(),
         pending: Default::default(),
-        dock,
     };
     announce(&policy, &token_source, &config);
 
@@ -187,56 +160,6 @@ pub async fn run(config: Config) -> Result<()> {
     )
     .await
     .context("serving")?;
-    Ok(())
-}
-
-/// The token a worker dials in with, if this deployment was given one.
-pub const WORKER_TOKEN_ENV: &str = "FIRETOWER_WORKER_TOKEN";
-
-fn worker_token() -> Option<String> {
-    std::env::var(WORKER_TOKEN_ENV)
-        .ok()
-        .map(|t| t.trim().to_string())
-        .filter(|t| !t.is_empty())
-}
-
-/// Make sure there is a host for the worker that will dial in, and that it
-/// expects the token this deployment is configured with.
-///
-/// Rotating the token is therefore editing one variable and restarting: the
-/// host keeps its identity, its history and its sessions, and only what it
-/// authenticates with changes. Recreating it instead would orphan everything
-/// that referred to it.
-async fn ensure_dialed_host(db: &Db, name: &str, token: &str) -> Result<()> {
-    let fingerprint = dock::fingerprint(token);
-
-    let compute = ft_core::Compute::Dialed {
-        token_hash: fingerprint.clone(),
-        label: Some("dials in".to_string()),
-    };
-
-    let host = db.ensure_host(name, compute.clone()).await?;
-
-    match &host.compute {
-        ft_core::Compute::Dialed { token_hash, .. } if token_hash == &fingerprint => {}
-        ft_core::Compute::Dialed { .. } => {
-            tracing::info!(
-                host = name,
-                "the worker token changed; the host now expects the new one"
-            );
-            db.set_host_compute(&host.id, compute).await?;
-        }
-        other => {
-            // Somebody added a host under this name by hand. Refusing beats
-            // quietly converting a server they configured into something else.
-            anyhow::bail!(
-                "{WORKER_TOKEN_ENV} is set, but the host called {name} is a {} that was added \
-                 another way. Rename one of them.",
-                other.label()
-            );
-        }
-    }
-
     Ok(())
 }
 
@@ -327,11 +250,6 @@ fn operational(state: AppState) -> axum::Router {
     use axum::routing::get;
 
     axum::Router::new()
-        // Where a worker that dials in arrives. Outside `/api` and outside the
-        // operator's gate: it is spoken by our own worker binary, which
-        // authenticates with its own token and has never heard of the
-        // interface's.
-        .route("/workers/connect", get(dock::connect))
         // Up. Says nothing about whether it can work — that is the other one.
         .route("/healthz", get(|| async { "ok" }))
         // Up *and* able to answer. The distinction matters to a load balancer:

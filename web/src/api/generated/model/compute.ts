@@ -67,21 +67,4 @@ export type Compute = {
      * @nullable
      */
   user?: string | null;
-} | {
-  /**
-     * What to call it on screen, if anything. The machine is whichever one
-     * connects with the token, and it may not have a name we would know.
-     * @nullable
-     */
-  label?: string | null;
-  /**
-     * SHA-256 of the token that machine authenticates with, hex.
-     *
-     * The hash rather than the token: this row is read on every attempt to
-     * connect, and a secret that is only ever compared does not need to be
-     * stored in a form anyone can read back. The token itself is supplied
-     * by whoever set the deployment up and is never written down here.
-     */
-  tokenHash: string;
-  type: 'Dialed';
 };

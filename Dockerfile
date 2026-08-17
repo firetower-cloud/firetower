@@ -5,10 +5,16 @@
 # version in step, and no reverse proxy needed to make two origins look like
 # one. See crates/ft-server/src/web.rs.
 #
-# What is deliberately *not* here: tmux, an agent, anything an agent needs. This
-# container holds every credential Firetower has, and work belongs somewhere
-# that does not. `FIRETOWER_LOCAL_HOST=0` below is the same decision expressed
-# to the program.
+# It can also run sessions itself, exactly as `just dev` does on a laptop: the
+# control plane spawns `firetower worker --stdio` as a child process, and
+# `localhost` is a real host in the fleet. That is why git, tmux, Node and an
+# agent are installed below.
+#
+# The trade that makes is the same one a workstation already makes — an agent
+# running as the same user, able to read the root key. Firetower has always
+# treated `localhost` as a real host rather than a special case, and a
+# container is no different. Keep them apart by adding a second machine over
+# ssh, which needs nothing from this image.
 
 # The interface first, because the Rust build embeds its output.
 #
@@ -75,11 +81,20 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
 
 FROM debian:bookworm-slim
 
-# git because repositories are probed from here before a worker ever sees them;
-# openssh-client because a server is reached by ssh-ing to it; ca-certificates
-# because both of those and every git host are over TLS.
+# git for repositories, tmux so an agent outlives the connection that started
+# it, openssh-client because a server is reached by ssh-ing to it, and
+# ca-certificates because all of that is over TLS.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        git openssh-client ca-certificates \
+        git tmux openssh-client ca-certificates curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# An agent, so this is somewhere work can actually run rather than only a place
+# to watch it from. Node is here for the agent, not for Firetower — the
+# interface is already inside the binary.
+RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && npm install -g @anthropic-ai/claude-code \
+    && npm cache clean --force \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=build /firetower /usr/local/bin/firetower
@@ -95,9 +110,6 @@ VOLUME /var/lib/firetower
 # settings belong next to each other.
 ENV FIRETOWER_BIND=0.0.0.0
 ENV FIRETOWER_PORT=4400
-
-# Not a place to run agents. See the note at the top.
-ENV FIRETOWER_LOCAL_HOST=0
 
 EXPOSE 4400
 

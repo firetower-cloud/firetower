@@ -1,0 +1,29 @@
+# The front door.
+#
+# `DOMAIN` unset serves plain HTTP on port 80, reachable from this machine. Set
+# it to a name that resolves here and Caddy gets a certificate on its own,
+# renews it, and redirects 80 to 443 — no configuration beyond the name.
+#
+# **Expiry warnings.** Let's Encrypt will email before a renewal that has
+# started failing. To get them, add this above the site block:
+#
+#     {
+#     	email you@example.com
+#     }
+#
+# It is left out rather than wired to a variable because Caddy refuses an empty
+# `email`, and a deployment with no domain has no use for one — a config that
+# will not start is a worse default than a missing warning.
+#
+# What this file does not need, and would be wrong to add:
+#
+#   * anything about websockets. `reverse_proxy` upgrades them natively, and
+#     Caddy has no default read timeout to cut the terminal off mid-session.
+#   * anything about buffering. Caddy does not buffer proxied responses, so
+#     the event stream arrives as it is written.
+#   * `encode gzip`. It buys little on small JSON and is a way to introduce
+#     buffering on the one stream where that would be felt.
+
+{$DOMAIN} {
+	reverse_proxy firetower:4400
+}

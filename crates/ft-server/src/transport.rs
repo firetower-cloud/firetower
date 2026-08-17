@@ -62,28 +62,6 @@ impl Connection {
     }
 }
 
-impl Connection {
-    /// A connection to something already running, with no child of ours behind
-    /// it.
-    ///
-    /// What a worker that dialled in produces: the stream is a websocket that
-    /// arrived on its own, so there is no process to hold open and no stderr to
-    /// quote when it ends. Everything downstream treats it identically to a
-    /// pipe to a child, which is the entire point of the transport being an
-    /// abstraction.
-    pub fn adopted(
-        reader: Box<dyn AsyncRead + Send + Unpin>,
-        writer: Box<dyn AsyncWrite + Send + Unpin>,
-    ) -> Self {
-        Self {
-            reader,
-            writer,
-            child: None,
-            tail: None,
-        }
-    }
-}
-
 #[cfg(test)]
 impl Connection {
     /// A connection with no process behind it, for tests that need a worker
@@ -129,18 +107,6 @@ pub trait Transport: Send + Sync {
     /// Human-readable, for logs and the Compute view.
     fn describe(&self) -> String;
     async fn connect(&self) -> Result<Connection>;
-
-    /// Whether connecting means waiting rather than dialling.
-    ///
-    /// Start-up and the add-a-host form both wait out the first attempt, so
-    /// that a machine which is not answering is a message rather than a
-    /// silence. That only makes sense when an attempt can fail. A transport
-    /// that waits for the far end to dial in has no attempt to fail — waiting
-    /// for its first connection would mean waiting for the machine itself,
-    /// which may be switched off until Monday.
-    fn awaits_arrival(&self) -> bool {
-        false
-    }
 }
 
 /// The worker as a child process on this machine.

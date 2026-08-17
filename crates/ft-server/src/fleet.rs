@@ -156,10 +156,9 @@ impl Fleet {
     /// The worker is identical in all three cases and cannot tell which it is
     /// behind — that indifference is what lets one binary serve a child
     /// process, a container, and a server on the other side of the world.
-    pub async fn transport_for(
+    pub fn transport_for(
         host: &ft_core::Host,
         home: &std::path::Path,
-        dock: &crate::dock::Dock,
     ) -> Result<Arc<dyn Transport>> {
         Ok(match &host.compute {
             ft_core::Compute::Local => {
@@ -194,9 +193,6 @@ impl Fleet {
                     .as_ref()
                     .map(|_| std::path::PathBuf::from("/var/lib/firetower/worker")),
             }),
-            // Nothing to dial. A berth is opened and the transport waits in it
-            // until that machine connects to us.
-            ft_core::Compute::Dialed { .. } => Arc::new(dock.berth(host.id.as_str()).await),
         })
     }
 
@@ -241,8 +237,6 @@ impl Fleet {
 
         let (first, waited) = oneshot::channel::<()>();
         let fleet = self.clone();
-        // Asked before the transport is handed to the task that owns it.
-        let awaits_arrival = transport.awaits_arrival();
 
         tokio::spawn(async move {
             let mut first = Some(first);
@@ -307,13 +301,7 @@ impl Fleet {
 
         // The first attempt, and no more than that: a host that is down should
         // not hold up start-up or a form.
-        //
-        // Unless there is no attempt to wait for. A host that dials in has not
-        // failed by being absent — it simply has not called yet — and waiting
-        // here for one to arrive would hang start-up until it did.
-        if !awaits_arrival {
-            let _ = waited.await;
-        }
+        let _ = waited.await;
     }
 
     /// Stop keeping a host connected, and drop the connection it has.

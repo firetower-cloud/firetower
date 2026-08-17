@@ -163,32 +163,6 @@ pub enum Compute {
         #[serde(default)]
         container: Option<String>,
     },
-    /// A worker that dials us, rather than one we go and find.
-    ///
-    /// Every other kind here is something the control plane reaches outward to:
-    /// a child process, `docker exec`, ssh. That works when the control plane
-    /// can open a connection to the machine, and stops working the moment the
-    /// machine is behind a firewall, on a home network, or simply not something
-    /// we are allowed to dial. So this one inverts it — the worker opens the
-    /// connection and the control plane waits.
-    ///
-    /// The transport underneath is the same stream of frames as everything
-    /// else. Only who picks up the phone changes, which is exactly the
-    /// indifference the protocol was built for.
-    #[serde(rename_all = "camelCase")]
-    Dialed {
-        /// SHA-256 of the token that machine authenticates with, hex.
-        ///
-        /// The hash rather than the token: this row is read on every attempt to
-        /// connect, and a secret that is only ever compared does not need to be
-        /// stored in a form anyone can read back. The token itself is supplied
-        /// by whoever set the deployment up and is never written down here.
-        token_hash: String,
-        /// What to call it on screen, if anything. The machine is whichever one
-        /// connects with the token, and it may not have a name we would know.
-        #[serde(default)]
-        label: Option<String>,
-    },
 }
 
 impl Compute {
@@ -198,7 +172,6 @@ impl Compute {
             Compute::Local => "local",
             Compute::Container { .. } => "container",
             Compute::Server { .. } => "server",
-            Compute::Dialed { .. } => "dialed",
         }
     }
 
@@ -212,9 +185,7 @@ impl Compute {
                 Some(user) => format!("{user}@{host}"),
                 None => host.clone(),
             }),
-            // Nothing here dials out, either because the machine is this one or
-            // because it is the far end that dials.
-            Compute::Local | Compute::Container { .. } | Compute::Dialed { .. } => None,
+            Compute::Local | Compute::Container { .. } => None,
         }
     }
 }

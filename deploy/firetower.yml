@@ -1,0 +1,97 @@
+# Firetower, on a machine you own.
+#
+#   curl -O https://raw.githubusercontent.com/firetower-cloud/firetower/main/deploy/firetower.yml
+#   curl -O https://raw.githubusercontent.com/firetower-cloud/firetower/main/deploy/Caddyfile
+#   curl -o .env https://raw.githubusercontent.com/firetower-cloud/firetower/main/deploy/.env.example
+#   # edit .env
+#   docker compose -f firetower.yml up -d
+#
+# Then read the log: the first start prints a URL with a token in it.
+#
+#   docker compose -f firetower.yml logs firetower
+#
+# **Only Caddy publishes a port.** The control plane holds every credential
+# Firetower has, and is reachable from nothing but the proxy in front of it —
+# which matters more than the certificate does.
+#
+# Sessions run in the control plane's own container, the same way they run on a
+# laptop: as a child process, with `localhost` in the fleet. To run them
+# somewhere else instead, add that machine over ssh — Compute → Add compute →
+# A server — and drain `localhost`.
+
+name: firetower
+
+services:
+  # The front door. Without DOMAIN it serves plain HTTP on port 80, which is
+  # the honest arrangement for something reachable only from this machine.
+  # With one, it gets a certificate on its own and redirects 80 to 443.
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on: [firetower]
+    ports:
+      - "80:80"
+      # Harmless with no domain: nothing answers there until there is a
+      # certificate to answer with.
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN:-:80}
+      ACME_EMAIL: ${ACME_EMAIL:-}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # The certificate and the ACME account key. Lose this and every restart
+      # asks Let's Encrypt for a new certificate — fine twice, rate-limited by
+      # the fifth time, and the limit is measured in days.
+      - caddy_data:/data
+      - caddy_config:/config
+
+  firetower:
+    image: ghcr.io/firetower-cloud/firetower:latest
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-firetower}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-firetower}
+
+      # Who may use this Firetower. Left empty, one is generated on the first
+      # start and printed in the log with a URL you can open.
+      FIRETOWER_TOKEN: ${FIRETOWER_TOKEN:-}
+
+      # What every stored credential is sealed with. Left empty, a key is
+      # written to the volume below — which works, and means the volume is now
+      # as valuable as the database. Setting it keeps the key off disk.
+      FIRETOWER_ROOT_KEY: ${FIRETOWER_ROOT_KEY:-}
+
+      # Yours, if you would rather not use ours.
+      FIRETOWER_GITHUB_CLIENT_ID: ${FIRETOWER_GITHUB_CLIENT_ID:-}
+    volumes:
+      # The root key, the token, and everything the worker on this machine
+      # keeps: repository mirrors, worktrees, the event log, and the agent's
+      # own directory.
+      - firetower:/var/lib/firetower
+    # No `ports`. On purpose — see the note at the top.
+
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-firetower}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-firetower}
+    volumes:
+      - postgres:/var/lib/postgresql/data
+    healthcheck:
+      # "ready for queries", not "the process started" — everything else waits
+      # on this.
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-firetower} -d ${POSTGRES_DB:-firetower}"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    # No `ports` either. Nothing outside this file has any business here.
+
+volumes:
+  postgres:
+  firetower:
+  caddy_data:
+  caddy_config:

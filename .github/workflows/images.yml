@@ -1,24 +1,31 @@
-# Publish the worker image — what a remote host runs.
+# Publish both images: the control plane, and the worker a host runs.
+#
+# Together, always. The control plane compares its version against each
+# worker's on every handshake and reports a drift, so publishing one without
+# the other would tell everybody who upgraded that their fleet is out of step.
 #
 # Goes to the registry that comes with the repository, so the job signs in as
 # itself and there is no stored credential.
 #
-# Note: the first push creates the package as private, even from a public
-# repository, and `docker compose pull` will then ask for a login. Make it
-# public once at Packages → firetower-worker → Package settings.
-name: worker image
+# Note: the first push creates each package as private, even from a public
+# repository, and `docker compose pull` will then ask for a login. Make them
+# public once at Packages → <name> → Package settings.
+name: images
 
 on:
   push:
     branches: [main]
-    # Only when something in the image could have changed.
+    # Only when something in an image could have changed. `web/**` matters to
+    # the control plane, which compiles the interface into its binary.
     paths:
       - "Cargo.toml"
       - "Cargo.lock"
       - "crates/**"
       - "migrations/**"
+      - "web/**"
+      - "Dockerfile"
       - "Dockerfile.worker"
-      - ".github/workflows/worker-image.yml"
+      - ".github/workflows/images.yml"
 
   # How a release publishes a versioned image: a tag pushed by a workflow
   # cannot trigger another, so `release.yml` calls this directly.
@@ -41,15 +48,28 @@ on:
         type: string
         required: false
 
-env:
-  IMAGE: ghcr.io/${{ github.repository_owner }}/firetower-worker
-
 jobs:
   publish:
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
+
+    strategy:
+      # One failing image should not cancel the other: knowing that only the
+      # worker built is more useful than knowing that something didn't.
+      fail-fast: false
+      matrix:
+        include:
+          - name: firetower
+            dockerfile: Dockerfile
+            title: control plane
+          - name: firetower-worker
+            dockerfile: Dockerfile.worker
+            title: worker
+
+    env:
+      IMAGE: ghcr.io/${{ github.repository_owner }}/${{ matrix.name }}
 
     steps:
       - uses: actions/checkout@v4
@@ -101,7 +121,7 @@ jobs:
       - uses: docker/build-push-action@v6
         with:
           context: .
-          file: Dockerfile.worker
+          file: ${{ matrix.dockerfile }}
           # Cross-compiled in the Dockerfile, so both build at native speed.
           platforms: linux/amd64,linux/arm64
           push: true
@@ -115,13 +135,15 @@ jobs:
           # that kind of cache is not exported, so a commit touching `crates/`
           # rebuilds dependencies on a fresh runner. A dependencies-only layer
           # is the fix if that becomes the slow part.
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # Keyed by image, or the two would evict each other's layers on
+          # every run and neither would ever hit.
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
 
       - name: what was published
         run: |
           {
-            echo "### Worker image"
+            echo "### ${{ matrix.title }}"
             echo '```'
             echo "${{ steps.meta.outputs.tags }}"
             echo '```'

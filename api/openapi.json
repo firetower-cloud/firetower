@@ -1843,33 +1843,6 @@
                 "description": "Who to connect as.\n\nAbsent leaves it to ssh, which is what keeps a name from your ssh\nconfig working on its own — that file may already say, and repeating\nit here badly is worse than not repeating it."
               }
             }
-          },
-          {
-            "type": "object",
-            "description": "A worker that dials us, rather than one we go and find.\n\nEvery other kind here is something the control plane reaches outward to:\na child process, `docker exec`, ssh. That works when the control plane\ncan open a connection to the machine, and stops working the moment the\nmachine is behind a firewall, on a home network, or simply not something\nwe are allowed to dial. So this one inverts it — the worker opens the\nconnection and the control plane waits.\n\nThe transport underneath is the same stream of frames as everything\nelse. Only who picks up the phone changes, which is exactly the\nindifference the protocol was built for.",
-            "required": [
-              "tokenHash",
-              "type"
-            ],
-            "properties": {
-              "label": {
-                "type": [
-                  "string",
-                  "null"
-                ],
-                "description": "What to call it on screen, if anything. The machine is whichever one\nconnects with the token, and it may not have a name we would know."
-              },
-              "tokenHash": {
-                "type": "string",
-                "description": "SHA-256 of the token that machine authenticates with, hex.\n\nThe hash rather than the token: this row is read on every attempt to\nconnect, and a secret that is only ever compared does not need to be\nstored in a form anyone can read back. The token itself is supplied\nby whoever set the deployment up and is never written down here."
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "Dialed"
-                ]
-              }
-            }
           }
         ],
         "description": "Where an agent can run.\n\nThree kinds, and they are not a ladder — each is the right answer sometimes.\nPoking at a repository by hand wants the first; leaving an agent running for\nan hour wants the third."

@@ -30,7 +30,7 @@ jobs:
   image:
     needs: please
     if: needs.please.outputs.released == 'true'
-    uses: ./.github/workflows/worker-image.yml
+    uses: ./.github/workflows/images.yml
     permissions:
       contents: read
       packages: write

@@ -37,15 +37,6 @@ tokio-util = { version = "0.7", features = ["io"] }
 # http
 axum = { version = "0.8", features = ["ws"] }
 tower-http = { version = "0.6", features = ["cors", "trace"] }
-# The client half of the same websocket axum serves — how a worker behind a
-# firewall reaches a control plane it cannot be reached from. Pinned to the
-# version axum already uses, so there is one copy of it in the tree.
-# webpki roots rather than the system's: a worker container should not need a
-# ca-certificates package kept in step with it.
-tokio-tungstenite = { version = "0.29", default-features = false, features = [
-  "connect",
-  "rustls-tls-webpki-roots",
-] }
 
 # api contract
 utoipa = { version = "5", features = ["axum_extras", "chrono"] }
