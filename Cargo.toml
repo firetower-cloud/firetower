@@ -78,6 +78,12 @@ chacha20poly1305 = "0.10"
 hmac = "0.12"
 sha2 = "0.10"
 zeroize = { version = "1", features = ["zeroize_derive"] }
+# Passwords. Not a hash we choose ourselves and not one that is fast: argon2id
+# is the current answer to someone who has the table and time to spend on it.
+# The salt and the cost parameters travel inside the encoded hash, so raising
+# the cost later leaves every existing password verifiable.
+argon2 = "0.5"
+password-hash = { version = "0.5", features = ["std"] }
 
 # talking to git hosts: their device-flow and repository endpoints
 reqwest = { version = "0.12", default-features = false, features = [

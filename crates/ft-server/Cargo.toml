@@ -29,6 +29,8 @@ chacha20poly1305.workspace = true
 hmac.workspace = true
 sha2.workspace = true
 zeroize.workspace = true
+argon2.workspace = true
+password-hash.workspace = true
 reqwest.workspace = true
 ulid.workspace = true
 tokio-stream = { version = "0.1", features = ["sync"] }

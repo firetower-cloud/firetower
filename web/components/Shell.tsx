@@ -2,6 +2,8 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useMe, useLogout } from "@/src/api/generated/auth/auth";
+import { forgetToken } from "@/src/api/http";
 import { Mark, Signal } from "./Signal";
 import { useListHosts } from "@/src/api/generated/hosts/hosts";
 import { useListSessions } from "@/src/api/generated/sessions/sessions";
@@ -68,8 +70,8 @@ export function Shell({ children }: { children: React.ReactNode }) {
   const { data: sessions = [] } = useListSessions();
   const { data: hosts = [] } = useListHosts();
 
-  /* Onboarding runs full-bleed — no fleet to navigate yet. */
-  if (path.startsWith("/setup")) return <>{children}</>;
+  /* Onboarding and signing in run full-bleed — no fleet to navigate yet. */
+  if (path.startsWith("/setup") || path.startsWith("/login")) return <>{children}</>;
 
   // Anything still alive, with what needs you first.
   const pinned = sessions
@@ -151,9 +153,55 @@ export function Shell({ children }: { children: React.ReactNode }) {
             </div>
           ))}
         </div>
+
+        <WhoAmI />
       </aside>
 
       <main className="min-w-0 flex-1">{children}</main>
+    </div>
+  );
+}
+
+/**
+ * Who is signed in, and the way out.
+ *
+ * At the bottom of the rail rather than in a menu: there is one account today,
+ * and the question it answers — "whose credentials would a session use?" — is
+ * worth a permanent line rather than a click.
+ */
+function WhoAmI() {
+  const { data } = useMe();
+
+  const out = useLogout();
+  const signOut = () =>
+    out.mutate(undefined, {
+      // Whether or not the server managed to delete the row, this browser is
+      // done with the token. Keeping it after someone asked to leave would be
+      // the wrong way to fail.
+      onSettled: () => {
+        forgetToken();
+        window.location.assign("/login");
+      },
+    });
+
+  if (!data) return null;
+
+  return (
+    <div className="border-t border-line px-4 py-3">
+      <div className="flex items-center gap-2">
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-[12.5px] text-dim">{data.user.username}</div>
+          {data.organization && (
+            <div className="truncate text-[11px] text-mute">{data.organization.name}</div>
+          )}
+        </div>
+        <button
+          onClick={signOut}
+          className="text-[11.5px] text-mute transition-colors hover:text-text"
+        >
+          Sign out
+        </button>
+      </div>
     </div>
   );
 }

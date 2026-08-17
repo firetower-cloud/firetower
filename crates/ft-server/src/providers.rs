@@ -34,19 +34,33 @@ pub struct Provider {
     pub client_id: &'static str,
 }
 
-/// Overridable so a contributor can point at their own registered application
-/// without editing the source.
-fn from_env(id: &str) -> Option<String> {
-    std::env::var(format!("FIRETOWER_{}_CLIENT_ID", id.to_uppercase())).ok()
+/// Where an operator-supplied client id is kept.
+pub fn setting_key(id: &str) -> String {
+    format!("{id}.client_id")
 }
 
-impl Provider {
-    /// The identifier to authorize with, if there is one.
-    pub fn client_id(&self) -> Option<String> {
-        from_env(self.id)
-            .or_else(|| Some(self.client_id.to_string()))
+/// The identifier to authorize with, if there is one.
+///
+/// The stored one first, then whatever this build was compiled with. There is
+/// deliberately no environment variable: this is answered in the setup wizard,
+/// or in the connect-a-repository screen at the moment it is missed, and a
+/// value that can also come from a file is a value someone will change in the
+/// interface and then find unchanged.
+pub async fn client_id(accounts: &crate::accounts::Accounts, id: &str) -> Option<String> {
+    let stored = accounts
+        .setting(&setting_key(id))
+        .await
+        .unwrap_or_else(|e| {
+            tracing::error!("could not read the {id} client id: {e:#}");
+            None
+        })
+        .filter(|s| !s.trim().is_empty());
+
+    stored.or_else(|| {
+        find(id)
+            .map(|p| p.client_id.to_string())
             .filter(|s| !s.trim().is_empty())
-    }
+    })
 }
 
 pub const PROVIDERS: &[Provider] = &[Provider {
@@ -67,10 +81,10 @@ pub const PROVIDERS: &[Provider] = &[Provider {
     //
     // This is the one line to change to end that. A device-flow client id is
     // public by design and has no paired secret, so a Firetower-owned one can
-    // ship in the source and in the image; `FIRETOWER_GITHUB_CLIENT_ID` still
-    // overrides it for anyone who would rather use their own. What it costs is
-    // that the approval screen shows our application's name, and its rate
-    // limit is shared.
+    // ship in the source and in the image; anyone who would rather use their
+    // own still enters it in the interface, and a stored one wins over this.
+    // What it costs is that the approval screen shows our application's name,
+    // and its rate limit is shared.
     client_id: "",
 }];
 
@@ -124,15 +138,26 @@ pub struct PendingAuth {
 mod tests {
     use super::*;
 
-    #[test]
-    fn an_unconfigured_build_says_so_rather_than_authorizing_with_nothing() {
-        let p = find("github").unwrap();
-        // With no identifier compiled in and none in the environment, the flow
-        // must refuse rather than send an empty client_id and get a confusing
-        // error back from the host.
-        if p.client_id.is_empty() && std::env::var("FIRETOWER_GITHUB_CLIENT_ID").is_err() {
-            assert!(p.client_id().is_none());
+    /// With nothing compiled in and nothing stored, the flow has to refuse
+    /// rather than send an empty client_id and get a confusing answer back.
+    #[tokio::test]
+    async fn an_unconfigured_build_says_so_rather_than_authorizing_with_nothing() {
+        let db = crate::db::Db::open_for_test().await.unwrap();
+        let accounts = crate::accounts::Accounts::new(db.pool().clone());
+
+        if find("github").unwrap().client_id.is_empty() {
+            assert!(client_id(&accounts, "github").await.is_none());
         }
+
+        // And a stored one is what it then uses.
+        accounts
+            .set_setting(&setting_key("github"), "Ov23liSTORED")
+            .await
+            .unwrap();
+        assert_eq!(
+            client_id(&accounts, "github").await.as_deref(),
+            Some("Ov23liSTORED")
+        );
     }
 
     #[test]

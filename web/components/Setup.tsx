@@ -5,11 +5,46 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Mark, KeyGlyph } from "./Signal";
 import { IMAGE } from "@/lib/data";
+import { useSetupState } from "@/src/api/generated/setup/setup";
+import { StepPassword, StepOrganization, StepGitHub } from "./SetupAccount";
 
-const STEPS = ["Running", "Repository", "Agent", "First session"];
+/**
+ * Two steps that ask something, then four that explain something.
+ *
+ * The first two are skipped once they are answered — a Firetower that has been
+ * set up shows the tour, and only the tour, however often this page is opened.
+ */
+const TOUR_STEPS = ["Running", "Repository", "Agent", "First session"];
 
 export function Setup() {
+  const { data: state, isLoading, refetch } = useSetupState();
+
+  // What is still outstanding decides how much of the wizard exists. Rendering
+  // a step somebody has already answered would ask them to do it twice.
+  const outstanding = [
+    state?.needsPassword ? "Password" : null,
+    state?.needsOrganization ? "Organisation" : null,
+    state?.needsGithub ? "GitHub" : null,
+  ].filter(Boolean) as string[];
+
+  const STEPS = [...outstanding, ...TOUR_STEPS];
   const [step, setStep] = useState(0);
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen px-8 pt-7">
+        <p className="text-[13px] text-mute">Looking…</p>
+      </div>
+    );
+  }
+
+  const current = STEPS[step];
+  // An answered step leaves the rail, so index 0 is then whatever is next —
+  // the remaining question, or the first page of the tour.
+  const advance = () => {
+    void refetch();
+    setStep(0);
+  };
 
   return (
     <div className="min-h-screen">
@@ -23,13 +58,16 @@ export function Setup() {
       </header>
 
       <div className="mx-auto max-w-[660px] px-8 pb-24">
-        <Rail step={step} onJump={setStep} />
+        <Rail steps={STEPS} step={step} onJump={setStep} />
 
         <div className="mt-9">
-          {step === 0 && <StepRunning onNext={() => setStep(1)} />}
-          {step === 1 && <StepRepo onNext={() => setStep(2)} />}
-          {step === 2 && <StepAgent onNext={() => setStep(3)} />}
-          {step === 3 && <StepSession />}
+          {current === "Password" && <StepPassword onNext={advance} />}
+          {current === "Organisation" && <StepOrganization onNext={advance} />}
+          {current === "GitHub" && <StepGitHub onNext={advance} />}
+          {current === "Running" && <StepRunning onNext={() => setStep(step + 1)} />}
+          {current === "Repository" && <StepRepo onNext={() => setStep(step + 1)} />}
+          {current === "Agent" && <StepAgent onNext={() => setStep(step + 1)} />}
+          {current === "First session" && <StepSession />}
         </div>
       </div>
     </div>
@@ -38,7 +76,16 @@ export function Setup() {
 
 /* ── The step rail ─────────────────────────────────────────────────── */
 
-function Rail({ step, onJump }: { step: number; onJump: (n: number) => void }) {
+function Rail({
+  steps,
+  step,
+  onJump,
+}: {
+  steps: string[];
+  step: number;
+  onJump: (n: number) => void;
+}) {
+  const STEPS = steps;
   return (
     <div className="flex items-center">
       {STEPS.map((label, i) => (

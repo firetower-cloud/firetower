@@ -1,5 +1,0 @@
-This directory is where `next build` writes the static export, and the control
-plane compiles whatever is in it into the binary — see crates/ft-server/src/web.rs.
-
-It is committed empty so that `cargo check` works in a clone that has never run
-`pnpm build`. Everything else in here is a build artifact and is ignored.

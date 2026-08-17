@@ -69,6 +69,27 @@ enum Command {
         database_url: String,
     },
 
+    /// Set someone's password, from the machine Firetower runs on.
+    ///
+    /// The only way back in when a password is forgotten. There is no email to
+    /// send a link to and deliberately no second path — one supported way to do
+    /// this is also one way to get it wrong.
+    ///
+    /// Every browser signed in as that person is signed out, which is the point
+    /// as much as the new password is.
+    Passwd {
+        /// Who. `admin` unless somebody chose otherwise.
+        username: String,
+
+        /// Where the control plane keeps its state.
+        #[arg(
+            long,
+            env = "DATABASE_URL",
+            default_value = "postgres://firetower:firetower@localhost:5433/firetower"
+        )]
+        database_url: String,
+    },
+
     /// Ask the control plane on this machine whether it is ready to work.
     ///
     /// Exists so the container image needs no curl: a health check is the one
@@ -133,6 +154,14 @@ async fn main() -> Result<()> {
             let value = ft_worker::askpass::respond_as_helper(&prompt.join(" ")).await?;
             println!("{value}");
             Ok(())
+        }
+
+        Some(Command::Passwd {
+            username,
+            database_url,
+        }) => {
+            init_tracing(true, true);
+            set_password(&username, &database_url).await
         }
 
         Some(Command::Healthcheck { port }) => {
@@ -211,6 +240,64 @@ async fn main() -> Result<()> {
             .await
         }
     }
+}
+
+/// Ask twice, then replace it.
+///
+/// Read from the terminal rather than taken as an argument: an argument is in
+/// the shell's history and in `ps` for as long as this runs.
+async fn set_password(username: &str, database_url: &str) -> Result<()> {
+    let db = ft_server::db::Db::open(database_url).await?;
+    let accounts = ft_server::accounts::Accounts::new(db.pool().clone());
+
+    let user = accounts
+        .user_by_name(username)
+        .await?
+        .with_context(|| format!("there is no user called {username}"))?;
+
+    let first = read_hidden(&format!("New password for {username}: "))?;
+    ft_server::accounts::check_password(&first)?;
+    let again = read_hidden("Again: ")?;
+    anyhow::ensure!(first == again, "those didn't match");
+
+    accounts.set_password(&user.id, &first).await?;
+
+    eprintln!();
+    eprintln!("  Done. Everywhere signed in as {username} has been signed out.");
+    Ok(())
+}
+
+/// A line from the terminal, with echo off while it is typed.
+///
+/// `stty` rather than a crate: this is the one place in Firetower that reads a
+/// password from a keyboard, and a dependency for it would be a dependency to
+/// keep patched forever.
+fn read_hidden(prompt: &str) -> Result<String> {
+    use std::io::{BufRead, Write};
+
+    eprint!("{prompt}");
+    std::io::stderr().flush().ok();
+
+    let hushed = std::process::Command::new("stty")
+        .arg("-echo")
+        .stdin(std::process::Stdio::inherit())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+
+    let mut line = String::new();
+    let read = std::io::stdin().lock().read_line(&mut line);
+
+    if hushed {
+        let _ = std::process::Command::new("stty")
+            .arg("echo")
+            .stdin(std::process::Stdio::inherit())
+            .status();
+        eprintln!();
+    }
+
+    read.context("reading from the terminal")?;
+    Ok(line.trim_end_matches(['\n', '\r']).to_string())
 }
 
 /// One GET, by hand, because a dependency for this would be absurd.

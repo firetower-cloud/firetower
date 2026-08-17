@@ -10,12 +10,14 @@
 //! router that puts them in order.
 
 mod agents;
+mod auth;
 mod events;
 mod hosts;
 mod providers;
 mod repos;
 mod secrets;
 mod sessions;
+mod setup;
 mod terminal;
 
 // `providers` on its own is the module below, which is this crate's git-host
@@ -72,14 +74,18 @@ pub enum ErrorCode {
     RepoInUse,
     /// The host tried and it didn't work — nothing to commit, push rejected.
     ActionFailed,
-    /// No token, the wrong one, or a proxy header from somewhere we don't
-    /// believe. The interface asks for a token rather than reporting a fault.
+    /// Nobody is signed in, or the session has ended. The interface shows the
+    /// sign-in screen rather than reporting a fault.
     Unauthorized,
+    /// Signed in, with a password that came from a file. Every other request
+    /// is refused until it is replaced — the interface turns this into the
+    /// wizard's first step rather than an error.
+    PasswordChangeRequired,
     Internal,
 }
 
 impl ErrorCode {
-    fn status(self) -> StatusCode {
+    pub(crate) fn status(self) -> StatusCode {
         match self {
             Self::InvalidRequest => StatusCode::BAD_REQUEST,
             Self::NotFound | Self::RepoNotConnected => StatusCode::NOT_FOUND,
@@ -87,6 +93,9 @@ impl ErrorCode {
             Self::ProviderNotConnected | Self::RepoAccessDenied | Self::Unauthorized => {
                 StatusCode::UNAUTHORIZED
             }
+            // Not 401: the credential was accepted. It is 403 because this
+            // account may do exactly one thing until it does it.
+            Self::PasswordChangeRequired => StatusCode::FORBIDDEN,
             Self::RepoUnreachable | Self::RepoUnusable => StatusCode::BAD_REQUEST,
             Self::NoCapacity
             | Self::HostUnreachable
@@ -198,6 +207,12 @@ pub struct ApiDoc;
 pub fn router() -> OpenApiRouter<AppState> {
     OpenApiRouter::with_openapi(ApiDoc::openapi())
         .routes(routes!(bootstrap))
+        .routes(routes!(auth::login))
+        .routes(routes!(auth::logout))
+        .routes(routes!(auth::me))
+        .routes(routes!(auth::change_password))
+        .routes(routes!(setup::setup_state))
+        .routes(routes!(setup::name_organization))
         .routes(routes!(hosts::list_hosts, hosts::create_host))
         .routes(routes!(hosts::delete_host))
         .routes(routes!(hosts::connect_host))
@@ -213,6 +228,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(secrets::replace_secret, secrets::remove_secret))
         .routes(routes!(secrets::reveal_secret))
         .routes(routes!(providers::list_providers))
+        .routes(routes!(providers::set_client_id))
         .routes(routes!(providers::authorize_provider))
         .routes(routes!(providers::disconnect_provider))
         .routes(routes!(providers::list_provider_repos))

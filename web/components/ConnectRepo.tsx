@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Modal, Command, Foot, Go, Quiet } from "./Modal";
+import { ClientIdForm } from "./SetupAccount";
 import {
   useListProviders,
   useAuthorizeProvider,
@@ -393,23 +394,26 @@ function NotConfigured({
   provider: ProviderStatus;
   onManual: () => void;
 }) {
+  const providers = useListProviders();
+
   return (
     <>
       <p className="max-w-[54ch] text-[13.5px] leading-[1.6] text-dim">
-        No application is registered for {provider.label} yet, so there&apos;s nothing
-        to authorize against. Register one — a device-flow application, which needs no
-        secret and no callback URL — then put its identifier in{" "}
-        <code className="font-mono text-[12.5px] text-slate">.env</code>:
+        No application is registered for {provider.label} yet, so there is nothing to
+        authorize against. It takes about five minutes, once, and this is the whole of
+        it — a device-flow application needs no secret and no callback URL.
       </p>
-      <div className="mt-3">
-        <Command text={`FIRETOWER_${provider.id.toUpperCase()}_CLIENT_ID=Ov23li…`} />
+
+      <div className="mt-4">
+        {/* Asked here rather than sent somewhere else to be asked: this is the
+            moment somebody wants the thing it enables, and a link to the README
+            is where that intention goes to die. Saved to the database, so it
+            works immediately and survives a restart. */}
+        <ClientIdForm onDone={() => void providers.refetch()} />
       </div>
-      <p className="mt-3 text-[12.5px] text-mute">
-        The README walks through registering it. Restart Firetower afterwards — until
-        then, pasting a URL works and uses whatever git credentials the host already has.
-      </p>
+
       <Foot>
-        <Go onClick={onManual}>Paste a URL</Go>
+        <Go onClick={onManual}>Paste a URL instead</Go>
       </Foot>
     </>
   );

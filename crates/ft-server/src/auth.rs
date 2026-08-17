@@ -1,22 +1,23 @@
 //! Who is allowed in.
 //!
-//! Until this existed, the only thing protecting every credential Firetower
-//! holds was that it listened on loopback. That is a real defence on a laptop
-//! and no defence at all on a server, so there are two ways to satisfy this and
-//! the deployment picks one:
+//! Until accounts existed, the only thing protecting every credential Firetower
+//! holds was that it listened on loopback. That is a defence on a laptop and
+//! none at all on a server.
 //!
-//! 1. **A token.** One shared secret, generated on first start if nobody
-//!    supplied one, kept at `~/.firetower/token` the way the root key is kept.
-//!    The command line prints a URL carrying it, so the first visit costs no
-//!    typing. This is the single-operator case, which is most of them.
+//! Two ways to satisfy this, and a deployment picks one:
+//!
+//! 1. **Signing in.** A username and password produce a session, and the
+//!    session's token is what every later request carries. This is the normal
+//!    path and the one the interface uses.
 //! 2. **A header a proxy sets.** `FIRETOWER_TRUSTED_PROXY_HEADER=X-Forwarded-Email`
 //!    hands identity to whatever is already in front — Cloudflare Access,
 //!    Authelia, oauth2-proxy, Caddy's `forward_auth`. Firetower does not learn
-//!    to speak OIDC; it learns to believe something that already does.
+//!    to speak OIDC; it learns to believe something that already does. The
+//!    header still has to name somebody who exists here.
 //!
-//! Both produce a [`Principal`] rather than a yes. A header that says *who*
-//! is worth more than a token that says *someone*, and the difference has to
-//! survive the middleware or it may as well not have been asked for.
+//! Both produce a [`Principal`] carrying the **user**, not a yes. A password
+//! that only answered "somebody" would make every later question about who did
+//! what unanswerable.
 //!
 //! **The trap this file exists to avoid.** A trusted header is only worth the
 //! network in front of it. If a request can reach Firetower without passing the
@@ -24,21 +25,17 @@
 //! from an address in `FIRETOWER_TRUSTED_PROXY`, and configuring the header
 //! without that list stops start-up rather than quietly trusting the internet.
 
+use crate::accounts::{Accounts, User};
 use anyhow::{bail, Context, Result};
 use axum::{
     extract::{ConnectInfo, Request, State},
-    http::{header, HeaderMap, HeaderName, StatusCode},
+    http::{header, HeaderMap, HeaderName},
     middleware::Next,
     response::{IntoResponse, Response},
     Json,
 };
 use std::net::{IpAddr, SocketAddr};
-use std::path::{Path, PathBuf};
 use std::sync::Arc;
-
-/// A token supplied rather than generated. For containers, and anything with a
-/// secret manager in front of it.
-pub const TOKEN_ENV: &str = "FIRETOWER_TOKEN";
 
 /// Set to `none` to serve with no authentication at all. Only honoured on
 /// loopback, or behind a proxy that authenticates instead.
@@ -51,46 +48,41 @@ pub const HEADER_ENV: &str = "FIRETOWER_TRUSTED_PROXY_HEADER";
 /// comma separated.
 pub const UPSTREAM_ENV: &str = "FIRETOWER_TRUSTED_PROXY";
 
-const FILE: &str = "token";
-
-/// Where the token came from, so start-up can say so without saying what it is.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Source {
-    Environment,
-    File(PathBuf),
-    /// Made just now — the one case where the log should print the URL.
-    NewFile(PathBuf),
-    /// Nobody is being asked for anything.
-    Disabled,
-}
-
-impl std::fmt::Display for Source {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Environment => write!(f, "{TOKEN_ENV}"),
-            Self::File(p) | Self::NewFile(p) => write!(f, "{}", p.display()),
-            Self::Disabled => write!(f, "disabled"),
-        }
-    }
-}
-
 /// Who made a request, once something has vouched for them.
 ///
-/// Deliberately not a boolean. Self-hosting has one operator and could get away
-/// with one, but the moment a proxy supplies an email address, throwing it away
-/// at the door means every later question about *who* has no answer to reach
-/// for.
+/// Deliberately not a boolean. One administrator could get away with one, but
+/// the moment a second person exists — or a proxy supplies a name — throwing it
+/// away at the door means every later question about *who* has no answer to
+/// reach for.
 #[derive(Debug, Clone)]
 pub struct Principal {
-    /// A name for the log and, later, for an audit trail. `"operator"` for the
-    /// shared token; whatever the proxy said otherwise.
+    /// A name for the log and, later, for an audit trail.
     pub subject: Arc<str>,
     pub via: Via,
+    /// Absent only when authentication is off.
+    pub user: Option<User>,
+}
+
+impl Principal {
+    /// Whether this request may do anything beyond replacing its password.
+    ///
+    /// An administrator whose password came out of a file is signed in and
+    /// almost entirely unable to act: the credential is in a file on disk, and
+    /// treating that as a working login would make the file the real
+    /// credential.
+    pub fn must_change_password(&self) -> bool {
+        self.user
+            .as_ref()
+            .map(|u| u.must_change_password)
+            .unwrap_or(false)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Via {
-    Token,
+    /// Signed in with a password.
+    Session,
+    /// Named by a proxy we believe.
     Proxy,
     /// Authentication is off. Recorded rather than represented by an absent
     /// principal, so handlers never have to care which it was.
@@ -100,8 +92,8 @@ pub enum Via {
 /// What the deployment will accept.
 #[derive(Clone)]
 pub struct Policy {
-    /// `None` when authentication is off.
-    token: Option<Arc<str>>,
+    /// True when `FIRETOWER_AUTH=none`. Sessions are then not consulted.
+    disabled: bool,
     header: Option<HeaderName>,
     upstreams: Arc<[Cidr]>,
 }
@@ -110,7 +102,7 @@ impl Policy {
     /// Nothing is asked of anybody. Only reachable by asking for it.
     pub fn open() -> Self {
         Self {
-            token: None,
+            disabled: true,
             header: None,
             upstreams: Arc::from(Vec::new()),
         }
@@ -121,88 +113,22 @@ impl Policy {
     /// The one question start-up asks before binding an address the rest of the
     /// world can reach.
     pub fn is_open(&self) -> bool {
-        self.token.is_none() && self.header.is_none()
-    }
-
-    /// The token, for the one line at start-up that puts it in a URL.
-    ///
-    /// The only way out of this module, and it exists because a token nobody
-    /// can find is a locked door with the key in another building. Callers are
-    /// expected to use it once, on the first start, and never log it again.
-    pub fn url_token(&self) -> Option<&str> {
-        self.token.as_deref()
+        self.disabled && self.header.is_none()
     }
 
     /// In words, for the log line at start-up.
     pub fn describe(&self) -> String {
-        match (&self.token, &self.header) {
-            (Some(_), Some(h)) => format!("a token, or {} from a trusted proxy", h.as_str()),
-            (Some(_), None) => "a token".to_string(),
-            (None, Some(h)) => format!("{} from a trusted proxy", h.as_str()),
-            (None, None) => "nothing — anyone who can reach the port is in".to_string(),
+        match (self.disabled, &self.header) {
+            (false, Some(h)) => format!("signing in, or {} from a trusted proxy", h.as_str()),
+            (false, None) => "signing in".to_string(),
+            (true, Some(h)) => format!("{} from a trusted proxy", h.as_str()),
+            (true, None) => "nothing — anyone who can reach the port is in".to_string(),
         }
-    }
-
-    /// Decide who this is, if anyone.
-    fn admit(&self, headers: &HeaderMap, query: Option<&str>, peer: IpAddr) -> Option<Principal> {
-        if self.is_open() {
-            return Some(Principal {
-                subject: "anyone".into(),
-                via: Via::Open,
-            });
-        }
-
-        // The proxy first: it knows a name, and the token only knows that
-        // somebody had it.
-        if let Some(name) = &self.header {
-            if self.upstreams.iter().any(|c| c.contains(peer)) {
-                if let Some(who) = headers.get(name).and_then(|v| v.to_str().ok()) {
-                    let who = who.trim();
-                    if !who.is_empty() {
-                        return Some(Principal {
-                            subject: who.into(),
-                            via: Via::Proxy,
-                        });
-                    }
-                }
-            }
-        }
-
-        let expected = self.token.as_ref()?;
-
-        if let Some(offered) = bearer(headers) {
-            if constant_time_eq(offered.as_bytes(), expected.as_bytes()) {
-                return Some(Principal {
-                    subject: "operator".into(),
-                    via: Via::Token,
-                });
-            }
-        }
-
-        // A browser cannot set a header on a websocket handshake, so the
-        // terminal has nowhere to put the token but the query string. Accepted
-        // only there: a query string is copied into access logs and browser
-        // history, which is exactly what a credential should not be in.
-        if is_upgrade(headers) {
-            if let Some(offered) = query_token(query) {
-                if constant_time_eq(offered.as_bytes(), expected.as_bytes()) {
-                    return Some(Principal {
-                        subject: "operator".into(),
-                        via: Via::Token,
-                    });
-                }
-            }
-        }
-
-        None
     }
 }
 
-/// Read the policy from the environment, making a token if that is what's left.
-///
-/// Mirrors [`crate::vault::root::load`] on purpose: an operator who has met one
-/// of them already knows how the other behaves.
-pub async fn load(home: &Path) -> Result<(Policy, Source)> {
+/// Read the policy from the environment.
+pub fn load() -> Result<Policy> {
     let header = match std::env::var(HEADER_ENV) {
         Ok(name) if !name.trim().is_empty() => Some(
             HeaderName::try_from(name.trim().to_ascii_lowercase())
@@ -238,203 +164,171 @@ pub async fn load(home: &Path) -> Result<(Policy, Source)> {
         Ok(ref v) if v == "none" || v == "off" || v == "disabled"
     );
 
-    if disabled {
-        return Ok((
-            Policy {
-                token: None,
-                header,
-                upstreams: Arc::from(upstreams),
-            },
-            Source::Disabled,
-        ));
-    }
-
-    if let Ok(text) = std::env::var(TOKEN_ENV) {
-        let text = text.trim();
-        if !text.is_empty() {
-            return Ok((
-                Policy {
-                    token: Some(text.into()),
-                    header,
-                    upstreams: Arc::from(upstreams),
-                },
-                Source::Environment,
-            ));
-        }
-    }
-
-    let path = home.join(FILE);
-    let (token, source) = match tokio::fs::read_to_string(&path).await {
-        Ok(text) if !text.trim().is_empty() => {
-            tighten(&path).await?;
-            (text.trim().to_string(), Source::File(path))
-        }
-        Ok(_) => {
-            // An empty file is a half-finished first start, not a decision.
-            let fresh = mint();
-            write_new(&path, &fresh).await?;
-            (fresh, Source::NewFile(path))
-        }
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            let fresh = mint();
-            write_new(&path, &fresh).await?;
-            (fresh, Source::NewFile(path))
-        }
-        Err(e) => return Err(e).with_context(|| format!("reading {}", path.display())),
-    };
-
-    Ok((
-        Policy {
-            token: Some(token.into()),
-            header,
-            upstreams: Arc::from(upstreams),
-        },
-        source,
-    ))
+    Ok(Policy {
+        disabled,
+        header,
+        upstreams: Arc::from(upstreams),
+    })
 }
 
-/// 32 bytes of randomness, in the alphabet that survives a URL.
-///
-/// The same source the vault's keys come from — there is no second-tier
-/// randomness here for the thing that guards all of it.
-fn mint() -> String {
-    use chacha20poly1305::aead::{AeadCore, OsRng};
-    use chacha20poly1305::XChaCha20Poly1305;
-
-    // Two nonces rather than a key: 48 bytes of the same OS randomness, and
-    // nothing that could ever be mistaken for something that decrypts.
-    let a = XChaCha20Poly1305::generate_nonce(&mut OsRng);
-    let b = XChaCha20Poly1305::generate_nonce(&mut OsRng);
-    let mut bytes = Vec::with_capacity(48);
-    bytes.extend_from_slice(&a);
-    bytes.extend_from_slice(&b);
-
-    // Base64 with `+` and `/` in it would need escaping in the URL the log
-    // prints, and a token that has to be escaped gets copied wrong.
-    const ALPHABET: &[u8] = b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-    bytes
-        .iter()
-        .take(40)
-        .map(|b| ALPHABET[*b as usize % ALPHABET.len()] as char)
-        .collect()
-}
-
-async fn write_new(path: &Path, token: &str) -> Result<()> {
-    let parent = path.parent().unwrap_or(Path::new("."));
-    tokio::fs::create_dir_all(parent)
-        .await
-        .with_context(|| format!("creating {}", parent.display()))?;
-
-    // Restricted before there is anything in it, for the same reason the root
-    // key is: the gap between writing and narrowing is a window.
-    let temp = path.with_extension("token.new");
-    restrict(&temp).await?;
-    tokio::fs::write(&temp, format!("{token}\n"))
-        .await
-        .with_context(|| format!("writing {}", temp.display()))?;
-    tokio::fs::rename(&temp, path)
-        .await
-        .with_context(|| format!("moving the new token into {}", path.display()))?;
-    Ok(())
-}
-
-#[cfg(unix)]
-async fn restrict(path: &Path) -> Result<()> {
-    use tokio::fs::OpenOptions;
-    OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .mode(0o600)
-        .open(path)
-        .await
-        .with_context(|| format!("creating {}", path.display()))?;
-    Ok(())
-}
-
-#[cfg(unix)]
-async fn tighten(path: &Path) -> Result<()> {
-    use std::os::unix::fs::PermissionsExt;
-
-    let mode = tokio::fs::metadata(path).await?.permissions().mode() & 0o777;
-    if mode != 0o600 {
-        tracing::warn!(
-            path = %path.display(),
-            "the token was readable beyond this account (mode {mode:o}); tightening it"
-        );
-        tokio::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
-            .await
-            .with_context(|| format!("restricting {}", path.display()))?;
-    }
-    Ok(())
-}
-
-#[cfg(not(unix))]
-async fn restrict(_path: &Path) -> Result<()> {
-    Ok(())
-}
-
-#[cfg(not(unix))]
-async fn tighten(_path: &Path) -> Result<()> {
-    Ok(())
+/// What the gate needs: the rules, and somewhere to look people up.
+#[derive(Clone)]
+pub struct Gate {
+    pub policy: Policy,
+    pub accounts: Accounts,
 }
 
 /// The gate itself.
-pub async fn require(State(policy): State<Policy>, mut request: Request, next: Next) -> Response {
+pub async fn require(State(gate): State<Gate>, mut request: Request, next: Next) -> Response {
     // Read out of the extensions rather than extracted, so a request that
     // arrived without connection information is a stricter check instead of a
     // 500. Nobody asks for one only in tests — and there, an address that
-    // matches no trusted block is the safe stand-in: the token still works,
-    // the header is not believed.
+    // matches no trusted block is the safe stand-in.
     let address = request
         .extensions()
         .get::<ConnectInfo<SocketAddr>>()
         .map(|ConnectInfo(a)| a.ip())
         .unwrap_or(IpAddr::from([0, 0, 0, 0]));
 
+    // Signing in cannot require being signed in. This is the only hole in the
+    // gate, it is one exact path, and what is behind it checks a password.
+    if request.uri().path() == "/api/v1/auth/login" {
+        return next.run(request).await;
+    }
+
     let query = request.uri().query().map(str::to_owned);
 
-    match policy.admit(request.headers(), query.as_deref(), address) {
-        Some(principal) => {
-            // Handlers do not read this yet. It is here because the alternative
-            // — deciding who someone is and throwing it away — is the thing
-            // that makes an audit trail impossible to add later.
-            request.extensions_mut().insert(principal);
-            next.run(request).await
-        }
-        None => {
+    let principal = match admit(&gate, request.headers(), query.as_deref(), address).await {
+        Ok(Some(principal)) => principal,
+        Ok(None) => {
             tracing::debug!(%address, path = %request.uri().path(), "refused");
-            (
-                StatusCode::UNAUTHORIZED,
-                Json(crate::api::ApiError::new(
-                    crate::api::ErrorCode::Unauthorized,
-                    "this Firetower needs a token. It was printed when the server started; \
-                     open the URL from that line, or set the token in the interface.",
-                )),
-            )
-                .into_response()
+            return refusal(
+                crate::api::ErrorCode::Unauthorized,
+                "sign in to use this Firetower",
+            );
+        }
+        Err(e) => {
+            tracing::error!("could not check who this is: {e:#}");
+            return refusal(
+                crate::api::ErrorCode::Internal,
+                "could not check the session",
+            );
+        }
+    };
+
+    // Signed in, and allowed to do exactly one thing.
+    if principal.must_change_password() && !permitted_while_locked(&request) {
+        return refusal(
+            crate::api::ErrorCode::PasswordChangeRequired,
+            "this password came from a file and has to be replaced before anything else",
+        );
+    }
+
+    // Handlers read this to know who they are acting for. It is inserted even
+    // where nothing reads it yet, because deciding who someone is and throwing
+    // it away is what makes an audit trail impossible to add later.
+    request.extensions_mut().insert(principal);
+    next.run(request).await
+}
+
+/// What an account with a file-supplied password may still reach.
+///
+/// Replacing the password, leaving, and the two reads the screen that does it
+/// is built from. Anything else would be acting on a credential that is sitting
+/// in a file on the server.
+fn permitted_while_locked(request: &Request) -> bool {
+    matches!(
+        request.uri().path(),
+        "/api/v1/auth/password" | "/api/v1/auth/logout" | "/api/v1/auth/me" | "/api/v1/setup"
+    )
+}
+
+fn refusal(code: crate::api::ErrorCode, message: &str) -> Response {
+    let error = crate::api::ApiError::new(code, message);
+    (code.status(), Json(error)).into_response()
+}
+
+/// Decide who this is, if anyone.
+async fn admit(
+    gate: &Gate,
+    headers: &HeaderMap,
+    query: Option<&str>,
+    peer: IpAddr,
+) -> Result<Option<Principal>> {
+    // The proxy first: it knows a name, and a session only knows that whoever
+    // holds the token signed in at some point.
+    if let Some(name) = &gate.policy.header {
+        if gate.policy.upstreams.iter().any(|c| c.contains(peer)) {
+            if let Some(who) = headers.get(name).and_then(|v| v.to_str().ok()) {
+                let who = who.trim();
+                if !who.is_empty() {
+                    // The header names somebody. They still have to be
+                    // somebody here — otherwise a misconfigured proxy admits
+                    // strangers as themselves.
+                    return Ok(gate
+                        .accounts
+                        .user_by_name(who)
+                        .await?
+                        .map(|user| Principal {
+                            subject: user.username.clone().into(),
+                            via: Via::Proxy,
+                            user: Some(user),
+                        }));
+                }
+            }
         }
     }
+
+    if gate.policy.disabled {
+        return Ok(Some(Principal {
+            subject: "anyone".into(),
+            via: Via::Open,
+            user: None,
+        }));
+    }
+
+    let Some(token) = offered_token(headers, query) else {
+        return Ok(None);
+    };
+
+    Ok(gate
+        .accounts
+        .session_user(&token)
+        .await?
+        .map(|user| Principal {
+            subject: user.username.clone().into(),
+            via: Via::Session,
+            user: Some(user),
+        }))
 }
 
-fn bearer(headers: &HeaderMap) -> Option<&str> {
-    let value = headers.get(header::AUTHORIZATION)?.to_str().ok()?;
-    let (scheme, rest) = value.split_once(' ')?;
-    scheme
-        .eq_ignore_ascii_case("bearer")
-        .then(|| rest.trim())
-        .filter(|s| !s.is_empty())
-}
+/// The session token, from wherever it can be.
+fn offered_token(headers: &HeaderMap, query: Option<&str>) -> Option<String> {
+    if let Some(value) = headers
+        .get(header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+    {
+        if let Some((scheme, rest)) = value.split_once(' ') {
+            if scheme.eq_ignore_ascii_case("bearer") && !rest.trim().is_empty() {
+                return Some(rest.trim().to_string());
+            }
+        }
+    }
 
-/// `t` rather than `token`: it is what the web application already sends, and
-/// the terminal is the only thing that sends it.
-fn query_token(query: Option<&str>) -> Option<&str> {
-    query?
-        .split('&')
-        .filter_map(|pair| pair.split_once('='))
-        .find(|(k, _)| *k == "t")
-        .map(|(_, v)| v)
-        .filter(|v| !v.is_empty())
+    // A browser cannot set a header on a websocket handshake, so the terminal
+    // has nowhere to put the token but the query string. Accepted only there: a
+    // query string is copied into access logs and browser history, which is
+    // exactly what a credential should not be in.
+    if is_upgrade(headers) {
+        return query?
+            .split('&')
+            .filter_map(|pair| pair.split_once('='))
+            .find(|(k, _)| *k == "t")
+            .map(|(_, v)| v.to_string())
+            .filter(|v| !v.is_empty());
+    }
+
+    None
 }
 
 fn is_upgrade(headers: &HeaderMap) -> bool {
@@ -442,18 +336,6 @@ fn is_upgrade(headers: &HeaderMap) -> bool {
         .get(header::UPGRADE)
         .and_then(|v| v.to_str().ok())
         .is_some_and(|v| v.eq_ignore_ascii_case("websocket"))
-}
-
-/// Compare without letting the clock say how much of it matched.
-///
-/// A `==` on the token would return at the first differing byte, which over
-/// enough attempts is how someone guesses one byte at a time. The cost of not
-/// doing that is this function.
-fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
-    if a.len() != b.len() {
-        return false;
-    }
-    a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
 }
 
 /// An address or a block of them.
@@ -529,10 +411,19 @@ fn prefix_matches(base: &[u8], other: &[u8], bits: u8) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::db::Db;
 
-    fn policy_with_token(token: &str) -> Policy {
+    async fn gate(policy: Policy) -> Gate {
+        let db = Db::open_for_test().await.unwrap();
+        Gate {
+            policy,
+            accounts: Accounts::new(db.pool().clone()),
+        }
+    }
+
+    fn signing_in() -> Policy {
         Policy {
-            token: Some(token.into()),
+            disabled: false,
             header: None,
             upstreams: Arc::from(Vec::new()),
         }
@@ -551,105 +442,158 @@ mod tests {
 
     const SOMEWHERE: IpAddr = IpAddr::V4(std::net::Ipv4Addr::new(203, 0, 113, 7));
 
-    #[test]
-    fn the_right_token_gets_in_and_the_wrong_one_does_not() {
-        let policy = policy_with_token("secret");
+    #[tokio::test]
+    async fn a_session_token_gets_in_and_anything_else_does_not() {
+        let gate = gate(signing_in()).await;
+        let admin = gate
+            .accounts
+            .create_first_admin("kevin", "a long enough password")
+            .await
+            .unwrap();
+        let token = gate.accounts.open_session(&admin.id).await.unwrap();
 
-        assert!(policy
-            .admit(
-                &headers(&[("authorization", "Bearer secret")]),
-                None,
-                SOMEWHERE
-            )
-            .is_some());
-        assert!(policy
-            .admit(
-                &headers(&[("authorization", "Bearer secrer")]),
-                None,
-                SOMEWHERE
-            )
+        let bearer = format!("Bearer {token}");
+        let who = admit(
+            &gate,
+            &headers(&[("authorization", &bearer)]),
+            None,
+            SOMEWHERE,
+        )
+        .await
+        .unwrap()
+        .expect("signed in");
+        assert_eq!(&*who.subject, "kevin");
+        assert_eq!(who.via, Via::Session);
+        assert_eq!(who.user.unwrap().id, admin.id);
+
+        assert!(admit(
+            &gate,
+            &headers(&[("authorization", "Bearer not-a-real-token")]),
+            None,
+            SOMEWHERE
+        )
+        .await
+        .unwrap()
+        .is_none());
+        assert!(admit(&gate, &HeaderMap::new(), None, SOMEWHERE)
+            .await
+            .unwrap()
             .is_none());
-        assert!(policy.admit(&HeaderMap::new(), None, SOMEWHERE).is_none());
-    }
-
-    #[test]
-    fn the_scheme_is_read_loosely_because_clients_disagree_about_case() {
-        let policy = policy_with_token("secret");
-        assert!(policy
-            .admit(
-                &headers(&[("authorization", "bearer secret")]),
-                None,
-                SOMEWHERE
-            )
-            .is_some());
     }
 
     /// The terminal's only option, and deliberately its only option.
-    #[test]
-    fn a_query_token_works_for_a_websocket_and_nowhere_else() {
-        let policy = policy_with_token("secret");
+    #[tokio::test]
+    async fn a_query_token_works_for_a_websocket_and_nowhere_else() {
+        let gate = gate(signing_in()).await;
+        let admin = gate
+            .accounts
+            .create_first_admin("kevin", "a long enough password")
+            .await
+            .unwrap();
+        let token = gate.accounts.open_session(&admin.id).await.unwrap();
+        let query = format!("cols=80&t={token}");
 
         assert!(
-            policy
-                .admit(
-                    &headers(&[("upgrade", "websocket")]),
-                    Some("cols=80&t=secret"),
-                    SOMEWHERE
-                )
-                .is_some(),
+            admit(
+                &gate,
+                &headers(&[("upgrade", "websocket")]),
+                Some(&query),
+                SOMEWHERE
+            )
+            .await
+            .unwrap()
+            .is_some(),
             "a browser cannot put a header on a handshake"
         );
 
         assert!(
-            policy
-                .admit(&HeaderMap::new(), Some("t=secret"), SOMEWHERE)
+            admit(&gate, &HeaderMap::new(), Some(&query), SOMEWHERE)
+                .await
+                .unwrap()
                 .is_none(),
             "an ordinary request must not carry its credential where logs keep it"
         );
     }
 
-    #[test]
-    fn a_proxy_header_is_believed_only_from_the_proxy() {
+    #[tokio::test]
+    async fn a_proxy_header_is_believed_only_from_the_proxy_and_only_for_someone_real() {
         let policy = Policy {
-            token: None,
+            disabled: false,
             header: Some(HeaderName::from_static("x-forwarded-email")),
             upstreams: Arc::from(vec![Cidr::parse("172.16.0.0/12").unwrap()]),
         };
+        let gate = gate(policy).await;
+        gate.accounts
+            .create_first_admin("kevin", "a long enough password")
+            .await
+            .unwrap();
 
-        let claim = headers(&[("x-forwarded-email", "kevin@example.com")]);
+        let claim = headers(&[("x-forwarded-email", "kevin")]);
+        let inside: IpAddr = "172.18.0.5".parse().unwrap();
 
-        let principal = policy
-            .admit(&claim, None, "172.18.0.5".parse().unwrap())
+        let who = admit(&gate, &claim, None, inside)
+            .await
+            .unwrap()
             .expect("the proxy is inside the trusted block");
-        assert_eq!(&*principal.subject, "kevin@example.com");
-        assert_eq!(principal.via, Via::Proxy);
+        assert_eq!(who.via, Via::Proxy);
+        assert_eq!(&*who.subject, "kevin");
 
         assert!(
-            policy.admit(&claim, None, SOMEWHERE).is_none(),
+            admit(&gate, &claim, None, SOMEWHERE)
+                .await
+                .unwrap()
+                .is_none(),
             "the same header from anywhere else is a forgery"
+        );
+
+        assert!(
+            admit(
+                &gate,
+                &headers(&[("x-forwarded-email", "somebody-else")]),
+                None,
+                inside
+            )
+            .await
+            .unwrap()
+            .is_none(),
+            "a header naming nobody here must not admit a stranger"
         );
     }
 
-    #[test]
-    fn a_principal_says_who_rather_than_yes() {
-        let policy = policy_with_token("secret");
-        let principal = policy
-            .admit(
-                &headers(&[("authorization", "Bearer secret")]),
-                None,
-                SOMEWHERE,
-            )
+    #[tokio::test]
+    async fn an_open_policy_admits_everyone_and_says_so() {
+        let gate = gate(Policy::open()).await;
+        assert!(gate.policy.is_open());
+        let who = admit(&gate, &HeaderMap::new(), None, SOMEWHERE)
+            .await
+            .unwrap()
             .unwrap();
-        assert_eq!(principal.via, Via::Token);
-        assert_eq!(&*principal.subject, "operator");
+        assert_eq!(who.via, Via::Open);
+        assert!(who.user.is_none());
     }
 
-    #[test]
-    fn an_open_policy_admits_everyone_and_says_so() {
-        let policy = Policy::open();
-        assert!(policy.is_open());
-        let principal = policy.admit(&HeaderMap::new(), None, SOMEWHERE).unwrap();
-        assert_eq!(principal.via, Via::Open);
+    #[tokio::test]
+    async fn a_password_from_a_file_is_signed_in_and_stuck() {
+        let gate = gate(signing_in()).await;
+        let admin = gate
+            .accounts
+            .create_first_admin("kevin", "a long enough password")
+            .await
+            .unwrap();
+        let token = gate.accounts.open_session(&admin.id).await.unwrap();
+
+        let bearer = format!("Bearer {token}");
+        let who = admit(
+            &gate,
+            &headers(&[("authorization", &bearer)]),
+            None,
+            SOMEWHERE,
+        )
+        .await
+        .unwrap()
+        .unwrap();
+
+        assert!(who.must_change_password());
     }
 
     #[test]
@@ -678,20 +622,5 @@ mod tests {
         assert!(Cidr::parse("172.16.0.0/33").is_err());
         assert!(Cidr::parse("not an address").is_err());
         assert!(Cidr::parse("172.16.0.0/wide").is_err());
-    }
-
-    #[test]
-    fn a_minted_token_is_long_and_url_safe() {
-        let token = mint();
-        assert_eq!(token.len(), 40);
-        assert!(token.chars().all(|c| c.is_ascii_alphanumeric()));
-        assert_ne!(token, mint(), "two starts must not produce the same token");
-    }
-
-    #[test]
-    fn comparing_is_length_safe() {
-        assert!(constant_time_eq(b"abc", b"abc"));
-        assert!(!constant_time_eq(b"abc", b"abcd"));
-        assert!(!constant_time_eq(b"", b"a"));
     }
 }

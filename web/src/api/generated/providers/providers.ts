@@ -27,6 +27,7 @@ import type {
 
 import type {
   ApiError,
+  ClientId,
   PendingAuth,
   ProviderStatus,
   RemoteRepo
@@ -300,6 +301,81 @@ export const useAuthorizeProvider = <TError = ApiError,
         TContext
       > => {
       return useMutation(getAuthorizeProviderMutationOptions(options), queryClient);
+    }
+    export const getSetClientIdUrl = (id: string,) => {
+
+
+
+
+  return `/api/v1/providers/${id}/client-id`
+}
+
+/**
+ * Asked twice on purpose: once in the setup wizard, where it is skippable,
+ * and again on the connect-a-repository screen at the moment somebody wants
+ * the thing it enables. Stored rather than configured, so it takes effect
+ * without a restart.
+ * @summary Register an application to authorize against.
+ */
+export const setClientId = async (id: string,
+    clientId: ClientId, options?: Parameters<typeof http>[1]): Promise<void> => {
+
+  return http<void>(getSetClientIdUrl(id),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(clientId)
+  }
+);}
+
+
+
+
+
+export const getSetClientIdMutationOptions = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setClientId>>, TError,{id: string;data: ClientId}, TContext>, request?: SecondParameter<typeof http>}
+): UseMutationOptions<Awaited<ReturnType<typeof setClientId>>, TError,{id: string;data: ClientId}, TContext> => {
+
+const mutationKey = ['setClientId'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof setClientId>>, {id: string;data: ClientId}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  setClientId(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SetClientIdMutationResult = NonNullable<Awaited<ReturnType<typeof setClientId>>>
+    export type SetClientIdMutationBody = ClientId
+    export type SetClientIdMutationError = ApiError
+
+    /**
+ * @summary Register an application to authorize against.
+ */
+export const useSetClientId = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setClientId>>, TError,{id: string;data: ClientId}, TContext>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof setClientId>>,
+        TError,
+        {id: string;data: ClientId},
+        TContext
+      > => {
+      return useMutation(getSetClientIdMutationOptions(options), queryClient);
     }
     export const getListProviderReposUrl = (id: string,) => {
 

@@ -11,7 +11,7 @@ mod ids;
 pub mod session;
 mod status;
 
-pub use ids::{HostId, RepoId, SessionId, WorkspaceId};
+pub use ids::{HostId, OrgId, RepoId, SessionId, UserId, WorkspaceId};
 pub use session::{
     sanitize_branch, slugify, title_from, workspace_name, NewSession, Session, Workspace,
     WorkspaceSize,

@@ -8,6 +8,7 @@ use anyhow::{Context, Result};
 use std::path::PathBuf;
 use std::sync::Arc;
 
+pub mod accounts;
 pub mod api;
 pub mod auth;
 mod container;
@@ -45,6 +46,8 @@ pub struct AppState {
     /// In memory on purpose: an authorization nobody finished should not
     /// survive a restart, and there is nothing here worth persisting.
     pub pending: Arc<tokio::sync::RwLock<std::collections::HashMap<String, api::Pending>>>,
+    /// Organisations, users, sessions and settings.
+    pub accounts: accounts::Accounts,
 }
 
 pub struct Config {
@@ -67,17 +70,15 @@ pub struct Config {
 pub async fn run(config: Config) -> Result<()> {
     // Before the database, because this is the check that can refuse to start
     // and it should refuse before it has done anything.
-    let (policy, token_source) = auth::load(&config.home).await?;
+    let policy = auth::load()?;
 
     if !config.bind.is_loopback() && policy.is_open() {
         anyhow::bail!(
-            "refusing to listen on {} with no authentication. Anything that can reach that \
-             address could read every credential in the vault.\n\n\
-             Unset {} to have a token generated, supply one in {}, or put a proxy in front \
-             that authenticates and name its header in {}.",
+            "refusing to listen on {} with authentication turned off. Anything that can reach \
+             that address could read every credential in the vault.\n\n\
+             Unset {}, or put a proxy in front that authenticates and name its header in {}.",
             config.bind,
             auth::MODE_ENV,
-            auth::TOKEN_ENV,
             auth::HEADER_ENV,
         );
     }
@@ -97,6 +98,13 @@ pub async fn run(config: Config) -> Result<()> {
     } else {
         tracing::info!(source = %source, "root key");
     }
+
+    let accounts = accounts::Accounts::new(db.pool().clone());
+
+    // Before the listener binds. A control plane that answered before it had an
+    // owner would be claimable by whoever reached it first, which is how
+    // self-hosted software gets taken over on its first boot.
+    let admin = ensure_admin(&accounts).await?;
 
     let vault = Arc::new(Vault::new(db.pool().clone(), root));
     let key_source: Arc<str> = match source {
@@ -139,10 +147,11 @@ pub async fn run(config: Config) -> Result<()> {
         key_source,
         home: config.home.clone(),
         pending: Default::default(),
+        accounts: accounts.clone(),
     };
-    announce(&policy, &token_source, &config);
+    announce(&policy, admin.as_ref(), &config);
 
-    let app = build_router(state, config.dev, policy);
+    let app = build_router(state, config.dev, policy, accounts);
 
     let addr = std::net::SocketAddr::new(config.bind, config.port);
     let listener = tokio::net::TcpListener::bind(addr)
@@ -186,13 +195,90 @@ fn public_url(config: &Config) -> String {
     format!("http://localhost:{port}")
 }
 
-/// Say how to get in, exactly once, at the only moment it is needed.
+/// The variables that seed the first administrator.
+pub const ADMIN_USERNAME_ENV: &str = "ADMIN_USERNAME";
+pub const ADMIN_PASSWORD_ENV: &str = "ADMIN_INITIAL_PASSWORD";
+
+/// What was created just now, so start-up can say it out loud once.
+struct FirstAdmin {
+    username: String,
+    /// Only when we invented it. A password somebody supplied is theirs to
+    /// know, and repeating it into the log would put it wherever the logs go.
+    password: Option<String>,
+}
+
+/// Make sure somebody can sign in, before anything is listening.
 ///
-/// The token goes in a URL on the first start and never again: after that the
-/// browser has it, and a credential printed on every restart ends up in
-/// whatever collects the logs.
-fn announce(policy: &auth::Policy, source: &auth::Source, config: &Config) {
-    tracing::info!(source = %source, "authentication: {}", policy.describe());
+/// From the environment when it says so, and otherwise invented and printed
+/// once. Refusing to start would be the safer-looking answer and the wrong one:
+/// `cargo run` and a bare `docker run` both have to work with no configuration
+/// at all, and an operator who reads one line of output is better served than
+/// one who has to go and find out what to set.
+///
+/// Either way the account is marked as needing a new password, so a credential
+/// that came out of a file cannot quietly become the permanent one.
+async fn ensure_admin(accounts: &accounts::Accounts) -> Result<Option<FirstAdmin>> {
+    if accounts.any_user().await? {
+        // Once somebody has signed in and chosen a password, the variables are
+        // ignored — never re-applied, never compared. Editing an unrelated line
+        // of a `.env` must not silently reset the administrator's password to
+        // whatever is still written above it.
+        return Ok(None);
+    }
+
+    let username = std::env::var(ADMIN_USERNAME_ENV)
+        .ok()
+        .map(|u| u.trim().to_string())
+        .filter(|u| !u.is_empty())
+        .unwrap_or_else(|| "admin".to_string());
+
+    let supplied = std::env::var(ADMIN_PASSWORD_ENV)
+        .ok()
+        .map(|p| p.trim().to_string())
+        .filter(|p| !p.is_empty());
+
+    if let Some(password) = &supplied {
+        accounts::check_password(password).with_context(|| {
+            format!("{ADMIN_PASSWORD_ENV} is too short to be the way into this Firetower")
+        })?;
+    }
+
+    let password = supplied.clone().unwrap_or_else(invent_password);
+    accounts.create_first_admin(&username, &password).await?;
+
+    Ok(Some(FirstAdmin {
+        username,
+        password: supplied.is_none().then_some(password),
+    }))
+}
+
+/// Three words and a number: long enough to be a real password, and shaped to
+/// survive being read off a terminal and typed into a browser once.
+fn invent_password() -> String {
+    use chacha20poly1305::aead::{AeadCore, OsRng};
+    use chacha20poly1305::XChaCha20Poly1305;
+
+    const WORDS: &[&str] = &[
+        "amber", "anchor", "beacon", "cedar", "cobalt", "copper", "ember", "harbor", "hollow",
+        "ivory", "kestrel", "lantern", "meadow", "onyx", "quarry", "quiet", "ridge", "river",
+        "saffron", "silver", "summit", "thicket", "timber", "velvet", "walnut", "willow",
+    ];
+
+    let noise = XChaCha20Poly1305::generate_nonce(&mut OsRng);
+    let pick = |i: usize| WORDS[noise[i] as usize % WORDS.len()];
+
+    format!(
+        "{}-{}-{}-{}",
+        pick(0),
+        pick(1),
+        pick(2),
+        100 + (u16::from(noise[3]) % 900)
+    )
+}
+
+/// Say where it is and, on the very first start, how to get in.
+fn announce(policy: &auth::Policy, admin: Option<&FirstAdmin>, config: &Config) {
+    tracing::info!("authentication: {}", policy.describe());
 
     eprintln!();
     eprintln!("  Firetower");
@@ -208,31 +294,48 @@ fn announce(policy: &auth::Policy, source: &auth::Source, config: &Config) {
     }
     eprintln!();
 
-    let first_start = matches!(source, auth::Source::NewFile(_));
-    if !first_start && !config.dev {
-        return;
-    }
-
-    let Some(token) = policy.url_token() else {
+    let Some(admin) = admin else {
         return;
     };
 
-    eprintln!("  Open this once — it carries the token, and the browser keeps it:");
-    eprintln!("  {}/?t={token}", public_url(config));
-    if first_start {
-        eprintln!();
-        eprintln!("  It is also in {}/token", config.home.display());
+    match &admin.password {
+        // We invented it, so this is the only time anybody will see it.
+        Some(password) => {
+            eprintln!("  There was no administrator, so one was made:");
+            eprintln!();
+            eprintln!("    username  {}", admin.username);
+            eprintln!("    password  {password}");
+            eprintln!();
+            eprintln!("  It is not written down anywhere you can read it back, and Firetower");
+            eprintln!("  will ask you to replace it as soon as you sign in.");
+        }
+        // It came from a file. Saying it again would only spread it.
+        None => {
+            eprintln!(
+                "  The administrator `{}` was created from {ADMIN_PASSWORD_ENV}.",
+                admin.username
+            );
+            eprintln!("  Sign in and replace that password — then remove it from the file.");
+        }
     }
+    eprintln!();
+    eprintln!("  {}", public_url(config));
     eprintln!();
 }
 
-fn build_router(state: AppState, dev: bool, policy: auth::Policy) -> axum::Router {
+fn build_router(
+    state: AppState,
+    dev: bool,
+    policy: auth::Policy,
+    accounts: accounts::Accounts,
+) -> axum::Router {
     let (router, _api) = api::router().with_state(state.clone()).split_for_parts();
 
     // Only the API. Whether the machine is up is not a secret, and a health
     // check that needs a credential is a health check that stops working the
     // day the credential is rotated.
-    let api = router.layer(axum::middleware::from_fn_with_state(policy, auth::require));
+    let gate = auth::Gate { policy, accounts };
+    let api = router.layer(axum::middleware::from_fn_with_state(gate, auth::require));
 
     let mut app = axum::Router::new()
         .merge(api)

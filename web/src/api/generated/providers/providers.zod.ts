@@ -44,6 +44,23 @@ export const AuthorizeProviderResponse = zod.object({
 }).describe('A device authorization waiting for someone to approve it in a browser.')
 
 /**
+ * Asked twice on purpose: once in the setup wizard, where it is skippable,
+ * and again on the connect-a-repository screen at the moment somebody wants
+ * the thing it enables. Stored rather than configured, so it takes effect
+ * without a restart.
+ * @summary Register an application to authorize against.
+ */
+export const SetClientIdParams = zod.object({
+  "id": zod.string().describe('Provider id')
+})
+
+export const SetClientIdBody = zod.object({
+  "clientId": zod.string().describe('GitHub\'s looks like `Ov23li…`. Public by design: a device-flow\napplication has no paired secret.')
+}).describe('The client id for a git host, supplied by whoever is setting this up.')
+
+export const SetClientIdResponse = zod.void()
+
+/**
  * @summary What the authorized account can see. This is the picker's data.
  */
 export const ListProviderReposParams = zod.object({

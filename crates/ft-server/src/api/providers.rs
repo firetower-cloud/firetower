@@ -43,7 +43,7 @@ pub(super) async fn list_providers(
             // operating system may put behind a prompt, and this endpoint only
             // renders a screen.
             connected: state.vault.holds(vault::GIT, p.id).await?,
-            configured: p.client_id().is_some(),
+            configured: providers::client_id(&state.accounts, p.id).await.is_some(),
             pending: pending.get(p.id).map(|p| p.auth.clone()),
         });
     }
@@ -69,22 +69,30 @@ pub(super) async fn authorize_provider(
 ) -> ApiResult<Json<PendingAuth>> {
     let provider = providers::find(&id).ok_or_else(|| ApiError::not_found("provider"))?;
 
-    if provider.client_id().is_none() {
+    let client_id = providers::client_id(&state.accounts, provider.id).await;
+
+    if client_id.is_none() {
         return Err(ApiError::new(
             ErrorCode::ProviderNotConfigured,
             format!(
-                "this build has no application registered for {}. Register one and set \
-                 FIRETOWER_{}_CLIENT_ID",
+                "no application is registered for {}. Add its client id — the connect screen \
+                 asks for one and explains where to get it.",
                 provider.label,
-                provider.id.to_uppercase()
             ),
         ));
     }
 
-    let started = oauth::start(provider).await.map_err(|e| match e {
-        oauth::StartError::NotConfigured(m) => ApiError::new(ErrorCode::ProviderNotConfigured, m),
-        oauth::StartError::Unreachable(m) => ApiError::new(ErrorCode::HostUnreachable, m),
-    })?;
+    // Held for the polling task below, which needs it on every attempt.
+    let polling_id = client_id.clone().expect("checked just above");
+
+    let started = oauth::start(provider, client_id)
+        .await
+        .map_err(|e| match e {
+            oauth::StartError::NotConfigured(m) => {
+                ApiError::new(ErrorCode::ProviderNotConfigured, m)
+            }
+            oauth::StartError::Unreachable(m) => ApiError::new(ErrorCode::HostUnreachable, m),
+        })?;
 
     let auth = PendingAuth {
         user_code: started.user_code.clone(),
@@ -103,7 +111,7 @@ pub(super) async fn authorize_provider(
         loop {
             tokio::time::sleep(interval).await;
 
-            match oauth::poll(provider, &device_code).await {
+            match oauth::poll(provider, &polling_id, &device_code).await {
                 Ok(oauth::Poll::Pending) => continue,
                 Ok(oauth::Poll::SlowDown) => {
                     interval += std::time::Duration::from_secs(5);
@@ -197,4 +205,53 @@ pub(super) async fn list_provider_repos(
         .await
         .map(Json)
         .map_err(|e| ApiError::new(ErrorCode::Internal, format!("{e:#}")))
+}
+
+/// The client id for a git host, supplied by whoever is setting this up.
+#[derive(Debug, serde::Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ClientId {
+    /// GitHub's looks like `Ov23li…`. Public by design: a device-flow
+    /// application has no paired secret.
+    pub client_id: String,
+}
+
+/// Register an application to authorize against.
+///
+/// Asked twice on purpose: once in the setup wizard, where it is skippable,
+/// and again on the connect-a-repository screen at the moment somebody wants
+/// the thing it enables. Stored rather than configured, so it takes effect
+/// without a restart.
+#[utoipa::path(
+    post, path = "/api/v1/providers/{id}/client-id", tag = "providers",
+    params(("id" = String, Path, description = "Provider id")),
+    request_body = ClientId,
+    responses(
+        (status = 204, description = "Stored"),
+        (status = 400, body = ApiError),
+        (status = 404, body = ApiError),
+    ),
+)]
+pub(super) async fn set_client_id(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(request): Json<ClientId>,
+) -> ApiResult<axum::http::StatusCode> {
+    let provider = providers::find(&id).ok_or_else(|| ApiError::not_found("provider"))?;
+
+    let value = request.client_id.trim();
+    if value.is_empty() {
+        return Err(ApiError::new(
+            ErrorCode::InvalidRequest,
+            "a client id is needed, or leave it alone",
+        ));
+    }
+
+    state
+        .accounts
+        .set_setting(&providers::setting_key(provider.id), value)
+        .await?;
+
+    tracing::info!(provider = provider.id, "a client id was registered");
+    Ok(axum::http::StatusCode::NO_CONTENT)
 }

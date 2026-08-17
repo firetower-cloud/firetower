@@ -52,13 +52,15 @@ pub enum StartError {
 }
 
 /// Begin an authorization. Returns the code to show and the code to poll with.
-pub async fn start(provider: &Provider) -> Result<DeviceStart, StartError> {
-    let client_id = provider.client_id().ok_or_else(|| {
+pub async fn start(
+    provider: &Provider,
+    client_id: Option<String>,
+) -> Result<DeviceStart, StartError> {
+    let client_id = client_id.ok_or_else(|| {
         StartError::NotConfigured(format!(
-            "this build has no application registered for {}. Register one and set \
-             FIRETOWER_{}_CLIENT_ID",
-            provider.label,
-            provider.id.to_uppercase()
+            "no application is registered for {}. Add its client id in Firetower — the \
+             connect screen asks for one and explains where to get it.",
+            provider.label
         ))
     })?;
 
@@ -81,11 +83,10 @@ pub async fn start(provider: &Provider) -> Result<DeviceStart, StartError> {
         // The host understood us and said no, which for this request means the
         // identifier is wrong or the application isn't set up for this flow.
         return Err(StartError::NotConfigured(format!(
-            "{} rejected this build's application identifier. Check \
-             FIRETOWER_{}_CLIENT_ID, and that the application has the device \
-             flow enabled.",
-            provider.label,
-            provider.id.to_uppercase()
+            "{} rejected that client id. Check it, and check that the application \
+             has the device flow enabled — it is off by default, and {} answers \
+             both mistakes the same way.",
+            provider.label, provider.label
         )));
     }
     if !status.is_success() {
@@ -116,11 +117,7 @@ pub enum Poll {
 }
 
 /// Ask once whether the code has been approved.
-pub async fn poll(provider: &Provider, device_code: &str) -> Result<Poll> {
-    let client_id = provider
-        .client_id()
-        .context("no application is registered for this host")?;
-
+pub async fn poll(provider: &Provider, client_id: &str, device_code: &str) -> Result<Poll> {
     #[derive(Deserialize)]
     struct Response {
         access_token: Option<String>,
@@ -132,7 +129,7 @@ pub async fn poll(provider: &Provider, device_code: &str) -> Result<Poll> {
         .post(provider.token_url)
         .header("accept", "application/json")
         .form(&[
-            ("client_id", client_id.as_str()),
+            ("client_id", client_id),
             ("device_code", device_code),
             ("grant_type", "urn:ietf:params:oauth:grant-type:device_code"),
         ])
@@ -298,14 +295,11 @@ mod tests {
     #[tokio::test]
     async fn starting_without_a_registered_application_explains_what_to_do() {
         let p = providers::find("github").unwrap();
-        if p.client_id().is_some() {
-            return; // this build has one; nothing to assert
-        }
-        let err = start(p).await.unwrap_err();
+        let err = start(p, None).await.unwrap_err();
         assert!(matches!(err, StartError::NotConfigured(_)), "{err}");
         assert!(
-            err.to_string().contains("FIRETOWER_GITHUB_CLIENT_ID"),
-            "{err}"
+            err.to_string().contains("client id"),
+            "it should say what is missing and where to put it: {err}"
         );
     }
 

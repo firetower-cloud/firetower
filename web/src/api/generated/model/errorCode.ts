@@ -27,5 +27,6 @@ export const ErrorCode = {
   RepoInUse: 'RepoInUse',
   ActionFailed: 'ActionFailed',
   Unauthorized: 'Unauthorized',
+  PasswordChangeRequired: 'PasswordChangeRequired',
   Internal: 'Internal',
 } as const;

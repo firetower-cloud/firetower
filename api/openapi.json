@@ -149,6 +149,112 @@
         }
       }
     },
+    "/api/v1/auth/login": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "operationId": "login",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Credentials"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SignedIn"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Wrong, or too many tries",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/logout": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "operationId": "logout",
+        "responses": {
+          "204": {
+            "description": "Signed out"
+          }
+        }
+      }
+    },
+    "/api/v1/auth/me": {
+      "get": {
+        "tags": [
+          "auth"
+        ],
+        "operationId": "me",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Me"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/password": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "operationId": "change_password",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewPassword"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Changed. Every browser is now signed out."
+          },
+          "400": {
+            "description": "Too short, or the current one is wrong",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/bootstrap": {
       "get": {
         "tags": [
@@ -537,6 +643,62 @@
             }
           },
           "501": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/providers/{id}/client-id": {
+      "post": {
+        "tags": [
+          "providers"
+        ],
+        "summary": "Register an application to authorize against.",
+        "description": "Asked twice on purpose: once in the setup wizard, where it is skippable,\nand again on the connect-a-repository screen at the moment somebody wants\nthe thing it enables. Stored rather than configured, so it takes effect\nwithout a restart.",
+        "operationId": "set_client_id",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Provider id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClientId"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Stored"
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
             "description": "",
             "content": {
               "application/json": {
@@ -1480,6 +1642,66 @@
           }
         }
       }
+    },
+    "/api/v1/setup": {
+      "get": {
+        "tags": [
+          "setup"
+        ],
+        "operationId": "setup_state",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SetupState"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/setup/organization": {
+      "post": {
+        "tags": [
+          "setup"
+        ],
+        "operationId": "name_organization",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NameOrganization"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Organization"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Already set up",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -1747,6 +1969,19 @@
           "Unknown"
         ]
       },
+      "ClientId": {
+        "type": "object",
+        "description": "The client id for a git host, supplied by whoever is setting this up.",
+        "required": [
+          "clientId"
+        ],
+        "properties": {
+          "clientId": {
+            "type": "string",
+            "description": "GitHub's looks like `Ov23li…`. Public by design: a device-flow\napplication has no paired secret."
+          }
+        }
+      },
       "Compute": {
         "oneOf": [
           {
@@ -1868,6 +2103,21 @@
           }
         }
       },
+      "Credentials": {
+        "type": "object",
+        "required": [
+          "username",
+          "password"
+        ],
+        "properties": {
+          "password": {
+            "type": "string"
+          },
+          "username": {
+            "type": "string"
+          }
+        }
+      },
       "Diagnosis": {
         "type": "object",
         "description": "Why a connection didn't happen, in terms of what to do about it.\n\nEach cause has a different fix, and the failure they arrive as — a closed\nstream — distinguishes none of them.",
@@ -1964,6 +2214,7 @@
           "RepoInUse",
           "ActionFailed",
           "Unauthorized",
+          "PasswordChangeRequired",
           "Internal"
         ]
       },
@@ -2355,6 +2606,40 @@
           "Draining"
         ]
       },
+      "Me": {
+        "type": "object",
+        "description": "Who the caller is, and what they belong to.",
+        "required": [
+          "user"
+        ],
+        "properties": {
+          "organization": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Organization",
+                "description": "Absent until setting up has finished."
+              }
+            ]
+          },
+          "user": {
+            "$ref": "#/components/schemas/User"
+          }
+        }
+      },
+      "NameOrganization": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          }
+        }
+      },
       "NewHost": {
         "type": "object",
         "required": [
@@ -2370,6 +2655,22 @@
               "null"
             ],
             "description": "What you'll call it. Defaults to something derived from the kind."
+          }
+        }
+      },
+      "NewPassword": {
+        "type": "object",
+        "required": [
+          "current",
+          "new"
+        ],
+        "properties": {
+          "current": {
+            "type": "string",
+            "description": "The one in use. Required even when it came from a file: knowing the\nsession token should not be enough to lock the owner out."
+          },
+          "new": {
+            "type": "string"
           }
         }
       },
@@ -2468,6 +2769,25 @@
           },
           "size": {
             "$ref": "#/components/schemas/WorkspaceSize"
+          }
+        }
+      },
+      "OrgId": {
+        "type": "string",
+        "description": "Identifies an organisation."
+      },
+      "Organization": {
+        "type": "object",
+        "required": [
+          "id",
+          "name"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/OrgId"
+          },
+          "name": {
+            "type": "string"
           }
         }
       },
@@ -2775,6 +3095,56 @@
           "Ended"
         ]
       },
+      "SetupState": {
+        "type": "object",
+        "description": "Which parts of setting up are still outstanding.\n\nRead before anything else, so the interface knows whether to show the\nwizard, and how much of it.",
+        "required": [
+          "needsPassword",
+          "needsOrganization",
+          "needsGithub"
+        ],
+        "properties": {
+          "needsGithub": {
+            "type": "boolean",
+            "description": "No GitHub application is configured. Not a blocker — it is skippable,\nand pasting a repository URL works without one."
+          },
+          "needsOrganization": {
+            "type": "boolean",
+            "description": "Nobody has named the organisation yet."
+          },
+          "needsPassword": {
+            "type": "boolean",
+            "description": "The signed-in account's password came from a file."
+          },
+          "organization": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Organization"
+              }
+            ]
+          }
+        }
+      },
+      "SignedIn": {
+        "type": "object",
+        "description": "What a browser gets for a correct password.",
+        "required": [
+          "token",
+          "user"
+        ],
+        "properties": {
+          "token": {
+            "type": "string",
+            "description": "Sent back on every later request. Said once — only its hash is kept."
+          },
+          "user": {
+            "$ref": "#/components/schemas/User"
+          }
+        }
+      },
       "Step": {
         "type": "string",
         "description": "One stage of bringing a session up.\n\nThe point of naming them is that the whole list is knowable *before* any of\nit runs — so a session can show what it is going to do the moment it is\ncreated, rather than assembling a shape out of events as they arrive. A step\nnobody has reached yet is still worth showing.",
@@ -2785,6 +3155,39 @@
           "Setup",
           "Launch"
         ]
+      },
+      "User": {
+        "type": "object",
+        "description": "Someone who can sign in.",
+        "required": [
+          "id",
+          "orgId",
+          "username",
+          "role",
+          "mustChangePassword"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/UserId"
+          },
+          "mustChangePassword": {
+            "type": "boolean",
+            "description": "True while the password came from a file rather than from a person.\nNothing but replacing it is permitted until this clears."
+          },
+          "orgId": {
+            "$ref": "#/components/schemas/OrgId"
+          },
+          "role": {
+            "type": "string"
+          },
+          "username": {
+            "type": "string"
+          }
+        }
+      },
+      "UserId": {
+        "type": "string",
+        "description": "Identifies someone who can sign in."
       },
       "VaultView": {
         "type": "object",

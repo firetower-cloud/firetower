@@ -74,6 +74,8 @@ id_type!(
 );
 id_type!(HostId, "h", "Identifies a host.");
 id_type!(RepoId, "r", "Identifies a connected repository.");
+id_type!(UserId, "u", "Identifies someone who can sign in.");
+id_type!(OrgId, "o", "Identifies an organisation.");
 
 #[cfg(test)]
 mod tests {

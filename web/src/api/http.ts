@@ -40,24 +40,42 @@ export function wsBase(): string {
   return apiBase().replace(/^http/, "ws");
 }
 
+const TOKEN_KEY = "firetower.token";
+
 /**
- * Handed to the app once, then kept. The command line prints a URL carrying it
- * so the first visit does this without anyone typing a token.
+ * The session, from signing in.
+ *
+ * Kept in local storage rather than a cookie: development runs the interface on
+ * :3000 and the API on :4400, which makes every cookie cross-site, while
+ * production is same-origin. One of those would have to behave differently, and
+ * the auth path that is exercised every day should be the one that ships.
  */
 export function token(): string | null {
   if (typeof window === "undefined") return null;
+  return window.localStorage.getItem(TOKEN_KEY);
+}
 
-  const fromUrl = new URLSearchParams(window.location.search).get("t");
-  if (fromUrl) {
-    window.localStorage.setItem("firetower.token", fromUrl);
-    // don't leave it in the address bar, or in whatever copies that URL
-    const clean = new URL(window.location.href);
-    clean.searchParams.delete("t");
-    window.history.replaceState({}, "", clean);
-    return fromUrl;
+export function rememberToken(value: string) {
+  window.localStorage.setItem(TOKEN_KEY, value);
+}
+
+export function forgetToken() {
+  window.localStorage.removeItem(TOKEN_KEY);
+}
+
+/**
+ * Where to send someone who isn't signed in.
+ *
+ * A hard assignment rather than the router: this happens from inside a fetch,
+ * anywhere in the app, and half-rendered screens holding stale data are worse
+ * than one reload.
+ */
+function toSignIn() {
+  if (typeof window === "undefined") return;
+  forgetToken();
+  if (window.location.pathname !== "/login") {
+    window.location.assign("/login");
   }
-
-  return window.localStorage.getItem("firetower.token");
 }
 
 /** Every non-success response. The `code` is what the interface switches on. */
@@ -98,7 +116,18 @@ export const http = async <T>(url: string, init: RequestInit = {}): Promise<T> =
 
   const res = await fetch(`${apiBase()}${url}`, { ...init, headers });
 
-  if (!res.ok) throw await ApiError.from(res);
+  if (!res.ok) {
+    const error = await ApiError.from(res);
+
+    // The session ended, or there never was one. Signing in again is the only
+    // thing to do about it, so do that rather than showing every screen its own
+    // version of the same message.
+    if (error.status === 401 && !url.startsWith("/api/v1/auth/login")) {
+      toSignIn();
+    }
+
+    throw error;
+  }
 
   // 202 and 204 carry nothing to parse.
   if (res.status === 204 || res.headers.get("content-length") === "0") {
