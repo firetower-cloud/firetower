@@ -163,6 +163,29 @@ pub async fn run(config: Config) -> Result<()> {
     Ok(())
 }
 
+/// Where to open a browser, as far as this process can tell.
+///
+/// Behind a proxy, it cannot tell: the control plane listens on 4400 inside a
+/// container while the address people type is a domain on 443. So the answer is
+/// configuration when there is any, and a guess only when there is not —
+/// printing `localhost:4400` to someone whose Firetower is behind Caddy sends
+/// them to a port nothing is published on.
+pub const PUBLIC_URL_ENV: &str = "FIRETOWER_PUBLIC_URL";
+
+fn public_url(config: &Config) -> String {
+    if let Ok(url) = std::env::var(PUBLIC_URL_ENV) {
+        let url = url.trim().trim_end_matches('/');
+        if !url.is_empty() {
+            return url.to_string();
+        }
+    }
+
+    // In development the interface is on its own port, so the URL that works
+    // is the dev server's rather than this one's.
+    let port = if config.dev { 3000 } else { config.port };
+    format!("http://localhost:{port}")
+}
+
 /// Say how to get in, exactly once, at the only moment it is needed.
 ///
 /// The token goes in a URL on the first start and never again: after that the
@@ -194,12 +217,8 @@ fn announce(policy: &auth::Policy, source: &auth::Source, config: &Config) {
         return;
     };
 
-    // In development the interface is on its own port, so the URL that works is
-    // the dev server's rather than this one's.
-    let port = if config.dev { 3000 } else { config.port };
-
     eprintln!("  Open this once — it carries the token, and the browser keeps it:");
-    eprintln!("  http://localhost:{port}/?t={token}");
+    eprintln!("  {}/?t={token}", public_url(config));
     if first_start {
         eprintln!();
         eprintln!("  It is also in {}/token", config.home.display());

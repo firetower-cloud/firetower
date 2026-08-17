@@ -63,6 +63,11 @@ services:
       # as valuable as the database. Setting it keeps the key off disk.
       FIRETOWER_ROOT_KEY: ${FIRETOWER_ROOT_KEY:-}
 
+      # The address you actually open, for the URL the log prints on the first
+      # start. This process listens on 4400 in here and has no way to know it
+      # is reached on 443 through Caddy.
+      FIRETOWER_PUBLIC_URL: ${FIRETOWER_PUBLIC_URL:-http://localhost}
+
       # Yours, if you would rather not use ours.
       FIRETOWER_GITHUB_CLIENT_ID: ${FIRETOWER_GITHUB_CLIENT_ID:-}
     volumes:
