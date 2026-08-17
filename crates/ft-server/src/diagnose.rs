@@ -155,6 +155,11 @@ fn machine(compute: &Compute) -> String {
         Compute::Server { host, .. } => host.clone(),
         Compute::Container { name, .. } => name.clone(),
         Compute::Local => "this machine".to_string(),
+        // We do not know where it is. That is the arrangement: it knows where
+        // we are, and it has not called.
+        Compute::Dialed { label, .. } => label
+            .clone()
+            .unwrap_or_else(|| "the machine that dials in".to_string()),
     }
 }
 

@@ -1,0 +1,19 @@
+# What Docker should not have to read before it starts building.
+#
+# Without this the context is gigabytes — `target` alone dwarfs the source —
+# and every build pays to send it. Worse, a stale `web/out` or a macOS-built
+# `target` copied into the image would be used instead of what the build makes.
+
+target
+**/node_modules
+web/.next
+web/out
+.git
+.claude
+.dev
+.firetower
+.env
+*.db
+*.db-shm
+*.db-wal
+.DS_Store

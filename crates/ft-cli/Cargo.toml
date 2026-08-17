@@ -26,6 +26,8 @@ anyhow.workspace = true
 clap.workspace = true
 dotenvy.workspace = true
 tokio.workspace = true
+tokio-tungstenite.workspace = true
+futures.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 

@@ -139,6 +139,21 @@ impl Db {
             .context("host vanished immediately after insert")
     }
 
+    /// Change how a host is reached, keeping everything else about it.
+    ///
+    /// Only rotation uses this today: a host is otherwise the settings it was
+    /// added with. Replacing the row instead would give it a new id, and its
+    /// sessions and events all point at the old one.
+    pub async fn set_host_compute(&self, id: &HostId, compute: Compute) -> Result<()> {
+        sqlx::query("UPDATE hosts SET compute = $1 WHERE id = $2")
+            .bind(serde_json::to_value(&compute)?)
+            .bind(id.as_str())
+            .execute(&self.pool)
+            .await
+            .context("updating how a host is reached")?;
+        Ok(())
+    }
+
     /// Take a host out of service, or put it back.
     ///
     /// Draining is deliberately not a `HostState`: a draining host is still

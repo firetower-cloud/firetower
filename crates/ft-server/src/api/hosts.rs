@@ -52,6 +52,19 @@ pub(super) async fn create_host(
         ));
     }
 
+    // A host that dials in is configured where the deployment is configured,
+    // not here. Accepting one over the API would mean taking the token's
+    // fingerprint from whoever asked, which is a credential decided by the
+    // caller — and the interface has nowhere to show the token afterwards,
+    // since it is deliberately never stored.
+    if matches!(req.compute, ft_core::Compute::Dialed { .. }) {
+        return Err(ApiError::new(
+            ErrorCode::InvalidRequest,
+            "a worker that dials in is set up with FIRETOWER_WORKER_TOKEN where the control \
+             plane runs, and appears here on its own",
+        ));
+    }
+
     let compute = settled(req.compute)?;
 
     let name = match req.name.as_deref().map(str::trim).filter(|n| !n.is_empty()) {
@@ -62,6 +75,9 @@ pub(super) async fn create_host(
             // The address is what it's called, now that the account and the
             // port are no longer buried in it.
             ft_core::Compute::Server { host, .. } => host.clone(),
+            // Refused above; named here only because the compiler is right
+            // that the match has to be complete.
+            ft_core::Compute::Dialed { .. } => "worker".to_string(),
         },
     };
 
@@ -81,7 +97,8 @@ pub(super) async fn create_host(
     let host = state.db.ensure_host(&name, compute).await?;
 
     // Connect now, so a bad address is a message rather than a silence.
-    let transport = fleet::Fleet::transport_for(&host, &state.home)
+    let transport = fleet::Fleet::transport_for(&host, &state.home, &state.dock)
+        .await
         .map_err(|e| ApiError::new(ErrorCode::Internal, format!("{e:#}")))?;
 
     // A host that didn't answer is kept, not discarded. Most reasons a first

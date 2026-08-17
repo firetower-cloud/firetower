@@ -220,6 +220,11 @@ function reach(host: Host) {
       return "a child process, no network";
     case "Container":
       return `docker exec ${host.compute.name}`;
+    // The one kind we do not reach. It connects to us, so there is no
+    // destination to show — only the fact that the direction is reversed,
+    // which is the thing worth knowing when it hasn't turned up.
+    case "Dialed":
+      return "dials in — nothing is connected to it from here";
     case "Server": {
       const { host: address, user, port, identityFile } = host.compute;
       return [
