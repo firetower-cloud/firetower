@@ -15,7 +15,10 @@
 
 # next.js
 /.next/
-/out/
+# Everything the export writes, but not the directory: the control plane embeds
+# it at compile time and has to find it in a clone that has never run a build.
+/out/*
+!/out/.gitkeep
 
 # production
 /build

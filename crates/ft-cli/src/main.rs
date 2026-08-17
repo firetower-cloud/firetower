@@ -160,21 +160,10 @@ async fn main() -> Result<()> {
                 .await
                 .with_context(|| format!("creating {}", home.display()))?;
 
-            eprintln!();
-            eprintln!("  Firetower");
-            // What someone can actually type. A bound address of 0.0.0.0 is
-            // not a URL, and printing it as one sends people to a page that
-            // never loads.
-            if bind.is_loopback() {
-                eprintln!("  http://localhost:{port}");
-            } else {
-                eprintln!("  listening on {bind}:{port}");
-            }
-            if dev {
-                eprintln!("  api only — the web application is on its own port");
-            }
-            eprintln!();
-
+            // The banner belongs to the server, not to this: it is printed
+            // once the checks that can refuse to start have passed. Printing
+            // an address here and then failing to bind it announced a server
+            // that was not running.
             ft_server::run(ft_server::Config {
                 home,
                 port,

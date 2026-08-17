@@ -556,10 +556,18 @@ mod tests {
         let policy = policy_with_token("secret");
 
         assert!(policy
-            .admit(&headers(&[("authorization", "Bearer secret")]), None, SOMEWHERE)
+            .admit(
+                &headers(&[("authorization", "Bearer secret")]),
+                None,
+                SOMEWHERE
+            )
             .is_some());
         assert!(policy
-            .admit(&headers(&[("authorization", "Bearer secrer")]), None, SOMEWHERE)
+            .admit(
+                &headers(&[("authorization", "Bearer secrer")]),
+                None,
+                SOMEWHERE
+            )
             .is_none());
         assert!(policy.admit(&HeaderMap::new(), None, SOMEWHERE).is_none());
     }
@@ -568,7 +576,11 @@ mod tests {
     fn the_scheme_is_read_loosely_because_clients_disagree_about_case() {
         let policy = policy_with_token("secret");
         assert!(policy
-            .admit(&headers(&[("authorization", "bearer secret")]), None, SOMEWHERE)
+            .admit(
+                &headers(&[("authorization", "bearer secret")]),
+                None,
+                SOMEWHERE
+            )
             .is_some());
     }
 
@@ -622,7 +634,11 @@ mod tests {
     fn a_principal_says_who_rather_than_yes() {
         let policy = policy_with_token("secret");
         let principal = policy
-            .admit(&headers(&[("authorization", "Bearer secret")]), None, SOMEWHERE)
+            .admit(
+                &headers(&[("authorization", "Bearer secret")]),
+                None,
+                SOMEWHERE,
+            )
             .unwrap();
         assert_eq!(principal.via, Via::Token);
         assert_eq!(&*principal.subject, "operator");

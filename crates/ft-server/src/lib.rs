@@ -18,6 +18,7 @@ pub mod oauth;
 pub mod providers;
 pub mod transport;
 pub mod vault;
+mod web;
 
 pub use api::ApiDoc;
 use db::Db;
@@ -170,6 +171,20 @@ pub async fn run(config: Config) -> Result<()> {
 fn announce(policy: &auth::Policy, source: &auth::Source, config: &Config) {
     tracing::info!(source = %source, "authentication: {}", policy.describe());
 
+    eprintln!();
+    eprintln!("  Firetower");
+    // What someone can actually type. A bound address of 0.0.0.0 is not a URL,
+    // and printing it as one sends people to a page that never loads.
+    if config.bind.is_loopback() {
+        eprintln!("  http://localhost:{}", config.port);
+    } else {
+        eprintln!("  listening on {}:{}", config.bind, config.port);
+    }
+    if config.dev {
+        eprintln!("  api only — the web application is on its own port");
+    }
+    eprintln!();
+
     let first_start = matches!(source, auth::Source::NewFile(_));
     if !first_start && !config.dev {
         return;
@@ -183,7 +198,6 @@ fn announce(policy: &auth::Policy, source: &auth::Source, config: &Config) {
     // the dev server's rather than this one's.
     let port = if config.dev { 3000 } else { config.port };
 
-    eprintln!();
     eprintln!("  Open this once — it carries the token, and the browser keeps it:");
     eprintln!("  http://localhost:{port}/?t={token}");
     if first_start {
@@ -205,6 +219,14 @@ fn build_router(state: AppState, dev: bool, policy: auth::Policy) -> axum::Route
         .merge(api)
         .merge(operational(state))
         .layer(tower_http::trace::TraceLayer::new_for_http());
+
+    if !dev {
+        // The interface, from inside the binary. Deliberately outside the gate
+        // above: the shell has to load before it can present the token, and
+        // there is nothing in it worth protecting — every byte it shows comes
+        // from an API call that is protected.
+        app = app.fallback(web::serve);
+    }
 
     if dev {
         // The web application is on its own port while developing.
@@ -235,15 +257,17 @@ fn operational(state: AppState) -> axum::Router {
         // requests without being killed and restarted into the same failure.
         .route(
             "/readyz",
-            get(|axum::extract::State(state): axum::extract::State<AppState>| async move {
-                match state.db.ping().await {
-                    Ok(()) => (axum::http::StatusCode::OK, "ready"),
-                    Err(e) => {
-                        tracing::warn!("not ready: {e:#}");
-                        (axum::http::StatusCode::SERVICE_UNAVAILABLE, "database")
+            get(
+                |axum::extract::State(state): axum::extract::State<AppState>| async move {
+                    match state.db.ping().await {
+                        Ok(()) => (axum::http::StatusCode::OK, "ready"),
+                        Err(e) => {
+                            tracing::warn!("not ready: {e:#}");
+                            (axum::http::StatusCode::SERVICE_UNAVAILABLE, "database")
+                        }
                     }
-                }
-            }),
+                },
+            ),
         )
         .with_state(state)
 }

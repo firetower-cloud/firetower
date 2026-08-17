@@ -2,7 +2,12 @@
 /api/openapi.json.tmp
 node_modules
 .next
-/web/out
+# The static export. Built by `just build` and compiled into the binary, so
+# nothing in it belongs in version control — but the directory itself does:
+# the crate that embeds it names it at compile time, and a fresh clone has to
+# build without running pnpm first.
+/web/out/*
+!/web/out/.gitkeep
 .env
 # ...but the template is the documentation of what can go in one.
 !.env.example

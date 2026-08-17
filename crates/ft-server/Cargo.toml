@@ -32,6 +32,9 @@ zeroize.workspace = true
 reqwest.workspace = true
 ulid.workspace = true
 tokio-stream = { version = "0.1", features = ["sync"] }
+# The interface, compiled in. One binary and one origin is the whole reason.
+rust-embed.workspace = true
+mime_guess.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
