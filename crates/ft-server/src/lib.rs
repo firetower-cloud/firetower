@@ -238,8 +238,16 @@ async fn ensure_admin(accounts: &accounts::Accounts) -> Result<Option<FirstAdmin
         .filter(|p| !p.is_empty());
 
     if let Some(password) = &supplied {
+        // Refused rather than ignored. Quietly generating a password instead
+        // would leave somebody who set one unable to sign in with it, and
+        // unsure whether the variable was even read.
         accounts::check_password(password).with_context(|| {
-            format!("{ADMIN_PASSWORD_ENV} is too short to be the way into this Firetower")
+            format!(
+                "{ADMIN_PASSWORD_ENV} needs at least {} characters — it is the way into this \
+                 Firetower. Lengthen it, or leave it empty and one will be generated and \
+                 printed here.",
+                accounts::MINIMUM_PASSWORD
+            )
         })?;
     }
 

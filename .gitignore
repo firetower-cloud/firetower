@@ -3,11 +3,11 @@
 node_modules
 .next
 # The static export. Built by `just build` and compiled into the binary, so
-# nothing in it belongs in version control — but the directory itself does:
-# the crate that embeds it names it at compile time, and a fresh clone has to
-# build without running pnpm first.
-/web/out/*
-!/web/out/.gitkeep
+# nothing in it belongs in version control. The directory has to exist for
+# ft-server to compile, and its build script creates it — a committed
+# placeholder does not survive, because `next build` deletes this directory
+# before writing it.
+/web/out
 .env
 # ...but the template is the documentation of what can go in one.
 !.env.example
@@ -23,3 +23,6 @@ node_modules
 /.dev
 
 /.claude-memory.md
+# Worktrees and whatever else the assistant keeps. Committing the first would
+# nest a git repository inside this one.
+/.claude/
