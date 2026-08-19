@@ -20,6 +20,13 @@ pub struct Session {
     pub agent: Agent,
     pub size: WorkspaceSize,
     pub status: SessionStatus,
+    /// Why it is in that status, when whatever set it knew.
+    ///
+    /// Only ever the agent's own words, and only for the statuses that mean
+    /// your move. Cleared when it goes back to working — a question that has
+    /// been answered is not worth keeping on screen.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
     pub host_id: HostId,
     pub workspace_id: Option<WorkspaceId>,
     /// What this session is going to do, in order, decided when it was created.

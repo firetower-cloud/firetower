@@ -116,6 +116,26 @@ enum Command {
         root: Option<PathBuf>,
     },
 
+    /// Report something an agent did. Run by the agent, never by a person.
+    ///
+    /// Installed into the agent's own hook configuration, so it fires when the
+    /// agent needs permission, finishes a turn, or stops on an error. It writes
+    /// one row into the worker's log on this machine and exits — no network, no
+    /// socket, nothing to be listening.
+    ///
+    /// That is what makes it survive Firetower being closed: the worker only
+    /// exists while a control plane is connected, but the log is a file, and
+    /// the next connection replays whatever accumulated.
+    ///
+    /// Silent and successful when it has nothing to do. It is installed in a
+    /// configuration shared with the agent's own sessions, and those are not
+    /// Firetower's business.
+    #[command(hide = true)]
+    Hook {
+        /// The hook that fired: `Notification`, `Stop`, `StopFailure`…
+        event: String,
+    },
+
     /// Answer git's credential prompt. Run by git, never by a person.
     ///
     /// Git calls whatever `GIT_ASKPASS` points at and reads one line from its
@@ -153,6 +173,15 @@ async fn main() -> Result<()> {
             // No tracing: anything on stdout here is read by git as the answer.
             let value = ft_worker::askpass::respond_as_helper(&prompt.join(" ")).await?;
             println!("{value}");
+            Ok(())
+        }
+
+        Some(Command::Hook { event }) => {
+            // Never fatal, never noisy. A hook that fails must not become a
+            // hook that interrupts the agent it is reporting on.
+            if let Err(e) = report_hook(&event).await {
+                tracing::debug!("hook {event}: {e:#}");
+            }
             Ok(())
         }
 
@@ -240,6 +269,62 @@ async fn main() -> Result<()> {
             .await
         }
     }
+}
+
+/// Write down what the agent just did.
+///
+/// Reads the hook's JSON payload from stdin — that is the contract every agent
+/// hook uses — and appends an event to the worker's log on this machine.
+async fn report_hook(event: &str) -> Result<()> {
+    use ft_core::hooks;
+
+    // Not ours. The agent's hook configuration is shared with whatever else
+    // somebody runs on this machine, and a session of their own has no
+    // Firetower environment around it.
+    let Ok(session) = std::env::var(hooks::SESSION_ENV) else {
+        return Ok(());
+    };
+    let session = ft_core::SessionId::from_stored(session);
+
+    let root = std::env::var(hooks::ROOT_ENV)
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| default_home().join("worker"));
+
+    // Whatever the agent sent us, if anything. A hook with no payload is still
+    // worth a status.
+    let payload: serde_json::Value = {
+        use tokio::io::AsyncReadExt;
+        let mut raw = String::new();
+        let _ = tokio::io::stdin().read_to_string(&mut raw).await;
+        serde_json::from_str(&raw).unwrap_or(serde_json::Value::Null)
+    };
+
+    let notification_type = payload.get("notification_type").and_then(|v| v.as_str());
+
+    let Some(status) = hooks::status_for(event, notification_type) else {
+        // An event we asked for and have no status for. Nothing to record.
+        return Ok(());
+    };
+
+    let note = hooks::NOTE_KEYS
+        .iter()
+        .find_map(|key| payload.get(key).and_then(|v| v.as_str()))
+        .and_then(hooks::trim_note);
+
+    let store = ft_worker::store::Store::open(&root.join("worker.db")).await?;
+
+    // The status the session is in, and the event that says so. Both, because
+    // the first is what every screen reads and the second is what reaches a
+    // control plane that was not connected when this happened.
+    store.set_status(&session, status).await?;
+    store
+        .append(
+            &session,
+            &ft_core::EventKind::StatusChanged { status, note },
+        )
+        .await?;
+
+    Ok(())
 }
 
 /// Ask twice, then replace it.

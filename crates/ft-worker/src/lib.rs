@@ -18,6 +18,7 @@ pub mod askpass;
 pub mod attach;
 pub mod first_run;
 pub mod git;
+pub mod hooks;
 pub mod store;
 pub mod tmux;
 
@@ -29,6 +30,15 @@ use tmux::Tmux;
 pub struct Worker {
     store: Store,
     git: GitRoot,
+    /// Where this worker keeps everything, including the log a hook appends to.
+    root: PathBuf,
+    /// The highest sequence number already sent to a control plane.
+    ///
+    /// A hook is a separate process appending to the same log, so events now
+    /// arrive from two directions: this worker, and whatever the agent just
+    /// did. One cursor, held across both, is what stops an event being sent
+    /// twice or not at all.
+    forwarded: Mutex<i64>,
     /// One terminal attachment per session, however many people are watching.
     attached: Mutex<HashMap<String, attach::Attachment>>,
 }
@@ -43,10 +53,17 @@ impl Worker {
     /// Open (or create) the worker's state under `root`.
     pub async fn open(root: impl Into<PathBuf>) -> Result<Self> {
         let root = root.into();
+        let store = Store::open(&root.join("worker.db")).await?;
+        let latest = store.latest_seq().await.unwrap_or(0);
+
         Ok(Self {
-            store: Store::open(&root.join("worker.db")).await?,
+            store,
             git: GitRoot::new(&root),
             attached: Mutex::new(HashMap::new()),
+            root,
+            // Everything already in the log predates this connection. A
+            // control plane that wants it asks, with `Resume`.
+            forwarded: Mutex::new(latest),
         })
     }
 
@@ -104,6 +121,14 @@ impl Worker {
 
                 Some(frame) = pending.recv() => {
                     outbound.write(&frame).await?;
+                }
+
+                // What the agent said about itself, through a hook, since we
+                // last looked.
+                _ = tokio::time::sleep(std::time::Duration::from_secs(1)) => {
+                    if let Err(e) = self.forward_new_events(&out).await {
+                        tracing::debug!("forwarding hook events: {e:#}");
+                    }
                 }
 
                 incoming = inbound.read::<ToWorker>() => {
@@ -250,6 +275,7 @@ impl Worker {
                         &session_id,
                         EventKind::StatusChanged {
                             status: SessionStatus::Failed,
+                            note: None,
                         },
                         out,
                     )
@@ -294,6 +320,7 @@ impl Worker {
                     &session_id,
                     EventKind::StatusChanged {
                         status: SessionStatus::Ended,
+                        note: None,
                     },
                     out,
                 )
@@ -573,12 +600,37 @@ impl Worker {
             }
         }
 
+        // Ask the agent to tell us when it stops. Without this nothing ever
+        // moves a session off `Working`: Firetower would know what it started
+        // and never what happened next.
+        if let Some(home) = std::env::var_os("HOME").map(std::path::PathBuf::from) {
+            if let Ok(exe) = std::env::current_exe() {
+                if let Err(e) = hooks::install(&home, spec.agent, &exe).await {
+                    tracing::warn!("could not install {} hooks: {e:#}", spec.agent.label());
+                }
+            }
+        }
+
         self.emit(&id, EventKind::StepStarted { step: Step::Launch }, out)
             .await?;
 
+        // What a hook needs to find its way home: which session it belongs to,
+        // and where this worker keeps its log. Inherited by the agent and by
+        // everything the agent runs.
+        //
+        // The session variable is also the guard. A hook that finds no session
+        // is not ours — somebody's own agent, sharing the same settings file —
+        // and does nothing.
+        let mut env = spec.env.clone();
+        env.push((ft_core::hooks::SESSION_ENV.to_string(), id.to_string()));
+        env.push((
+            ft_core::hooks::ROOT_ENV.to_string(),
+            self.root.display().to_string(),
+        ));
+
         // The agent runs under tmux so it outlives this worker, this
         // connection, and the laptop that started it.
-        tmux.start(&path, &spec.agent.launch(&spec.prompt), &spec.env)
+        tmux.start(&path, &spec.agent.launch(&spec.prompt), &env)
             .await
             .with_context(|| format!("starting {}", spec.agent.label()))?;
 
@@ -598,6 +650,7 @@ impl Worker {
             &id,
             EventKind::StatusChanged {
                 status: SessionStatus::Working,
+                note: None,
             },
             out,
         )
@@ -649,6 +702,7 @@ impl Worker {
                     session_id,
                     EventKind::StatusChanged {
                         status: SessionStatus::HandedBack,
+                        note: None,
                     },
                     out,
                 )
@@ -755,19 +809,54 @@ impl Worker {
         out: &mpsc::Sender<ToServer>,
     ) -> Result<()> {
         let stored = self.store.append(session_id, &kind).await?;
+
+        // Under the cursor's lock, so the tail below cannot look between the
+        // append and the send and decide this one is unsent.
+        let mut forwarded = self.forwarded.lock().await;
+        let seq = stored.seq;
         out.send(ToServer::Event {
-            seq: stored.seq,
+            seq,
             session_id: stored.session_id,
             kind: stored.kind,
             at: stored.at,
         })
         .await
         .map_err(|_| anyhow::anyhow!("nobody is listening for events"))?;
+        *forwarded = (*forwarded).max(seq);
         Ok(())
     }
 
     pub fn store(&self) -> &Store {
         &self.store
+    }
+
+    /// Send anything that appeared in the log without going through us.
+    ///
+    /// Which means hooks: a separate process, started by the agent, appending
+    /// what the agent just did. Polled rather than watched because SQLite has
+    /// no notification a second process can wait on — and a second is well
+    /// inside the time it takes somebody to look at a screen.
+    ///
+    /// When no control plane is connected this never runs, and it does not
+    /// need to: the rows stay in the log, and the next `Resume` collects them.
+    /// That is the whole reason a hook writes to a file rather than to us.
+    async fn forward_new_events(&self, out: &mpsc::Sender<ToServer>) -> Result<()> {
+        let mut forwarded = self.forwarded.lock().await;
+
+        for e in self.store.events_since(*forwarded).await? {
+            let seq = e.seq;
+            out.send(ToServer::Event {
+                seq,
+                session_id: e.session_id,
+                kind: e.kind,
+                at: e.at,
+            })
+            .await
+            .map_err(|_| anyhow::anyhow!("nobody is listening for events"))?;
+            *forwarded = (*forwarded).max(seq);
+        }
+
+        Ok(())
     }
 
     pub fn git(&self) -> &GitRoot {

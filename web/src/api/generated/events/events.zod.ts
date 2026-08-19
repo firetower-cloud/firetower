@@ -53,6 +53,7 @@ export const ListEventsResponseItem = zod.object({
   "agent": zod.enum(['ClaudeCode', 'Codex', 'Shell']).describe('Which agent runs inside a workspace.\n\nSerialised as the variant name — see the wire conventions in the brief: a\nfield takes the consumer\'s casing, an enum value stays the symbol it is.'),
   "type": zod.enum(['AgentLaunched'])
 }),zod.object({
+  "note": zod.string().nullish().describe('Why, when whatever changed it knows.\n\nThe agent\'s own words: the permission it is asking for, the last\nthing it said before finishing, the error that stopped it. Without\nthis a blocked session is a red dot you have to open a terminal to\nunderstand, which is most of the cost of being interrupted.'),
   "status": zod.enum(['Starting', 'Working', 'NeedsYou', 'HandedBack', 'Failed', 'Ended']),
   "type": zod.enum(['StatusChanged'])
 }),zod.object({

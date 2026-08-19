@@ -673,6 +673,7 @@ dependencies = [
  "ft-proto",
  "ft-server",
  "ft-worker",
+ "serde_json",
  "tokio",
  "tracing",
  "tracing-subscriber",

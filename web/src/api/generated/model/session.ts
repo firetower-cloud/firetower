@@ -28,6 +28,15 @@ export interface Session {
   createdAt: string;
   hostId: HostId;
   id: SessionId;
+  /**
+     * Why it is in that status, when whatever set it knew.
+     *
+     * Only ever the agent's own words, and only for the statuses that mean
+     * your move. Cleared when it goes back to working — a question that has
+     * been answered is not worth keeping on screen.
+     * @nullable
+     */
+  note?: string | null;
   prompt: string;
   /**
      * `None` for a bare agent: a workspace with nothing checked out.

@@ -43,6 +43,16 @@ export type EventKind = {
   agent: Agent;
   type: 'AgentLaunched';
 } | {
+  /**
+     * Why, when whatever changed it knows.
+     *
+     * The agent's own words: the permission it is asking for, the last
+     * thing it said before finishing, the error that stopped it. Without
+     * this a blocked session is a red dot you have to open a terminal to
+     * understand, which is most of the cost of being interrupted.
+     * @nullable
+     */
+  note?: string | null;
   status: SessionStatus;
   type: 'StatusChanged';
 } | {

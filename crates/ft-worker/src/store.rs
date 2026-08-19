@@ -153,6 +153,19 @@ impl Store {
     }
 
     /// Everything after `since`, oldest first. This is the resume path.
+    /// The last sequence number in the log, or zero for an empty one.
+    ///
+    /// Read when a worker starts, so it knows what already happened without
+    /// re-sending it: everything older belongs to a connection that is over,
+    /// and a control plane that wants it asks with `Resume`.
+    pub async fn latest_seq(&self) -> Result<i64> {
+        let row = sqlx::query("SELECT COALESCE(MAX(seq), 0) AS seq FROM events")
+            .fetch_one(&self.pool)
+            .await
+            .context("reading the last sequence number")?;
+        Ok(row.get("seq"))
+    }
+
     pub async fn events_since(&self, since: i64) -> Result<Vec<StoredEvent>> {
         let rows = sqlx::query(
             "SELECT seq, session_id, payload, created_at
@@ -284,6 +297,67 @@ mod tests {
         .await
         .unwrap();
         id
+    }
+
+    /// The whole mechanism, from the other side: a second process appends to
+    /// this log while the worker is not looking, and the worker finds it.
+    ///
+    /// This is what makes closing Firetower safe. A hook is not talking to
+    /// anybody — it writes to a file — so nothing has to be running to receive
+    /// it, and the next connection collects whatever accumulated.
+    #[tokio::test]
+    async fn an_event_written_by_another_process_is_found_by_sequence() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("worker.db");
+
+        let worker = Store::open(&path).await.unwrap();
+        let id = SessionId::new();
+        worker
+            .create_session(
+                &id,
+                Some("acme/backend"),
+                "Fix retries",
+                "Fix retries",
+                Some("agent/fix"),
+                Some("main"),
+                "ClaudeCode",
+                ft_core::WorkspaceSize::Medium,
+            )
+            .await
+            .unwrap();
+        let up_to = worker.latest_seq().await.unwrap();
+
+        // A hook, in its own process, with its own connection to the same file.
+        {
+            let hook = Store::open(&path).await.unwrap();
+            hook.set_status(&id, SessionStatus::NeedsYou).await.unwrap();
+            hook.append(
+                &id,
+                &EventKind::StatusChanged {
+                    status: SessionStatus::NeedsYou,
+                    note: Some("Claude wants to run `git push --force`".into()),
+                },
+            )
+            .await
+            .unwrap();
+        }
+
+        // The worker was never told. It finds it by asking what is new.
+        let found = worker.events_since(up_to).await.unwrap();
+        assert_eq!(found.len(), 1, "exactly the row the hook wrote");
+        assert!(matches!(
+            &found[0].kind,
+            EventKind::StatusChanged {
+                status: SessionStatus::NeedsYou,
+                note: Some(n),
+            } if n.contains("force")
+        ));
+
+        assert_eq!(
+            worker.status_of(&id).await.unwrap(),
+            Some(SessionStatus::NeedsYou),
+            "and the session it belongs to is blocked"
+        );
     }
 
     #[tokio::test]

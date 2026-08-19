@@ -661,13 +661,19 @@ impl Db {
                 .await?;
         }
 
-        if let EventKind::StatusChanged { status } = kind {
-            sqlx::query("UPDATE sessions SET status = $1, updated_at = $2 WHERE id = $3")
-                .bind(serde_json::to_string(status)?.trim_matches('"'))
-                .bind(at)
-                .bind(session_id.as_str())
-                .execute(&mut *tx)
-                .await?;
+        if let EventKind::StatusChanged { status, note } = kind {
+            // The note is replaced every time, including with nothing. A
+            // question that has been answered should not still be on the card
+            // after the agent went back to work.
+            sqlx::query(
+                "UPDATE sessions SET status = $1, note = $2, updated_at = $3 WHERE id = $4",
+            )
+            .bind(serde_json::to_string(status)?.trim_matches('"'))
+            .bind(note.as_deref())
+            .bind(at)
+            .bind(session_id.as_str())
+            .execute(&mut *tx)
+            .await?;
         }
 
         sqlx::query("UPDATE hosts SET last_seq = $1 WHERE id = $2 AND last_seq < $3")
@@ -834,6 +840,7 @@ fn session_from_row(r: sqlx::postgres::PgRow) -> Result<Session> {
     let size: String = r.get("size");
 
     Ok(Session {
+        note: r.get("note"),
         id: SessionId::from_stored(r.get::<String, _>("id")),
         repo: r.get("repo"),
         title: r.get("title"),
@@ -1081,6 +1088,7 @@ mod tests {
             &id,
             &EventKind::StatusChanged {
                 status: SessionStatus::NeedsYou,
+                note: None,
             },
             chrono::Utc::now(),
         )
@@ -1262,6 +1270,7 @@ mod tests {
                 id,
                 &EventKind::StatusChanged {
                     status: SessionStatus::Working,
+                    note: None,
                 },
                 chrono::Utc::now(),
             )

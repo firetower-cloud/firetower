@@ -2529,6 +2529,13 @@
               "type"
             ],
             "properties": {
+              "note": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Why, when whatever changed it knows.\n\nThe agent's own words: the permission it is asking for, the last\nthing it said before finishing, the error that stopped it. Without\nthis a blocked session is a red dot you have to open a terminal to\nunderstand, which is most of the cost of being interrupted."
+              },
               "status": {
                 "$ref": "#/components/schemas/SessionStatus"
               },
@@ -3141,6 +3148,13 @@
           },
           "id": {
             "$ref": "#/components/schemas/SessionId"
+          },
+          "note": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why it is in that status, when whatever set it knew.\n\nOnly ever the agent's own words, and only for the statuses that mean\nyour move. Cleared when it goes back to working — a question that has\nbeen answered is not worth keeping on screen."
           },
           "prompt": {
             "type": "string"

@@ -45,7 +45,17 @@ export function NeedsCard({ session }: { session: SessionView }) {
             <span>{elapsed(session.minutes)}{waiting ? " waiting" : " ago"}</span>
           </div>
 
-          
+          {/* What it actually wants, in its own words — the permission it is
+              asking for, the last thing it said, the error that stopped it.
+              Without this the card is a red dot you have to open a terminal to
+              understand, and opening the terminal is most of the cost of being
+              interrupted. */}
+          {session.note && (
+            <p className="mt-2.5 line-clamp-3 text-[13px] leading-[1.5] text-text">
+              {session.note}
+            </p>
+          )}
+
           {session.status === "HandedBack" && (
             <p className="mt-3 flex items-center gap-3 text-[13px] text-text">
               <span>{outcomeOf(session)}</span>

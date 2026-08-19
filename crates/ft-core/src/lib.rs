@@ -559,6 +559,43 @@ impl Agent {
             Agent::Codex | Agent::Shell => None,
         }
     }
+
+    /// Which of this agent's hooks Firetower wants to hear about.
+    ///
+    /// Empty for an agent with no hooks, and that is the honest answer rather
+    /// than a gap: a session running Codex cannot be known to have stopped, so
+    /// it should say so instead of showing a status that is a guess.
+    pub fn hooks(&self) -> &'static [&'static str] {
+        match self {
+            Agent::ClaudeCode => &[
+                // Blocked on a person: a permission prompt, an idle prompt, an
+                // MCP server asking something.
+                "Notification",
+                "Elicitation",
+                // Finished a turn, and what it finished with.
+                "Stop",
+                // The turn ended on an API error — a rate limit, an expired
+                // credential. The case this product exists to route to you.
+                "StopFailure",
+                // Working again, without anybody having to guess.
+                "UserPromptSubmit",
+                // It exited. Currently invisible, which leaves a session
+                // claiming to be working forever.
+                "SessionEnd",
+            ],
+            // No hooks. See `status_for` — nothing will move these off
+            // `Working` and the interface should admit that.
+            Agent::Codex | Agent::Shell => &[],
+        }
+    }
+
+    /// The file, under the agent's home, that its hooks are configured in.
+    pub fn hooks_file(&self) -> Option<&'static str> {
+        match self {
+            Agent::ClaudeCode => Some(".claude/settings.json"),
+            Agent::Codex | Agent::Shell => None,
+        }
+    }
 }
 
 /// Questions to answer in an agent's own configuration before it runs.
@@ -577,6 +614,95 @@ pub struct FirstRun {
     /// Everything asked so far is a yes, hence `bool`; widen it when something
     /// needs otherwise.
     pub answers: Vec<(Vec<String>, bool)>,
+}
+
+/// What an agent's hooks tell Firetower.
+///
+/// The whole point of the product is knowing when an agent stopped being useful
+/// without you, and the agent is the only thing that actually knows. Watching
+/// its terminal is guesswork; a hook is the agent saying so.
+pub mod hooks {
+    use super::SessionStatus;
+
+    /// The environment a hook needs to find its way home.
+    ///
+    /// Which session this is, and where the worker keeps its log. Set on the
+    /// agent's process, and inherited by every hook it runs.
+    pub const SESSION_ENV: &str = "FIRETOWER_SESSION";
+    pub const ROOT_ENV: &str = "FIRETOWER_WORKER_ROOT";
+
+    /// What a fired hook means for the session.
+    ///
+    /// `None` for the events we install but do not act on — they are worth
+    /// having in the log without being worth a status.
+    ///
+    /// `notification_type` matters because `Notification` covers both "it wants
+    /// permission" and "it just authenticated": one is you, the other is not.
+    pub fn status_for(event: &str, notification_type: Option<&str>) -> Option<SessionStatus> {
+        match event {
+            // Blocked on a person. `agent_completed` arrives here too — it is
+            // the agent saying it has nothing left to do, which in an inbox is
+            // the same as your move.
+            "Notification" => match notification_type {
+                Some("auth_success") => None,
+                Some("agent_completed") => Some(SessionStatus::HandedBack),
+                // permission_prompt, idle_prompt, agent_needs_input,
+                // elicitation_dialog, and anything added later: all of them
+                // mean it is waiting on somebody.
+                _ => Some(SessionStatus::NeedsYou),
+            },
+
+            // An MCP server asking a question mid-tool-call.
+            "Elicitation" => Some(SessionStatus::NeedsYou),
+
+            // Finished a turn. A resting state, not an end.
+            "Stop" => Some(SessionStatus::HandedBack),
+
+            // The turn ended on an API error — a rate limit, an expired
+            // credential, a billing problem. Yours to deal with, and the one
+            // the README promises to route to you.
+            "StopFailure" => Some(SessionStatus::Failed),
+
+            // You said something, so it is working again.
+            "UserPromptSubmit" => Some(SessionStatus::Working),
+
+            // The agent exited. Not `Ended`: the workspace and the branch are
+            // still there, and what to do with them is yours to decide.
+            "SessionEnd" => Some(SessionStatus::HandedBack),
+
+            _ => None,
+        }
+    }
+
+    /// Where the agent's own words live, by event, most specific first.
+    ///
+    /// Each hook carries what it stopped for under a different key and none of
+    /// them are guaranteed. The caller does the JSON — this crate describes
+    /// the protocol and stays free of a parser.
+    pub const NOTE_KEYS: &[&str] = &[
+        "notification_message",   // Notification
+        "last_assistant_message", // Stop, SubagentStop
+        "error_message",          // StopFailure
+        "elicitation_prompt",     // Elicitation
+        "message",                // UserPromptSubmit
+    ];
+
+    /// One line for an inbox, out of whatever the agent said.
+    ///
+    /// The rest is in the terminal, one click away. A card that grows to fit a
+    /// wall of text buries every other session on the screen.
+    pub fn trim_note(text: &str) -> Option<String> {
+        let text = text.trim();
+        if text.is_empty() {
+            return None;
+        }
+
+        const LIMIT: usize = 240;
+        Some(match text.char_indices().nth(LIMIT) {
+            None => text.to_string(),
+            Some((cut, _)) => format!("{}…", text[..cut].trim_end()),
+        })
+    }
 }
 
 /// A repository Firetower can cut worktrees from.
@@ -669,6 +795,14 @@ pub enum EventKind {
     },
     StatusChanged {
         status: SessionStatus,
+        /// Why, when whatever changed it knows.
+        ///
+        /// The agent's own words: the permission it is asking for, the last
+        /// thing it said before finishing, the error that stopped it. Without
+        /// this a blocked session is a red dot you have to open a terminal to
+        /// understand, which is most of the cost of being interrupted.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        note: Option<String>,
     },
     Failed {
         code: String,
