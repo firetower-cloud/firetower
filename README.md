@@ -389,10 +389,14 @@ wrong credential. The cipher is XChaCha20-Poly1305.
 ```sh
 # 1. an environment variable — for containers, servers, anything with a key
 #    manager in front of it. Nothing is written to disk.
-FIRETOWER_ROOT_KEY=<base64, 32 bytes>
+FIRETOWER_ROOT_KEY=$(openssl rand -base64 32)
 
 # 2. otherwise ~/.firetower/root.key, mode 0600, created on first run.
 ```
+
+44 characters ending in `=`. Anything else stops start-up rather than being
+used — a key that is not a key would seal every credential under junk, and
+finding that out later is worse than finding it out now.
 
 Back it up separately from the database. A database backup on its own opens
 nothing, which is the point — and losing the key means adding every credential
