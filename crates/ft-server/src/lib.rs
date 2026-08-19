@@ -237,18 +237,21 @@ async fn ensure_admin(accounts: &accounts::Accounts) -> Result<Option<FirstAdmin
         .map(|p| p.trim().to_string())
         .filter(|p| !p.is_empty());
 
+    // Whatever they wrote is used, however short. This one is temporary by
+    // construction — the account can do nothing but replace it — and refusing
+    // to start over a value in a file is a worse failure than the weak password
+    // it would be guarding against.
+    //
+    // Said once, at the only moment it can be acted on, and only when it is
+    // going to be reachable by more than this machine.
     if let Some(password) = &supplied {
-        // Refused rather than ignored. Quietly generating a password instead
-        // would leave somebody who set one unable to sign in with it, and
-        // unsure whether the variable was even read.
-        accounts::check_password(password).with_context(|| {
-            format!(
-                "{ADMIN_PASSWORD_ENV} needs at least {} characters — it is the way into this \
-                 Firetower. Lengthen it, or leave it empty and one will be generated and \
-                 printed here.",
-                accounts::MINIMUM_PASSWORD
-            )
-        })?;
+        if password.chars().count() < accounts::MINIMUM_PASSWORD {
+            tracing::warn!(
+                "{ADMIN_PASSWORD_ENV} is short. It is a working credential until somebody \
+                 signs in and replaces it, so on anything reachable from outside this machine, \
+                 make it a real one."
+            );
+        }
     }
 
     let password = supplied.clone().unwrap_or_else(invent_password);

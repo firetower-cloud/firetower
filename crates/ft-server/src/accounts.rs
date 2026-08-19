@@ -30,11 +30,15 @@ use utoipa::ToSchema;
 /// enough that a laptop lost in a drawer eventually stops being a way in.
 const SESSION_LIFETIME: chrono::Duration = chrono::Duration::days(30);
 
-/// Shorter than the minimum anyone would defend, and long enough to be worth
-/// more than the rules people usually attach to it.
+/// The minimum for a password somebody *chooses*.
 ///
 /// Length only. Requiring a symbol and a digit produces `Passw0rd!` across a
 /// whole company and nothing else.
+///
+/// Deliberately not applied to the one seeded from the environment. That one is
+/// temporary by construction, and enforcing it there meant a control plane that
+/// would not start because of a short string in a file — which is a worse
+/// failure than the one it was guarding against.
 pub const MINIMUM_PASSWORD: usize = 12;
 
 /// Someone who can sign in.
@@ -107,7 +111,12 @@ impl Accounts {
     pub async fn create_first_admin(&self, username: &str, password: &str) -> Result<User> {
         let username = username.trim();
         anyhow::ensure!(!username.is_empty(), "an administrator needs a username");
-        check_password(password)?;
+        anyhow::ensure!(!password.is_empty(), "an administrator needs a password");
+
+        // No length required of this one, unlike a password somebody chooses.
+        // It exists to be replaced — the account can do nothing else until it
+        // is — and refusing to create it would mean refusing to start over a
+        // value in a file, which helps nobody.
 
         let mut tx = self.pool.begin().await?;
 
@@ -362,6 +371,9 @@ fn user_from_row(r: sqlx::postgres::PgRow) -> User {
 }
 
 /// Long enough to be worth having, with nothing else asked of it.
+///
+/// For passwords a person picks: the wizard, and `firetower passwd`. What the
+/// environment seeds is exempt — see [`MINIMUM_PASSWORD`].
 pub fn check_password(password: &str) -> Result<()> {
     anyhow::ensure!(
         password.chars().count() >= MINIMUM_PASSWORD,
@@ -464,6 +476,29 @@ mod tests {
                 .is_err(),
             "a second one would be a way in nobody asked for"
         );
+    }
+
+    /// A short one from the environment is allowed, because it is temporary by
+    /// construction — and a control plane that will not start because of a
+    /// string in a file is a worse failure than the weak password itself.
+    #[tokio::test]
+    async fn a_seeded_password_may_be_short_but_a_chosen_one_may_not() {
+        let accounts = accounts().await;
+
+        let admin = accounts.create_first_admin("admin", "admin").await.unwrap();
+        assert!(admin.must_change_password, "it still has to be replaced");
+        assert!(accounts
+            .authenticate("admin", "admin")
+            .await
+            .unwrap()
+            .is_some());
+
+        // What replaces it is held to the real minimum.
+        assert!(accounts.set_password(&admin.id, "short").await.is_err());
+        assert!(accounts
+            .set_password(&admin.id, "a long enough password")
+            .await
+            .is_ok());
     }
 
     #[tokio::test]
