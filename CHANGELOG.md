@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.4.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.3.0...firetower-v0.4.0) (2026-08-19)
+
+
+### Features
+
+* a shell and the files of a session ([00109df](https://github.com/firetower-cloud/firetower/commit/00109df7e62764405eff18f03c81f9d1772eb0a2))
+* force remove a session whose host is gone ([dc433e8](https://github.com/firetower-cloud/firetower/commit/dc433e8dd900154502c26d7c76d40db6b17bd856))
+* per-repository environment variables ([3426a31](https://github.com/firetower-cloud/firetower/commit/3426a3143b9de23bcafb7666df78c8948e4345b0))
+* sessions get a name ([84ad8ab](https://github.com/firetower-cloud/firetower/commit/84ad8ab803966c72500d49e4da9e06bd2a839ddb))
+* the chart labels agents by name ([b7846c5](https://github.com/firetower-cloud/firetower/commit/b7846c5a116e5e67e46d898cb6e0792ffae45084))
+* the terminal is focused when you open a session ([8b61a33](https://github.com/firetower-cloud/firetower/commit/8b61a33381d14db749875196ac13a60d042e2a6c))
+
+
+### Bug Fixes
+
+* the card shows the question the agent is asking ([6e9d5dc](https://github.com/firetower-cloud/firetower/commit/6e9d5dc150b368694c948f8eb0402461fa3ae0e2))
+
 ## [0.3.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.2.0...firetower-v0.3.0) (2026-08-19)
 
 
