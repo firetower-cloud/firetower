@@ -63,6 +63,17 @@ export function forgetToken() {
   window.localStorage.removeItem(TOKEN_KEY);
 }
 
+/** Where the one thing they are allowed to do lives. */
+function toSetup() {
+  if (typeof window === "undefined") return;
+  if (window.location.pathname !== "/setup") {
+    // A full load for the same reason as below: every cached query on this
+    // screen was refused, and none of them are worth keeping.
+    // eslint-disable-next-line @next/next/no-location-assign-relative-destination
+    window.location.assign("/setup");
+  }
+}
+
 /**
  * Where to send someone who isn't signed in.
  *
@@ -128,6 +139,14 @@ export const http = async <T>(url: string, init: RequestInit = {}): Promise<T> =
     // version of the same message.
     if (error.status === 401 && !url.startsWith("/api/v1/auth/login")) {
       toSignIn();
+    }
+
+    // Signed in, and allowed to do exactly one thing until a password that came
+    // from a file is replaced. Every other screen would render "can't reach the
+    // control plane", which is both wrong and unactionable — the wizard is
+    // where this is fixed.
+    if (error.code === "PasswordChangeRequired") {
+      toSetup();
     }
 
     throw error;
