@@ -21,6 +21,7 @@ export * from './compute';
 export * from './configureAgent';
 export * from './credentials';
 export * from './deleteHostParams';
+export * from './destroySessionParams';
 export * from './diagnosis';
 export * from './done';
 export * from './drain';

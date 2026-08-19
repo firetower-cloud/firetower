@@ -38,6 +38,13 @@ pub struct Session {
     /// been answered is not worth keeping on screen.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
+    /// When it was removed from here without the machine being told.
+    ///
+    /// Set only by a forced removal: the host was not answering, so nobody
+    /// could tear the workspace down. The session is `Ended` here from that
+    /// moment, and the agent may well still be running there.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub forgotten_at: Option<chrono::DateTime<chrono::Utc>>,
     pub host_id: HostId,
     pub workspace_id: Option<WorkspaceId>,
     /// What this session is going to do, in order, decided when it was created.

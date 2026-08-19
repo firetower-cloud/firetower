@@ -13,6 +13,7 @@ import {
   getListSessionsQueryKey,
   getGetSessionQueryKey,
 } from "@/src/api/generated/sessions/sessions";
+import { useListHosts } from "@/src/api/generated/hosts/hosts";
 import type { Session } from "@/src/api/generated/model";
 import { ApiError } from "@/src/api/http";
 
@@ -33,6 +34,17 @@ export function SessionActions({ session }: { session: Session }) {
 
   const ended = session.status === "Ended";
   const running = session.status === "Working" || session.status === "Starting";
+
+  /**
+   * Whether the machine this runs on is answering.
+   *
+   * Everything below except removing it goes through that machine, and a
+   * session on a host that has gone can otherwise never be got rid of: ending
+   * one asks its worker to tear the workspace down, and there is no worker.
+   */
+  const { data: hosts } = useListHosts();
+  const host = hosts?.find((h) => h.id === session.hostId);
+  const unreachable = host?.state === "Unreachable";
 
   const { data: work } = useSessionWork(session.id, {
     // Cheap, and it changes whenever the agent does something. Skipped without
@@ -83,8 +95,13 @@ export function SessionActions({ session }: { session: Session }) {
   if (ended) {
     return (
       <Panel>
-        <p className="text-[12.5px] text-mute">
-          This session has ended and its workspace was removed.
+        <p className="text-[12.5px] leading-[1.5] text-mute">
+          {session.forgottenAt
+            ? // It did not end — it was taken off the inbox. Saying the
+              // workspace was removed would be untrue, and this is the one
+              // screen that knows better.
+              `Removed here while ${host?.name ?? "its host"} wasn't answering. Whatever it left behind is still on that machine, and Firetower tears it down if that machine comes back.`
+            : "This session has ended and its workspace was removed."}
         </p>
       </Panel>
     );
@@ -98,6 +115,14 @@ export function SessionActions({ session }: { session: Session }) {
 
   return (
     <Panel>
+      {unreachable && (
+        <p className="mb-3 rounded-[5px] border border-ember/30 bg-ember/[0.05] px-2.5 py-1.5 text-[11.5px] leading-[1.5] text-bone">
+          {host?.name ?? "This session's host"} isn&apos;t answering. Nothing here
+          reaches the agent until it does — you can still remove the session from
+          Firetower.
+        </p>
+      )}
+
       {checkout ? (
         <Work work={work} />
       ) : (
@@ -209,20 +234,34 @@ export function SessionActions({ session }: { session: Session }) {
             disabled={busy}
             className="text-[12px] text-mute transition-colors hover:text-ember"
           >
-            End session
+            {unreachable ? "Force remove" : "End session"}
           </button>
         ) : (
           <div className="flex flex-col gap-2">
-            <p className="text-[11.5px] leading-[1.5] text-dim">
-              {checkout && atRisk(work)
-                ? "This removes the workspace. What hasn't been pushed is gone."
-                : "This removes the workspace. Everything is pushed."}
-            </p>
+            {unreachable ? (
+              // Said plainly, because it is not what ending normally means.
+              // Nothing is being torn down here — the agent is still running on
+              // a machine we cannot reach, and this only stops it filling the
+              // inbox.
+              <p className="text-[11.5px] leading-[1.5] text-dim">
+                {host?.name ?? "That machine"} isn&apos;t answering, so the workspace
+                can&apos;t be removed. The agent keeps running there, holding its
+                worktree and its terminal. If that machine comes back, Firetower
+                tears them down then. We also can&apos;t tell you what is unpushed,
+                because we can&apos;t reach it to look.
+              </p>
+            ) : (
+              <p className="text-[11.5px] leading-[1.5] text-dim">
+                {checkout && atRisk(work)
+                  ? "This removes the workspace. What hasn't been pushed is gone."
+                  : "This removes the workspace. Everything is pushed."}
+              </p>
+            )}
             <div className="flex items-center gap-3">
               <button
                 onClick={() =>
                   destroy.mutate(
-                    { id: session.id },
+                    { id: session.id, params: unreachable ? { force: true } : undefined },
                     {
                       onSuccess: async () => {
                         await queryClient.invalidateQueries({
@@ -237,7 +276,13 @@ export function SessionActions({ session }: { session: Session }) {
                 disabled={busy}
                 className="rounded-[4px] bg-ember px-2.5 py-1 text-[11.5px] font-semibold text-[#1a0c04] transition-opacity hover:opacity-90 disabled:opacity-60"
               >
-                {destroy.isPending ? "Ending…" : "End it"}
+                {destroy.isPending
+                  ? unreachable
+                    ? "Removing…"
+                    : "Ending…"
+                  : unreachable
+                    ? "Remove it here"
+                    : "End it"}
               </button>
               <button
                 onClick={() => setConfirming(false)}

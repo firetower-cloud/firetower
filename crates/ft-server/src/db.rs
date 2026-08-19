@@ -206,6 +206,59 @@ impl Db {
     }
 
     /// Sessions still running on a host, for refusing to remove it.
+    /// End a session here without the machine being told.
+    ///
+    /// For a host that is not answering, where the usual ending — ask the
+    /// worker, let its event come back — has nobody to ask. `forgotten_at` is
+    /// what keeps a later replay from undoing this.
+    pub async fn forget_session(&self, id: &SessionId) -> Result<()> {
+        let now = chrono::Utc::now();
+        sqlx::query(
+            "UPDATE sessions SET status = 'Ended', forgotten_at = $1, updated_at = $1
+              WHERE id = $2",
+        )
+        .bind(now)
+        .bind(id.as_str())
+        .execute(&self.pool)
+        .await
+        .context("forgetting a session")?;
+        Ok(())
+    }
+
+    /// Sessions removed here while this host was away, that it has not been
+    /// told about yet.
+    ///
+    /// Removing one does not stop the agent — it cannot, with nothing
+    /// listening. This is the debt: when the machine comes back, it still gets
+    /// torn down.
+    pub async fn owed_cleanup_on(&self, host: &HostId) -> Result<Vec<SessionId>> {
+        let rows = sqlx::query(
+            "SELECT id FROM sessions
+              WHERE host_id = $1 AND forgotten_at IS NOT NULL AND cleaned_at IS NULL
+              ORDER BY forgotten_at",
+        )
+        .bind(host.as_str())
+        .fetch_all(&self.pool)
+        .await
+        .context("listing sessions still owed a teardown")?;
+
+        Ok(rows
+            .into_iter()
+            .map(|r| SessionId::from_stored(r.get::<String, _>("id")))
+            .collect())
+    }
+
+    /// The machine has been told to tear this one down, so stop asking.
+    pub async fn mark_cleaned(&self, id: &SessionId) -> Result<()> {
+        sqlx::query("UPDATE sessions SET cleaned_at = $1 WHERE id = $2")
+            .bind(chrono::Utc::now())
+            .bind(id.as_str())
+            .execute(&self.pool)
+            .await
+            .context("recording a teardown")?;
+        Ok(())
+    }
+
     pub async fn live_sessions_on(&self, id: &HostId) -> Result<Vec<String>> {
         // A failed session holds nothing — no workspace, no agent, no claim on
         // the host. Counting it would block removing a host forever.
@@ -683,8 +736,12 @@ impl Db {
             // The note is replaced every time, including with nothing. A
             // question that has been answered should not still be on the card
             // after the agent went back to work.
+            // Not for a session you removed while its host was away. The
+            // worker knows nothing about that and will happily report it as
+            // working; applying that here would put a ghost back on the inbox.
             sqlx::query(
-                "UPDATE sessions SET status = $1, note = $2, updated_at = $3 WHERE id = $4",
+                "UPDATE sessions SET status = $1, note = $2, updated_at = $3
+                  WHERE id = $4 AND forgotten_at IS NULL",
             )
             .bind(serde_json::to_string(status)?.trim_matches('"'))
             .bind(note.as_deref())
@@ -875,6 +932,7 @@ fn session_from_row(r: sqlx::postgres::PgRow) -> Result<Session> {
         size: serde_json::from_str(&format!("\"{size}\"")).context("decoding size")?,
         status: serde_json::from_str::<SessionStatus>(&format!("\"{status}\""))
             .context("decoding session status")?,
+        forgotten_at: r.get("forgotten_at"),
         host_id: HostId::from_stored(r.get::<String, _>("host_id")),
         workspace_id: None,
         // Sessions created before steps were recorded have none, which renders
@@ -1449,6 +1507,98 @@ mod tests {
         assert_eq!(
             after.compute, host.compute,
             "the name is what changed, not where it is"
+        );
+    }
+
+    /// A session removed while its host was away stays removed.
+    ///
+    /// The machine knows nothing about it. When it comes back it reports that
+    /// session as working, because it is — and applying that would put a ghost
+    /// back on the inbox that nobody can get rid of a second time.
+    #[tokio::test]
+    async fn a_forgotten_session_is_not_resurrected_by_its_host() {
+        let db = Db::open_for_test().await.unwrap();
+        let host = db.ensure_host("fire-01", Compute::Local).await.unwrap();
+
+        let id = SessionId::new();
+        db.insert_session(
+            &id,
+            &host.id,
+            Some("acme/backend"),
+            "Fix the flaky test",
+            "fix the flaky test",
+            None,
+            Some("main"),
+            "ClaudeCode",
+            WorkspaceSize::Medium,
+            &[],
+        )
+        .await
+        .unwrap();
+
+        db.forget_session(&id).await.unwrap();
+
+        let gone = db.session(&id).await.unwrap().unwrap();
+        assert_eq!(gone.status, ft_core::SessionStatus::Ended);
+        assert!(gone.forgotten_at.is_some(), "removed here, not by the worker");
+
+        // The machine comes back and says what it has always said.
+        db.record_event(
+            &host.id,
+            1,
+            &id,
+            &EventKind::StatusChanged {
+                status: ft_core::SessionStatus::NeedsYou,
+                note: Some("What would you like to work on next?".into()),
+            },
+            chrono::Utc::now(),
+        )
+        .await
+        .unwrap();
+
+        let still = db.session(&id).await.unwrap().unwrap();
+        assert_eq!(
+            still.status,
+            ft_core::SessionStatus::Ended,
+            "a removed session does not come back"
+        );
+        assert_eq!(still.note, None, "and brings no question with it");
+    }
+
+    /// Removing it here leaves a teardown owed on the machine.
+    #[tokio::test]
+    async fn a_forgotten_session_is_owed_a_teardown_until_it_is_told() {
+        let db = Db::open_for_test().await.unwrap();
+        let host = db.ensure_host("fire-01", Compute::Local).await.unwrap();
+
+        let id = SessionId::new();
+        db.insert_session(
+            &id,
+            &host.id,
+            None,
+            "Ask me anything",
+            "ask me anything",
+            None,
+            None,
+            "ClaudeCode",
+            WorkspaceSize::Medium,
+            &[],
+        )
+        .await
+        .unwrap();
+
+        assert!(
+            db.owed_cleanup_on(&host.id).await.unwrap().is_empty(),
+            "a session nobody removed is nobody's debt"
+        );
+
+        db.forget_session(&id).await.unwrap();
+        assert_eq!(db.owed_cleanup_on(&host.id).await.unwrap(), vec![id.clone()]);
+
+        db.mark_cleaned(&id).await.unwrap();
+        assert!(
+            db.owed_cleanup_on(&host.id).await.unwrap().is_empty(),
+            "asking twice would kill a session started since"
         );
     }
 

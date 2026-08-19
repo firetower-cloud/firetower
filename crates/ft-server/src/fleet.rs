@@ -460,6 +460,55 @@ impl Fleet {
             let _ = tell.send(());
         }
 
+        // Sessions removed here while this machine was away were removed on the
+        // promise that they would be cleaned up if it ever came back. It just
+        // did. The agent has been running unattended since, and its workspace
+        // and tmux session are still there.
+        {
+            let fleet = self.clone();
+            let host = host_id.clone();
+            tokio::spawn(async move {
+                let owed = match fleet.db.owed_cleanup_on(&host).await {
+                    Ok(owed) => owed,
+                    Err(e) => {
+                        tracing::warn!(host = %host, "looking for sessions to tear down: {e:#}");
+                        return;
+                    }
+                };
+
+                for session_id in owed {
+                    match fleet
+                        .send(
+                            &host,
+                            ToWorker::Destroy {
+                                session_id: session_id.clone(),
+                                force: true,
+                            },
+                        )
+                        .await
+                    {
+                        // Recorded as told, not as done: the worker tears it
+                        // down and says so in its own time, and asking twice
+                        // would kill a session someone started since.
+                        Ok(()) => {
+                            tracing::info!(host = %host, session = %session_id,
+                                "tearing down a session removed while this host was away");
+                            if let Err(e) = fleet.db.mark_cleaned(&session_id).await {
+                                tracing::warn!(session = %session_id, "recording a teardown: {e:#}");
+                            }
+                        }
+                        // It went away again. The debt stands, and the next
+                        // connection tries again.
+                        Err(e) => {
+                            tracing::warn!(host = %host, session = %session_id,
+                                "tearing down after a reconnect: {e:#}");
+                            break;
+                        }
+                    }
+                }
+            });
+        }
+
         // Ask what this host has as soon as it turns up. Waiting for someone to
         // press a button means a fresh install reports no agents at all, which
         // reads as "nothing works" rather than "nobody has looked yet".

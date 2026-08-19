@@ -27,6 +27,7 @@ import type {
 
 import type {
   ApiError,
+  DestroySessionParams,
   Done,
   EndedAll,
   FileDiff,
@@ -431,17 +432,26 @@ export const useGetGetSessionQueryData = () => {
 }
 
 
-export const getDestroySessionUrl = (id: string,) => {
+export const getDestroySessionUrl = (id: string,
+    params?: DestroySessionParams,) => {
+  const normalizedParams = new URLSearchParams();
 
+  Object.entries(params || {}).forEach(([key, value]) => {
 
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
 
+  const stringifiedParams = normalizedParams.toString();
 
-  return `/api/v1/sessions/${id}`
+  return stringifiedParams.length > 0 ? `/api/v1/sessions/${id}?${stringifiedParams}` : `/api/v1/sessions/${id}`
 }
 
-export const destroySession = async (id: string, options?: Parameters<typeof http>[1]): Promise<void> => {
+export const destroySession = async (id: string,
+    params?: DestroySessionParams, options?: Parameters<typeof http>[1]): Promise<void> => {
 
-  return http<void>(getDestroySessionUrl(id),
+  return http<void>(getDestroySessionUrl(id,params),
   {
     ...options,
     method: 'DELETE'
@@ -455,8 +465,8 @@ export const destroySession = async (id: string, options?: Parameters<typeof htt
 
 
 export const getDestroySessionMutationOptions = <TError = ApiError,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof destroySession>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof http>}
-): UseMutationOptions<Awaited<ReturnType<typeof destroySession>>, TError,{id: string}, TContext> => {
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof destroySession>>, TError,{id: string;params?: DestroySessionParams}, TContext>, request?: SecondParameter<typeof http>}
+): UseMutationOptions<Awaited<ReturnType<typeof destroySession>>, TError,{id: string;params?: DestroySessionParams}, TContext> => {
 
 const mutationKey = ['destroySession'];
 const {mutation: mutationOptions, request: requestOptions} = options ?
@@ -468,10 +478,10 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof destroySession>>, {id: string}> = (props) => {
-          const {id} = props ?? {};
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof destroySession>>, {id: string;params?: DestroySessionParams}> = (props) => {
+          const {id,params} = props ?? {};
 
-          return  destroySession(id,requestOptions)
+          return  destroySession(id,params,requestOptions)
         }
 
 
@@ -486,11 +496,11 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type DestroySessionMutationError = ApiError
 
     export const useDestroySession = <TError = ApiError,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof destroySession>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof http>}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof destroySession>>, TError,{id: string;params?: DestroySessionParams}, TContext>, request?: SecondParameter<typeof http>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof destroySession>>,
         TError,
-        {id: string},
+        {id: string;params?: DestroySessionParams},
         TContext
       > => {
       return useMutation(getDestroySessionMutationOptions(options), queryClient);

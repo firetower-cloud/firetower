@@ -26,6 +26,15 @@ export interface Session {
      */
   branch?: string | null;
   createdAt: string;
+  /**
+     * When it was removed from here without the machine being told.
+     *
+     * Set only by a forced removal: the host was not answering, so nobody
+     * could tear the workspace down. The session is `Ended` here from that
+     * moment, and the agent may well still be running there.
+     * @nullable
+     */
+  forgottenAt?: string | null;
   hostId: HostId;
   id: SessionId;
   /**

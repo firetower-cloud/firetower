@@ -1379,6 +1379,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "force",
+            "in": "query",
+            "description": "Remove it here even though its host isn't answering",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
           }
         ],
         "responses": {
@@ -1386,6 +1395,16 @@
             "description": ""
           },
           "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
             "description": "",
             "content": {
               "application/json": {
@@ -3216,6 +3235,14 @@
           "createdAt": {
             "type": "string",
             "format": "date-time"
+          },
+          "forgottenAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When it was removed from here without the machine being told.\n\nSet only by a forced removal: the host was not answering, so nobody\ncould tear the workspace down. The session is `Ended` here from that\nmoment, and the agent may well still be running there."
           },
           "hostId": {
             "$ref": "#/components/schemas/HostId"

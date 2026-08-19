@@ -28,6 +28,7 @@ export const ListSessionsResponseItem = zod.object({
   "base": zod.string().nullish(),
   "branch": zod.string().nullish().describe('Absent along with the repository — there is nothing to branch.'),
   "createdAt": zod.iso.datetime({"offset":true}),
+  "forgottenAt": zod.iso.datetime({"offset":true}).nullish().describe('When it was removed from here without the machine being told.\n\nSet only by a forced removal: the host was not answering, so nobody\ncould tear the workspace down. The session is `Ended` here from that\nmoment, and the agent may well still be running there.'),
   "hostId": zod.string().describe('Identifies a host.'),
   "id": zod.string().describe('Identifies a session — the unit of work you talk to.'),
   "name": zod.string().describe('What to call it. `Agent 3` until somebody says otherwise.\n\nSeparate from `title`, which is cut from the prompt and describes the\nwork. This one identifies the session, which is a different job: five\nsessions on one repository all called \"Ask me…\" are impossible to tell\napart, and renaming one of them to \"the flaky test\" fixes that.'),
@@ -59,6 +60,7 @@ export const CreateSessionResponse = zod.object({
   "base": zod.string().nullish(),
   "branch": zod.string().nullish().describe('Absent along with the repository — there is nothing to branch.'),
   "createdAt": zod.iso.datetime({"offset":true}),
+  "forgottenAt": zod.iso.datetime({"offset":true}).nullish().describe('When it was removed from here without the machine being told.\n\nSet only by a forced removal: the host was not answering, so nobody\ncould tear the workspace down. The session is `Ended` here from that\nmoment, and the agent may well still be running there.'),
   "hostId": zod.string().describe('Identifies a host.'),
   "id": zod.string().describe('Identifies a session — the unit of work you talk to.'),
   "name": zod.string().describe('What to call it. `Agent 3` until somebody says otherwise.\n\nSeparate from `title`, which is cut from the prompt and describes the\nwork. This one identifies the session, which is a different job: five\nsessions on one repository all called \"Ask me…\" are impossible to tell\napart, and renaming one of them to \"the flaky test\" fixes that.'),
@@ -100,6 +102,7 @@ export const GetSessionResponse = zod.object({
   "base": zod.string().nullish(),
   "branch": zod.string().nullish().describe('Absent along with the repository — there is nothing to branch.'),
   "createdAt": zod.iso.datetime({"offset":true}),
+  "forgottenAt": zod.iso.datetime({"offset":true}).nullish().describe('When it was removed from here without the machine being told.\n\nSet only by a forced removal: the host was not answering, so nobody\ncould tear the workspace down. The session is `Ended` here from that\nmoment, and the agent may well still be running there.'),
   "hostId": zod.string().describe('Identifies a host.'),
   "id": zod.string().describe('Identifies a session — the unit of work you talk to.'),
   "name": zod.string().describe('What to call it. `Agent 3` until somebody says otherwise.\n\nSeparate from `title`, which is cut from the prompt and describes the\nwork. This one identifies the session, which is a different job: five\nsessions on one repository all called \"Ask me…\" are impossible to tell\napart, and renaming one of them to \"the flaky test\" fixes that.'),
@@ -117,6 +120,10 @@ export const GetSessionResponse = zod.object({
 
 export const DestroySessionParams = zod.object({
   "id": zod.string().describe('Session id')
+})
+
+export const DestroySessionQueryParams = zod.object({
+  "force": zod.boolean().optional().describe('Remove it here even though its host isn\'t answering')
 })
 
 export const DestroySessionResponse = zod.void()
@@ -140,6 +147,7 @@ export const RenameSessionResponse = zod.object({
   "base": zod.string().nullish(),
   "branch": zod.string().nullish().describe('Absent along with the repository — there is nothing to branch.'),
   "createdAt": zod.iso.datetime({"offset":true}),
+  "forgottenAt": zod.iso.datetime({"offset":true}).nullish().describe('When it was removed from here without the machine being told.\n\nSet only by a forced removal: the host was not answering, so nobody\ncould tear the workspace down. The session is `Ended` here from that\nmoment, and the agent may well still be running there.'),
   "hostId": zod.string().describe('Identifies a host.'),
   "id": zod.string().describe('Identifies a session — the unit of work you talk to.'),
   "name": zod.string().describe('What to call it. `Agent 3` until somebody says otherwise.\n\nSeparate from `title`, which is cut from the prompt and describes the\nwork. This one identifies the session, which is a different job: five\nsessions on one repository all called \"Ask me…\" are impossible to tell\napart, and renaming one of them to \"the flaky test\" fixes that.'),

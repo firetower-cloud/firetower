@@ -82,7 +82,9 @@ export function outcomeOf(session: Session): string {
     case "Failed":
       return "Something went wrong — open the terminal";
     case "Ended":
-      return "Ended";
+      // It did not end so much as get taken off the inbox: its host was not
+      // answering, and nothing tore the workspace down.
+      return session.forgottenAt ? "Removed" : "Ended";
     default:
       return "";
   }

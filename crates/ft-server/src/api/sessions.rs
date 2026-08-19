@@ -374,12 +374,16 @@ pub(super) async fn create_session(
 
 #[utoipa::path(
     delete, path = "/api/v1/sessions/{id}", tag = "sessions",
-    params(("id" = String, Path, description = "Session id")),
-    responses((status = 202), (status = 404, body = ApiError)),
+    params(
+        ("id" = String, Path, description = "Session id"),
+        ("force" = Option<bool>, Query, description = "Remove it here even though its host isn't answering"),
+    ),
+    responses((status = 202), (status = 404, body = ApiError), (status = 409, body = ApiError)),
 )]
 pub(super) async fn destroy_session(
     State(state): State<AppState>,
     Path(id): Path<String>,
+    Query(req): Query<Removal>,
 ) -> ApiResult<StatusCode> {
     let id = SessionId::from_stored(id);
     let session = state
@@ -390,6 +394,35 @@ pub(super) async fn destroy_session(
 
     if session.status == SessionStatus::Ended {
         return Err(ApiError::new(ErrorCode::SessionEnded, "already ended"));
+    }
+
+    // Ending is normally the worker's word: it tears the workspace down and
+    // reports it, and the row follows. With nobody listening there is no such
+    // word, and this used to fail as an internal error — a 500 for a machine
+    // being off, and a session nobody could get rid of.
+    if !state.fleet.is_connected(&session.host_id).await {
+        if !req.force {
+            let host = state
+                .db
+                .host_by_id(&session.host_id)
+                .await?
+                .map(|h| h.name)
+                .unwrap_or_else(|| "its host".to_string());
+
+            return Err(ApiError::new(
+                ErrorCode::HostUnreachable,
+                format!(
+                    "{host} isn't answering, so the workspace can't be torn down. \
+                     Remove it here anyway to stop it filling the inbox — it keeps \
+                     running there until that machine comes back."
+                ),
+            ));
+        }
+
+        // Removed here, and owed a teardown there. The debt is paid the next
+        // time that host connects; see `Fleet`'s reconnect.
+        state.db.forget_session(&id).await?;
+        return Ok(StatusCode::ACCEPTED);
     }
 
     state
@@ -404,6 +437,14 @@ pub(super) async fn destroy_session(
         .await?;
 
     Ok(StatusCode::ACCEPTED)
+}
+
+/// Removing a session whose host has stopped answering.
+#[derive(Debug, Default, Deserialize, utoipa::IntoParams)]
+pub(super) struct Removal {
+    /// Take it off the inbox without the machine being told.
+    #[serde(default)]
+    force: bool,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
