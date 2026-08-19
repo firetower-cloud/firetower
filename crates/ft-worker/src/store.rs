@@ -114,6 +114,30 @@ impl Store {
         Ok(())
     }
 
+    /// Why a session is where it is, if anything said.
+    pub async fn note_of(&self, id: &SessionId) -> Result<Option<String>> {
+        let row = sqlx::query("SELECT note FROM sessions WHERE id = ?")
+            .bind(id.as_str())
+            .fetch_optional(&self.pool)
+            .await?;
+        Ok(row.and_then(|r| r.get::<Option<String>, _>("note")))
+    }
+
+    /// Record why, or clear it.
+    ///
+    /// Held here as well as in the event so that a hook can tell whether
+    /// anything actually changed — without it, an agent that notifies four
+    /// times while it waits writes four identical rows.
+    pub async fn set_note(&self, id: &SessionId, note: Option<&str>) -> Result<()> {
+        sqlx::query("UPDATE sessions SET note = ?, updated_at = ? WHERE id = ?")
+            .bind(note)
+            .bind(chrono::Utc::now().to_rfc3339())
+            .bind(id.as_str())
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
     pub async fn status_of(&self, id: &SessionId) -> Result<Option<SessionStatus>> {
         let row = sqlx::query("SELECT status FROM sessions WHERE id = ?")
             .bind(id.as_str())

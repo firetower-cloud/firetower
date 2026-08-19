@@ -76,8 +76,20 @@ pub async fn install(home: &Path, agent: Agent, exe: &Path) -> Result<()> {
             continue;
         };
 
-        // Already ours. Recognised by the command rather than by position,
-        // because somebody may have added their own hooks around it.
+        // Drop any of ours that point somewhere else.
+        //
+        // The command is an absolute path to the binary that installed it, so
+        // `cargo clean`, an upgrade, or a move leaves an entry pointing at
+        // nothing — and a hook that cannot run is a session that silently stops
+        // reporting, which looks exactly like the feature being broken. Ours
+        // are recognised by the `hook` subcommand and replaced; anybody else's
+        // are left alone.
+        let before = matchers.len();
+        matchers.retain(|m| !is_a_stale_firetower_hook(m, &command));
+        changed |= matchers.len() != before;
+
+        // Already ours, and current. Recognised by the command rather than by
+        // position, because somebody may have added their own around it.
         if matchers.iter().any(|m| mentions(m, &command)) {
             continue;
         }
@@ -109,6 +121,22 @@ pub async fn install(home: &Path, agent: Agent, exe: &Path) -> Result<()> {
         &serde_json::to_string_pretty(&Value::Object(config))?,
     )
     .await
+}
+
+/// One of ours, from a binary that is no longer where it was.
+fn is_a_stale_firetower_hook(matcher: &Value, command: &str) -> bool {
+    matcher
+        .get("hooks")
+        .and_then(|h| h.as_array())
+        .map(|hooks| {
+            hooks.iter().any(|h| {
+                h.get("command")
+                    .and_then(|c| c.as_str())
+                    // Ours by shape, but not the binary running now.
+                    .is_some_and(|c| c.contains(" hook ") && !c.starts_with(command))
+            })
+        })
+        .unwrap_or(false)
 }
 
 /// Whether this matcher already runs our command.
@@ -244,6 +272,72 @@ mod tests {
             tokio::fs::read_to_string(&path).await.unwrap(),
             "{ this is not json"
         );
+    }
+
+    /// A binary that moved: `cargo clean`, an upgrade, a release install. The
+    /// entry left behind cannot run, and a hook that cannot run is a session
+    /// that stops reporting without saying so.
+    #[tokio::test]
+    async fn a_hook_pointing_at_a_binary_that_moved_is_replaced() {
+        let home = tempfile::tempdir().unwrap();
+        let path = home.path().join(".claude/settings.json");
+
+        install(
+            home.path(),
+            Agent::ClaudeCode,
+            &std::path::PathBuf::from("/old/place/firetower"),
+        )
+        .await
+        .unwrap();
+        install(home.path(), Agent::ClaudeCode, &exe())
+            .await
+            .unwrap();
+
+        let config = read(&path).await;
+        let stop = config["hooks"]["Stop"].as_array().unwrap();
+
+        assert_eq!(
+            stop.len(),
+            1,
+            "the one that moved is gone, not kept beside it"
+        );
+        assert_eq!(
+            stop[0]["hooks"][0]["command"],
+            "/usr/local/bin/firetower hook Stop"
+        );
+    }
+
+    /// Somebody else's hook that happens to mention a path is not ours to
+    /// remove, however much it looks like housekeeping.
+    #[tokio::test]
+    async fn hooks_that_are_not_ours_survive_the_tidy_up() {
+        let home = tempfile::tempdir().unwrap();
+        let path = home.path().join(".claude/settings.json");
+        tokio::fs::create_dir_all(path.parent().unwrap())
+            .await
+            .unwrap();
+        tokio::fs::write(
+            &path,
+            serde_json::to_string_pretty(&json!({
+                "hooks": {
+                    "Stop": [{ "hooks": [{ "type": "command", "command": "/usr/bin/say done" }] }]
+                }
+            }))
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+
+        install(home.path(), Agent::ClaudeCode, &exe())
+            .await
+            .unwrap();
+
+        let stop = read(&path).await["hooks"]["Stop"]
+            .as_array()
+            .unwrap()
+            .clone();
+        assert_eq!(stop.len(), 2);
+        assert_eq!(stop[0]["hooks"][0]["command"], "/usr/bin/say done");
     }
 
     #[tokio::test]

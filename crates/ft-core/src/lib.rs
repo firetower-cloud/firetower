@@ -572,13 +572,20 @@ impl Agent {
                 // MCP server asking something.
                 "Notification",
                 "Elicitation",
+                // The same block as a notification, with the detail attached:
+                // which tool, and its arguments.
+                "PermissionRequest",
                 // Finished a turn, and what it finished with.
                 "Stop",
                 // The turn ended on an API error — a rate limit, an expired
                 // credential. The case this product exists to route to you.
                 "StopFailure",
-                // Working again, without anybody having to guess.
+                // Working again, without anybody having to guess. Both are
+                // needed: answering a permission prompt is not submitting a
+                // prompt, so only the tool call that follows says the agent
+                // resumed.
                 "UserPromptSubmit",
+                "PreToolUse",
                 // It exited. Currently invisible, which leaves a session
                 // claiming to be working forever.
                 "SessionEnd",
@@ -666,6 +673,23 @@ pub mod hooks {
             // You said something, so it is working again.
             "UserPromptSubmit" => Some(SessionStatus::Working),
 
+            // And so is running a tool — which is the one that matters.
+            //
+            // Answering a permission prompt is not submitting a prompt, so
+            // `UserPromptSubmit` never fires for it and a session that was
+            // unblocked by pressing `1` stayed on `NeedsYou` while the agent
+            // worked. A tool call is the first thing that happens afterwards,
+            // whatever unblocked it.
+            //
+            // This fires on every tool call — hundreds a session — so it costs
+            // nothing only because a report that changes nothing is dropped
+            // before it is written. See the caller.
+            "PreToolUse" => Some(SessionStatus::Working),
+
+            // About to ask whether it may do something specific, which is the
+            // same block as `Notification` with the detail attached.
+            "PermissionRequest" => Some(SessionStatus::NeedsYou),
+
             // The agent exited. Not `Ended`: the workspace and the branch are
             // still there, and what to do with them is yours to decide.
             "SessionEnd" => Some(SessionStatus::HandedBack),
@@ -686,6 +710,34 @@ pub mod hooks {
         "elicitation_prompt",     // Elicitation
         "message",                // UserPromptSubmit
     ];
+
+    /// What the agent wants to do, in a phrase.
+    ///
+    /// `Notification` says "Claude needs your permission" whatever it is
+    /// asking, which tells you only that you are needed. `PermissionRequest`
+    /// carries the tool and its arguments, so this can say what for.
+    pub fn note_for_tool(tool: &str, detail: Option<&str>) -> String {
+        let verb = match tool {
+            "Bash" => "wants to run",
+            "Edit" | "Write" | "NotebookEdit" => "wants to edit",
+            "Read" => "wants to read",
+            "WebFetch" => "wants to fetch",
+            _ => "wants to use",
+        };
+
+        match detail.map(str::trim).filter(|d| !d.is_empty()) {
+            Some(detail) => format!("{verb} {detail}"),
+            // Better than nothing: the tool's name is still more than
+            // "needs your permission".
+            None => format!("{verb} {tool}"),
+        }
+    }
+
+    /// Where the interesting part of a tool call lives, by tool.
+    ///
+    /// The caller does the JSON; this crate keeps the knowledge of which key
+    /// matters without taking a parser as a dependency.
+    pub const TOOL_DETAIL_KEYS: &[&str] = &["command", "file_path", "url", "path", "pattern"];
 
     /// One line for an inbox, out of whatever the agent said.
     ///
@@ -1210,5 +1262,81 @@ mod contract_tests {
             .keys()
             .map(String::as_str)
             .collect()
+    }
+}
+
+#[cfg(test)]
+mod hook_tests {
+    use super::hooks::*;
+    use super::SessionStatus;
+
+    /// The one that was broken: answering a permission prompt is not
+    /// submitting a prompt, so nothing said the agent had resumed and the
+    /// session sat on `NeedsYou` while it worked.
+    #[test]
+    fn a_tool_call_means_the_agent_is_working_again() {
+        assert_eq!(
+            status_for("PreToolUse", None),
+            Some(SessionStatus::Working),
+            "whatever unblocked it, this is the first thing that happens after"
+        );
+    }
+
+    #[test]
+    fn the_notifications_that_mean_you_and_the_ones_that_do_not() {
+        for kind in ["permission_prompt", "idle_prompt", "agent_needs_input"] {
+            assert_eq!(
+                status_for("Notification", Some(kind)),
+                Some(SessionStatus::NeedsYou),
+                "{kind}"
+            );
+        }
+
+        assert_eq!(
+            status_for("Notification", Some("auth_success")),
+            None,
+            "signing in is not somebody's move"
+        );
+        assert_eq!(
+            status_for("Notification", Some("agent_completed")),
+            Some(SessionStatus::HandedBack)
+        );
+    }
+
+    #[test]
+    fn an_api_error_is_yours_to_deal_with() {
+        assert_eq!(status_for("StopFailure", None), Some(SessionStatus::Failed));
+    }
+
+    #[test]
+    fn a_hook_we_do_not_act_on_changes_nothing() {
+        assert_eq!(status_for("PostToolUse", None), None);
+        assert_eq!(status_for("PreCompact", None), None);
+    }
+
+    /// "Claude needs your permission" tells you only that you are needed.
+    #[test]
+    fn a_tool_call_reads_as_what_it_wants_to_do() {
+        assert_eq!(
+            note_for_tool("Bash", Some("git push --force origin main")),
+            "wants to run git push --force origin main"
+        );
+        assert_eq!(
+            note_for_tool("Edit", Some("src/lib.rs")),
+            "wants to edit src/lib.rs"
+        );
+        // No arguments is still more than "needs your permission".
+        assert_eq!(note_for_tool("Bash", None), "wants to run Bash");
+    }
+
+    #[test]
+    fn a_note_is_one_line_rather_than_a_transcript() {
+        assert_eq!(trim_note("   "), None);
+        assert_eq!(trim_note(" hello "), Some("hello".to_string()));
+
+        let long = "x".repeat(400);
+        let trimmed = trim_note(&long).unwrap();
+        assert!(trimmed.len() < long.len());
+        assert!(trimmed.ends_with('…'), "and says that it was cut");
     }
 }

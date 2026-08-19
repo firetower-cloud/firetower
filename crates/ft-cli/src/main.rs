@@ -306,17 +306,35 @@ async fn report_hook(event: &str) -> Result<()> {
         return Ok(());
     };
 
-    let note = hooks::NOTE_KEYS
-        .iter()
-        .find_map(|key| payload.get(key).and_then(|v| v.as_str()))
-        .and_then(hooks::trim_note);
+    let (mut note, specific) = note_for(&payload, status);
 
     let store = ft_worker::store::Store::open(&root.join("worker.db")).await?;
+
+    // Nothing to say. `PreToolUse` fires before every tool call — hundreds a
+    // session — and without this each one would write a row, stream a frame to
+    // the browser, and bury the log in copies of "Working".
+    //
+    // It also stops a blocked agent repeating itself: a permission prompt
+    // notifies more than once while it waits, and those were three identical
+    // rows before this.
+    let was = store.status_of(&session).await?;
+    let said = store.note_of(&session).await?;
+
+    // Keep the better sentence. Still the same block, and we have nothing more
+    // specific to say than we already did.
+    if was == Some(status) && !specific && said.is_some() {
+        note = said.clone();
+    }
+
+    if was == Some(status) && said == note {
+        return Ok(());
+    }
 
     // The status the session is in, and the event that says so. Both, because
     // the first is what every screen reads and the second is what reaches a
     // control plane that was not connected when this happened.
     store.set_status(&session, status).await?;
+    store.set_note(&session, note.as_deref()).await?;
     store
         .append(
             &session,
@@ -325,6 +343,102 @@ async fn report_hook(event: &str) -> Result<()> {
         .await?;
 
     Ok(())
+}
+
+/// What to show on the card, in the agent's own terms.
+///
+/// In order of how much it actually tells you:
+///
+/// 1. the tool it is asking to use, which `PermissionRequest` carries
+/// 2. the last thing it said, out of the transcript — the question, the menu,
+///    the thing it is waiting on
+/// 3. whatever message the hook came with, which for a permission prompt is
+///    the constant "Claude needs your permission" however specific the question
+///
+/// Nothing at all once it is working again: a question that has been answered
+/// should not still be on the screen.
+fn note_for(payload: &serde_json::Value, status: ft_core::SessionStatus) -> (Option<String>, bool) {
+    use ft_core::hooks;
+
+    if status == ft_core::SessionStatus::Working {
+        return (None, true);
+    }
+
+    // 1. What it wants to do.
+    if let Some(tool) = payload.get("tool_name").and_then(|v| v.as_str()) {
+        let detail = payload.get("tool_input").and_then(|input| {
+            hooks::TOOL_DETAIL_KEYS
+                .iter()
+                .find_map(|key| input.get(key).and_then(|v| v.as_str()))
+        });
+        return (hooks::trim_note(&hooks::note_for_tool(tool, detail)), true);
+    }
+
+    // 2. What it last said. The generic notification is the same sentence
+    //    whether it wants to run a command or wants you to choose from a list,
+    //    and the transcript is where that difference lives.
+    if let Some(said) = payload
+        .get("transcript_path")
+        .and_then(|v| v.as_str())
+        .and_then(last_thing_said)
+        .and_then(|t| hooks::trim_note(&t))
+    {
+        return (Some(said), true);
+    }
+
+    // 3. Better than silence, and nothing more. Marked unspecific so it cannot
+    //    replace something that actually said what the agent wants: a blocked
+    //    agent notifies repeatedly, and "Claude needs your permission" arriving
+    //    after "wants to run git push --force" is a downgrade.
+    (
+        hooks::NOTE_KEYS
+            .iter()
+            .find_map(|key| payload.get(key).and_then(|v| v.as_str()))
+            .and_then(hooks::trim_note),
+        false,
+    )
+}
+
+/// The last thing the agent said, from its own transcript.
+///
+/// Newline-delimited JSON, one row per message, read from the end because only
+/// the last assistant turn matters.
+///
+/// The format belongs to the agent and can change under us — the same bargain
+/// `first_run` makes with its configuration. It is worth it: without this the
+/// card says "needs your permission" whatever is being asked. If it ever stops
+/// parsing, the note falls back to the hook's own message rather than breaking.
+///
+/// The documentation warns this file "may lag behind the current turn", so a
+/// stale line is possible. Still more than the alternative says.
+fn last_thing_said(path: &str) -> Option<String> {
+    let text = std::fs::read_to_string(path).ok()?;
+
+    for line in text.lines().rev() {
+        let Ok(row) = serde_json::from_str::<serde_json::Value>(line) else {
+            continue;
+        };
+        if row.get("type").and_then(|t| t.as_str()) != Some("assistant") {
+            continue;
+        }
+
+        let said = row
+            .get("message")
+            .and_then(|m| m.get("content"))
+            .and_then(|c| c.as_array())
+            .into_iter()
+            .flatten()
+            .filter(|block| block.get("type").and_then(|t| t.as_str()) == Some("text"))
+            .filter_map(|block| block.get("text").and_then(|t| t.as_str()))
+            .collect::<Vec<_>>()
+            .join(" ");
+
+        if !said.trim().is_empty() {
+            return Some(said);
+        }
+    }
+
+    None
 }
 
 /// Ask twice, then replace it.
@@ -461,5 +575,58 @@ fn init_tracing(to_stderr: bool, pretty: bool) {
         builder.init();
     } else {
         builder.json().init();
+    }
+}
+
+#[cfg(test)]
+mod hook_note_tests {
+    use super::note_for;
+    use ft_core::SessionStatus;
+    use serde_json::json;
+
+    #[test]
+    fn a_tool_call_beats_the_message_that_came_with_it() {
+        let (note, specific) = note_for(
+            &json!({
+                "tool_name": "Bash",
+                "tool_input": { "command": "git push --force" },
+                "notification_message": "Claude needs your permission",
+            }),
+            SessionStatus::NeedsYou,
+        );
+
+        assert_eq!(note.as_deref(), Some("wants to run git push --force"));
+        assert!(
+            specific,
+            "so a later generic notification cannot replace it"
+        );
+    }
+
+    /// The fallback, and why it is marked.
+    ///
+    /// "Claude needs your permission" is what a permission prompt says however
+    /// specific the question. Arriving after something that said what the agent
+    /// actually wants, it would be a downgrade — so it is allowed to fill a
+    /// gap and never to overwrite.
+    #[test]
+    fn the_generic_message_is_a_last_resort() {
+        let (note, specific) = note_for(
+            &json!({ "notification_message": "Claude needs your permission" }),
+            SessionStatus::NeedsYou,
+        );
+
+        assert_eq!(note.as_deref(), Some("Claude needs your permission"));
+        assert!(!specific);
+    }
+
+    #[test]
+    fn working_again_clears_it() {
+        let (note, specific) = note_for(
+            &json!({ "tool_name": "Bash", "tool_input": { "command": "ls" } }),
+            SessionStatus::Working,
+        );
+
+        assert_eq!(note, None, "a question that was answered is not news");
+        assert!(specific);
     }
 }
