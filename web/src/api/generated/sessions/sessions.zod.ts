@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.2.0
+ * OpenAPI spec version: 0.3.0
  */
 import * as zod from 'zod';
 
@@ -30,7 +30,9 @@ export const ListSessionsResponseItem = zod.object({
   "createdAt": zod.iso.datetime({"offset":true}),
   "hostId": zod.string().describe('Identifies a host.'),
   "id": zod.string().describe('Identifies a session — the unit of work you talk to.'),
+  "name": zod.string().describe('What to call it. `Agent 3` until somebody says otherwise.\n\nSeparate from `title`, which is cut from the prompt and describes the\nwork. This one identifies the session, which is a different job: five\nsessions on one repository all called \"Ask me…\" are impossible to tell\napart, and renaming one of them to \"the flaky test\" fixes that.'),
   "note": zod.string().nullish().describe('Why it is in that status, when whatever set it knew.\n\nOnly ever the agent\'s own words, and only for the statuses that mean\nyour move. Cleared when it goes back to working — a question that has\nbeen answered is not worth keeping on screen.'),
+  "number": zod.int().describe('Assigned once, never reused, and the same for as long as the session\nexists. What `name` is derived from, and what a name that has been\nchanged can always be traced back to.'),
   "prompt": zod.string(),
   "repo": zod.string().nullish().describe('`None` for a bare agent: a workspace with nothing checked out.'),
   "size": zod.enum(['Small', 'Medium', 'Large']),
@@ -59,7 +61,9 @@ export const CreateSessionResponse = zod.object({
   "createdAt": zod.iso.datetime({"offset":true}),
   "hostId": zod.string().describe('Identifies a host.'),
   "id": zod.string().describe('Identifies a session — the unit of work you talk to.'),
+  "name": zod.string().describe('What to call it. `Agent 3` until somebody says otherwise.\n\nSeparate from `title`, which is cut from the prompt and describes the\nwork. This one identifies the session, which is a different job: five\nsessions on one repository all called \"Ask me…\" are impossible to tell\napart, and renaming one of them to \"the flaky test\" fixes that.'),
   "note": zod.string().nullish().describe('Why it is in that status, when whatever set it knew.\n\nOnly ever the agent\'s own words, and only for the statuses that mean\nyour move. Cleared when it goes back to working — a question that has\nbeen answered is not worth keeping on screen.'),
+  "number": zod.int().describe('Assigned once, never reused, and the same for as long as the session\nexists. What `name` is derived from, and what a name that has been\nchanged can always be traced back to.'),
   "prompt": zod.string(),
   "repo": zod.string().nullish().describe('`None` for a bare agent: a workspace with nothing checked out.'),
   "size": zod.enum(['Small', 'Medium', 'Large']),
@@ -98,7 +102,9 @@ export const GetSessionResponse = zod.object({
   "createdAt": zod.iso.datetime({"offset":true}),
   "hostId": zod.string().describe('Identifies a host.'),
   "id": zod.string().describe('Identifies a session — the unit of work you talk to.'),
+  "name": zod.string().describe('What to call it. `Agent 3` until somebody says otherwise.\n\nSeparate from `title`, which is cut from the prompt and describes the\nwork. This one identifies the session, which is a different job: five\nsessions on one repository all called \"Ask me…\" are impossible to tell\napart, and renaming one of them to \"the flaky test\" fixes that.'),
   "note": zod.string().nullish().describe('Why it is in that status, when whatever set it knew.\n\nOnly ever the agent\'s own words, and only for the statuses that mean\nyour move. Cleared when it goes back to working — a question that has\nbeen answered is not worth keeping on screen.'),
+  "number": zod.int().describe('Assigned once, never reused, and the same for as long as the session\nexists. What `name` is derived from, and what a name that has been\nchanged can always be traced back to.'),
   "prompt": zod.string(),
   "repo": zod.string().nullish().describe('`None` for a bare agent: a workspace with nothing checked out.'),
   "size": zod.enum(['Small', 'Medium', 'Large']),
@@ -114,6 +120,40 @@ export const DestroySessionParams = zod.object({
 })
 
 export const DestroySessionResponse = zod.void()
+
+/**
+ * The name only. A session's number is what other things point at, so it is
+ * fixed for as long as the session exists — renaming is for the half a person
+ * reads.
+ * @summary Call it something else.
+ */
+export const RenameSessionParams = zod.object({
+  "id": zod.string().describe('Session id')
+})
+
+export const RenameSessionBody = zod.object({
+  "name": zod.string()
+})
+
+export const RenameSessionResponse = zod.object({
+  "agent": zod.enum(['ClaudeCode', 'Codex', 'Shell']).describe('Which agent runs inside a workspace.\n\nSerialised as the variant name — see the wire conventions in the brief: a\nfield takes the consumer\'s casing, an enum value stays the symbol it is.'),
+  "base": zod.string().nullish(),
+  "branch": zod.string().nullish().describe('Absent along with the repository — there is nothing to branch.'),
+  "createdAt": zod.iso.datetime({"offset":true}),
+  "hostId": zod.string().describe('Identifies a host.'),
+  "id": zod.string().describe('Identifies a session — the unit of work you talk to.'),
+  "name": zod.string().describe('What to call it. `Agent 3` until somebody says otherwise.\n\nSeparate from `title`, which is cut from the prompt and describes the\nwork. This one identifies the session, which is a different job: five\nsessions on one repository all called \"Ask me…\" are impossible to tell\napart, and renaming one of them to \"the flaky test\" fixes that.'),
+  "note": zod.string().nullish().describe('Why it is in that status, when whatever set it knew.\n\nOnly ever the agent\'s own words, and only for the statuses that mean\nyour move. Cleared when it goes back to working — a question that has\nbeen answered is not worth keeping on screen.'),
+  "number": zod.int().describe('Assigned once, never reused, and the same for as long as the session\nexists. What `name` is derived from, and what a name that has been\nchanged can always be traced back to.'),
+  "prompt": zod.string(),
+  "repo": zod.string().nullish().describe('`None` for a bare agent: a workspace with nothing checked out.'),
+  "size": zod.enum(['Small', 'Medium', 'Large']),
+  "status": zod.enum(['Starting', 'Working', 'NeedsYou', 'HandedBack', 'Failed', 'Ended']),
+  "steps": zod.array(zod.enum(['Fetch', 'Worktree', 'Workspace', 'Setup', 'Launch']).describe('One stage of bringing a session up.\n\nThe point of naming them is that the whole list is knowable \*before\* any of\nit runs — so a session can show what it is going to do the moment it is\ncreated, rather than assembling a shape out of events as they arrive. A step\nnobody has reached yet is still worth showing.')).optional().describe('What this session is going to do, in order, decided when it was created.\n\nHere rather than inferred from events so the screen has something to\nshow before the worker has said a word — the difference between \"this\nis fetching a repository\" and a blank page.'),
+  "title": zod.string().describe('Short, derived from the prompt — the prompt itself lives in the transcript.'),
+  "updatedAt": zod.iso.datetime({"offset":true}),
+  "workspaceId": zod.union([zod.null(),zod.string().describe('Identifies a workspace — the compute a session runs on.')]).optional()
+}).describe('A line of work with a conversation attached and a branch at the end.')
 
 /**
  * Split on the server: it is a pure function over text that is easy to get

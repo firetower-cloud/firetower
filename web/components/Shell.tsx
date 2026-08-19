@@ -129,7 +129,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
               >
                 <Signal status={t.status} size={6} />
                 <span className={`flex-1 truncate text-[12.5px] ${on ? "text-bone" : "text-dim"}`}>
-                  {t.title}
+                  {t.name}
                 </span>
                 <span className="font-mono text-[10px] text-mute">{elapsed(minutesSince(t.createdAt))}</span>
               </Link>

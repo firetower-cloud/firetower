@@ -27,14 +27,20 @@ export function NeedsCard({ session }: { session: SessionView }) {
         </div>
 
         <div className="min-w-0 flex-1">
+          {/* What to call it, then what it was asked to do. Five sessions on
+              one repository used to differ only in a title cut from the first
+              four words of the prompt, which for "ask me a question about…"
+              meant five cards reading almost the same thing. */}
           <Link href={`/sessions/${session.id}`} className="group flex items-baseline gap-2">
-            <span className="font-mono text-[11.5px] text-mute">{session.repo}</span>
             <span className="text-[14px] font-semibold text-bone group-hover:underline">
-              {session.title}
+              {session.name}
             </span>
+            <span className="min-w-0 truncate text-[13px] text-dim">{session.title}</span>
           </Link>
 
           <div className="mt-0.5 flex items-center gap-2 font-mono text-[11px] text-mute">
+            <span>{session.repo}</span>
+            <span>·</span>
             <span>{session.agent}</span>
             <span>·</span>
             <span>{session.host}</span>

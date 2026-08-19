@@ -12,8 +12,6 @@ import type { Host, Session, SessionStatus } from "./generated/model";
 
 /** What the screens actually render. */
 export type SessionView = Session & {
-  /** `title` under the name the interface uses. */
-  name: string;
   /** Minutes since it started — derived, never stored. */
   minutes: number;
   /** The host's display name, looked up from its id. */
@@ -23,7 +21,6 @@ export type SessionView = Session & {
 export function toView(session: Session, hosts: Host[] = []): SessionView {
   return {
     ...session,
-    name: session.title,
     minutes: minutesSince(session.createdAt),
     host: hosts.find((h) => h.id === session.hostId)?.name ?? "unknown",
   };

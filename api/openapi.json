@@ -10,7 +10,7 @@
       "name": "AGPL-3.0-only",
       "identifier": "AGPL-3.0-only"
     },
-    "version": "0.2.0"
+    "version": "0.3.0"
   },
   "paths": {
     "/api/v1/agents": {
@@ -1384,6 +1384,67 @@
         "responses": {
           "202": {
             "description": ""
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "sessions"
+        ],
+        "summary": "Call it something else.",
+        "description": "The name only. A session's number is what other things point at, so it is\nfixed for as long as the session exists — renaming is for the half a person\nreads.",
+        "operationId": "rename_session",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Session id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RenameSession"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Session"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
           },
           "404": {
             "description": "",
@@ -3023,6 +3084,17 @@
           }
         }
       },
+      "RenameSession": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          }
+        }
+      },
       "ReplaceSecret": {
         "type": "object",
         "required": [
@@ -3113,6 +3185,8 @@
         "description": "A line of work with a conversation attached and a branch at the end.",
         "required": [
           "id",
+          "number",
+          "name",
           "title",
           "prompt",
           "agent",
@@ -3149,12 +3223,21 @@
           "id": {
             "$ref": "#/components/schemas/SessionId"
           },
+          "name": {
+            "type": "string",
+            "description": "What to call it. `Agent 3` until somebody says otherwise.\n\nSeparate from `title`, which is cut from the prompt and describes the\nwork. This one identifies the session, which is a different job: five\nsessions on one repository all called \"Ask me…\" are impossible to tell\napart, and renaming one of them to \"the flaky test\" fixes that."
+          },
           "note": {
             "type": [
               "string",
               "null"
             ],
             "description": "Why it is in that status, when whatever set it knew.\n\nOnly ever the agent's own words, and only for the statuses that mean\nyour move. Cleared when it goes back to working — a question that has\nbeen answered is not worth keeping on screen."
+          },
+          "number": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Assigned once, never reused, and the same for as long as the session\nexists. What `name` is derived from, and what a name that has been\nchanged can always be traced back to."
           },
           "prompt": {
             "type": "string"

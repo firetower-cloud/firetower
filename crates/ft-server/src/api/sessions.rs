@@ -472,6 +472,57 @@ async fn act(state: &AppState, id: &SessionId, action: ft_proto::Action) -> ApiR
     }
 }
 
+/// Call it something else.
+///
+/// The name only. A session's number is what other things point at, so it is
+/// fixed for as long as the session exists — renaming is for the half a person
+/// reads.
+#[utoipa::path(
+    patch, path = "/api/v1/sessions/{id}", tag = "sessions",
+    params(("id" = String, Path, description = "Session id")),
+    request_body = RenameSession,
+    responses(
+        (status = 200, body = Session),
+        (status = 400, body = ApiError),
+        (status = 404, body = ApiError),
+    ),
+)]
+pub(super) async fn rename_session(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(req): Json<RenameSession>,
+) -> ApiResult<Json<Session>> {
+    let id = SessionId::from_stored(id);
+
+    let name = req.name.trim();
+    if name.is_empty() {
+        return Err(ApiError::new(
+            ErrorCode::InvalidRequest,
+            "a session needs a name — `Agent 3` if you want the one it started with",
+        ));
+    }
+
+    state
+        .db
+        .session(&id)
+        .await?
+        .ok_or_else(|| ApiError::not_found("session"))?;
+
+    state.db.rename_session(&id, name).await?;
+
+    state
+        .db
+        .session(&id)
+        .await?
+        .map(Json)
+        .ok_or_else(|| ApiError::not_found("session"))
+}
+
+#[derive(Debug, serde::Deserialize, utoipa::ToSchema)]
+pub struct RenameSession {
+    pub name: String,
+}
+
 /// Stop the agent. The workspace and its branch stay.
 #[utoipa::path(
     post, path = "/api/v1/sessions/{id}/stop", tag = "sessions",

@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.2.0
+ * OpenAPI spec version: 0.3.0
  */
 import type { Agent } from './agent';
 import type { HostId } from './hostId';
@@ -29,6 +29,15 @@ export interface Session {
   hostId: HostId;
   id: SessionId;
   /**
+     * What to call it. `Agent 3` until somebody says otherwise.
+     *
+     * Separate from `title`, which is cut from the prompt and describes the
+     * work. This one identifies the session, which is a different job: five
+     * sessions on one repository all called "Ask me…" are impossible to tell
+     * apart, and renaming one of them to "the flaky test" fixes that.
+     */
+  name: string;
+  /**
      * Why it is in that status, when whatever set it knew.
      *
      * Only ever the agent's own words, and only for the statuses that mean
@@ -37,6 +46,12 @@ export interface Session {
      * @nullable
      */
   note?: string | null;
+  /**
+     * Assigned once, never reused, and the same for as long as the session
+     * exists. What `name` is derived from, and what a name that has been
+     * changed can always be traced back to.
+     */
+  number: number;
   prompt: string;
   /**
      * `None` for a bare agent: a workspace with nothing checked out.

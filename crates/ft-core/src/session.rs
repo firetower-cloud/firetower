@@ -9,6 +9,17 @@ use utoipa::ToSchema;
 #[serde(rename_all = "camelCase")]
 pub struct Session {
     pub id: SessionId,
+    /// Assigned once, never reused, and the same for as long as the session
+    /// exists. What `name` is derived from, and what a name that has been
+    /// changed can always be traced back to.
+    pub number: i64,
+    /// What to call it. `Agent 3` until somebody says otherwise.
+    ///
+    /// Separate from `title`, which is cut from the prompt and describes the
+    /// work. This one identifies the session, which is a different job: five
+    /// sessions on one repository all called "Ask me…" are impossible to tell
+    /// apart, and renaming one of them to "the flaky test" fixes that.
+    pub name: String,
     /// `None` for a bare agent: a workspace with nothing checked out.
     pub repo: Option<String>,
     /// Short, derived from the prompt — the prompt itself lives in the transcript.

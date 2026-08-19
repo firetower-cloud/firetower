@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.2.0
+ * OpenAPI spec version: 0.3.0
  */
 import {
   useMutation,
@@ -34,6 +34,7 @@ import type {
   NewPullRequest,
   NewSession,
   PullRequest,
+  RenameSession,
   Session,
   SessionPtyParams,
   WorkSummary
@@ -493,6 +494,80 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
         TContext
       > => {
       return useMutation(getDestroySessionMutationOptions(options), queryClient);
+    }
+    export const getRenameSessionUrl = (id: string,) => {
+
+
+
+
+  return `/api/v1/sessions/${id}`
+}
+
+/**
+ * The name only. A session's number is what other things point at, so it is
+ * fixed for as long as the session exists — renaming is for the half a person
+ * reads.
+ * @summary Call it something else.
+ */
+export const renameSession = async (id: string,
+    renameSessionBody: RenameSession, options?: Parameters<typeof http>[1]): Promise<Session> => {
+
+  return http<Session>(getRenameSessionUrl(id),
+  {
+    ...options,
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(renameSessionBody)
+  }
+);}
+
+
+
+
+
+export const getRenameSessionMutationOptions = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof renameSession>>, TError,{id: string;data: RenameSession}, TContext>, request?: SecondParameter<typeof http>}
+): UseMutationOptions<Awaited<ReturnType<typeof renameSession>>, TError,{id: string;data: RenameSession}, TContext> => {
+
+const mutationKey = ['renameSession'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof renameSession>>, {id: string;data: RenameSession}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  renameSession(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RenameSessionMutationResult = NonNullable<Awaited<ReturnType<typeof renameSession>>>
+    export type RenameSessionMutationBody = RenameSession
+    export type RenameSessionMutationError = ApiError
+
+    /**
+ * @summary Call it something else.
+ */
+export const useRenameSession = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof renameSession>>, TError,{id: string;data: RenameSession}, TContext>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof renameSession>>,
+        TError,
+        {id: string;data: RenameSession},
+        TContext
+      > => {
+      return useMutation(getRenameSessionMutationOptions(options), queryClient);
     }
     export const getSessionDiffUrl = (id: string,) => {
 

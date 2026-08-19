@@ -3,7 +3,7 @@
 import { usePathname } from "next/navigation";
 import { useState } from "react";
 import Link from "next/link";
-import { useGetSession } from "@/src/api/generated/sessions/sessions";
+import { useGetSession, useRenameSession } from "@/src/api/generated/sessions/sessions";
 import { useListEvents } from "@/src/api/generated/events/events";
 import { Steps, STEP_EVENTS } from "@/components/Steps";
 import { Signal } from "@/components/Signal";
@@ -47,12 +47,18 @@ export default function SessionView() {
   // frozen mid-build with no way to tell, which is exactly what it looked like.
   // So while a session is still going, ask as well. Once it is over, stop —
   // there is nothing left to learn.
-  const { data: session, isLoading, error } = useGetSession(id, {
+  const {
+    data: session,
+    isLoading,
+    error,
+    refetch,
+  } = useGetSession(id, {
     query: {
       refetchInterval: (query) =>
         query.state.data && unfinished(query.state.data) ? 2_000 : false,
     },
   });
+  const rename = useRenameSession();
 
   const busy = !!session && unfinished(session);
   const { data: events = [] } = useListEvents(
@@ -94,9 +100,25 @@ export default function SessionView() {
 
         <div className="mt-2 flex items-center gap-3">
           <Signal status={session.status} size={8} />
+          {/* The name is what this session is called on every other screen, so
+              it is what the page is titled by. The task it was given follows
+              it, since two agents on one repository are told similar things. */}
           <h1 className="text-[19px] font-semibold tracking-[-0.01em] text-bone">
-            {session.title}
+            {session.name}
           </h1>
+          <button
+            onClick={() => {
+              const next = window.prompt(`Call ${session.name} what?`, session.name);
+              if (!next || next.trim() === session.name) return;
+              rename.mutate(
+                { id: session.id, data: { name: next.trim() } },
+                { onSuccess: () => refetch() },
+              );
+            }}
+            className="text-[11.5px] text-mute transition-colors hover:text-ember"
+          >
+            Rename
+          </button>
           <span className="rounded-[4px] border border-line px-1.5 py-0.5 font-mono text-[10.5px] text-slate">
             {STATUS_LABEL[session.status] ?? session.status}
           </span>
@@ -104,6 +126,8 @@ export default function SessionView() {
             {elapsed(minutesSince(session.createdAt))}
           </span>
         </div>
+
+        <p className="mt-1 text-[13.5px] text-dim">{session.title}</p>
 
         <div className="mt-2 flex items-center gap-4 font-mono text-[11.5px] text-mute">
           <span>{session.repo}</span>

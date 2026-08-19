@@ -5,9 +5,7 @@
  * The Firetower control plane: API, scheduling, and worker transports.
  * OpenAPI spec version: 0.3.0
  */
-import type { OrgId } from './orgId';
 
-export interface Organization {
-  id: OrgId;
+export interface RenameSession {
   name: string;
 }

@@ -107,6 +107,7 @@ export default function Dashboard() {
                   className="flex items-center gap-3 px-3 py-2.5 transition-colors first:rounded-t-[5px] last:rounded-b-[5px] hover:bg-raise"
                 >
                   <Signal status={s.status} size={7} />
+                  <span className="shrink-0 text-[13.5px] text-bone">{s.name}</span>
                   <span className="font-mono text-[11.5px] text-mute">{s.repo}</span>
                   <span className="min-w-0 flex-1 truncate text-[13.5px] text-text">{s.title}</span>
                   <span className="hidden font-mono text-[11px] text-mute md:block">{s.host}</span>
@@ -134,6 +135,7 @@ export default function Dashboard() {
                   className="flex items-center gap-3 rounded-[5px] px-3 py-2 transition-colors hover:bg-panel"
                 >
                   <span className="text-mute/50">⎿</span>
+                  <span className="shrink-0 text-[13px] text-dim">{s.name}</span>
                   <span className="font-mono text-[11.5px] text-mute/70">{s.repo}</span>
                   <span className="min-w-0 flex-1 truncate text-[13px] text-dim">{s.title}</span>
                   <span className="font-mono text-[11px] text-mute">{outcomeOf(s)}</span>

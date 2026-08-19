@@ -241,6 +241,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(events::stream_events))
         .routes(routes!(terminal::session_pty))
         .routes(routes!(sessions::stop_session))
+        .routes(routes!(sessions::rename_session))
         .routes(routes!(sessions::push_session))
         .routes(routes!(sessions::session_diff))
         .routes(routes!(sessions::open_pull_request))

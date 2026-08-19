@@ -88,6 +88,9 @@ export default function AllSessions() {
               className="flex items-center gap-3 rounded-[5px] px-3 py-2 transition-colors hover:bg-panel"
             >
               <Signal status={s.status} size={6} />
+              <span className={`shrink-0 text-[13.5px] ${ended ? "text-dim" : "text-bone"}`}>
+                {s.name}
+              </span>
               <span className="font-mono text-[11.5px] text-mute">{s.repo}</span>
               <span
                 className={`min-w-0 flex-1 truncate text-[13.5px] ${ended ? "text-dim" : "text-text"}`}

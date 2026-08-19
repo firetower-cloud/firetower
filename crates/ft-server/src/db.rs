@@ -142,6 +142,22 @@ impl Db {
             .context("host vanished immediately after insert")
     }
 
+    /// Call a session something else.
+    ///
+    /// Only the name. The number it was given cannot change — it is what a
+    /// renamed session can still be traced back to, and what nothing else is
+    /// allowed to take.
+    pub async fn rename_session(&self, id: &SessionId, name: &str) -> Result<()> {
+        sqlx::query("UPDATE sessions SET name = $1, updated_at = $2 WHERE id = $3")
+            .bind(name.trim())
+            .bind(chrono::Utc::now())
+            .bind(id.as_str())
+            .execute(&self.pool)
+            .await
+            .context("renaming a session")?;
+        Ok(())
+    }
+
     /// Take a host out of service, or put it back.
     ///
     /// Draining is deliberately not a `HostState`: a draining host is still
@@ -550,8 +566,10 @@ impl Db {
         sqlx::query(
             "INSERT INTO sessions
                (id, host_id, repo, title, prompt, branch, base, agent, size, status,
-                steps, created_at, updated_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'Starting', $10, $11, $12)",
+                steps, created_at, updated_at, number, name)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'Starting', $10, $11, $12,
+                     nextval('session_number_seq'),
+                     'Agent ' || currval('session_number_seq'))",
         )
         .bind(id.as_str())
         .bind(host_id.as_str())
@@ -840,6 +858,12 @@ fn session_from_row(r: sqlx::postgres::PgRow) -> Result<Session> {
     let size: String = r.get("size");
 
     Ok(Session {
+        number: r.get("number"),
+        // Written when the session is created, so this is only ever absent for
+        // a row from before names existed.
+        name: r
+            .get::<Option<String>, _>("name")
+            .unwrap_or_else(|| format!("Agent {}", r.get::<i64, _>("number"))),
         note: r.get("note"),
         id: SessionId::from_stored(r.get::<String, _>("id")),
         repo: r.get("repo"),
@@ -1426,6 +1450,61 @@ mod tests {
             after.compute, host.compute,
             "the name is what changed, not where it is"
         );
+    }
+
+    /// Numbers are handed out once and never handed out again.
+    ///
+    /// Reuse would mean a number written down last week coming back pointing at
+    /// somebody else's session, and the inbox is a place people come back to.
+    #[tokio::test]
+    async fn every_session_gets_its_own_number_and_a_name_from_it() {
+        let db = Db::open_for_test().await.unwrap();
+        let host = db.ensure_host("localhost", Compute::Local).await.unwrap();
+
+        let mut made = Vec::new();
+        for expected in 1..=3 {
+            let id = SessionId::new();
+            db.insert_session(
+                &id,
+                &host.id,
+                Some("acme/backend"),
+                "Ask me question about",
+                "ask me a question about this repo",
+                None,
+                Some("main"),
+                "ClaudeCode",
+                WorkspaceSize::Medium,
+                &[],
+            )
+            .await
+            .unwrap();
+
+            let session = db.session(&id).await.unwrap().unwrap();
+            assert_eq!(
+                session.number, expected,
+                "numbering starts at 1 and counts up, on a fresh install too"
+            );
+            assert_eq!(
+                session.name,
+                format!("Agent {}", session.number),
+                "a session is called after the number it was given"
+            );
+            made.push((id, session.number));
+        }
+
+        let mut numbers: Vec<i64> = made.iter().map(|(_, n)| *n).collect();
+        numbers.sort_unstable();
+        numbers.dedup();
+        assert_eq!(numbers.len(), 3, "no two sessions share a number");
+
+        // Renaming leaves the number alone: it is what a renamed session can
+        // still be traced back to.
+        let (id, number) = &made[0];
+        db.rename_session(id, "the flaky test").await.unwrap();
+
+        let after = db.session(id).await.unwrap().unwrap();
+        assert_eq!(after.name, "the flaky test");
+        assert_eq!(after.number, *number, "the handle does not move");
     }
 
     /// The failure that stopped a control plane from booting: a host row
