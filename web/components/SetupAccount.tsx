@@ -76,7 +76,7 @@ export function StepPassword({ onNext }: { onNext: () => void }) {
         <Field
           id="new"
           label="New password"
-          hint="At least 12 characters. Nothing else is required of it."
+          hint="At least 5 characters. Nothing else is required of it."
           type="password"
           autoComplete="new-password"
           value={next}
@@ -99,7 +99,7 @@ export function StepPassword({ onNext }: { onNext: () => void }) {
 
         <button
           type="submit"
-          disabled={change.isPending || !current || next.length < 12}
+          disabled={change.isPending || !current || next.length < 5}
           className="mt-5 rounded bg-ember px-3.5 py-2 text-[13px] font-medium text-ink disabled:opacity-40"
         >
           {change.isPending ? "Saving…" : "Save and sign in again"}

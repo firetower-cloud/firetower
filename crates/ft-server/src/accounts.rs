@@ -35,11 +35,16 @@ const SESSION_LIFETIME: chrono::Duration = chrono::Duration::days(30);
 /// Length only. Requiring a symbol and a digit produces `Passw0rd!` across a
 /// whole company and nothing else.
 ///
+/// Low on purpose. This is a tool people run for themselves, usually on a
+/// machine only they can reach, and a rule that turns setting it up into an
+/// argument is a rule that gets worked around. What actually keeps a Firetower
+/// closed is that it is behind a proxy or on a private network, not the length
+/// of this.
+///
 /// Deliberately not applied to the one seeded from the environment. That one is
 /// temporary by construction, and enforcing it there meant a control plane that
-/// would not start because of a short string in a file — which is a worse
-/// failure than the one it was guarding against.
-pub const MINIMUM_PASSWORD: usize = 12;
+/// would not start because of a short string in a file.
+pub const MINIMUM_PASSWORD: usize = 5;
 
 /// Someone who can sign in.
 #[derive(Debug, Clone, Serialize, ToSchema)]
@@ -450,8 +455,8 @@ mod tests {
 
     #[test]
     fn short_passwords_are_refused() {
-        assert!(check_password("short").is_err());
-        assert!(check_password("exactly-12ch").is_ok());
+        assert!(check_password("four").is_err());
+        assert!(check_password("short").is_ok(), "five is the minimum");
     }
 
     #[tokio::test]
@@ -494,7 +499,7 @@ mod tests {
             .is_some());
 
         // What replaces it is held to the real minimum.
-        assert!(accounts.set_password(&admin.id, "short").await.is_err());
+        assert!(accounts.set_password(&admin.id, "four").await.is_err());
         assert!(accounts
             .set_password(&admin.id, "a long enough password")
             .await
