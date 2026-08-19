@@ -59,9 +59,15 @@ pub(super) async fn create_host(
         None => match &compute {
             ft_core::Compute::Local => "localhost".to_string(),
             ft_core::Compute::Container { name, .. } => name.clone(),
-            // The address is what it's called, now that the account and the
-            // port are no longer buried in it.
-            ft_core::Compute::Server { host, .. } => host.clone(),
+            // A server has to be called something. It used to fall back to the
+            // address, which meant every screen showed an IP — and the machine
+            // you think of as the big one was 34.122.172.74 everywhere.
+            ft_core::Compute::Server { .. } => {
+                return Err(ApiError::new(
+                    ErrorCode::InvalidRequest,
+                    "a server needs a name — what you call it, not where it is",
+                ))
+            }
         },
     };
 
@@ -157,6 +163,68 @@ fn given(value: Option<String>) -> Option<String> {
     value
         .map(|v| v.trim().to_string())
         .filter(|v| !v.is_empty())
+}
+
+/// Call it something else.
+///
+/// The name and nothing else: what a host *is* was settled when it was added,
+/// and pointing it somewhere different is removing it and adding another.
+#[utoipa::path(
+    patch, path = "/api/v1/hosts/{id}", tag = "hosts",
+    params(("id" = String, Path, description = "Host id")),
+    request_body = Rename,
+    responses(
+        (status = 200, body = Host),
+        (status = 400, body = ApiError, description = "Empty, or already taken"),
+        (status = 404, body = ApiError),
+    ),
+)]
+pub(super) async fn rename_host(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(req): Json<Rename>,
+) -> ApiResult<Json<Host>> {
+    let id = ft_core::HostId::from_stored(id);
+
+    let name = req.name.trim();
+    if name.is_empty() {
+        return Err(ApiError::new(
+            ErrorCode::InvalidRequest,
+            "a host needs a name",
+        ));
+    }
+
+    state
+        .db
+        .host_by_id(&id)
+        .await?
+        .ok_or_else(|| ApiError::not_found("host"))?;
+
+    // Checked rather than caught, so the message names the host instead of
+    // repeating a constraint.
+    if let Some(existing) = state.db.host_by_name(name).await? {
+        if existing.id != id {
+            return Err(ApiError::new(
+                ErrorCode::InvalidRequest,
+                format!("there is already a host called {name}"),
+            ));
+        }
+    }
+
+    state.db.rename_host(&id, name).await?;
+
+    let host = state
+        .db
+        .host_by_id(&id)
+        .await?
+        .ok_or_else(|| ApiError::not_found("host"))?;
+
+    Ok(Json(seen(&state, host).await))
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct Rename {
+    pub name: String,
 }
 
 /// Stop sending work here, or start again.

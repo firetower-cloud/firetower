@@ -29,7 +29,14 @@ export function AddCompute({ onClose }: { onClose: () => void }) {
   const [address, setAddress] = useState("");
   const [user, setUser] = useState("");
   const [key, setKey] = useState("");
-  const [name, setName] = useState("");
+  /**
+   * What you call it — the name shown on every screen.
+   *
+   * Separate from the container below, which is a machine's business rather
+   * than yours. They used to be one variable, which is why adding a server
+   * could not name it: the field was only ever rendered for a container.
+   */
+  const [label, setLabel] = useState("");
   /** Which container the worker runs in. Empty runs the binary on the host. */
   const [container, setContainer] = useState(DEFAULT_CONTAINER);
   /**
@@ -49,7 +56,7 @@ export function AddCompute({ onClose }: { onClose: () => void }) {
         return {
           type: "Container",
           image: WORKER_IMAGE,
-          name: name.trim() || "firetower-worker",
+          name: label.trim() || "firetower-worker",
         };
       case "Server":
         return {
@@ -65,11 +72,17 @@ export function AddCompute({ onClose }: { onClose: () => void }) {
     }
   };
 
-  const ready = kind !== "Server" || address.trim().length > 0;
+  // A server needs both. Disabled until then rather than refused afterwards:
+  // the fix is right there, and an error would be telling somebody something
+  // the form could have shown.
+  const ready =
+    kind === "Server"
+      ? address.trim().length > 0 && label.trim().length > 0
+      : label.trim().length > 0;
 
   const add = () =>
     create.mutate(
-      { data: { compute: compute(), name: name.trim() || undefined } },
+      { data: { compute: compute(), name: label.trim() || undefined } },
       {
         onSuccess: async (host) => {
           await queryClient.invalidateQueries({ queryKey: getListHostsQueryKey() });
@@ -103,9 +116,14 @@ export function AddCompute({ onClose }: { onClose: () => void }) {
 
       {kind === "Server" && (
         <>
+          <Field label="Name" autoFocus value={label} onChange={setLabel} placeholder="fire-02">
+            What you call this machine. It is what every screen shows — the
+            session picker, the fleet, the sidebar — so make it the thing you
+            say out loud rather than where it happens to live.
+          </Field>
+
           <Field
             label="Where to ssh"
-            autoFocus
             value={address}
             onChange={setAddress}
             placeholder="203.0.113.44"
@@ -161,8 +179,8 @@ export function AddCompute({ onClose }: { onClose: () => void }) {
         <Field
           label="Container name"
           autoFocus
-          value={name}
-          onChange={setName}
+          value={label}
+          onChange={setLabel}
           placeholder="firetower-worker"
         >
           Started from <code className="font-mono text-slate">{WORKER_IMAGE}</code> and

@@ -50,6 +50,7 @@ export * from './probeResponse';
 export * from './providerStatus';
 export * from './pullRequest';
 export * from './remoteRepo';
+export * from './rename';
 export * from './replaceSecret';
 export * from './repo';
 export * from './repoId';

@@ -30,7 +30,8 @@ import type {
   DeleteHostParams,
   Drain,
   Host,
-  NewHost
+  NewHost,
+  Rename
 } from '../model';
 
 import { http } from '../../http';
@@ -323,6 +324,79 @@ export const useDeleteHost = <TError = ApiError,
         TContext
       > => {
       return useMutation(getDeleteHostMutationOptions(options), queryClient);
+    }
+    export const getRenameHostUrl = (id: string,) => {
+
+
+
+
+  return `/api/v1/hosts/${id}`
+}
+
+/**
+ * The name and nothing else: what a host *is* was settled when it was added,
+ * and pointing it somewhere different is removing it and adding another.
+ * @summary Call it something else.
+ */
+export const renameHost = async (id: string,
+    rename: Rename, options?: Parameters<typeof http>[1]): Promise<Host> => {
+
+  return http<Host>(getRenameHostUrl(id),
+  {
+    ...options,
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(rename)
+  }
+);}
+
+
+
+
+
+export const getRenameHostMutationOptions = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof renameHost>>, TError,{id: string;data: Rename}, TContext>, request?: SecondParameter<typeof http>}
+): UseMutationOptions<Awaited<ReturnType<typeof renameHost>>, TError,{id: string;data: Rename}, TContext> => {
+
+const mutationKey = ['renameHost'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof renameHost>>, {id: string;data: Rename}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  renameHost(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RenameHostMutationResult = NonNullable<Awaited<ReturnType<typeof renameHost>>>
+    export type RenameHostMutationBody = Rename
+    export type RenameHostMutationError = ApiError
+
+    /**
+ * @summary Call it something else.
+ */
+export const useRenameHost = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof renameHost>>, TError,{id: string;data: Rename}, TContext>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof renameHost>>,
+        TError,
+        {id: string;data: Rename},
+        TContext
+      > => {
+      return useMutation(getRenameHostMutationOptions(options), queryClient);
     }
     export const getConnectHostUrl = (id: string,) => {
 

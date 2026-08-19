@@ -146,6 +146,60 @@ export const DeleteHostQueryParams = zod.object({
 export const DeleteHostResponse = zod.void()
 
 /**
+ * The name and nothing else: what a host *is* was settled when it was added,
+ * and pointing it somewhere different is removing it and adding another.
+ * @summary Call it something else.
+ */
+export const RenameHostParams = zod.object({
+  "id": zod.string().describe('Host id')
+})
+
+export const RenameHostBody = zod.object({
+  "name": zod.string()
+})
+
+export const renameHostResponseComputeThreePortMin = 0;
+
+export const renameHostResponseCpusMin = 0;
+
+export const renameHostResponseMemoryMbMin = 0;
+
+
+
+export const RenameHostResponse = zod.object({
+  "compute": zod.union([zod.object({
+  "type": zod.enum(['Local'])
+}).describe('A worker as a child process here. Inherits your environment, and its\nworkspaces are directories you can open.'),zod.object({
+  "image": zod.string(),
+  "name": zod.string(),
+  "type": zod.enum(['Container'])
+}).describe('A worker in a container here. Linux, and isolated from your machine.\n\nReached with `docker exec` rather than ssh: the same bidirectional pipe\nwithout an sshd, a key, or a host key to verify.'),zod.object({
+  "container": zod.string().nullish().describe('The container the worker runs in on that machine. Absent runs the\nbinary on the host itself, for a machine whose image already has it.\n\nReached by ssh-ing to the machine and running `docker exec` there,\nnever by ssh-ing into the container — that would need a key inside\nthe image, a published port, and a host key that changes on every\nrecreate.'),
+  "host": zod.string().describe('A hostname, an address, or a name from your ssh config.'),
+  "hostKey": zod.string().nullish().describe('Recorded when the host is added. Not yet checked against what the\nmachine answers with — connecting trusts a key it hasn\'t seen before\nand remembers it, so this is a record rather than a guarantee.'),
+  "identityFile": zod.string().nullish().describe('Which private key to authenticate with, as a path on the machine\nrunning the control plane.\n\nThe path, never the key. A private key is the one credential\nFiretower has no reason to hold: ssh reads the file itself, and only\nthis machine ever dials out. Absent lets ssh choose, which means the\nagent and then the usual names in `~\/.ssh`.'),
+  "port": zod.int().min(renameHostResponseComputeThreePortMin).nullish().describe('Absent is whatever ssh would use: 22, or what the config says.'),
+  "type": zod.enum(['Server']),
+  "user": zod.string().nullish().describe('Who to connect as.\n\nAbsent leaves it to ssh, which is what keeps a name from your ssh\nconfig working on its own — that file may already say, and repeating\nit here badly is worse than not repeating it.')
+}).describe('A worker on another machine. What a real deployment looks like.\n\nHeld as the parts of an ssh destination rather than one string, because\neach part is a separate decision: the address is the machine, the user is\nthe account work runs as, and the key is which of several you keep.\nAssembling them is [`Compute::ssh_destination`]\'s job.')]).describe('Where an agent can run.\n\nThree kinds, and they are not a ladder — each is the right answer sometimes.\nPoking at a repository by hand wants the first; leaving an agent running for\nan hour wants the third.'),
+  "cpus": zod.int().min(renameHostResponseCpusMin).nullish(),
+  "diagnosis": zod.union([zod.null(),zod.object({
+  "at": zod.iso.datetime({"offset":true}),
+  "cause": zod.enum(['WorkerMissing', 'DockerMissing', 'DockerDenied', 'ContainerMissing', 'AuthRefused', 'Unreachable', 'HostKeyChanged', 'ProtocolMismatch', 'Unknown']).describe('What went wrong, at the granularity of what fixes it.'),
+  "detail": zod.string().nullish().describe('What the far end actually said, verbatim.\n\nKept even when the cause is recognised: the summary is an inference\nabout another machine, and this is what survives it being wrong.'),
+  "remedy": zod.string().nullish().describe('What to run, when there is something to run. Shown with a copy button,\nso it must be the whole command and nothing else.'),
+  "summary": zod.string().describe('One sentence, written for whoever is looking at the screen.')
+}).describe('Why it isn\'t answering, when it isn\'t. Cleared as soon as it does.')]).optional(),
+  "drained": zod.boolean().optional().describe('Finishing what it has, taking nothing new. Separate from being\nunreachable: a draining host is still online and still working.'),
+  "id": zod.string().describe('Identifies a host.'),
+  "memoryMb": zod.int().min(renameHostResponseMemoryMbMin).nullish(),
+  "name": zod.string().describe('What the user calls it. `localhost` is a real host, not a special case.'),
+  "reconnecting": zod.boolean().optional().describe('Whether we are still trying to reach it.\n\nA fact about the running control plane rather than about the host, so it\nis answered per request and never stored. Distinguishes a machine on its\nway back from one nobody is looking for.'),
+  "state": zod.enum(['Online', 'Unreachable', 'Draining']),
+  "workerVersion": zod.string().nullish()
+}).describe('A machine that can run workspaces.')
+
+/**
  * The supervisor would get there on its own; this is for the moment just after
  * you have fixed the machine and would rather not wait.
  * @summary Try a host again now, instead of waiting out the backoff.

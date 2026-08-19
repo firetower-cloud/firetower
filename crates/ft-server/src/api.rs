@@ -216,6 +216,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(setup::complete_setup))
         .routes(routes!(hosts::list_hosts, hosts::create_host))
         .routes(routes!(hosts::delete_host))
+        .routes(routes!(hosts::rename_host))
         .routes(routes!(hosts::connect_host))
         .routes(routes!(hosts::drain_host))
         .routes(routes!(repos::list_repos, repos::create_repo))

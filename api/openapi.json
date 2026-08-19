@@ -468,6 +468,67 @@
             }
           }
         }
+      },
+      "patch": {
+        "tags": [
+          "hosts"
+        ],
+        "summary": "Call it something else.",
+        "description": "The name and nothing else: what a host *is* was settled when it was added,\nand pointing it somewhere different is removing it and adding another.",
+        "operationId": "rename_host",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Host id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Rename"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Host"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Empty, or already taken",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/api/v1/hosts/{id}/connect": {
@@ -2941,6 +3002,17 @@
           "slug": {
             "type": "string",
             "description": "`acme/backend`"
+          }
+        }
+      },
+      "Rename": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
           }
         }
       },

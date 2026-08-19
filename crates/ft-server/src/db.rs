@@ -164,6 +164,22 @@ impl Db {
         Ok(row.map(|r| r.get::<bool, _>("drained")).unwrap_or(false))
     }
 
+    /// Give a host a different name.
+    ///
+    /// Only the name: what a host *is* was decided when it was added, and
+    /// changing where it points is removing it and adding another. Names are
+    /// unique, so this can fail — and the caller has to say so in words rather
+    /// than showing a constraint violation.
+    pub async fn rename_host(&self, id: &HostId, name: &str) -> Result<()> {
+        sqlx::query("UPDATE hosts SET name = $1 WHERE id = $2")
+            .bind(name.trim())
+            .bind(id.as_str())
+            .execute(&self.pool)
+            .await
+            .context("renaming a host")?;
+        Ok(())
+    }
+
     /// Forget a host. Its sessions must be dealt with first.
     pub async fn delete_host(&self, id: &HostId) -> Result<()> {
         sqlx::query("DELETE FROM hosts WHERE id = $1")
@@ -1372,6 +1388,35 @@ mod tests {
         assert!(seen[0].found.installed);
         assert_eq!(seen[0].found.version.as_deref(), Some("2.1.44"));
         assert_eq!(seen[0].found.logged_in, Some(true));
+    }
+
+    #[tokio::test]
+    async fn a_host_can_be_renamed_and_keeps_everything_else() {
+        let db = Db::open_for_test().await.unwrap();
+        let host = db
+            .ensure_host(
+                "34.122.172.74",
+                Compute::Server {
+                    host: "34.122.172.74".into(),
+                    user: Some("kevin".into()),
+                    port: None,
+                    identity_file: None,
+                    host_key: None,
+                    container: Some("firetower-worker".into()),
+                },
+            )
+            .await
+            .unwrap();
+
+        db.rename_host(&host.id, "fire-02").await.unwrap();
+
+        let after = db.host_by_id(&host.id).await.unwrap().unwrap();
+        assert_eq!(after.name, "fire-02");
+        assert_eq!(after.id, host.id, "renaming is not replacing");
+        assert_eq!(
+            after.compute, host.compute,
+            "the name is what changed, not where it is"
+        );
     }
 
     /// The failure that stopped a control plane from booting: a host row

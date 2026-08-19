@@ -6,6 +6,7 @@ import {
   useListHosts,
   useDeleteHost,
   useDrainHost,
+  useRenameHost,
   getListHostsQueryKey,
 } from "@/src/api/generated/hosts/hosts";
 import { useListSessions } from "@/src/api/generated/sessions/sessions";
@@ -102,6 +103,7 @@ function HostRow({
   const queryClient = useQueryClient();
   const remove = useDeleteHost();
   const drain = useDrainHost();
+  const rename = useRenameHost();
 
   const refresh = () => queryClient.invalidateQueries({ queryKey: getListHostsQueryKey() });
   const failed = (e: unknown) =>
@@ -118,6 +120,14 @@ function HostRow({
           }`}
         />
         <span className="font-mono text-[13.5px] text-bone">{host.name}</span>
+        {/* The address beside the name, for a machine that has one. The name is
+            what you call it; this is how you tell two of them apart at a
+            glance without reading the line below. */}
+        {host.compute.type === "Server" && (
+          <span className="truncate font-mono text-[11px] text-mute">
+            {host.compute.host}
+          </span>
+        )}
         <span className="rounded-[4px] border border-line px-1.5 py-0.5 font-mono text-[10.5px] text-slate">
           {kind === "Local" ? "this machine" : kind.toLowerCase()}
         </span>
@@ -146,6 +156,25 @@ function HostRow({
         >
           {host.drained ? "Resume" : "Drain"}
         </button>
+        {/* Names are typed by hand and are the only thing on most screens, so
+            getting one wrong should not mean removing the host and adding it
+            again. */}
+        {kind !== "Local" && (
+          <button
+            onClick={() => {
+              onProblem(null);
+              const next = prompt(`Call ${host.name} what?`, host.name);
+              if (!next || next.trim() === host.name) return;
+              rename.mutate(
+                { id: host.id, data: { name: next.trim() } },
+                { onSuccess: refresh, onError: failed },
+              );
+            }}
+            className="text-[11.5px] text-mute transition-colors hover:text-ember"
+          >
+            Rename
+          </button>
+        )}
         {/* This machine is always here, so there is nothing to remove. */}
         {kind !== "Local" && (
           <button
