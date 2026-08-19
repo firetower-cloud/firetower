@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Mark } from "./Signal";
 import { useLogin } from "@/src/api/generated/auth/auth";
+import { setupState } from "@/src/api/generated/setup/setup";
 import { ApiError, rememberToken } from "@/src/api/http";
 
 /**
@@ -30,11 +31,28 @@ export function SignIn() {
     login.mutate(
       { data: { username, password } },
       {
-        onSuccess: ({ token, user }) => {
+        onSuccess: async ({ token }) => {
           rememberToken(token);
-          // A password that came out of a file is not a password anybody chose,
-          // so the wizard is where this goes next.
-          router.replace(user.mustChangePassword ? "/setup" : "/");
+
+          // Where to land is "is setting up finished?", not "is this password
+          // temporary?". Routing on the password alone meant that after the
+          // first step — which clears it — you were sent to an inbox while the
+          // organisation was still unnamed, with nothing to take you back.
+          //
+          // `needsGithub` is deliberately not part of this. It is skippable,
+          // and anyone who skipped it would be dragged back here on every
+          // sign-in until they registered an application they may not want.
+          try {
+            const state = await setupState();
+            router.replace(
+              state.needsPassword || state.needsOrganization ? "/setup" : "/",
+            );
+          } catch {
+            // If that call fails, the inbox is the safer guess: it renders its
+            // own errors, where a wizard would be asking questions it cannot
+            // save the answers to.
+            router.replace("/");
+          }
         },
         onError: (error) => {
           setFailed(

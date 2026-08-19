@@ -9,6 +9,7 @@ import * as zod from 'zod';
 
 
 export const SetupStateResponse = zod.object({
+  "completed": zod.boolean().describe('Somebody has been through onboarding, however much they skipped.\n\nOnce true it stays true: the steps after the organisation exist to point\nsomewhere, and a tour that reappears every time this page is opened is a\ntour nobody finishes twice. Connecting GitHub later is asked for on the\nscreen that needs it, where there is no skipping it.'),
   "needsGithub": zod.boolean().describe('No GitHub application is configured. Not a blocker — it is skippable,\nand pasting a repository URL works without one.'),
   "needsOrganization": zod.boolean().describe('Nobody has named the organisation yet.'),
   "needsPassword": zod.boolean().describe('The signed-in account\'s password came from a file.'),
@@ -17,6 +18,8 @@ export const SetupStateResponse = zod.object({
   "name": zod.string()
 })]).optional()
 }).describe('Which parts of setting up are still outstanding.\n\nRead before anything else, so the interface knows whether to show the\nwizard, and how much of it.')
+
+export const CompleteSetupResponse = zod.void()
 
 export const NameOrganizationBody = zod.object({
   "name": zod.string()

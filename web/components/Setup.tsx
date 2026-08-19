@@ -1,10 +1,9 @@
 "use client";
 
-import Link from "next/link";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Mark } from "./Signal";
-import { useSetupState } from "@/src/api/generated/setup/setup";
+import { useSetupState, useCompleteSetup } from "@/src/api/generated/setup/setup";
 import { useListRepos } from "@/src/api/generated/repos/repos";
 import { useListAgents } from "@/src/api/generated/agents/agents";
 import type { AgentView } from "@/src/api/generated/model";
@@ -25,7 +24,9 @@ import { ConnectAgent } from "./ConnectAgent";
 const TOUR_STEPS = ["Repository", "Agent", "First session"];
 
 export function Setup() {
+  const router = useRouter();
   const { data: state, isLoading, refetch } = useSetupState();
+  const complete = useCompleteSetup();
 
   // What is still outstanding decides how much of the wizard exists. Rendering
   // a step somebody has already answered would ask them to do it twice.
@@ -35,7 +36,10 @@ export function Setup() {
     state?.needsGithub ? "GitHub" : null,
   ].filter(Boolean) as string[];
 
-  const STEPS = [...outstanding, ...TOUR_STEPS];
+  // The tour goes once. Whatever was skipped on the way stays skipped —
+  // connecting GitHub is asked for again on the screen that needs it, where
+  // there is no skipping it.
+  const STEPS = state?.completed ? outstanding : [...outstanding, ...TOUR_STEPS];
   const [step, setStep] = useState(0);
 
   if (isLoading) {
@@ -44,6 +48,13 @@ export function Setup() {
         <p className="text-[13px] text-mute">Looking…</p>
       </div>
     );
+  }
+
+  // Nothing left to ask and the tour already taken: this page has no reason to
+  // exist for this install.
+  if (STEPS.length === 0) {
+    router.replace("/");
+    return null;
   }
 
   const current = STEPS[step];
@@ -76,7 +87,9 @@ export function Setup() {
             <StepRepository onNext={() => setStep(step + 1)} />
           )}
           {current === "Agent" && <StepAgent onNext={() => setStep(step + 1)} />}
-          {current === "First session" && <StepSession />}
+          {current === "First session" && (
+            <StepSession onDone={() => complete.mutate()} />
+          )}
         </div>
       </div>
     </div>
@@ -269,8 +282,15 @@ function StepAgent({ onNext }: { onNext: () => void }) {
   );
 }
 
-function StepSession() {
+function StepSession({ onDone }: { onDone: () => void }) {
   const router = useRouter();
+
+  // Either way out of here is the end of onboarding, so both record it. Leaving
+  // by closing the tab does not, which is deliberate: nothing was decided.
+  const leave = (to: string) => {
+    onDone();
+    router.push(to);
+  };
 
   return (
     <Card
@@ -278,12 +298,13 @@ function StepSession() {
       sub="A session is a branch, a worktree and an agent running in tmux on one of your hosts. It survives you closing the laptop, and the inbox is where it comes back to you when it stops being useful without you."
     >
       <Actions>
-        <Primary onClick={() => router.push("/sessions/new")}>
-          Start a session
-        </Primary>
-        <Link href="/" className="text-[12.5px] text-mute hover:text-text">
+        <Primary onClick={() => leave("/sessions/new")}>Start a session</Primary>
+        <button
+          onClick={() => leave("/")}
+          className="text-[12.5px] text-mute hover:text-text"
+        >
           Go to the inbox
-        </Link>
+        </button>
       </Actions>
     </Card>
   );

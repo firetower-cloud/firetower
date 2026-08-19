@@ -54,6 +54,7 @@ export * from './replaceSecret';
 export * from './repo';
 export * from './repoId';
 export * from './revealedSecret';
+export * from './rotated';
 export * from './session';
 export * from './sessionId';
 export * from './sessionPtyParams';

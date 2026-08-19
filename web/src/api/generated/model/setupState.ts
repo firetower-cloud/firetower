@@ -15,6 +15,15 @@ import type { Organization } from './organization';
  */
 export interface SetupState {
   /**
+     * Somebody has been through onboarding, however much they skipped.
+     *
+     * Once true it stays true: the steps after the organisation exist to point
+     * somewhere, and a tour that reappears every time this page is opened is a
+     * tour nobody finishes twice. Connecting GitHub later is asked for on the
+     * screen that needs it, where there is no skipping it.
+     */
+  completed: boolean;
+  /**
      * No GitHub application is configured. Not a blocker — it is skippable,
      * and pasting a repository URL works without one.
      */

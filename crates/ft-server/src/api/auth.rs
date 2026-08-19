@@ -43,6 +43,15 @@ pub struct Me {
     pub organization: Option<crate::accounts::Organization>,
 }
 
+/// What the browser that changed a password gets back.
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct Rotated {
+    /// A new session, because the old one went with every other. Store this
+    /// and carry on — being signed out is not part of changing a password.
+    pub token: String,
+}
+
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct NewPassword {
@@ -133,7 +142,7 @@ pub(super) async fn me(
     post, path = "/api/v1/auth/password", tag = "auth",
     request_body = NewPassword,
     responses(
-        (status = 204, description = "Changed. Every browser is now signed out."),
+        (status = 200, body = Rotated, description = "Changed. Every other browser is signed out."),
         (status = 400, body = ApiError, description = "Too short, or the current one is wrong"),
     ),
 )]
@@ -141,7 +150,7 @@ pub(super) async fn change_password(
     State(state): State<AppState>,
     Extension(principal): Extension<Principal>,
     Json(request): Json<NewPassword>,
-) -> ApiResult<StatusCode> {
+) -> ApiResult<Json<Rotated>> {
     let user = principal
         .user
         .ok_or_else(|| ApiError::new(ErrorCode::Unauthorized, "nobody is signed in"))?;
@@ -158,14 +167,14 @@ pub(super) async fn change_password(
         ));
     }
 
-    state
+    let token = state
         .accounts
         .set_password(&user.id, &request.new)
         .await
         .map_err(|e| ApiError::new(ErrorCode::InvalidRequest, format!("{e:#}")))?;
 
-    tracing::info!(user = %user.username, "password changed; every session ended");
-    Ok(StatusCode::NO_CONTENT)
+    tracing::info!(user = %user.username, "password changed; every other session ended");
+    Ok(Json(Rotated { token }))
 }
 
 fn bearer(headers: &axum::http::HeaderMap) -> Option<String> {

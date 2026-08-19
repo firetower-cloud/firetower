@@ -31,6 +31,13 @@ pub struct SetupState {
     /// No GitHub application is configured. Not a blocker — it is skippable,
     /// and pasting a repository URL works without one.
     pub needs_github: bool,
+    /// Somebody has been through onboarding, however much they skipped.
+    ///
+    /// Once true it stays true: the steps after the organisation exist to point
+    /// somewhere, and a tour that reappears every time this page is opened is a
+    /// tour nobody finishes twice. Connecting GitHub later is asked for on the
+    /// screen that needs it, where there is no skipping it.
+    pub completed: bool,
     pub organization: Option<crate::accounts::Organization>,
 }
 
@@ -56,8 +63,20 @@ pub(super) async fn setup_state(
         needs_github: crate::providers::client_id(&state.accounts, "github")
             .await
             .is_none(),
+        completed: state.accounts.onboarded().await?,
         organization,
     }))
+}
+
+#[utoipa::path(
+    post, path = "/api/v1/setup/complete", tag = "setup",
+    responses((status = 204, description = "Onboarding will not be offered again")),
+)]
+pub(super) async fn complete_setup(
+    State(state): State<AppState>,
+) -> ApiResult<axum::http::StatusCode> {
+    state.accounts.mark_onboarded().await?;
+    Ok(axum::http::StatusCode::NO_CONTENT)
 }
 
 #[utoipa::path(

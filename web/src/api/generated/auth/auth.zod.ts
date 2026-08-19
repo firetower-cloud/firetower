@@ -45,5 +45,7 @@ export const ChangePasswordBody = zod.object({
   "new": zod.string()
 })
 
-export const ChangePasswordResponse = zod.void()
+export const ChangePasswordResponse = zod.object({
+  "token": zod.string().describe('A new session, because the old one went with every other. Store this\nand carry on — being signed out is not part of changing a password.')
+}).describe('What the browser that changed a password gets back.')
 

@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useChangePassword } from "@/src/api/generated/auth/auth";
 import { useNameOrganization } from "@/src/api/generated/setup/setup";
 import { useSetClientId } from "@/src/api/generated/providers/providers";
-import { ApiError, forgetToken } from "@/src/api/http";
+import { ApiError, rememberToken } from "@/src/api/http";
 
 /**
  * The parts of setting up that only a person can answer.
@@ -36,16 +36,12 @@ export function StepPassword({ onNext }: { onNext: () => void }) {
     change.mutate(
       { data: { current, new: next } },
       {
-        onSuccess: () => {
-          // Changing a password ends every session, including this one. That is
-          // the point of it, so the only honest thing to do is send them back
-          // to sign in with what they just chose.
-          forgetToken();
-          // A full load on purpose: this runs when a session has just ended, and the
-          // router would keep every cached query belonging to whoever was signed in.
-          // Clearing that is the point.
-          // eslint-disable-next-line @next/next/no-location-assign-relative-destination
-          window.location.assign("/login");
+        onSuccess: ({ token }) => {
+          // Every *other* browser was signed out, and this one was handed a new
+          // session. Keeping it is what lets the wizard carry on — being thrown
+          // out halfway through step one was the bug this replaced.
+          rememberToken(token);
+          onNext();
         },
         onError: (error) =>
           setFailed(
@@ -106,14 +102,13 @@ export function StepPassword({ onNext }: { onNext: () => void }) {
           disabled={change.isPending || !current || next.length < 5}
           className="mt-5 rounded bg-ember px-3.5 py-2 text-[13px] font-medium text-ink disabled:opacity-40"
         >
-          {change.isPending ? "Saving…" : "Save and sign in again"}
+          {change.isPending ? "Saving…" : "Save and continue"}
         </button>
       </form>
 
       <p className="mt-4 text-[12px] text-mute">
-        Every browser signed in as you is signed out, including this one.
+        Every other browser signed in as you is signed out. This one carries on.
       </p>
-      <button onClick={onNext} className="hidden" aria-hidden />
     </div>
   );
 }

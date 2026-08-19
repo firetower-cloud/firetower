@@ -30,6 +30,7 @@ import type {
   Credentials,
   Me,
   NewPassword,
+  Rotated,
   SignedIn
 } from '../model';
 
@@ -296,9 +297,9 @@ export const getChangePasswordUrl = () => {
   return `/api/v1/auth/password`
 }
 
-export const changePassword = async (newPassword: NewPassword, options?: Parameters<typeof http>[1]): Promise<void> => {
+export const changePassword = async (newPassword: NewPassword, options?: Parameters<typeof http>[1]): Promise<Rotated> => {
 
-  return http<void>(getChangePasswordUrl(),
+  return http<Rotated>(getChangePasswordUrl(),
   {
     ...options,
     method: 'POST',

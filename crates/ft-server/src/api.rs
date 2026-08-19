@@ -213,6 +213,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(auth::change_password))
         .routes(routes!(setup::setup_state))
         .routes(routes!(setup::name_organization))
+        .routes(routes!(setup::complete_setup))
         .routes(routes!(hosts::list_hosts, hosts::create_host))
         .routes(routes!(hosts::delete_host))
         .routes(routes!(hosts::connect_host))

@@ -239,8 +239,15 @@
           "required": true
         },
         "responses": {
-          "204": {
-            "description": "Changed. Every browser is now signed out."
+          "200": {
+            "description": "Changed. Every other browser is signed out.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Rotated"
+                }
+              }
+            }
           },
           "400": {
             "description": "Too short, or the current one is wrong",
@@ -1663,6 +1670,19 @@
         }
       }
     },
+    "/api/v1/setup/complete": {
+      "post": {
+        "tags": [
+          "setup"
+        ],
+        "operationId": "complete_setup",
+        "responses": {
+          "204": {
+            "description": "Onboarding will not be offered again"
+          }
+        }
+      }
+    },
     "/api/v1/setup/organization": {
       "post": {
         "tags": [
@@ -2996,6 +3016,19 @@
           }
         }
       },
+      "Rotated": {
+        "type": "object",
+        "description": "What the browser that changed a password gets back.",
+        "required": [
+          "token"
+        ],
+        "properties": {
+          "token": {
+            "type": "string",
+            "description": "A new session, because the old one went with every other. Store this\nand carry on — being signed out is not part of changing a password."
+          }
+        }
+      },
       "Session": {
         "type": "object",
         "description": "A line of work with a conversation attached and a branch at the end.",
@@ -3101,9 +3134,14 @@
         "required": [
           "needsPassword",
           "needsOrganization",
-          "needsGithub"
+          "needsGithub",
+          "completed"
         ],
         "properties": {
+          "completed": {
+            "type": "boolean",
+            "description": "Somebody has been through onboarding, however much they skipped.\n\nOnce true it stays true: the steps after the organisation exist to point\nsomewhere, and a tour that reappears every time this page is opened is a\ntour nobody finishes twice. Connecting GitHub later is asked for on the\nscreen that needs it, where there is no skipping it."
+          },
           "needsGithub": {
             "type": "boolean",
             "description": "No GitHub application is configured. Not a blocker — it is skippable,\nand pasting a repository URL works without one."

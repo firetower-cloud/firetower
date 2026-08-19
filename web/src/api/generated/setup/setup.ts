@@ -159,7 +159,71 @@ export const useGetSetupStateQueryData = () => {
 }
 
 
-export const getNameOrganizationUrl = () => {
+export const getCompleteSetupUrl = () => {
+
+
+
+
+  return `/api/v1/setup/complete`
+}
+
+export const completeSetup = async ( options?: Parameters<typeof http>[1]): Promise<void> => {
+
+  return http<void>(getCompleteSetupUrl(),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getCompleteSetupMutationOptions = <TError = unknown,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof completeSetup>>, TError,void, TContext>, request?: SecondParameter<typeof http>}
+): UseMutationOptions<Awaited<ReturnType<typeof completeSetup>>, TError,void, TContext> => {
+
+const mutationKey = ['completeSetup'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof completeSetup>>, void> = () => {
+
+
+          return  completeSetup(requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CompleteSetupMutationResult = NonNullable<Awaited<ReturnType<typeof completeSetup>>>
+
+    export type CompleteSetupMutationError = unknown
+
+    export const useCompleteSetup = <TError = unknown,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof completeSetup>>, TError,void, TContext>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof completeSetup>>,
+        TError,
+        void,
+        TContext
+      > => {
+      return useMutation(getCompleteSetupMutationOptions(options), queryClient);
+    }
+    export const getNameOrganizationUrl = () => {
 
 
 

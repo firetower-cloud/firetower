@@ -251,12 +251,19 @@ impl Accounts {
         Ok(Some(user_from_row(row)))
     }
 
-    /// Replace a password, and sign every browser out.
+    /// Replace a password, and sign every *other* browser out.
     ///
-    /// Including the one asking. A password is changed because the old one may
-    /// be known, and leaving the sessions it opened alive would leave whoever
-    /// knew it signed in.
-    pub async fn set_password(&self, id: &UserId, password: &str) -> Result<()> {
+    /// A password is changed because the old one may be known, so the sessions
+    /// it opened have to go. Every one of them, including the caller's — and
+    /// then a fresh session is issued for whoever asked, and returned.
+    ///
+    /// Which is not the same as sparing theirs. The old token dies too, so a
+    /// stolen one is no more use after this than a stolen password. What the
+    /// caller gets back is new.
+    ///
+    /// Doing it any other way meant the first step of setting up threw you out
+    /// halfway through it, which is how this was found.
+    pub async fn set_password(&self, id: &UserId, password: &str) -> Result<String> {
         check_password(password)?;
 
         let mut tx = self.pool.begin().await?;
@@ -274,8 +281,20 @@ impl Accounts {
             .execute(&mut *tx)
             .await?;
 
+        // In the same transaction: a password that changed without leaving the
+        // person who changed it a way back in is the failure this replaced.
+        let token = mint_token();
+        sqlx::query(
+            "INSERT INTO user_sessions (token_hash, user_id, expires_at) VALUES ($1,$2,$3)",
+        )
+        .bind(fingerprint(&token))
+        .bind(id.as_str())
+        .bind(chrono::Utc::now() + SESSION_LIFETIME)
+        .execute(&mut *tx)
+        .await?;
+
         tx.commit().await?;
-        Ok(())
+        Ok(token)
     }
 
     // ── being signed in ────────────────────────────────────────────────
@@ -343,6 +362,23 @@ impl Accounts {
     }
 
     // ── settings ───────────────────────────────────────────────────────
+
+    /// Whether somebody has been through onboarding.
+    ///
+    /// Separate from `installation`, which is written when the organisation is
+    /// named — that happens partway through, and the steps after it are
+    /// skippable. This records reaching the end, however much was skipped on
+    /// the way, so a finished onboarding stays finished.
+    pub const ONBOARDED: &'static str = "setup.completed";
+
+    pub async fn onboarded(&self) -> Result<bool> {
+        Ok(self.setting(Self::ONBOARDED).await?.is_some())
+    }
+
+    pub async fn mark_onboarded(&self) -> Result<()> {
+        self.set_setting(Self::ONBOARDED, &chrono::Utc::now().to_rfc3339())
+            .await
+    }
 
     pub async fn setting(&self, key: &str) -> Result<Option<String>> {
         let row = sqlx::query("SELECT value FROM settings WHERE key = $1")
@@ -580,7 +616,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn changing_a_password_signs_every_browser_out() {
+    async fn changing_a_password_signs_every_other_browser_out() {
         let accounts = accounts().await;
         let admin = accounts
             .create_first_admin("kevin", "a long enough password")
@@ -590,13 +626,18 @@ mod tests {
         let laptop = accounts.open_session(&admin.id).await.unwrap();
         let phone = accounts.open_session(&admin.id).await.unwrap();
 
-        accounts
+        let fresh = accounts
             .set_password(&admin.id, "a different long password")
             .await
             .unwrap();
 
         assert!(accounts.session_user(&laptop).await.unwrap().is_none());
         assert!(accounts.session_user(&phone).await.unwrap().is_none());
+        assert!(
+            accounts.session_user(&fresh).await.unwrap().is_some(),
+            "whoever changed it gets a way back in, or the first step of \
+             setting up throws you out halfway through"
+        );
 
         let after = accounts.user_by_id(&admin.id).await.unwrap().unwrap();
         assert!(!after.must_change_password, "that was the change it wanted");
@@ -605,6 +646,58 @@ mod tests {
             .await
             .unwrap()
             .is_some());
+    }
+
+    /// The sequence that was broken: sign in with what the environment seeded,
+    /// replace it, name the organisation, finish. Nothing in the middle may
+    /// sign anybody out, and afterwards setting up has to stay finished.
+    ///
+    /// There was no test walking this, which is why a first step that hung up
+    /// on itself was committed.
+    #[tokio::test]
+    async fn the_whole_of_setting_up_can_be_done_in_one_sitting() {
+        let accounts = accounts().await;
+
+        // Seeded from the environment, so it must be replaced before anything.
+        let admin = accounts.create_first_admin("admin", "admin").await.unwrap();
+        let signed_in = accounts.open_session(&admin.id).await.unwrap();
+        assert!(
+            accounts
+                .session_user(&signed_in)
+                .await
+                .unwrap()
+                .unwrap()
+                .must_change_password
+        );
+
+        // Step one. The session it hands back is what the rest of the wizard
+        // carries on with.
+        let carried_on = accounts
+            .set_password(&admin.id, "something they chose")
+            .await
+            .unwrap();
+        let who = accounts
+            .session_user(&carried_on)
+            .await
+            .unwrap()
+            .expect("still signed in");
+        assert!(!who.must_change_password);
+
+        // Step two.
+        assert!(accounts.organization().await.unwrap().is_none());
+        accounts
+            .finish_setup(&who.org_id, "Westlabs")
+            .await
+            .unwrap();
+        assert_eq!(
+            accounts.organization().await.unwrap().unwrap().name,
+            "Westlabs"
+        );
+
+        // And the end, which has to stick.
+        assert!(!accounts.onboarded().await.unwrap());
+        accounts.mark_onboarded().await.unwrap();
+        assert!(accounts.onboarded().await.unwrap());
     }
 
     #[tokio::test]
