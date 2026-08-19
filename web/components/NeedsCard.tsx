@@ -1,7 +1,6 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
 import { elapsed, outcomeOf, type SessionView } from "@/src/api/view";
 import { Signal } from "./Signal";
 
@@ -12,8 +11,6 @@ const BAR: Record<string, string> = {
 };
 
 export function NeedsCard({ session }: { session: SessionView }) {
-  const [reply, setReply] = useState("");
-  const [sent, setSent] = useState(false);
   const waiting = session.status === "NeedsYou";
 
   return (
@@ -67,38 +64,29 @@ export function NeedsCard({ session }: { session: SessionView }) {
             <p className="mt-3 font-mono text-[12px] text-brick/90">{outcomeOf(session)}</p>
           )}
 
+          {/* One way out of every state: the terminal.
+              There used to be a reply box here. It was never wired to anything
+              — the button set a local flag and rendered "Sent. ClaudeCode
+              picked it up.", which was untrue — and it could not have worked
+              anyway. What blocks an agent is usually a permission prompt
+              wanting `1`, `2` or `3` against options this card cannot see,
+              because a notification message is a sentence rather than a menu.
+              Answering happens where the question is. */}
           <div className="mt-3.5 flex items-center gap-2">
-            {waiting ? (
-              sent ? (
-                <span className="flex items-center gap-2 font-mono text-[11.5px] text-ember">
-                  <span className="breathe h-1.5 w-1.5 rounded-full bg-current" />
-                  Sent. {session.agent} picked it up.
-                </span>
-              ) : (
-                <>
-                  <input
-                    value={reply}
-                    onChange={(e) => setReply(e.target.value)}
-                    onKeyDown={(e) => e.key === "Enter" && reply.trim() && setSent(true)}
-                    placeholder="Reuse Nav.tsx for both."
-                    className="flex-1 rounded-[5px] border border-line bg-ground px-2.5 py-1.5 text-[13px] text-bone placeholder:text-mute focus:border-ember focus:outline-none"
-                  />
-                  <button
-                    onClick={() => reply.trim() && setSent(true)}
-                    className="shrink-0 rounded-[5px] bg-ember px-3 py-1.5 text-[12.5px] font-semibold text-[#1a0c04] transition-opacity hover:opacity-90"
-                  >
-                    Reply
-                  </button>
-                </>
-              )
-            ) : (
-              <Link
-                href={`/sessions/${session.id}`}
-                className="rounded-[5px] border border-line bg-raise px-3 py-1.5 text-[12.5px] font-medium text-text transition-colors hover:border-[#3a3631] hover:text-bone"
-              >
-                {session.status === "HandedBack" ? "Review changes" : "Open terminal"}
-              </Link>
-            )}
+            <Link
+              href={`/sessions/${session.id}`}
+              className={
+                waiting
+                  ? "rounded-[5px] bg-ember px-3 py-1.5 text-[12.5px] font-semibold text-[#1a0c04] transition-opacity hover:opacity-90"
+                  : "rounded-[5px] border border-line bg-raise px-3 py-1.5 text-[12.5px] font-medium text-text transition-colors hover:border-[#3a3631] hover:text-bone"
+              }
+            >
+              {waiting
+                ? "Open agent"
+                : session.status === "HandedBack"
+                  ? "Review changes"
+                  : "Open terminal"}
+            </Link>
           </div>
         </div>
       </div>

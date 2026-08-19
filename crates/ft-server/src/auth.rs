@@ -315,11 +315,18 @@ fn offered_token(headers: &HeaderMap, query: Option<&str>) -> Option<String> {
         }
     }
 
-    // A browser cannot set a header on a websocket handshake, so the terminal
-    // has nowhere to put the token but the query string. Accepted only there: a
-    // query string is copied into access logs and browser history, which is
-    // exactly what a credential should not be in.
-    if is_upgrade(headers) {
+    // Two browser APIs cannot set a header — `WebSocket` and `EventSource` —
+    // and both are load-bearing here: the terminal and the live event stream.
+    // For those the token has nowhere to go but the query string.
+    //
+    // Still refused everywhere else, which is what this restriction is for: a
+    // query string is copied into access logs and browser history, and a
+    // credential should not be in either.
+    //
+    // This was websocket-only at first, which silently broke every live update
+    // in the interface — the stream was refused, EventSource retried forever,
+    // and nothing moved until somebody reloaded the page.
+    if cannot_set_a_header(headers) {
         return query?
             .split('&')
             .filter_map(|pair| pair.split_once('='))
@@ -331,11 +338,20 @@ fn offered_token(headers: &HeaderMap, query: Option<&str>) -> Option<String> {
     None
 }
 
-fn is_upgrade(headers: &HeaderMap) -> bool {
-    headers
+/// Whether this request comes from a browser API that has no way to send one.
+fn cannot_set_a_header(headers: &HeaderMap) -> bool {
+    let upgrading = headers
         .get(header::UPGRADE)
         .and_then(|v| v.to_str().ok())
-        .is_some_and(|v| v.eq_ignore_ascii_case("websocket"))
+        .is_some_and(|v| v.eq_ignore_ascii_case("websocket"));
+
+    // `EventSource` asks for exactly this, and nothing else does by accident.
+    let streaming = headers
+        .get(header::ACCEPT)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| v.contains("text/event-stream"));
+
+    upgrading || streaming
 }
 
 /// An address or a block of them.
@@ -511,6 +527,52 @@ mod tests {
                 .await
                 .unwrap()
                 .is_none(),
+            "an ordinary request must not carry its credential where logs keep it"
+        );
+    }
+
+    /// The live event stream, which is the other thing in this interface that
+    /// cannot send a header.
+    ///
+    /// This was websocket-only once, and the cost was that nothing in the
+    /// interface ever updated by itself: the stream was refused, `EventSource`
+    /// retried forever, and every screen showed whatever it had at page load.
+    /// A reload hid it, because ordinary queries do send a header.
+    #[tokio::test]
+    async fn the_event_stream_may_carry_its_token_in_the_query_string() {
+        let gate = gate(signing_in()).await;
+        let admin = gate
+            .accounts
+            .create_first_admin("kevin", "a long enough password")
+            .await
+            .unwrap();
+        let token = gate.accounts.open_session(&admin.id).await.unwrap();
+        let query = format!("t={token}");
+
+        assert!(
+            admit(
+                &gate,
+                &headers(&[("accept", "text/event-stream")]),
+                Some(&query),
+                SOMEWHERE
+            )
+            .await
+            .unwrap()
+            .is_some(),
+            "EventSource cannot set a header, so this is the only way in"
+        );
+
+        // And everything else still has to.
+        assert!(
+            admit(
+                &gate,
+                &headers(&[("accept", "application/json")]),
+                Some(&query),
+                SOMEWHERE
+            )
+            .await
+            .unwrap()
+            .is_none(),
             "an ordinary request must not carry its credential where logs keep it"
         );
     }

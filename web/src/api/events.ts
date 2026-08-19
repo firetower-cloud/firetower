@@ -89,15 +89,20 @@ export function applyEvent(queryClient: QueryClient, event: SessionEvent) {
   }
 
   if (kind.type === "StatusChanged") {
+    // The note travels with the status and replaces whatever was there,
+    // including with nothing. It is why the session stopped — the permission it
+    // wants, the error that ended the turn — and a card that turns orange
+    // without saying why costs a click to understand. Dropping it here left
+    // exactly that, until somebody reloaded.
+    const changed = { status: kind.status, note: kind.note, updatedAt: event.at };
+
     queryClient.setQueryData<Session[]>(getListSessionsQueryKey(), (sessions) =>
-      sessions?.map((s) =>
-        s.id === event.sessionId ? { ...s, status: kind.status, updatedAt: event.at } : s,
-      ),
+      sessions?.map((s) => (s.id === event.sessionId ? { ...s, ...changed } : s)),
     );
     // And the session the page is looking at, which is a query of its own —
     // it feeds the heading and decides which verbs are offered.
     queryClient.setQueryData<Session>(getGetSessionQueryKey(event.sessionId), (session) =>
-      session ? { ...session, status: kind.status, updatedAt: event.at } : session,
+      session ? { ...session, ...changed } : session,
     );
   }
 
