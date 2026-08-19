@@ -29,8 +29,11 @@ import type {
   ApiError,
   DestroySessionParams,
   Done,
+  DownloadFileParams,
   EndedAll,
   FileDiff,
+  FileEntry,
+  ListFilesParams,
   ListSessionsParams,
   NewPullRequest,
   NewSession,
@@ -695,6 +698,280 @@ export const useGetSessionDiffQueryData = () => {
   const queryClient = useQueryClient();
   return (id: string,) =>
     queryClient.getQueryData<Awaited<ReturnType<typeof sessionDiff>>>(getSessionDiffQueryKey(id));
+}
+
+
+export const getDownloadFileUrl = (id: string,
+    params: DownloadFileParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/v1/sessions/${id}/file?${stringifiedParams}` : `/api/v1/sessions/${id}/file`
+}
+
+/**
+ * Chunked all the way through: the worker reads it in pieces, the pieces cross
+ * one pipe shared with every terminal on that machine, and they go straight
+ * out to the browser rather than being collected here first.
+ * @summary A file out of the workspace, streamed.
+ */
+export const downloadFile = async (id: string,
+    params: DownloadFileParams, options?: Parameters<typeof http>[1]): Promise<void> => {
+
+  return http<void>(getDownloadFileUrl(id,params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getDownloadFileQueryKey = (id: string,
+    params?: DownloadFileParams,) => {
+    return [
+    `/api/v1/sessions/${id}/file`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getDownloadFileQueryOptions = <TData = Awaited<ReturnType<typeof downloadFile>>, TError = ApiError>(id: string,
+    params: DownloadFileParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof downloadFile>>, TError, TData>>, request?: SecondParameter<typeof http>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getDownloadFileQueryKey(id,params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof downloadFile>>> = ({ signal }) => downloadFile(id,params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: id !== null && id !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof downloadFile>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type DownloadFileQueryResult = NonNullable<Awaited<ReturnType<typeof downloadFile>>>
+export type DownloadFileQueryError = ApiError
+
+
+export function useDownloadFile<TData = Awaited<ReturnType<typeof downloadFile>>, TError = ApiError>(
+ id: string,
+    params: DownloadFileParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof downloadFile>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof downloadFile>>,
+          TError,
+          Awaited<ReturnType<typeof downloadFile>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useDownloadFile<TData = Awaited<ReturnType<typeof downloadFile>>, TError = ApiError>(
+ id: string,
+    params: DownloadFileParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof downloadFile>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof downloadFile>>,
+          TError,
+          Awaited<ReturnType<typeof downloadFile>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useDownloadFile<TData = Awaited<ReturnType<typeof downloadFile>>, TError = ApiError>(
+ id: string,
+    params: DownloadFileParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof downloadFile>>, TError, TData>>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary A file out of the workspace, streamed.
+ */
+
+export function useDownloadFile<TData = Awaited<ReturnType<typeof downloadFile>>, TError = ApiError>(
+ id: string,
+    params: DownloadFileParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof downloadFile>>, TError, TData>>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getDownloadFileQueryOptions(id,params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+/**
+ * @summary A file out of the workspace, streamed.
+ */
+export const useSetDownloadFileQueryData = () => {
+  const queryClient = useQueryClient();
+  return (id: string,
+    params: DownloadFileParams | undefined,updater: Awaited<ReturnType<typeof downloadFile>> | undefined | ((old: Awaited<ReturnType<typeof downloadFile>> | undefined) => Awaited<ReturnType<typeof downloadFile>> | undefined)) => {
+    queryClient.setQueriesData<Awaited<ReturnType<typeof downloadFile>>>({ queryKey: getDownloadFileQueryKey(id,params) }, updater);
+  };
+}
+
+/**
+ * @summary A file out of the workspace, streamed.
+ */
+export const useGetDownloadFileQueryData = () => {
+  const queryClient = useQueryClient();
+  return (id: string,
+    params: DownloadFileParams,) =>
+    queryClient.getQueryData<Awaited<ReturnType<typeof downloadFile>>>(getDownloadFileQueryKey(id,params));
+}
+
+
+export const getListFilesUrl = (id: string,
+    params?: ListFilesParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/v1/sessions/${id}/files?${stringifiedParams}` : `/api/v1/sessions/${id}/files`
+}
+
+/**
+ * Paths are relative to the workspace and stay there: the worker refuses
+ * anything with a `..` in it, and describes a symbolic link rather than
+ * following it.
+ * @summary What is in a directory of a session's workspace.
+ */
+export const listFiles = async (id: string,
+    params?: ListFilesParams, options?: Parameters<typeof http>[1]): Promise<FileEntry[]> => {
+
+  return http<FileEntry[]>(getListFilesUrl(id,params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListFilesQueryKey = (id: string,
+    params?: ListFilesParams,) => {
+    return [
+    `/api/v1/sessions/${id}/files`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getListFilesQueryOptions = <TData = Awaited<ReturnType<typeof listFiles>>, TError = ApiError>(id: string,
+    params?: ListFilesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listFiles>>, TError, TData>>, request?: SecondParameter<typeof http>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListFilesQueryKey(id,params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listFiles>>> = ({ signal }) => listFiles(id,params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: id !== null && id !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listFiles>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListFilesQueryResult = NonNullable<Awaited<ReturnType<typeof listFiles>>>
+export type ListFilesQueryError = ApiError
+
+
+export function useListFiles<TData = Awaited<ReturnType<typeof listFiles>>, TError = ApiError>(
+ id: string,
+    params: undefined |  ListFilesParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listFiles>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listFiles>>,
+          TError,
+          Awaited<ReturnType<typeof listFiles>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListFiles<TData = Awaited<ReturnType<typeof listFiles>>, TError = ApiError>(
+ id: string,
+    params?: ListFilesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listFiles>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listFiles>>,
+          TError,
+          Awaited<ReturnType<typeof listFiles>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListFiles<TData = Awaited<ReturnType<typeof listFiles>>, TError = ApiError>(
+ id: string,
+    params?: ListFilesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listFiles>>, TError, TData>>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary What is in a directory of a session's workspace.
+ */
+
+export function useListFiles<TData = Awaited<ReturnType<typeof listFiles>>, TError = ApiError>(
+ id: string,
+    params?: ListFilesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listFiles>>, TError, TData>>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getListFilesQueryOptions(id,params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+/**
+ * @summary What is in a directory of a session's workspace.
+ */
+export const useSetListFilesQueryData = () => {
+  const queryClient = useQueryClient();
+  return (id: string,
+    params: ListFilesParams | undefined,updater: Awaited<ReturnType<typeof listFiles>> | undefined | ((old: Awaited<ReturnType<typeof listFiles>> | undefined) => Awaited<ReturnType<typeof listFiles>> | undefined)) => {
+    queryClient.setQueriesData<Awaited<ReturnType<typeof listFiles>>>({ queryKey: getListFilesQueryKey(id,params) }, updater);
+  };
+}
+
+/**
+ * @summary What is in a directory of a session's workspace.
+ */
+export const useGetListFilesQueryData = () => {
+  const queryClient = useQueryClient();
+  return (id: string,
+    params?: ListFilesParams,) =>
+    queryClient.getQueryData<Awaited<ReturnType<typeof listFiles>>>(getListFilesQueryKey(id,params));
 }
 
 

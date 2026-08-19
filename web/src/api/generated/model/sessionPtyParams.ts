@@ -17,4 +17,8 @@ cols?: number;
  * @minimum 0
  */
 rows?: number;
+/**
+ * A shell of your own rather than the agent's terminal
+ */
+shell?: boolean;
 };

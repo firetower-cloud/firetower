@@ -9,7 +9,7 @@ use crate::db::Db;
 use anyhow::{Context, Result};
 use ft_core::{AgentPresence, Event, HostId, SessionId, WorkSummary};
 use ft_proto::{
-    decode, encode, Codec, CodecError, Credential, ProbeFailure, RemoteInfo, ReqId, ToServer,
+    decode, encode, Codec, CodecError, Credential, ProbeFailure, Pty, RemoteInfo, ReqId, ToServer,
     ToWorker, PROTOCOL_VERSION,
 };
 use std::collections::HashMap;
@@ -53,10 +53,31 @@ pub enum Terminal {
     Closed,
 }
 
+/// One terminal of one session.
+///
+/// A session has more than one now — the agent's, and a shell of your own — and
+/// everything here used to key on the session alone.
+fn terminal_key(session_id: &SessionId, pty: Pty) -> String {
+    match pty {
+        Pty::Agent => session_id.to_string(),
+        Pty::Shell => format!("{session_id}:shell"),
+    }
+}
+
 /// One map for everything waiting on an answer, so the timeout and the
 /// clean-up-on-disconnect logic exist once rather than once per request type.
 enum Waiting {
     Remote(oneshot::Sender<Result<RemoteInfo, ProbeFailure>>),
+    /// What is in a directory.
+    Listing(oneshot::Sender<Result<Vec<ft_core::FileEntry>, String>>),
+    /// A file: whether it is coming, and then the pieces of it.
+    ///
+    /// Two channels for one request because a browser needs an answer before a
+    /// body — the first says whether there will be one, the second carries it.
+    File {
+        opened: Option<oneshot::Sender<Result<u64, String>>>,
+        chunks: mpsc::Sender<Vec<u8>>,
+    },
     Agents(oneshot::Sender<Vec<AgentPresence>>),
     Action(oneshot::Sender<Result<String, String>>),
     Summary(oneshot::Sender<WorkSummary>),
@@ -601,17 +622,62 @@ impl Fleet {
                                 None => tracing::debug!("a probe answer arrived after its request gave up"),
                             }
                         }
-                        Ok(ToServer::PtyOutput { session_id, data }) => {
+                        Ok(ToServer::PtyOutput { session_id, pty, data }) => {
                             if let Some(bytes) = decode(&data) {
-                                if let Some(tx) = terminals.read().await.get(session_id.as_str()) {
+                                if let Some(tx) = terminals.read().await.get(&terminal_key(&session_id, pty)) {
                                     // An error only means nobody is watching.
                                     let _ = tx.send(Terminal::Data(bytes));
                                 }
                             }
                         }
-                        Ok(ToServer::PtyClosed { session_id }) => {
-                            if let Some(tx) = terminals.write().await.remove(session_id.as_str()) {
+                        Ok(ToServer::PtyClosed { session_id, pty }) => {
+                            if let Some(tx) = terminals.write().await.remove(&terminal_key(&session_id, pty)) {
                                 let _ = tx.send(Terminal::Closed);
+                            }
+                        }
+                        Ok(ToServer::Listed { req, result }) => {
+                            match probes.write().await.remove(&req) {
+                                Some(Asked { waiting: Waiting::Listing(reply), .. }) => { let _ = reply.send(result); }
+                                Some(other) => { probes.write().await.insert(req, other); }
+                                None => tracing::debug!("a listing arrived after its request gave up"),
+                            }
+                        }
+                        Ok(ToServer::FileOpened { req, result }) => {
+                            // The entry stays: the chunks that follow are
+                            // routed by the same id, and it is removed when the
+                            // last one arrives or the reader goes away.
+                            let mut held = probes.write().await;
+                            if let Some(Asked { waiting: Waiting::File { opened, .. }, .. }) = held.get_mut(&req) {
+                                if let Some(tell) = opened.take() {
+                                    let _ = tell.send(result);
+                                    continue;
+                                }
+                            }
+                            tracing::debug!("a file answer arrived after its request gave up");
+                        }
+                        Ok(ToServer::FileChunk { req, data, last }) => {
+                            let sender = {
+                                let held = probes.read().await;
+                                match held.get(&req) {
+                                    Some(Asked { waiting: Waiting::File { chunks, .. }, .. }) => Some(chunks.clone()),
+                                    _ => None,
+                                }
+                            };
+
+                            if let Some(chunks) = sender {
+                                if let Some(bytes) = decode(&data) {
+                                    // Blocks when the browser is slower than the
+                                    // machine, which is the point: it is what
+                                    // stops a download filling memory here.
+                                    if chunks.send(bytes).await.is_err() {
+                                        probes.write().await.remove(&req);
+                                        continue;
+                                    }
+                                }
+                            }
+
+                            if last {
+                                probes.write().await.remove(&req);
                             }
                         }
                         Ok(ToServer::ActionDone { req, result }) => {
@@ -682,6 +748,17 @@ impl Fleet {
                     Waiting::Agents(_) | Waiting::Summary(_) => {}
                     Waiting::Action(reply) => {
                         let _ = reply.send(Err("the host stopped answering".into()));
+                    }
+                    Waiting::Listing(reply) => {
+                        let _ = reply.send(Err("the host stopped answering".into()));
+                    }
+                    // A download in flight ends where it got to. Dropping the
+                    // sender is what tells the browser the body is over; a
+                    // half-file is what a dropped connection means.
+                    Waiting::File { opened, .. } => {
+                        if let Some(tell) = opened {
+                            let _ = tell.send(Err("the host stopped answering".into()));
+                        }
                     }
                 }
             }
@@ -789,18 +866,20 @@ impl Fleet {
         &self,
         host_id: &HostId,
         session_id: &SessionId,
+        pty: Pty,
         cols: u16,
         rows: u16,
     ) -> Result<broadcast::Receiver<Terminal>> {
+        let key = terminal_key(session_id, pty);
         let mut terminals = self.terminals.write().await;
 
-        let receiver = match terminals.get(session_id.as_str()) {
+        let receiver = match terminals.get(&key) {
             Some(existing) => existing.subscribe(),
             None => {
                 // Deep enough that a burst of output during a slow render
                 // doesn't drop frames and corrupt the screen.
                 let (tx, rx) = broadcast::channel(1024);
-                terminals.insert(session_id.to_string(), tx);
+                terminals.insert(key.clone(), tx);
                 rx
             }
         };
@@ -810,6 +889,7 @@ impl Fleet {
             host_id,
             ToWorker::PtyOpen {
                 session_id: session_id.clone(),
+                pty,
                 cols,
                 rows,
             },
@@ -823,12 +903,14 @@ impl Fleet {
         &self,
         host_id: &HostId,
         session_id: &SessionId,
+        pty: Pty,
         bytes: &[u8],
     ) -> Result<()> {
         self.send(
             host_id,
             ToWorker::PtyInput {
                 session_id: session_id.clone(),
+                pty,
                 data: encode(bytes),
             },
         )
@@ -839,6 +921,7 @@ impl Fleet {
         &self,
         host_id: &HostId,
         session_id: &SessionId,
+        pty: Pty,
         cols: u16,
         rows: u16,
     ) -> Result<()> {
@@ -846,6 +929,7 @@ impl Fleet {
             host_id,
             ToWorker::PtyResize {
                 session_id: session_id.clone(),
+                pty,
                 cols,
                 rows,
             },
@@ -853,22 +937,125 @@ impl Fleet {
         .await
     }
 
+    /// What is in a directory of a session's workspace.
+    pub async fn list_files(
+        &self,
+        host_id: &HostId,
+        session_id: &SessionId,
+        path: &str,
+    ) -> Result<Result<Vec<ft_core::FileEntry>, String>> {
+        let req = ulid::Ulid::new().to_string();
+        let (tx, rx) = oneshot::channel();
+        self.probes.write().await.insert(
+            req.clone(),
+            Asked {
+                host: host_id.to_string(),
+                waiting: Waiting::Listing(tx),
+            },
+        );
+
+        let sent = self
+            .send(
+                host_id,
+                ToWorker::ListFiles {
+                    req: req.clone(),
+                    session_id: session_id.clone(),
+                    path: path.to_string(),
+                },
+            )
+            .await;
+
+        if let Err(e) = sent {
+            self.probes.write().await.remove(&req);
+            return Err(e);
+        }
+
+        match tokio::time::timeout(std::time::Duration::from_secs(20), rx).await {
+            Ok(Ok(result)) => Ok(result),
+            Ok(Err(_)) => Err(anyhow::anyhow!("the host stopped answering")),
+            Err(_) => {
+                self.probes.write().await.remove(&req);
+                Err(anyhow::anyhow!("the host didn't answer in time"))
+            }
+        }
+    }
+
+    /// A file, as a stream of pieces.
+    ///
+    /// The size comes back before the first piece so a browser can be given a
+    /// length and a name with its headers. The receiver is where the body comes
+    /// from; dropping it stops the download at the next chunk.
+    pub async fn read_file(
+        &self,
+        host_id: &HostId,
+        session_id: &SessionId,
+        path: &str,
+    ) -> Result<Result<(u64, mpsc::Receiver<Vec<u8>>), String>> {
+        let req = ulid::Ulid::new().to_string();
+        let (opened, wait) = oneshot::channel();
+        // Shallow on purpose: this is what makes the worker wait for a slow
+        // browser instead of the control plane holding a whole file in memory.
+        let (chunks, body) = mpsc::channel(4);
+
+        self.probes.write().await.insert(
+            req.clone(),
+            Asked {
+                host: host_id.to_string(),
+                waiting: Waiting::File {
+                    opened: Some(opened),
+                    chunks,
+                },
+            },
+        );
+
+        let sent = self
+            .send(
+                host_id,
+                ToWorker::ReadFile {
+                    req: req.clone(),
+                    session_id: session_id.clone(),
+                    path: path.to_string(),
+                },
+            )
+            .await;
+
+        if let Err(e) = sent {
+            self.probes.write().await.remove(&req);
+            return Err(e);
+        }
+
+        match tokio::time::timeout(std::time::Duration::from_secs(20), wait).await {
+            Ok(Ok(Ok(size))) => Ok(Ok((size, body))),
+            Ok(Ok(Err(refused))) => {
+                self.probes.write().await.remove(&req);
+                Ok(Err(refused))
+            }
+            Ok(Err(_)) => Err(anyhow::anyhow!("the host stopped answering")),
+            Err(_) => {
+                self.probes.write().await.remove(&req);
+                Err(anyhow::anyhow!("the host didn't answer in time"))
+            }
+        }
+    }
+
     /// Stop watching. Only tells the worker to let go when nobody is left.
-    pub async fn unwatch(&self, host_id: &HostId, session_id: &SessionId) {
+    pub async fn unwatch(&self, host_id: &HostId, session_id: &SessionId, pty: Pty) {
+        let key = terminal_key(session_id, pty);
         let mut terminals = self.terminals.write().await;
         let alone = terminals
-            .get(session_id.as_str())
+            .get(&key)
             .map(|tx| tx.receiver_count() <= 1)
             .unwrap_or(true);
 
         if alone {
-            terminals.remove(session_id.as_str());
+            terminals.remove(&key);
             drop(terminals);
             let _ = self
                 .send(
                     host_id,
                     ToWorker::PtyClose {
                         session_id: session_id.clone(),
+                        pty,
                     },
                 )
                 .await;

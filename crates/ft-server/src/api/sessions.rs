@@ -486,6 +486,98 @@ pub struct Done {
     pub detail: String,
 }
 
+/// What is in a directory of a session's workspace.
+///
+/// Paths are relative to the workspace and stay there: the worker refuses
+/// anything with a `..` in it, and describes a symbolic link rather than
+/// following it.
+#[utoipa::path(
+    get, path = "/api/v1/sessions/{id}/files", tag = "sessions",
+    params(
+        ("id" = String, Path, description = "Session id"),
+        ("path" = Option<String>, Query, description = "Directory, relative to the workspace"),
+    ),
+    responses((status = 200, body = Vec<ft_core::FileEntry>), (status = 404, body = ApiError), (status = 409, body = ApiError)),
+)]
+pub(super) async fn list_files(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Query(req): Query<FilePath>,
+) -> ApiResult<Json<Vec<ft_core::FileEntry>>> {
+    let id = SessionId::from_stored(id);
+    let (_, host) = session_context(&state, &id).await?;
+
+    state
+        .fleet
+        .list_files(&host, &id, req.path.as_deref().unwrap_or(""))
+        .await
+        .map_err(|e| ApiError::new(ErrorCode::HostUnreachable, format!("{e:#}")))?
+        .map(Json)
+        .map_err(|refused| ApiError::new(ErrorCode::InvalidRequest, refused))
+}
+
+/// A file out of the workspace, streamed.
+///
+/// Chunked all the way through: the worker reads it in pieces, the pieces cross
+/// one pipe shared with every terminal on that machine, and they go straight
+/// out to the browser rather than being collected here first.
+#[utoipa::path(
+    get, path = "/api/v1/sessions/{id}/file", tag = "sessions",
+    params(
+        ("id" = String, Path, description = "Session id"),
+        ("path" = String, Query, description = "File, relative to the workspace"),
+    ),
+    responses((status = 200, description = "The file"), (status = 404, body = ApiError), (status = 409, body = ApiError)),
+)]
+pub(super) async fn download_file(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Query(req): Query<FilePath>,
+) -> Result<axum::response::Response, ApiError> {
+    let id = SessionId::from_stored(id);
+    let (_, host) = session_context(&state, &id).await?;
+
+    let path = req.path.unwrap_or_default();
+    if path.trim().is_empty() {
+        return Err(ApiError::new(
+            ErrorCode::InvalidRequest,
+            "which file? `path` is relative to the workspace",
+        ));
+    }
+
+    let (size, chunks) = state
+        .fleet
+        .read_file(&host, &id, &path)
+        .await
+        .map_err(|e| ApiError::new(ErrorCode::HostUnreachable, format!("{e:#}")))?
+        .map_err(|refused| ApiError::new(ErrorCode::InvalidRequest, refused))?;
+
+    let name = path.rsplit('/').next().unwrap_or("download").to_string();
+    use futures::StreamExt;
+    let body = axum::body::Body::from_stream(
+        tokio_stream::wrappers::ReceiverStream::new(chunks).map(Ok::<_, std::io::Error>),
+    );
+
+    axum::response::Response::builder()
+        .header(axum::http::header::CONTENT_TYPE, "application/octet-stream")
+        .header(axum::http::header::CONTENT_LENGTH, size)
+        // Quoted, because a filename can contain a space and a header cannot
+        // pretend otherwise.
+        .header(
+            axum::http::header::CONTENT_DISPOSITION,
+            format!("attachment; filename=\"{}\"", name.replace('"', "")),
+        )
+        .body(body)
+        .map_err(|e| ApiError::new(ErrorCode::Internal, format!("{e:#}")))
+}
+
+#[derive(Debug, Deserialize, utoipa::IntoParams)]
+pub(super) struct FilePath {
+    /// Relative to the workspace. Absent means the workspace itself.
+    #[serde(default)]
+    path: Option<String>,
+}
+
 /// Everything a repository holds, decrypted for one session.
 ///
 /// Names come from the vault's index; each value is a separate open, and each

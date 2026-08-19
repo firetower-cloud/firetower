@@ -10,6 +10,7 @@ import { Signal } from "@/components/Signal";
 import { Terminal } from "@/components/Terminal";
 import { SessionActions } from "@/components/SessionActions";
 import { Diff } from "@/components/Diff";
+import { Files } from "@/components/Files";
 import { elapsed, minutesSince, unfinished, STATUS_LABEL } from "@/src/api/view";
 import { ApiError } from "@/src/api/http";
 
@@ -19,7 +20,7 @@ import { ApiError } from "@/src/api/http";
  * Client-side on purpose: session ids don't exist when the interface is built,
  * so nothing here can be pre-rendered per session.
  */
-type Tab = "Terminal" | "Changes";
+type Tab = "Terminal" | "Shell" | "Files" | "Changes";
 
 /**
  * The id, taken from the address bar rather than from the router.
@@ -139,7 +140,7 @@ export default function SessionView() {
       <div className="grid min-h-0 flex-1 grid-cols-[1fr_320px]">
         <section className="flex min-w-0 flex-col overflow-hidden border-r border-line p-6">
           <div className="mb-3 flex gap-1">
-            {(["Terminal", "Changes"] as Tab[]).map((t) => (
+            {(["Terminal", "Shell", "Files", "Changes"] as Tab[]).map((t) => (
               <button
                 key={t}
                 onClick={() => setTab(t)}
@@ -158,6 +159,18 @@ export default function SessionView() {
             <div className={`h-full ${tab === "Terminal" ? "" : "hidden"}`}>
               <Terminal sessionId={session.id} live={busy} showing={tab === "Terminal"} />
             </div>
+            {/* Mounted only while you are looking at it: a shell lives for the
+                length of a visit, and opening this tab is what starts one. */}
+            {tab === "Shell" && (
+              <div className="h-full">
+                <Terminal sessionId={session.id} live={busy} shell showing />
+              </div>
+            )}
+            {tab === "Files" && (
+              <div className="h-full">
+                <Files sessionId={session.id} />
+              </div>
+            )}
             <div className={`h-full ${tab === "Changes" ? "" : "hidden"}`}>
               <Diff sessionId={session.id} />
             </div>

@@ -21,6 +21,8 @@ type State = "connecting" | "live" | "closed";
 export function Terminal({
   sessionId,
   live,
+  /** A shell of your own rather than the terminal the agent is running in. */
+  shell = false,
   /**
    * Whether the terminal is the panel on screen.
    *
@@ -31,6 +33,7 @@ export function Terminal({
 }: {
   sessionId: string;
   live: boolean;
+  shell?: boolean;
   showing?: boolean;
 }) {
   const host = useRef<HTMLDivElement>(null);
@@ -95,6 +98,7 @@ export function Terminal({
       instance.current = term;
 
       const url = new URL(`${wsBase()}/api/v1/sessions/${sessionId}/pty`);
+      if (shell) url.searchParams.set("shell", "true");
       url.searchParams.set("cols", String(term.cols));
       url.searchParams.set("rows", String(term.rows));
       const auth = token();
@@ -146,7 +150,7 @@ export function Terminal({
       disposed = true;
       cleanup();
     };
-  }, [sessionId, attempt]);
+  }, [sessionId, shell, attempt]);
 
   // Opening a session and being unable to type into it was a click that never
   // did anything else. Focus follows the tab rather than the mount: the
@@ -170,7 +174,13 @@ export function Terminal({
           }`}
         />
         <span className="font-narrow text-[9.5px] font-semibold tracking-[0.14em] text-mute uppercase">
-          {state === "live" ? "Terminal" : state === "connecting" ? "Connecting" : "Detached"}
+          {state === "live"
+            ? shell
+              ? "Shell"
+              : "Terminal"
+            : state === "connecting"
+              ? "Connecting"
+              : "Detached"}
         </span>
         {state === "closed" && (
           <button

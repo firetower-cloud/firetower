@@ -27,6 +27,7 @@ use utoipa::ToSchema;
         ("id" = String, Path, description = "Session id"),
         ("cols" = Option<u16>, Query, description = "Terminal width"),
         ("rows" = Option<u16>, Query, description = "Terminal height"),
+        ("shell" = Option<bool>, Query, description = "A shell of your own rather than the agent's terminal"),
     ),
     responses((status = 101, description = "Terminal stream")),
 )]
@@ -44,6 +45,10 @@ pub(super) async fn session_pty(
 pub struct TerminalSize {
     pub cols: Option<u16>,
     pub rows: Option<u16>,
+    /// A shell in the same directory with the same environment, rather than
+    /// the terminal the agent is running in.
+    #[serde(default)]
+    pub shell: bool,
 }
 
 /// What a browser can say about its terminal, beyond typing into it.
@@ -68,8 +73,13 @@ async fn drive_terminal(
 
     let host = session.host_id;
     let (cols, rows) = (size.cols.unwrap_or(120), size.rows.unwrap_or(32));
+    let pty = if size.shell {
+        ft_proto::Pty::Shell
+    } else {
+        ft_proto::Pty::Agent
+    };
 
-    let mut output = match state.fleet.watch(&host, &session_id, cols, rows).await {
+    let mut output = match state.fleet.watch(&host, &session_id, pty, cols, rows).await {
         Ok(rx) => rx,
         Err(e) => {
             let _ = socket.send(Message::Text(format!("{e:#}").into())).await;
@@ -98,13 +108,13 @@ async fn drive_terminal(
 
             incoming = socket.recv() => match incoming {
                 Some(Ok(Message::Binary(bytes))) => {
-                    if state.fleet.send_input(&host, &session_id, &bytes).await.is_err() {
+                    if state.fleet.send_input(&host, &session_id, pty, &bytes).await.is_err() {
                         break;
                     }
                 }
                 Some(Ok(Message::Text(text))) => {
                     if let Ok(FromViewer::Resize { cols, rows }) = serde_json::from_str(&text) {
-                        let _ = state.fleet.resize(&host, &session_id, cols, rows).await;
+                        let _ = state.fleet.resize(&host, &session_id, pty, cols, rows).await;
                     }
                 }
                 Some(Ok(_)) => {}
@@ -113,5 +123,5 @@ async fn drive_terminal(
         }
     }
 
-    state.fleet.unwatch(&host, &session_id).await;
+    state.fleet.unwatch(&host, &session_id, pty).await;
 }

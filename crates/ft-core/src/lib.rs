@@ -860,6 +860,24 @@ pub struct Repo {
     pub env: Vec<String>,
 }
 
+/// One thing in a workspace directory.
+///
+/// Enough to draw a row and decide what to do with it, and nothing about where
+/// it is: paths are the caller's, resolved against the workspace on the machine
+/// that holds it.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct FileEntry {
+    pub name: String,
+    pub directory: bool,
+    /// Zero for a directory — counting what is inside would mean walking it.
+    pub size: u64,
+    pub modified: Option<chrono::DateTime<chrono::Utc>>,
+    /// Shown, never followed. A repository can contain a link to `/`, and a
+    /// listing that followed one would be a file browser for the whole machine.
+    pub link: bool,
+}
+
 /// What is in a workspace that isn't safely elsewhere yet.
 ///
 /// The thing that makes ending a session a decision rather than a gamble.

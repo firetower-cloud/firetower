@@ -187,6 +187,49 @@ export const SessionDiffResponseItem = zod.object({
 export const SessionDiffResponse = zod.array(SessionDiffResponseItem)
 
 /**
+ * Chunked all the way through: the worker reads it in pieces, the pieces cross
+ * one pipe shared with every terminal on that machine, and they go straight
+ * out to the browser rather than being collected here first.
+ * @summary A file out of the workspace, streamed.
+ */
+export const DownloadFileParams = zod.object({
+  "id": zod.string().describe('Session id')
+})
+
+export const DownloadFileQueryParams = zod.object({
+  "path": zod.string().describe('File, relative to the workspace')
+})
+
+export const DownloadFileResponse = zod.unknown()
+
+/**
+ * Paths are relative to the workspace and stay there: the worker refuses
+ * anything with a `..` in it, and describes a symbolic link rather than
+ * following it.
+ * @summary What is in a directory of a session's workspace.
+ */
+export const ListFilesParams = zod.object({
+  "id": zod.string().describe('Session id')
+})
+
+export const ListFilesQueryParams = zod.object({
+  "path": zod.string().optional().describe('Directory, relative to the workspace')
+})
+
+export const listFilesResponseSizeMin = 0;
+
+
+
+export const ListFilesResponseItem = zod.object({
+  "directory": zod.boolean(),
+  "link": zod.boolean().describe('Shown, never followed. A repository can contain a link to `\/`, and a\nlisting that followed one would be a file browser for the whole machine.'),
+  "modified": zod.iso.datetime({"offset":true}).nullish(),
+  "name": zod.string(),
+  "size": zod.int().min(listFilesResponseSizeMin).describe('Zero for a directory — counting what is inside would mean walking it.')
+}).describe('One thing in a workspace directory.\n\nEnough to draw a row and decide what to do with it, and nothing about where\nit is: paths are the caller\'s, resolved against the workspace on the machine\nthat holds it.')
+export const ListFilesResponse = zod.array(ListFilesResponseItem)
+
+/**
  * A websocket rather than the event stream: this is the one thing in Firetower
  * that genuinely flows both ways, byte at a time, and where latency is felt.
  *
@@ -206,7 +249,8 @@ export const sessionPtyQueryRowsMin = 0;
 
 export const SessionPtyQueryParams = zod.object({
   "cols": zod.int().min(sessionPtyQueryColsMin).optional().describe('Terminal width'),
-  "rows": zod.int().min(sessionPtyQueryRowsMin).optional().describe('Terminal height')
+  "rows": zod.int().min(sessionPtyQueryRowsMin).optional().describe('Terminal height'),
+  "shell": zod.boolean().optional().describe('A shell of your own rather than the agent\'s terminal')
 })
 
 export const SessionPtyResponse = zod.void()

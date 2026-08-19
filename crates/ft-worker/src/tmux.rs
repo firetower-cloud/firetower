@@ -21,9 +21,42 @@ impl Tmux {
     /// Named after the session, so `tmux ls` on a host is readable by a human
     /// wondering what Firetower has running.
     pub fn for_session(session_id: &str) -> Self {
-        Self {
-            name: format!("firetower-{session_id}"),
+        Self::named(ft_proto::Pty::Agent.tmux_name(session_id))
+    }
+
+    /// A tmux session by name — the shell a session opens alongside its agent.
+    pub fn named(name: String) -> Self {
+        Self { name }
+    }
+
+    /// The environment the session was started with.
+    ///
+    /// Asked of tmux rather than remembered, because it is the one place these
+    /// values already are: they were handed over with `-e` when the agent
+    /// started, and a worker deliberately writes them nowhere. Lines that are
+    /// not `KEY=value` — tmux prints `-KEY` for one it was told to unset — are
+    /// skipped.
+    pub async fn environment(&self) -> Result<Vec<(String, String)>> {
+        let output = Command::new("tmux")
+            .args(["show-environment", "-t", &self.name])
+            .output()
+            .await
+            .context("reading the session environment")?;
+
+        if !output.status.success() {
+            bail!(
+                "reading the environment of {}: {}",
+                self.name,
+                String::from_utf8_lossy(&output.stderr).trim()
+            );
         }
+
+        Ok(String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .filter_map(|line| line.split_once('='))
+            .filter(|(name, _)| !name.starts_with('-'))
+            .map(|(name, value)| (name.to_string(), value.to_string()))
+            .collect())
     }
 
     pub fn name(&self) -> &str {

@@ -36,6 +36,7 @@ impl Attachment {
     pub fn open(
         tmux_session: &str,
         session_id: SessionId,
+        pty_kind: ft_proto::Pty,
         cols: u16,
         rows: u16,
         out: mpsc::Sender<ToServer>,
@@ -77,6 +78,7 @@ impl Attachment {
                         // is bytes, not text — it carries control sequences and
                         // partial UTF-8 mid-character.
                         let frame = ToServer::PtyOutput {
+                            pty: pty_kind,
                             session_id: session_id.clone(),
                             data: encode(&buf[..n]),
                         };
@@ -87,7 +89,10 @@ impl Attachment {
                 }
             }
             ending.store(false, Ordering::Relaxed);
-            let _ = out.blocking_send(ToServer::PtyClosed { session_id });
+            let _ = out.blocking_send(ToServer::PtyClosed {
+                session_id,
+                pty: pty_kind,
+            });
         });
 
         Ok(Self {

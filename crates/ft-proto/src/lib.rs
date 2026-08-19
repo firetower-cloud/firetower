@@ -101,21 +101,42 @@ pub enum ToWorker {
     /// Attach a terminal.
     PtyOpen {
         session_id: SessionId,
+        #[serde(default)]
+        pty: Pty,
         cols: u16,
         rows: u16,
     },
     PtyInput {
         session_id: SessionId,
+        #[serde(default)]
+        pty: Pty,
         /// base64, because terminal input is bytes and JSON is text
         data: String,
     },
     PtyResize {
         session_id: SessionId,
+        #[serde(default)]
+        pty: Pty,
         cols: u16,
         rows: u16,
     },
     PtyClose {
         session_id: SessionId,
+        #[serde(default)]
+        pty: Pty,
+    },
+    /// What is in a directory of a session's workspace.
+    ListFiles {
+        req: ReqId,
+        session_id: SessionId,
+        /// Relative to the workspace. Empty is the workspace itself.
+        path: String,
+    },
+    /// Send a file back, in pieces.
+    ReadFile {
+        req: ReqId,
+        session_id: SessionId,
+        path: String,
     },
     /// Stop the agent but keep the workspace.
     Stop {
@@ -207,6 +228,33 @@ pub struct CreateWorkspace {
     pub credential: Option<Credential>,
 }
 
+/// Which terminal in a session.
+///
+/// Every terminal frame carries one. Without it a second terminal's output
+/// lands in the first one's screen: the maps on both sides key on the session,
+/// and until there was more than one terminal that was the same thing.
+///
+/// Defaulted so that a worker from before this existed still understands a
+/// frame from a control plane that has it, and means the agent by it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum Pty {
+    /// The agent's own terminal, under `firetower-<session>`.
+    #[default]
+    Agent,
+    /// A shell of your own, in the same directory with the same environment.
+    Shell,
+}
+
+impl Pty {
+    /// The tmux session it lives in.
+    pub fn tmux_name(&self, session: &str) -> String {
+        match self {
+            Pty::Agent => format!("firetower-{session}"),
+            Pty::Shell => format!("firetower-{session}-shell"),
+        }
+    }
+}
+
 /// What to write, and where, when a repository asks for a file.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -248,11 +296,37 @@ pub enum ToServer {
     },
     PtyOutput {
         session_id: SessionId,
+        #[serde(default)]
+        pty: Pty,
         /// base64
         data: String,
     },
     PtyClosed {
         session_id: SessionId,
+        #[serde(default)]
+        pty: Pty,
+    },
+    /// The answer to [`ToWorker::ListFiles`].
+    Listed {
+        req: ReqId,
+        result: Result<Vec<ft_core::FileEntry>, String>,
+    },
+    /// Whether a [`ToWorker::ReadFile`] is coming, and how much of it.
+    ///
+    /// Separate from the pieces because the control plane has to answer a
+    /// browser with headers before it can send a body: it needs to know this
+    /// worked before the first byte, not after the last.
+    FileOpened {
+        req: ReqId,
+        result: Result<u64, String>,
+    },
+    /// A piece of a file, in order.
+    FileChunk {
+        req: ReqId,
+        /// base64
+        data: String,
+        /// The last one. There is no other end-of-file marker.
+        last: bool,
     },
     /// How a [`ToWorker::RunAction`] ended.
     ActionDone {
@@ -334,12 +408,34 @@ mod tests {
     fn frames_round_trip() {
         let frame = ToWorker::PtyResize {
             session_id: SessionId::from_stored("s_abc"),
+            pty: Pty::Shell,
             cols: 120,
             rows: 40,
         };
         let json = serde_json::to_string(&frame).unwrap();
         let back: ToWorker = serde_json::from_str(&json).unwrap();
-        assert!(matches!(back, ToWorker::PtyResize { cols: 120, .. }));
+        assert!(matches!(
+            back,
+            ToWorker::PtyResize {
+                cols: 120,
+                pty: Pty::Shell,
+                ..
+            }
+        ));
+    }
+
+    /// Which terminal a frame is about was added after workers were already
+    /// running on machines somebody else has to upgrade. A frame without it is
+    /// about the agent's terminal, which is what every frame meant before.
+    #[test]
+    fn a_terminal_frame_without_a_target_is_the_agents() {
+        let older = r#"{"frame":"PtyOpen","session_id":"s_abc","cols":80,"rows":24}"#;
+        let back: ToWorker = serde_json::from_str(older).unwrap();
+        assert!(matches!(back, ToWorker::PtyOpen { pty: Pty::Agent, .. }));
+
+        let older = r#"{"frame":"PtyOutput","session_id":"s_abc","data":"aGk="}"#;
+        let back: ToServer = serde_json::from_str(older).unwrap();
+        assert!(matches!(back, ToServer::PtyOutput { pty: Pty::Agent, .. }));
     }
 
     #[test]

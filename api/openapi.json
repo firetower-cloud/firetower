@@ -1731,6 +1731,126 @@
         }
       }
     },
+    "/api/v1/sessions/{id}/file": {
+      "get": {
+        "tags": [
+          "sessions"
+        ],
+        "summary": "A file out of the workspace, streamed.",
+        "description": "Chunked all the way through: the worker reads it in pieces, the pieces cross\none pipe shared with every terminal on that machine, and they go straight\nout to the browser rather than being collected here first.",
+        "operationId": "download_file",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Session id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "path",
+            "in": "query",
+            "description": "File, relative to the workspace",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The file"
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sessions/{id}/files": {
+      "get": {
+        "tags": [
+          "sessions"
+        ],
+        "summary": "What is in a directory of a session's workspace.",
+        "description": "Paths are relative to the workspace and stay there: the worker refuses\nanything with a `..` in it, and describes a symbolic link rather than\nfollowing it.",
+        "operationId": "list_files",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Session id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "path",
+            "in": "query",
+            "description": "Directory, relative to the workspace",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/FileEntry"
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/sessions/{id}/pty": {
       "get": {
         "tags": [
@@ -1769,6 +1889,15 @@
               "type": "integer",
               "format": "int32",
               "minimum": 0
+            }
+          },
+          {
+            "name": "shell",
+            "in": "query",
+            "description": "A shell of your own rather than the agent's terminal",
+            "required": false,
+            "schema": {
+              "type": "boolean"
             }
           }
         ],
@@ -2898,6 +3027,41 @@
           "removed": {
             "type": "integer",
             "format": "int32",
+            "minimum": 0
+          }
+        }
+      },
+      "FileEntry": {
+        "type": "object",
+        "description": "One thing in a workspace directory.\n\nEnough to draw a row and decide what to do with it, and nothing about where\nit is: paths are the caller's, resolved against the workspace on the machine\nthat holds it.",
+        "required": [
+          "name",
+          "directory",
+          "size",
+          "link"
+        ],
+        "properties": {
+          "directory": {
+            "type": "boolean"
+          },
+          "link": {
+            "type": "boolean",
+            "description": "Shown, never followed. A repository can contain a link to `/`, and a\nlisting that followed one would be a file browser for the whole machine."
+          },
+          "modified": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "name": {
+            "type": "string"
+          },
+          "size": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Zero for a directory — counting what is inside would mean walking it.",
             "minimum": 0
           }
         }

@@ -7,9 +7,21 @@
 
 use anyhow::{Context, Result};
 use ft_core::{EventKind, SessionId, SessionStatus, Step};
-use ft_proto::{Codec, CodecError, CreateWorkspace, ToServer, ToWorker, PROTOCOL_VERSION};
+use ft_proto::{Codec, CodecError, CreateWorkspace, Pty, ToServer, ToWorker, PROTOCOL_VERSION};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+
+/// How much of a directory is worth sending. A worktree with `node_modules` in
+/// it has hundreds of thousands of entries and nobody reads past the first few.
+const LISTING_LIMIT: usize = 500;
+
+/// How much of a file goes in one frame. Small enough that terminal output for
+/// other sessions on this machine gets a turn between the pieces.
+const CHUNK: usize = 256 * 1024;
+
+/// The most that comes down this pipe. Above it, the answer is a message
+/// naming a better tool rather than a minute of stuttering terminals.
+const MAX_DOWNLOAD: u64 = 100 * 1_048_576;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::{mpsc, Mutex};
 
@@ -286,8 +298,17 @@ impl Worker {
             ToWorker::Destroy { session_id, .. } => {
                 // Everything goes: the agent, its terminal, and the worktree.
                 self.attached.lock().await.remove(session_id.as_str());
+                self.attached
+                    .lock()
+                    .await
+                    .remove(&terminal_key(&session_id, Pty::Shell));
                 // Whatever was worth keeping should already have been pushed.
                 Tmux::for_session(session_id.as_str()).kill().await?;
+                // And the shell, which would otherwise sit in a directory that
+                // is about to stop existing.
+                Tmux::named(Pty::Shell.tmux_name(session_id.as_str()))
+                    .kill()
+                    .await?;
 
                 // The worktree is registered against its mirror, so removing it
                 // means finding the mirror the session was cut from.
@@ -329,26 +350,32 @@ impl Worker {
 
             ToWorker::PtyOpen {
                 session_id,
+                pty,
                 cols,
                 rows,
             } => {
-                if let Err(e) = self.open_terminal(&session_id, cols, rows, out).await {
-                    tracing::warn!(session = %session_id, "attaching: {e:#}");
+                if let Err(e) = self.open_terminal(&session_id, pty, cols, rows, out).await {
+                    tracing::warn!(session = %session_id, ?pty, "attaching: {e:#}");
                     out.send(ToServer::Error {
                         session_id: Some(session_id.clone()),
                         code: "TerminalUnavailable".into(),
                         message: format!("{e:#}"),
                     })
                     .await?;
-                    out.send(ToServer::PtyClosed { session_id }).await?;
+                    out.send(ToServer::PtyClosed { session_id, pty }).await?;
                 }
             }
 
-            ToWorker::PtyInput { session_id, data } => {
+            ToWorker::PtyInput {
+                session_id,
+                pty,
+                data,
+            } => {
                 // Typed characters, verbatim — including the ones that mean
                 // "stop", which is half the reason a terminal is the interface.
                 if let Some(bytes) = ft_proto::decode(&data) {
-                    if let Some(a) = self.attached.lock().await.get(session_id.as_str()) {
+                    if let Some(a) = self.attached.lock().await.get(&terminal_key(&session_id, pty))
+                    {
                         if let Err(e) = a.write(&bytes) {
                             tracing::warn!(session = %session_id, "sending input: {e:#}");
                         }
@@ -358,20 +385,53 @@ impl Worker {
 
             ToWorker::PtyResize {
                 session_id,
+                pty,
                 cols,
                 rows,
             } => {
-                if let Some(a) = self.attached.lock().await.get(session_id.as_str()) {
+                if let Some(a) = self.attached.lock().await.get(&terminal_key(&session_id, pty)) {
                     if let Err(e) = a.resize(cols, rows) {
                         tracing::warn!(session = %session_id, "resizing: {e:#}");
                     }
                 }
             }
 
-            ToWorker::PtyClose { session_id } => {
+            ToWorker::PtyClose { session_id, pty } => {
                 // Dropping the attachment detaches. The agent is tmux's child,
                 // so nobody watching it is what it needs to keep working.
-                self.attached.lock().await.remove(session_id.as_str());
+                self.attached
+                    .lock()
+                    .await
+                    .remove(&terminal_key(&session_id, pty));
+
+                // A shell is yours for as long as you are looking at it. Nobody
+                // is looking now, so it goes — along with whatever it was
+                // running, which is the shape of "a shell per visit".
+                if pty == Pty::Shell {
+                    if let Err(e) = Tmux::named(pty.tmux_name(session_id.as_str())).kill().await {
+                        tracing::warn!(session = %session_id, "closing the shell: {e:#}");
+                    }
+                }
+            }
+
+            ToWorker::ListFiles {
+                req,
+                session_id,
+                path,
+            } => {
+                let result = self
+                    .list_files(&session_id, &path)
+                    .await
+                    .map_err(|e| format!("{e:#}"));
+                out.send(ToServer::Listed { req, result }).await?;
+            }
+
+            ToWorker::ReadFile {
+                req,
+                session_id,
+                path,
+            } => {
+                self.read_file(&req, &session_id, &path, out).await?;
             }
 
             ToWorker::RunAction {
@@ -404,6 +464,145 @@ impl Worker {
             }
         }
         Ok(true)
+    }
+
+    /// What is in a directory of this session's workspace.
+    ///
+    /// Directories first, then files, each alphabetically — the order somebody
+    /// scanning for a name expects, rather than whatever the filesystem hands
+    /// back.
+    async fn list_files(&self, session_id: &SessionId, path: &str) -> Result<Vec<ft_core::FileEntry>> {
+        let workspace = self.workspace_of(session_id).await?;
+        let dir = inside(&workspace, path)?;
+
+        let mut reading = tokio::fs::read_dir(&dir)
+            .await
+            .with_context(|| format!("reading {}", showable(&workspace, &dir)))?;
+
+        let mut entries = Vec::new();
+        while let Some(entry) = reading.next_entry().await? {
+            // `symlink_metadata`, so a link is described rather than followed.
+            // Following one would answer questions about whatever it points
+            // at, which can be anywhere on the machine.
+            let Ok(meta) = entry.metadata().await.or(entry.path().symlink_metadata()) else {
+                continue;
+            };
+            let link = entry
+                .path()
+                .symlink_metadata()
+                .map(|m| m.file_type().is_symlink())
+                .unwrap_or(false);
+
+            entries.push(ft_core::FileEntry {
+                name: entry.file_name().to_string_lossy().to_string(),
+                directory: meta.is_dir(),
+                size: if meta.is_dir() { 0 } else { meta.len() },
+                modified: meta.modified().ok().map(chrono::DateTime::<chrono::Utc>::from),
+                link,
+            });
+
+            // A worktree with `node_modules` in it has hundreds of thousands of
+            // entries, and nobody is reading past the first few hundred.
+            if entries.len() >= LISTING_LIMIT {
+                break;
+            }
+        }
+
+        entries.sort_by(|a, b| {
+            b.directory
+                .cmp(&a.directory)
+                .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+        });
+
+        Ok(entries)
+    }
+
+    /// Send a file back in pieces.
+    ///
+    /// Pieces because everything on this connection shares one pipe: terminal
+    /// output for every session on this machine queues behind whatever is being
+    /// sent. A file arrives as chunks with the other traffic interleaved
+    /// between them, rather than as one frame that stops the world.
+    async fn read_file(
+        &self,
+        req: &str,
+        session_id: &SessionId,
+        path: &str,
+        out: &mpsc::Sender<ToServer>,
+    ) -> Result<()> {
+        let opened = self.open_for_reading(session_id, path).await;
+
+        let mut file = match opened {
+            Ok((file, size)) => {
+                out.send(ToServer::FileOpened {
+                    req: req.to_string(),
+                    result: Ok(size),
+                })
+                .await?;
+                file
+            }
+            Err(e) => {
+                out.send(ToServer::FileOpened {
+                    req: req.to_string(),
+                    result: Err(format!("{e:#}")),
+                })
+                .await?;
+                return Ok(());
+            }
+        };
+
+        use tokio::io::AsyncReadExt;
+        let mut buffer = vec![0u8; CHUNK];
+        loop {
+            let read = file.read(&mut buffer).await.context("reading the file")?;
+            if read == 0 {
+                out.send(ToServer::FileChunk {
+                    req: req.to_string(),
+                    data: String::new(),
+                    last: true,
+                })
+                .await?;
+                return Ok(());
+            }
+
+            out.send(ToServer::FileChunk {
+                req: req.to_string(),
+                data: ft_proto::encode(&buffer[..read]),
+                last: false,
+            })
+            .await?;
+        }
+    }
+
+    /// Everything that can refuse a download, before a byte is sent.
+    async fn open_for_reading(
+        &self,
+        session_id: &SessionId,
+        path: &str,
+    ) -> Result<(tokio::fs::File, u64)> {
+        let workspace = self.workspace_of(session_id).await?;
+        let file = inside(&workspace, path)?;
+
+        let meta = tokio::fs::symlink_metadata(&file)
+            .await
+            .with_context(|| format!("looking at {path}"))?;
+
+        if meta.file_type().is_symlink() {
+            anyhow::bail!("{path} is a link. Open it where it points, or use the shell");
+        }
+        if meta.is_dir() {
+            anyhow::bail!("{path} is a directory. Downloading one isn't a thing yet");
+        }
+        if meta.len() > MAX_DOWNLOAD {
+            anyhow::bail!(
+                "{path} is {}. Anything over {} MB has to come off the machine another \
+                 way — `scp`, `docker cp`, or a command in the shell tab",
+                readable(meta.len()),
+                MAX_DOWNLOAD / 1_048_576,
+            );
+        }
+
+        Ok((tokio::fs::File::open(&file).await?, meta.len()))
     }
 
     /// Write a repository's variables into the workspace.
@@ -881,14 +1080,45 @@ impl Worker {
     async fn open_terminal(
         &self,
         session_id: &SessionId,
+        pty: Pty,
         cols: u16,
         rows: u16,
         out: &mpsc::Sender<ToServer>,
     ) -> Result<()> {
-        let tmux = Tmux::for_session(session_id.as_str());
-        if !tmux.exists().await {
-            anyhow::bail!("nothing is running for this session");
+        let tmux = Tmux::named(pty.tmux_name(session_id.as_str()));
+
+        match pty {
+            Pty::Agent => {
+                if !tmux.exists().await {
+                    anyhow::bail!("nothing is running for this session");
+                }
+            }
+            // A shell is made when you ask for one, in the directory the agent
+            // works in and carrying what the agent carries — read back out of
+            // the agent's own tmux session, which is the only place those
+            // values live on this machine.
+            Pty::Shell => {
+                if !tmux.exists().await {
+                    let workspace = self.workspace_of(session_id).await?;
+                    let agent = Tmux::for_session(session_id.as_str());
+                    let env = match agent.environment().await {
+                        Ok(env) => env,
+                        // A session whose agent has already gone still gets a
+                        // shell; it just gets a plain one.
+                        Err(e) => {
+                            tracing::warn!(session = %session_id, "no environment to copy: {e:#}");
+                            Vec::new()
+                        }
+                    };
+
+                    tmux.start(&workspace, &login_shell(), &env)
+                        .await
+                        .context("starting a shell")?;
+                }
+            }
         }
+
+        let key = terminal_key(session_id, pty);
 
         // Reuse a live attachment rather than replacing it. Two viewers share
         // one, and tearing the old one down would send its dying client's
@@ -896,7 +1126,7 @@ impl Worker {
         // or a development double-mount, would do on every open.
         {
             let attached = self.attached.lock().await;
-            if let Some(existing) = attached.get(session_id.as_str()) {
+            if let Some(existing) = attached.get(&key) {
                 if existing.is_alive() {
                     // The last repaint went to whoever was watching then, so
                     // ask for another one on behalf of whoever just arrived.
@@ -905,20 +1135,18 @@ impl Worker {
                 }
             }
         }
-        self.attached.lock().await.remove(session_id.as_str());
+        self.attached.lock().await.remove(&key);
 
         let attachment = attach::Attachment::open(
             tmux.name(),
             session_id.clone(),
+            pty,
             cols.max(20),
             rows.max(5),
             out.clone(),
         )?;
 
-        self.attached
-            .lock()
-            .await
-            .insert(session_id.to_string(), attachment);
+        self.attached.lock().await.insert(key, attachment);
 
         Ok(())
     }
@@ -1020,6 +1248,68 @@ fn takes_a_while(frame: &ToWorker) -> bool {
             // silent for good with the connection still open.
             | ToWorker::Resume { .. }
     )
+}
+
+/// One terminal of one session — what both maps key on now that a session has
+/// more than one.
+fn terminal_key(session_id: &SessionId, pty: Pty) -> String {
+    match pty {
+        Pty::Agent => session_id.to_string(),
+        Pty::Shell => format!("{session_id}:shell"),
+    }
+}
+
+/// The shell somebody would get if they logged in to this machine.
+fn login_shell() -> String {
+    std::env::var("SHELL")
+        .ok()
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| "/bin/sh".to_string())
+}
+
+/// Resolve a path against a workspace, or refuse.
+///
+/// On components rather than on the joined string: `workspace/../escaped` does
+/// start with `workspace` as far as `Path::starts_with` is concerned, which is
+/// a check that passes exactly what it exists to stop.
+fn inside(workspace: &Path, path: &str) -> Result<PathBuf> {
+    let relative = Path::new(path.trim_start_matches('/'));
+
+    if relative.components().any(|c| {
+        matches!(
+            c,
+            std::path::Component::ParentDir
+                | std::path::Component::RootDir
+                | std::path::Component::Prefix(_)
+        )
+    }) {
+        anyhow::bail!("{path} is outside the workspace");
+    }
+
+    Ok(workspace.join(relative))
+}
+
+/// A size in the unit somebody would say it in.
+///
+/// 101 MB was reading as "0.1 GB", which is both true and no use to anyone
+/// deciding whether their file is nearly small enough.
+fn readable(bytes: u64) -> String {
+    const MB: f64 = 1_048_576.0;
+    const GB: f64 = 1_073_741_824.0;
+
+    match bytes as f64 {
+        b if b >= GB => format!("{:.1} GB", b / GB),
+        b if b >= MB => format!("{:.0} MB", b / MB),
+        b => format!("{b:.0} bytes"),
+    }
+}
+
+/// A path as somebody looking at the workspace would write it.
+fn showable(workspace: &Path, path: &Path) -> String {
+    path.strip_prefix(workspace)
+        .unwrap_or(path)
+        .display()
+        .to_string()
 }
 
 #[cfg(test)]
