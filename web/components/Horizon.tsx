@@ -119,13 +119,22 @@ function Stem({
         className="stem-rise flex w-full flex-col items-center justify-end"
         style={{ height: `${h}%`, animationDelay: `${index * 70}ms` }}
       >
+        {/* What it is called, then what it is working on. The repository alone
+            put five identical labels across the chart. */}
         <div
-          className={`max-w-full truncate px-1 pb-1.5 font-narrow text-[10px] font-semibold tracking-[0.1em] uppercase transition-opacity duration-200 ${tone} ${
+          className={`max-w-full px-1 pb-1.5 transition-opacity duration-200 ${
             show ? "opacity-100" : "opacity-0"
           }`}
         >
+          <div
+            className={`max-w-full truncate font-narrow text-[10px] font-semibold tracking-[0.1em] uppercase ${tone}`}
+          >
+            {session.name}
+          </div>
           {/* The last part identifies it; a bare agent has none. */}
-          {session.repo?.split("/").pop() ?? "no repo"}
+          <div className="max-w-full truncate font-mono text-[9.5px] text-mute">
+            {session.repo?.split("/").pop() ?? "no repo"}
+          </div>
         </div>
 
         <span className={`relative flex items-center justify-center ${tone}`}>
