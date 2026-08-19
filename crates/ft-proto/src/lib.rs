@@ -195,8 +195,25 @@ pub struct CreateWorkspace {
     pub setup: Option<String>,
     /// Injected into the workspace environment. Secrets are already resolved.
     pub env: Vec<(String, String)>,
+    /// A file to write in the workspace before setup runs, for tooling that
+    /// reads one instead of the environment.
+    ///
+    /// Its own list rather than a flag over `env`: what belongs in a file is
+    /// the repository's own variables, not the agent's API key or the two
+    /// variables a hook needs to find its way home.
+    #[serde(default)]
+    pub env_file: Option<EnvFile>,
     /// For the clone, and held in memory for this session's later pushes.
     pub credential: Option<Credential>,
+}
+
+/// What to write, and where, when a repository asks for a file.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EnvFile {
+    /// Relative to the workspace. `.env` for most.
+    pub path: String,
+    pub variables: Vec<(String, String)>,
 }
 
 /// What to check out, when there is something to check out.

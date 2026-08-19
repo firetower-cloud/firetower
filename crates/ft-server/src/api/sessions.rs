@@ -328,6 +328,26 @@ pub(super) async fn create_session(
         )
         .await?;
 
+    // The repository's own variables, opened once. Each read is a line in the
+    // vault's log naming the session it was for.
+    let repo_env = match repo.as_ref() {
+        Some(r) => repo_env(&state, r, &id).await?,
+        None => Vec::new(),
+    };
+
+    // The repository first, the agent's own token last. A repository that sets
+    // `ANTHROPIC_API_KEY` for its own reasons must not be able to stop the
+    // agent from starting — whoever wrote that variable was thinking about
+    // their application, not about us.
+    let mut env: Vec<(String, String)> = repo_env
+        .iter()
+        .map(|v| (v.name.clone(), v.value.clone()))
+        .collect();
+    for (name, value) in agent_env(&state, req.agent, &id).await? {
+        env.retain(|(existing, _)| *existing != name);
+        env.push((name, value));
+    }
+
     state
         .fleet
         .send(
@@ -349,7 +369,20 @@ pub(super) async fn create_session(
                 setup: repo.as_ref().and_then(|r| r.setup.clone()),
                 // Resolved here, sent with the work, and held in memory on the
                 // host. Never written to a worker's disk.
-                env: agent_env(&state, req.agent, &id).await?,
+                env,
+                // Only the repository's own variables go in a file. The agent's
+                // token is ours, and the file belongs to the checkout.
+                env_file: repo
+                    .as_ref()
+                    .and_then(|r| r.env_file.clone())
+                    .filter(|path| !path.trim().is_empty() && !repo_env.is_empty())
+                    .map(|path| ft_proto::EnvFile {
+                        path,
+                        variables: repo_env
+                            .iter()
+                            .map(|v| (v.name.clone(), v.value.clone()))
+                            .collect(),
+                    }),
                 // Sent with the work rather than held by the host: the worker
                 // keeps it in memory for this session and writes it nowhere.
                 credential: match repo.as_ref() {
@@ -451,6 +484,43 @@ pub(super) struct Removal {
 #[serde(rename_all = "camelCase")]
 pub struct Done {
     pub detail: String,
+}
+
+/// Everything a repository holds, decrypted for one session.
+///
+/// Names come from the vault's index; each value is a separate open, and each
+/// open is logged with the session it was for. A variable that has gone missing
+/// between listing and reading is skipped rather than fatal — a session that
+/// won't start because one variable was removed a second ago is a worse answer
+/// than one that starts without it.
+async fn repo_env(
+    state: &AppState,
+    repo: &ft_core::Repo,
+    session: &SessionId,
+) -> Result<Vec<ft_core::dotenv::Variable>, ApiError> {
+    let scope = super::repos::env_scope(&repo.id);
+    let reason = format!("starting {session} on {}", repo.slug);
+
+    let mut out = Vec::new();
+    for (_, name) in state
+        .vault
+        .names()
+        .await?
+        .into_iter()
+        .filter(|(s, _)| *s == scope)
+    {
+        if let Some(value) = state.vault.get(&scope, &name, &reason).await? {
+            // Out of its zeroizing wrapper here, as the agent's own token
+            // already is: from this point it is going into a frame, over a
+            // pipe, and into a tmux environment.
+            out.push(ft_core::dotenv::Variable {
+                name,
+                value: value.to_string(),
+            });
+        }
+    }
+
+    Ok(out)
 }
 
 /// The session, its host, and the credential its remote needs.

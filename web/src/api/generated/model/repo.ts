@@ -19,6 +19,22 @@ export interface Repo {
      * @nullable
      */
   defaultBranch?: string | null;
+  /**
+     * The names of the variables held for it, never the values.
+     *
+     * Derived per request from the vault rather than stored, so that a screen
+     * can say what a session will bring without opening anything.
+     */
+  env?: string[];
+  /**
+     * Where to write this repository's variables in the workspace.
+     *
+     * Absent for most: the environment is enough for anything that reads
+     * `process.env`. Present — usually `.env` — for tooling that only reads
+     * files, and then it is written before setup runs and excluded from git.
+     * @nullable
+     */
+  envFile?: string | null;
   id: RepoId;
   /** Where the worker clones from. */
   remote: string;

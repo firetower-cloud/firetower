@@ -21,7 +21,264 @@ use utoipa::ToSchema;
     responses((status = 200, body = Vec<Repo>)),
 )]
 pub(super) async fn list_repos(State(state): State<AppState>) -> ApiResult<Json<Vec<Repo>>> {
-    Ok(Json(state.db.repos().await?))
+    let mut repos = state.db.repos().await?;
+    // Names only, and from one read of the vault rather than one per
+    // repository. Nothing is decrypted: a screen that says how many variables a
+    // session will bring has no business opening any of them.
+    let held = state.vault.names().await?;
+
+    for repo in &mut repos {
+        let scope = env_scope(&repo.id);
+        repo.env = held
+            .iter()
+            .filter(|(s, _)| *s == scope)
+            .map(|(_, name)| name.clone())
+            .collect();
+    }
+
+    Ok(Json(repos))
+}
+
+/// Where a repository's variables live in the vault.
+///
+/// By id rather than by slug: a slug has a `/` in it, and these end up in a URL
+/// path on the way to being revealed.
+pub fn env_scope(id: &RepoId) -> String {
+    format!("repo:{id}")
+}
+
+/// Change what a repository does before an agent starts.
+///
+/// Both fields are optional, and absent means "leave it alone" rather than
+/// "clear it" — a form that edits one must not wipe the other.
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct RepoChanges {
+    /// A shell command, or an empty string to run nothing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub setup: Option<String>,
+    /// Where to write the variables in the workspace, or an empty string for
+    /// no file at all.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub env_file: Option<String>,
+}
+
+#[utoipa::path(
+    patch, path = "/api/v1/repos/{id}", tag = "repos",
+    params(("id" = String, Path, description = "Repository id")),
+    request_body = RepoChanges,
+    responses((status = 200, body = Repo), (status = 400, body = ApiError), (status = 404, body = ApiError)),
+)]
+pub(super) async fn update_repo(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(req): Json<RepoChanges>,
+) -> ApiResult<Json<Repo>> {
+    let id = RepoId::from_stored(id);
+    state
+        .db
+        .repo(&id)
+        .await?
+        .ok_or_else(|| ApiError::not_found("repository"))?;
+
+    // A path out of the workspace is not a path in it. The worker joins this
+    // onto the worktree, and `../../.ssh/authorized_keys` would be joined just
+    // as happily.
+    let file = req.env_file.as_deref().map(str::trim);
+    if let Some(path) = file.filter(|p| !p.is_empty()) {
+        if path.starts_with('/') || path.split('/').any(|part| part == "..") {
+            return Err(ApiError::new(
+                ErrorCode::InvalidRequest,
+                "the file goes somewhere inside the workspace — a relative path with no `..`",
+            ));
+        }
+    }
+
+    state
+        .db
+        .update_repo(
+            &id,
+            req.setup
+                .as_deref()
+                .map(|s| Some(s.trim()).filter(|s| !s.is_empty())),
+            file.map(|p| Some(p).filter(|p| !p.is_empty())),
+        )
+        .await?;
+
+    let repos = list_repos(State(state)).await?;
+    repos
+        .0
+        .into_iter()
+        .find(|r| r.id == id)
+        .map(Json)
+        .ok_or_else(|| ApiError::not_found("repository"))
+}
+
+/// The variables a session on this repository will be given.
+///
+/// Names, never values. One value comes back from one route, the same one
+/// everything else in the vault uses, and that route writes to the log first.
+#[utoipa::path(
+    get, path = "/api/v1/repos/{id}/env", tag = "repos",
+    params(("id" = String, Path, description = "Repository id")),
+    responses((status = 200, body = Vec<String>), (status = 404, body = ApiError)),
+)]
+pub(super) async fn list_repo_env(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> ApiResult<Json<Vec<String>>> {
+    let id = RepoId::from_stored(id);
+    state
+        .db
+        .repo(&id)
+        .await?
+        .ok_or_else(|| ApiError::not_found("repository"))?;
+
+    let scope = env_scope(&id);
+    Ok(Json(
+        state
+            .vault
+            .names()
+            .await?
+            .into_iter()
+            .filter(|(s, _)| *s == scope)
+            .map(|(_, name)| name)
+            .collect(),
+    ))
+}
+
+/// Variables to hold for this repository.
+///
+/// Either typed one at a time, or pasted as a whole `.env` — the same route,
+/// because they are the same thing arriving in two shapes, and the file is the
+/// shape people already have.
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct NewEnv {
+    #[serde(default)]
+    pub variables: Vec<EnvVariable>,
+    /// A pasted `.env`, parsed here rather than in a browser: quoting is where
+    /// this goes wrong, and there should be one implementation of it.
+    #[serde(default)]
+    pub dotenv: Option<String>,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct EnvVariable {
+    pub name: String,
+    pub value: String,
+}
+
+/// What was stored, and what was not.
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct StoredEnv {
+    /// Every variable this repository now has, in order.
+    pub names: Vec<String>,
+    /// Lines that were skipped, and why — said rather than swallowed, because
+    /// a variable that silently never arrives is a long afternoon.
+    pub skipped: Vec<String>,
+}
+
+#[utoipa::path(
+    put, path = "/api/v1/repos/{id}/env", tag = "repos",
+    params(("id" = String, Path, description = "Repository id")),
+    request_body = NewEnv,
+    responses((status = 200, body = StoredEnv), (status = 400, body = ApiError), (status = 404, body = ApiError)),
+)]
+pub(super) async fn put_repo_env(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(req): Json<NewEnv>,
+) -> ApiResult<Json<StoredEnv>> {
+    let id = RepoId::from_stored(id);
+    let repo = state
+        .db
+        .repo(&id)
+        .await?
+        .ok_or_else(|| ApiError::not_found("repository"))?;
+
+    let mut keeping: Vec<ft_core::dotenv::Variable> = Vec::new();
+    let mut skipped: Vec<String> = Vec::new();
+
+    for typed in req.variables {
+        let name = typed.name.trim().to_string();
+        match ft_core::dotenv::check(&name) {
+            Ok(()) => keeping.push(ft_core::dotenv::Variable {
+                name,
+                value: typed.value,
+            }),
+            Err(reason) => skipped.push(reason),
+        }
+    }
+
+    if let Some(text) = req.dotenv.as_deref() {
+        let parsed = ft_core::dotenv::parse(text);
+        keeping.extend(parsed.variables);
+        skipped.extend(
+            parsed
+                .rejected
+                .into_iter()
+                .map(|r| format!("line {}: {}", r.line, r.reason)),
+        );
+    }
+
+    if keeping.is_empty() {
+        return Err(ApiError::new(
+            ErrorCode::InvalidRequest,
+            if skipped.is_empty() {
+                "nothing to store".to_string()
+            } else {
+                skipped.join("; ")
+            },
+        ));
+    }
+
+    let scope = env_scope(&id);
+    for variable in &keeping {
+        state
+            .vault
+            .put(
+                &scope,
+                &variable.name,
+                &variable.value,
+                &format!("set for {} on the repository screen", repo.slug),
+            )
+            .await?;
+    }
+
+    let names = list_repo_env(State(state), Path(id.to_string())).await?.0;
+    Ok(Json(StoredEnv { names, skipped }))
+}
+
+#[utoipa::path(
+    delete, path = "/api/v1/repos/{id}/env/{name}", tag = "repos",
+    params(
+        ("id" = String, Path, description = "Repository id"),
+        ("name" = String, Path, description = "Variable name"),
+    ),
+    responses((status = 204), (status = 404, body = ApiError)),
+)]
+pub(super) async fn remove_repo_env(
+    State(state): State<AppState>,
+    Path((id, name)): Path<(String, String)>,
+) -> ApiResult<StatusCode> {
+    let id = RepoId::from_stored(id);
+    let repo = state
+        .db
+        .repo(&id)
+        .await?
+        .ok_or_else(|| ApiError::not_found("repository"))?;
+
+    state
+        .vault
+        .forget(
+            &env_scope(&id),
+            &name,
+            &format!("removed from {} on the repository screen", repo.slug),
+        )
+        .await?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 /// Connect a repository. Nothing is cloned until a session needs it.

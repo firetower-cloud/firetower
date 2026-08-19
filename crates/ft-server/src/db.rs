@@ -147,6 +147,39 @@ impl Db {
     /// Only the name. The number it was given cannot change — it is what a
     /// renamed session can still be traced back to, and what nothing else is
     /// allowed to take.
+    /// Change what a repository does before an agent starts, and where its
+    /// variables are written.
+    ///
+    /// Both are optional and both are answered: `Some(None)` clears one,
+    /// `None` leaves it as it was. A form that only edits the setup command
+    /// must not silently drop the file path.
+    pub async fn update_repo(
+        &self,
+        id: &RepoId,
+        setup: Option<Option<&str>>,
+        env_file: Option<Option<&str>>,
+    ) -> Result<()> {
+        if let Some(setup) = setup {
+            sqlx::query("UPDATE repos SET setup = $1 WHERE id = $2")
+                .bind(setup)
+                .bind(id.as_str())
+                .execute(&self.pool)
+                .await
+                .context("saving a setup command")?;
+        }
+
+        if let Some(env_file) = env_file {
+            sqlx::query("UPDATE repos SET env_file = $1 WHERE id = $2")
+                .bind(env_file)
+                .bind(id.as_str())
+                .execute(&self.pool)
+                .await
+                .context("saving an environment file path")?;
+        }
+
+        Ok(())
+    }
+
     pub async fn rename_session(&self, id: &SessionId, name: &str) -> Result<()> {
         sqlx::query("UPDATE sessions SET name = $1, updated_at = $2 WHERE id = $3")
             .bind(name.trim())
@@ -906,6 +939,9 @@ fn repo_from_row(r: sqlx::postgres::PgRow) -> Repo {
         remote: r.get("remote"),
         default_branch: r.get("default_branch"),
         setup: r.get("setup"),
+        env_file: r.get("env_file"),
+        // Filled in by whoever asks the vault; a row knows only the path.
+        env: Vec::new(),
     }
 }
 

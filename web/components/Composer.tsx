@@ -218,6 +218,18 @@ export function Composer() {
               options={choices.map((c) => agentLabel(c, runsHere(c)))}
             />
 
+            {/* Said before you start rather than discovered in the terminal:
+                this repository hands the agent things you configured weeks ago
+                and have every right to have forgotten. */}
+            {repo && repo.env && repo.env.length > 0 && (
+              <span
+                className="font-mono text-[11px] text-mute"
+                title={repo.env.join(" · ")}
+              >
+                + {repo.env.length} {repo.env.length === 1 ? "variable" : "variables"}
+              </span>
+            )}
+
             <div className="ml-auto flex items-center gap-3">
               <span className="font-mono text-[10px] text-mute">⌘⏎</span>
               <button

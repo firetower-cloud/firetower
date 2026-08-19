@@ -991,6 +991,65 @@
             }
           }
         }
+      },
+      "patch": {
+        "tags": [
+          "repos"
+        ],
+        "operationId": "update_repo",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Repository id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RepoChanges"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Repo"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/api/v1/repos/{id}/branches": {
@@ -1022,6 +1081,154 @@
                 }
               }
             }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/repos/{id}/env": {
+      "get": {
+        "tags": [
+          "repos"
+        ],
+        "summary": "The variables a session on this repository will be given.",
+        "description": "Names, never values. One value comes back from one route, the same one\neverything else in the vault uses, and that route writes to the log first.",
+        "operationId": "list_repo_env",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Repository id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "repos"
+        ],
+        "operationId": "put_repo_env",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Repository id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewEnv"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StoredEnv"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/repos/{id}/env/{name}": {
+      "delete": {
+        "tags": [
+          "repos"
+        ],
+        "operationId": "remove_repo_env",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Repository id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Variable name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
           },
           "404": {
             "description": "",
@@ -2357,6 +2564,21 @@
           }
         }
       },
+      "EnvVariable": {
+        "type": "object",
+        "required": [
+          "name",
+          "value"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          }
+        }
+      },
       "ErrorCode": {
         "type": "string",
         "description": "The catalogue is the type, so there is no separate list to keep in sync.",
@@ -2808,6 +3030,25 @@
           }
         }
       },
+      "NewEnv": {
+        "type": "object",
+        "description": "Variables to hold for this repository.\n\nEither typed one at a time, or pasted as a whole `.env` — the same route,\nbecause they are the same thing arriving in two shapes, and the file is the\nshape people already have.",
+        "properties": {
+          "dotenv": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A pasted `.env`, parsed here rather than in a browser: quoting is where\nthis goes wrong, and there should be one implementation of it."
+          },
+          "variables": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EnvVariable"
+            }
+          }
+        }
+      },
       "NewHost": {
         "type": "object",
         "required": [
@@ -3142,6 +3383,20 @@
             ],
             "description": "The trunk, once something has read the remote.\n\nAbsent until then: a repository can be connected while no worker is\nreachable, and the first session to clone it fills this in."
           },
+          "env": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The names of the variables held for it, never the values.\n\nDerived per request from the vault rather than stored, so that a screen\ncan say what a session will bring without opening anything."
+          },
+          "envFile": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Where to write this repository's variables in the workspace.\n\nAbsent for most: the environment is enough for anything that reads\n`process.env`. Present — usually `.env` — for tooling that only reads\nfiles, and then it is written before setup runs and excluded from git."
+          },
           "id": {
             "$ref": "#/components/schemas/RepoId"
           },
@@ -3159,6 +3414,26 @@
           "slug": {
             "type": "string",
             "description": "`acme/backend`"
+          }
+        }
+      },
+      "RepoChanges": {
+        "type": "object",
+        "description": "Change what a repository does before an agent starts.\n\nBoth fields are optional, and absent means \"leave it alone\" rather than\n\"clear it\" — a form that edits one must not wipe the other.",
+        "properties": {
+          "envFile": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Where to write the variables in the workspace, or an empty string for\nno file at all."
+          },
+          "setup": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A shell command, or an empty string to run nothing."
           }
         }
       },
@@ -3389,6 +3664,30 @@
           "Setup",
           "Launch"
         ]
+      },
+      "StoredEnv": {
+        "type": "object",
+        "description": "What was stored, and what was not.",
+        "required": [
+          "names",
+          "skipped"
+        ],
+        "properties": {
+          "names": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Every variable this repository now has, in order."
+          },
+          "skipped": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Lines that were skipped, and why — said rather than swallowed, because\na variable that silently never arrives is a long afternoon."
+          }
+        }
       },
       "User": {
         "type": "object",

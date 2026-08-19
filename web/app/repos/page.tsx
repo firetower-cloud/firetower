@@ -9,10 +9,13 @@ import {
 } from "@/src/api/generated/repos/repos";
 import { useListSessions } from "@/src/api/generated/sessions/sessions";
 import { ConnectRepo } from "@/components/ConnectRepo";
+import { RepoSettings } from "@/components/RepoSettings";
 import { ApiError } from "@/src/api/http";
 
 export default function Repos() {
   const [connecting, setConnecting] = useState(false);
+  /** The repository being configured, if any. */
+  const [settling, setSettling] = useState<string | null>(null);
   const [refused, setRefused] = useState<string | null>(null);
 
   const queryClient = useQueryClient();
@@ -60,6 +63,12 @@ export default function Repos() {
                   {count} {count === 1 ? "session" : "sessions"}
                 </span>
                 <button
+                  onClick={() => setSettling(r.id)}
+                  className="text-[11.5px] text-mute transition-colors hover:text-ember"
+                >
+                  Settings
+                </button>
+                <button
                   onClick={() => forget(r.id)}
                   className="text-[11.5px] text-mute transition-colors hover:text-ember"
                 >
@@ -73,6 +82,17 @@ export default function Repos() {
                 <code className="font-mono text-[11.5px] text-dim">
                   {r.setup ?? <span className="text-mute">nothing to run</span>}
                 </code>
+                <span className="eyebrow">Environment</span>
+                <span className="font-mono text-[11.5px] text-dim">
+                  {r.env && r.env.length > 0 ? (
+                    <>
+                      {r.env.length} {r.env.length === 1 ? "variable" : "variables"}
+                      {r.envFile && <span className="text-mute"> · written to {r.envFile}</span>}
+                    </>
+                  ) : (
+                    <span className="text-mute">none</span>
+                  )}
+                </span>
               </div>
             </div>
           );
@@ -99,6 +119,13 @@ export default function Repos() {
       </button>
 
       {connecting && <ConnectRepo onClose={() => setConnecting(false)} />}
+
+      {settling && repos.find((r) => r.id === settling) && (
+        <RepoSettings
+          repo={repos.find((r) => r.id === settling)!}
+          onClose={() => setSettling(null)}
+        />
+      )}
     </div>
   );
 }

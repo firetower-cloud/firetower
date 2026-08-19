@@ -10,6 +10,8 @@ import * as zod from 'zod';
 
 export const ListReposResponseItem = zod.object({
   "defaultBranch": zod.string().nullish().describe('The trunk, once something has read the remote.\n\nAbsent until then: a repository can be connected while no worker is\nreachable, and the first session to clone it fills this in.'),
+  "env": zod.array(zod.string()).optional().describe('The names of the variables held for it, never the values.\n\nDerived per request from the vault rather than stored, so that a screen\ncan say what a session will bring without opening anything.'),
+  "envFile": zod.string().nullish().describe('Where to write this repository\'s variables in the workspace.\n\nAbsent for most: the environment is enough for anything that reads\n`process.env`. Present — usually `.env` — for tooling that only reads\nfiles, and then it is written before setup runs and excluded from git.'),
   "id": zod.string().describe('Identifies a connected repository.'),
   "remote": zod.string().describe('Where the worker clones from.'),
   "setup": zod.string().nullish().describe('Runs once per session before the agent starts.'),
@@ -25,6 +27,8 @@ export const CreateRepoBody = zod.object({
 
 export const CreateRepoResponse = zod.object({
   "defaultBranch": zod.string().nullish().describe('The trunk, once something has read the remote.\n\nAbsent until then: a repository can be connected while no worker is\nreachable, and the first session to clone it fills this in.'),
+  "env": zod.array(zod.string()).optional().describe('The names of the variables held for it, never the values.\n\nDerived per request from the vault rather than stored, so that a screen\ncan say what a session will bring without opening anything.'),
+  "envFile": zod.string().nullish().describe('Where to write this repository\'s variables in the workspace.\n\nAbsent for most: the environment is enough for anything that reads\n`process.env`. Present — usually `.env` — for tooling that only reads\nfiles, and then it is written before setup runs and excluded from git.'),
   "id": zod.string().describe('Identifies a connected repository.'),
   "remote": zod.string().describe('Where the worker clones from.'),
   "setup": zod.string().nullish().describe('Runs once per session before the agent starts.'),
@@ -59,6 +63,25 @@ export const DeleteRepoParams = zod.object({
 
 export const DeleteRepoResponse = zod.void()
 
+export const UpdateRepoParams = zod.object({
+  "id": zod.string().describe('Repository id')
+})
+
+export const UpdateRepoBody = zod.object({
+  "envFile": zod.string().nullish().describe('Where to write the variables in the workspace, or an empty string for\nno file at all.'),
+  "setup": zod.string().nullish().describe('A shell command, or an empty string to run nothing.')
+}).describe('Change what a repository does before an agent starts.\n\nBoth fields are optional, and absent means \"leave it alone\" rather than\n\"clear it\" — a form that edits one must not wipe the other.')
+
+export const UpdateRepoResponse = zod.object({
+  "defaultBranch": zod.string().nullish().describe('The trunk, once something has read the remote.\n\nAbsent until then: a repository can be connected while no worker is\nreachable, and the first session to clone it fills this in.'),
+  "env": zod.array(zod.string()).optional().describe('The names of the variables held for it, never the values.\n\nDerived per request from the vault rather than stored, so that a screen\ncan say what a session will bring without opening anything.'),
+  "envFile": zod.string().nullish().describe('Where to write this repository\'s variables in the workspace.\n\nAbsent for most: the environment is enough for anything that reads\n`process.env`. Present — usually `.env` — for tooling that only reads\nfiles, and then it is written before setup runs and excluded from git.'),
+  "id": zod.string().describe('Identifies a connected repository.'),
+  "remote": zod.string().describe('Where the worker clones from.'),
+  "setup": zod.string().nullish().describe('Runs once per session before the agent starts.'),
+  "slug": zod.string().describe('`acme\/backend`')
+}).describe('A repository Firetower can cut worktrees from.')
+
 /**
  * Asked of the remote rather than read from a cached list: a branch pushed a
  * minute ago should be offerable, and the probe that answers this is the same
@@ -73,4 +96,40 @@ export const RepoBranchesResponse = zod.object({
   "branches": zod.array(zod.string()),
   "defaultBranch": zod.string()
 })
+
+/**
+ * Names, never values. One value comes back from one route, the same one
+ * everything else in the vault uses, and that route writes to the log first.
+ * @summary The variables a session on this repository will be given.
+ */
+export const ListRepoEnvParams = zod.object({
+  "id": zod.string().describe('Repository id')
+})
+
+export const ListRepoEnvResponseItem = zod.string()
+export const ListRepoEnvResponse = zod.array(ListRepoEnvResponseItem)
+
+export const PutRepoEnvParams = zod.object({
+  "id": zod.string().describe('Repository id')
+})
+
+export const PutRepoEnvBody = zod.object({
+  "dotenv": zod.string().nullish().describe('A pasted `.env`, parsed here rather than in a browser: quoting is where\nthis goes wrong, and there should be one implementation of it.'),
+  "variables": zod.array(zod.object({
+  "name": zod.string(),
+  "value": zod.string()
+})).optional()
+}).describe('Variables to hold for this repository.\n\nEither typed one at a time, or pasted as a whole `.env` — the same route,\nbecause they are the same thing arriving in two shapes, and the file is the\nshape people already have.')
+
+export const PutRepoEnvResponse = zod.object({
+  "names": zod.array(zod.string()).describe('Every variable this repository now has, in order.'),
+  "skipped": zod.array(zod.string()).describe('Lines that were skipped, and why — said rather than swallowed, because\na variable that silently never arrives is a long afternoon.')
+}).describe('What was stored, and what was not.')
+
+export const RemoveRepoEnvParams = zod.object({
+  "id": zod.string().describe('Repository id'),
+  "name": zod.string().describe('Variable name')
+})
+
+export const RemoveRepoEnvResponse = zod.void()
 

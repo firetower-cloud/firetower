@@ -7,6 +7,7 @@
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
+pub mod dotenv;
 mod ids;
 pub mod session;
 mod status;
@@ -844,6 +845,19 @@ pub struct Repo {
     pub default_branch: Option<String>,
     /// Runs once per session before the agent starts.
     pub setup: Option<String>,
+    /// Where to write this repository's variables in the workspace.
+    ///
+    /// Absent for most: the environment is enough for anything that reads
+    /// `process.env`. Present — usually `.env` — for tooling that only reads
+    /// files, and then it is written before setup runs and excluded from git.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub env_file: Option<String>,
+    /// The names of the variables held for it, never the values.
+    ///
+    /// Derived per request from the vault rather than stored, so that a screen
+    /// can say what a session will bring without opening anything.
+    #[serde(default)]
+    pub env: Vec<String>,
 }
 
 /// What is in a workspace that isn't safely elsewhere yet.

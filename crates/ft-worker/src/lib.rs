@@ -9,7 +9,7 @@ use anyhow::{Context, Result};
 use ft_core::{EventKind, SessionId, SessionStatus, Step};
 use ft_proto::{Codec, CodecError, CreateWorkspace, ToServer, ToWorker, PROTOCOL_VERSION};
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::{mpsc, Mutex};
 
@@ -406,6 +406,116 @@ impl Worker {
         Ok(true)
     }
 
+    /// Write a repository's variables into the workspace.
+    ///
+    /// And tell git to ignore the file. In `.git/info/exclude` rather than
+    /// `.gitignore`: the latter is the repository's own file, and editing it
+    /// would show up as a change the agent didn't make and might well commit.
+    /// Exclude is local to this worktree and belongs to whoever checked it out,
+    /// which is us.
+    async fn write_env_file(workspace: &Path, file: &ft_proto::EnvFile) -> Result<()> {
+        // The server checks this too. Checked again here because this is the
+        // side holding the filesystem, and a frame is not a promise.
+        //
+        // On the components rather than on the joined path: `workspace/../x`
+        // *does* start with `workspace` as far as `Path::starts_with` is
+        // concerned, which is a check that passes everything it should refuse.
+        let relative = Path::new(&file.path);
+        if relative.components().any(|c| {
+            matches!(
+                c,
+                std::path::Component::ParentDir
+                    | std::path::Component::RootDir
+                    | std::path::Component::Prefix(_)
+            )
+        }) {
+            anyhow::bail!("{} is outside the workspace", file.path);
+        }
+
+        let path = workspace.join(relative);
+
+        if let Some(parent) = path.parent() {
+            tokio::fs::create_dir_all(parent).await.ok();
+        }
+
+        let variables: Vec<ft_core::dotenv::Variable> = file
+            .variables
+            .iter()
+            .map(|(name, value)| ft_core::dotenv::Variable {
+                name: name.clone(),
+                value: value.clone(),
+            })
+            .collect();
+
+        tokio::fs::write(&path, ft_core::dotenv::render(&variables)).await?;
+
+        // Readable by its owner and nobody else. The default would be whatever
+        // the umask says, and on a shared machine that is often everybody.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            tokio::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))
+                .await
+                .ok();
+        }
+
+        Self::exclude_from_git(workspace, &file.path).await;
+        Ok(())
+    }
+
+    /// Add a path to this worktree's local excludes, once.
+    ///
+    /// Best effort: a workspace with nothing checked out has no `.git` at all,
+    /// and a file that git can see is a smaller problem than a session that
+    /// refuses to start.
+    async fn exclude_from_git(workspace: &Path, path: &str) {
+        // The *common* directory, not `--git-dir`. A session runs in a linked
+        // worktree, whose own git directory has an `info/exclude` that git
+        // never reads — excludes are shared, and live with the mirror. Writing
+        // to the worktree's copy looks right and does nothing, which is how
+        // this was found: the file was still listed as untracked.
+        let Ok(output) = tokio::process::Command::new("git")
+            .args(["rev-parse", "--git-common-dir"])
+            .current_dir(workspace)
+            .output()
+            .await
+        else {
+            return;
+        };
+
+        if !output.status.success() {
+            return;
+        }
+
+        let git_dir = PathBuf::from(String::from_utf8_lossy(&output.stdout).trim().to_string());
+        let git_dir = if git_dir.is_absolute() {
+            git_dir
+        } else {
+            workspace.join(git_dir)
+        };
+
+        let exclude = git_dir.join("info").join("exclude");
+        tracing::debug!(exclude = %exclude.display(), "excluding {path} from git");
+        if let Some(parent) = exclude.parent() {
+            tokio::fs::create_dir_all(parent).await.ok();
+        }
+
+        let existing = tokio::fs::read_to_string(&exclude).await.unwrap_or_default();
+        if existing.lines().any(|line| line.trim() == path) {
+            return;
+        }
+
+        let mut next = existing;
+        if !next.is_empty() && !next.ends_with('\n') {
+            next.push('\n');
+        }
+        next.push_str(&format!("# written by Firetower\n{path}\n"));
+
+        if let Err(e) = tokio::fs::write(&exclude, next).await {
+            tracing::warn!("could not exclude {path} from git: {e:#}");
+        }
+    }
+
     /// Build a workspace, narrating each step as it completes.
     ///
     /// The narration is the point: it's what the interface shows while you wait,
@@ -559,6 +669,28 @@ impl Worker {
         )
         .await?;
 
+        // What a hook needs to find its way home: which session it belongs to,
+        // and where this worker keeps its log. Inherited by the agent, by the
+        // setup script, and by everything either of them runs.
+        //
+        // The session variable is also the guard. A hook that finds no session
+        // is not ours — somebody's own agent, sharing the same settings file —
+        // and does nothing.
+        let mut env = spec.env.clone();
+        env.push((ft_core::hooks::SESSION_ENV.to_string(), id.to_string()));
+        env.push((
+            ft_core::hooks::ROOT_ENV.to_string(),
+            self.root.display().to_string(),
+        ));
+
+        // Before setup, because a setup script is the first thing that wants to
+        // read it — `npm run db:migrate` against a URL that is only in a file.
+        if let Some(file) = &spec.env_file {
+            Self::write_env_file(&path, file)
+                .await
+                .with_context(|| format!("writing {}", file.path))?;
+        }
+
         if let Some(setup) = spec.setup.as_deref().filter(|s| !s.trim().is_empty()) {
             self.emit(&id, EventKind::StepStarted { step: Step::Setup }, out)
                 .await?;
@@ -567,6 +699,11 @@ impl Worker {
                 .arg("-lc")
                 .arg(setup)
                 .current_dir(&path)
+                // The same environment the agent gets. A setup script that
+                // installs dependencies and migrates a database needs the
+                // repository's variables as much as the agent does, and until
+                // now it ran with none of them.
+                .envs(env.iter().map(|(k, v)| (k.as_str(), v.as_str())))
                 .output()
                 .await
                 .context("running the setup script")?;
@@ -613,20 +750,6 @@ impl Worker {
 
         self.emit(&id, EventKind::StepStarted { step: Step::Launch }, out)
             .await?;
-
-        // What a hook needs to find its way home: which session it belongs to,
-        // and where this worker keeps its log. Inherited by the agent and by
-        // everything the agent runs.
-        //
-        // The session variable is also the guard. A hook that finds no session
-        // is not ours — somebody's own agent, sharing the same settings file —
-        // and does nothing.
-        let mut env = spec.env.clone();
-        env.push((ft_core::hooks::SESSION_ENV.to_string(), id.to_string()));
-        env.push((
-            ft_core::hooks::ROOT_ENV.to_string(),
-            self.root.display().to_string(),
-        ));
 
         // The agent runs under tmux so it outlives this worker, this
         // connection, and the laptop that started it.
@@ -905,6 +1028,117 @@ mod tests {
     use ft_core::{Agent, WorkspaceSize};
     use tempfile::TempDir;
 
+    /// The file a repository asked for, where it asked for it, and invisible
+    /// to git.
+    ///
+    /// In a linked worktree, because that is what a session runs in and it is
+    /// not the same thing: a worktree's own `info/exclude` is never read, so a
+    /// test in a plain checkout passes while every real session leaves a `.env`
+    /// sitting there untracked, waiting to be committed.
+    ///
+    /// And git is the oracle. `check-ignore` is the question actually being
+    /// asked — whether the file is invisible — where reading the exclude file
+    /// back only proves we wrote something somewhere.
+    #[tokio::test]
+    async fn an_env_file_is_written_and_kept_out_of_git() {
+        let dir = TempDir::new().unwrap();
+        let mirror = dir.path().join("mirror");
+        let workspace = dir.path().join("work");
+
+        let git = |args: &[&str], cwd: &Path| {
+            std::process::Command::new("git")
+                .args(args)
+                .current_dir(cwd)
+                .output()
+                .unwrap()
+        };
+
+        std::fs::create_dir_all(&mirror).unwrap();
+        git(&["init", "-q", "-b", "main"], &mirror);
+        std::fs::write(mirror.join("README.md"), "# demo\n").unwrap();
+        git(&["add", "-A"], &mirror);
+        git(
+            &[
+                "-c", "user.email=a@b", "-c", "user.name=t",
+                "commit", "-qm", "init",
+            ],
+            &mirror,
+        );
+        git(
+            &["worktree", "add", "-q", workspace.to_str().unwrap()],
+            &mirror,
+        );
+
+        Worker::write_env_file(
+            &workspace,
+            &ft_proto::EnvFile {
+                path: "config/.env".into(),
+                variables: vec![
+                    ("DATABASE_URL".into(), "postgres://user:pa'ss@host/db".into()),
+                    ("NOTE".into(), "two words # not a comment".into()),
+                ],
+            },
+        )
+        .await
+        .unwrap();
+
+        let written = std::fs::read_to_string(workspace.join("config/.env")).unwrap();
+        let read_back = ft_core::dotenv::parse(&written);
+        assert_eq!(read_back.variables.len(), 2);
+        assert_eq!(read_back.variables[0].value, "postgres://user:pa'ss@host/db");
+        assert_eq!(read_back.variables[1].value, "two words # not a comment");
+
+        let ignored = git(&["check-ignore", "config/.env"], &workspace);
+        assert!(
+            ignored.status.success(),
+            "git itself has to be the one that can't see it"
+        );
+
+        let untracked = git(&["status", "--porcelain"], &workspace);
+        let untracked = String::from_utf8_lossy(&untracked.stdout);
+        assert!(
+            !untracked.contains(".env"),
+            "and it stays out of what an agent would commit: {untracked}"
+        );
+
+        // Starting a second session on the same checkout must not write the
+        // line again.
+        Worker::exclude_from_git(&workspace, "config/.env").await;
+        let common = git(&["rev-parse", "--git-common-dir"], &workspace);
+        let common = PathBuf::from(String::from_utf8_lossy(&common.stdout).trim().to_string());
+        let exclude = std::fs::read_to_string(
+            if common.is_absolute() { common } else { workspace.join(common) }
+                .join("info")
+                .join("exclude"),
+        )
+        .unwrap();
+        assert_eq!(
+            exclude.lines().filter(|l| l.trim() == "config/.env").count(),
+            1,
+            "and only once"
+        );
+    }
+
+    /// A path out of the workspace is refused by the side holding the disk.
+    #[tokio::test]
+    async fn an_env_file_cannot_be_written_outside_the_workspace() {
+        let dir = TempDir::new().unwrap();
+        let workspace = dir.path().join("work");
+        std::fs::create_dir_all(&workspace).unwrap();
+
+        let refused = Worker::write_env_file(
+            &workspace,
+            &ft_proto::EnvFile {
+                path: "../escaped".into(),
+                variables: vec![("A".into(), "1".into())],
+            },
+        )
+        .await;
+
+        assert!(refused.is_err(), "a frame is not a promise");
+        assert!(!dir.path().join("escaped").exists());
+    }
+
     /// Drive a worker over an in-memory pipe, the way the control plane does.
     async fn exchange(worker: &std::sync::Arc<Worker>, frames: Vec<ToWorker>) -> Vec<ToServer> {
         let mut input = Vec::new();
@@ -1040,6 +1274,7 @@ mod tests {
             setup: setup.map(str::to_string),
             workspace: id.as_str().to_string(),
             env: vec![],
+            env_file: None,
             credential: None,
         }))
     }
@@ -1218,6 +1453,7 @@ mod tests {
                     setup: None,
                     workspace: id.as_str().to_string(),
                     env: vec![],
+                    env_file: None,
                     credential: None,
                 })),
             ],

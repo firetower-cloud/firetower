@@ -28,10 +28,13 @@ import type {
 import type {
   ApiError,
   Branches,
+  NewEnv,
   NewRepo,
   ProbeRequest,
   ProbeResponse,
-  Repo
+  Repo,
+  RepoChanges,
+  StoredEnv
 } from '../model';
 
 import { http } from '../../http';
@@ -371,6 +374,71 @@ export const useDeleteRepo = <TError = ApiError,
       > => {
       return useMutation(getDeleteRepoMutationOptions(options), queryClient);
     }
+    export const getUpdateRepoUrl = (id: string,) => {
+
+
+
+
+  return `/api/v1/repos/${id}`
+}
+
+export const updateRepo = async (id: string,
+    repoChanges: RepoChanges, options?: Parameters<typeof http>[1]): Promise<Repo> => {
+
+  return http<Repo>(getUpdateRepoUrl(id),
+  {
+    ...options,
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(repoChanges)
+  }
+);}
+
+
+
+
+
+export const getUpdateRepoMutationOptions = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateRepo>>, TError,{id: string;data: RepoChanges}, TContext>, request?: SecondParameter<typeof http>}
+): UseMutationOptions<Awaited<ReturnType<typeof updateRepo>>, TError,{id: string;data: RepoChanges}, TContext> => {
+
+const mutationKey = ['updateRepo'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateRepo>>, {id: string;data: RepoChanges}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  updateRepo(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateRepoMutationResult = NonNullable<Awaited<ReturnType<typeof updateRepo>>>
+    export type UpdateRepoMutationBody = RepoChanges
+    export type UpdateRepoMutationError = ApiError
+
+    export const useUpdateRepo = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateRepo>>, TError,{id: string;data: RepoChanges}, TContext>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof updateRepo>>,
+        TError,
+        {id: string;data: RepoChanges},
+        TContext
+      > => {
+      return useMutation(getUpdateRepoMutationOptions(options), queryClient);
+    }
     export const getRepoBranchesUrl = (id: string,) => {
 
 
@@ -491,3 +559,253 @@ export const useGetRepoBranchesQueryData = () => {
 }
 
 
+export const getListRepoEnvUrl = (id: string,) => {
+
+
+
+
+  return `/api/v1/repos/${id}/env`
+}
+
+/**
+ * Names, never values. One value comes back from one route, the same one
+ * everything else in the vault uses, and that route writes to the log first.
+ * @summary The variables a session on this repository will be given.
+ */
+export const listRepoEnv = async (id: string, options?: Parameters<typeof http>[1]): Promise<string[]> => {
+
+  return http<string[]>(getListRepoEnvUrl(id),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListRepoEnvQueryKey = (id: string,) => {
+    return [
+    `/api/v1/repos/${id}/env`
+    ] as const;
+    }
+
+
+export const getListRepoEnvQueryOptions = <TData = Awaited<ReturnType<typeof listRepoEnv>>, TError = ApiError>(id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listRepoEnv>>, TError, TData>>, request?: SecondParameter<typeof http>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListRepoEnvQueryKey(id);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listRepoEnv>>> = ({ signal }) => listRepoEnv(id, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: id !== null && id !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listRepoEnv>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListRepoEnvQueryResult = NonNullable<Awaited<ReturnType<typeof listRepoEnv>>>
+export type ListRepoEnvQueryError = ApiError
+
+
+export function useListRepoEnv<TData = Awaited<ReturnType<typeof listRepoEnv>>, TError = ApiError>(
+ id: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listRepoEnv>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listRepoEnv>>,
+          TError,
+          Awaited<ReturnType<typeof listRepoEnv>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListRepoEnv<TData = Awaited<ReturnType<typeof listRepoEnv>>, TError = ApiError>(
+ id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listRepoEnv>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listRepoEnv>>,
+          TError,
+          Awaited<ReturnType<typeof listRepoEnv>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListRepoEnv<TData = Awaited<ReturnType<typeof listRepoEnv>>, TError = ApiError>(
+ id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listRepoEnv>>, TError, TData>>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary The variables a session on this repository will be given.
+ */
+
+export function useListRepoEnv<TData = Awaited<ReturnType<typeof listRepoEnv>>, TError = ApiError>(
+ id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listRepoEnv>>, TError, TData>>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getListRepoEnvQueryOptions(id,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+/**
+ * @summary The variables a session on this repository will be given.
+ */
+export const useSetListRepoEnvQueryData = () => {
+  const queryClient = useQueryClient();
+  return (id: string,updater: Awaited<ReturnType<typeof listRepoEnv>> | undefined | ((old: Awaited<ReturnType<typeof listRepoEnv>> | undefined) => Awaited<ReturnType<typeof listRepoEnv>> | undefined)) => {
+    queryClient.setQueriesData<Awaited<ReturnType<typeof listRepoEnv>>>({ queryKey: getListRepoEnvQueryKey(id) }, updater);
+  };
+}
+
+/**
+ * @summary The variables a session on this repository will be given.
+ */
+export const useGetListRepoEnvQueryData = () => {
+  const queryClient = useQueryClient();
+  return (id: string,) =>
+    queryClient.getQueryData<Awaited<ReturnType<typeof listRepoEnv>>>(getListRepoEnvQueryKey(id));
+}
+
+
+export const getPutRepoEnvUrl = (id: string,) => {
+
+
+
+
+  return `/api/v1/repos/${id}/env`
+}
+
+export const putRepoEnv = async (id: string,
+    newEnv: NewEnv, options?: Parameters<typeof http>[1]): Promise<StoredEnv> => {
+
+  return http<StoredEnv>(getPutRepoEnvUrl(id),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(newEnv)
+  }
+);}
+
+
+
+
+
+export const getPutRepoEnvMutationOptions = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof putRepoEnv>>, TError,{id: string;data: NewEnv}, TContext>, request?: SecondParameter<typeof http>}
+): UseMutationOptions<Awaited<ReturnType<typeof putRepoEnv>>, TError,{id: string;data: NewEnv}, TContext> => {
+
+const mutationKey = ['putRepoEnv'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof putRepoEnv>>, {id: string;data: NewEnv}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  putRepoEnv(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type PutRepoEnvMutationResult = NonNullable<Awaited<ReturnType<typeof putRepoEnv>>>
+    export type PutRepoEnvMutationBody = NewEnv
+    export type PutRepoEnvMutationError = ApiError
+
+    export const usePutRepoEnv = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof putRepoEnv>>, TError,{id: string;data: NewEnv}, TContext>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof putRepoEnv>>,
+        TError,
+        {id: string;data: NewEnv},
+        TContext
+      > => {
+      return useMutation(getPutRepoEnvMutationOptions(options), queryClient);
+    }
+    export const getRemoveRepoEnvUrl = (id: string,
+    name: string,) => {
+
+
+
+
+  return `/api/v1/repos/${id}/env/${name}`
+}
+
+export const removeRepoEnv = async (id: string,
+    name: string, options?: Parameters<typeof http>[1]): Promise<void> => {
+
+  return http<void>(getRemoveRepoEnvUrl(id,name),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+
+export const getRemoveRepoEnvMutationOptions = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof removeRepoEnv>>, TError,{id: string;name: string}, TContext>, request?: SecondParameter<typeof http>}
+): UseMutationOptions<Awaited<ReturnType<typeof removeRepoEnv>>, TError,{id: string;name: string}, TContext> => {
+
+const mutationKey = ['removeRepoEnv'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof removeRepoEnv>>, {id: string;name: string}> = (props) => {
+          const {id,name} = props ?? {};
+
+          return  removeRepoEnv(id,name,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RemoveRepoEnvMutationResult = NonNullable<Awaited<ReturnType<typeof removeRepoEnv>>>
+
+    export type RemoveRepoEnvMutationError = ApiError
+
+    export const useRemoveRepoEnv = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof removeRepoEnv>>, TError,{id: string;name: string}, TContext>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof removeRepoEnv>>,
+        TError,
+        {id: string;name: string},
+        TContext
+      > => {
+      return useMutation(getRemoveRepoEnvMutationOptions(options), queryClient);
+    }
