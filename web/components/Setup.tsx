@@ -156,7 +156,7 @@ function Rail({
    second implementation of screens that already existed, so there is no second
    implementation here.
 
-   None of it is required. Every one can be skipped, and the inbox works with
+   None of it is required. Every one can be skipped, and Firetower works with
    no repository, no agent and no session — it just has nothing in it.        */
 
 function StepRepository({ onNext }: { onNext: () => void }) {
@@ -285,26 +285,22 @@ function StepAgent({ onNext }: { onNext: () => void }) {
 function StepSession({ onDone }: { onDone: () => void }) {
   const router = useRouter();
 
-  // Either way out of here is the end of onboarding, so both record it. Leaving
-  // by closing the tab does not, which is deliberate: nothing was decided.
-  const leave = (to: string) => {
+  // One way out, and it is the home page — which is where sessions are started
+  // and where they come back to you. There were two before: one named for a
+  // concept this interface does not use, and one to a page that played a
+  // recorded animation of a session starting without starting one.
+  const leave = () => {
     onDone();
-    router.push(to);
+    router.push("/");
   };
 
   return (
     <Card
       title="That's everything."
-      sub="A session is a branch, a worktree and an agent running in tmux on one of your hosts. It survives you closing the laptop, and the inbox is where it comes back to you when it stops being useful without you."
+      sub="A session is a branch, a worktree and an agent running in tmux on one of your hosts. It survives you closing the laptop, and describing what you want on the next screen is how you start one."
     >
       <Actions>
-        <Primary onClick={() => leave("/sessions/new")}>Start a session</Primary>
-        <button
-          onClick={() => leave("/")}
-          className="text-[12.5px] text-mute hover:text-text"
-        >
-          Go to the inbox
-        </button>
+        <Primary onClick={leave}>Go to Firetower</Primary>
       </Actions>
     </Card>
   );

@@ -36,7 +36,7 @@ export function SignIn() {
 
           // Where to land is "is setting up finished?", not "is this password
           // temporary?". Routing on the password alone meant that after the
-          // first step — which clears it — you were sent to an inbox while the
+          // first step — which clears it — you were sent to the home page while the
           // organisation was still unnamed, with nothing to take you back.
           //
           // `needsGithub` is deliberately not part of this. It is skippable,
@@ -48,9 +48,9 @@ export function SignIn() {
               state.needsPassword || state.needsOrganization ? "/setup" : "/",
             );
           } catch {
-            // If that call fails, the inbox is the safer guess: it renders its
-            // own errors, where a wizard would be asking questions it cannot
-            // save the answers to.
+            // If that call fails, the home page is the safer guess: it renders
+            // its own errors, where a wizard would be asking questions it
+            // cannot save the answers to.
             router.replace("/");
           }
         },
