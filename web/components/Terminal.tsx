@@ -1,6 +1,9 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+// Type only, so the import disappears at build time: the library itself is
+// loaded below, inside the effect, for the reason given there.
+import type { Terminal as Xterm } from "@xterm/xterm";
 import { wsBase, token } from "@/src/api/http";
 // xterm positions rows and measures cells from its own stylesheet. Without it
 // every glyph lands at the wrong width and the screen looks stretched.
@@ -15,8 +18,24 @@ type State = "connecting" | "live" | "closed";
  * arrow keys, tab completion and `Ctrl-C` all reach the agent. That's the point
  * — you're driving the CLI, not talking to a wrapper around it.
  */
-export function Terminal({ sessionId, live }: { sessionId: string; live: boolean }) {
+export function Terminal({
+  sessionId,
+  live,
+  /**
+   * Whether the terminal is the panel on screen.
+   *
+   * It stays mounted behind the other tab rather than being torn down and
+   * reattached, so this is what tells it apart from being visible.
+   */
+  showing = true,
+}: {
+  sessionId: string;
+  live: boolean;
+  showing?: boolean;
+}) {
   const host = useRef<HTMLDivElement>(null);
+  /** The attached terminal, for the focus effect below. */
+  const instance = useRef<Xterm | null>(null);
   const [state, setState] = useState<State>("connecting");
   /** Bumping this re-runs the effect below, which is one whole new attachment. */
   const [attempt, setAttempt] = useState(0);
@@ -73,6 +92,7 @@ export function Terminal({ sessionId, live }: { sessionId: string; live: boolean
       term.loadAddon(fit);
       term.open(host.current);
       fit.fit();
+      instance.current = term;
 
       const url = new URL(`${wsBase()}/api/v1/sessions/${sessionId}/pty`);
       url.searchParams.set("cols", String(term.cols));
@@ -118,6 +138,7 @@ export function Terminal({ sessionId, live }: { sessionId: string; live: boolean
         typed.dispose();
         socket?.close();
         term.dispose();
+        instance.current = null;
       };
     })();
 
@@ -126,6 +147,15 @@ export function Terminal({ sessionId, live }: { sessionId: string; live: boolean
       cleanup();
     };
   }, [sessionId, attempt]);
+
+  // Opening a session and being unable to type into it was a click that never
+  // did anything else. Focus follows the tab rather than the mount: the
+  // terminal stays attached behind the other one, and a focused terminal you
+  // cannot see would take your keystrokes and send them to the agent.
+  useEffect(() => {
+    if (showing && state === "live") instance.current?.focus();
+    else instance.current?.blur();
+  }, [showing, state]);
 
   return (
     <div className="flex h-full flex-col overflow-hidden rounded-[6px] border border-line bg-[#0f0e0d]">

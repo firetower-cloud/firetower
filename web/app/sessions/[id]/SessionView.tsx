@@ -156,7 +156,7 @@ export default function SessionView() {
               connection and lose everything on screen. */}
           <div className="min-h-0 flex-1">
             <div className={`h-full ${tab === "Terminal" ? "" : "hidden"}`}>
-              <Terminal sessionId={session.id} live={busy} />
+              <Terminal sessionId={session.id} live={busy} showing={tab === "Terminal"} />
             </div>
             <div className={`h-full ${tab === "Changes" ? "" : "hidden"}`}>
               <Diff sessionId={session.id} />
