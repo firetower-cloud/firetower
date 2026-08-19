@@ -284,7 +284,13 @@ inside the worker itself. Add the host and leave the container field **empty**.
 
 #### Upgrading
 
-Pull the new image and start the container again:
+**Drain the host first, and wait.** Compute → the host → **Drain**, until
+nothing is running on it. Recreating the container takes the tmux server with
+it, and every session on that host goes too. This is the only step here that
+can lose work, which is why it comes before the commands rather than after
+them.
+
+Then, on the machine:
 
 ```sh
 docker pull ghcr.io/firetower-cloud/firetower-worker:latest
@@ -296,14 +302,23 @@ docker run -d --name firetower-worker \
   sleep infinity
 ```
 
-Removing the container is safe because the volume is what holds anything worth
-keeping: repositories, worktrees, the event log and the agent's own directory.
-**Running sessions are not** — recreating the container takes the tmux server
-with it, so drain the host first.
+**Keep the volume exactly as it is.** `firetower:/var/lib/firetower` holds
+everything worth keeping — repositories, worktrees, the event log, and the
+agent's own home, which is where the hooks Firetower installed live. Removing
+the container is safe precisely because none of that is in it.
+
+Resume the host afterwards: the same button now says **Resume**.
 
 `latest` is the newest release. Firetower compares its own version against each
 worker's on every connection and says when they have drifted, so name a version
-instead — `:0.2.0` — if you would rather decide when a worker moves.
+instead — `:0.3.0` — if you would rather decide when a worker moves.
+
+**A worker that is behind still works, quietly.** It runs sessions perfectly
+well; what it cannot do is anything added since it was built. A worker older
+than agent hooks, for instance, will start an agent and never tell you it
+stopped — the session simply sits on *working* while the agent waits for you.
+Nothing reports an error, so the version drift the fleet screen shows is the
+thing to look at when a feature seems not to exist.
 
 ### Connecting repositories
 
