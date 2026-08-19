@@ -180,6 +180,10 @@ function WhoAmI() {
       // the wrong way to fail.
       onSettled: () => {
         forgetToken();
+        // A full load on purpose: this runs when a session has just ended, and the
+        // router would keep every cached query belonging to whoever was signed in.
+        // Clearing that is the point.
+        // eslint-disable-next-line @next/next/no-location-assign-relative-destination
         window.location.assign("/login");
       },
     });

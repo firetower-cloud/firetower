@@ -43,6 +43,15 @@ export function ConnectAgent({
 
   return (
     <Modal title={`Connect ${agent.label}`} onClose={onClose} wide>
+      {/* Only the subscription. The protocol and the vault both handle an API
+          key — `AgentMode::ApiKey` is real on the server — but nothing has been
+          run end to end that way, and offering an untested path beside a
+          working one is how somebody spends an afternoon finding that out.
+          Restoring the choice is this block and nothing else.
+
+          An agent already configured with a key still reports it, and the
+          agents screen still shows it. This is about what is offered, not what
+          is understood. */}
       <div className="flex flex-col gap-2">
         <Choice
           on={mode === AgentMode.Subscription}
@@ -50,13 +59,6 @@ export function ConnectAgent({
           tag="plan"
           body="Get a token once on your own machine. Every host uses it — no signing in server by server."
           onClick={() => setMode(AgentMode.Subscription)}
-        />
-        <Choice
-          on={mode === AgentMode.ApiKey}
-          title="An API key"
-          tag="metered"
-          body="Billed per token, rather than against a plan you already pay for."
-          onClick={() => setMode(AgentMode.ApiKey)}
         />
       </div>
 
@@ -77,9 +79,7 @@ export function ConnectAgent({
       )}
 
       <div className="mt-4">
-        <label className="eyebrow">
-          {mode === AgentMode.Subscription ? "Paste the token" : "API key"}
-        </label>
+        <label className="eyebrow">Paste the token</label>
         <input
           autoFocus
           type="password"

@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Modal, Command, Foot, Go, Quiet } from "./Modal";
+import { Modal, Foot, Go, Quiet } from "./Modal";
 import { ClientIdForm } from "./SetupAccount";
 import {
   useListProviders,
