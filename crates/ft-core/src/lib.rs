@@ -711,6 +711,76 @@ pub mod hooks {
         "message",                // UserPromptSubmit
     ];
 
+    /// How much a note actually tells you.
+    ///
+    /// A blocked agent reports more than once and from more than one hook, so
+    /// notes arrive out of order and compete. Ranking them is what stops the
+    /// worse one landing last: `Stop` reading a stale sentence out of the
+    /// transcript six seconds after `PermissionRequest` said exactly what was
+    /// being asked.
+    ///
+    /// A boolean was not enough. Both of those are "specific"; only one of them
+    /// is the question.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+    pub enum Detail {
+        /// "Claude needs your permission" — true of every permission prompt.
+        Message = 0,
+        /// The last thing the agent said, which may be about something else by
+        /// the time it blocks.
+        Said = 1,
+        /// The tool it is waiting to use, and its arguments.
+        Tool = 2,
+        /// The question itself. Nothing beats being asked.
+        Question = 3,
+    }
+
+    /// Whether a note is worth replacing what is already on the card.
+    ///
+    /// Equal ranks replace — a new question supersedes an older question — and
+    /// lower ones never do.
+    pub fn worth_replacing(existing: Detail, incoming: Detail) -> bool {
+        incoming >= existing
+    }
+
+    /// A question the agent asked, as one line.
+    ///
+    /// The options belong on the card. The point of the inbox is deciding
+    /// without opening a terminal, and a question with its choices hidden still
+    /// makes you go and look.
+    pub fn note_for_question(question: &str, options: &[String]) -> String {
+        let question = question.trim();
+        if options.is_empty() {
+            return question.to_string();
+        }
+        format!("{question} — {}", options.join(" / "))
+    }
+
+    /// Emphasis, as characters.
+    ///
+    /// Notes are prose an agent wrote, so they arrive with markdown in them,
+    /// and the card is one line of plain text — `**Option A**` renders as
+    /// exactly that, asterisks and all.
+    pub fn plain(text: &str) -> String {
+        let mut out = String::with_capacity(text.len());
+        let mut chars = text.chars().peekable();
+
+        while let Some(c) = chars.next() {
+            match c {
+                // `**bold**` and `*italic*` alike: the markers go, the words
+                // stay.
+                '*' | '_' => {
+                    while chars.peek() == Some(&c) {
+                        chars.next();
+                    }
+                }
+                '`' => {}
+                other => out.push(other),
+            }
+        }
+
+        out
+    }
+
     /// What the agent wants to do, in a phrase.
     ///
     /// `Notification` says "Claude needs your permission" whatever it is

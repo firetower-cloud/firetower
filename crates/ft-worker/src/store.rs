@@ -123,14 +123,24 @@ impl Store {
         Ok(row.and_then(|r| r.get::<Option<String>, _>("note")))
     }
 
+    /// How good the note currently on this session is.
+    pub async fn note_rank_of(&self, id: &SessionId) -> Result<i64> {
+        let row = sqlx::query("SELECT note_rank FROM sessions WHERE id = ?")
+            .bind(id.as_str())
+            .fetch_optional(&self.pool)
+            .await?;
+        Ok(row.map(|r| r.get::<i64, _>("note_rank")).unwrap_or(0))
+    }
+
     /// Record why, or clear it.
     ///
     /// Held here as well as in the event so that a hook can tell whether
     /// anything actually changed — without it, an agent that notifies four
     /// times while it waits writes four identical rows.
-    pub async fn set_note(&self, id: &SessionId, note: Option<&str>) -> Result<()> {
-        sqlx::query("UPDATE sessions SET note = ?, updated_at = ? WHERE id = ?")
+    pub async fn set_note(&self, id: &SessionId, note: Option<&str>, rank: i64) -> Result<()> {
+        sqlx::query("UPDATE sessions SET note = ?, note_rank = ?, updated_at = ? WHERE id = ?")
             .bind(note)
+            .bind(rank)
             .bind(chrono::Utc::now().to_rfc3339())
             .bind(id.as_str())
             .execute(&self.pool)

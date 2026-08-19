@@ -6,6 +6,7 @@
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
+use ft_core::hooks;
 use std::path::PathBuf;
 
 #[derive(Parser)]
@@ -306,7 +307,8 @@ async fn report_hook(event: &str) -> Result<()> {
         return Ok(());
     };
 
-    let (mut note, specific) = note_for(&payload, status);
+    let (note, rank) = note_for(&payload, status);
+    let note = note.map(|n| hooks::plain(&n));
 
     let store = ft_worker::store::Store::open(&root.join("worker.db")).await?;
 
@@ -319,12 +321,32 @@ async fn report_hook(event: &str) -> Result<()> {
     // rows before this.
     let was = store.status_of(&session).await?;
     let said = store.note_of(&session).await?;
+    let said_rank = store.note_rank_of(&session).await?;
 
-    // Keep the better sentence. Still the same block, and we have nothing more
-    // specific to say than we already did.
-    if was == Some(status) && !specific && said.is_some() {
-        note = said.clone();
+    // Finishing a sentence in order to ask a question is not handing back.
+    //
+    // `Stop` fires when the agent stops talking, which is exactly what it does
+    // before it waits for you — so it arrived seconds after `NeedsYou` and
+    // demoted it. Both land in the same inbox, so this was only ever wrong on
+    // the card, but it was wrong.
+    if was == Some(ft_core::SessionStatus::NeedsYou) && status == ft_core::SessionStatus::HandedBack
+    {
+        return Ok(());
     }
+
+    // Keep the better sentence.
+    //
+    // Notes arrive from several hooks within seconds and not best-first: the
+    // question, then a stale paragraph out of the transcript. Only something at
+    // least as good may replace what is already there.
+    let note = if was == Some(status)
+        && said.is_some()
+        && !hooks::worth_replacing(rank_from(said_rank), rank)
+    {
+        said.clone()
+    } else {
+        note
+    };
 
     if was == Some(status) && said == note {
         return Ok(());
@@ -334,7 +356,9 @@ async fn report_hook(event: &str) -> Result<()> {
     // the first is what every screen reads and the second is what reaches a
     // control plane that was not connected when this happened.
     store.set_status(&session, status).await?;
-    store.set_note(&session, note.as_deref()).await?;
+    store
+        .set_note(&session, note.as_deref(), rank as i64)
+        .await?;
     store
         .append(
             &session,
@@ -357,61 +381,114 @@ async fn report_hook(event: &str) -> Result<()> {
 ///
 /// Nothing at all once it is working again: a question that has been answered
 /// should not still be on the screen.
-fn note_for(payload: &serde_json::Value, status: ft_core::SessionStatus) -> (Option<String>, bool) {
-    use ft_core::hooks;
+fn note_for(
+    payload: &serde_json::Value,
+    status: ft_core::SessionStatus,
+) -> (Option<String>, hooks::Detail) {
+    use ft_core::hooks::{self, Detail};
 
     if status == ft_core::SessionStatus::Working {
-        return (None, true);
+        // A question that has been answered is not news. Highest rank so it
+        // always clears whatever was there.
+        return (None, Detail::Question);
     }
 
-    // 1. What it wants to do.
+    // 1. The question, when the agent asked one outright.
+    if let Some(asked) = question_in(payload.get("tool_input")) {
+        return (hooks::trim_note(&asked), Detail::Question);
+    }
+
+    // 2. What it wants to do.
     if let Some(tool) = payload.get("tool_name").and_then(|v| v.as_str()) {
         let detail = payload.get("tool_input").and_then(|input| {
             hooks::TOOL_DETAIL_KEYS
                 .iter()
                 .find_map(|key| input.get(key).and_then(|v| v.as_str()))
         });
-        return (hooks::trim_note(&hooks::note_for_tool(tool, detail)), true);
+        return (
+            hooks::trim_note(&hooks::note_for_tool(tool, detail)),
+            Detail::Tool,
+        );
     }
 
-    // 2. What it last said. The generic notification is the same sentence
-    //    whether it wants to run a command or wants you to choose from a list,
-    //    and the transcript is where that difference lives.
-    if let Some(said) = payload
+    // 3. Whatever the transcript ends on — a question if it asked one, and
+    //    otherwise the last thing it said.
+    if let Some((said, rank)) = payload
         .get("transcript_path")
         .and_then(|v| v.as_str())
         .and_then(last_thing_said)
-        .and_then(|t| hooks::trim_note(&t))
     {
-        return (Some(said), true);
+        if let Some(note) = hooks::trim_note(&said) {
+            return (Some(note), rank);
+        }
     }
 
-    // 3. Better than silence, and nothing more. Marked unspecific so it cannot
-    //    replace something that actually said what the agent wants: a blocked
-    //    agent notifies repeatedly, and "Claude needs your permission" arriving
-    //    after "wants to run git push --force" is a downgrade.
+    // 4. Better than silence, and nothing more. The same sentence whatever is
+    //    being asked, so it may fill a gap and never replace anything.
     (
         hooks::NOTE_KEYS
             .iter()
             .find_map(|key| payload.get(key).and_then(|v| v.as_str()))
             .and_then(hooks::trim_note),
-        false,
+        Detail::Message,
     )
 }
 
-/// The last thing the agent said, from its own transcript.
+/// A rank as it came out of the database.
 ///
-/// Newline-delimited JSON, one row per message, read from the end because only
-/// the last assistant turn matters.
+/// Anything unrecognised counts as the weakest, so a row written by an older
+/// build cannot block a better note from landing.
+fn rank_from(stored: i64) -> hooks::Detail {
+    use ft_core::hooks::Detail;
+    match stored {
+        3 => Detail::Question,
+        2 => Detail::Tool,
+        1 => Detail::Said,
+        _ => Detail::Message,
+    }
+}
+
+/// The question inside an `AskUserQuestion` call, with its options.
+///
+/// This is the one tool whose arguments *are* the question. Without reading it,
+/// a card that could have said "What would you like to work on next? — Continue
+/// prior task / Something new" says "wants to use AskUserQuestion".
+fn question_in(input: Option<&serde_json::Value>) -> Option<String> {
+    let first = input?.get("questions")?.as_array()?.first()?;
+    let question = first.get("question")?.as_str()?;
+
+    let options: Vec<String> = first
+        .get("options")
+        .and_then(|o| o.as_array())
+        .map(|options| {
+            options
+                .iter()
+                .filter_map(|o| o.get("label").and_then(|l| l.as_str()))
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default();
+
+    Some(ft_core::hooks::note_for_question(question, &options))
+}
+
+/// Whatever the agent's transcript ends on.
+///
+/// Newline-delimited JSON, one row per message, read from the end. The last
+/// assistant row is what matters — and what it holds may be a question rather
+/// than a sentence, because an agent asking you something does it through a
+/// tool call. Reading only the prose walked straight past the question and
+/// reported the paragraph before it.
 ///
 /// The format belongs to the agent and can change under us — the same bargain
-/// `first_run` makes with its configuration. It is worth it: without this the
-/// card says "needs your permission" whatever is being asked. If it ever stops
-/// parsing, the note falls back to the hook's own message rather than breaking.
+/// `first_run` makes with its configuration. If it ever stops parsing, the note
+/// falls back to the hook's own message rather than breaking.
 ///
 /// The documentation warns this file "may lag behind the current turn", so a
 /// stale line is possible. Still more than the alternative says.
-fn last_thing_said(path: &str) -> Option<String> {
+fn last_thing_said(path: &str) -> Option<(String, hooks::Detail)> {
+    use ft_core::hooks::Detail;
+
     let text = std::fs::read_to_string(path).ok()?;
 
     for line in text.lines().rev() {
@@ -422,19 +499,32 @@ fn last_thing_said(path: &str) -> Option<String> {
             continue;
         }
 
-        let said = row
+        let Some(blocks) = row
             .get("message")
             .and_then(|m| m.get("content"))
             .and_then(|c| c.as_array())
-            .into_iter()
-            .flatten()
+        else {
+            continue;
+        };
+
+        // A question first, whatever else this row holds.
+        if let Some(asked) = blocks
+            .iter()
+            .filter(|b| b.get("name").and_then(|n| n.as_str()) == Some("AskUserQuestion"))
+            .find_map(|b| question_in(b.get("input")))
+        {
+            return Some((asked, Detail::Question));
+        }
+
+        let said = blocks
+            .iter()
             .filter(|block| block.get("type").and_then(|t| t.as_str()) == Some("text"))
             .filter_map(|block| block.get("text").and_then(|t| t.as_str()))
             .collect::<Vec<_>>()
             .join(" ");
 
         if !said.trim().is_empty() {
-            return Some(said);
+            return Some((said, Detail::Said));
         }
     }
 
@@ -580,13 +670,39 @@ fn init_tracing(to_stderr: bool, pretty: bool) {
 
 #[cfg(test)]
 mod hook_note_tests {
-    use super::note_for;
+    use super::{note_for, question_in};
+    use ft_core::hooks::Detail;
     use ft_core::SessionStatus;
     use serde_json::json;
 
+    /// The one from the screenshot: the agent asked through a tool call, and
+    /// the card showed the paragraph before it.
+    #[test]
+    fn a_question_asked_through_a_tool_is_the_question() {
+        let (note, rank) = note_for(
+            &json!({
+                "tool_name": "AskUserQuestion",
+                "tool_input": { "questions": [{
+                    "question": "What would you like to work on next?",
+                    "options": [
+                        { "label": "Continue prior task" },
+                        { "label": "Something new" },
+                    ],
+                }]},
+            }),
+            SessionStatus::NeedsYou,
+        );
+
+        assert_eq!(
+            note.as_deref(),
+            Some("What would you like to work on next? — Continue prior task / Something new")
+        );
+        assert_eq!(rank, Detail::Question, "nothing outranks being asked");
+    }
+
     #[test]
     fn a_tool_call_beats_the_message_that_came_with_it() {
-        let (note, specific) = note_for(
+        let (note, rank) = note_for(
             &json!({
                 "tool_name": "Bash",
                 "tool_input": { "command": "git push --force" },
@@ -596,37 +712,70 @@ mod hook_note_tests {
         );
 
         assert_eq!(note.as_deref(), Some("wants to run git push --force"));
-        assert!(
-            specific,
-            "so a later generic notification cannot replace it"
-        );
+        assert_eq!(rank, Detail::Tool);
     }
 
-    /// The fallback, and why it is marked.
-    ///
     /// "Claude needs your permission" is what a permission prompt says however
-    /// specific the question. Arriving after something that said what the agent
-    /// actually wants, it would be a downgrade — so it is allowed to fill a
-    /// gap and never to overwrite.
+    /// specific the question, so it may fill a gap and never replace anything.
     #[test]
     fn the_generic_message_is_a_last_resort() {
-        let (note, specific) = note_for(
+        let (note, rank) = note_for(
             &json!({ "notification_message": "Claude needs your permission" }),
             SessionStatus::NeedsYou,
         );
 
         assert_eq!(note.as_deref(), Some("Claude needs your permission"));
-        assert!(!specific);
+        assert_eq!(rank, Detail::Message);
+        assert!(!ft_core::hooks::worth_replacing(Detail::Tool, rank));
+        assert!(!ft_core::hooks::worth_replacing(Detail::Question, rank));
+    }
+
+    #[test]
+    fn a_newer_question_replaces_an_older_one() {
+        assert!(ft_core::hooks::worth_replacing(
+            Detail::Question,
+            Detail::Question
+        ));
     }
 
     #[test]
     fn working_again_clears_it() {
-        let (note, specific) = note_for(
+        let (note, rank) = note_for(
             &json!({ "tool_name": "Bash", "tool_input": { "command": "ls" } }),
             SessionStatus::Working,
         );
 
         assert_eq!(note, None, "a question that was answered is not news");
-        assert!(specific);
+        assert_eq!(rank, Detail::Question, "and nothing may put it back");
+    }
+
+    /// The exact shape read off a real transcript, options and all.
+    #[test]
+    fn the_question_shape_is_the_one_agents_actually_write() {
+        let asked = question_in(Some(&json!({
+            "questions": [{
+                "question": "Which one do you want?",
+                "header": "Next task",
+                "options": [
+                    { "label": "Option A", "description": "the first" },
+                    { "label": "Option B", "description": "the second" },
+                ],
+                "multiSelect": false,
+            }]
+        })));
+
+        assert_eq!(
+            asked.as_deref(),
+            Some("Which one do you want? — Option A / Option B")
+        );
+    }
+
+    #[test]
+    fn markdown_is_not_shown_as_characters() {
+        assert_eq!(
+            ft_core::hooks::plain("Got it — you picked **Option A**."),
+            "Got it — you picked Option A."
+        );
+        assert_eq!(ft_core::hooks::plain("run `ls -la` now"), "run ls -la now");
     }
 }
