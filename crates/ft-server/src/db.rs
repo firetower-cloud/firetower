@@ -109,6 +109,9 @@ impl Db {
                 )
             })?;
 
+        // Before this run adds one of its own.
+        sweep_test_schemas(&pool).await;
+
         Self::migrated(pool).await
     }
 
@@ -698,6 +701,83 @@ impl Db {
             })
             .collect()
     }
+}
+
+/// Drop the schemas left behind by runs that are over.
+///
+/// On the way *in*, not on the way out, and that is the whole design. Rust has
+/// no teardown hook; `Drop` cannot help because `Db` is cloned into half the
+/// crate and dropping a schema is an async query a synchronous `Drop` cannot
+/// await; and anything that does run at the end is skipped by exactly the
+/// panicking test you most want to look at. So each run tidies up after the
+/// last one, and however this process dies, the next one cleans up after it.
+///
+/// Left to itself this leaked 1,117 schemas and half a gigabyte into a database
+/// whose real contents are a few dozen rows.
+///
+/// Once per process. Failures are ignored on purpose: this is housekeeping, and
+/// a test that cannot run is a better thing to report than a test that could
+/// not tidy up.
+#[cfg(test)]
+async fn sweep_test_schemas(pool: &PgPool) {
+    static SWEPT: tokio::sync::OnceCell<()> = tokio::sync::OnceCell::const_new();
+
+    SWEPT
+        .get_or_init(|| async {
+            // An hour. The whole suite takes seconds, so nothing this old can
+            // belong to a test that is still running — including one in another
+            // process, which is why this is not "anything but mine".
+            let stale: Vec<String> = match sqlx::query_scalar(
+                "SELECT schema_name::text FROM information_schema.schemata
+                  WHERE schema_name LIKE 'test\\_%' ESCAPE '\\'",
+            )
+            .fetch_all(pool)
+            .await
+            {
+                Ok(found) => found,
+                Err(e) => {
+                    tracing::debug!("could not list test schemas: {e}");
+                    return;
+                }
+            };
+
+            let cutoff = chrono::Utc::now() - chrono::Duration::hours(1);
+            let mut dropped = 0;
+
+            for name in stale {
+                // The name carries when it was made: `test_<ulid>`, and a ULID
+                // is a timestamp with randomness after it.
+                let Some(made) = name
+                    .strip_prefix("test_")
+                    .and_then(|id| ulid::Ulid::from_string(&id.to_uppercase()).ok())
+                    .and_then(|id| {
+                        chrono::DateTime::from_timestamp_millis(id.timestamp_ms() as i64)
+                    })
+                else {
+                    continue;
+                };
+
+                if made >= cutoff {
+                    continue;
+                }
+
+                // One statement per schema, each its own transaction. Dropping
+                // a thousand of them in one goes through `max_locks_per_transaction`
+                // and fails with `out of shared memory`, having done nothing.
+                if sqlx::query(&format!("DROP SCHEMA \"{name}\" CASCADE"))
+                    .execute(pool)
+                    .await
+                    .is_ok()
+                {
+                    dropped += 1;
+                }
+            }
+
+            if dropped > 0 {
+                eprintln!("swept {dropped} test schemas left by earlier runs");
+            }
+        })
+        .await;
 }
 
 fn host_from_row(r: sqlx::postgres::PgRow) -> Result<Host> {

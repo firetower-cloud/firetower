@@ -134,6 +134,27 @@ lint:
     cargo fmt --check
     cd web && pnpm lint
 
+# Drop the schemas the tests leave behind.
+#
+# Each test that touches Postgres works in a schema of its own, and a run
+# leaves one per test. They are swept by the next run that starts more than an
+# hour later, so this is only for when you want the space back now — or when a
+# tool you have pointed at the database is drowning in them.
+db-clean:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # One statement each, not one transaction: a thousand schemas in a single
+    # transaction exhausts max_locks_per_transaction and rolls the lot back.
+    docker compose exec -T postgres psql -U "${POSTGRES_USER:-firetower}" -d "${POSTGRES_DB:-firetower}" -tAc \
+        "SELECT format('DROP SCHEMA %I CASCADE;', schema_name) FROM information_schema.schemata \
+          WHERE schema_name LIKE 'test\_%' ESCAPE '\'" \
+      | docker compose exec -T postgres psql -U "${POSTGRES_USER:-firetower}" -d "${POSTGRES_DB:-firetower}" -q
+    echo "  swept. Reclaim the disk with: just db-vacuum"
+
+# Give the space back to the filesystem. Only worth it after db-clean.
+db-vacuum:
+    docker compose exec -T postgres psql -U "${POSTGRES_USER:-firetower}" -d "${POSTGRES_DB:-firetower}" -c "VACUUM FULL;"
+
 # Start fresh. The control plane's database is a cache — it rebuilds from
 # the workers on reconnect.
 reset:

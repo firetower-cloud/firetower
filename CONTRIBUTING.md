@@ -83,6 +83,29 @@ produce a second lockfile, so `packageManager` refuses it.
 
 `.env.example` is for contributors. Nobody running Firetower needs one.
 
+## The tests and your database
+
+Each test that touches Postgres works in a schema of its own, named
+`test_<ulid>`, so the suite runs in parallel against one server without tests
+seeing each other's rows. A run leaves one schema per test — around 130.
+
+They are swept by the next run that starts, an hour or more later. That is
+deliberately on the way *in* rather than on the way out: Rust has no teardown
+hook, `Drop` cannot help because `Db` is cloned into half the crate and
+dropping a schema is an async query, and anything that runs at the end is
+skipped by exactly the test that panicked. Tidying up before starting survives
+all of that.
+
+If you want the space back now — or a tool pointed at that database is drowning
+in them:
+
+```sh
+just db-clean     # drop them
+just db-vacuum    # give the disk back
+```
+
+Left alone for three days of heavy use, this reached 1,117 schemas and 514 MB.
+
 ## The interface is a static export
 
 `next build` writes `web/out`, and the control plane compiles it into the
