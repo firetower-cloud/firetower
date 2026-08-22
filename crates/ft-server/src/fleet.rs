@@ -172,6 +172,67 @@ impl Fleet {
         self.events.subscribe()
     }
 
+    /// Connect once and say what happened, writing nothing down.
+    ///
+    /// The same handshake `supervise` runs, without a host to attach it to.
+    /// Adding a machine can then find out whether it works *before* the row
+    /// exists, so a name that was mistyped leaves nothing behind and a retry is
+    /// a button rather than a form to fill in again.
+    ///
+    /// `None` means it answered as a worker. Anything else is why it did not.
+    pub async fn probe_host(
+        transport: Arc<dyn Transport>,
+        compute: &ft_core::Compute,
+    ) -> Option<ft_core::Diagnosis> {
+        let mut conn = match transport.connect().await {
+            Ok(conn) => conn,
+            Err(e) => {
+                // Nothing started, so there is no stderr to read; the error is
+                // already in the right words.
+                return Some(ft_core::Diagnosis::new(
+                    ft_core::Cause::Unknown,
+                    format!("{e:#}"),
+                ));
+            }
+        };
+
+        let mut codec = Codec::new(&mut conn.reader, &mut conn.writer);
+
+        let greeting = codec
+            .write(&ToWorker::Hello {
+                protocol: PROTOCOL_VERSION,
+                client_version: env!("CARGO_PKG_VERSION").to_string(),
+            })
+            .await;
+
+        let handshake = match greeting {
+            Ok(()) => codec.read::<ToServer>().await,
+            Err(e) => Err(e),
+        };
+
+        match handshake {
+            Ok(ToServer::Hello { protocol, .. }) if protocol == PROTOCOL_VERSION => None,
+            Ok(ToServer::Hello { protocol, .. }) => Some(crate::diagnose::protocol_mismatch(
+                protocol,
+                PROTOCOL_VERSION,
+                compute,
+            )),
+            Ok(_) => Some(ft_core::Diagnosis::new(
+                ft_core::Cause::Unknown,
+                "That host replied with something other than a worker's greeting.",
+            )),
+            Err(_) => {
+                // The codec borrows both halves; reading the child's stderr
+                // needs them back.
+                drop(codec);
+
+                let said = conn.stderr_tail();
+                let status = conn.exit_status().await;
+                Some(crate::diagnose::from_output(&said, status, compute))
+            }
+        }
+    }
+
     /// The transport a host's kind implies.
     ///
     /// The worker is identical in all three cases and cannot tell which it is
@@ -207,12 +268,12 @@ impl Fleet {
                     .context("a server host has somewhere to dial")?,
                 port: *port,
                 key: key.clone(),
-                // Only carried when the key is one the vault holds. A path or
-                // ssh's own choice needs nothing from us.
-                vault: key
-                    .is_held()
-                    .then(|| vault.map(|v| (v.clone(), home.to_path_buf())))
-                    .flatten(),
+                // Always: ssh records host keys under here whichever key it
+                // authenticates with.
+                home: home.to_path_buf(),
+                // Only when the key is one the vault holds. A path, or ssh's
+                // own choice, needs nothing from us.
+                vault: key.is_held().then(|| vault.cloned()).flatten(),
                 container: container.clone(),
                 // Inside a container, the path the image creates. On the
                 // machine itself, the worker's own default: that account may

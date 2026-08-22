@@ -228,12 +228,13 @@ pub struct SshTransport {
     /// nobody rechecked. A key the vault holds is written where ssh can read it
     /// at that same moment — see [`crate::sshkey::materialise`].
     pub key: ft_core::SshKey,
-    /// Where a held key is read from, and the state directory to fall back to
-    /// when there is no `/dev/shm` to write it in.
+    /// Where the control plane keeps its state, on this machine.
     ///
-    /// `None` for a transport that will never need one, which is every kind but
-    /// this and only this kind when the key is a path or ssh's own choice.
-    pub vault: Option<(Arc<crate::vault::Vault>, std::path::PathBuf)>,
+    /// Two things live under it: the file ssh records host keys in, and — when
+    /// there is no `/dev/shm` — the key it authenticates with.
+    pub home: std::path::PathBuf,
+    /// Where a held key is read from, when the key is one.
+    pub vault: Option<Arc<crate::vault::Vault>>,
     /// The container to run the worker in on that machine, if it runs in one.
     ///
     /// Reached by ssh-ing to the machine and running `docker exec` there,
@@ -251,6 +252,25 @@ pub struct SshTransport {
 }
 
 impl SshTransport {
+    /// The file ssh records host keys in, created if it is not there.
+    ///
+    /// One file for every host rather than one each: that is what ssh expects,
+    /// and it is what makes a machine answering on an address it did not answer
+    /// on before something ssh can notice.
+    fn known_hosts(&self) -> Result<std::path::PathBuf> {
+        let dir = self.home.join("ssh");
+        std::fs::create_dir_all(&dir)
+            .with_context(|| format!("making {}", dir.display()))?;
+
+        let path = dir.join("known_hosts");
+        if !path.exists() {
+            std::fs::write(&path, "")
+                .with_context(|| format!("creating {}", path.display()))?;
+        }
+
+        Ok(path)
+    }
+
     /// The file to hand `ssh -i`, if any.
     ///
     /// `None` means ssh decides for itself, which is what an unset key has
@@ -260,14 +280,13 @@ impl SshTransport {
             ft_core::SshKey::Default => Ok(None),
             ft_core::SshKey::File { path } => Ok(Some(identity_path(path)?)),
             ft_core::SshKey::Managed | ft_core::SshKey::Held { .. } => {
-                let (vault, home) = self
-                    .vault
-                    .as_ref()
-                    .context("this host authenticates with a key Firetower holds, and there is no vault to read it from")?;
+                let vault = self.vault.as_ref().context(
+                    "this host authenticates with a key Firetower holds, and there is no vault to read it from",
+                )?;
 
                 let path = crate::sshkey::materialise(
                     vault,
-                    home,
+                    &self.home,
                     &format!("connecting to {}", self.destination),
                 )
                 .await?;
@@ -314,6 +333,28 @@ impl Transport for SshTransport {
             // wrong machine.
             .arg("-o")
             .arg("StrictHostKeyChecking=accept-new");
+
+        // Where ssh remembers what each machine answered with.
+        //
+        // Not its default. That is `$HOME/.ssh/known_hosts`, which in the image
+        // is `/root/.ssh/known_hosts` — the container's writable layer, thrown
+        // away every time the container is recreated. So every upgrade emptied
+        // it, and `accept-new` above then re-trusted whatever answered next:
+        // the exact substitution StrictHostKeyChecking exists to catch, made
+        // invisible by the upgrade that caused it.
+        //
+        // Under the state directory it is on the volume, and outlives both.
+        match self.known_hosts() {
+            Ok(path) => {
+                ssh.arg("-o")
+                    .arg(format!("UserKnownHostsFile={}", path.display()));
+            }
+            // Not fatal. A connection with ssh's own default is worth more than
+            // no connection, and the log says which we got.
+            Err(e) => tracing::warn!(
+                "could not prepare a known_hosts file, falling back to ssh's default: {e:#}"
+            ),
+        }
 
         if let Some(port) = self.port {
             ssh.arg("-p").arg(port.to_string());
@@ -463,6 +504,7 @@ mod tests {
             destination: destination.into(),
             port: None,
             key: ft_core::SshKey::Default,
+            home: std::path::PathBuf::from("/var/lib/firetower"),
             // These describe themselves without connecting, and a key ssh
             // chooses for itself never reaches the vault.
             vault: None,
@@ -591,6 +633,27 @@ mod tests {
         assert!(said("").contains("no key"));
         assert!(said(".ssh/id_ed25519").contains("relative path"));
         assert!(said("/no/such/directory/id_ed25519").contains("no key at"));
+    }
+
+    #[test]
+    fn known_hosts_lives_under_the_state_directory_not_the_container() {
+        // ssh's default is $HOME/.ssh/known_hosts, which in the image is the
+        // container's writable layer — emptied by every upgrade, after which
+        // `accept-new` re-trusts whatever answers. Under the state directory it
+        // is on the volume and outlives the container.
+        let dir = tempfile::tempdir().unwrap();
+
+        let transport = SshTransport {
+            home: dir.path().to_path_buf(),
+            ..ssh("deploy@fire-01")
+        };
+
+        let path = transport.known_hosts().unwrap();
+        assert_eq!(path, dir.path().join("ssh").join("known_hosts"));
+        assert!(path.exists(), "ssh is given a file that is already there");
+
+        // Asked for twice, because every connection asks.
+        assert_eq!(transport.known_hosts().unwrap(), path);
     }
 
     #[test]

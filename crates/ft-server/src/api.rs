@@ -197,7 +197,8 @@ async fn credential_for(state: &AppState, remote: &str, why: &str) -> Option<Cre
         ft_core::FileDiff,
         ft_core::Compute,
         ft_core::SshKey,
-        crate::sshkey::PublicIdentity
+        crate::sshkey::PublicIdentity,
+        hosts::Reached
     ))
 )]
 pub struct ApiDoc;
@@ -222,6 +223,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(hosts::connect_host))
         .routes(routes!(hosts::drain_host))
         .routes(routes!(hosts::ssh_key))
+        .routes(routes!(hosts::probe_host))
         .routes(routes!(repos::list_repos, repos::create_repo))
         .routes(routes!(repos::delete_repo, repos::update_repo))
         .routes(routes!(repos::list_repo_env, repos::put_repo_env))

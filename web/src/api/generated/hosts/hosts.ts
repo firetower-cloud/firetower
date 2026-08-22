@@ -32,6 +32,7 @@ import type {
   Host,
   NewHost,
   PublicIdentity,
+  Reached,
   Rename
 } from '../model';
 
@@ -240,6 +241,84 @@ export const useCreateHost = <TError = ApiError,
         TContext
       > => {
       return useMutation(getCreateHostMutationOptions(options), queryClient);
+    }
+    export const getProbeHostUrl = () => {
+
+
+
+
+  return `/api/v1/hosts/probe`
+}
+
+/**
+ * Adding used to create the row and then connect, which left a host behind
+ * whenever the first attempt failed — and with Firetower's own key, the first
+ * attempt failing is the ordinary path rather than the exception: a machine has
+ * not been told about the key yet.
+ *
+ * So the interface asks this first. Nothing is stored, so a mistyped address
+ * leaves nothing to delete, and retrying is a button rather than a form to fill
+ * in again.
+ * @summary Try a machine without adding it.
+ */
+export const probeHost = async (newHost: NewHost, options?: Parameters<typeof http>[1]): Promise<Reached> => {
+
+  return http<Reached>(getProbeHostUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(newHost)
+  }
+);}
+
+
+
+
+
+export const getProbeHostMutationOptions = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof probeHost>>, TError,{data: NewHost}, TContext>, request?: SecondParameter<typeof http>}
+): UseMutationOptions<Awaited<ReturnType<typeof probeHost>>, TError,{data: NewHost}, TContext> => {
+
+const mutationKey = ['probeHost'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof probeHost>>, {data: NewHost}> = (props) => {
+          const {data} = props ?? {};
+
+          return  probeHost(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ProbeHostMutationResult = NonNullable<Awaited<ReturnType<typeof probeHost>>>
+    export type ProbeHostMutationBody = NewHost
+    export type ProbeHostMutationError = ApiError
+
+    /**
+ * @summary Try a machine without adding it.
+ */
+export const useProbeHost = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof probeHost>>, TError,{data: NewHost}, TContext>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof probeHost>>,
+        TError,
+        {data: NewHost},
+        TContext
+      > => {
+      return useMutation(getProbeHostMutationOptions(options), queryClient);
     }
     export const getDeleteHostUrl = (id: string,
     params?: DeleteHostParams,) => {

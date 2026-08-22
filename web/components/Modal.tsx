@@ -152,14 +152,17 @@ export function Go({
 export function Quiet({
   children,
   onClick,
+  disabled,
 }: {
   children: React.ReactNode;
   onClick?: () => void;
+  disabled?: boolean;
 }) {
   return (
     <button
       onClick={onClick}
-      className="text-[12.5px] text-mute transition-colors hover:text-text"
+      disabled={disabled}
+      className="text-[12.5px] text-mute transition-colors hover:text-text disabled:opacity-40 disabled:hover:text-mute"
     >
       {children}
     </button>

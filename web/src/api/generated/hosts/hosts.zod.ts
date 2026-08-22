@@ -157,6 +157,61 @@ export const CreateHostResponse = zod.object({
 }).describe('A machine that can run workspaces.')
 
 /**
+ * Adding used to create the row and then connect, which left a host behind
+ * whenever the first attempt failed — and with Firetower's own key, the first
+ * attempt failing is the ordinary path rather than the exception: a machine has
+ * not been told about the key yet.
+ *
+ * So the interface asks this first. Nothing is stored, so a mistyped address
+ * leaves nothing to delete, and retrying is a button rather than a form to fill
+ * in again.
+ * @summary Try a machine without adding it.
+ */
+export const probeHostBodyComputeThreePortMin = 0;
+
+
+
+export const ProbeHostBody = zod.object({
+  "compute": zod.union([zod.object({
+  "type": zod.enum(['Local'])
+}).describe('A worker as a child process here. Inherits your environment, and its\nworkspaces are directories you can open.'),zod.object({
+  "image": zod.string(),
+  "name": zod.string(),
+  "type": zod.enum(['Container'])
+}).describe('A worker in a container here. Linux, and isolated from your machine.\n\nReached with `docker exec` rather than ssh: the same bidirectional pipe\nwithout an sshd, a key, or a host key to verify.'),zod.object({
+  "container": zod.string().nullish().describe('The container the worker runs in on that machine. Absent runs the\nbinary on the host itself, for a machine whose image already has it.\n\nReached by ssh-ing to the machine and running `docker exec` there,\nnever by ssh-ing into the container — that would need a key inside\nthe image, a published port, and a host key that changes on every\nrecreate.'),
+  "host": zod.string().describe('A hostname, an address, or a name from your ssh config.'),
+  "hostKey": zod.string().nullish().describe('Recorded when the host is added. Not yet checked against what the\nmachine answers with — connecting trusts a key it hasn\'t seen before\nand remembers it, so this is a record rather than a guarantee.'),
+  "key": zod.union([zod.object({
+  "type": zod.enum(['Default'])
+}).describe('Let ssh choose: the agent first, then the usual names in `~\/.ssh`.\n\nThe default, and what an absent `identity_file` used to mean. Still\nuseful for a control plane running on a machine whose ssh is already\nconfigured — a development install, or a binary on a host.'),zod.object({
+  "type": zod.enum(['Managed'])
+}).describe('The key Firetower made for itself, sealed in the vault.\n\nWhat a server added through the interface uses. Firetower holds this one\nbecause in a container there is no other way for it to hold anything:\nit is scoped to this installation, opens nothing else, and is revoked by\ndeleting one line on one machine.'),zod.object({
+  "name": zod.string(),
+  "type": zod.enum(['Held'])
+}).describe('A private key the operator pasted, sealed in the vault under this name.\n\nFor an existing key they would rather reuse, or one signed by a CA.'),zod.object({
+  "path": zod.string(),
+  "type": zod.enum(['File'])
+}).describe('A path on the machine running the control plane.\n\nStill correct when that machine is not a container. Kept so that every\nhost added before this existed keeps working and means what it did.')]).optional().describe('Which key to authenticate with. See [`SshKey`].'),
+  "port": zod.int().min(probeHostBodyComputeThreePortMin).nullish().describe('Absent is whatever ssh would use: 22, or what the config says.'),
+  "type": zod.enum(['Server']),
+  "user": zod.string().nullish().describe('Who to connect as.\n\nAbsent leaves it to ssh, which is what keeps a name from your ssh\nconfig working on its own — that file may already say, and repeating\nit here badly is worse than not repeating it.')
+}).describe('A worker on another machine. What a real deployment looks like.\n\nHeld as the parts of an ssh destination rather than one string, because\neach part is a separate decision: the address is the machine, the user is\nthe account work runs as, and the key is which of several you keep.\nAssembling them is [`Compute::ssh_destination`]\'s job.')]),
+  "name": zod.string().nullish().describe('What you\'ll call it. Defaults to something derived from the kind.')
+})
+
+export const ProbeHostResponse = zod.object({
+  "diagnosis": zod.union([zod.null(),zod.object({
+  "at": zod.iso.datetime({"offset":true}),
+  "cause": zod.enum(['WorkerMissing', 'DockerMissing', 'DockerDenied', 'ContainerMissing', 'AuthRefused', 'Unreachable', 'HostKeyChanged', 'ProtocolMismatch', 'Unknown']).describe('What went wrong, at the granularity of what fixes it.'),
+  "detail": zod.string().nullish().describe('What the far end actually said, verbatim.\n\nKept even when the cause is recognised: the summary is an inference\nabout another machine, and this is what survives it being wrong.'),
+  "remedy": zod.string().nullish().describe('What to run, when there is something to run. Shown with a copy button,\nso it must be the whole command and nothing else.'),
+  "summary": zod.string().describe('One sentence, written for whoever is looking at the screen.')
+}).describe('Why not, or what is still wrong once we were in.')]).optional(),
+  "reached": zod.boolean().describe('Whether ssh got onto the machine.\n\nNot the same as \"everything is fine\". A machine with no worker on it has\nbeen reached — the address, the account and the key are all right — and\nis worth adding, because what is left is a command to run over there.')
+}).describe('What a machine would say, before anything is written down.')
+
+/**
  * Refuses while sessions are running unless `force`, in which case they are
  * told to end first — an agent that gets to shut down leaves its worktree and
  * tmux session behind cleanly, rather than having the floor pulled out.

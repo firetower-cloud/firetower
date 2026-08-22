@@ -56,6 +56,7 @@ export * from './probeResponse';
 export * from './providerStatus';
 export * from './publicIdentity';
 export * from './pullRequest';
+export * from './reached';
 export * from './remoteRepo';
 export * from './rename';
 export * from './renameSession';

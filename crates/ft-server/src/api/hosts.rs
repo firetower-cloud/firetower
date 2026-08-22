@@ -12,7 +12,7 @@ use axum::{
 };
 use ft_core::Host;
 use ft_proto::ToWorker;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -514,4 +514,77 @@ pub(super) async fn ssh_key(
         .map_err(|e| ApiError::new(ErrorCode::Internal, format!("{e:#}")))?;
 
     Ok(Json(identity))
+}
+
+/// What a machine would say, before anything is written down.
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct Reached {
+    /// Whether ssh got onto the machine.
+    ///
+    /// Not the same as "everything is fine". A machine with no worker on it has
+    /// been reached — the address, the account and the key are all right — and
+    /// is worth adding, because what is left is a command to run over there.
+    pub reached: bool,
+    /// Why not, or what is still wrong once we were in.
+    pub diagnosis: Option<ft_core::Diagnosis>,
+}
+
+/// Try a machine without adding it.
+///
+/// Adding used to create the row and then connect, which left a host behind
+/// whenever the first attempt failed — and with Firetower's own key, the first
+/// attempt failing is the ordinary path rather than the exception: a machine has
+/// not been told about the key yet.
+///
+/// So the interface asks this first. Nothing is stored, so a mistyped address
+/// leaves nothing to delete, and retrying is a button rather than a form to fill
+/// in again.
+#[utoipa::path(
+    post, path = "/api/v1/hosts/probe", tag = "hosts",
+    request_body = NewHost,
+    responses((status = 200, body = Reached), (status = 400, body = ApiError)),
+)]
+pub(super) async fn probe_host(
+    State(state): State<AppState>,
+    Json(req): Json<NewHost>,
+) -> ApiResult<Json<Reached>> {
+    if req.compute == ft_core::Compute::Local {
+        return Err(ApiError::new(
+            ErrorCode::InvalidRequest,
+            "this machine is always available and doesn't need adding",
+        ));
+    }
+
+    // The same tidying and the same refusals as adding, so what is tried here
+    // is what would be stored.
+    let compute = settled(req.compute)?;
+
+    // A probe needs a transport, and building one wants a host. This one is
+    // never saved: it exists for the length of the attempt.
+    let pretend = ft_core::Host {
+        id: ft_core::HostId::from_stored("probe".to_string()),
+        name: "probe".to_string(),
+        state: ft_core::HostState::Unreachable,
+        compute: compute.clone(),
+        drained: false,
+        cpus: None,
+        memory_mb: None,
+        worker_version: None,
+        diagnosis: None,
+        reconnecting: false,
+    };
+
+    let transport = fleet::Fleet::transport_for(&pretend, &state.home, Some(&state.vault))
+        .map_err(|e| ApiError::new(ErrorCode::InvalidRequest, format!("{e:#}")))?;
+
+    let diagnosis = fleet::Fleet::probe_host(transport, &compute).await;
+
+    Ok(Json(Reached {
+        // No diagnosis at all means it answered as a worker.
+        reached: diagnosis
+            .as_ref()
+            .is_none_or(|d| d.cause.reached_the_machine()),
+        diagnosis,
+    }))
 }

@@ -415,6 +415,48 @@
         }
       }
     },
+    "/api/v1/hosts/probe": {
+      "post": {
+        "tags": [
+          "hosts"
+        ],
+        "summary": "Try a machine without adding it.",
+        "description": "Adding used to create the row and then connect, which left a host behind\nwhenever the first attempt failed — and with Firetower's own key, the first\nattempt failing is the ordinary path rather than the exception: a machine has\nnot been told about the key yet.\n\nSo the interface asks this first. Nothing is stored, so a mistyped address\nleaves nothing to delete, and retrying is a button rather than a form to fill\nin again.",
+        "operationId": "probe_host",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewHost"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Reached"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/hosts/{id}": {
       "delete": {
         "tags": [
@@ -3501,6 +3543,30 @@
         "properties": {
           "url": {
             "type": "string"
+          }
+        }
+      },
+      "Reached": {
+        "type": "object",
+        "description": "What a machine would say, before anything is written down.",
+        "required": [
+          "reached"
+        ],
+        "properties": {
+          "diagnosis": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Diagnosis",
+                "description": "Why not, or what is still wrong once we were in."
+              }
+            ]
+          },
+          "reached": {
+            "type": "boolean",
+            "description": "Whether ssh got onto the machine.\n\nNot the same as \"everything is fine\". A machine with no worker on it has\nbeen reached — the address, the account and the key are all right — and\nis worth adding, because what is left is a command to run over there."
           }
         }
       },

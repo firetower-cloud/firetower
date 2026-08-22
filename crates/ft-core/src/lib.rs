@@ -483,6 +483,35 @@ pub enum Cause {
     Unknown,
 }
 
+impl Cause {
+    /// Whether ssh got onto the machine.
+    ///
+    /// The line adding a host now has to draw. A machine that answered and has
+    /// no worker on it is worth keeping — ssh works, the address and the account
+    /// and the key are all right, and what is left is a command to run over
+    /// there. A machine that never answered is not: nothing about it has been
+    /// confirmed, and saving it means saving a guess.
+    ///
+    /// `Unknown` counts as not reached. It is the bucket for output nobody
+    /// recognised, and the safe reading of "we do not know what happened" is
+    /// that it did not.
+    pub fn reached_the_machine(&self) -> bool {
+        match self {
+            // ssh got in, and what it found on the other side was wrong.
+            Cause::WorkerMissing
+            | Cause::DockerMissing
+            | Cause::DockerDenied
+            | Cause::ContainerMissing
+            | Cause::ProtocolMismatch => true,
+
+            // ssh never got in, or refused to.
+            Cause::AuthRefused | Cause::Unreachable | Cause::HostKeyChanged | Cause::Unknown => {
+                false
+            }
+        }
+    }
+}
+
 impl Diagnosis {
     pub fn new(cause: Cause, summary: impl Into<String>) -> Self {
         Self {
@@ -1549,5 +1578,32 @@ mod ssh_key_tests {
         assert!(SshKey::Held { name: "ci".into() }.is_held());
         assert!(!SshKey::Default.is_held());
         assert!(!SshKey::File { path: "/k".into() }.is_held());
+    }
+}
+
+
+#[cfg(test)]
+mod reachability_tests {
+    use super::*;
+
+    /// Adding a host turns on this distinction, so it is worth stating
+    /// case by case rather than trusting a match arm to stay right.
+    #[test]
+    fn what_counts_as_having_reached_the_machine() {
+        // ssh worked; the far side is missing something.
+        assert!(Cause::WorkerMissing.reached_the_machine());
+        assert!(Cause::DockerMissing.reached_the_machine());
+        assert!(Cause::DockerDenied.reached_the_machine());
+        assert!(Cause::ContainerMissing.reached_the_machine());
+        assert!(Cause::ProtocolMismatch.reached_the_machine());
+
+        // ssh did not.
+        assert!(!Cause::AuthRefused.reached_the_machine());
+        assert!(!Cause::Unreachable.reached_the_machine());
+        assert!(!Cause::HostKeyChanged.reached_the_machine());
+
+        // And the bucket for output nobody recognised, which is not evidence
+        // of anything.
+        assert!(!Cause::Unknown.reached_the_machine());
     }
 }

@@ -5,6 +5,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Modal, Choice, Foot, Go, Quiet } from "./Modal";
 import {
   useCreateHost,
+  useProbeHost,
   useSshKey,
   getListHostsQueryKey,
 } from "@/src/api/generated/hosts/hosts";
@@ -54,15 +55,30 @@ export function AddCompute({ onClose }: { onClose: () => void }) {
   /** Which container the worker runs in. Empty runs the binary on the host. */
   const [container, setContainer] = useState(DEFAULT_CONTAINER);
   /**
-   * Added, and not answering.
+   * What the last attempt found, when it found something.
    *
-   * Not an error: the host exists either way. Kept on screen because the fix is
-   * usually on that machine, and closing would hide what it said.
+   * About the attempt rather than about a host: nothing has been created at this
+   * point. Cleared by any edit below, because a panel describing values that
+   * have since changed is worse than no panel.
    */
-  const [notAnswering, setNotAnswering] = useState<Diagnosis | null>(null);
-
+  const [told, setTold] = useState<Diagnosis | null>(null);
   const queryClient = useQueryClient();
   const create = useCreateHost();
+  const probe = useProbeHost();
+
+  /**
+   * Every field clears the last result.
+   *
+   * The usual reason a first attempt fails is a wrong username or a typo in the
+   * address, so the fix is in the form — and a stale diagnosis sitting above a
+   * form that has been corrected says the wrong thing about it.
+   */
+  const edit =
+    <T,>(set: (value: T) => void) =>
+    (value: T) => {
+      setTold(null);
+      set(value);
+    };
 
   /**
    * Firetower's own key unless a path was given.
@@ -105,20 +121,54 @@ export function AddCompute({ onClose }: { onClose: () => void }) {
       ? address.trim().length > 0 && label.trim().length > 0
       : label.trim().length > 0;
 
-  const add = () =>
+  const body = () => ({ compute: compute(), name: label.trim() || undefined });
+
+  const save = () =>
     create.mutate(
-      { data: { compute: compute(), name: label.trim() || undefined } },
+      { data: body() },
       {
-        onSuccess: async (host) => {
+        onSuccess: async () => {
           await queryClient.invalidateQueries({ queryKey: getListHostsQueryKey() });
-          if (host.diagnosis) {
-            setNotAnswering(host.diagnosis);
-            return;
-          }
           onClose();
         },
       },
     );
+
+  /**
+   * Try the machine, and only then write it down.
+   *
+   * A container is skipped: `create_host` starts it, so there is nothing to
+   * reach until it has.
+   */
+  const add = () => {
+    if (kind === "Container") {
+      save();
+      return;
+    }
+
+    // Always the current values. A retry that replayed what just failed would
+    // be a button that cannot succeed.
+    probe.mutate(
+      { data: body() },
+      {
+        onSuccess: (result) => {
+          // Reached is the whole test, and it is broader than "answered as a
+          // worker": a machine with no worker on it has still been reached, so
+          // the address, the account and the key are confirmed. What is left is
+          // a command to run over there, and the host's own page is where that
+          // belongs — so it gets added, diagnosis and all.
+          if (result.reached) {
+            save();
+            return;
+          }
+
+          setTold(result.diagnosis ?? null);
+        },
+      },
+    );
+  };
+
+  const busy = probe.isPending || create.isPending;
 
   return (
     <Modal title="Add compute" onClose={onClose} wide>
@@ -141,7 +191,7 @@ export function AddCompute({ onClose }: { onClose: () => void }) {
 
       {kind === "Server" && (
         <>
-          <Field label="Name" autoFocus value={label} onChange={setLabel} placeholder="fire-02">
+          <Field label="Name" autoFocus value={label} onChange={edit(setLabel)} placeholder="fire-02">
             What you call this machine. It is what every screen shows — the
             session picker, the fleet, the sidebar — so make it the thing you
             say out loud rather than where it happens to live.
@@ -150,7 +200,7 @@ export function AddCompute({ onClose }: { onClose: () => void }) {
           <Field
             label="Where to ssh"
             value={address}
-            onChange={setAddress}
+            onChange={edit(setAddress)}
             placeholder="203.0.113.44"
           >
             A hostname, an address, or a name from your ssh config. Add{" "}
@@ -162,25 +212,30 @@ export function AddCompute({ onClose }: { onClose: () => void }) {
             label="Username"
             optional
             value={user}
-            onChange={setUser}
+            onChange={edit(setUser)}
             placeholder="root"
           >
-            Who to connect as. Left empty, ssh decides — which is the point of a name from
-            your config, since that file may already say.
+            Who to connect as, and whose{" "}
+            <code className="font-mono text-slate">authorized_keys</code> the key above has
+            to be in — those two have to agree, and when they do not, the machine simply
+            refuses and names neither half. It also has to reach Docker, which{" "}
+            <code className="font-mono text-slate">root</code> always can and anything else
+            needs the <code className="font-mono text-slate">docker</code> group for.
           </Field>
 
           <HowWeGetIn
             ownKey={ownKey}
             onOwnKey={setOwnKey}
             keyPath={keyPath}
-            onKeyPath={setKeyPath}
+            onKeyPath={edit(setKeyPath)}
+            user={user}
           />
 
           <Field
             label="Container"
             optional
             value={container}
-            onChange={setContainer}
+            onChange={edit(setContainer)}
             placeholder={DEFAULT_CONTAINER}
           >
             What the worker runs in over there, reached with{" "}
@@ -201,7 +256,7 @@ export function AddCompute({ onClose }: { onClose: () => void }) {
           label="Container name"
           autoFocus
           value={label}
-          onChange={setLabel}
+          onChange={edit(setLabel)}
           placeholder="firetower-worker"
         >
           Started from <code className="font-mono text-slate">{WORKER_IMAGE}</code> and
@@ -220,16 +275,25 @@ export function AddCompute({ onClose }: { onClose: () => void }) {
         </div>
       )}
 
-      {notAnswering && <NotAnswering told={notAnswering} />}
+      {told && <NotAnswering told={told} />}
 
       <Foot>
-        {/* No retry: the host exists, so adding it again is a name conflict. */}
-        {notAnswering ? (
-          <Go onClick={onClose}>Done</Go>
+        {/* Nothing has been created, so this is a retry rather than a second
+            attempt at the same row — and it reads the form as it is now. */}
+        {told ? (
+          <>
+            <Go onClick={add} disabled={!ready || busy}>
+              {busy ? "Trying…" : "Try again"}
+            </Go>
+            <Quiet onClick={save} disabled={busy}>
+              Add it anyway
+            </Quiet>
+            <Quiet onClick={onClose}>Cancel</Quiet>
+          </>
         ) : (
           <>
-            <Go onClick={add} disabled={!ready || create.isPending}>
-              {create.isPending ? "Connecting…" : "Add it"}
+            <Go onClick={add} disabled={!ready || busy}>
+              {busy ? "Connecting…" : "Add it"}
             </Go>
             <Quiet onClick={onClose}>Cancel</Quiet>
           </>
@@ -246,9 +310,29 @@ export function AddCompute({ onClose }: { onClose: () => void }) {
  * the point of the panel, so it carries the weight.
  */
 function NotAnswering({ told }: { told: Diagnosis }) {
+  const { data: identity } = useSshKey();
+  const refused = told.cause === "AuthRefused";
+
   return (
     <div className="mt-4 rounded-[6px] border border-slate/30 bg-slate/[0.05] px-3.5 py-3">
       <p className="text-[12.5px] leading-[1.55] text-bone">{told.summary}</p>
+
+      {/* By far the likeliest first failure now: the machine has never been
+          told about Firetower's key. The fix is a copy-paste, so it goes here
+          rather than behind a link to somewhere else. */}
+      {refused && identity && (
+        <>
+          <p className="mt-2 text-[12px] leading-[1.55] text-dim">
+            Firetower authenticates with its own key, and that machine has not accepted it.
+            Check the username above is the account you gave it to — and if that machine
+            manages keys elsewhere, Google Cloud metadata or an SSH CA, it belongs there
+            rather than in <code className="font-mono">authorized_keys</code>.
+          </p>
+          <code className="mt-2 block overflow-x-auto rounded-[4px] bg-black/25 px-3 py-2 font-mono text-[11px] break-all text-bone">
+            {identity.publicKey}
+          </code>
+        </>
+      )}
 
       {told.remedy && (
         <pre className="mt-2.5 overflow-x-auto rounded-[4px] bg-black/25 px-3 py-2 font-mono text-[11.5px] leading-[1.6] text-bone">
@@ -278,6 +362,32 @@ function NotAnswering({ told }: { told: Diagnosis }) {
 }
 
 /**
+ * The command, for whoever adds keys on the machine itself.
+ *
+ * The path follows the username rather than saying `~/.ssh`, because the
+ * account you paste this as is often not the account Firetower will be. Pasting
+ * `~/.ssh/authorized_keys` while logged in as root puts the key in root's file
+ * and leaves `deploy` still refusing.
+ *
+ * `mkdir` and both `chmod`s are not padding: sshd ignores an `authorized_keys`
+ * it considers too permissive, without saying so, and a fresh cloud image often
+ * has no `~/.ssh` at all. Either fails in a way indistinguishable from a wrong
+ * key.
+ */
+function authorizedKeys(user: string, key: string) {
+  const who = user.trim();
+  const home = !who || who === "root" ? "/root" : `/home/${who}`;
+  const owner = who || "root";
+
+  return [
+    `mkdir -p ${home}/.ssh && chmod 700 ${home}/.ssh`,
+    `echo '${key}' >> ${home}/.ssh/authorized_keys`,
+    `chmod 600 ${home}/.ssh/authorized_keys`,
+    `chown -R ${owner} ${home}/.ssh`,
+  ].join("\n");
+}
+
+/**
  * The step that happens on the *other* machine.
  *
  * Firetower dials out with a key it made for itself, so the machine has to be
@@ -296,14 +406,18 @@ function HowWeGetIn({
   onOwnKey,
   keyPath,
   onKeyPath,
+  user,
 }: {
   ownKey: boolean;
   onOwnKey: (on: boolean) => void;
   keyPath: string;
   onKeyPath: (path: string) => void;
+  /** Whose authorized_keys the command should write to. */
+  user: string;
 }) {
   const { data: identity, isLoading } = useSshKey();
   const [copied, setCopied] = useState(false);
+  const [showing, setShowing] = useState(false);
 
   const copy = async () => {
     if (!identity) return;
@@ -365,6 +479,20 @@ function HowWeGetIn({
             afterwards. Some manage keys their own way — Google Cloud through instance
             metadata or OS Login, and an SSH CA through the CA.
           </p>
+
+          <button
+            type="button"
+            onClick={() => setShowing(!showing)}
+            className="mt-3 text-[12px] text-slate hover:text-bone"
+          >
+            {showing ? "▾" : "▸"} Adding it on the machine yourself
+          </button>
+
+          {showing && (
+            <pre className="mt-2 overflow-x-auto rounded-[4px] bg-black/25 px-3 py-2 font-mono text-[11px] leading-[1.7] text-bone">
+              {authorizedKeys(user, identity?.publicKey ?? "…")}
+            </pre>
+          )}
 
           <div className="mt-3 flex items-center justify-between gap-3">
             <span className="font-mono text-[11px] text-mute">
