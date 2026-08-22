@@ -49,12 +49,15 @@ struct Cli {
     command: Option<Command>,
 }
 
-/// The ways the worker is run by something other than the control plane.
-///
-/// Both are the worker calling itself back. git and the agents it starts know
-/// how to run *a program*, so the worker hands them its own path — which means
-/// this binary has to answer to more than `--stdio`, and answer identically to
-/// the way `firetower` always has.
+// The ways the worker is run by something other than the control plane.
+//
+// Both are the worker calling itself back. git and the agents it starts know
+// how to run *a program*, so the worker hands them its own path — which means
+// this binary has to answer to more than `--stdio`, and answer identically to
+// the way `firetower` always has.
+//
+// Deliberately not a doc comment: clap would take it as the whole command's
+// `about` and print six lines of rationale above the usage.
 #[derive(Subcommand)]
 enum Command {
     /// Answer git's credential prompt.
