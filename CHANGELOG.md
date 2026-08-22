@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.5.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.4.0...firetower-v0.5.0) (2026-08-22)
+
+
+### Features
+
+* Firetower dials out with a key of its own ([6b7a9aa](https://github.com/firetower-cloud/firetower/commit/6b7a9aa992e677be759901ef572809f7e56df97b))
+* say what a machine still needs, where you are looking ([4b3c86d](https://github.com/firetower-cloud/firetower/commit/4b3c86d963c580e354672789fb479739e7491863))
+* the worker gets a name no person types ([1e8f755](https://github.com/firetower-cloud/firetower/commit/1e8f7558865f0ddff5c50d0491fec9e1087aa365))
+
+
+### Bug Fixes
+
+* stop the dev stack sharing a namespace with a deployment ([0262117](https://github.com/firetower-cloud/firetower/commit/0262117957c65e0a9aa097a6406fcfbe62948a35))
+* try a machine before adding it, and remember its host key ([3b1f614](https://github.com/firetower-cloud/firetower/commit/3b1f614649d99b893c87a0cd2952d0141222b409))
+
 ## [0.4.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.3.0...firetower-v0.4.0) (2026-08-19)
 
 
