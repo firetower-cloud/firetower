@@ -32,6 +32,10 @@ That's why the dashboard is an inbox rather than a fleet monitor, and why a sess
 - **Credentials stay yours.** Every token is sealed with envelope encryption under a root key that never enters the database.
 - **Self-hosted, no account.** The worker never dials out.
 
+## Demo
+
+https://github.com/user-attachments/assets/aca9ef60-8d57-4443-bea7-57860e45aaba
+
 ## How it fits together
 
 ```
