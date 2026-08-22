@@ -89,20 +89,22 @@ impl Agent {
 
     /// How the agent is started, beyond its name and the prompt.
     ///
-    /// **Claude Code runs with edits pre-approved.** A session here is
-    /// unattended by construction — it is on a worker, in tmux, and whoever
-    /// started it has closed the tab — so an agent that stops to ask *may I
-    /// write this file?* stops for somebody who is not there, and the run is
-    /// wasted until they come back.
+    /// **Claude Code runs in `auto`.** A session here is unattended by
+    /// construction — it is on a worker, in tmux, and whoever started it has
+    /// closed the tab — so an agent that stops to ask *may I run this?* stops
+    /// for somebody who is not there, and the run is wasted until they come
+    /// back.
     ///
-    /// This does not make it silent. `acceptEdits` covers edits and nothing
-    /// else: running a command still asks, and a question the agent wants
-    /// answered is still a question. Those are the ones worth routing back to
-    /// you, and Firetower's whole claim is that it does. Approving each write
-    /// to a file it was told to change was never one of them.
+    /// `auto` and not `acceptEdits`, which covers only writes and leaves every
+    /// command still asking. Nor `bypassPermissions`, which Claude Code refuses
+    /// outright when it is running as root — and the worker container is root,
+    /// so that would fail to start on every host we ship.
+    ///
+    /// It does not make the session silent. A question the agent wants answered
+    /// is still a question, and routing those back is the whole claim.
     fn launch_flags(&self) -> &'static [&'static str] {
         match self {
-            Agent::ClaudeCode => &["--permission-mode", "acceptEdits"],
+            Agent::ClaudeCode => &["--permission-mode", "auto"],
             // Codex has its own spelling for this and is not configured here
             // yet; a wrong flag would stop it starting at all.
             Agent::Codex | Agent::Shell => &[],
@@ -1272,21 +1274,21 @@ mod launch_tests {
     fn the_prompt_is_handed_to_the_agent() {
         assert_eq!(
             Agent::ClaudeCode.launch("Fix retry handling"),
-            "claude --permission-mode acceptEdits 'Fix retry handling'"
+            "claude --permission-mode auto 'Fix retry handling'"
         );
     }
 
-    /// The session is unattended, so an agent that stops to ask permission to
-    /// write a file stops for nobody.
+    /// The session is unattended, so an agent that stops to ask permission
+    /// stops for nobody.
     #[test]
-    fn claude_code_starts_with_edits_already_approved() {
+    fn claude_code_starts_without_asking_permission() {
         let line = Agent::ClaudeCode.launch("anything");
-        assert!(line.contains("--permission-mode acceptEdits"), "{line}");
+        assert!(line.contains("--permission-mode auto"), "{line}");
 
         // Including with no prompt, where somebody is driving it by hand: the
         // agent should not be configured differently for that.
         assert!(
-            Agent::ClaudeCode.launch("").contains("--permission-mode acceptEdits"),
+            Agent::ClaudeCode.launch("").contains("--permission-mode auto"),
             "an empty prompt should not change how the agent runs"
         );
     }
@@ -1324,7 +1326,7 @@ mod launch_tests {
         assert_eq!(Agent::Shell.launch("anything"), "bash");
         assert_eq!(
             Agent::ClaudeCode.launch("   "),
-            "claude --permission-mode acceptEdits"
+            "claude --permission-mode auto"
         );
     }
 }
