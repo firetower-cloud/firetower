@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.6.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.5.1...firetower-v0.6.0) (2026-08-22)
+
+
+### Features
+
+* Claude Code sessions run in auto ([c7e0c75](https://github.com/firetower-cloud/firetower/commit/c7e0c75ba18e63e069241df22f098be7bf4a6469))
+* Claude Code starts with edits already approved ([7e98b98](https://github.com/firetower-cloud/firetower/commit/7e98b9812616de9ab8b9d7d3db6621c4c6e4a210))
+
+
+### Bug Fixes
+
+* the worker's --help describes the worker ([cc6fcea](https://github.com/firetower-cloud/firetower/commit/cc6fceaa20a993eb174098ada347c0f5b328d124))
+
 ## [0.5.1](https://github.com/firetower-cloud/firetower/compare/firetower-v0.5.0...firetower-v0.5.1) (2026-08-22)
 
 
