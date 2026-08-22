@@ -22,7 +22,7 @@
 //! question of what PATH holds.
 
 use anyhow::{Context, Result};
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
 #[derive(Parser)]
@@ -32,7 +32,7 @@ use std::path::PathBuf;
     version
 )]
 struct Cli {
-    /// The only mode there is, and required all the same.
+    /// Serving frames is the default, and saying so is required all the same.
     ///
     /// A worker that started a session because somebody ran it out of
     /// curiosity would be worse than one that refuses to start without being
@@ -44,11 +44,64 @@ struct Cli {
     /// event log, and the agent's own directory.
     #[arg(long)]
     root: Option<PathBuf>,
+
+    #[command(subcommand)]
+    command: Option<Command>,
+}
+
+/// The ways the worker is run by something other than the control plane.
+///
+/// Both are the worker calling itself back. git and the agents it starts know
+/// how to run *a program*, so the worker hands them its own path — which means
+/// this binary has to answer to more than `--stdio`, and answer identically to
+/// the way `firetower` always has.
+#[derive(Subcommand)]
+enum Command {
+    /// Answer git's credential prompt.
+    ///
+    /// Run by the one-line bridge script `Askpass::start` writes, never by
+    /// hand: git's contract is `$GIT_ASKPASS "<prompt>"` with no subcommand, so
+    /// the script exists to add this word.
+    Askpass {
+        /// Git's prompt, verbatim — it says whether it wants the username or
+        /// the password.
+        prompt: Vec<String>,
+    },
+    /// Report that an agent stopped.
+    ///
+    /// Installed into the agent's own configuration as `<this binary> hook`.
+    /// Without it nothing moves a session off `Working`: Firetower would know
+    /// what it started and never what happened next.
+    Hook {
+        /// The hook that fired: `Notification`, `Stop`, `StopFailure`…
+        event: String,
+    },
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
+
+    // Neither of these is the daemon, and neither may write to stdout: git
+    // reads the askpass answer from there, and a hook's output is the agent's.
+    match cli.command {
+        Some(Command::Askpass { prompt }) => {
+            let value = ft_worker::askpass::respond_as_helper(&prompt.join(" ")).await?;
+            println!("{value}");
+            return Ok(());
+        }
+        Some(Command::Hook { event }) => {
+            // Never fatal, never noisy. A hook that fails must not become a
+            // hook that interrupts the agent it is reporting on.
+            if let Err(e) =
+                ft_worker::hooks::report(&event, &default_root()).await
+            {
+                tracing::debug!("hook {event}: {e:#}");
+            }
+            return Ok(());
+        }
+        None => {}
+    }
 
     anyhow::ensure!(cli.stdio, "the worker only speaks over stdio; pass --stdio");
 
@@ -62,11 +115,7 @@ async fn main() -> Result<()> {
         )
         .init();
 
-    let root = cli.root.unwrap_or_else(|| {
-        directories::BaseDirs::new()
-            .map(|d| d.home_dir().join(".firetower").join("worker"))
-            .unwrap_or_else(|| PathBuf::from("/var/lib/firetower/worker"))
-    });
+    let root = cli.root.unwrap_or_else(default_root);
 
     let worker = std::sync::Arc::new(
         ft_worker::Worker::open(&root)
@@ -82,4 +131,15 @@ async fn main() -> Result<()> {
         .context("serving frames")?;
 
     Ok(())
+}
+
+/// Where a worker keeps its state when nobody says.
+///
+/// The control plane always passes `--root`, so this is for the two callbacks
+/// below — git's askpass and an agent's hook — which are started by something
+/// that knows nothing about our arguments.
+fn default_root() -> PathBuf {
+    directories::BaseDirs::new()
+        .map(|d| d.home_dir().join(".firetower").join("worker"))
+        .unwrap_or_else(|| PathBuf::from("/var/lib/firetower/worker"))
 }
