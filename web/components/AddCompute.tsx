@@ -3,8 +3,12 @@
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Modal, Choice, Foot, Go, Quiet } from "./Modal";
-import { useCreateHost, getListHostsQueryKey } from "@/src/api/generated/hosts/hosts";
-import type { Compute, Diagnosis } from "@/src/api/generated/model";
+import {
+  useCreateHost,
+  useSshKey,
+  getListHostsQueryKey,
+} from "@/src/api/generated/hosts/hosts";
+import type { Compute, Diagnosis, SshKey } from "@/src/api/generated/model";
 import { ApiError } from "@/src/api/http";
 
 type Kind = "Container" | "Server";
@@ -28,7 +32,17 @@ export function AddCompute({ onClose }: { onClose: () => void }) {
   const [kind, setKind] = useState<Kind>("Container");
   const [address, setAddress] = useState("");
   const [user, setUser] = useState("");
-  const [key, setKey] = useState("");
+  /**
+   * A path to a key on the machine running the control plane.
+   *
+   * Empty means Firetower's own key, which is what almost everyone wants and
+   * the only thing that works when the control plane is in a container: a path
+   * is read inside that container, so one naming a file on your machine names
+   * nothing.
+   */
+  const [keyPath, setKeyPath] = useState("");
+  /** Whether the path field is even on screen. */
+  const [ownKey, setOwnKey] = useState(false);
   /**
    * What you call it — the name shown on every screen.
    *
@@ -50,6 +64,17 @@ export function AddCompute({ onClose }: { onClose: () => void }) {
   const queryClient = useQueryClient();
   const create = useCreateHost();
 
+  /**
+   * Firetower's own key unless a path was given.
+   *
+   * Not `Default`: that leaves the choice to ssh, which in a container means
+   * an agent that is not running and a `~/.ssh` that is empty. It stays
+   * reachable for a host added before this existed, and is not worth offering
+   * to somebody adding one now.
+   */
+  const sshKey = (): SshKey =>
+    ownKey && keyPath.trim() ? { type: "File", path: keyPath.trim() } : { type: "Managed" };
+
   const compute = (): Compute => {
     switch (kind) {
       case "Container":
@@ -65,7 +90,7 @@ export function AddCompute({ onClose }: { onClose: () => void }) {
           // Left empty means ssh decides, which is what lets a name from your
           // config bring its own. A blank string would mean something else.
           user: user.trim() || undefined,
-          identityFile: key.trim() || undefined,
+          key: sshKey(),
           // And empty here means the binary runs on the machine itself.
           container: container.trim() || undefined,
         };
@@ -144,16 +169,12 @@ export function AddCompute({ onClose }: { onClose: () => void }) {
             your config, since that file may already say.
           </Field>
 
-          <Field
-            label="Private key"
-            optional
-            value={key}
-            onChange={setKey}
-            placeholder="~/.ssh/id_ed25519"
-          >
-            A key other than the one ssh would reach for on its own. Firetower keeps the
-            path and never the key, so this machine is still the only one that holds it.
-          </Field>
+          <HowWeGetIn
+            ownKey={ownKey}
+            onOwnKey={setOwnKey}
+            keyPath={keyPath}
+            onKeyPath={setKeyPath}
+          />
 
           <Field
             label="Container"
@@ -252,6 +273,113 @@ function NotAnswering({ told }: { told: Diagnosis }) {
         It&apos;s on the Compute screen either way. Firetower tries it again next
         time it starts.
       </p>
+    </div>
+  );
+}
+
+/**
+ * The step that happens on the *other* machine.
+ *
+ * Firetower dials out with a key it made for itself, so the machine has to be
+ * given the public half before it will let us in. Nothing here can do that —
+ * it is a change on a machine we cannot reach yet, which is the whole reason
+ * this sits above the address fields rather than below them.
+ *
+ * The key is what is offered, not a command. Where it goes depends on the
+ * machine: a provider's web form when the VM is being made now, instance
+ * metadata on Google Cloud, an SSH CA where there is one, and
+ * `authorized_keys` on a machine you already own. A command assumes the last of
+ * those, and on Google Cloud the guest agent will quietly undo it.
+ */
+function HowWeGetIn({
+  ownKey,
+  onOwnKey,
+  keyPath,
+  onKeyPath,
+}: {
+  ownKey: boolean;
+  onOwnKey: (on: boolean) => void;
+  keyPath: string;
+  onKeyPath: (path: string) => void;
+}) {
+  const { data: identity, isLoading } = useSshKey();
+  const [copied, setCopied] = useState(false);
+
+  const copy = async () => {
+    if (!identity) return;
+    await navigator.clipboard.writeText(identity.publicKey);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <div className="mt-5 rounded-[6px] border border-line bg-ground/40 p-3">
+      <p className="eyebrow">How Firetower gets in</p>
+
+      {ownKey ? (
+        <>
+          <Field
+            label="Private key"
+            optional
+            value={keyPath}
+            onChange={onKeyPath}
+            placeholder="~/.ssh/id_ed25519"
+          >
+            A path on the machine running Firetower — which, if that is a container, is
+            inside the container rather than on yours. A key you can see is not
+            necessarily one it can.
+          </Field>
+          <button
+            type="button"
+            onClick={() => onOwnKey(false)}
+            className="mt-3 text-[12px] text-slate hover:text-bone"
+          >
+            ← Use Firetower&apos;s key
+          </button>
+        </>
+      ) : (
+        <>
+          <p className="mt-2 text-[12px] leading-[1.5] text-mute">
+            Give this public key to the machine you are about to name. It is public —
+            safe to paste into a provider&apos;s web form, a cloud-init file, or
+            <code className="mx-1 font-mono text-slate">authorized_keys</code> on a
+            machine you own.
+          </p>
+
+          <div className="mt-2 flex items-start gap-2">
+            <code className="min-w-0 flex-1 break-all rounded-[6px] border border-line bg-ground px-3 py-2 font-mono text-[11.5px] leading-[1.5] text-bone">
+              {isLoading ? "…" : (identity?.publicKey ?? "no key yet")}
+            </code>
+            <button
+              type="button"
+              onClick={copy}
+              disabled={!identity}
+              className="shrink-0 rounded-[6px] border border-line px-3 py-2 text-[12px] text-slate hover:text-bone disabled:opacity-40"
+            >
+              {copied ? "Copied" : "Copy"}
+            </button>
+          </div>
+
+          <p className="mt-2 text-[12px] leading-[1.5] text-mute">
+            Most providers take it when you create the machine, or in its settings
+            afterwards. Some manage keys their own way — Google Cloud through instance
+            metadata or OS Login, and an SSH CA through the CA.
+          </p>
+
+          <div className="mt-3 flex items-center justify-between gap-3">
+            <span className="font-mono text-[11px] text-mute">
+              {identity?.fingerprint ?? ""}
+            </span>
+            <button
+              type="button"
+              onClick={() => onOwnKey(true)}
+              className="shrink-0 text-[12px] text-slate hover:text-bone"
+            >
+              Use my own key instead →
+            </button>
+          </div>
+        </>
+      )}
     </div>
   );
 }

@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.3.0
+ * OpenAPI spec version: 0.4.0
  */
 
 export * from './accessEntry';
@@ -54,6 +54,7 @@ export * from './pendingAuth';
 export * from './probeRequest';
 export * from './probeResponse';
 export * from './providerStatus';
+export * from './publicIdentity';
 export * from './pullRequest';
 export * from './remoteRepo';
 export * from './rename';
@@ -70,6 +71,7 @@ export * from './sessionPtyParams';
 export * from './sessionStatus';
 export * from './setupState';
 export * from './signedIn';
+export * from './sshKey';
 export * from './step';
 export * from './storedEnv';
 export * from './user';

@@ -78,6 +78,11 @@ chacha20poly1305 = "0.10"
 hmac = "0.12"
 sha2 = "0.10"
 zeroize = { version = "1", features = ["zeroize_derive"] }
+# Firetower's own ssh key: generating the pair, and writing both halves in the
+# formats ssh and `authorized_keys` expect. Encoding OpenSSH's private key
+# format by hand is exactly the kind of thing to get subtly wrong once and
+# discover on somebody else's server.
+ssh-key = { version = "0.6", features = ["ed25519", "std", "getrandom"] }
 # Passwords. Not a hash we choose ourselves and not one that is fast: argon2id
 # is the current answer to someone who has the table and time to spend on it.
 # The salt and the cost parameters travel inside the encoded hash, so raising

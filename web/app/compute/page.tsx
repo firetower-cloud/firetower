@@ -11,7 +11,7 @@ import {
 } from "@/src/api/generated/hosts/hosts";
 import { useListSessions } from "@/src/api/generated/sessions/sessions";
 import { useListAgents } from "@/src/api/generated/agents/agents";
-import type { Host } from "@/src/api/generated/model";
+import type { Host, SshKey } from "@/src/api/generated/model";
 import { AddCompute } from "@/components/AddCompute";
 import { holdsHost } from "@/src/api/view";
 import { ApiError } from "@/src/api/http";
@@ -243,6 +243,19 @@ function removalWarning(host: Host, running: number) {
  * this is the line that shows which key and which port a connection is really
  * using. That is the whole question when one of them is wrong.
  */
+function keyFlag(key: SshKey | undefined) {
+  switch (key?.type) {
+    case "File":
+      return `-i ${key.path}`;
+    case "Managed":
+      return "-i <firetower's key>";
+    case "Held":
+      return `-i <${key.name}>`;
+    default:
+      return null;
+  }
+}
+
 function reach(host: Host) {
   switch (host.compute.type) {
     case "Local":
@@ -250,11 +263,14 @@ function reach(host: Host) {
     case "Container":
       return `docker exec ${host.compute.name}`;
     case "Server": {
-      const { host: address, user, port, identityFile } = host.compute;
+      const { host: address, user, port, key } = host.compute;
       return [
         "ssh",
         port ? `-p ${port}` : null,
-        identityFile ? `-i ${identityFile}` : null,
+        // A path is shown as one. The two the vault holds have no path worth
+        // showing — they are written where ssh can read them at the moment of
+        // connecting and removed again — so they are named instead.
+        keyFlag(key),
         user ? `${user}@${address}` : address,
       ]
         .filter(Boolean)

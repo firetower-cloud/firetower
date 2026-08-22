@@ -180,6 +180,7 @@ impl Fleet {
     pub fn transport_for(
         host: &ft_core::Host,
         home: &std::path::Path,
+        vault: Option<&Arc<crate::vault::Vault>>,
     ) -> Result<Arc<dyn Transport>> {
         Ok(match &host.compute {
             ft_core::Compute::Local => {
@@ -194,7 +195,7 @@ impl Fleet {
             }
             ft_core::Compute::Server {
                 port,
-                identity_file,
+                key,
                 container,
                 ..
             } => Arc::new(crate::transport::SshTransport {
@@ -205,7 +206,13 @@ impl Fleet {
                     .ssh_destination()
                     .context("a server host has somewhere to dial")?,
                 port: *port,
-                identity_file: identity_file.clone(),
+                key: key.clone(),
+                // Only carried when the key is one the vault holds. A path or
+                // ssh's own choice needs nothing from us.
+                vault: key
+                    .is_held()
+                    .then(|| vault.map(|v| (v.clone(), home.to_path_buf())))
+                    .flatten(),
                 container: container.clone(),
                 // Inside a container, the path the image creates. On the
                 // machine itself, the worker's own default: that account may

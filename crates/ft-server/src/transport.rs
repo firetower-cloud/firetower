@@ -221,10 +221,19 @@ pub struct SshTransport {
     pub destination: String,
     /// `None` takes ssh's own default, which may be set in its config.
     pub port: Option<u16>,
-    /// A path as it was typed, `~` and all. Expanded and checked on the way to
-    /// the command line, so a key that moved is an error when it is needed
-    /// rather than a stale value nobody rechecked.
-    pub identity_file: Option<String>,
+    /// Which key to offer.
+    ///
+    /// A path is expanded and checked on the way to the command line, so a key
+    /// that moved is an error when it is needed rather than a stale value
+    /// nobody rechecked. A key the vault holds is written where ssh can read it
+    /// at that same moment — see [`crate::sshkey::materialise`].
+    pub key: ft_core::SshKey,
+    /// Where a held key is read from, and the state directory to fall back to
+    /// when there is no `/dev/shm` to write it in.
+    ///
+    /// `None` for a transport that will never need one, which is every kind but
+    /// this and only this kind when the key is a path or ssh's own choice.
+    pub vault: Option<(Arc<crate::vault::Vault>, std::path::PathBuf)>,
     /// The container to run the worker in on that machine, if it runs in one.
     ///
     /// Reached by ssh-ing to the machine and running `docker exec` there,
@@ -241,6 +250,34 @@ pub struct SshTransport {
     pub root: Option<std::path::PathBuf>,
 }
 
+impl SshTransport {
+    /// The file to hand `ssh -i`, if any.
+    ///
+    /// `None` means ssh decides for itself, which is what an unset key has
+    /// always meant.
+    async fn key_file(&self) -> Result<Option<std::path::PathBuf>> {
+        match &self.key {
+            ft_core::SshKey::Default => Ok(None),
+            ft_core::SshKey::File { path } => Ok(Some(identity_path(path)?)),
+            ft_core::SshKey::Managed | ft_core::SshKey::Held { .. } => {
+                let (vault, home) = self
+                    .vault
+                    .as_ref()
+                    .context("this host authenticates with a key Firetower holds, and there is no vault to read it from")?;
+
+                let path = crate::sshkey::materialise(
+                    vault,
+                    home,
+                    &format!("connecting to {}", self.destination),
+                )
+                .await?;
+
+                Ok(Some(path))
+            }
+        }
+    }
+}
+
 #[async_trait]
 impl Transport for SshTransport {
     fn describe(&self) -> String {
@@ -248,8 +285,11 @@ impl Transport for SshTransport {
         if let Some(port) = self.port {
             described.push_str(&format!(" -p {port}"));
         }
-        if let Some(key) = &self.identity_file {
-            described.push_str(&format!(" -i {key}"));
+        match &self.key {
+            ft_core::SshKey::File { path } => described.push_str(&format!(" -i {path}")),
+            ft_core::SshKey::Managed => described.push_str(" -i <firetower's key>"),
+            ft_core::SshKey::Held { name } => described.push_str(&format!(" -i <{name}>")),
+            ft_core::SshKey::Default => {}
         }
         described.push(' ');
         described.push_str(&self.destination);
@@ -279,8 +319,8 @@ impl Transport for SshTransport {
             ssh.arg("-p").arg(port.to_string());
         }
 
-        if let Some(raw) = &self.identity_file {
-            ssh.arg("-i").arg(identity_path(raw)?);
+        if let Some(path) = self.key_file().await? {
+            ssh.arg("-i").arg(path);
             // Naming a key does not stop ssh offering the others first: the
             // agent's keys and the usual names in `~/.ssh` are still tried, and
             // a server with a low `MaxAuthTries` can close the connection
@@ -326,6 +366,33 @@ impl Transport for SshTransport {
     }
 }
 
+/// Whether we are the image rather than a binary on somebody's machine.
+///
+/// Set in the Dockerfile, so this is a fact about how we were built rather than
+/// a guess from `/.dockerenv` about where we are running.
+pub fn in_a_container() -> bool {
+    std::env::var_os("FIRETOWER_CONTAINER").is_some()
+}
+
+/// What to say when the key is not there.
+///
+/// In a container the plain answer is worse than unhelpful: the path names a
+/// file that exists on the operator's machine, so "no such file" reads as a
+/// mistake in what they typed and sends them to check the wrong filesystem.
+/// Nothing they can type would work — the two filesystems are not the same one.
+fn missing_key(path: &std::path::Path) -> String {
+    if in_a_container() {
+        format!(
+            "no key at {}\n\nFiretower is running in a container, so that path is read inside \
+             it rather than on your machine — which is why a key you can see is not one it can. \
+             Use Firetower's own key instead: Compute → Add compute shows it.",
+            path.display()
+        )
+    } else {
+        format!("no key at {}", path.display())
+    }
+}
+
 /// Make sense of a key path before anything depends on it.
 ///
 /// Every failure here is one ssh would also refuse, but it refuses at
@@ -362,8 +429,7 @@ pub fn identity_path(raw: &str) -> Result<std::path::PathBuf> {
         path.display()
     );
 
-    let found =
-        std::fs::metadata(&path).with_context(|| format!("no key at {}", path.display()))?;
+    let found = std::fs::metadata(&path).with_context(|| missing_key(&path))?;
 
     anyhow::ensure!(found.is_file(), "{} is not a file", path.display());
 
@@ -396,7 +462,10 @@ mod tests {
         SshTransport {
             destination: destination.into(),
             port: None,
-            identity_file: None,
+            key: ft_core::SshKey::Default,
+            // These describe themselves without connecting, and a key ssh
+            // chooses for itself never reaches the vault.
+            vault: None,
             container: None,
             root: None,
         }
@@ -426,7 +495,7 @@ mod tests {
         // so the line has to say which key and which port were actually used.
         let described = SshTransport {
             port: Some(2222),
-            identity_file: Some("~/.ssh/fire".into()),
+            key: ft_core::SshKey::File { path: "~/.ssh/fire".into() },
             ..ssh("deploy@fire-01")
         }
         .describe();
@@ -522,6 +591,28 @@ mod tests {
         assert!(said("").contains("no key"));
         assert!(said(".ssh/id_ed25519").contains("relative path"));
         assert!(said("/no/such/directory/id_ed25519").contains("no key at"));
+    }
+
+    #[test]
+    fn a_missing_key_in_a_container_says_which_filesystem_was_read() {
+        // The path exists on the operator's machine. Saying only "no such file"
+        // reads as a typo and sends them to check the wrong one.
+        let path = std::path::Path::new("/root/.ssh/id_ed25519");
+
+        let plain = {
+            std::env::remove_var("FIRETOWER_CONTAINER");
+            missing_key(path)
+        };
+        assert_eq!(plain, "no key at /root/.ssh/id_ed25519");
+
+        let contained = {
+            std::env::set_var("FIRETOWER_CONTAINER", "1");
+            let said = missing_key(path);
+            std::env::remove_var("FIRETOWER_CONTAINER");
+            said
+        };
+        assert!(contained.contains("running in a container"));
+        assert!(contained.contains("Add compute"));
     }
 
     #[test]

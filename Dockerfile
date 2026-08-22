@@ -111,6 +111,16 @@ VOLUME /var/lib/firetower
 ENV FIRETOWER_BIND=0.0.0.0
 ENV FIRETOWER_PORT=4400
 
+# So the control plane knows its filesystem is not the operator's.
+#
+# It matters for one message: a key path is read in here, and `~/.ssh/id_ed25519`
+# names a file that exists on their machine and not in this one. Saying "no such
+# file" alone sends them to check the wrong filesystem.
+#
+# Set from the image rather than sniffed from `/.dockerenv`, so it is a fact
+# about how this was built instead of a guess about where it is running.
+ENV FIRETOWER_CONTAINER=1
+
 EXPOSE 4400
 
 ARG VERSION=0.0.0-dev

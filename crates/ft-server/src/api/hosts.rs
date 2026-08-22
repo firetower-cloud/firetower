@@ -87,7 +87,7 @@ pub(super) async fn create_host(
     let host = state.db.ensure_host(&name, compute).await?;
 
     // Connect now, so a bad address is a message rather than a silence.
-    let transport = fleet::Fleet::transport_for(&host, &state.home)
+    let transport = fleet::Fleet::transport_for(&host, &state.home, Some(&state.vault))
         .map_err(|e| ApiError::new(ErrorCode::Internal, format!("{e:#}")))?;
 
     // A host that didn't answer is kept, not discarded. Most reasons a first
@@ -119,7 +119,7 @@ fn settled(compute: ft_core::Compute) -> Result<ft_core::Compute, ApiError> {
             host,
             user,
             port,
-            identity_file,
+            key,
             host_key,
             container,
         } => {
@@ -135,20 +135,22 @@ fn settled(compute: ft_core::Compute) -> Result<ft_core::Compute, ApiError> {
             // Read now rather than at the first connection. A host that was
             // accepted should not then fail on something we could have learned
             // from the filesystem before saying yes.
-            let identity_file = match given(identity_file) {
-                Some(raw) => {
-                    crate::transport::identity_path(&raw)
-                        .map_err(|e| ApiError::new(ErrorCode::InvalidRequest, format!("{e:#}")))?;
-                    Some(raw)
-                }
-                None => None,
-            };
+            //
+            // Only a path can be checked here. A key the vault holds is not a
+            // question about this filesystem, and whether the *other* machine
+            // has been given the public half is not something any amount of
+            // validation here can answer — that is what the first connection is
+            // for, and what its diagnosis says.
+            if let ft_core::SshKey::File { path } = &key {
+                crate::transport::identity_path(path)
+                    .map_err(|e| ApiError::new(ErrorCode::InvalidRequest, format!("{e:#}")))?;
+            }
 
             Ok(ft_core::Compute::Server {
                 host: typed.host,
                 user: given(user).or(typed.user),
                 port: port.or(typed.port),
-                identity_file,
+                key,
                 host_key: given(host_key),
                 // Blank means the worker runs on the machine itself.
                 container: given(container),
@@ -419,7 +421,7 @@ mod tests {
             host: host.into(),
             user: user.map(Into::into),
             port: None,
-            identity_file: None,
+            key: ft_core::SshKey::Default,
             host_key: None,
             container: None,
         }
@@ -435,7 +437,7 @@ mod tests {
                 host: "203.0.113.44".into(),
                 user: Some("root".into()),
                 port: Some(2222),
-                identity_file: None,
+                key: ft_core::SshKey::Default,
                 host_key: None,
                 container: None,
             }
@@ -478,7 +480,7 @@ mod tests {
             host: "fire-01".into(),
             user: None,
             port: None,
-            identity_file: Some("~/.ssh/nothing-is-here".into()),
+            key: ft_core::SshKey::File { path: "~/.ssh/nothing-is-here".into() },
             host_key: None,
             container: None,
         })
@@ -487,4 +489,29 @@ mod tests {
         assert!(matches!(e.code, ErrorCode::InvalidRequest), "{}", e.message);
         assert!(e.message.contains("no key at"), "{}", e.message);
     }
+}
+
+/// The public half of Firetower's own ssh key.
+///
+/// Read before adding a server, because the machine has to be given this before
+/// it will let Firetower in — and that is a step on the *other* machine, which
+/// nothing here can do.
+///
+/// There is no companion endpoint for the private half, and there should never
+/// be one. It goes from the vault to a file ssh reads and no further.
+#[utoipa::path(
+    get, path = "/api/v1/ssh-key", tag = "hosts",
+    responses((status = 200, body = crate::sshkey::PublicIdentity)),
+)]
+pub(super) async fn ssh_key(
+    State(state): State<AppState>,
+) -> ApiResult<Json<crate::sshkey::PublicIdentity>> {
+    // `ensure` rather than `public`: start-up makes the pair, and an
+    // installation upgraded while running has not been through start-up since.
+    // Asking for it is a reasonable moment to make it.
+    let identity = crate::sshkey::ensure(&state.vault)
+        .await
+        .map_err(|e| ApiError::new(ErrorCode::Internal, format!("{e:#}")))?;
+
+    Ok(Json(identity))
 }

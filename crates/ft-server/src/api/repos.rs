@@ -755,7 +755,7 @@ mod tests {
                     host: "fire-01".into(),
                     user: None,
                     port: None,
-                    identity_file: None,
+                    key: ft_core::SshKey::Default,
                     host_key: None,
                     container: None,
                 },

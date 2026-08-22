@@ -17,6 +17,7 @@ pub mod diagnose;
 pub mod fleet;
 pub mod oauth;
 pub mod providers;
+pub mod sshkey;
 pub mod transport;
 pub mod vault;
 mod web;
@@ -107,6 +108,11 @@ pub async fn run(config: Config) -> Result<()> {
     let admin = ensure_admin(&accounts).await?;
 
     let vault = Arc::new(Vault::new(db.pool().clone(), root));
+
+    // Made now rather than when the first server is added, so that start-up can
+    // print it: the next thing anyone does after installing is add a machine,
+    // and the key has to exist before it can be put on one.
+    let ssh_identity = sshkey::ensure(&vault).await?;
     let key_source: Arc<str> = match source {
         vault::root::Source::Environment => "the FIRETOWER_ROOT_KEY variable".into(),
         vault::root::Source::File(_) | vault::root::Source::NewFile(_) => {
@@ -124,7 +130,7 @@ pub async fn run(config: Config) -> Result<()> {
     // itself would silently lose every server you added the moment it
     // restarted — and restarting is meant to cost nothing.
     for host in db.hosts().await? {
-        let transport = match Fleet::transport_for(&host, &config.home) {
+        let transport = match Fleet::transport_for(&host, &config.home, Some(&vault)) {
             Ok(t) => t,
             Err(e) => {
                 tracing::error!(host = %host.name, "no transport: {e:#}");
@@ -149,7 +155,7 @@ pub async fn run(config: Config) -> Result<()> {
         pending: Default::default(),
         accounts: accounts.clone(),
     };
-    announce(&policy, admin.as_ref(), &config);
+    announce(&policy, admin.as_ref(), &ssh_identity, &config);
 
     let app = build_router(state, config.dev, policy, accounts);
 
@@ -288,7 +294,12 @@ fn invent_password() -> String {
 }
 
 /// Say where it is and, on the very first start, how to get in.
-fn announce(policy: &auth::Policy, admin: Option<&FirstAdmin>, config: &Config) {
+fn announce(
+    policy: &auth::Policy,
+    admin: Option<&FirstAdmin>,
+    ssh_identity: &sshkey::PublicIdentity,
+    config: &Config,
+) {
     tracing::info!("authentication: {}", policy.describe());
 
     eprintln!();
@@ -329,6 +340,17 @@ fn announce(policy: &auth::Policy, admin: Option<&FirstAdmin>, config: &Config) 
             eprintln!("  Sign in and replace that password — then remove it from the file.");
         }
     }
+    // The next thing anyone does is add a machine, and that machine has to be
+    // given this before it will let Firetower in. Printed here so the first
+    // server can be prepared without opening the interface at all.
+    eprintln!();
+    eprintln!("  To let Firetower onto a machine, give it this public key:");
+    eprintln!();
+    eprintln!("    {}", ssh_identity.public_key);
+    eprintln!();
+    eprintln!("  It is public — safe to paste into a provider's web form, a");
+    eprintln!("  cloud-init file, or authorized_keys on a machine you own.");
+
     eprintln!();
     eprintln!("  {}", public_url(config));
     eprintln!();

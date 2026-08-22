@@ -10,7 +10,7 @@
       "name": "AGPL-3.0-only",
       "identifier": "AGPL-3.0-only"
     },
-    "version": "0.3.0"
+    "version": "0.4.0"
   },
   "paths": {
     "/api/v1/agents": {
@@ -2199,6 +2199,28 @@
           }
         }
       }
+    },
+    "/api/v1/ssh-key": {
+      "get": {
+        "tags": [
+          "hosts"
+        ],
+        "summary": "The public half of Firetower's own ssh key.",
+        "description": "Read before adding a server, because the machine has to be given this before\nit will let Firetower in — and that is a step on the *other* machine, which\nnothing here can do.\n\nThere is no companion endpoint for the private half, and there should never\nbe one. It goes from the vault to a file ssh reads and no further.",
+        "operationId": "ssh_key",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicIdentity"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -2545,12 +2567,9 @@
                 ],
                 "description": "Recorded when the host is added. Not yet checked against what the\nmachine answers with — connecting trusts a key it hasn't seen before\nand remembers it, so this is a record rather than a guarantee."
               },
-              "identityFile": {
-                "type": [
-                  "string",
-                  "null"
-                ],
-                "description": "Which private key to authenticate with, as a path on the machine\nrunning the control plane.\n\nThe path, never the key. A private key is the one credential\nFiretower has no reason to hold: ssh reads the file itself, and only\nthis machine ever dials out. Absent lets ssh choose, which means the\nagent and then the usual names in `~/.ssh`."
+              "key": {
+                "$ref": "#/components/schemas/SshKey",
+                "description": "Which key to authenticate with. See [`SshKey`]."
               },
               "port": {
                 "type": [
@@ -2576,8 +2595,7 @@
               }
             }
           }
-        ],
-        "description": "Where an agent can run.\n\nThree kinds, and they are not a ladder — each is the right answer sometimes.\nPoking at a repository by hand wants the first; leaving an agent running for\nan hour wants the third."
+        ]
       },
       "ConfigureAgent": {
         "type": "object",
@@ -3453,6 +3471,28 @@
           }
         }
       },
+      "PublicIdentity": {
+        "type": "object",
+        "description": "What a person may see.\n\nThe private half is not here and is not returned by anything: it goes from\nthe vault to a file ssh reads, and back out of existence. Every field below\nis safe on a screen, in a screenshot, and in a provider's web form.",
+        "required": [
+          "publicKey",
+          "fingerprint",
+          "algorithm"
+        ],
+        "properties": {
+          "algorithm": {
+            "type": "string"
+          },
+          "fingerprint": {
+            "type": "string",
+            "description": "`SHA256:…`, to match against `ssh-keygen -lf` on the other machine when\nthe two disagree about what was installed."
+          },
+          "publicKey": {
+            "type": "string",
+            "description": "`ssh-ed25519 AAAAC3… firetower`, exactly as `authorized_keys` wants it."
+          }
+        }
+      },
       "PullRequest": {
         "type": "object",
         "required": [
@@ -3817,6 +3857,79 @@
             "$ref": "#/components/schemas/User"
           }
         }
+      },
+      "SshKey": {
+        "oneOf": [
+          {
+            "type": "object",
+            "description": "Let ssh choose: the agent first, then the usual names in `~/.ssh`.\n\nThe default, and what an absent `identity_file` used to mean. Still\nuseful for a control plane running on a machine whose ssh is already\nconfigured — a development install, or a binary on a host.",
+            "required": [
+              "type"
+            ],
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "Default"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "The key Firetower made for itself, sealed in the vault.\n\nWhat a server added through the interface uses. Firetower holds this one\nbecause in a container there is no other way for it to hold anything:\nit is scoped to this installation, opens nothing else, and is revoked by\ndeleting one line on one machine.",
+            "required": [
+              "type"
+            ],
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "Managed"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "A private key the operator pasted, sealed in the vault under this name.\n\nFor an existing key they would rather reuse, or one signed by a CA.",
+            "required": [
+              "name",
+              "type"
+            ],
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "Held"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "A path on the machine running the control plane.\n\nStill correct when that machine is not a container. Kept so that every\nhost added before this existed keeps working and means what it did.",
+            "required": [
+              "path",
+              "type"
+            ],
+            "properties": {
+              "path": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "File"
+                ]
+              }
+            }
+          }
+        ],
+        "description": "Where an agent can run.\n\nThree kinds, and they are not a ladder — each is the right answer sometimes.\nPoking at a repository by hand wants the first; leaving an agent running for\nan hour wants the third.\nWhich private key ssh should offer when reaching a server.\n\nThis used to be one field, `identity_file`: a path on the machine running the\ncontrol plane. That was right while the control plane ran on the operator's\nown machine, and stopped being right in a container — the path is read\ninside the container, `~/.ssh/id_ed25519` names a file that exists on their\nmachine and not in this one, and no path they can type would bridge the two.\n\nSo a host now says *which* key rather than *where* it is, and only one of\nthese is still a path."
       },
       "Step": {
         "type": "string",

@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.3.0
+ * OpenAPI spec version: 0.4.0
  */
 import * as zod from 'zod';
 
@@ -27,11 +27,21 @@ export const ListHostsResponseItem = zod.object({
   "container": zod.string().nullish().describe('The container the worker runs in on that machine. Absent runs the\nbinary on the host itself, for a machine whose image already has it.\n\nReached by ssh-ing to the machine and running `docker exec` there,\nnever by ssh-ing into the container — that would need a key inside\nthe image, a published port, and a host key that changes on every\nrecreate.'),
   "host": zod.string().describe('A hostname, an address, or a name from your ssh config.'),
   "hostKey": zod.string().nullish().describe('Recorded when the host is added. Not yet checked against what the\nmachine answers with — connecting trusts a key it hasn\'t seen before\nand remembers it, so this is a record rather than a guarantee.'),
-  "identityFile": zod.string().nullish().describe('Which private key to authenticate with, as a path on the machine\nrunning the control plane.\n\nThe path, never the key. A private key is the one credential\nFiretower has no reason to hold: ssh reads the file itself, and only\nthis machine ever dials out. Absent lets ssh choose, which means the\nagent and then the usual names in `~\/.ssh`.'),
+  "key": zod.union([zod.object({
+  "type": zod.enum(['Default'])
+}).describe('Let ssh choose: the agent first, then the usual names in `~\/.ssh`.\n\nThe default, and what an absent `identity_file` used to mean. Still\nuseful for a control plane running on a machine whose ssh is already\nconfigured — a development install, or a binary on a host.'),zod.object({
+  "type": zod.enum(['Managed'])
+}).describe('The key Firetower made for itself, sealed in the vault.\n\nWhat a server added through the interface uses. Firetower holds this one\nbecause in a container there is no other way for it to hold anything:\nit is scoped to this installation, opens nothing else, and is revoked by\ndeleting one line on one machine.'),zod.object({
+  "name": zod.string(),
+  "type": zod.enum(['Held'])
+}).describe('A private key the operator pasted, sealed in the vault under this name.\n\nFor an existing key they would rather reuse, or one signed by a CA.'),zod.object({
+  "path": zod.string(),
+  "type": zod.enum(['File'])
+}).describe('A path on the machine running the control plane.\n\nStill correct when that machine is not a container. Kept so that every\nhost added before this existed keeps working and means what it did.')]).optional().describe('Which key to authenticate with. See [`SshKey`].'),
   "port": zod.int().min(listHostsResponseComputeThreePortMin).nullish().describe('Absent is whatever ssh would use: 22, or what the config says.'),
   "type": zod.enum(['Server']),
   "user": zod.string().nullish().describe('Who to connect as.\n\nAbsent leaves it to ssh, which is what keeps a name from your ssh\nconfig working on its own — that file may already say, and repeating\nit here badly is worse than not repeating it.')
-}).describe('A worker on another machine. What a real deployment looks like.\n\nHeld as the parts of an ssh destination rather than one string, because\neach part is a separate decision: the address is the machine, the user is\nthe account work runs as, and the key is which of several you keep.\nAssembling them is [`Compute::ssh_destination`]\'s job.')]).describe('Where an agent can run.\n\nThree kinds, and they are not a ladder — each is the right answer sometimes.\nPoking at a repository by hand wants the first; leaving an agent running for\nan hour wants the third.'),
+}).describe('A worker on another machine. What a real deployment looks like.\n\nHeld as the parts of an ssh destination rather than one string, because\neach part is a separate decision: the address is the machine, the user is\nthe account work runs as, and the key is which of several you keep.\nAssembling them is [`Compute::ssh_destination`]\'s job.')]),
   "cpus": zod.int().min(listHostsResponseCpusMin).nullish(),
   "diagnosis": zod.union([zod.null(),zod.object({
   "at": zod.iso.datetime({"offset":true}),
@@ -77,11 +87,21 @@ export const CreateHostBody = zod.object({
   "container": zod.string().nullish().describe('The container the worker runs in on that machine. Absent runs the\nbinary on the host itself, for a machine whose image already has it.\n\nReached by ssh-ing to the machine and running `docker exec` there,\nnever by ssh-ing into the container — that would need a key inside\nthe image, a published port, and a host key that changes on every\nrecreate.'),
   "host": zod.string().describe('A hostname, an address, or a name from your ssh config.'),
   "hostKey": zod.string().nullish().describe('Recorded when the host is added. Not yet checked against what the\nmachine answers with — connecting trusts a key it hasn\'t seen before\nand remembers it, so this is a record rather than a guarantee.'),
-  "identityFile": zod.string().nullish().describe('Which private key to authenticate with, as a path on the machine\nrunning the control plane.\n\nThe path, never the key. A private key is the one credential\nFiretower has no reason to hold: ssh reads the file itself, and only\nthis machine ever dials out. Absent lets ssh choose, which means the\nagent and then the usual names in `~\/.ssh`.'),
+  "key": zod.union([zod.object({
+  "type": zod.enum(['Default'])
+}).describe('Let ssh choose: the agent first, then the usual names in `~\/.ssh`.\n\nThe default, and what an absent `identity_file` used to mean. Still\nuseful for a control plane running on a machine whose ssh is already\nconfigured — a development install, or a binary on a host.'),zod.object({
+  "type": zod.enum(['Managed'])
+}).describe('The key Firetower made for itself, sealed in the vault.\n\nWhat a server added through the interface uses. Firetower holds this one\nbecause in a container there is no other way for it to hold anything:\nit is scoped to this installation, opens nothing else, and is revoked by\ndeleting one line on one machine.'),zod.object({
+  "name": zod.string(),
+  "type": zod.enum(['Held'])
+}).describe('A private key the operator pasted, sealed in the vault under this name.\n\nFor an existing key they would rather reuse, or one signed by a CA.'),zod.object({
+  "path": zod.string(),
+  "type": zod.enum(['File'])
+}).describe('A path on the machine running the control plane.\n\nStill correct when that machine is not a container. Kept so that every\nhost added before this existed keeps working and means what it did.')]).optional().describe('Which key to authenticate with. See [`SshKey`].'),
   "port": zod.int().min(createHostBodyComputeThreePortMin).nullish().describe('Absent is whatever ssh would use: 22, or what the config says.'),
   "type": zod.enum(['Server']),
   "user": zod.string().nullish().describe('Who to connect as.\n\nAbsent leaves it to ssh, which is what keeps a name from your ssh\nconfig working on its own — that file may already say, and repeating\nit here badly is worse than not repeating it.')
-}).describe('A worker on another machine. What a real deployment looks like.\n\nHeld as the parts of an ssh destination rather than one string, because\neach part is a separate decision: the address is the machine, the user is\nthe account work runs as, and the key is which of several you keep.\nAssembling them is [`Compute::ssh_destination`]\'s job.')]).describe('Where an agent can run.\n\nThree kinds, and they are not a ladder — each is the right answer sometimes.\nPoking at a repository by hand wants the first; leaving an agent running for\nan hour wants the third.'),
+}).describe('A worker on another machine. What a real deployment looks like.\n\nHeld as the parts of an ssh destination rather than one string, because\neach part is a separate decision: the address is the machine, the user is\nthe account work runs as, and the key is which of several you keep.\nAssembling them is [`Compute::ssh_destination`]\'s job.')]),
   "name": zod.string().nullish().describe('What you\'ll call it. Defaults to something derived from the kind.')
 })
 
@@ -104,11 +124,21 @@ export const CreateHostResponse = zod.object({
   "container": zod.string().nullish().describe('The container the worker runs in on that machine. Absent runs the\nbinary on the host itself, for a machine whose image already has it.\n\nReached by ssh-ing to the machine and running `docker exec` there,\nnever by ssh-ing into the container — that would need a key inside\nthe image, a published port, and a host key that changes on every\nrecreate.'),
   "host": zod.string().describe('A hostname, an address, or a name from your ssh config.'),
   "hostKey": zod.string().nullish().describe('Recorded when the host is added. Not yet checked against what the\nmachine answers with — connecting trusts a key it hasn\'t seen before\nand remembers it, so this is a record rather than a guarantee.'),
-  "identityFile": zod.string().nullish().describe('Which private key to authenticate with, as a path on the machine\nrunning the control plane.\n\nThe path, never the key. A private key is the one credential\nFiretower has no reason to hold: ssh reads the file itself, and only\nthis machine ever dials out. Absent lets ssh choose, which means the\nagent and then the usual names in `~\/.ssh`.'),
+  "key": zod.union([zod.object({
+  "type": zod.enum(['Default'])
+}).describe('Let ssh choose: the agent first, then the usual names in `~\/.ssh`.\n\nThe default, and what an absent `identity_file` used to mean. Still\nuseful for a control plane running on a machine whose ssh is already\nconfigured — a development install, or a binary on a host.'),zod.object({
+  "type": zod.enum(['Managed'])
+}).describe('The key Firetower made for itself, sealed in the vault.\n\nWhat a server added through the interface uses. Firetower holds this one\nbecause in a container there is no other way for it to hold anything:\nit is scoped to this installation, opens nothing else, and is revoked by\ndeleting one line on one machine.'),zod.object({
+  "name": zod.string(),
+  "type": zod.enum(['Held'])
+}).describe('A private key the operator pasted, sealed in the vault under this name.\n\nFor an existing key they would rather reuse, or one signed by a CA.'),zod.object({
+  "path": zod.string(),
+  "type": zod.enum(['File'])
+}).describe('A path on the machine running the control plane.\n\nStill correct when that machine is not a container. Kept so that every\nhost added before this existed keeps working and means what it did.')]).optional().describe('Which key to authenticate with. See [`SshKey`].'),
   "port": zod.int().min(createHostResponseComputeThreePortMin).nullish().describe('Absent is whatever ssh would use: 22, or what the config says.'),
   "type": zod.enum(['Server']),
   "user": zod.string().nullish().describe('Who to connect as.\n\nAbsent leaves it to ssh, which is what keeps a name from your ssh\nconfig working on its own — that file may already say, and repeating\nit here badly is worse than not repeating it.')
-}).describe('A worker on another machine. What a real deployment looks like.\n\nHeld as the parts of an ssh destination rather than one string, because\neach part is a separate decision: the address is the machine, the user is\nthe account work runs as, and the key is which of several you keep.\nAssembling them is [`Compute::ssh_destination`]\'s job.')]).describe('Where an agent can run.\n\nThree kinds, and they are not a ladder — each is the right answer sometimes.\nPoking at a repository by hand wants the first; leaving an agent running for\nan hour wants the third.'),
+}).describe('A worker on another machine. What a real deployment looks like.\n\nHeld as the parts of an ssh destination rather than one string, because\neach part is a separate decision: the address is the machine, the user is\nthe account work runs as, and the key is which of several you keep.\nAssembling them is [`Compute::ssh_destination`]\'s job.')]),
   "cpus": zod.int().min(createHostResponseCpusMin).nullish(),
   "diagnosis": zod.union([zod.null(),zod.object({
   "at": zod.iso.datetime({"offset":true}),
@@ -177,11 +207,21 @@ export const RenameHostResponse = zod.object({
   "container": zod.string().nullish().describe('The container the worker runs in on that machine. Absent runs the\nbinary on the host itself, for a machine whose image already has it.\n\nReached by ssh-ing to the machine and running `docker exec` there,\nnever by ssh-ing into the container — that would need a key inside\nthe image, a published port, and a host key that changes on every\nrecreate.'),
   "host": zod.string().describe('A hostname, an address, or a name from your ssh config.'),
   "hostKey": zod.string().nullish().describe('Recorded when the host is added. Not yet checked against what the\nmachine answers with — connecting trusts a key it hasn\'t seen before\nand remembers it, so this is a record rather than a guarantee.'),
-  "identityFile": zod.string().nullish().describe('Which private key to authenticate with, as a path on the machine\nrunning the control plane.\n\nThe path, never the key. A private key is the one credential\nFiretower has no reason to hold: ssh reads the file itself, and only\nthis machine ever dials out. Absent lets ssh choose, which means the\nagent and then the usual names in `~\/.ssh`.'),
+  "key": zod.union([zod.object({
+  "type": zod.enum(['Default'])
+}).describe('Let ssh choose: the agent first, then the usual names in `~\/.ssh`.\n\nThe default, and what an absent `identity_file` used to mean. Still\nuseful for a control plane running on a machine whose ssh is already\nconfigured — a development install, or a binary on a host.'),zod.object({
+  "type": zod.enum(['Managed'])
+}).describe('The key Firetower made for itself, sealed in the vault.\n\nWhat a server added through the interface uses. Firetower holds this one\nbecause in a container there is no other way for it to hold anything:\nit is scoped to this installation, opens nothing else, and is revoked by\ndeleting one line on one machine.'),zod.object({
+  "name": zod.string(),
+  "type": zod.enum(['Held'])
+}).describe('A private key the operator pasted, sealed in the vault under this name.\n\nFor an existing key they would rather reuse, or one signed by a CA.'),zod.object({
+  "path": zod.string(),
+  "type": zod.enum(['File'])
+}).describe('A path on the machine running the control plane.\n\nStill correct when that machine is not a container. Kept so that every\nhost added before this existed keeps working and means what it did.')]).optional().describe('Which key to authenticate with. See [`SshKey`].'),
   "port": zod.int().min(renameHostResponseComputeThreePortMin).nullish().describe('Absent is whatever ssh would use: 22, or what the config says.'),
   "type": zod.enum(['Server']),
   "user": zod.string().nullish().describe('Who to connect as.\n\nAbsent leaves it to ssh, which is what keeps a name from your ssh\nconfig working on its own — that file may already say, and repeating\nit here badly is worse than not repeating it.')
-}).describe('A worker on another machine. What a real deployment looks like.\n\nHeld as the parts of an ssh destination rather than one string, because\neach part is a separate decision: the address is the machine, the user is\nthe account work runs as, and the key is which of several you keep.\nAssembling them is [`Compute::ssh_destination`]\'s job.')]).describe('Where an agent can run.\n\nThree kinds, and they are not a ladder — each is the right answer sometimes.\nPoking at a repository by hand wants the first; leaving an agent running for\nan hour wants the third.'),
+}).describe('A worker on another machine. What a real deployment looks like.\n\nHeld as the parts of an ssh destination rather than one string, because\neach part is a separate decision: the address is the machine, the user is\nthe account work runs as, and the key is which of several you keep.\nAssembling them is [`Compute::ssh_destination`]\'s job.')]),
   "cpus": zod.int().min(renameHostResponseCpusMin).nullish(),
   "diagnosis": zod.union([zod.null(),zod.object({
   "at": zod.iso.datetime({"offset":true}),
@@ -222,4 +262,19 @@ export const DrainHostBody = zod.object({
 })
 
 export const DrainHostResponse = zod.void()
+
+/**
+ * Read before adding a server, because the machine has to be given this before
+ * it will let Firetower in — and that is a step on the *other* machine, which
+ * nothing here can do.
+ *
+ * There is no companion endpoint for the private half, and there should never
+ * be one. It goes from the vault to a file ssh reads and no further.
+ * @summary The public half of Firetower's own ssh key.
+ */
+export const SshKeyResponse = zod.object({
+  "algorithm": zod.string(),
+  "fingerprint": zod.string().describe('`SHA256:…`, to match against `ssh-keygen -lf` on the other machine when\nthe two disagree about what was installed.'),
+  "publicKey": zod.string().describe('`ssh-ed25519 AAAAC3… firetower`, exactly as `authorized_keys` wants it.')
+}).describe('What a person may see.\n\nThe private half is not here and is not returned by anything: it goes from\nthe vault to a file ssh reads, and back out of existence. Every field below\nis safe on a screen, in a screenshot, and in a provider\'s web form.')
 

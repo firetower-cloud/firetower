@@ -3,16 +3,10 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.3.0
+ * OpenAPI spec version: 0.4.0
  */
+import type { SshKey } from './sshKey';
 
-/**
- * Where an agent can run.
- *
- * Three kinds, and they are not a ladder — each is the right answer sometimes.
- * Poking at a repository by hand wants the first; leaving an agent running for
- * an hour wants the third.
- */
 export type Compute = {
   type: 'Local';
 } | {
@@ -40,17 +34,8 @@ export type Compute = {
      * @nullable
      */
   hostKey?: string | null;
-  /**
-     * Which private key to authenticate with, as a path on the machine
-     * running the control plane.
-     *
-     * The path, never the key. A private key is the one credential
-     * Firetower has no reason to hold: ssh reads the file itself, and only
-     * this machine ever dials out. Absent lets ssh choose, which means the
-     * agent and then the usual names in `~/.ssh`.
-     * @nullable
-     */
-  identityFile?: string | null;
+  /** Which key to authenticate with. See [`SshKey`]. */
+  key?: SshKey;
   /**
      * Absent is whatever ssh would use: 22, or what the config says.
      * @minimum 0

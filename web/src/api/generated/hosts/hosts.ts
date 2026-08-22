@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.3.0
+ * OpenAPI spec version: 0.4.0
  */
 import {
   useMutation,
@@ -31,6 +31,7 @@ import type {
   Drain,
   Host,
   NewHost,
+  PublicIdentity,
   Rename
 } from '../model';
 
@@ -541,3 +542,126 @@ export const useDrainHost = <TError = ApiError,
       > => {
       return useMutation(getDrainHostMutationOptions(options), queryClient);
     }
+    export const getSshKeyUrl = () => {
+
+
+
+
+  return `/api/v1/ssh-key`
+}
+
+/**
+ * Read before adding a server, because the machine has to be given this before
+ * it will let Firetower in — and that is a step on the *other* machine, which
+ * nothing here can do.
+ *
+ * There is no companion endpoint for the private half, and there should never
+ * be one. It goes from the vault to a file ssh reads and no further.
+ * @summary The public half of Firetower's own ssh key.
+ */
+export const sshKey = async ( options?: Parameters<typeof http>[1]): Promise<PublicIdentity> => {
+
+  return http<PublicIdentity>(getSshKeyUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getSshKeyQueryKey = () => {
+    return [
+    `/api/v1/ssh-key`
+    ] as const;
+    }
+
+
+export const getSshKeyQueryOptions = <TData = Awaited<ReturnType<typeof sshKey>>, TError = unknown>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof sshKey>>, TError, TData>>, request?: SecondParameter<typeof http>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getSshKeyQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof sshKey>>> = ({ signal }) => sshKey({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof sshKey>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type SshKeyQueryResult = NonNullable<Awaited<ReturnType<typeof sshKey>>>
+export type SshKeyQueryError = unknown
+
+
+export function useSshKey<TData = Awaited<ReturnType<typeof sshKey>>, TError = unknown>(
+  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof sshKey>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof sshKey>>,
+          TError,
+          Awaited<ReturnType<typeof sshKey>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useSshKey<TData = Awaited<ReturnType<typeof sshKey>>, TError = unknown>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof sshKey>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof sshKey>>,
+          TError,
+          Awaited<ReturnType<typeof sshKey>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useSshKey<TData = Awaited<ReturnType<typeof sshKey>>, TError = unknown>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof sshKey>>, TError, TData>>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary The public half of Firetower's own ssh key.
+ */
+
+export function useSshKey<TData = Awaited<ReturnType<typeof sshKey>>, TError = unknown>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof sshKey>>, TError, TData>>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getSshKeyQueryOptions(options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+/**
+ * @summary The public half of Firetower's own ssh key.
+ */
+export const useSetSshKeyQueryData = () => {
+  const queryClient = useQueryClient();
+  return (updater: Awaited<ReturnType<typeof sshKey>> | undefined | ((old: Awaited<ReturnType<typeof sshKey>> | undefined) => Awaited<ReturnType<typeof sshKey>> | undefined)) => {
+    queryClient.setQueriesData<Awaited<ReturnType<typeof sshKey>>>({ queryKey: getSshKeyQueryKey() }, updater);
+  };
+}
+
+/**
+ * @summary The public half of Firetower's own ssh key.
+ */
+export const useGetSshKeyQueryData = () => {
+  const queryClient = useQueryClient();
+  return () =>
+    queryClient.getQueryData<Awaited<ReturnType<typeof sshKey>>>(getSshKeyQueryKey());
+}
+
+

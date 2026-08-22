@@ -112,6 +112,66 @@ fn quote(text: &str) -> String {
 // it — would disagree with the wire about a field nobody checks by hand. Both
 // understand a variant asking for itself. See the test at the bottom of this
 // file, which is what keeps that true.
+/// Which private key ssh should offer when reaching a server.
+///
+/// This used to be one field, `identity_file`: a path on the machine running the
+/// control plane. That was right while the control plane ran on the operator's
+/// own machine, and stopped being right in a container — the path is read
+/// inside the container, `~/.ssh/id_ed25519` names a file that exists on their
+/// machine and not in this one, and no path they can type would bridge the two.
+///
+/// So a host now says *which* key rather than *where* it is, and only one of
+/// these is still a path.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(tag = "type")]
+pub enum SshKey {
+    /// Let ssh choose: the agent first, then the usual names in `~/.ssh`.
+    ///
+    /// The default, and what an absent `identity_file` used to mean. Still
+    /// useful for a control plane running on a machine whose ssh is already
+    /// configured — a development install, or a binary on a host.
+    #[default]
+    Default,
+    /// The key Firetower made for itself, sealed in the vault.
+    ///
+    /// What a server added through the interface uses. Firetower holds this one
+    /// because in a container there is no other way for it to hold anything:
+    /// it is scoped to this installation, opens nothing else, and is revoked by
+    /// deleting one line on one machine.
+    Managed,
+    /// A private key the operator pasted, sealed in the vault under this name.
+    ///
+    /// For an existing key they would rather reuse, or one signed by a CA.
+    #[serde(rename_all = "camelCase")]
+    Held { name: String },
+    /// A path on the machine running the control plane.
+    ///
+    /// Still correct when that machine is not a container. Kept so that every
+    /// host added before this existed keeps working and means what it did.
+    #[serde(rename_all = "camelCase")]
+    File { path: String },
+}
+
+impl SshKey {
+    /// The path to hand `ssh -i`, when the answer is a path on this filesystem.
+    ///
+    /// `None` for [`SshKey::Default`], which is ssh's own business, and for the
+    /// two the vault holds — those are written somewhere ssh can read them at
+    /// the moment of connecting, and that is the transport's job rather than
+    /// this type's.
+    pub fn path(&self) -> Option<&str> {
+        match self {
+            SshKey::File { path } => Some(path),
+            _ => None,
+        }
+    }
+
+    /// Whether the key comes out of the vault.
+    pub fn is_held(&self) -> bool {
+        matches!(self, SshKey::Managed | SshKey::Held { .. })
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(tag = "type")]
 pub enum Compute {
@@ -142,14 +202,9 @@ pub enum Compute {
         user: Option<String>,
         /// Absent is whatever ssh would use: 22, or what the config says.
         port: Option<u16>,
-        /// Which private key to authenticate with, as a path on the machine
-        /// running the control plane.
-        ///
-        /// The path, never the key. A private key is the one credential
-        /// Firetower has no reason to hold: ssh reads the file itself, and only
-        /// this machine ever dials out. Absent lets ssh choose, which means the
-        /// agent and then the usual names in `~/.ssh`.
-        identity_file: Option<String>,
+        /// Which key to authenticate with. See [`SshKey`].
+        #[serde(default)]
+        key: SshKey,
         /// Recorded when the host is added. Not yet checked against what the
         /// machine answers with — connecting trusts a key it hasn't seen before
         /// and remembers it, so this is a record rather than a guarantee.
@@ -320,7 +375,7 @@ mod destination_tests {
             host: "203.0.113.44".into(),
             user: Some("deploy".into()),
             port: None,
-            identity_file: None,
+            key: SshKey::Default,
             host_key: None,
             container: None,
         };
@@ -333,7 +388,7 @@ mod destination_tests {
             host: "fire-01".into(),
             user: None,
             port: None,
-            identity_file: None,
+            key: SshKey::Default,
             host_key: None,
             container: None,
         };
@@ -1317,7 +1372,7 @@ mod contract_tests {
                 host: "203.0.113.44".into(),
                 user: Some("root".into()),
                 port: None,
-                identity_file: None,
+                key: SshKey::Default,
                 host_key: None,
                 container: None,
             },
@@ -1440,5 +1495,59 @@ mod hook_tests {
         let trimmed = trim_note(&long).unwrap();
         assert!(trimmed.len() < long.len());
         assert!(trimmed.ends_with('…'), "and says that it was cut");
+    }
+}
+
+#[cfg(test)]
+mod ssh_key_tests {
+    use super::*;
+
+    /// What the migration writes has to be what this reads. They are two
+    /// different pieces of code agreeing about a shape, which is exactly the
+    /// kind of agreement that rots quietly.
+    #[test]
+    fn the_shapes_the_migration_writes_are_the_ones_we_read() {
+        let file: Compute = serde_json::from_str(
+            r#"{"type":"Server","host":"fire-01","user":"deploy",
+                "key":{"type":"File","path":"~/.ssh/fire"},
+                "container":"firetower-worker"}"#,
+        )
+        .unwrap();
+
+        let Compute::Server { key, .. } = &file else {
+            panic!("not a server")
+        };
+        assert_eq!(key.path(), Some("~/.ssh/fire"));
+        assert!(!key.is_held());
+
+        let default: Compute =
+            serde_json::from_str(r#"{"type":"Server","host":"fire-02","key":{"type":"Default"}}"#)
+                .unwrap();
+        let Compute::Server { key, .. } = &default else {
+            panic!("not a server")
+        };
+        assert_eq!(*key, SshKey::Default);
+    }
+
+    /// A row written before the `key` field existed, in case one survives the
+    /// migration — a host added by a replica mid-upgrade, say. Absent has always
+    /// meant "ssh decides", and it still does.
+    #[test]
+    fn a_row_with_no_key_at_all_still_reads() {
+        let old: Compute =
+            serde_json::from_str(r#"{"type":"Server","host":"fire-03"}"#).unwrap();
+        let Compute::Server { key, .. } = &old else {
+            panic!("not a server")
+        };
+        assert_eq!(*key, SshKey::Default);
+    }
+
+    /// Only the vault-held kinds ask the vault for anything.
+    #[test]
+    fn which_kinds_need_the_vault() {
+        assert!(SshKey::Managed.is_held());
+        assert!(SshKey::Held { name: "ci".into() }.is_held());
+        assert!(!SshKey::Default.is_held());
+        assert!(!SshKey::File { path: "/k".into() }.is_held());
     }
 }

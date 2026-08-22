@@ -188,7 +188,7 @@ mod tests {
             host: "fire-01".into(),
             user: Some("deploy".into()),
             port: None,
-            identity_file: None,
+            key: ft_core::SshKey::Default,
             host_key: None,
             container: container.map(Into::into),
         }
