@@ -14,7 +14,7 @@ Attach from a browser or a phone, answer questions, review the diff, ship the br
 
 [Website](https://usefiretower.com) · [Getting started](https://usefiretower.com/docs/getting-started) · [How it works](https://usefiretower.com/docs/self-hosting) · [Issues](https://github.com/firetower-cloud/firetower/issues)
 
-### 🌟 Star the repository if Firetower is useful to you 🌟
+### 🌟 Star the repository to support us 🌟
 
 </div>
 
@@ -95,19 +95,6 @@ Everything else — putting it on a domain, adding a server, connecting reposito
 | [Connect repositories](https://usefiretower.com/docs/repositories) | Git URLs, paths, and authorizing GitHub |
 | [Secrets](https://usefiretower.com/docs/secrets) | How credentials are sealed, and where the root key lives |
 
-## Status
-
-Early, but the loop is closed. A session can run on this machine, in a container, or on a server you SSH into. It does not need a repository — an agent can start in an empty workspace.
-
-- [x] Control plane, worker daemon, and the protocol between them
-- [x] This machine, a container here, and a server over SSH
-- [x] Repository mirrors, per-session worktrees, and sessions with no repository
-- [x] An event log on the worker, so a session survives the laptop sleeping
-- [x] The agent's terminal in the browser
-- [x] Encrypted credentials, and whether each agent is present on a host
-- [x] Diff, push, and opening a pull request
-- [x] HTTP API with a generated contract
-- [ ] A hosted control plane — the worker still never dials out
 
 ## Contributing
 
