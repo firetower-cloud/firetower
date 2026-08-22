@@ -19,6 +19,13 @@
 # somewhere else instead, add that machine over ssh — Compute → Add compute →
 # A server — and drain `localhost`.
 
+# The namespace for the containers, the network and the volumes below. Fixed,
+# because changing it would orphan the volumes of every installation that
+# already exists and hand them back an empty database.
+#
+# `compose.yaml` at the repository root is deliberately `firetower-dev` so that
+# running Firetower on the machine you develop it on does not have the two
+# fighting over one `firetower_postgres`.
 name: firetower
 
 services:

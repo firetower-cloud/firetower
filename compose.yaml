@@ -4,7 +4,25 @@
 # Nothing in this file is a secret. Postgres credentials come from .env, which
 # is gitignored, with .env.example beside it.
 
-name: firetower
+# **Not `firetower`.** `deploy/firetower.yml` is that, and a Compose project
+# name is the namespace for containers, networks and volumes alike — so sharing
+# one means both files resolve `postgres:` to the same `firetower_postgres`
+# volume. Running Firetower on the machine you develop it on then goes wrong in
+# ways that look like nothing to do with Docker:
+#
+#   * whichever came up first owns the database, and the other authenticates
+#     against credentials baked into a data directory at initdb, which no
+#     amount of editing `.env` will change;
+#   * `docker compose` here reports the deployment's containers as orphans, and
+#     offers to remove them;
+#   * `just reset` runs `docker compose down -v`, which would take the
+#     deployment's database with it.
+#
+# Renaming this one rather than the deployment is deliberate. A contributor's
+# database is disposable and rebuilt by the next `just db`; changing the name in
+# `deploy/` would orphan the volumes of every installation that already exists,
+# and their database would come back empty.
+name: firetower-dev
 
 services:
   postgres:
