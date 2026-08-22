@@ -51,7 +51,7 @@ That's why the dashboard is an inbox rather than a fleet monitor, and why a sess
 
 The control plane owns intent: hosts, repositories, credentials, and what should run where. Workers own reality: they write the event log first and report afterwards, so a reconnecting control plane just asks for everything since the last thing it saw.
 
-**The worker never opens a port.** It reads frames from stdin and writes them to stdout, so who dials is a transport detail — a child process, `docker exec -i`, or `ssh host firetower worker --stdio`. The daemon can't tell the difference. `localhost` is a real host, not a special case: it appears in the fleet, runs sessions, and can be drained.
+**The worker never opens a port.** It reads frames from stdin and writes them to stdout, so who dials is a transport detail — a child process, `docker exec -i`, or `ssh host firetower-worker --stdio`. The daemon can't tell the difference. `localhost` is a real host, not a special case: it appears in the fleet, runs sessions, and can be drained.
 
 <div align="center">
 

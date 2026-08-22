@@ -76,7 +76,10 @@ COPY --from=web /web/out ./web/out
 
 RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
     --mount=type=cache,target=/src/target,sharing=locked \
-    cargo build --release -p ft-cli --target "$(cat /target)" \
+    # Only this binary. The package also builds `firetower-worker`, which
+    # belongs in the worker image and would be dead weight here — `localhost`
+    # runs its worker from this executable, by absolute path.
+    cargo build --release -p ft-cli --bin firetower --target "$(cat /target)" \
     && cp "target/$(cat /target)/release/firetower" /firetower
 
 FROM debian:bookworm-slim

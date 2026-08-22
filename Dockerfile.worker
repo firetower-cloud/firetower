@@ -64,9 +64,17 @@ COPY migrations ./migrations
 
 RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
     --mount=type=cache,target=/src/target,sharing=locked \
-    cargo build --release -p ft-cli --target "$(cat /target)" \
+    # `--no-default-features` is what the `server` feature was written for and
+    # what this image had never actually used: it was shipping the whole control
+    # plane — axum, sqlx, the embedded web application — to a container whose
+    # only job is to speak frames. 16M becomes 5.6M.
+    #
+    # `firetower-worker`, not `firetower`: a person's PATH may hold a `firetower`
+    # that is the npm CLI, and the control plane has to name the one it means.
+    cargo build --release -p ft-cli --no-default-features \
+        --bin firetower-worker --target "$(cat /target)" \
     # Out of the cache mount, which does not survive the layer.
-    && cp "target/$(cat /target)/release/firetower" /firetower
+    && cp "target/$(cat /target)/release/firetower-worker" /firetower-worker
 
 FROM debian:bookworm-slim
 
@@ -86,7 +94,7 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && npm cache clean --force \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=build /firetower /usr/local/bin/firetower
+COPY --from=build /firetower-worker /usr/local/bin/firetower-worker
 
 # Where this worker keeps its mirrors, worktrees and event log.
 RUN mkdir -p /var/lib/firetower/worker

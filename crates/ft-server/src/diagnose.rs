@@ -9,9 +9,10 @@ use ft_core::{Cause, Compute, Diagnosis};
 
 /// What a failed connection means, given what the far end said.
 ///
-/// `status` is the child's exit code where we have it — 127 is a shell that
-/// couldn't find the command. The text decides where the two disagree: ssh
-/// passes a remote shell's wording through more reliably than its exit code.
+/// `status` is the child's exit code where we have it — see [`is_not_found`].
+/// The text decides where the two disagree: ssh passes a remote shell's wording
+/// through more reliably than its exit code. Where there is no text at all, the
+/// status is all there is, and `docker exec` is exactly that case.
 pub fn from_output(
     stderr: &[String],
     status: Option<std::process::ExitStatus>,
@@ -56,7 +57,13 @@ pub fn from_output(
             Cause::DockerMissing,
             "Docker isn't installed on that machine.",
         )
-    } else if said.contains("firetower: command not found")
+    } else if said.contains("firetower-worker: command not found")
+        || said.contains("firetower-worker: not found")
+        // Docker phrases it its own way, and this is the one an upgrade meets:
+        // an image built before the worker had its own name has `firetower` and
+        // not `firetower-worker`.
+        || said.contains("executable file not found")
+        || said.contains("firetower: command not found")
         || said.contains("firetower: not found")
         || (is_not_found(status) && !said.contains("docker"))
     {
@@ -80,27 +87,6 @@ pub fn from_output(
             )
             .with_remedy("npm i -g @firetower/cli\nfiretower worker install")
         }
-    } else if said.contains("unknown option '--stdio'") || said.contains("unknown command 'worker'")
-    {
-        // There is a `firetower` on that machine and it is the npm CLI, not a
-        // worker. They share a name — `@firetower/cli` installs its `bin` as
-        // `firetower`, and so does the worker — so whichever is first on PATH
-        // answers. The CLI installs and upgrades workers; it does not speak
-        // frames, and says so in a way that names neither itself nor us.
-        //
-        // Almost always this is a host added without naming the container its
-        // worker runs in, so the control plane tried the machine directly.
-        Diagnosis::new(
-            Cause::WorkerMissing,
-            format!(
-                "The `firetower` on {} is the CLI, not a worker.",
-                machine(compute)
-            ),
-        )
-        .with_remedy(
-            "# name the container the worker runs in — usually:\nfiretower-worker\n\n\
-             # or, if there isn't one yet, on that machine:\nfiretower worker install",
-        )
     } else if said.contains("permission denied (publickey")
         || said.contains("no supported authentication methods")
         || said.contains("too many authentication failures")
@@ -170,9 +156,23 @@ pub fn protocol_mismatch(theirs: u32, ours: u32, compute: &Compute) -> Diagnosis
     }
 }
 
-/// An exit code that means the shell had nothing to run.
+/// Whether the far end could not run what it was asked to run.
+///
+/// 127 is a shell saying it found nothing by that name. 126 is `docker exec`
+/// saying the same about a container — and it matters here because docker
+/// writes that reason to **stdout**, which this transport reads as the frame
+/// stream. So the text never reaches the stderr we diagnose from, and the exit
+/// status is the only evidence left:
+///
+/// ```text
+/// $ docker exec -i old-worker firetower-worker --stdio >out 2>err; echo $?
+/// 126
+/// $ cat err          # empty
+/// $ cat out
+/// OCI runtime exec failed: … "firetower-worker": executable file not found …
+/// ```
 fn is_not_found(status: Option<std::process::ExitStatus>) -> bool {
-    status.and_then(|s| s.code()) == Some(127)
+    matches!(status.and_then(|s| s.code()), Some(126) | Some(127))
 }
 
 /// How to name the machine in a sentence, without repeating the whole
@@ -237,7 +237,7 @@ mod tests {
     /// A machine with nothing installed on it.
     #[test]
     fn a_missing_worker_is_named_rather_than_reported_as_a_closed_stream() {
-        let d = read(&["bash: firetower: command not found"], &server());
+        let d = read(&["bash: firetower-worker: command not found"], &server());
         assert_eq!(d.cause, Cause::WorkerMissing);
         assert!(d.summary.contains("isn't installed"), "{}", d.summary);
 
@@ -248,19 +248,35 @@ mod tests {
         assert!(remedy.contains("firetower worker install"), "{remedy}");
     }
 
-    /// The CLI and the worker are both called `firetower`, so on a machine
-    /// with the CLI installed and no container named, PATH picks the wrong one
-    /// and it complains about a flag rather than about being the wrong program.
+    /// The case with no text at all. `docker exec` puts its reason on stdout,
+    /// which the transport reads as frames, so stderr is empty and the exit
+    /// status is the only thing left to go on.
     #[test]
-    fn the_cli_answering_for_a_worker_is_named_as_such() {
-        let d = read(&["error: unknown option '--stdio'"], &server());
+    fn a_container_that_cannot_run_the_worker_is_diagnosed_from_its_exit_status() {
+        use std::os::unix::process::ExitStatusExt;
+
+        let d = from_output(
+            &[],
+            Some(std::process::ExitStatus::from_raw(126 << 8)),
+            &in_container(),
+        );
 
         assert_eq!(d.cause, Cause::WorkerMissing);
-        assert!(d.summary.contains("is the CLI"), "{}", d.summary);
+        assert!(d.remedy.is_some(), "it should say how to fix it");
+    }
 
-        // And says the likeliest fix: the container was never named.
-        let remedy = d.remedy.as_deref().unwrap_or_default();
-        assert!(remedy.contains("firetower-worker"), "{remedy}");
+    /// Docker says it differently, and this is the message an upgrade meets:
+    /// a worker image built before the binary had its own name.
+    #[test]
+    fn an_image_without_the_worker_binary_is_a_missing_worker() {
+        let d = read(
+            &["OCI runtime exec failed: exec failed: unable to start container \
+               process: exec: \"firetower-worker\": executable file not found in $PATH: unknown"],
+            &in_container(),
+        );
+
+        assert_eq!(d.cause, Cause::WorkerMissing);
+        assert!(d.remedy.is_some(), "it should say how to fix it");
     }
 
     /// Same shell message, different fix; only the host tells them apart.

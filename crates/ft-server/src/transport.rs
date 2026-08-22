@@ -134,7 +134,7 @@ pub trait Transport: Send + Sync {
 
 /// The worker as a child process on this machine.
 ///
-/// The command is `firetower worker --stdio`. Reaching a remote host adds
+/// The command is `firetower-worker --stdio`. Reaching a remote host adds
 /// `ssh <target>` in front of exactly that — which is why the local milestone is
 /// the real system rather than a stand-in for it.
 pub struct LocalTransport {
@@ -213,8 +213,7 @@ impl Transport for DockerTransport {
             // helpfully translate newlines and corrupt them.
             .arg("-i")
             .arg(&self.container)
-            .arg("firetower")
-            .arg("worker")
+            .arg(WORKER_BINARY)
             .arg("--stdio")
             .arg("--root")
             .arg(&self.root)
@@ -237,6 +236,18 @@ impl Transport for DockerTransport {
         })
     }
 }
+
+/// What a host is asked to run.
+///
+/// Not `firetower`. That is a person's command — `@firetower/cli` installs its
+/// own `bin` under that name — so asking a machine for `firetower worker
+/// --stdio` got whichever PATH offered first, and on a host somebody had
+/// installed the CLI on, that was the CLI. It knows nothing about `--stdio` and
+/// said so, naming neither program.
+///
+/// `localhost` does not use this: that worker is spawned from the control
+/// plane's own executable by absolute path.
+pub const WORKER_BINARY: &str = "firetower-worker";
 
 pub struct SshTransport {
     /// `user@host`, or the host by itself. Assembled from the parts a host
@@ -401,7 +412,7 @@ impl Transport for SshTransport {
             ssh.arg("docker").arg("exec").arg("-i").arg(container);
         }
 
-        ssh.arg("firetower").arg("worker").arg("--stdio");
+        ssh.arg(WORKER_BINARY).arg("--stdio");
 
         if let Some(root) = &self.root {
             ssh.arg("--root").arg(root);
@@ -640,7 +651,7 @@ mod tests {
 
     #[test]
     fn local_and_ssh_differ_only_in_how_the_command_is_reached() {
-        // Both run `firetower worker --stdio`. That is the entire difference
+        // Both run the same worker command. That is the entire difference
         // between the local milestone and the remote one.
         let local = LocalTransport::new("/tmp/ft").unwrap();
         assert_eq!(local.describe(), "local child process");

@@ -12,6 +12,19 @@ description = "Firetower — run coding agents on your own servers."
 name = "firetower"
 path = "src/main.rs"
 
+# The worker a host runs, under a name no person types.
+#
+# `firetower` is a human's command — `@firetower/cli` claims it too, to install
+# and upgrade workers — so a control plane asking a machine for
+# `firetower worker --stdio` got whichever PATH offered first. On a host with the
+# CLI on it, that was the CLI.
+#
+# Built with `--no-default-features`, which is what `server` was written for and
+# what the worker image had never used.
+[[bin]]
+name = "firetower-worker"
+path = "src/worker_main.rs"
+
 [features]
 default = ["server"]
 # Dropping this builds the small artifact that gets copied to a host: no axum,
@@ -29,6 +42,7 @@ serde_json.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
+directories.workspace = true
 
 [dev-dependencies]
 ft-proto.workspace = true
