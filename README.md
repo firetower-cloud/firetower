@@ -92,7 +92,18 @@ Everything else — putting it on a domain, adding a server, connecting reposito
 
 ## Current stage
 
-The project is in active development and still in the early stages. Expect changes and bugs.
+> [!WARNING]
+> The project is in active development and still in the early stages. Expect changes and bugs.
+
+## Supported agents
+
+| | |
+| --- | --- |
+| Claude Code | Supported |
+| Codex | Planned |
+| OpenCode | Planned |
+| Grok| Planned |
+| Cursor | Planned |
 
 ## Contributing
 
