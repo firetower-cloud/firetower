@@ -8,6 +8,12 @@ repository.workspace = true
 authors.workspace = true
 description = "Firetower — run coding agents on your own servers."
 
+# `cargo run -p ft-cli` means the product, and there are two binaries now. The
+# other one is a daemon nobody runs by hand, so naming a default here is more
+# honest than making every caller — the justfile, CONTRIBUTING, muscle memory —
+# say `--bin firetower`.
+default-run = "firetower"
+
 [[bin]]
 name = "firetower"
 path = "src/main.rs"
