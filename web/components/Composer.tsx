@@ -82,7 +82,24 @@ export function Composer() {
     hosts[0];
 
   // Reconnecting counts: the launch waits for it, and it is usually seconds.
-  const usable = (h?: Host) => !!h && (h.state === "Online" || h.reconnecting);
+  //
+  // But only for a machine that has worked before. A host with nothing
+  // installed on it reconnects forever — the supervisor keeps trying, and
+  // there is nothing there to answer — so without `workerVersion` it would sit
+  // in this list looking launchable and fail every time. Having ever reported a
+  // version is the difference between "briefly away" and "never worked".
+  const usable = (h?: Host) =>
+    !!h && (h.state === "Online" || (h.reconnecting && !!h.workerVersion));
+
+  /**
+   * What a host is called in the picker.
+   *
+   * A machine with nothing on it stays in the list rather than disappearing —
+   * you added it, and it not being there would be its own puzzle — but it says
+   * why it cannot be picked. Used for the value and the matcher as well as the
+   * options, because a label that differs between the three selects nothing.
+   */
+  const label = (h: Host) => (usable(h) ? picked(h) : `${picked(h)} · no worker`);
 
   /** Whether this agent could run on the host that's currently chosen. */
   const runsHere = (a: AgentView) => (host ? canRun(a, host.id) : false);
@@ -200,11 +217,9 @@ export function Composer() {
                 agent you picked — that would hide the thing you just added. */}
             <Chip
               glyph="host"
-              value={picked(host)}
-              onChange={(name) =>
-                setHostId(hosts.find((h) => picked(h) === name)?.id ?? "")
-              }
-              options={hosts.length ? hosts.map((h) => picked(h)) : ["nowhere to run"]}
+              value={host ? label(host) : ""}
+              onChange={(name) => setHostId(hosts.find((h) => label(h) === name)?.id ?? "")}
+              options={hosts.length ? hosts.map(label) : ["nowhere to run"]}
             />
 
             <Chip

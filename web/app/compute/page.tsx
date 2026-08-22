@@ -7,11 +7,13 @@ import {
   useDeleteHost,
   useDrainHost,
   useRenameHost,
+  useConnectHost,
   getListHostsQueryKey,
 } from "@/src/api/generated/hosts/hosts";
 import { useListSessions } from "@/src/api/generated/sessions/sessions";
 import { useListAgents } from "@/src/api/generated/agents/agents";
 import type { Host, SshKey } from "@/src/api/generated/model";
+import { SetUpHost, canBeSetUp } from "@/components/SetUpHost";
 import { AddCompute } from "@/components/AddCompute";
 import { holdsHost } from "@/src/api/view";
 import { ApiError } from "@/src/api/http";
@@ -109,6 +111,9 @@ function HostRow({
   const failed = (e: unknown) =>
     onProblem(e instanceof ApiError ? e.message : "That didn't work.");
 
+  /** Whether the set-up panel is open for this host. */
+  const [settingUp, setSettingUp] = useState(false);
+
   const kind = host.compute.type;
 
   return (
@@ -200,9 +205,28 @@ function HostRow({
         <code className="truncate font-mono text-[11.5px] text-dim">{reach(host)}</code>
 
         <span className="eyebrow">Worker</span>
-        <span className="font-mono text-[11.5px] text-dim">
-          {host.workerVersion ?? <span className="text-mute">not connected</span>}
-          {host.cpus ? ` · ${host.cpus} CPU` : ""}
+        <span className="flex items-center gap-2.5 font-mono text-[11.5px] text-dim">
+          {host.workerVersion ? (
+            <>
+              {host.workerVersion}
+              {host.cpus ? ` · ${host.cpus} CPU` : ""}
+            </>
+          ) : (
+            <span className="text-mute">
+              {canBeSetUp(host) ? "not installed" : "not connected"}
+            </span>
+          )}
+
+          {/* Reached, and not set up. One command away, so the way to it is a
+              button rather than a paragraph somewhere else. */}
+          {canBeSetUp(host) && (
+            <button
+              onClick={() => setSettingUp(true)}
+              className="rounded-[4px] border border-line px-1.5 py-0.5 text-[11px] text-slate transition-colors hover:border-[#3a3631] hover:text-bone"
+            >
+              See instructions
+            </button>
+          )}
         </span>
 
         <span className="eyebrow">Agents</span>
@@ -210,6 +234,52 @@ function HostRow({
           {agents.length > 0 ? agents.join(", ") : <span className="text-mute">none installed</span>}
         </span>
       </div>
+
+      {/* Until now this page showed a grey dot and "not connected" for a
+          switched-off machine, a wrong address, a refused key and a rebooting
+          box alike — while the reason sat on the object, rendered only by the
+          launch screen. */}
+      {host.state !== "Online" && host.diagnosis && (
+        <Wrong host={host} onRetry={refresh} />
+      )}
+
+      {settingUp && <SetUpHost host={host} onClose={() => setSettingUp(false)} />}
+    </div>
+  );
+}
+
+/**
+ * Why a host isn't answering, and the two things worth doing about it.
+ *
+ * Not styled as an error. Most of these are a machine that is off, or one
+ * command away from working, and neither is anybody's mistake.
+ */
+function Wrong({ host, onRetry }: { host: Host; onRetry: () => void }) {
+  const connect = useConnectHost();
+
+  return (
+    <div className="mt-3 border-t border-line pt-3">
+      <div className="flex items-start gap-3">
+        <p className="flex-1 text-[11.5px] leading-[1.5] text-mute">
+          {host.diagnosis?.summary}
+          {host.reconnecting && " Still trying."}
+        </p>
+        <button
+          onClick={() => connect.mutate({ id: host.id }, { onSuccess: onRetry })}
+          disabled={connect.isPending}
+          className="shrink-0 rounded-[5px] border border-line px-2 py-1 text-[11.5px] text-dim transition-colors hover:border-[#3a3631] hover:text-text disabled:text-mute"
+        >
+          {connect.isPending ? "Trying…" : "Try now"}
+        </button>
+      </div>
+
+      {/* The remedy for anything that has one and no panel of its own — a
+          stopped Docker, a container that isn't running. */}
+      {host.diagnosis?.remedy && !canBeSetUp(host) && (
+        <pre className="mt-2 overflow-x-auto rounded-[4px] bg-black/25 px-3 py-2 font-mono text-[11px] leading-[1.6] text-bone">
+          {host.diagnosis.remedy}
+        </pre>
+      )}
     </div>
   );
 }

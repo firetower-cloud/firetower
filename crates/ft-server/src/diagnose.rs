@@ -69,11 +69,38 @@ pub fn from_output(
             )
             .with_remedy("docker compose pull && docker compose up -d")
         } else {
+            // ssh got in, so the address, the account and the key are all
+            // right. One thing is left, and it is one command — which is worth
+            // carrying on the diagnosis rather than only in the screen that
+            // happens to know about it, since every place a diagnosis is shown
+            // is a place somebody is looking for this.
             Diagnosis::new(
                 Cause::WorkerMissing,
                 "Firetower isn't installed on that machine.",
             )
+            .with_remedy("npm i -g @firetower/cli\nfiretower worker install")
         }
+    } else if said.contains("unknown option '--stdio'") || said.contains("unknown command 'worker'")
+    {
+        // There is a `firetower` on that machine and it is the npm CLI, not a
+        // worker. They share a name — `@firetower/cli` installs its `bin` as
+        // `firetower`, and so does the worker — so whichever is first on PATH
+        // answers. The CLI installs and upgrades workers; it does not speak
+        // frames, and says so in a way that names neither itself nor us.
+        //
+        // Almost always this is a host added without naming the container its
+        // worker runs in, so the control plane tried the machine directly.
+        Diagnosis::new(
+            Cause::WorkerMissing,
+            format!(
+                "The `firetower` on {} is the CLI, not a worker.",
+                machine(compute)
+            ),
+        )
+        .with_remedy(
+            "# name the container the worker runs in — usually:\nfiretower-worker\n\n\
+             # or, if there isn't one yet, on that machine:\nfiretower worker install",
+        )
     } else if said.contains("permission denied (publickey")
         || said.contains("no supported authentication methods")
         || said.contains("too many authentication failures")
@@ -213,6 +240,27 @@ mod tests {
         let d = read(&["bash: firetower: command not found"], &server());
         assert_eq!(d.cause, Cause::WorkerMissing);
         assert!(d.summary.contains("isn't installed"), "{}", d.summary);
+
+        // And says what to run. ssh worked, so this is the only thing between
+        // the machine and working — leaving it out sent people to the docs to
+        // find one line.
+        let remedy = d.remedy.as_deref().unwrap_or_default();
+        assert!(remedy.contains("firetower worker install"), "{remedy}");
+    }
+
+    /// The CLI and the worker are both called `firetower`, so on a machine
+    /// with the CLI installed and no container named, PATH picks the wrong one
+    /// and it complains about a flag rather than about being the wrong program.
+    #[test]
+    fn the_cli_answering_for_a_worker_is_named_as_such() {
+        let d = read(&["error: unknown option '--stdio'"], &server());
+
+        assert_eq!(d.cause, Cause::WorkerMissing);
+        assert!(d.summary.contains("is the CLI"), "{}", d.summary);
+
+        // And says the likeliest fix: the container was never named.
+        let remedy = d.remedy.as_deref().unwrap_or_default();
+        assert!(remedy.contains("firetower-worker"), "{remedy}");
     }
 
     /// Same shell message, different fix; only the host tells them apart.

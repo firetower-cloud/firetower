@@ -45,6 +45,29 @@ impl Connection {
             .unwrap_or_default()
     }
 
+    /// What the far end said, once it has finished saying it.
+    ///
+    /// `stderr_tail` on its own races the task that fills it. The frame stream
+    /// closing, the process being reaped, and that task getting scheduled are
+    /// three separate events, so reading the ring the instant a read fails
+    /// often finds it empty — and an empty ring becomes "That host didn't
+    /// answer as a worker", with the line that said why thrown away.
+    ///
+    /// So: wait for the child, then give the reader a moment to drain. Bounded,
+    /// and only ever on the path where something has already gone wrong.
+    pub async fn said(&mut self) -> (Vec<String>, Option<std::process::ExitStatus>) {
+        let status = self.exit_status().await;
+
+        for _ in 0..20 {
+            if !self.stderr_tail().is_empty() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+
+        (self.stderr_tail(), status)
+    }
+
     /// How the child ended, if it has.
     ///
     /// Waits briefly rather than only polling: stdout closing and the process

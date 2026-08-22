@@ -9,7 +9,8 @@ import {
   useSshKey,
   getListHostsQueryKey,
 } from "@/src/api/generated/hosts/hosts";
-import type { Compute, Diagnosis, SshKey } from "@/src/api/generated/model";
+import type { Compute, Diagnosis, Host, SshKey } from "@/src/api/generated/model";
+import { SetUpHost } from "./SetUpHost";
 import { ApiError } from "@/src/api/http";
 
 type Kind = "Container" | "Server";
@@ -62,6 +63,8 @@ export function AddCompute({ onClose }: { onClose: () => void }) {
    * have since changed is worse than no panel.
    */
   const [told, setTold] = useState<Diagnosis | null>(null);
+  /** Created, and not ready. Holds the panel open on what to do next. */
+  const [added, setAdded] = useState<Host | null>(null);
   const queryClient = useQueryClient();
   const create = useCreateHost();
   const probe = useProbeHost();
@@ -123,12 +126,25 @@ export function AddCompute({ onClose }: { onClose: () => void }) {
 
   const body = () => ({ compute: compute(), name: label.trim() || undefined });
 
+  /**
+   * Add it, and close — unless the machine was reached and has nothing on it.
+   *
+   * That case used to close silently, which threw away the one moment somebody
+   * is definitely looking at this. The host is still created — ssh worked, so
+   * the address, the account and the key are confirmed — and the panel that
+   * says what to run stays on screen instead of being something to go and find.
+   */
   const save = () =>
     create.mutate(
       { data: body() },
       {
-        onSuccess: async () => {
+        onSuccess: async (host) => {
           await queryClient.invalidateQueries({ queryKey: getListHostsQueryKey() });
+
+          if (host.diagnosis) {
+            setAdded(host);
+            return;
+          }
           onClose();
         },
       },
@@ -169,6 +185,8 @@ export function AddCompute({ onClose }: { onClose: () => void }) {
   };
 
   const busy = probe.isPending || create.isPending;
+
+  if (added) return <SetUpHost host={added} onClose={onClose} />;
 
   return (
     <Modal title="Add compute" onClose={onClose} wide>

@@ -226,8 +226,7 @@ impl Fleet {
                 // needs them back.
                 drop(codec);
 
-                let said = conn.stderr_tail();
-                let status = conn.exit_status().await;
+                let (said, status) = conn.said().await;
                 Some(crate::diagnose::from_output(&said, status, compute))
             }
         }
@@ -521,8 +520,7 @@ impl Fleet {
 
                 // A closed frame stream says nothing about why. The stderr the
                 // far end wrote before it went does.
-                let said = conn.stderr_tail();
-                let status = conn.exit_status().await;
+                let (said, status) = conn.said().await;
                 let told = crate::diagnose::from_output(&said, status, &compute);
 
                 tracing::warn!(
