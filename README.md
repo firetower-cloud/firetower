@@ -6,9 +6,11 @@
 
 **Firetower is a control plane for coding agents.**
 
-Give it a server you can SSH into and a repository, describe some work, and it picks a host,
-cuts a branch, makes a worktree, starts tmux, launches the agent, and keeps it running.
-Attach from a browser or a phone, answer questions, review the diff, ship the branch, destroy the workspace.
+It lets you orchestrate your favorite coding agents on your local computer or any remote server through an SSH tunnel.
+
+Give it a server you can SSH into and a repository, describe some work, and it picks a host, cuts a branch, makes a worktree, starts tmux, launches the agent, and keeps it running.
+
+And yes, it works with your own subscription (Claude Code, Codex, etc.).
 
 [![Read the documentation](https://img.shields.io/badge/Read_the_documentation-FF4F00?style=for-the-badge&logo=readthedocs&logoColor=white&labelColor=FF4F00)](https://usefiretower.com/docs)
 
@@ -17,20 +19,6 @@ Attach from a browser or a phone, answer questions, review the diff, ship the br
 ### 🌟 Star the repository to support us 🌟
 
 </div>
-
----
-
-## What it is
-
-Agents block. You are the bottleneck. Firetower's job is to route their blocking to you — wherever you are — and get you back out fast.
-
-That's why the dashboard is an inbox rather than a fleet monitor, and why a session that asked a question, finished a turn, or hit an expired credential all land in the same place. They mean the same thing: *it stopped being useful without you.*
-
-- **Any agent, any machine.** This laptop, a container here, or a server you SSH into. Firetower installs nothing you didn't put there.
-- **Sessions survive you.** The worker records what happened before reporting it, so closing your laptop costs nothing.
-- **The terminal in your browser.** Attach, answer, review the diff, push the branch, open the pull request.
-- **Credentials stay yours.** Every token is sealed with envelope encryption under a root key that never enters the database.
-- **Self-hosted, no account.** The worker never dials out.
 
 ## Demo
 
@@ -51,11 +39,11 @@ https://github.com/user-attachments/assets/aca9ef60-8d57-4443-bea7-57860e45aaba
                                                              +------------------------------------------+
 ```
 
-`*` a session that has stopped and needs you · `o` one still working, nothing to do · `ssh` how the app reaches a machine you own
+The control plane can run on your local computer or a remote server. It allows you to orchestrate the agent, manage your repositories, your secrets, and user accounts.
 
-The control plane owns intent: hosts, repositories, credentials, and what should run where. Workers own reality: they write the event log first and report afterwards, so a reconnecting control plane just asks for everything since the last thing it saw.
+The workers can run locally or on any remote server as well. Their only job is to pull a repository, start a task into a new worktree, and run the coding agent.
 
-**The worker never opens a port.** It reads frames from stdin and writes them to stdout, so who dials is a transport detail — a child process, `docker exec -i`, or `ssh host firetower-worker --stdio`. The daemon can't tell the difference. `localhost` is a real host, not a special case: it appears in the fleet, runs sessions, and can be drained.
+The control plane and the worker communicate entirely through SSH, and you can close and reopen the connection at any time.
 
 <div align="center">
 
@@ -65,17 +53,19 @@ The control plane owns intent: hosts, repositories, credentials, and what should
 
 ## Running it
 
-Docker, and nothing else. Everything is in one image: the control plane, the interface compiled into the binary, and what a session needs to run.
+To install the control plane:
 
 ```sh
-curl -O https://raw.githubusercontent.com/firetower-cloud/firetower/main/deploy/firetower.yml
-curl -O https://raw.githubusercontent.com/firetower-cloud/firetower/main/deploy/Caddyfile
-curl -o .env https://raw.githubusercontent.com/firetower-cloud/firetower/main/deploy/.env.example
-
-docker compose -f firetower.yml up -d
+npm i -g @firetower/cli
+firetower install
 ```
 
-The first start makes an administrator and prints its password once — `docker compose -f firetower.yml logs firetower`.
+To set up a worker on a server:
+
+```sh
+npm i -g @firetower/cli
+firetower worker install
+```
 
 Everything else — putting it on a domain, adding a server, connecting repositories, secrets, upgrades — is in the documentation.
 
@@ -100,9 +90,13 @@ Everything else — putting it on a domain, adding a server, connecting reposito
 | [Secrets](https://usefiretower.com/docs/secrets) | How credentials are sealed, and where the root key lives |
 
 
+## Current stage
+
+The project is in active development and still in the early stages. Expect changes and bugs.
+
 ## Contributing
 
-Building Firetower rather than running it is a different set of tools and a different set of commands. They live in [CONTRIBUTING.md](CONTRIBUTING.md).
+Due to the early stage of the project, we don't accept contributions at the moment. We may accept some small fixes or changes, but not big features. However, feel free to open an issue and share feedback; it will be helpful.
 
 ## Licence
 
