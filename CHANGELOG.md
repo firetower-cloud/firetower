@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.5.1](https://github.com/firetower-cloud/firetower/compare/firetower-v0.5.0...firetower-v0.5.1) (2026-08-22)
+
+
+### Bug Fixes
+
+* `cargo run -p ft-cli` knows which binary it means ([ed07e48](https://github.com/firetower-cloud/firetower/commit/ed07e485ac95bb96a3b95e049c17f4ea6ba66f95))
+* the worker answers the callbacks it makes into itself ([cdb67ee](https://github.com/firetower-cloud/firetower/commit/cdb67ee4d5e295de0e3df4e5cfac566952a6ced7))
+
 ## [0.5.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.4.0...firetower-v0.5.0) (2026-08-22)
 
 
