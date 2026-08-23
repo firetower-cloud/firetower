@@ -25,15 +25,11 @@ CREATE TABLE session_repos (
     -- Set when this repository could not be checked out, so a session that came
     -- up with two of three can say which one is missing rather than pretending.
     trouble     TEXT,
-    -- Where this repository's pull request went. One per repository, because
-    -- that is what GitHub can actually represent: two changes on one branch
-    -- name in two repositories are two pull requests that point at each other.
-    pull_request TEXT,
     PRIMARY KEY (session_id, position)
 );
 
-INSERT INTO session_repos (session_id, position, repo_id, slug, base, branch, path, pull_request)
-SELECT s.id, 0, r.id, s.repo, s.base, s.branch, '', s.pull_request
+INSERT INTO session_repos (session_id, position, repo_id, slug, base, branch, path)
+SELECT s.id, 0, r.id, s.repo, s.base, s.branch, ''
 FROM sessions s
 LEFT JOIN repos r ON r.slug = s.repo
 WHERE s.repo IS NOT NULL AND s.branch IS NOT NULL AND s.base IS NOT NULL;
