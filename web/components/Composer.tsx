@@ -302,8 +302,7 @@ export function Composer() {
               </span>
             )}
 
-            <div className="ml-auto flex items-center gap-3">
-              <span className="font-mono text-[10px] text-mute">⌘⏎</span>
+            <div className="ml-auto flex items-center">
               <button
                 onClick={launch}
                 disabled={
@@ -313,13 +312,22 @@ export function Composer() {
                   !runsHere(chosen) ||
                   create.isPending
                 }
-                className="rounded-[5px] bg-ember px-3.5 py-1.5 text-[12.5px] font-semibold text-[#1a0c04] transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:bg-line disabled:text-mute"
+                title="Launch (⌘↵)"
+                className="flex items-center gap-2 rounded-[5px] bg-ember px-3.5 py-1.5 text-[12.5px] font-semibold text-[#1a0c04] transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:bg-line disabled:text-mute"
               >
                 {create.isPending
                   ? host?.state === "Online"
                     ? "Opening…"
                     : `Waiting for ${where(host)}…`
                   : "Launch"}
+                {/* On the button, as everywhere else: a shortcut floating
+                    beside a control is a caption for whatever it lands next
+                    to. */}
+                {!create.isPending && (
+                  <span aria-hidden className="font-mono text-[12px] opacity-60">
+                    ⌘↵
+                  </span>
+                )}
               </button>
             </div>
           </div>
