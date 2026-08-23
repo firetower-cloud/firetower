@@ -49,7 +49,17 @@ export function ChatComposer({
   const [draft, setDraft] = useState("");
   const [images, setImages] = useState<Attached[]>([]);
   const [over, setOver] = useState(false);
+  const [refused, setRefused] = useState<string | null>(null);
   const box = useRef<HTMLTextAreaElement>(null);
+  const picker = useRef<HTMLInputElement>(null);
+
+  /** Take what we can, and say plainly what we could not. */
+  const take = async (files: File[]) => {
+    const { kept, why } = await readImages(files);
+    setRefused(why ?? null);
+    if (kept.length) setImages((held) => [...held, ...kept]);
+    return kept.length > 0;
+  };
 
   /** What is being typed after a trigger character, if anything. */
   const token = triggerAt(draft);
@@ -93,8 +103,7 @@ export function ChatComposer({
         if (!live) return;
         e.preventDefault();
         setOver(false);
-        const found = await readImages(Array.from(e.dataTransfer.files));
-        if (found.length) setImages((held) => [...held, ...found]);
+        await take(Array.from(e.dataTransfer.files));
       }}
       className={`rounded-[6px] transition-colors ${over ? "bg-raise" : ""}`}
     >
@@ -117,6 +126,10 @@ export function ChatComposer({
             </li>
           ))}
         </ul>
+      )}
+
+      {refused && (
+        <p className="mb-2 text-[11.5px] text-brick">{refused}</p>
       )}
 
       {images.length > 0 && (
@@ -155,15 +168,14 @@ export function ChatComposer({
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           onPaste={async (e) => {
-            const found = await readImages(
-              Array.from(e.clipboardData.files).filter((f) => f.type.startsWith("image/")),
+            const pictures = Array.from(e.clipboardData.files).filter((f) =>
+              f.type.startsWith("image/"),
             );
-            if (found.length) {
-              // Only swallow the paste if it actually was a picture; a paste of
-              // text and an image together should still deliver the text.
-              if (!e.clipboardData.getData("text")) e.preventDefault();
-              setImages((held) => [...held, ...found]);
-            }
+            if (pictures.length === 0) return;
+            // Only swallow the paste if it actually was a picture; a paste of
+            // text and an image together should still deliver the text.
+            if (!e.clipboardData.getData("text")) e.preventDefault();
+            await take(pictures);
           }}
           onKeyDown={(e) => {
             if (suggestions.length > 0) {
@@ -206,6 +218,30 @@ export function ChatComposer({
         {/* Controls, not captions. Everything here changes something; what is
             merely true about the session moved to the line underneath. */}
         <div className="flex items-center gap-1.5 px-2.5 pb-2">
+          {/* Discoverable. Pasting and dropping both work and neither announces
+              itself, so somebody who has not been told cannot know they can. */}
+          <button
+            onClick={() => picker.current?.click()}
+            disabled={!live}
+            aria-label="Attach an image"
+            title="Attach an image"
+            className="grid h-6 w-6 shrink-0 place-items-center rounded-[5px] text-[15px] leading-none text-mute transition-colors hover:bg-raise hover:text-bone disabled:opacity-40"
+          >
+            +
+          </button>
+          <input
+            ref={picker}
+            type="file"
+            accept="image/*"
+            multiple
+            hidden
+            onChange={async (e) => {
+              await take(Array.from(e.target.files ?? []));
+              // Cleared, or choosing the same file twice does nothing.
+              e.target.value = "";
+            }}
+          />
+
           <Picker
             choices={MODELS}
             current={model}
@@ -469,15 +505,38 @@ function directoryOf(query: string): string {
 }
 
 /**
+ * How large one image may be.
+ *
+ * Base64 inflates by about a third, and the whole thing travels as a single
+ * line of JSON through every hop — the browser, the control plane, an SSH pipe,
+ * the worker, and the agent's stdin — each of which holds it whole. Nothing in
+ * that chain has a limit of its own, so this is the limit.
+ *
+ * Generous for what people actually attach: a screenshot is a megabyte or two.
+ */
+const BIGGEST = 5 * 1024 * 1024;
+
+/**
  * Read dropped or pasted images into something a message can carry.
  *
  * Images only. Anything else needs to be written into the workspace and
  * mentioned by path, which is a different thing and not this.
+ *
+ * Says what it refused rather than dropping it silently: somebody who drags in
+ * a PDF and sees nothing happen concludes attachments are broken.
  */
-async function readImages(files: File[]): Promise<Attached[]> {
+async function readImages(
+  files: File[],
+): Promise<{ kept: Attached[]; why?: string }> {
+  if (files.length === 0) return { kept: [] };
+
   const pictures = files.filter((f) => f.type.startsWith("image/"));
-  return Promise.all(
-    pictures.map(
+  const wrongKind = files.length - pictures.length;
+  const small = pictures.filter((f) => f.size <= BIGGEST);
+  const tooBig = pictures.length - small.length;
+
+  const kept = await Promise.all(
+    small.map(
       (file) =>
         new Promise<Attached>((done, fail) => {
           const reader = new FileReader();
@@ -491,4 +550,20 @@ async function readImages(files: File[]): Promise<Attached[]> {
         }),
     ),
   );
+
+  const complaints: string[] = [];
+  if (wrongKind > 0) {
+    complaints.push(
+      wrongKind === 1
+        ? "That is not an image — only images can be attached."
+        : `${wrongKind} of those are not images — only images can be attached.`,
+    );
+  }
+  if (tooBig > 0) {
+    complaints.push(
+      `${tooBig === 1 ? "That image is" : `${tooBig} images are`} over 5 MB.`,
+    );
+  }
+
+  return { kept, why: complaints.join(" ") || undefined };
 }
