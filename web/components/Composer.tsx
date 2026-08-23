@@ -62,7 +62,6 @@ export function Composer() {
   const [adding, setAdding] = useState(false);
   const [search, setSearch] = useState("");
   const [agent, setAgent] = useState<Agent | "">("");
-  const [base, setBase] = useState<string>("");
   const [branch, setBranch] = useState<string>("");
   const [hostId, setHostId] = useState<string>("");
   const ta = useRef<HTMLTextAreaElement>(null);
@@ -74,6 +73,14 @@ export function Composer() {
   // The first one, for everything that wants a single name: the caption when
   // the composer is closed, the branch suggestion.
   const repo = checkouts[0] ? repos.find((r) => r.id === checkouts[0].id) : undefined;
+
+  // What every chosen repository brings, not just the first. Two of them bring
+  // two sets, and the count is the thing worth saying before you start.
+  const variables = [
+    ...new Set(
+      checkouts.flatMap((c) => repos.find((r) => r.id === c.id)?.env ?? []),
+    ),
+  ];
   const unpicked = repos.filter(
     (r) =>
       !checkouts.some((p) => p.id === r.id) &&
@@ -129,19 +136,6 @@ export function Composer() {
     choices[0]?.kind) as Agent | undefined;
   const chosen = choices.find((c) => c.kind === chosenAgent);
 
-  // Only ask once the composer is open — it reaches the remote.
-  const { data: branchInfo } = useRepoBranches(repo?.id ?? "", {
-    query: { enabled: open && !!repo },
-  });
-  const branches = branchInfo?.branches ?? [];
-
-  // What we know, never a guess. A repository connected while nothing could
-  // read it has no trunk yet, and sending `main` on its behalf is how you
-  // branch from the wrong place in a repository that calls it something else —
-  // the host doing the clone works it out instead.
-  const knownBase = base || branchInfo?.defaultBranch || repo?.defaultBranch;
-  const chosenBase = knownBase ?? "its default branch";
-
   const create = useCreateSession({
     mutation: {
       onSuccess: (session) => {
@@ -185,6 +179,10 @@ export function Composer() {
           value={text}
           placeholder="What should we work on?"
           onFocus={() => setOpen(true)}
+          // Clicking counts too. Escape closes it without moving the cursor, so
+          // without this the next click fires no focus event and the row of
+          // controls has no way back.
+          onClick={() => setOpen(true)}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) launch();
@@ -206,20 +204,19 @@ export function Composer() {
       {open && (
         <div className="border-t border-line px-3 py-2.5">
           <div className="flex flex-wrap items-center gap-1.5">
-            {checkouts.map((p) => (
-              <span key={p.id} className="flex items-center gap-1.5">
-                <span className="flex items-center gap-1.5 rounded-[5px] border border-line bg-panel py-1 pr-1 pl-2 text-[12px] text-dim">
-                  <span className="text-mute">▣</span>
-                  <span className="font-mono text-[11.5px] text-bone">{p.slug}</span>
-                  <button
-                    onClick={() => setCheckouts((held) => held.filter((h) => h.id !== p.id))}
-                    aria-label={`Remove ${p.slug}`}
-                    className="rounded-[4px] px-1 text-[12px] text-mute transition-colors hover:text-brick"
-                  >
-                    ×
-                  </button>
-                </span>
-              </span>
+            {checkouts.map((c) => (
+              <RepoChip
+                key={c.id}
+                repoId={c.id}
+                slug={c.slug}
+                base={c.base}
+                onBase={(base) =>
+                  setCheckouts((held) =>
+                    held.map((h) => (h.id === c.id ? { ...h, base } : h)),
+                  )
+                }
+                onRemove={() => setCheckouts((held) => held.filter((h) => h.id !== c.id))}
+              />
             ))}
 
             {/* One more, and the list of what is left. Search because a fleet
@@ -264,19 +261,6 @@ export function Composer() {
             </Picker>
 
             {repo && (
-            <Chip
-              glyph="branch"
-              value={chosenBase}
-              onChange={(b) => {
-                setBase(b);
-                setCheckouts((held) =>
-                  held.map((p, i) => (i === 0 ? { ...p, base: b } : p)),
-                );
-              }}
-              options={branches.length ? branches : [chosenBase]}
-            />
-            )}
-            {repo && (
             <label className="flex items-center gap-1.5 rounded-[5px] border border-line bg-panel py-1 pr-2 pl-2 text-[12px] text-dim transition-colors focus-within:border-ember/40 hover:border-[#3a3631]">
               <span className="text-mute">⎇</span>
               <input
@@ -312,12 +296,9 @@ export function Composer() {
             {/* Said before you start rather than discovered in the terminal:
                 this repository hands the agent things you configured weeks ago
                 and have every right to have forgotten. */}
-            {repo && repo.env && repo.env.length > 0 && (
-              <span
-                className="font-mono text-[11px] text-mute"
-                title={repo.env.join(" · ")}
-              >
-                + {repo.env.length} {repo.env.length === 1 ? "variable" : "variables"}
+            {variables.length > 0 && (
+              <span className="font-mono text-[11px] text-mute" title={variables.join(" · ")}>
+                + {variables.length} {variables.length === 1 ? "variable" : "variables"}
               </span>
             )}
 
@@ -557,6 +538,71 @@ function Picker({
           document.body,
         )}
     </>
+  );
+}
+
+/**
+ * One repository in the list, with the branch it starts from.
+ *
+ * Its own component because the branches come from the remote, one request per
+ * repository — and a session holds any number of them. Reading main from one
+ * and a release branch from another is a real thing to want, so each carries
+ * its own.
+ */
+function RepoChip({
+  repoId,
+  slug,
+  base,
+  onBase,
+  onRemove,
+}: {
+  repoId: string;
+  slug: string;
+  base?: string;
+  onBase: (base: string) => void;
+  onRemove: () => void;
+}) {
+  // It reaches the remote, so only once this repository is actually in.
+  const { data: info } = useRepoBranches(repoId, { query: { enabled: true } });
+  const branches = info?.branches ?? [];
+
+  // What we know, never a guess. A repository connected while nothing could
+  // read it has no trunk yet, and sending `main` on its behalf is how you
+  // branch from the wrong place in a repository that calls it something else —
+  // the host doing the clone works it out instead.
+  const showing = base ?? info?.defaultBranch ?? "its default branch";
+
+  return (
+    <span className="flex items-center rounded-[5px] border border-line bg-panel text-[12px] text-dim">
+      <span className="flex items-center gap-1.5 py-1 pl-2">
+        <span className="text-mute">▣</span>
+        <span className="max-w-[170px] truncate font-mono text-[11.5px] text-bone">{slug}</span>
+      </span>
+
+      <label className="group relative flex items-center gap-1 border-l border-line py-1 pr-5 pl-2">
+        <span className="text-mute">⑂</span>
+        <span className="max-w-[110px] truncate font-mono text-[11.5px]">{showing}</span>
+        <span className="pointer-events-none absolute right-1.5 text-[9px] text-mute">▾</span>
+        <select
+          value={showing}
+          onChange={(e) => onBase(e.target.value)}
+          aria-label={`Branch to start ${slug} from`}
+          className="absolute inset-0 cursor-pointer opacity-0"
+        >
+          {(branches.length ? branches : [showing]).map((b) => (
+            <option key={b}>{b}</option>
+          ))}
+        </select>
+      </label>
+
+      <button
+        onClick={onRemove}
+        aria-label={`Remove ${slug}`}
+        className="border-l border-line px-1.5 py-1 text-[12px] text-mute transition-colors hover:text-brick"
+      >
+        ×
+      </button>
+    </span>
   );
 }
 
