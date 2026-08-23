@@ -95,7 +95,9 @@ struct OpenBlock {
 #[derive(Default)]
 pub struct ClaudeNormaliser {
     /// Turns are numbered rather than named: the agent gives us nothing stable
-    /// to key them by, and an ordinal is reproducible on a re-read.
+    /// to key them by, and an ordinal is reproducible on a re-read. Spelled
+    /// out in full — `turn-3`, not `t3` — because the short form reads as a
+    /// product name rather than as a counter.
     turns_seen: u32,
     active_turn: Option<TurnId>,
     /// The message the current blocks belong to. Block indices restart at zero
@@ -570,7 +572,7 @@ impl ClaudeNormaliser {
             return;
         }
         self.turns_seen += 1;
-        let turn = TurnId::new(format!("t{}", self.turns_seen));
+        let turn = TurnId::new(format!("turn-{}", self.turns_seen));
         self.active_turn = Some(turn.clone());
         out.push(TurnEvent::TurnStarted { turn });
     }
@@ -581,7 +583,7 @@ impl ClaudeNormaliser {
         // the same block the same way.
         match &self.current_message {
             Some(message) => ItemId::new(format!("{message}:{index}")),
-            None => ItemId::new(format!("t{}:{index}", self.turns_seen)),
+            None => ItemId::new(format!("turn-{}:{index}", self.turns_seen)),
         }
     }
 
