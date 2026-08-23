@@ -1,5 +1,48 @@
 # Changelog
 
+## [0.7.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.6.0...firetower-v0.7.0) (2026-08-23)
+
+
+### Features
+
+* a session screen you can read, and a meter that means something ([1b3db21](https://github.com/firetower-cloud/firetower/commit/1b3db216df4b0d31c660f28a55a48928b8f12793))
+* answer the agent's questions instead of permitting them ([8de5b00](https://github.com/firetower-cloud/firetower/commit/8de5b003dca0923d2ae590c5fbf6e13df490c61c))
+* attach any file, not only pictures ([df23b19](https://github.com/firetower-cloud/firetower/commit/df23b190bf6d311c62d53a8c8b12aea440c3f7a5))
+* carry a conversation between a browser and a headless agent ([ec4bf6d](https://github.com/firetower-cloud/firetower/commit/ec4bf6d90b31c4b0c3c5228a4126973a25b4fe58))
+* **core:** read a coding agent's output as a conversation ([0023e75](https://github.com/firetower-cloud/firetower/commit/0023e75e984ef87797e82e15806619a96f0f1ab6))
+* get the work out in one press ([449a40b](https://github.com/firetower-cloud/firetower/commit/449a40b1bc0209386e4490eb062273cc0e30669f))
+* let the agent stop and ask, and let somebody answer ([3098935](https://github.com/firetower-cloud/firetower/commit/30989353f30a4d1ecc1ea1ee0493c33f2caa405e))
+* paste a picture, mention a file, type a command ([8fcd1fa](https://github.com/firetower-cloud/firetower/commit/8fcd1fa1154d0bc6de7462c7b5c231807f12a086))
+* tell somebody when a session stops ([56f7c91](https://github.com/firetower-cloud/firetower/commit/56f7c91862fcfa38bd01f62add2c5bbcda15618c))
+* **web:** annotate what the agent said, and send the notes together ([06f65cd](https://github.com/firetower-cloud/firetower/commit/06f65cd64f2484a00b4674f52516e1d93119b78c))
+* **web:** answer a question in your own words ([bcca365](https://github.com/firetower-cloud/firetower/commit/bcca3657f7ced2ac2b58f82f80c12cd9065b4ee1))
+* **web:** give a session a shape you can read before the words ([aec59c8](https://github.com/firetower-cloud/firetower/commit/aec59c804c3cb69f76091965cf45b365044b6982))
+* **web:** give the session the whole window, and the bring-up to the chat ([b8b0a46](https://github.com/firetower-cloud/firetower/commit/b8b0a46d97d96ce77945fae438d4cf564a9c5ab1))
+* **web:** keep the answer to a question in the transcript ([5d9cf61](https://github.com/firetower-cloud/firetower/commit/5d9cf61ae8a43878b56db87d059bd857df5c0502))
+* **web:** let the agent's text arrive at a readable pace ([0515d61](https://github.com/firetower-cloud/firetower/commit/0515d61c0e1261e53b4fe6e1bcb7235ff7fa2826))
+* **web:** make attaching an image something you can see ([baa3319](https://github.com/firetower-cloud/firetower/commit/baa3319534e3e9b45090389a0502ba11bfca55b2))
+* **web:** mark only what is running or wrong, and clear the fade ([4f7db5b](https://github.com/firetower-cloud/firetower/commit/4f7db5bd55119f2d61ac8f9d9b6a50585fd80efd))
+* **web:** no marker for a session that has handed back ([1108e5a](https://github.com/firetower-cloud/firetower/commit/1108e5a4a8137c2d6dd0a560a7d135b434361c76))
+* **web:** rename in place, and stop saying the repo twice ([502fcfb](https://github.com/firetower-cloud/firetower/commit/502fcfb3dcbb4a63e310173f79c031d68c7c2b63))
+* **web:** render what the agent wrote as it meant it ([0f84b1b](https://github.com/firetower-cloud/firetower/commit/0f84b1ba7e41adcadffd2ec6b8969fad94dd0359))
+* **web:** rework the chat's type, surfaces and composer ([d677647](https://github.com/firetower-cloud/firetower/commit/d6776472403a4e12fcc2815c89811f75874e31d1))
+* **web:** show a session as a conversation instead of a screen ([7a7c02b](https://github.com/firetower-cloud/firetower/commit/7a7c02b212ad1fb4419e18bd062fe3676a49c335))
+* **web:** show what was handed to a subagent ([8da7f5e](https://github.com/firetower-cloud/firetower/commit/8da7f5e791827df04e4774e1c29517f041723f78))
+* **web:** type to annotate, and say that Enter keeps it ([34d00d4](https://github.com/firetower-cloud/firetower/commit/34d00d4b8dfd88e775850d45f29d586efc9aca62))
+* **web:** what is behind the context ring ([af60af2](https://github.com/firetower-cloud/firetower/commit/af60af20b01052748e0823b6d37fd63c0d6675b0))
+* **worker:** supervise a headless agent and hold its pipes ([bb2b1d5](https://github.com/firetower-cloud/firetower/commit/bb2b1d5e2b23ba351c4edf2b82a818aa79d35f91))
+
+
+### Bug Fixes
+
+* let one thing decide what a session is doing ([031baeb](https://github.com/firetower-cloud/firetower/commit/031baeb326a2a6740187b447f731946b848a5d98))
+* make "Always" mean always ([d19f6aa](https://github.com/firetower-cloud/firetower/commit/d19f6aa0c7aac32e35a67ed99f22fb2a2c00116c))
+* order the slash commands by what somebody probably wants ([e1dfeb9](https://github.com/firetower-cloud/firetower/commit/e1dfeb9c03016f5e5ce29ca6441c8cf87fcc19af))
+* show the picture that was sent, not just the words with it ([276befe](https://github.com/firetower-cloud/firetower/commit/276befe5b837e7c4f06ea4815637133df04aecbe))
+* stop asking about everything, and run the biggest model ([bb10160](https://github.com/firetower-cloud/firetower/commit/bb10160bd5001d4cc755be109f0466965ae3259c))
+* the session reader knows about the limit event ([34172ae](https://github.com/firetower-cloud/firetower/commit/34172ae422256f6b912c6b6daf119e4f5d9c34cc))
+* two things in one turn cannot share an identifier ([f542ef9](https://github.com/firetower-cloud/firetower/commit/f542ef94ce7f059d003a7ab9c04b17daa3a8f302))
+
 ## [0.6.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.5.1...firetower-v0.6.0) (2026-08-22)
 
 
