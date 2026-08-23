@@ -29,6 +29,7 @@ pub mod agentd;
 pub mod agents;
 pub mod askpass;
 pub mod attach;
+pub mod entry;
 pub mod first_run;
 pub mod git;
 pub mod hooks;
@@ -446,14 +447,11 @@ impl Worker {
                     tokio::spawn(async move {
                         if let Err(e) = structured::watch(id.clone(), since_line, out.clone()).await
                         {
-                            tracing::warn!(session = %id, "watching the agent: {e:#}");
-                            let _ = out
-                                .send(ToServer::Error {
-                                    session_id: Some(id.clone()),
-                                    code: "AgentUnavailable".into(),
-                                    message: format!("{e:#}"),
-                                })
-                                .await;
+                            // Ordinary rather than exceptional: a session
+                            // running in a terminal has no agent to watch, and
+                            // the control plane asks about all of them rather
+                            // than remembering which is which.
+                            tracing::debug!(session = %id, "no conversation to follow: {e:#}");
                             let _ = out.send(ToServer::AgentClosed { session_id: id }).await;
                         }
                     })
@@ -1099,6 +1097,21 @@ impl Worker {
                 .await
                 .context("sending the first turn")?;
             }
+
+            // Start forwarding now rather than when somebody opens the session.
+            // What the agent says is how the control plane learns that it
+            // finished, or stopped to ask something — and a session nobody is
+            // watching is exactly the one that most needs to be able to say so.
+            let watcher = out.clone();
+            let watched = id.clone();
+            self.watching.lock().await.insert(
+                id.to_string(),
+                tokio::spawn(async move {
+                    if let Err(e) = structured::watch(watched.clone(), 0, watcher).await {
+                        tracing::warn!(session = %watched, "following the agent: {e:#}");
+                    }
+                }),
+            );
         }
 
         self.store.set_status(&id, SessionStatus::Working).await?;

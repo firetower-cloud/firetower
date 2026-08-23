@@ -173,7 +173,7 @@ async fn main() -> Result<()> {
             from_line,
             raw,
         }) => {
-            return tail(&session, from_line, raw).await;
+            return ft_worker::entry::tail_agent(&session, from_line, raw).await;
         }
         None => {}
     }
@@ -205,87 +205,6 @@ async fn main() -> Result<()> {
         .context("serving frames")?;
 
     Ok(())
-}
-
-/// Print what a running agent is saying, one event per line.
-async fn tail(session: &str, from_line: u64, raw: bool) -> Result<()> {
-    use tokio::io::AsyncBufReadExt;
-
-    let mut client = ft_worker::agentd::AgentClient::connect(session)
-        .await
-        .with_context(|| format!("no agent is listening for session {session}"))?;
-    client
-        .send(&ft_worker::agentd::ToAgent::Watch { from_line })
-        .await?;
-
-    let mut normaliser = ft_core::normalise::ClaudeNormaliser::new();
-    let mut frames = tokio::io::BufReader::new(client.into_stream()).lines();
-
-    while let Some(frame) = frames.next_line().await? {
-        let Ok(frame) = serde_json::from_str::<ft_worker::agentd::FromAgent>(&frame) else {
-            continue;
-        };
-        match frame {
-            ft_worker::agentd::FromAgent::Line { line_no, line } => {
-                if raw {
-                    println!("{line_no:>5}  {line}");
-                    continue;
-                }
-                for event in normaliser.push(&line) {
-                    println!("{line_no:>5}  {}", summarise(&event));
-                }
-            }
-            ft_worker::agentd::FromAgent::Exited { .. } => {
-                println!("      the agent exited");
-                break;
-            }
-            other => println!("      {other:?}"),
-        }
-    }
-    Ok(())
-}
-
-/// One event, short enough to read a session by.
-fn summarise(event: &ft_core::TurnEvent) -> String {
-    use ft_core::turn::TurnEvent as E;
-    match event {
-        E::SessionConfigured { model, tools, .. } => {
-            format!("session   {model}, {} tools", tools.len())
-        }
-        E::TurnStarted { turn } => format!("turn      {turn} started"),
-        E::TurnCompleted { turn, status, .. } => format!("turn      {turn} {status:?}"),
-        E::ItemStarted { kind, title, .. } => {
-            format!("item      {kind:?} {}", title.as_deref().unwrap_or(""))
-        }
-        E::ItemUpdated { item, .. } => format!("item      {item} input"),
-        E::ItemCompleted { item, status } => format!("item      {item} {status:?}"),
-        E::ContentDelta { stream, delta, .. } => {
-            format!("text      {stream:?} {:?}", trim(delta))
-        }
-        E::RequestOpened { kind, detail, .. } => format!("asks      {kind:?} {detail}"),
-        E::RequestResolved { decision, .. } => format!("answered  {decision:?}"),
-        E::UserInputRequested { questions, .. } => {
-            format!("asks      {} question(s)", questions.len())
-        }
-        E::UserInputResolved { .. } => "answered  questions".into(),
-        E::PlanUpdated { steps } => format!("plan      {} step(s)", steps.len()),
-        E::TaskStarted { description, .. } => format!("subagent  {description}"),
-        E::TaskProgress { detail, .. } => format!("subagent  {detail}"),
-        E::TaskCompleted { status, .. } => format!("subagent  {status:?}"),
-        E::Raw { payload, .. } => format!(
-            "unnamed   {}",
-            payload.get("type").and_then(|t| t.as_str()).unwrap_or("?")
-        ),
-    }
-}
-
-fn trim(text: &str) -> String {
-    let flat = text.replace('\n', " ");
-    if flat.chars().count() > 60 {
-        format!("{}…", flat.chars().take(60).collect::<String>())
-    } else {
-        flat
-    }
 }
 
 /// Where a worker keeps its state when nobody says.

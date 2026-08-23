@@ -568,6 +568,30 @@ impl Fleet {
         let since = self.db.last_seq(&host_id).await?;
         codec.write(&ToWorker::Resume { since }).await?;
 
+        // Start mirroring every conversation this host is still holding.
+        //
+        // Not left until somebody opens one in a browser: the control plane is
+        // what turns "the agent asked a question" into a session that needs
+        // you, and it cannot do that from lines it never asked for. Each
+        // session resumes from what is already stored, so a reconnection costs
+        // the difference rather than the history.
+        for session in self
+            .db
+            .live_session_ids_on(&host_id)
+            .await
+            .unwrap_or_default()
+        {
+            let since_line = self.db.last_agent_line(&session).await.unwrap_or(0).max(0) as u64;
+            // A session running in a terminal has no conversation, and its
+            // worker answers this by finding no agent to watch.
+            codec
+                .write(&ToWorker::WatchAgent {
+                    session_id: session,
+                    since_line,
+                })
+                .await?;
+        }
+
         let (tx, mut rx) = mpsc::channel::<ToWorker>(64);
         self.workers.write().await.insert(host_id.to_string(), tx);
 

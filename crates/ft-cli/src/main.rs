@@ -148,6 +148,33 @@ enum Command {
         /// the password.
         prompt: Vec<String>,
     },
+
+    /// Supervise one session's agent, holding its pipes. Run by tmux.
+    ///
+    /// Here as well as on `firetower-worker` because localhost's worker is
+    /// this binary: the control plane spawns its own executable with a
+    /// subcommand, so a session started on this machine asks this program for
+    /// something only the other one used to answer.
+    #[command(hide = true)]
+    AgentRun {
+        #[arg(long)]
+        session: String,
+        #[arg(long)]
+        workspace: std::path::PathBuf,
+        #[arg(long, default_value = "ClaudeCode")]
+        agent: String,
+    },
+
+    /// Watch a running agent, as the control plane would see it.
+    #[command(hide = true)]
+    AgentTail {
+        #[arg(long)]
+        session: String,
+        #[arg(long, default_value_t = 0)]
+        from_line: u64,
+        #[arg(long)]
+        raw: bool,
+    },
 }
 
 /// Settings that belong to an install rather than to the source.
@@ -179,13 +206,27 @@ async fn main() -> Result<()> {
         Some(Command::Hook { event }) => {
             // Never fatal, never noisy. A hook that fails must not become a
             // hook that interrupts the agent it is reporting on.
-            if let Err(e) =
-                ft_worker::hooks::report(&event, &default_home().join("worker")).await
-            {
+            if let Err(e) = ft_worker::hooks::report(&event, &default_home().join("worker")).await {
                 tracing::debug!("hook {event}: {e:#}");
             }
             Ok(())
         }
+
+        Some(Command::AgentRun {
+            session,
+            workspace,
+            agent,
+        }) => {
+            // A daemon, so it logs like one — to stderr, where tmux keeps it.
+            init_tracing(true, false);
+            ft_worker::entry::run_agent(&session, workspace, &agent).await
+        }
+
+        Some(Command::AgentTail {
+            session,
+            from_line,
+            raw,
+        }) => ft_worker::entry::tail_agent(&session, from_line, raw).await,
 
         Some(Command::Passwd {
             username,
@@ -272,16 +313,6 @@ async fn main() -> Result<()> {
         }
     }
 }
-
-
-
-
-
-
-
-
-
-
 
 /// Ask twice, then replace it.
 ///
