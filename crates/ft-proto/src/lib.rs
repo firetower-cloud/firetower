@@ -228,10 +228,23 @@ pub enum Action {
     Stop,
     Commit {
         message: String,
+        /// Which files to include. Empty means all of them.
+        ///
+        /// Sent rather than assumed, because the review sheet lets somebody
+        /// untick one and an agent often touches a file that was never the
+        /// point — a lockfile, a scratch note.
+        #[serde(default)]
+        paths: Vec<String>,
     },
     Push,
     /// Everything this session changed, as a unified diff.
     Diff,
+    /// What the agent would call this work: a title and a body, for a commit
+    /// message and a pull request.
+    ///
+    /// Runs on the host, where the code is — the control plane never sees the
+    /// diff and needs no model credentials of its own.
+    Describe,
 }
 
 /// Everything a worker needs to build a workspace. No control-plane concepts.

@@ -152,6 +152,48 @@ fn summarise(said: &str) -> Option<String> {
     ))
 }
 
+/// Ask the host what this session's work should be called.
+///
+/// Off the connection loop, because it starts a short-lived agent on that
+/// machine and takes seconds — and nothing is waiting for the answer. It lands
+/// in the session, where the review sheet finds it already written.
+///
+/// Quiet about failing. A session that finished is finished whether or not
+/// anybody could think of a name for it, and the sheet works with an empty box.
+async fn describe(fleet: &Fleet, db: &Db, host_id: &HostId, session_id: &SessionId) {
+    // Nothing to describe without a checkout, and nothing to open either.
+    match db.session(session_id).await {
+        Ok(Some(session)) if session.repo.is_some() => {}
+        _ => return,
+    }
+
+    let answer = match fleet
+        .run_action(host_id, session_id, ft_proto::Action::Describe, None)
+        .await
+    {
+        Ok(Ok(answer)) => answer,
+        Ok(Err(why)) => {
+            tracing::debug!(session = %session_id, "nothing to describe: {why}");
+            return;
+        }
+        Err(e) => {
+            tracing::debug!(session = %session_id, "could not describe: {e:#}");
+            return;
+        }
+    };
+
+    let (title, body) = answer.split_once("\n\n").unwrap_or((answer.as_str(), ""));
+    if title.trim().is_empty() {
+        return;
+    }
+    if let Err(e) = db
+        .record_proposal(session_id, title.trim(), body.trim())
+        .await
+    {
+        tracing::warn!(session = %session_id, "could not keep the proposal: {e:#}");
+    }
+}
+
 /// Tell whoever asked to be told.
 ///
 /// Named by the session rather than by its id, because a notification arriving
@@ -811,6 +853,7 @@ impl Fleet {
         let asked = self.asked.clone();
         let progress = self.progress.clone();
         let notify = self.notify.clone();
+        let describing = self.clone();
 
         {
             // conn is moved in so the child process outlives this scope
@@ -925,6 +968,21 @@ impl Fleet {
                                 // every time we are told it still does.
                                 if status.needs_you() && !was_waiting {
                                     tell(&db, &notify, &session_id, note.as_deref()).await;
+                                }
+
+                                // The moment it stops is the moment something
+                                // on that host knows most about what changed,
+                                // so it is asked then rather than when somebody
+                                // eventually opens the review sheet — by which
+                                // time they are waiting on it.
+                                if status == SessionStatus::HandedBack {
+                                    let describing = describing.clone();
+                                    let db = db.clone();
+                                    let session_id = session_id.clone();
+                                    let host_id = host_id.clone();
+                                    tokio::spawn(async move {
+                                        describe(&describing, &db, &host_id, &session_id).await;
+                                    });
                                 }
                             }
 

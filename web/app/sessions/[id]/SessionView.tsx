@@ -5,10 +5,14 @@ import { useState } from "react";
 import Link from "next/link";
 import { useGetSession, useRenameSession } from "@/src/api/generated/sessions/sessions";
 import { useListEvents } from "@/src/api/generated/events/events";
+import { useSessionWork } from "@/src/api/generated/sessions/sessions";
+import type { Session, WorkSummary } from "@/src/api/generated/model";
 import { Steps, STEP_EVENTS } from "@/components/Steps";
 import { Signal } from "@/components/Signal";
 import { Terminal } from "@/components/Terminal";
 import { Chat } from "@/components/Chat";
+import { Review } from "@/components/Review";
+import { shipping, ready } from "@/src/api/ship";
 import { SessionActions } from "@/components/SessionActions";
 import { Diff } from "@/components/Diff";
 import { Files } from "@/components/Files";
@@ -34,6 +38,40 @@ type Tab = "Chat" | "Shell" | "Files" | "Changes";
  * than the session actually being looked at, on the deployment that matters
  * most. The address bar is always right.
  */
+/**
+ * The one control for getting the work out.
+ *
+ * Disabled with a reason rather than hidden — "nothing changed yet" is
+ * information, and a button that vanishes teaches somebody to go looking for
+ * where it went.
+ */
+function Ship({
+  session,
+  work,
+  onReview,
+}: {
+  session: Session;
+  work?: WorkSummary;
+  onReview: () => void;
+}) {
+  const ship = shipping(session, work);
+  const can = ready(ship);
+  return (
+    <button
+      onClick={onReview}
+      disabled={!can}
+      title={ship.blocked ?? ship.label}
+      className={`shrink-0 rounded-[7px] px-2.5 py-1 text-[12px] font-medium transition-colors ${
+        can
+          ? "bg-ember text-ground"
+          : "border border-line text-mute"
+      }`}
+    >
+      {ship.label}
+    </button>
+  );
+}
+
 function useSessionId(): string {
   const pathname = usePathname();
   const last = pathname.split("/").filter(Boolean).pop() ?? "";
@@ -43,6 +81,7 @@ function useSessionId(): string {
 export default function SessionView() {
   const id = useSessionId();
   const [tab, setTab] = useState<Tab>("Chat");
+  const [reviewing, setReviewing] = useState(false);
 
   // The stream is how this stays live, and it is fast. It is not, however,
   // something to bet the page on: a stream that silently stops leaves a session
@@ -63,6 +102,11 @@ export default function SessionView() {
   const rename = useRenameSession();
 
   const busy = !!session && unfinished(session);
+  // What is in the workspace that is not safely elsewhere. Asked while the
+  // session is running because it changes under you, and once afterwards.
+  const { data: work } = useSessionWork(id, {
+    query: { enabled: !!session?.repo, refetchInterval: busy ? 10_000 : false },
+  });
   const { data: events = [] } = useListEvents(
     { since: 0, sessionId: id },
     { query: { refetchInterval: busy ? 1_500 : false } },
@@ -142,7 +186,16 @@ export default function SessionView() {
         <span className="shrink-0 rounded-[6px] border border-line px-1.5 py-0.5 font-mono text-[10.5px] text-slate">
           {STATUS_LABEL[session.status] ?? session.status}
         </span>
+
+        {/* One control, saying the next honest thing. A session is always at
+            exactly one point on the way out, so offering every verb and letting
+            somebody work out which applies is work the screen can do. */}
+        {session.repo && <Ship session={session} work={work} onReview={() => setReviewing(true)} />}
       </header>
+
+      {reviewing && (
+        <Review session={session} work={work} onClose={() => setReviewing(false)} />
+      )}
 
       {/* One column on a phone, two on a desktop. Mobile is not a fallback
           here — routing an agent's blocking to somebody who is not at a desk is

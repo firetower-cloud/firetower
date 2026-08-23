@@ -62,6 +62,26 @@ export interface Session {
      */
   number: number;
   prompt: string;
+  /** @nullable */
+  proposedBody?: string | null;
+  /**
+     * What the agent proposed calling this work, when it finished.
+     *
+     * A draft to edit rather than a box to fill. Nothing acts on it: it is
+     * what the review sheet starts with, and whoever is shipping decides what
+     * it actually says.
+     * @nullable
+     */
+  proposedTitle?: string | null;
+  /**
+     * Where the pull request is, once one has been opened.
+     *
+     * Remembered so a screen can tell "pushed" from "already open" without
+     * asking GitHub, which is what lets one control name the next step rather
+     * than offering every verb at once.
+     * @nullable
+     */
+  pullRequest?: string | null;
   /**
      * `None` for a bare agent: a workspace with nothing checked out.
      * @nullable

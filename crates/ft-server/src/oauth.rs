@@ -237,15 +237,36 @@ pub async fn list_repos(provider: &Provider, token: &str) -> Result<Vec<RemoteRe
 ///
 /// Not a git operation — this talks to the host's API, so it belongs on the
 /// control plane with the token, exactly like listing repositories does.
+/// What to open, as one thing.
+///
+/// Grouped rather than passed as six strings in a row, which is how a base and
+/// a head end up the wrong way round: the call site now names each one.
+pub struct Opening<'a> {
+    pub slug: &'a str,
+    /// The branch with the work on it.
+    pub head: &'a str,
+    /// The branch it is going into.
+    pub base: &'a str,
+    pub title: &'a str,
+    pub body: &'a str,
+    /// A draft says "look at this" rather than "merge this", which is most of
+    /// what somebody wants from a session that just finished.
+    pub draft: bool,
+}
+
 pub async fn open_pull_request(
     provider: &Provider,
     token: &str,
-    slug: &str,
-    head: &str,
-    base: &str,
-    title: &str,
-    body: &str,
+    opening: Opening<'_>,
 ) -> Result<String> {
+    let Opening {
+        slug,
+        head,
+        base,
+        title,
+        body,
+        draft,
+    } = opening;
     #[derive(Deserialize)]
     struct Created {
         html_url: Option<String>,
@@ -261,6 +282,7 @@ pub async fn open_pull_request(
             "head": head,
             "base": base,
             "body": body,
+            "draft": draft,
         }))
         .send()
         .await

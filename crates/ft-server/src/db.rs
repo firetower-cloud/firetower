@@ -819,6 +819,42 @@ impl Db {
         Ok(())
     }
 
+    /// Remember where a session's pull request is.
+    ///
+    /// Written once it exists, so a screen can tell "pushed" from "already
+    /// open" without asking GitHub every time somebody looks.
+    pub async fn record_pull_request(&self, session_id: &SessionId, url: &str) -> Result<()> {
+        sqlx::query("UPDATE sessions SET pull_request = $1, updated_at = now() WHERE id = $2")
+            .bind(url)
+            .bind(session_id.as_str())
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    /// Keep what the agent proposed calling its work.
+    ///
+    /// Replaced whenever a newer one arrives: a session that carried on working
+    /// has a newer answer, and the older one describes a diff that no longer
+    /// exists.
+    pub async fn record_proposal(
+        &self,
+        session_id: &SessionId,
+        title: &str,
+        body: &str,
+    ) -> Result<()> {
+        sqlx::query(
+            "UPDATE sessions SET proposed_title = $1, proposed_body = $2, updated_at = now()
+              WHERE id = $3",
+        )
+        .bind(title)
+        .bind(body)
+        .bind(session_id.as_str())
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
     /// What this session is currently reported as doing.
     ///
     /// Read before writing, so a notification can be sent on the *change* into
@@ -1072,6 +1108,9 @@ fn session_from_row(r: sqlx::postgres::PgRow) -> Result<Session> {
         status: serde_json::from_str::<SessionStatus>(&format!("\"{status}\""))
             .context("decoding session status")?,
         forgotten_at: r.get("forgotten_at"),
+        pull_request: r.get("pull_request"),
+        proposed_title: r.get("proposed_title"),
+        proposed_body: r.get("proposed_body"),
         host_id: HostId::from_stored(r.get::<String, _>("host_id")),
         workspace_id: None,
         // Sessions created before steps were recorded have none, which renders

@@ -8,12 +8,14 @@
 
 export interface NewPullRequest {
   /**
-     * Defaults to the session's prompt.
+     * Falls back to what the agent proposed, then to the session's prompt.
      * @nullable
      */
   body?: string | null;
+  /** Open it as a draft. */
+  draft?: boolean;
   /**
-     * Written by whoever opens it.
+     * Written by whoever opens it, or what the agent proposed.
      * @nullable
      */
   title?: string | null;

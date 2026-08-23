@@ -370,8 +370,28 @@ impl GitRoot {
     }
 
     /// Commit whatever the agent left behind, including new files.
-    pub async fn commit(&self, dest: &Path, message: &str) -> Result<String> {
-        run(dest, "git", &["add", "-A"]).await?;
+    /// Commit the workspace, or only the paths somebody chose.
+    ///
+    /// `paths` empty means everything, which is what an unattended session
+    /// wants and what this always used to do. A list means exactly those, and
+    /// exactly those — anything already staged from an earlier attempt is
+    /// unstaged first, or unticking a file in the review sheet would not
+    /// actually leave it out.
+    ///
+    /// Paths are passed after `--`, so a file called `-f` is a file rather than
+    /// an argument.
+    pub async fn commit(&self, dest: &Path, message: &str, paths: &[String]) -> Result<String> {
+        if paths.is_empty() {
+            run(dest, "git", &["add", "-A"]).await?;
+        } else {
+            // Start from nothing staged. A previous run, or the agent itself,
+            // may have staged something nobody asked to include.
+            run(dest, "git", &["reset"]).await?;
+            let mut args = vec!["add", "--"];
+            args.extend(paths.iter().map(String::as_str));
+            run(dest, "git", &args).await?;
+        }
+
         let staged = run(dest, "git", &["diff", "--cached", "--name-only"]).await?;
         if staged.trim().is_empty() {
             bail!("there is nothing to commit");
@@ -834,6 +854,43 @@ mod tests {
     use tempfile::TempDir;
 
     #[tokio::test]
+    async fn only_the_chosen_files_are_committed() {
+        // Unticking a file in the review sheet has to actually leave it out —
+        // including when something else already staged it, which an agent
+        // often has.
+        let dest = tempfile::tempdir().unwrap();
+        let git = GitRoot::new(dest.path());
+        run(dest.path(), "git", &["init", "-q"]).await.unwrap();
+        run(dest.path(), "git", &["config", "user.email", "a@b"])
+            .await
+            .unwrap();
+        run(dest.path(), "git", &["config", "user.name", "t"])
+            .await
+            .unwrap();
+
+        std::fs::write(dest.path().join("wanted.txt"), "keep").unwrap();
+        std::fs::write(dest.path().join("not-wanted.txt"), "drop").unwrap();
+        // Already staged by somebody else, and still not wanted.
+        run(dest.path(), "git", &["add", "not-wanted.txt"])
+            .await
+            .unwrap();
+
+        git.commit(dest.path(), "only one", &["wanted.txt".to_string()])
+            .await
+            .unwrap();
+
+        let inside = run(
+            dest.path(),
+            "git",
+            &["show", "--name-only", "--format=", "HEAD"],
+        )
+        .await
+        .unwrap();
+        assert!(inside.contains("wanted.txt"), "{inside:?}");
+        assert!(!inside.contains("not-wanted.txt"), "{inside:?}");
+    }
+
+    #[tokio::test]
     async fn work_can_be_pushed_back_to_where_it_came_from() {
         let (origin_dir, remote) = origin().await;
         let home = TempDir::new().unwrap();
@@ -851,7 +908,7 @@ mod tests {
         tokio::fs::write(dest.join("new.txt"), "from the agent\n")
             .await
             .unwrap();
-        git.commit(&dest, "Add a file").await.unwrap();
+        git.commit(&dest, "Add a file", &[]).await.unwrap();
         git.push(&dest, &branch, None).await.unwrap();
 
         // the branch reached the origin, which is what makes ending a session

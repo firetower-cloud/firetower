@@ -253,6 +253,8 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(sessions::stop_session))
         .routes(routes!(sessions::rename_session))
         .routes(routes!(sessions::push_session))
+        .routes(routes!(sessions::commit_session))
+        .routes(routes!(sessions::describe_session))
         .routes(routes!(sessions::session_diff))
         .routes(routes!(sessions::open_pull_request))
         .routes(routes!(sessions::session_work))

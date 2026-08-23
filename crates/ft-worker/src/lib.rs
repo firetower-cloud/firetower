@@ -30,6 +30,7 @@ pub mod agents;
 pub mod approver;
 pub mod askpass;
 pub mod attach;
+pub mod describe;
 pub mod entry;
 pub mod first_run;
 pub mod git;
@@ -950,6 +951,13 @@ impl Worker {
             }
         };
 
+        // Firetower's own files live in the workspace, which means git can see
+        // them. The supervisor's log is written on every line an agent prints,
+        // so without this it is the largest change in every diff, it is what a
+        // description gets asked about, and committing everything would put it
+        // in somebody's repository.
+        Self::exclude_from_git(&path, &format!("{}/", agentd::DIR)).await;
+
         let tmux = Tmux::for_session(id.as_str());
         self.store
             .record_workspace(&id, path.to_str().unwrap_or_default(), tmux.name())
@@ -1175,14 +1183,32 @@ impl Worker {
                 Ok("stopped".to_string())
             }
 
-            ft_proto::Action::Commit { message } => {
+            ft_proto::Action::Commit { message, paths } => {
                 let dest = self.workspace_of(session_id).await?;
-                self.git.commit(&dest, &message).await
+                self.git.commit(&dest, &message, &paths).await
             }
 
             ft_proto::Action::Push => {
                 let dest = self.workspace_of(session_id).await?;
                 self.git.push(&dest, &branch().await?, credential).await
+            }
+
+            ft_proto::Action::Describe => {
+                let dest = self.workspace_of(session_id).await?;
+                let (agent, prompt) = self.store.session_brief(session_id).await?;
+                let base = self
+                    .store
+                    .refs_of(session_id)
+                    .await?
+                    .map(|(_, base)| base)
+                    .unwrap_or_default();
+                let diff = self.git.diff(&dest, &base).await?;
+
+                let proposal = describe::propose(agent, &dest, &prompt, &diff).await?;
+                // Two values through a channel that carries one string. The
+                // shape the control plane reads it back with is right beside
+                // this, in `sessions::describe`.
+                Ok(format!("{}\n\n{}", proposal.title, proposal.body))
             }
 
             ft_proto::Action::Diff => {

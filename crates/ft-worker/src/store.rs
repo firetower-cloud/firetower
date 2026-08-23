@@ -104,6 +104,24 @@ impl Store {
         Ok(())
     }
 
+    /// Which agent a session runs, and what it was asked to do.
+    ///
+    /// Both were written when it was created. Read back rather than passed
+    /// around because the thing that wants them — describing the work at the
+    /// end — happens a long way from where the session started.
+    pub async fn session_brief(&self, id: &SessionId) -> Result<(ft_core::Agent, String)> {
+        let row = sqlx::query("SELECT agent, prompt FROM sessions WHERE id = ?")
+            .bind(id.as_str())
+            .fetch_optional(&self.pool)
+            .await?
+            .context("no such session")?;
+
+        let agent: String = row.get("agent");
+        let agent = ft_core::Agent::from_name(&agent)
+            .with_context(|| format!("no agent called {agent}"))?;
+        Ok((agent, row.get("prompt")))
+    }
+
     pub async fn set_status(&self, id: &SessionId, status: SessionStatus) -> Result<()> {
         sqlx::query("UPDATE sessions SET status = ?, updated_at = ? WHERE id = ?")
             .bind(serde_json::to_string(&status)?.trim_matches('"'))

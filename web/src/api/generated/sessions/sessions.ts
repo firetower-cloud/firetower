@@ -28,6 +28,7 @@ import type {
 import type {
   Answer,
   ApiError,
+  Commit,
   Conversation,
   DestroySessionParams,
   Done,
@@ -40,6 +41,7 @@ import type {
   ListSessionsParams,
   NewPullRequest,
   NewSession,
+  Proposal,
   PullRequest,
   RenameSession,
   Sent,
@@ -661,6 +663,80 @@ export const useAnswerRequest = <TError = ApiError,
       > => {
       return useMutation(getAnswerRequestMutationOptions(options), queryClient);
     }
+    export const getCommitSessionUrl = (id: string,) => {
+
+
+
+
+  return `/api/v1/sessions/${id}/commit`
+}
+
+/**
+ * Everything by default, because that is what an unattended session wants.
+ * Naming files is for the review sheet, where somebody has just looked at each
+ * one and unticked the lockfile.
+ * @summary Commit the work, or the part of it somebody kept.
+ */
+export const commitSession = async (id: string,
+    commit: Commit, options?: Parameters<typeof http>[1]): Promise<Done> => {
+
+  return http<Done>(getCommitSessionUrl(id),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(commit)
+  }
+);}
+
+
+
+
+
+export const getCommitSessionMutationOptions = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof commitSession>>, TError,{id: string;data: Commit}, TContext>, request?: SecondParameter<typeof http>}
+): UseMutationOptions<Awaited<ReturnType<typeof commitSession>>, TError,{id: string;data: Commit}, TContext> => {
+
+const mutationKey = ['commitSession'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof commitSession>>, {id: string;data: Commit}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  commitSession(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CommitSessionMutationResult = NonNullable<Awaited<ReturnType<typeof commitSession>>>
+    export type CommitSessionMutationBody = Commit
+    export type CommitSessionMutationError = ApiError
+
+    /**
+ * @summary Commit the work, or the part of it somebody kept.
+ */
+export const useCommitSession = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof commitSession>>, TError,{id: string;data: Commit}, TContext>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof commitSession>>,
+        TError,
+        {id: string;data: Commit},
+        TContext
+      > => {
+      return useMutation(getCommitSessionMutationOptions(options), queryClient);
+    }
     export const getGetConversationUrl = (id: string,
     params?: GetConversationParams,) => {
   const normalizedParams = new URLSearchParams();
@@ -919,7 +995,82 @@ export const useGetStreamConversationQueryData = () => {
 }
 
 
-export const getSessionDiffUrl = (id: string,) => {
+export const getDescribeSessionUrl = (id: string,) => {
+
+
+
+
+  return `/api/v1/sessions/${id}/describe`
+}
+
+/**
+ * Runs on the host, where the code is — a short-lived agent reading the diff,
+ * not a turn in the session. A hidden turn is still a turn: it would land in
+ * the transcript, spend the session's tokens and move its context meter, and a
+ * session somebody is about to carry on working in should not be closer to
+ * full because something wanted a sentence for a form.
+ * @summary What the agent would call this work.
+ */
+export const describeSession = async (id: string, options?: Parameters<typeof http>[1]): Promise<Proposal> => {
+
+  return http<Proposal>(getDescribeSessionUrl(id),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getDescribeSessionMutationOptions = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof describeSession>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof http>}
+): UseMutationOptions<Awaited<ReturnType<typeof describeSession>>, TError,{id: string}, TContext> => {
+
+const mutationKey = ['describeSession'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof describeSession>>, {id: string}> = (props) => {
+          const {id} = props ?? {};
+
+          return  describeSession(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DescribeSessionMutationResult = NonNullable<Awaited<ReturnType<typeof describeSession>>>
+
+    export type DescribeSessionMutationError = ApiError
+
+    /**
+ * @summary What the agent would call this work.
+ */
+export const useDescribeSession = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof describeSession>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof describeSession>>,
+        TError,
+        {id: string},
+        TContext
+      > => {
+      return useMutation(getDescribeSessionMutationOptions(options), queryClient);
+    }
+    export const getSessionDiffUrl = (id: string,) => {
 
 
 

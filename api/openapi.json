@@ -1790,6 +1790,69 @@
         }
       }
     },
+    "/api/v1/sessions/{id}/commit": {
+      "post": {
+        "tags": [
+          "sessions"
+        ],
+        "summary": "Commit the work, or the part of it somebody kept.",
+        "description": "Everything by default, because that is what an unattended session wants.\nNaming files is for the review sheet, where somebody has just looked at each\none and unticked the lockfile.",
+        "operationId": "commit_session",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Session id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Commit"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Done"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/sessions/{id}/conversation": {
       "get": {
         "tags": [
@@ -1866,6 +1929,59 @@
         "responses": {
           "200": {
             "description": "text/event-stream of ConversationEvent"
+          }
+        }
+      }
+    },
+    "/api/v1/sessions/{id}/describe": {
+      "post": {
+        "tags": [
+          "sessions"
+        ],
+        "summary": "What the agent would call this work.",
+        "description": "Runs on the host, where the code is — a short-lived agent reading the diff,\nnot a turn in the session. A hidden turn is still a turn: it would land in\nthe transcript, spend the session's tokens and move its context meter, and a\nsession somebody is about to carry on working in should not be closer to\nfull because something wanted a sentence for a form.",
+        "operationId": "describe_session",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Session id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Proposal"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
           }
         }
       }
@@ -2835,6 +2951,25 @@
           }
         }
       },
+      "Commit": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The commit message. Falls back to what the agent proposed."
+          },
+          "paths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Which files to include. Empty means everything that changed."
+          }
+        }
+      },
       "Compute": {
         "oneOf": [
           {
@@ -3750,14 +3885,18 @@
               "string",
               "null"
             ],
-            "description": "Defaults to the session's prompt."
+            "description": "Falls back to what the agent proposed, then to the session's prompt."
+          },
+          "draft": {
+            "type": "boolean",
+            "description": "Open it as a draft."
           },
           "title": {
             "type": [
               "string",
               "null"
             ],
-            "description": "Written by whoever opens it."
+            "description": "Written by whoever opens it, or what the agent proposed."
           }
         }
       },
@@ -3932,6 +4071,21 @@
           "slug": {
             "type": "string",
             "description": "Derived from the remote, and editable before saving."
+          }
+        }
+      },
+      "Proposal": {
+        "type": "object",
+        "required": [
+          "title",
+          "body"
+        ],
+        "properties": {
+          "body": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
           }
         }
       },
@@ -4349,6 +4503,26 @@
           },
           "prompt": {
             "type": "string"
+          },
+          "proposedBody": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "proposedTitle": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What the agent proposed calling this work, when it finished.\n\nA draft to edit rather than a box to fill. Nothing acts on it: it is\nwhat the review sheet starts with, and whoever is shipping decides what\nit actually says."
+          },
+          "pullRequest": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Where the pull request is, once one has been opened.\n\nRemembered so a screen can tell \"pushed\" from \"already open\" without\nasking GitHub, which is what lets one control name the next step rather\nthan offering every verb at once."
           },
           "repo": {
             "type": [

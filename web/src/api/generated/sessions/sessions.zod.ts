@@ -35,6 +35,9 @@ export const ListSessionsResponseItem = zod.object({
   "note": zod.string().nullish().describe('Why it is in that status, when whatever set it knew.\n\nOnly ever the agent\'s own words, and only for the statuses that mean\nyour move. Cleared when it goes back to working — a question that has\nbeen answered is not worth keeping on screen.'),
   "number": zod.int().describe('Assigned once, never reused, and the same for as long as the session\nexists. What `name` is derived from, and what a name that has been\nchanged can always be traced back to.'),
   "prompt": zod.string(),
+  "proposedBody": zod.string().nullish(),
+  "proposedTitle": zod.string().nullish().describe('What the agent proposed calling this work, when it finished.\n\nA draft to edit rather than a box to fill. Nothing acts on it: it is\nwhat the review sheet starts with, and whoever is shipping decides what\nit actually says.'),
+  "pullRequest": zod.string().nullish().describe('Where the pull request is, once one has been opened.\n\nRemembered so a screen can tell \"pushed\" from \"already open\" without\nasking GitHub, which is what lets one control name the next step rather\nthan offering every verb at once.'),
   "repo": zod.string().nullish().describe('`None` for a bare agent: a workspace with nothing checked out.'),
   "size": zod.enum(['Small', 'Medium', 'Large']),
   "status": zod.enum(['Starting', 'Working', 'NeedsYou', 'HandedBack', 'Failed', 'Ended']),
@@ -67,6 +70,9 @@ export const CreateSessionResponse = zod.object({
   "note": zod.string().nullish().describe('Why it is in that status, when whatever set it knew.\n\nOnly ever the agent\'s own words, and only for the statuses that mean\nyour move. Cleared when it goes back to working — a question that has\nbeen answered is not worth keeping on screen.'),
   "number": zod.int().describe('Assigned once, never reused, and the same for as long as the session\nexists. What `name` is derived from, and what a name that has been\nchanged can always be traced back to.'),
   "prompt": zod.string(),
+  "proposedBody": zod.string().nullish(),
+  "proposedTitle": zod.string().nullish().describe('What the agent proposed calling this work, when it finished.\n\nA draft to edit rather than a box to fill. Nothing acts on it: it is\nwhat the review sheet starts with, and whoever is shipping decides what\nit actually says.'),
+  "pullRequest": zod.string().nullish().describe('Where the pull request is, once one has been opened.\n\nRemembered so a screen can tell \"pushed\" from \"already open\" without\nasking GitHub, which is what lets one control name the next step rather\nthan offering every verb at once.'),
   "repo": zod.string().nullish().describe('`None` for a bare agent: a workspace with nothing checked out.'),
   "size": zod.enum(['Small', 'Medium', 'Large']),
   "status": zod.enum(['Starting', 'Working', 'NeedsYou', 'HandedBack', 'Failed', 'Ended']),
@@ -109,6 +115,9 @@ export const GetSessionResponse = zod.object({
   "note": zod.string().nullish().describe('Why it is in that status, when whatever set it knew.\n\nOnly ever the agent\'s own words, and only for the statuses that mean\nyour move. Cleared when it goes back to working — a question that has\nbeen answered is not worth keeping on screen.'),
   "number": zod.int().describe('Assigned once, never reused, and the same for as long as the session\nexists. What `name` is derived from, and what a name that has been\nchanged can always be traced back to.'),
   "prompt": zod.string(),
+  "proposedBody": zod.string().nullish(),
+  "proposedTitle": zod.string().nullish().describe('What the agent proposed calling this work, when it finished.\n\nA draft to edit rather than a box to fill. Nothing acts on it: it is\nwhat the review sheet starts with, and whoever is shipping decides what\nit actually says.'),
+  "pullRequest": zod.string().nullish().describe('Where the pull request is, once one has been opened.\n\nRemembered so a screen can tell \"pushed\" from \"already open\" without\nasking GitHub, which is what lets one control name the next step rather\nthan offering every verb at once.'),
   "repo": zod.string().nullish().describe('`None` for a bare agent: a workspace with nothing checked out.'),
   "size": zod.enum(['Small', 'Medium', 'Large']),
   "status": zod.enum(['Starting', 'Working', 'NeedsYou', 'HandedBack', 'Failed', 'Ended']),
@@ -154,6 +163,9 @@ export const RenameSessionResponse = zod.object({
   "note": zod.string().nullish().describe('Why it is in that status, when whatever set it knew.\n\nOnly ever the agent\'s own words, and only for the statuses that mean\nyour move. Cleared when it goes back to working — a question that has\nbeen answered is not worth keeping on screen.'),
   "number": zod.int().describe('Assigned once, never reused, and the same for as long as the session\nexists. What `name` is derived from, and what a name that has been\nchanged can always be traced back to.'),
   "prompt": zod.string(),
+  "proposedBody": zod.string().nullish(),
+  "proposedTitle": zod.string().nullish().describe('What the agent proposed calling this work, when it finished.\n\nA draft to edit rather than a box to fill. Nothing acts on it: it is\nwhat the review sheet starts with, and whoever is shipping decides what\nit actually says.'),
+  "pullRequest": zod.string().nullish().describe('Where the pull request is, once one has been opened.\n\nRemembered so a screen can tell \"pushed\" from \"already open\" without\nasking GitHub, which is what lets one control name the next step rather\nthan offering every verb at once.'),
   "repo": zod.string().nullish().describe('`None` for a bare agent: a workspace with nothing checked out.'),
   "size": zod.enum(['Small', 'Medium', 'Large']),
   "status": zod.enum(['Starting', 'Working', 'NeedsYou', 'HandedBack', 'Failed', 'Ended']),
@@ -190,6 +202,25 @@ export const AnswerRequestBody = zod.object({
 
 export const AnswerRequestResponse = zod.object({
   "sent": zod.boolean()
+})
+
+/**
+ * Everything by default, because that is what an unattended session wants.
+ * Naming files is for the review sheet, where somebody has just looked at each
+ * one and unticked the lockfile.
+ * @summary Commit the work, or the part of it somebody kept.
+ */
+export const CommitSessionParams = zod.object({
+  "id": zod.string().describe('Session id')
+})
+
+export const CommitSessionBody = zod.object({
+  "message": zod.string().nullish().describe('The commit message. Falls back to what the agent proposed.'),
+  "paths": zod.array(zod.string()).optional().describe('Which files to include. Empty means everything that changed.')
+})
+
+export const CommitSessionResponse = zod.object({
+  "detail": zod.string()
 })
 
 /**
@@ -350,6 +381,23 @@ export const StreamConversationParams = zod.object({
 export const StreamConversationResponse = zod.unknown()
 
 /**
+ * Runs on the host, where the code is — a short-lived agent reading the diff,
+ * not a turn in the session. A hidden turn is still a turn: it would land in
+ * the transcript, spend the session's tokens and move its context meter, and a
+ * session somebody is about to carry on working in should not be closer to
+ * full because something wanted a sentence for a form.
+ * @summary What the agent would call this work.
+ */
+export const DescribeSessionParams = zod.object({
+  "id": zod.string().describe('Session id')
+})
+
+export const DescribeSessionResponse = zod.object({
+  "body": zod.string(),
+  "title": zod.string()
+})
+
+/**
  * Split on the server: it is a pure function over text that is easy to get
  * subtly wrong, and doing it once here beats doing it in every client.
  * @summary What this session changed, file by file.
@@ -462,8 +510,9 @@ export const OpenPullRequestParams = zod.object({
 })
 
 export const OpenPullRequestBody = zod.object({
-  "body": zod.string().nullish().describe('Defaults to the session\'s prompt.'),
-  "title": zod.string().nullish().describe('Written by whoever opens it.')
+  "body": zod.string().nullish().describe('Falls back to what the agent proposed, then to the session\'s prompt.'),
+  "draft": zod.boolean().optional().describe('Open it as a draft.'),
+  "title": zod.string().nullish().describe('Written by whoever opens it, or what the agent proposed.')
 })
 
 export const OpenPullRequestResponse = zod.object({
