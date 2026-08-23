@@ -819,6 +819,25 @@ impl Db {
         Ok(())
     }
 
+    /// Record that a session has stopped and is waiting for somebody.
+    ///
+    /// Written as an event rather than only as a column, so the inbox, the
+    /// activity list and anything watching the feed all learn it the same way
+    /// they learn everything else. The sequence is this host's, continuing the
+    /// numbering the worker uses, so a client's cursor still means one thing.
+    pub async fn note_session_asked(&self, session_id: &SessionId, note: &str) -> Result<()> {
+        sqlx::query(
+            "UPDATE sessions SET status = $1, note = $2, updated_at = now()
+              WHERE id = $3 AND forgotten_at IS NULL",
+        )
+        .bind(format!("{:?}", SessionStatus::NeedsYou))
+        .bind(note)
+        .bind(session_id.as_str())
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
     /// Everything the agent has said, in order, from `since` onward.
     pub async fn agent_lines_since(
         &self,

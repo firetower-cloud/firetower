@@ -74,6 +74,19 @@ pub enum AgentSpeech {
     Closed,
 }
 
+/// The part of a question worth putting on a card in the inbox.
+fn detail_of(question: &AgentSpeech) -> String {
+    let AgentSpeech::Asks { input, .. } = question else {
+        return String::new();
+    };
+    for key in ["command", "file_path", "path", "url"] {
+        if let Some(value) = input.get(key).and_then(|v| v.as_str()) {
+            return value.to_string();
+        }
+    }
+    String::new()
+}
+
 /// One terminal of one session.
 ///
 /// A session has more than one now — the agent's, and a shell of your own — and
@@ -126,6 +139,14 @@ pub struct Fleet {
     /// Live terminals, one broadcast per session. The worker holds a single
     /// attachment; this is where it fans out to however many are watching.
     terminals: Arc<RwLock<HashMap<String, broadcast::Sender<Terminal>>>>,
+    /// Questions each session is blocked on, until they are answered.
+    ///
+    /// Held here because nothing else can hold them for a browser: a question
+    /// is not in the agent's log — it is blocked, not talking — and the live
+    /// broadcast has no history. Without this, opening a session that is
+    /// already waiting shows an agent doing nothing, with no way to find out
+    /// why.
+    asked: Arc<RwLock<HashMap<String, Vec<AgentSpeech>>>>,
     /// Live conversations, one broadcast per session.
     ///
     /// Carries lines as the agent wrote them. Turning them into something an
@@ -193,6 +214,7 @@ impl Fleet {
             probes: Arc::new(RwLock::new(HashMap::new())),
             terminals: Arc::new(RwLock::new(HashMap::new())),
             conversations: Arc::new(RwLock::new(HashMap::new())),
+            asked: Arc::new(RwLock::new(HashMap::new())),
             supervised: Arc::new(RwLock::new(HashMap::new())),
         }
     }
@@ -673,6 +695,7 @@ impl Fleet {
         let probes = self.probes.clone();
         let terminals = self.terminals.clone();
         let conversations = self.conversations.clone();
+        let asked = self.asked.clone();
 
         {
             // conn is moved in so the child process outlives this scope
@@ -765,11 +788,33 @@ impl Fleet {
                             }
                         }
                         Ok(ToServer::AgentAsks { session_id, req, tool_name, input }) => {
+                            let question = AgentSpeech::Asks { req: req.clone(), tool_name: tool_name.clone(), input };
+
+                            // Kept before it is announced, so a browser that
+                            // opens a moment later still finds it.
+                            {
+                                let mut held = asked.write().await;
+                                let waiting = held.entry(session_id.to_string()).or_default();
+                                if !waiting.iter().any(|q| matches!(q, AgentSpeech::Asks { req: seen, .. } if *seen == req)) {
+                                    waiting.push(question.clone());
+                                }
+                            }
+
+                            // This is the whole product: a session that stopped
+                            // and needs somebody. Recorded as an event so the
+                            // inbox and the activity list learn it the same way
+                            // they learn everything else.
+                            let note = format!("{tool_name}: {}", detail_of(&question));
+                            if let Err(e) = db.note_session_asked(&session_id, &note).await {
+                                tracing::warn!(session = %session_id, "marking as waiting: {e:#}");
+                            }
+
                             if let Some(tx) = conversations.read().await.get(session_id.as_str()) {
-                                let _ = tx.send(AgentSpeech::Asks { req, tool_name, input });
+                                let _ = tx.send(question);
                             }
                         }
                         Ok(ToServer::AgentClosed { session_id }) => {
+                            asked.write().await.remove(session_id.as_str());
                             if let Some(tx) = conversations.write().await.remove(session_id.as_str()) {
                                 let _ = tx.send(AgentSpeech::Closed);
                             }
@@ -1090,6 +1135,42 @@ impl Fleet {
             ToWorker::SendTurn {
                 session_id: session_id.clone(),
                 message,
+            },
+        )
+        .await
+    }
+
+    /// What this session is blocked on, if anything.
+    pub async fn asked(&self, session_id: &SessionId) -> Vec<AgentSpeech> {
+        self.asked
+            .read()
+            .await
+            .get(session_id.as_str())
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    /// Answer something the agent is blocked on.
+    pub async fn answer(
+        &self,
+        host_id: &HostId,
+        session_id: &SessionId,
+        req: String,
+        result: serde_json::Value,
+    ) -> Result<()> {
+        // Forgotten here rather than when the agent acknowledges, because it
+        // does not acknowledge — it simply carries on, and the next thing it
+        // says is the proof.
+        if let Some(waiting) = self.asked.write().await.get_mut(session_id.as_str()) {
+            waiting.retain(|q| !matches!(q, AgentSpeech::Asks { req: seen, .. } if *seen == req));
+        }
+
+        self.send(
+            host_id,
+            ToWorker::Answer {
+                session_id: session_id.clone(),
+                req,
+                result,
             },
         )
         .await

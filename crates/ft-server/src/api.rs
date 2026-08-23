@@ -260,6 +260,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(conversation::stream_conversation))
         .routes(routes!(conversation::send_turn))
         .routes(routes!(conversation::interrupt_session))
+        .routes(routes!(conversation::answer_request))
 }
 
 #[cfg(test)]

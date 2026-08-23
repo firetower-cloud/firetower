@@ -31,7 +31,7 @@ use serde_json::Value;
 
 use crate::turn::{
     ItemId, ItemKind, ItemStatus, PlanStep, PlanStepStatus, Question, QuestionOption, RawSource,
-    RequestId, SlashCommand, StreamKind, TaskId, TurnEvent, TurnId, TurnStatus, Usage,
+    RequestId, RequestKind, SlashCommand, StreamKind, TaskId, TurnEvent, TurnId, TurnStatus, Usage,
 };
 
 /// What a tool's name suggests it does.
@@ -71,6 +71,20 @@ pub fn classify(tool_name: &str) -> ItemKind {
         return ItemKind::FileChange;
     }
     ItemKind::Unknown
+}
+
+/// What a person is actually being asked to allow.
+///
+/// Coarser than [`classify`], because the question is "may this run", not
+/// "which of forty tools is this". Read-only calls are separated out because
+/// they are the ones somebody can wave through without reading.
+pub fn classify_request(tool_name: &str) -> RequestKind {
+    match classify(tool_name) {
+        ItemKind::CommandExecution => RequestKind::CommandExecution,
+        ItemKind::FileRead => RequestKind::FileRead,
+        ItemKind::FileChange => RequestKind::FileChange,
+        _ => RequestKind::Tool,
+    }
 }
 
 /// What to call a card before anything has arrived in it.

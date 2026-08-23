@@ -1727,6 +1727,69 @@
         }
       }
     },
+    "/api/v1/sessions/{id}/answer": {
+      "post": {
+        "tags": [
+          "sessions"
+        ],
+        "summary": "Answer something the agent is waiting on.",
+        "description": "Until this arrives the agent is stopped, holding the tool call open. There\nis no timeout anywhere on that path: somebody may be asleep, and an agent\nthat gave up and denied would be worse than one that waited.",
+        "operationId": "answer_request",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Session id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Answer"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Sent"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/sessions/{id}/conversation": {
       "get": {
         "tags": [
@@ -2655,6 +2718,22 @@
               "null"
             ],
             "description": "What to run locally to get a token, when this agent works that way."
+          }
+        }
+      },
+      "Answer": {
+        "type": "object",
+        "required": [
+          "req",
+          "decision"
+        ],
+        "properties": {
+          "decision": {
+            "$ref": "#/components/schemas/Decision"
+          },
+          "req": {
+            "type": "string",
+            "description": "Which question. The agent's own id for the call it is blocked on."
           }
         }
       },

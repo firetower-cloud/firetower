@@ -12,6 +12,7 @@ export * from './agentMode';
 export * from './agentOnHost';
 export * from './agentPresence';
 export * from './agentView';
+export * from './answer';
 export * from './apiError';
 export * from './bootstrap';
 export * from './branches';

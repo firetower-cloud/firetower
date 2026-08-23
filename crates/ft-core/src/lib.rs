@@ -136,11 +136,11 @@ impl Agent {
     /// `--bare` is deliberately absent. It skips hooks, skills, MCP servers and
     /// `CLAUDE.md` — everything that makes an agent useful in somebody's actual
     /// repository — and refuses to read a subscription login.
-    pub fn launch_headless(&self, session_id: &str) -> Option<Vec<String>> {
+    pub fn launch_headless(&self, session_id: &str, asking: &Asking) -> Option<Vec<String>> {
         let agent_session = agent_session_uuid(session_id);
         match self {
-            Agent::ClaudeCode => Some(
-                [
+            Agent::ClaudeCode => {
+                let mut argv: Vec<String> = [
                     self.command(),
                     "-p",
                     "--input-format",
@@ -152,18 +152,32 @@ impl Agent {
                     "--replay-user-messages",
                     "--session-id",
                     &agent_session,
-                    // Temporary. Until the permission tool is wired up there is
-                    // nothing to answer a prompt, and an agent that asked would
-                    // wait for somebody who cannot reach it. Narrower than the
-                    // interactive default rather than wider: this approves
-                    // edits, not commands.
-                    "--permission-mode",
-                    "acceptEdits",
                 ]
                 .iter()
                 .map(|s| s.to_string())
-                .collect(),
-            ),
+                .collect();
+
+                match asking {
+                    // The agent stops and asks, and the question is routed to
+                    // whoever is watching. This is the point of the whole
+                    // arrangement, so it is the ordinary case.
+                    Asking::Ask { tool, config } => argv.extend([
+                        "--permission-mode".into(),
+                        "default".into(),
+                        "--permission-prompt-tool".into(),
+                        tool.clone(),
+                        "--mcp-config".into(),
+                        config.clone(),
+                    ]),
+                    // Nothing can answer, so nothing may be asked. Narrower
+                    // than the interactive default rather than wider: this
+                    // approves edits, not commands.
+                    Asking::CannotAsk => {
+                        argv.extend(["--permission-mode".into(), "acceptEdits".into()])
+                    }
+                }
+                Some(argv)
+            }
             Agent::Codex | Agent::Shell => None,
         }
     }
@@ -649,6 +663,20 @@ pub enum AgentMode {
     /// Distinct from an absent mode, which means nobody has configured this
     /// agent yet — the response carries `null` for that.
     NotNeeded,
+}
+
+/// Whether there is anybody to answer a permission prompt.
+///
+/// An agent that asks a question nobody can hear is worse than one that was
+/// never allowed to ask: it waits, and the session looks hung. So the two are
+/// one decision, made once, rather than a flag that can be set without the
+/// machinery behind it.
+#[derive(Debug, Clone)]
+pub enum Asking {
+    /// Route questions through this tool, configured by this file.
+    Ask { tool: String, config: String },
+    /// Approve what can be approved without asking, and refuse the rest.
+    CannotAsk,
 }
 
 /// The identifier an agent is told to call its own session.

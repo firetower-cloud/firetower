@@ -141,6 +141,13 @@ pub enum FromAgent {
     Exited { code: Option<i32> },
 }
 
+/// A question the agent is blocked on, and the way back to it.
+struct Pending {
+    tool_name: String,
+    input: serde_json::Value,
+    answer: oneshot::Sender<serde_json::Value>,
+}
+
 /// One line, as it was written and where.
 #[derive(Debug, Clone)]
 struct Logged {
@@ -157,10 +164,19 @@ struct Session {
     /// How many lines the log holds. Read before opening the file, so a
     /// subscriber can tell what it is about to have already seen.
     written: Arc<Mutex<u64>>,
+    /// Questions as they are asked, so every watcher hears them and not only
+    /// the permission tool that raised one.
+    asked: broadcast::Sender<FromAgent>,
     /// Messages queued for the agent's stdin.
     to_agent: mpsc::Sender<serde_json::Value>,
     /// Approvals waiting on somebody, keyed by request.
-    pending: Arc<Mutex<HashMap<String, oneshot::Sender<serde_json::Value>>>>,
+    ///
+    /// The question is kept beside the channel because a watcher that arrives
+    /// after it was asked has to be told about it. Nothing in the log records
+    /// an approval — the agent is blocked, not talking — so this is the only
+    /// place a pending question exists, and a browser that reloads would
+    /// otherwise show a session that is simply stuck.
+    pending: Arc<Mutex<HashMap<String, Pending>>>,
     /// The agent's process id, for interrupting it.
     pid: Option<u32>,
     /// Removed on the way out, so a later run can bind it again.
@@ -279,6 +295,7 @@ async fn start(launch: Launch, socket: PathBuf) -> Result<(Session, Child, JoinH
         })
     };
 
+    let (asked, _) = broadcast::channel(64);
     let (to_agent, mut queued) = mpsc::channel::<serde_json::Value>(64);
     tokio::spawn(async move {
         while let Some(message) = queued.recv().await {
@@ -302,6 +319,7 @@ async fn start(launch: Launch, socket: PathBuf) -> Result<(Session, Child, JoinH
             log,
             live,
             written,
+            asked,
             to_agent,
             pending: Arc::new(Mutex::new(HashMap::new())),
             pid,
@@ -356,7 +374,24 @@ async fn serve(stream: UnixStream, session: Arc<Session>) -> Result<()> {
                 // a line written while we are still reading is held here
                 // rather than missed, and skipped below if the file had it.
                 let live = session.live.subscribe();
-                return replay_then_follow(&mut writer, &session, from_line, live).await;
+                let questions = session.asked.subscribe();
+
+                // Anything the agent is already blocked on. A watcher that
+                // arrives after the question was asked would otherwise see a
+                // session doing nothing, with no way to find out why.
+                for (req, pending) in session.pending.lock().await.iter() {
+                    send(
+                        &mut writer,
+                        &FromAgent::Approval {
+                            req: req.clone(),
+                            tool_name: pending.tool_name.clone(),
+                            input: pending.input.clone(),
+                        },
+                    )
+                    .await?;
+                }
+
+                return replay_then_follow(&mut writer, &session, from_line, live, questions).await;
             }
             ToAgent::Send { message } => {
                 let _ = session.to_agent.send(message).await;
@@ -364,7 +399,7 @@ async fn serve(stream: UnixStream, session: Arc<Session>) -> Result<()> {
             ToAgent::Interrupt => interrupt(&session).await,
             ToAgent::Decide { req, result } => {
                 if let Some(waiting) = session.pending.lock().await.remove(&req) {
-                    let _ = waiting.send(result);
+                    let _ = waiting.answer.send(result);
                 }
             }
             ToAgent::Approver => {}
@@ -374,12 +409,22 @@ async fn serve(stream: UnixStream, session: Arc<Session>) -> Result<()> {
                 input,
             } => {
                 let (answer, wait) = oneshot::channel();
-                session.pending.lock().await.insert(req.clone(), answer);
+                session.pending.lock().await.insert(
+                    req.clone(),
+                    Pending {
+                        tool_name: tool_name.clone(),
+                        input: input.clone(),
+                        answer,
+                    },
+                );
+                // Everybody watching, not just whoever asked: the question has
+                // to reach a browser, and the browser is on the other socket.
                 let asked = FromAgent::Approval {
                     req: req.clone(),
                     tool_name,
                     input,
                 };
+                let _ = session.asked.send(asked.clone());
                 send(&mut writer, &asked).await?;
                 // No timeout on purpose. Somebody may be asleep, and an agent
                 // that gave up and denied would be worse than one that waited.
@@ -402,6 +447,7 @@ async fn replay_then_follow(
     session: &Session,
     from_line: u64,
     mut live: broadcast::Receiver<Logged>,
+    mut questions: broadcast::Receiver<FromAgent>,
 ) -> Result<()> {
     let mut sent = from_line;
     if let Ok(text) = tokio::fs::read_to_string(&session.log).await {
@@ -423,7 +469,21 @@ async fn replay_then_follow(
     }
 
     loop {
-        match live.recv().await {
+        // Lines and questions arrive on separate channels because a question
+        // is not part of the log — the agent is blocked rather than talking,
+        // so there is nothing to write down and nothing to resume from.
+        let logged = tokio::select! {
+            asked = questions.recv() => {
+                match asked {
+                    Ok(frame) => { send(writer, &frame).await?; continue }
+                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(broadcast::error::RecvError::Closed) => return Ok(()),
+                }
+            }
+            line = live.recv() => line,
+        };
+
+        match logged {
             Ok(logged) if logged.line_no == u64::MAX => {
                 return send(writer, &FromAgent::Exited { code: None }).await;
             }

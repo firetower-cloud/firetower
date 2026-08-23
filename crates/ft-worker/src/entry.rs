@@ -14,8 +14,17 @@ use std::path::PathBuf;
 pub async fn run_agent(session: &str, workspace: PathBuf, agent: &str) -> Result<()> {
     let kind =
         ft_core::Agent::from_name(agent).with_context(|| format!("no agent called {agent}"))?;
+
+    // Written before the agent starts, because it is what tells the agent how
+    // to ask us anything. Losing it does not make the session unsafe — it makes
+    // it silent, which is worse — so a failure here is fatal rather than best
+    // effort.
+    let asking = arrange_asking(session, &workspace)
+        .await
+        .context("setting up how the agent asks for permission")?;
+
     let argv = kind
-        .launch_headless(session)
+        .launch_headless(session, &asking)
         .with_context(|| format!("{} cannot be driven this way yet", kind.label()))?;
 
     crate::agentd::run(crate::agentd::Launch {
@@ -28,6 +37,26 @@ pub async fn run_agent(session: &str, workspace: PathBuf, agent: &str) -> Result
     })
     .await
     .context("supervising the agent")
+}
+
+/// Write the permission tool's configuration, and say how to reach it.
+///
+/// This binary is both the agent's supervisor and the server it will call to
+/// ask a question — the agent starts the second one itself, from what is
+/// written here.
+async fn arrange_asking(session: &str, workspace: &std::path::Path) -> Result<ft_core::Asking> {
+    let exe = std::env::current_exe().context("finding this binary's own path")?;
+    let dir = crate::agentd::dir_for(workspace);
+    tokio::fs::create_dir_all(&dir).await?;
+
+    let config = dir.join("mcp.json");
+    let contents = serde_json::to_vec_pretty(&crate::approver::mcp_config(&exe, session))?;
+    tokio::fs::write(&config, contents).await?;
+
+    Ok(ft_core::Asking::Ask {
+        tool: crate::approver::tool_name(),
+        config: config.display().to_string(),
+    })
 }
 
 /// Print what a running agent is saying, one event per line.

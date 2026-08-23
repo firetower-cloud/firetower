@@ -164,6 +164,32 @@ export const RenameSessionResponse = zod.object({
 }).describe('A line of work with a conversation attached and a branch at the end.')
 
 /**
+ * Until this arrives the agent is stopped, holding the tool call open. There
+ * is no timeout anywhere on that path: somebody may be asleep, and an agent
+ * that gave up and denied would be worse than one that waited.
+ * @summary Answer something the agent is waiting on.
+ */
+export const AnswerRequestParams = zod.object({
+  "id": zod.string().describe('Session id')
+})
+
+export const AnswerRequestBody = zod.object({
+  "decision": zod.union([zod.object({
+  "decision": zod.enum(['Allow'])
+}),zod.object({
+  "decision": zod.enum(['AllowAlways'])
+}).describe('Allow, and stop asking about calls like this one.'),zod.object({
+  "decision": zod.enum(['Deny']),
+  "reason": zod.string().nullish().describe('Shown to the agent, which reads it and often tries something else.\nThat is the point of asking for one.')
+})]).describe('What the person decided, when they were asked.'),
+  "req": zod.string().describe('Which question. The agent\'s own id for the call it is blocked on.')
+})
+
+export const AnswerRequestResponse = zod.object({
+  "sent": zod.boolean()
+})
+
+/**
  * A snapshot. Use the stream for a session that is still running — this is for
  * one that has finished, and for a first paint that wants to be a single
  * request rather than a connection.

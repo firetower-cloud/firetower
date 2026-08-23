@@ -153,6 +153,9 @@ pub(super) async fn stream_conversation(
     };
 
     let stored = state.db.agent_lines_since(&id, 0).await.unwrap_or_default();
+    // Anything the agent is already blocked on, so opening a waiting session
+    // shows the question rather than a transcript that stops for no reason.
+    let waiting = state.fleet.asked(&id).await;
 
     // One normaliser for the whole connection: the backlog leaves it holding
     // the state the live lines are about to need.
@@ -169,6 +172,25 @@ pub(super) async fn stream_conversation(
         }
     }
 
+    for question in waiting {
+        if let AgentSpeech::Asks {
+            req,
+            tool_name,
+            input,
+        } = question
+        {
+            backlog.push(ConversationEvent {
+                line_no: replayed,
+                event: TurnEvent::RequestOpened {
+                    req: ft_core::RequestId::new(req),
+                    kind: ft_core::normalise::classify_request(&tool_name),
+                    detail: tool_name,
+                    args: input,
+                },
+            });
+        }
+    }
+
     let following = BroadcastStream::new(live)
         .filter_map(|frame| async move { frame.ok() })
         .flat_map(move |speech| {
@@ -180,10 +202,24 @@ pub(super) async fn stream_conversation(
                     .collect(),
                 // Already replayed from the table above.
                 AgentSpeech::Line { .. } => Vec::new(),
-                // Approvals reach the browser as part of the conversation in
-                // their own right; there is nothing in the log for them,
-                // because the agent is blocked rather than talking.
-                AgentSpeech::Asks { .. } | AgentSpeech::Closed => Vec::new(),
+                // A question is not in the log — the agent is blocked rather
+                // than talking — so it carries the line it interrupted. That
+                // keeps the resume cursor monotonic: a question stamped zero
+                // would send a reconnecting client back to the start.
+                AgentSpeech::Asks {
+                    req,
+                    tool_name,
+                    input,
+                } => vec![ConversationEvent {
+                    line_no: replayed,
+                    event: TurnEvent::RequestOpened {
+                        req: ft_core::RequestId::new(req),
+                        kind: ft_core::normalise::classify_request(&tool_name),
+                        detail: tool_name,
+                        args: input,
+                    },
+                }],
+                AgentSpeech::Closed => Vec::new(),
             };
             futures::stream::iter(events)
         });
@@ -270,6 +306,81 @@ pub(super) async fn interrupt_session(
         .map_err(|e| ApiError::new(ErrorCode::HostUnreachable, format!("{e:#}")))?;
 
     Ok(Json(Sent { sent: true }))
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct Answer {
+    /// Which question. The agent's own id for the call it is blocked on.
+    pub req: String,
+    pub decision: ft_core::turn::Decision,
+}
+
+/// Answer something the agent is waiting on.
+///
+/// Until this arrives the agent is stopped, holding the tool call open. There
+/// is no timeout anywhere on that path: somebody may be asleep, and an agent
+/// that gave up and denied would be worse than one that waited.
+#[utoipa::path(
+    post, path = "/api/v1/sessions/{id}/answer", tag = "sessions",
+    params(("id" = String, Path, description = "Session id")),
+    request_body = Answer,
+    responses((status = 200, body = Sent), (status = 404, body = ApiError), (status = 409, body = ApiError)),
+)]
+pub(super) async fn answer_request(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(answer): Json<Answer>,
+) -> ApiResult<Json<Sent>> {
+    let id = SessionId::from_stored(id);
+    let host = host_of(&state, &id).await?;
+
+    state
+        .fleet
+        .answer(&host, &id, answer.req, permission_result(&answer.decision))
+        .await
+        .map_err(|e| ApiError::new(ErrorCode::HostUnreachable, format!("{e:#}")))?;
+
+    Ok(Json(Sent { sent: true }))
+}
+
+/// A decision, in the shape the agent reads.
+///
+/// Verified against a real run rather than inferred. `updatedInput` is required
+/// on an allow — an older agent rejected an allow without one and denied the
+/// call with a validation error — and `null` means "unchanged", which is what
+/// we always want: Firetower shows a command, it does not rewrite one.
+fn permission_result(decision: &ft_core::turn::Decision) -> serde_json::Value {
+    use ft_core::turn::Decision;
+    match decision {
+        Decision::Allow | Decision::AllowAlways => serde_json::json!({
+            "behavior": "allow",
+            "updatedInput": serde_json::Value::Null,
+        }),
+        Decision::Deny { reason } => serde_json::json!({
+            "behavior": "deny",
+            "message": denial(reason.as_deref()),
+        }),
+    }
+}
+
+/// A denial, said in a way the agent will act on rather than distrust.
+///
+/// The reason is attributed rather than stated. A tool result that simply says
+/// "call it pear.txt instead" reads to an agent exactly like an instruction
+/// smuggled into data, and a good one refuses it — one did, in testing, and
+/// reported the redirection as a prompt injection attempt instead of following
+/// it. Which is correct behaviour, and the reason this wrapping exists: the
+/// sentence really is from the person watching, so it should say so.
+///
+/// It does not make the agent obey. It makes an instruction from a person
+/// distinguishable from one that arrived in a tool's output, which is the only
+/// thing we can honestly offer.
+fn denial(reason: Option<&str>) -> String {
+    match reason.map(str::trim).filter(|r| !r.is_empty()) {
+        Some(reason) => format!("The person watching this session denied this and said: {reason}"),
+        None => "The person watching this session denied this.".into(),
+    }
 }
 
 /// Which machine is holding this session's agent.

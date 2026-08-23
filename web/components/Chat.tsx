@@ -1,9 +1,13 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { useSendTurn, useInterruptSession } from "@/src/api/generated/sessions/sessions";
-import { useConversation, type Item } from "@/src/api/conversation";
-import type { ItemKind, PlanStep } from "@/src/api/generated/model";
+import {
+  useSendTurn,
+  useInterruptSession,
+  useAnswerRequest,
+} from "@/src/api/generated/sessions/sessions";
+import { useConversation, type Asked, type Item } from "@/src/api/conversation";
+import type { Decision, ItemKind, PlanStep, RequestKind } from "@/src/api/generated/model";
 
 /**
  * The agent's side of a session, as a conversation.
@@ -14,7 +18,7 @@ import type { ItemKind, PlanStep } from "@/src/api/generated/model";
  * message instead of keystrokes that can arrive while nothing is listening.
  */
 export function Chat({ sessionId, live }: { sessionId: string; live: boolean }) {
-  const { conversation, echo } = useConversation(sessionId, live);
+  const { conversation, echo, settle } = useConversation(sessionId, live);
   const send = useSendTurn();
   const interrupt = useInterruptSession();
   const [draft, setDraft] = useState("");
@@ -81,6 +85,18 @@ export function Chat({ sessionId, live }: { sessionId: string; live: boolean }) 
       </div>
 
       <div className="mt-3 border-t border-line pt-3">
+        {/* Above the composer, because it is the thing to deal with before
+            saying anything else — and because on a phone that is where a
+            thumb already is. */}
+        {conversation.asked.map((asked) => (
+          <Approval
+            key={asked.req}
+            sessionId={sessionId}
+            asked={asked}
+            onAnswered={() => settle(asked.req)}
+          />
+        ))}
+
         <div className="flex items-end gap-2">
           <textarea
             value={draft}
@@ -123,6 +139,112 @@ export function Chat({ sessionId, live }: { sessionId: string; live: boolean }) 
       </div>
     </div>
   );
+}
+
+/** What the agent is asking to do, in words rather than a tool name. */
+const ASKING: Record<RequestKind, string> = {
+  CommandExecution: "wants to run",
+  FileChange: "wants to change",
+  FileRead: "wants to read",
+  Tool: "wants to use",
+};
+
+/**
+ * A question the agent has stopped for.
+ *
+ * The agent is genuinely blocked while this is on screen — the tool call is
+ * held open on the host, waiting. There is no timer anywhere on that path, so
+ * this can sit here for hours and the session picks up exactly where it was.
+ */
+function Approval({
+  sessionId,
+  asked,
+  onAnswered,
+}: {
+  sessionId: string;
+  asked: Asked;
+  onAnswered: () => void;
+}) {
+  const answer = useAnswerRequest();
+  const [reason, setReason] = useState("");
+  const [explaining, setExplaining] = useState(false);
+
+  const decide = (decision: Decision) => {
+    onAnswered();
+    answer.mutate({ id: sessionId, data: { req: asked.req, decision } });
+  };
+
+  return (
+    <div className="mb-3 rounded-[6px] border border-ember-deep bg-panel p-3">
+      <div className="flex items-baseline gap-2">
+        <span className="text-[12px] text-ember">{ASKING[asked.kind]}</span>
+        <span className="font-mono text-[11px] text-mute">{asked.detail}</span>
+      </div>
+
+      <pre className="mt-2 max-h-[160px] overflow-auto rounded-[4px] bg-ground px-2.5 py-2 font-mono text-[11.5px] whitespace-pre-wrap text-text">
+        {what(asked)}
+      </pre>
+
+      {explaining ? (
+        <div className="mt-2 flex items-end gap-2">
+          <input
+            autoFocus
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") decide({ decision: "Deny", reason: reason.trim() || null });
+              if (e.key === "Escape") setExplaining(false);
+            }}
+            placeholder="Why not? The agent reads this."
+            className="flex-1 rounded-[5px] border border-line bg-ground px-2.5 py-1.5 text-[12.5px] text-text placeholder:text-mute focus:border-ember focus:outline-none"
+          />
+          <button
+            onClick={() => decide({ decision: "Deny", reason: reason.trim() || null })}
+            className="rounded-[5px] border border-brick px-2.5 py-1.5 text-[12px] text-brick"
+          >
+            Deny
+          </button>
+        </div>
+      ) : (
+        <div className="mt-2 flex gap-2">
+          <button
+            onClick={() => decide({ decision: "Allow" })}
+            className="rounded-[5px] bg-ember px-3 py-1.5 text-[12px] font-medium text-ground"
+          >
+            Allow
+          </button>
+          <button
+            onClick={() => decide({ decision: "AllowAlways" })}
+            className="rounded-[5px] border border-line px-3 py-1.5 text-[12px] text-dim transition-colors hover:text-bone"
+          >
+            Always
+          </button>
+          <button
+            onClick={() => setExplaining(true)}
+            className="ml-auto rounded-[5px] border border-line px-3 py-1.5 text-[12px] text-dim transition-colors hover:border-brick hover:text-brick"
+          >
+            Deny
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The part of a request worth reading before deciding.
+ *
+ * The command for a shell call, the path for a file. Falls back to the whole
+ * input, which is all there is for a tool nobody has taught this about — and
+ * showing that is still better than asking somebody to approve a name.
+ */
+function what(asked: Asked): string {
+  const args = asked.args as Record<string, unknown> | undefined;
+  for (const key of ["command", "file_path", "path", "pattern", "url"]) {
+    const value = args?.[key];
+    if (typeof value === "string" && value.trim()) return value;
+  }
+  return JSON.stringify(asked.args ?? {}, null, 2);
 }
 
 /** The agent's own checklist, when it is keeping one. */

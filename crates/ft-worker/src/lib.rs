@@ -27,6 +27,7 @@ use tokio::sync::{mpsc, Mutex};
 
 pub mod agentd;
 pub mod agents;
+pub mod approver;
 pub mod askpass;
 pub mod attach;
 pub mod entry;
@@ -1051,7 +1052,13 @@ impl Worker {
         // choosing. There is no mode to explain and none to get wrong, and the
         // terminal stops being an option for an agent the moment it stops
         // needing to be one.
-        let structured = spec.agent.launch_headless(id.as_str()).is_some();
+        // Asked with a placeholder arrangement, because this question is only
+        // "does this agent have a protocol at all" — how it asks for
+        // permission is settled by the supervisor, which knows the workspace.
+        let structured = spec
+            .agent
+            .launch_headless(id.as_str(), &ft_core::Asking::CannotAsk)
+            .is_some();
 
         // The agent runs under tmux so it outlives this worker, this
         // connection, and the laptop that started it. In a structured session

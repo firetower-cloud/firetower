@@ -96,6 +96,15 @@ enum Command {
         #[arg(long, default_value = "ClaudeCode")]
         agent: String,
     },
+    /// Answer the agent's permission prompts. Run by the agent, never by hand.
+    ///
+    /// An MCP server the agent starts for itself, from the configuration the
+    /// supervisor wrote. Its stdout is the protocol, so nothing else may be
+    /// written there.
+    McpApprove {
+        #[arg(long)]
+        session: String,
+    },
     /// Watch a running agent, as the control plane would see it.
     ///
     /// A debugging tool, and the quickest way to tell whether a session is
@@ -151,22 +160,10 @@ async fn main() -> Result<()> {
                 )
                 .init();
 
-            let agent = ft_core::Agent::from_name(&agent)
-                .with_context(|| format!("no agent called {agent}"))?;
-            let argv = agent
-                .launch_headless(&session)
-                .with_context(|| format!("{} cannot be driven this way yet", agent.label()))?;
-
-            return ft_worker::agentd::run(ft_worker::agentd::Launch {
-                session_id: session,
-                workspace,
-                argv,
-                // Inherited from tmux, which was handed the session's
-                // environment when it started this. Nothing to add.
-                env: vec![],
-            })
-            .await
-            .context("supervising the agent");
+            return ft_worker::entry::run_agent(&session, workspace, &agent).await;
+        }
+        Some(Command::McpApprove { session }) => {
+            return ft_worker::approver::serve(&session).await;
         }
         Some(Command::AgentTail {
             session,

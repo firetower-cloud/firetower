@@ -26,6 +26,7 @@ import type {
 } from '@tanstack/react-query';
 
 import type {
+  Answer,
   ApiError,
   Conversation,
   DestroySessionParams,
@@ -585,6 +586,80 @@ export const useRenameSession = <TError = ApiError,
         TContext
       > => {
       return useMutation(getRenameSessionMutationOptions(options), queryClient);
+    }
+    export const getAnswerRequestUrl = (id: string,) => {
+
+
+
+
+  return `/api/v1/sessions/${id}/answer`
+}
+
+/**
+ * Until this arrives the agent is stopped, holding the tool call open. There
+ * is no timeout anywhere on that path: somebody may be asleep, and an agent
+ * that gave up and denied would be worse than one that waited.
+ * @summary Answer something the agent is waiting on.
+ */
+export const answerRequest = async (id: string,
+    answer: Answer, options?: Parameters<typeof http>[1]): Promise<Sent> => {
+
+  return http<Sent>(getAnswerRequestUrl(id),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(answer)
+  }
+);}
+
+
+
+
+
+export const getAnswerRequestMutationOptions = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof answerRequest>>, TError,{id: string;data: Answer}, TContext>, request?: SecondParameter<typeof http>}
+): UseMutationOptions<Awaited<ReturnType<typeof answerRequest>>, TError,{id: string;data: Answer}, TContext> => {
+
+const mutationKey = ['answerRequest'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof answerRequest>>, {id: string;data: Answer}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  answerRequest(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type AnswerRequestMutationResult = NonNullable<Awaited<ReturnType<typeof answerRequest>>>
+    export type AnswerRequestMutationBody = Answer
+    export type AnswerRequestMutationError = ApiError
+
+    /**
+ * @summary Answer something the agent is waiting on.
+ */
+export const useAnswerRequest = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof answerRequest>>, TError,{id: string;data: Answer}, TContext>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof answerRequest>>,
+        TError,
+        {id: string;data: Answer},
+        TContext
+      > => {
+      return useMutation(getAnswerRequestMutationOptions(options), queryClient);
     }
     export const getGetConversationUrl = (id: string,
     params?: GetConversationParams,) => {

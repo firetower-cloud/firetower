@@ -10,7 +10,23 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { apiBase, token } from "./http";
-import type { ConversationEvent, ItemKind, ItemStatus, PlanStep } from "./generated/model";
+import type {
+  ConversationEvent,
+  ItemKind,
+  ItemStatus,
+  PlanStep,
+  RequestKind,
+} from "./generated/model";
+
+/** Something the agent has stopped for and will not continue without. */
+export type Asked = {
+  req: string;
+  kind: RequestKind;
+  /** The tool's name — what it is, in one word. */
+  detail: string;
+  /** Everything it was given, for a card that shows the command or the path. */
+  args: unknown;
+};
 
 /** One thing in the transcript, as the screen needs it. */
 export type Item = {
@@ -31,6 +47,14 @@ export type Item = {
 export type Conversation = {
   items: Item[];
   plan: PlanStep[];
+  /**
+   * What the agent is blocked on, if anything.
+   *
+   * Kept apart from the transcript because it is not something that happened —
+   * it is something waiting to. It sits above the composer, where the answer
+   * goes.
+   */
+  asked: Asked[];
   /** True between a turn starting and finishing — the agent is busy. */
   working: boolean;
   /** The model this session is running, once it has said. */
@@ -52,6 +76,7 @@ const TYPED = "typed-";
 export const nothing: Conversation = {
   items: [],
   plan: [],
+  asked: [],
   working: false,
   lastLine: 0,
 };
@@ -132,6 +157,32 @@ export function apply(state: Conversation, event: ConversationEvent): Conversati
 
     case "PlanUpdated":
       return { ...state, plan: event.steps, lastLine };
+
+    case "RequestOpened":
+      // Re-sent whenever a watcher attaches, so the same question can arrive
+      // more than once — a reload must not stack up three copies of one card.
+      return state.asked.some((a) => a.req === event.req)
+        ? { ...state, lastLine }
+        : {
+            ...state,
+            lastLine,
+            asked: [
+              ...state.asked,
+              {
+                req: event.req,
+                kind: event.kind,
+                detail: event.detail,
+                args: event.args,
+              },
+            ],
+          };
+
+    case "RequestResolved":
+      return {
+        ...state,
+        lastLine,
+        asked: state.asked.filter((a) => a.req !== event.req),
+      };
 
     default:
       // Everything else — subagent lifecycle, approvals, unnamed lines — is
@@ -249,5 +300,13 @@ export function useConversation(sessionId: string, live: boolean) {
     }));
   }, []);
 
-  return { conversation: state, echo };
+  /** Take a question off the screen the moment it is answered. */
+  const settle = useCallback((req: string) => {
+    setState((current) => ({
+      ...current,
+      asked: current.asked.filter((a) => a.req !== req),
+    }));
+  }, []);
+
+  return { conversation: state, echo, settle };
 }

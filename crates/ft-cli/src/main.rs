@@ -165,6 +165,17 @@ enum Command {
         agent: String,
     },
 
+    /// Answer the agent's permission prompts. Run by the agent, never by hand.
+    ///
+    /// Here as well as on `firetower-worker` for the same reason `agent-run`
+    /// is: localhost's worker is this binary, so a session on this machine
+    /// starts this program to ask its questions.
+    #[command(hide = true)]
+    McpApprove {
+        #[arg(long)]
+        session: String,
+    },
+
     /// Watch a running agent, as the control plane would see it.
     #[command(hide = true)]
     AgentTail {
@@ -220,6 +231,12 @@ async fn main() -> Result<()> {
             // A daemon, so it logs like one — to stderr, where tmux keeps it.
             init_tracing(true, false);
             ft_worker::entry::run_agent(&session, workspace, &agent).await
+        }
+
+        Some(Command::McpApprove { session }) => {
+            // No tracing anywhere near this: stdout carries the protocol, and
+            // a stray log line would be read as a malformed frame.
+            ft_worker::approver::serve(&session).await
         }
 
         Some(Command::AgentTail {
