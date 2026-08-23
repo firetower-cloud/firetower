@@ -480,7 +480,9 @@ mod tests {
             host: "fire-01".into(),
             user: None,
             port: None,
-            key: ft_core::SshKey::File { path: "~/.ssh/nothing-is-here".into() },
+            key: ft_core::SshKey::File {
+                path: "~/.ssh/nothing-is-here".into(),
+            },
             host_key: None,
             container: None,
         })
