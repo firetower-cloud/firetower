@@ -7,6 +7,7 @@ import {
   useAnswerRequest,
 } from "@/src/api/generated/sessions/sessions";
 import { useConversation, type Asked, type Item } from "@/src/api/conversation";
+import { Markdown } from "@/components/Markdown";
 import type { Decision, ItemKind, PlanStep, RequestKind } from "@/src/api/generated/model";
 
 /**
@@ -291,9 +292,9 @@ function Entry({ item }: { item: Item }) {
 
     case "AssistantMessage":
       return (
-        <p className="max-w-[75ch] whitespace-pre-wrap text-[13.5px] leading-[1.55] text-text">
-          {item.text}
-        </p>
+        <div className="max-w-[75ch]">
+          <Markdown>{item.text}</Markdown>
+        </div>
       );
 
     case "Reasoning":
@@ -326,9 +327,9 @@ function Reasoning({ item }: { item: Item }) {
         {open ? "▾" : "▸"} thinking
       </button>
       {open && (
-        <p className="mt-1 max-w-[75ch] border-l border-line pl-3 text-[12.5px] whitespace-pre-wrap text-mute">
-          {item.text}
-        </p>
+        <div className="mt-1 max-w-[75ch] border-l border-line pl-3 text-mute">
+          <Markdown>{item.text}</Markdown>
+        </div>
       )}
     </div>
   );
