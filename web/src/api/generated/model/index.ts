@@ -14,6 +14,7 @@ export * from './agentPresence';
 export * from './agentView';
 export * from './answer';
 export * from './apiError';
+export * from './attached';
 export * from './bootstrap';
 export * from './branches';
 export * from './cause';

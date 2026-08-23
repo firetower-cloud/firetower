@@ -2754,6 +2754,24 @@
           }
         }
       },
+      "Attached": {
+        "type": "object",
+        "description": "An image somebody put in the composer.",
+        "required": [
+          "mediaType",
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "type": "string",
+            "description": "The bytes, base64, without a data-url prefix."
+          },
+          "mediaType": {
+            "type": "string",
+            "description": "`image/png` and friends."
+          }
+        }
+      },
       "Bootstrap": {
         "type": "object",
         "description": "What the web application needs before it can do anything else.",
@@ -4589,6 +4607,13 @@
           "text"
         ],
         "properties": {
+          "images": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Attached"
+            },
+            "description": "Pictures pasted or dropped into the composer.\n\nCarried inside the message rather than written to the workspace: there\nis nothing to clean up afterwards and no approval prompt for reading a\nfile somebody just handed over."
+          },
           "text": {
             "type": "string"
           }

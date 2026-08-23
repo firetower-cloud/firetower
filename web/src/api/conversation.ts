@@ -17,6 +17,7 @@ import type {
   PlanStep,
   Question,
   RequestKind,
+  SlashCommand,
 } from "./generated/model";
 
 /** One subagent, and what it has been up to. */
@@ -102,6 +103,13 @@ export type Conversation = {
   working: boolean;
   /** The model this session is running, once it has said. */
   model?: string;
+  /**
+   * The commands this install offers, as the agent reported them at startup.
+   *
+   * Whatever that machine actually has, rather than a list kept in step by
+   * hand.
+   */
+  commands: SlashCommand[];
   /** How far we have read. The resume cursor. */
   lastLine: number;
   /** Set when the stream could not be opened or fell over. */
@@ -122,6 +130,7 @@ export const nothing: Conversation = {
   asked: [],
   tasks: [],
   questions: [],
+  commands: [],
   working: false,
   lastLine: 0,
 };
@@ -152,7 +161,12 @@ export function apply(state: Conversation, event: ConversationEvent): Conversati
     case "SessionConfigured":
       // Sent again at the start of every turn, so this must not reset
       // anything — it is a restatement, not a new session.
-      return { ...state, model: event.model, lastLine };
+      return {
+        ...state,
+        model: event.model,
+        commands: event.commands.length ? event.commands : state.commands,
+        lastLine,
+      };
 
     case "TurnStarted":
       return { ...state, working: true, lastLine };

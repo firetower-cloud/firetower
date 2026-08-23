@@ -235,6 +235,13 @@ pub(super) async fn stream_conversation(
 #[serde(rename_all = "camelCase")]
 pub struct Turn {
     pub text: String,
+    /// Pictures pasted or dropped into the composer.
+    ///
+    /// Carried inside the message rather than written to the workspace: there
+    /// is nothing to clean up afterwards and no approval prompt for reading a
+    /// file somebody just handed over.
+    #[serde(default)]
+    pub images: Vec<ft_core::turn::Attached>,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -259,7 +266,7 @@ pub(super) async fn send_turn(
     Json(turn): Json<Turn>,
 ) -> ApiResult<Json<Sent>> {
     let id = SessionId::from_stored(id);
-    if turn.text.trim().is_empty() {
+    if turn.text.trim().is_empty() && turn.images.is_empty() {
         return Err(ApiError::new(
             ErrorCode::InvalidRequest,
             "there is nothing to send",
@@ -269,7 +276,11 @@ pub(super) async fn send_turn(
 
     state
         .fleet
-        .send_turn(&host, &id, ft_core::turn::user_message(&turn.text))
+        .send_turn(
+            &host,
+            &id,
+            ft_core::turn::user_message_with(&turn.text, &turn.images),
+        )
         .await
         .map_err(|e| ApiError::new(ErrorCode::HostUnreachable, format!("{e:#}")))?;
 

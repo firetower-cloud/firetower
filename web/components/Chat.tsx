@@ -14,8 +14,15 @@ import {
   type Task,
 } from "@/src/api/conversation";
 import { Markdown } from "@/components/Markdown";
+import { ChatComposer } from "@/components/Composer.chat";
 import { useReveal } from "@/src/api/reveal";
-import type { Decision, ItemKind, PlanStep, RequestKind } from "@/src/api/generated/model";
+import type {
+  Attached,
+  Decision,
+  ItemKind,
+  PlanStep,
+  RequestKind,
+} from "@/src/api/generated/model";
 
 /**
  * A session, as the thing that stopped and needs you.
@@ -33,7 +40,6 @@ export function Chat({ sessionId, live }: { sessionId: string; live: boolean }) 
   const { conversation, echo, settle } = useConversation(sessionId, live);
   const send = useSendTurn();
   const interrupt = useInterruptSession();
-  const [draft, setDraft] = useState("");
   const foot = useRef<HTMLDivElement>(null);
   /** Off while somebody has scrolled up to read something. */
   const following = useRef(true);
@@ -44,12 +50,10 @@ export function Chat({ sessionId, live }: { sessionId: string; live: boolean }) 
     if (following.current) foot.current?.scrollIntoView({ block: "end" });
   }, [conversation.items, conversation.working]);
 
-  const submit = () => {
-    const text = draft.trim();
-    if (!text || send.isPending) return;
-    setDraft("");
-    echo(text);
-    send.mutate({ id: sessionId, data: { text } });
+  const submit = (text: string, images: Attached[]) => {
+    if (send.isPending) return;
+    echo(text || "(image)");
+    send.mutate({ id: sessionId, data: { text, images } });
   };
 
   return (
@@ -116,45 +120,15 @@ export function Chat({ sessionId, live }: { sessionId: string; live: boolean }) 
           />
         ))}
 
-        <div className="flex items-end gap-2">
-          <textarea
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={(e) => {
-              // Enter sends. This is a message box, not an editor — a newline
-              // needs a modifier.
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                submit();
-              }
-            }}
-            rows={2}
-            placeholder={live ? "Reply…" : "This session has finished."}
-            disabled={!live}
-            className="min-h-[46px] flex-1 resize-none rounded-[6px] border border-line bg-panel px-3 py-2 text-[13.5px] text-text placeholder:text-mute focus:border-ember focus:outline-none disabled:opacity-50"
-          />
-          {conversation.working ? (
-            <button
-              onClick={() => interrupt.mutate({ id: sessionId })}
-              className="min-h-[44px] rounded-[6px] border border-line px-3.5 text-[12.5px] text-dim transition-colors hover:border-brick hover:text-brick"
-            >
-              Stop
-            </button>
-          ) : (
-            <button
-              onClick={submit}
-              disabled={!live || !draft.trim() || send.isPending}
-              className="min-h-[44px] rounded-[6px] bg-ember px-4 text-[12.5px] font-medium text-ground transition-opacity disabled:opacity-40"
-            >
-              Send
-            </button>
-          )}
-        </div>
-        {send.isError && (
-          <p className="mt-1.5 text-[11.5px] text-brick">
-            That didn&apos;t reach the agent. It may have stopped.
-          </p>
-        )}
+        <ChatComposer
+          sessionId={sessionId}
+          live={live}
+          working={conversation.working}
+          commands={conversation.commands}
+          onSend={submit}
+          onStop={() => interrupt.mutate({ id: sessionId })}
+          failed={send.isError}
+        />
       </div>
     </div>
   );

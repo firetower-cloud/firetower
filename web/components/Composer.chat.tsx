@@ -1,0 +1,302 @@
+"use client";
+
+import { useMemo, useRef, useState } from "react";
+import { useListFiles } from "@/src/api/generated/sessions/sessions";
+import type { Attached, SlashCommand } from "@/src/api/generated/model";
+
+/**
+ * Saying something to the agent.
+ *
+ * Everything here exists because a message is not keystrokes. A terminal can
+ * take a paste of text and nothing else — no picture, no file, no way to offer
+ * completions for the thing you are half way through typing. This can, and the
+ * three affordances below are the whole reason the composer was worth building
+ * rather than reusing a prompt.
+ */
+export function ChatComposer({
+  sessionId,
+  live,
+  working,
+  commands,
+  onSend,
+  onStop,
+  failed,
+}: {
+  sessionId: string;
+  live: boolean;
+  working: boolean;
+  commands: SlashCommand[];
+  onSend: (text: string, images: Attached[]) => void;
+  onStop: () => void;
+  failed: boolean;
+}) {
+  const [draft, setDraft] = useState("");
+  const [images, setImages] = useState<Attached[]>([]);
+  const [over, setOver] = useState(false);
+  const box = useRef<HTMLTextAreaElement>(null);
+
+  /** What is being typed after a trigger character, if anything. */
+  const token = triggerAt(draft);
+  const suggestions = useSuggestions(sessionId, token, commands, live);
+
+  // Which suggestion is under the keyboard, remembered against the thing being
+  // typed. Tying it to the token is what resets it when somebody types another
+  // character, without an effect that sets state and renders twice for it.
+  const [choice, setChoice] = useState({ of: "", at: 0 });
+  const typing = token ? token.kind + token.query : "";
+  const highlighted =
+    choice.of === typing ? Math.min(choice.at, Math.max(0, suggestions.length - 1)) : 0;
+  const move = (at: number) => setChoice({ of: typing, at });
+
+  /** Put a suggestion where the half-typed word was. */
+  const finish = (value: string) => {
+    if (!token) return;
+    const before = draft.slice(0, token.at);
+    const after = draft.slice(token.at + token.query.length + 1);
+    setDraft(`${before}${token.kind}${value} ${after.trimStart()}`);
+    box.current?.focus();
+  };
+
+  const submit = () => {
+    const text = draft.trim();
+    if (!text && images.length === 0) return;
+    setDraft("");
+    setImages([]);
+    onSend(text, images);
+  };
+
+  return (
+    <div
+      onDragOver={(e) => {
+        if (!live) return;
+        e.preventDefault();
+        setOver(true);
+      }}
+      onDragLeave={() => setOver(false)}
+      onDrop={async (e) => {
+        if (!live) return;
+        e.preventDefault();
+        setOver(false);
+        const found = await readImages(Array.from(e.dataTransfer.files));
+        if (found.length) setImages((held) => [...held, ...found]);
+      }}
+      className={`rounded-[6px] transition-colors ${over ? "bg-raise" : ""}`}
+    >
+      {suggestions.length > 0 && (
+        <ul className="mb-2 max-h-[220px] overflow-y-auto rounded-[6px] border border-line bg-panel py-1">
+          {suggestions.map((s, i) => (
+            <li key={s.value}>
+              <button
+                onMouseEnter={() => move(i)}
+                onClick={() => finish(s.value)}
+                className={`flex w-full items-baseline gap-2 px-2.5 py-1.5 text-left ${
+                  i === highlighted ? "bg-raise" : ""
+                }`}
+              >
+                <span className="font-mono text-[12px] text-bone">{s.value}</span>
+                {s.hint && (
+                  <span className="min-w-0 truncate text-[11.5px] text-mute">{s.hint}</span>
+                )}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {images.length > 0 && (
+        <div className="mb-2 flex flex-wrap gap-2">
+          {images.map((image, i) => (
+            <div key={i} className="relative">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={`data:${image.mediaType};base64,${image.data}`}
+                alt=""
+                className="h-14 w-14 rounded-[4px] border border-line object-cover"
+              />
+              <button
+                onClick={() => setImages((held) => held.filter((_, at) => at !== i))}
+                aria-label="Remove image"
+                className="absolute -top-1.5 -right-1.5 h-5 w-5 rounded-full border border-line bg-ground text-[11px] text-dim hover:text-bone"
+              >
+                ×
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="flex items-end gap-2">
+        <textarea
+          ref={box}
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onPaste={async (e) => {
+            const found = await readImages(
+              Array.from(e.clipboardData.files).filter((f) => f.type.startsWith("image/")),
+            );
+            if (found.length) {
+              // Only swallow the paste if it actually was a picture; a paste of
+              // text and an image together should still deliver the text.
+              if (!e.clipboardData.getData("text")) e.preventDefault();
+              setImages((held) => [...held, ...found]);
+            }
+          }}
+          onKeyDown={(e) => {
+            if (suggestions.length > 0) {
+              if (e.key === "ArrowDown") {
+                e.preventDefault();
+                move((highlighted + 1) % suggestions.length);
+                return;
+              }
+              if (e.key === "ArrowUp") {
+                e.preventDefault();
+                move((highlighted - 1 + suggestions.length) % suggestions.length);
+                return;
+              }
+              if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey)) {
+                e.preventDefault();
+                finish(suggestions[highlighted].value);
+                return;
+              }
+              if (e.key === "Escape") {
+                e.preventDefault();
+                setDraft((d) => `${d} `);
+                return;
+              }
+            }
+            // Enter sends. This is a message box, not an editor — a newline
+            // needs a modifier.
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              submit();
+            }
+          }}
+          rows={2}
+          placeholder={live ? "Reply…" : "This session has finished."}
+          disabled={!live}
+          className="min-h-[46px] flex-1 resize-none rounded-[6px] border border-line bg-panel px-3 py-2 text-[13.5px] text-text placeholder:text-mute focus:border-ember focus:outline-none disabled:opacity-50"
+        />
+        {working ? (
+          <button
+            onClick={onStop}
+            className="min-h-[44px] rounded-[6px] border border-line px-3.5 text-[12.5px] text-dim transition-colors hover:border-brick hover:text-brick"
+          >
+            Stop
+          </button>
+        ) : (
+          <button
+            onClick={submit}
+            disabled={!live || (!draft.trim() && images.length === 0)}
+            className="min-h-[44px] rounded-[6px] bg-ember px-4 text-[12.5px] font-medium text-ground transition-opacity disabled:opacity-40"
+          >
+            Send
+          </button>
+        )}
+      </div>
+
+      {failed && (
+        <p className="mt-1.5 text-[11.5px] text-brick">
+          That didn&apos;t reach the agent. It may have stopped.
+        </p>
+      )}
+    </div>
+  );
+}
+
+/** A trigger character and what has been typed after it. */
+type Token = { kind: "@" | "/"; at: number; query: string };
+
+/**
+ * What the cursor is in the middle of, if it is in the middle of anything.
+ *
+ * Only at the start of a word, so an email address is not a file mention and a
+ * path is not a command.
+ */
+function triggerAt(draft: string): Token | undefined {
+  const match = /(^|\s)([@/])([^\s]*)$/.exec(draft);
+  if (!match) return undefined;
+  return {
+    kind: match[2] as "@" | "/",
+    at: match.index + match[1].length,
+    query: match[3],
+  };
+}
+
+type Suggestion = { value: string; hint?: string };
+
+/**
+ * What to offer for the thing being typed.
+ *
+ * Files come from the session's own workspace, which the control plane already
+ * knows how to list. Commands come from what the agent reported it had at
+ * startup — so the list is whatever that install actually offers, rather than a
+ * list we keep in step by hand.
+ */
+function useSuggestions(
+  sessionId: string,
+  token: Token | undefined,
+  commands: SlashCommand[],
+  live: boolean,
+): Suggestion[] {
+  // A file mention is relative to the workspace root, so this only ever asks
+  // for the top level. Deeper paths are typed.
+  const wanted = token?.kind === "@" && live;
+  const { data: files } = useListFiles(
+    sessionId,
+    { path: directoryOf(token?.query ?? "") },
+    { query: { enabled: wanted } },
+  );
+
+  return useMemo(() => {
+    if (!token) return [];
+    const query = token.query.toLowerCase();
+
+    if (token.kind === "/") {
+      return commands
+        .filter((c) => c.name.toLowerCase().startsWith(query))
+        .slice(0, 8)
+        .map((c) => ({ value: c.name, hint: c.description ?? undefined }));
+    }
+
+    const within = directoryOf(token.query);
+    const leaf = token.query.slice(within.length ? within.length + 1 : 0).toLowerCase();
+    return (files ?? [])
+      .filter((f) => f.name.toLowerCase().includes(leaf))
+      .slice(0, 8)
+      .map((f) => ({
+        value: within ? `${within}/${f.name}` : f.name,
+        hint: f.directory ? "directory" : undefined,
+      }));
+  }, [token, commands, files]);
+}
+
+/** The part of a half-typed path that is already a directory. */
+function directoryOf(query: string): string {
+  const cut = query.lastIndexOf("/");
+  return cut < 0 ? "" : query.slice(0, cut);
+}
+
+/**
+ * Read dropped or pasted images into something a message can carry.
+ *
+ * Images only. Anything else needs to be written into the workspace and
+ * mentioned by path, which is a different thing and not this.
+ */
+async function readImages(files: File[]): Promise<Attached[]> {
+  const pictures = files.filter((f) => f.type.startsWith("image/"));
+  return Promise.all(
+    pictures.map(
+      (file) =>
+        new Promise<Attached>((done, fail) => {
+          const reader = new FileReader();
+          reader.onerror = () => fail(reader.error);
+          reader.onload = () => {
+            const url = String(reader.result);
+            // `data:image/png;base64,XXXX` — the message wants only the bytes.
+            done({ mediaType: file.type, data: url.slice(url.indexOf(",") + 1) });
+          };
+          reader.readAsDataURL(file);
+        }),
+    ),
+  );
+}

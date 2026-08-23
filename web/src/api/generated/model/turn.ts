@@ -5,7 +5,16 @@
  * The Firetower control plane: API, scheduling, and worker transports.
  * OpenAPI spec version: 0.6.0
  */
+import type { Attached } from './attached';
 
 export interface Turn {
+  /**
+     * Pictures pasted or dropped into the composer.
+     *
+     * Carried inside the message rather than written to the workspace: there
+     * is nothing to clean up afterwards and no approval prompt for reading a
+     * file somebody just handed over.
+     */
+  images?: Attached[];
   text: string;
 }

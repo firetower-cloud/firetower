@@ -496,6 +496,10 @@ export const SendTurnParams = zod.object({
 })
 
 export const SendTurnBody = zod.object({
+  "images": zod.array(zod.object({
+  "data": zod.string().describe('The bytes, base64, without a data-url prefix.'),
+  "mediaType": zod.string().describe('`image\/png` and friends.')
+}).describe('An image somebody put in the composer.')).optional().describe('Pictures pasted or dropped into the composer.\n\nCarried inside the message rather than written to the workspace: there\nis nothing to clean up afterwards and no approval prompt for reading a\nfile somebody just handed over.'),
   "text": zod.string()
 })
 

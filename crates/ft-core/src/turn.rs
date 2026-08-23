@@ -366,18 +366,57 @@ pub enum TurnEvent {
     },
 }
 
+/// An image somebody put in the composer.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct Attached {
+    /// `image/png` and friends.
+    pub media_type: String,
+    /// The bytes, base64, without a data-url prefix.
+    pub data: String,
+}
+
 /// One thing somebody typed, in the shape an agent reads.
 ///
 /// Here rather than in the worker because it is a value, and because the
 /// control plane builds one too — the worker forwards turns, it does not
 /// author them.
 pub fn user_message(text: &str) -> serde_json::Value {
+    user_message_with(text, &[])
+}
+
+/// The same, with pictures.
+///
+/// Images travel inside the message rather than being written to the workspace
+/// and mentioned by path. Nothing to clean up, no directory to grant the agent
+/// access to, and no approval prompt for reading a file somebody just handed
+/// over. Anything that is not an image does need the filesystem, and does not
+/// belong here.
+///
+/// Images come first. A picture followed by "what is wrong with this" reads the
+/// way somebody meant it; the other order asks a question about nothing.
+pub fn user_message_with(text: &str, images: &[Attached]) -> serde_json::Value {
+    let mut content: Vec<serde_json::Value> = images
+        .iter()
+        .map(|image| {
+            serde_json::json!({
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": image.media_type,
+                    "data": image.data,
+                },
+            })
+        })
+        .collect();
+
+    if !text.trim().is_empty() || content.is_empty() {
+        content.push(serde_json::json!({ "type": "text", "text": text }));
+    }
+
     serde_json::json!({
         "type": "user",
-        "message": {
-            "role": "user",
-            "content": [{ "type": "text", "text": text }],
-        },
+        "message": { "role": "user", "content": content },
     })
 }
 
@@ -391,6 +430,36 @@ mod tests {
         assert_eq!(message["type"], "user");
         assert_eq!(message["message"]["role"], "user");
         assert_eq!(message["message"]["content"][0]["text"], "hello");
+    }
+
+    #[test]
+    fn a_picture_comes_before_the_question_about_it() {
+        // The other order asks a question about nothing.
+        let message = user_message_with(
+            "what is wrong with this?",
+            &[Attached {
+                media_type: "image/png".into(),
+                data: "AAAA".into(),
+            }],
+        );
+        let content = message["message"]["content"].as_array().unwrap();
+        assert_eq!(content[0]["type"], "image");
+        assert_eq!(content[0]["source"]["media_type"], "image/png");
+        assert_eq!(content[1]["type"], "text");
+    }
+
+    #[test]
+    fn an_image_on_its_own_still_makes_a_message() {
+        let message = user_message_with(
+            "",
+            &[Attached {
+                media_type: "image/png".into(),
+                data: "AAAA".into(),
+            }],
+        );
+        let content = message["message"]["content"].as_array().unwrap();
+        assert_eq!(content.len(), 1, "no empty text block tacked on the end");
+        assert_eq!(content[0]["type"], "image");
     }
 
     #[test]
