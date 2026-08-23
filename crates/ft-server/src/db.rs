@@ -819,6 +819,21 @@ impl Db {
         Ok(())
     }
 
+    /// What this session is currently reported as doing.
+    ///
+    /// Read before writing, so a notification can be sent on the *change* into
+    /// needing somebody rather than every time we are reminded that it does.
+    /// Without it, a reconnect re-announces every waiting session and somebody
+    /// with four of them gets four notifications for things they already knew.
+    pub async fn session_status(&self, session_id: &SessionId) -> Result<Option<SessionStatus>> {
+        let stored: Option<String> =
+            sqlx::query_scalar("SELECT status FROM sessions WHERE id = $1")
+                .bind(session_id.as_str())
+                .fetch_optional(&self.pool)
+                .await?;
+        Ok(stored.and_then(|s| serde_json::from_str(&format!("\"{s}\"")).ok()))
+    }
+
     /// Say where a session has got to, from what its agent said.
     ///
     /// The only writer of this field for an agent that speaks a protocol —

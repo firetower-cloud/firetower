@@ -152,6 +152,33 @@ fn summarise(said: &str) -> Option<String> {
     ))
 }
 
+/// Tell whoever asked to be told.
+///
+/// Named by the session rather than by its id, because a notification arriving
+/// on a phone has to say which of four agents wants something before anybody
+/// will open it.
+async fn tell(
+    db: &Db,
+    notify: &crate::notify::Notifier,
+    session_id: &SessionId,
+    note: Option<&str>,
+) {
+    if !notify.configured() {
+        return;
+    }
+    let name = match db.session(session_id).await {
+        Ok(Some(session)) => session.name,
+        // Worth telling somebody even when we cannot name it nicely.
+        _ => session_id.to_string(),
+    };
+    notify.stopped(
+        session_id,
+        &name,
+        note.unwrap_or("It stopped and is waiting for you."),
+        std::env::var("FIRETOWER_PUBLIC_URL").ok().as_deref(),
+    );
+}
+
 /// A question, short enough for a card in the inbox.
 fn asking_about(tool: &str, args: &serde_json::Value) -> String {
     for key in ["command", "file_path", "path", "url"] {
@@ -222,6 +249,8 @@ pub struct Fleet {
     /// The same events, read for a different purpose, and neither can stall
     /// the other.
     progress: Arc<RwLock<HashMap<String, Progress>>>,
+    /// How somebody is told a session stopped, when they asked to be.
+    notify: crate::notify::Notifier,
     /// Questions each session is blocked on, until they are answered.
     ///
     /// Held here because nothing else can hold them for a browser: a question
@@ -299,6 +328,7 @@ impl Fleet {
             conversations: Arc::new(RwLock::new(HashMap::new())),
             asked: Arc::new(RwLock::new(HashMap::new())),
             progress: Arc::new(RwLock::new(HashMap::new())),
+            notify: crate::notify::Notifier::from_env(),
             supervised: Arc::new(RwLock::new(HashMap::new())),
         }
     }
@@ -781,6 +811,7 @@ impl Fleet {
         let conversations = self.conversations.clone();
         let asked = self.asked.clone();
         let progress = self.progress.clone();
+        let notify = self.notify.clone();
 
         {
             // conn is moved in so the child process outlives this scope
@@ -879,11 +910,22 @@ impl Fleet {
                                     .read(&line)
                             };
                             if let Some((status, note)) = moved {
+                                let was_waiting = db
+                                    .session_status(&session_id)
+                                    .await
+                                    .ok()
+                                    .flatten()
+                                    .is_some_and(|s| s.needs_you());
                                 if let Err(e) = db
                                     .set_session_state(&session_id, status, note.as_deref())
                                     .await
                                 {
                                     tracing::warn!(session = %session_id, "recording progress: {e:#}");
+                                }
+                                // On the change into needing somebody, not
+                                // every time we are told it still does.
+                                if status.needs_you() && !was_waiting {
+                                    tell(&db, &notify, &session_id, note.as_deref()).await;
                                 }
                             }
 
@@ -898,18 +940,25 @@ impl Fleet {
 
                             // Kept before it is announced, so a browser that
                             // opens a moment later still finds it.
-                            {
+                            let news = {
                                 let mut held = asked.write().await;
                                 let waiting = held.entry(session_id.to_string()).or_default();
-                                if !waiting.iter().any(|q| matches!(q, AgentSpeech::Asks { req: seen, .. } if *seen == req)) {
+                                let known = waiting.iter().any(|q| matches!(q, AgentSpeech::Asks { req: seen, .. } if *seen == req));
+                                if !known {
                                     waiting.push(question.clone());
                                 }
-                            }
+                                !known
+                            };
 
-                            // This is the whole product: a session that stopped
-                            // and needs somebody. Recorded as an event so the
-                            // inbox and the activity list learn it the same way
-                            // they learn everything else.
+                            // Read before the write, or this always says it was
+                            // already waiting and nobody is ever told anything.
+                            let already = db
+                                .session_status(&session_id)
+                                .await
+                                .ok()
+                                .flatten()
+                                .is_some_and(|s| s.needs_you());
+
                             // A permission prompt is never in the log — the
                             // agent is blocked, not talking — so this frame is
                             // the only thing that can say the session stopped.
@@ -919,6 +968,16 @@ impl Fleet {
                                 .await
                             {
                                 tracing::warn!(session = %session_id, "marking as waiting: {e:#}");
+                            }
+
+                            // A watcher attaching re-announces everything the
+                            // agent is already blocked on, which is right for
+                            // drawing it and wrong for telling somebody: four
+                            // waiting sessions would notify four times on every
+                            // reconnect.
+                            tracing::debug!(session = %session_id, news, already, "deciding whether to notify");
+                            if news && !already {
+                                tell(&db, &notify, &session_id, Some(&note)).await;
                             }
 
                             if let Some(tx) = conversations.read().await.get(session_id.as_str()) {
