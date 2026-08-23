@@ -651,7 +651,6 @@ pub enum AgentMode {
     NotNeeded,
 }
 
-
 /// The identifier an agent is told to call its own session.
 ///
 /// Firetower names sessions with a ULID, so `s_01k…` — and Claude Code will not

@@ -53,6 +53,27 @@ pub enum Terminal {
     Closed,
 }
 
+/// What a structured agent is saying, live.
+///
+/// Lines are unread here on purpose — the same bytes the agent wrote. Each
+/// subscriber makes its own sense of them, because arriving in the middle of a
+/// conversation means replaying what came before to get there.
+#[derive(Clone, Debug)]
+pub enum AgentSpeech {
+    Line {
+        line_no: u64,
+        line: String,
+    },
+    /// The agent is blocked and will not continue until somebody answers.
+    Asks {
+        req: String,
+        tool_name: String,
+        input: serde_json::Value,
+    },
+    /// Nothing more is coming.
+    Closed,
+}
+
 /// One terminal of one session.
 ///
 /// A session has more than one now — the agent's, and a shell of your own — and
@@ -105,6 +126,13 @@ pub struct Fleet {
     /// Live terminals, one broadcast per session. The worker holds a single
     /// attachment; this is where it fans out to however many are watching.
     terminals: Arc<RwLock<HashMap<String, broadcast::Sender<Terminal>>>>,
+    /// Live conversations, one broadcast per session.
+    ///
+    /// Carries lines as the agent wrote them. Turning them into something an
+    /// interface can draw happens per subscriber, because a subscriber that
+    /// joined late has to replay the stored lines through a normaliser of its
+    /// own to arrive in the right state.
+    conversations: Arc<RwLock<HashMap<String, broadcast::Sender<AgentSpeech>>>>,
     /// One per host we are keeping connected, whether or not it is answering.
     ///
     /// A host is in here from the moment it is added until it is removed, which
@@ -164,6 +192,7 @@ impl Fleet {
             events,
             probes: Arc::new(RwLock::new(HashMap::new())),
             terminals: Arc::new(RwLock::new(HashMap::new())),
+            conversations: Arc::new(RwLock::new(HashMap::new())),
             supervised: Arc::new(RwLock::new(HashMap::new())),
         }
     }
@@ -619,6 +648,7 @@ impl Fleet {
         let workers = self.workers.clone();
         let probes = self.probes.clone();
         let terminals = self.terminals.clone();
+        let conversations = self.conversations.clone();
 
         {
             // conn is moved in so the child process outlives this scope
@@ -694,6 +724,30 @@ impl Fleet {
                                     // An error only means nobody is watching.
                                     let _ = tx.send(Terminal::Data(bytes));
                                 }
+                            }
+                        }
+                        Ok(ToServer::AgentLine { session_id, line_no, line }) => {
+                            // Stored before it is broadcast. A subscriber that
+                            // arrives a moment later replays from the table, so
+                            // a line that was announced but not yet written
+                            // would be one nobody ever sees again.
+                            if let Err(e) = db.record_agent_line(&session_id, line_no as i64, &line).await {
+                                tracing::error!(session = %session_id, "recording a line: {e:#}");
+                                continue;
+                            }
+                            if let Some(tx) = conversations.read().await.get(session_id.as_str()) {
+                                // An error only means nobody is watching.
+                                let _ = tx.send(AgentSpeech::Line { line_no, line });
+                            }
+                        }
+                        Ok(ToServer::AgentAsks { session_id, req, tool_name, input }) => {
+                            if let Some(tx) = conversations.read().await.get(session_id.as_str()) {
+                                let _ = tx.send(AgentSpeech::Asks { req, tool_name, input });
+                            }
+                        }
+                        Ok(ToServer::AgentClosed { session_id }) => {
+                            if let Some(tx) = conversations.write().await.remove(session_id.as_str()) {
+                                let _ = tx.send(AgentSpeech::Closed);
                             }
                         }
                         Ok(ToServer::PtyClosed { session_id, pty }) => {
@@ -963,6 +1017,69 @@ impl Fleet {
         .await?;
 
         Ok(receiver)
+    }
+
+    /// Follow a session's conversation, and ask its worker to start sending.
+    ///
+    /// The cursor is what this control plane already has, so a worker that has
+    /// been talking to nobody sends only the difference.
+    pub async fn watch_agent(
+        &self,
+        host_id: &HostId,
+        session_id: &SessionId,
+        since_line: u64,
+    ) -> Result<broadcast::Receiver<AgentSpeech>> {
+        let mut conversations = self.conversations.write().await;
+        let receiver = match conversations.get(session_id.as_str()) {
+            Some(existing) => existing.subscribe(),
+            None => {
+                // Deep enough to absorb replaying a long session into a
+                // subscriber that is still setting itself up.
+                let (tx, rx) = broadcast::channel(4096);
+                conversations.insert(session_id.to_string(), tx);
+                rx
+            }
+        };
+        drop(conversations);
+
+        self.send(
+            host_id,
+            ToWorker::WatchAgent {
+                session_id: session_id.clone(),
+                since_line,
+            },
+        )
+        .await?;
+
+        Ok(receiver)
+    }
+
+    /// One message for the agent.
+    pub async fn send_turn(
+        &self,
+        host_id: &HostId,
+        session_id: &SessionId,
+        message: serde_json::Value,
+    ) -> Result<()> {
+        self.send(
+            host_id,
+            ToWorker::SendTurn {
+                session_id: session_id.clone(),
+                message,
+            },
+        )
+        .await
+    }
+
+    /// End the turn in progress, leaving the session alive.
+    pub async fn interrupt(&self, host_id: &HostId, session_id: &SessionId) -> Result<()> {
+        self.send(
+            host_id,
+            ToWorker::Interrupt {
+                session_id: session_id.clone(),
+            },
+        )
+        .await
     }
 
     pub async fn send_input(

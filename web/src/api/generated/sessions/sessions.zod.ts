@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.4.0
+ * OpenAPI spec version: 0.6.0
  */
 import * as zod from 'zod';
 
@@ -164,6 +164,154 @@ export const RenameSessionResponse = zod.object({
 }).describe('A line of work with a conversation attached and a branch at the end.')
 
 /**
+ * A snapshot. Use the stream for a session that is still running — this is for
+ * one that has finished, and for a first paint that wants to be a single
+ * request rather than a connection.
+ * @summary Everything the agent has said so far.
+ */
+export const GetConversationParams = zod.object({
+  "id": zod.string().describe('Session id')
+})
+
+export const getConversationQuerySinceLineMin = 0;
+
+
+
+export const GetConversationQueryParams = zod.object({
+  "sinceLine": zod.int().min(getConversationQuerySinceLineMin).optional().describe('Continue from this line')
+})
+
+export const getConversationResponseEventsItemOneThreeUsageTwoCacheReadTokensMin = 0;
+
+export const getConversationResponseEventsItemOneThreeUsageTwoInputTokensMin = 0;
+
+export const getConversationResponseEventsItemOneThreeUsageTwoOutputTokensMin = 0;
+
+export const getConversationResponseEventsItemTwoLineNoMin = 0;
+
+export const getConversationResponseLastLineMin = 0;
+
+
+
+export const GetConversationResponse = zod.object({
+  "events": zod.array(zod.union([zod.object({
+  "commands": zod.array(zod.object({
+  "description": zod.string().nullish(),
+  "name": zod.string()
+}).describe('A slash command this session offers, as the agent reported it at startup.')),
+  "model": zod.string(),
+  "tools": zod.array(zod.string()),
+  "type": zod.enum(['SessionConfigured'])
+}).describe('What this session can do, reported once when the agent starts.'),zod.object({
+  "turn": zod.string().describe('One exchange: a prompt in, and everything that happened before the agent stopped.'),
+  "type": zod.enum(['TurnStarted'])
+}),zod.object({
+  "status": zod.enum(['Completed', 'Failed', 'Interrupted']).describe('How a turn ended.'),
+  "turn": zod.string().describe('One exchange: a prompt in, and everything that happened before the agent stopped.'),
+  "type": zod.enum(['TurnCompleted']),
+  "usage": zod.union([zod.null(),zod.object({
+  "cacheReadTokens": zod.int().min(getConversationResponseEventsItemOneThreeUsageTwoCacheReadTokensMin).nullish().describe('Absent when the agent does not say.'),
+  "costUsd": zod.number().nullish().describe('The agent\'s own estimate, in dollars. Its arithmetic, not ours.'),
+  "inputTokens": zod.int().min(getConversationResponseEventsItemOneThreeUsageTwoInputTokensMin),
+  "outputTokens": zod.int().min(getConversationResponseEventsItemOneThreeUsageTwoOutputTokensMin)
+}).describe('What a turn cost.\n\nNot `Eq`, because the cost is a float. Comparing two of these for equality\nis a test convenience, not something to build on.')]).optional()
+}),zod.object({
+  "item": zod.string().describe('One thing in the transcript — a message, a thought, a tool call.'),
+  "kind": zod.enum(['AssistantMessage', 'Reasoning', 'UserMessage', 'CommandExecution', 'FileChange', 'FileRead', 'McpToolCall', 'WebSearch', 'SubagentCall', 'Unknown']).describe('What kind of thing an item is, which is what decides how it is drawn.\n\nThe list is short on purpose. It is not a catalogue of every tool an agent\nmight have — that changes weekly and is not knowable — but of the shapes\nFiretower can draw usefully. Anything that doesn\'t fit is [`Unknown`], which\nstill renders: name, input, output. A wrong guess costs a nicer card, never\nthe event itself.\n\n[`Unknown`]: ItemKind::Unknown'),
+  "task": zod.union([zod.null(),zod.string().describe('Set when a subagent owns this item rather than the main thread.\n\nWithout it a subagent\'s tool calls interleave into the transcript\nand read as though the main agent made them.')]).optional(),
+  "title": zod.string().nullish().describe('What the card is called before there is anything in it.'),
+  "type": zod.enum(['ItemStarted'])
+}),zod.object({
+  "data": zod.unknown(),
+  "item": zod.string().describe('One thing in the transcript — a message, a thought, a tool call.'),
+  "type": zod.enum(['ItemUpdated'])
+}).describe('Something about an open item changed — usually a tool\'s arguments\narriving, which come a fragment at a time and are only worth showing\nonce they parse.'),zod.object({
+  "item": zod.string().describe('One thing in the transcript — a message, a thought, a tool call.'),
+  "status": zod.enum(['Completed', 'Failed', 'Declined']).describe('How an item ended, when it has.'),
+  "type": zod.enum(['ItemCompleted'])
+}),zod.object({
+  "delta": zod.string(),
+  "item": zod.string().describe('One thing in the transcript — a message, a thought, a tool call.'),
+  "stream": zod.enum(['AssistantText', 'Reasoning', 'ToolOutput', 'ToolInput']).describe('Which stream a piece of text belongs to.\n\nSeparate from [`ItemKind`] because one item can carry more than one: a\ncommand has both its own text and its output.'),
+  "type": zod.enum(['ContentDelta'])
+}),zod.object({
+  "args": zod.unknown().describe('The tool\'s full input, for a card that wants to show more.'),
+  "detail": zod.string().describe('The command, the path — whatever a person needs to decide.'),
+  "kind": zod.enum(['CommandExecution', 'FileRead', 'FileChange', 'Tool']).describe('What an agent is asking permission for.\n\nCoarser than the tool that triggered it, because the question a person is\nbeing asked is \"may this run\", not \"which of forty tools is this\".'),
+  "req": zod.string().describe('One thing the agent is blocked on and needs an answer to.'),
+  "type": zod.enum(['RequestOpened'])
+}).describe('The agent is blocked and cannot continue without an answer.'),zod.object({
+  "decision": zod.union([zod.object({
+  "decision": zod.enum(['Allow'])
+}),zod.object({
+  "decision": zod.enum(['AllowAlways'])
+}).describe('Allow, and stop asking about calls like this one.'),zod.object({
+  "decision": zod.enum(['Deny']),
+  "reason": zod.string().nullish().describe('Shown to the agent, which reads it and often tries something else.\nThat is the point of asking for one.')
+})]).describe('What the person decided, when they were asked.'),
+  "req": zod.string().describe('One thing the agent is blocked on and needs an answer to.'),
+  "type": zod.enum(['RequestResolved'])
+}),zod.object({
+  "questions": zod.array(zod.object({
+  "header": zod.string().describe('A few words, for the top of the card.'),
+  "multiSelect": zod.boolean().optional(),
+  "options": zod.array(zod.object({
+  "description": zod.string(),
+  "label": zod.string().describe('What the agent expects back. Answers are keyed by this, not by position.')
+}).describe('One choice offered by a question.')),
+  "question": zod.string().describe('The answer is keyed by this text, so it has to survive the round trip\nunchanged.')
+}).describe('Something the agent wants to know before it carries on.')),
+  "req": zod.string().describe('One thing the agent is blocked on and needs an answer to.'),
+  "type": zod.enum(['UserInputRequested'])
+}),zod.object({
+  "answers": zod.unknown(),
+  "req": zod.string().describe('One thing the agent is blocked on and needs an answer to.'),
+  "type": zod.enum(['UserInputResolved'])
+}),zod.object({
+  "steps": zod.array(zod.object({
+  "status": zod.enum(['Pending', 'InProgress', 'Completed']),
+  "step": zod.string()
+}).describe('One line of the agent\'s plan.')),
+  "type": zod.enum(['PlanUpdated'])
+}),zod.object({
+  "agent": zod.string().nullish(),
+  "description": zod.string(),
+  "item": zod.string().describe('The tool call that spawned it, which is how its items find their way\nhome.'),
+  "task": zod.string().describe('One subagent run, from the moment it was spawned to its report.'),
+  "type": zod.enum(['TaskStarted'])
+}),zod.object({
+  "detail": zod.string(),
+  "task": zod.string().describe('One subagent run, from the moment it was spawned to its report.'),
+  "type": zod.enum(['TaskProgress'])
+}),zod.object({
+  "status": zod.enum(['Completed', 'Failed', 'Declined']).describe('How an item ended, when it has.'),
+  "summary": zod.string().nullish(),
+  "task": zod.string().describe('One subagent run, from the moment it was spawned to its report.'),
+  "type": zod.enum(['TaskCompleted'])
+}),zod.object({
+  "payload": zod.unknown(),
+  "source": zod.enum(['ClaudeStreamJson']).describe('Which agent\'s output a raw frame came from.\n\nCarried so that a frame kept for later is still interpretable later: the\nbytes alone do not say whose they are.'),
+  "type": zod.enum(['Raw'])
+}).describe('A line we kept but could not name.\n\nOnly for what nothing else matched — the complete raw log is already\nwhat Firetower stores, so repeating every mapped line here would double\nthe volume to say nothing new. This is the marker for \"an agent said\nsomething in a shape we have never seen\", which is how a version that\ngrew a new message type shows up as a gap to fill rather than as\nsilence.')]).describe('Something an agent said or did.\n\nThe vocabulary the interface draws, and the only thing that crosses out of\nthe normaliser.').and(zod.object({
+  "lineNo": zod.int().min(getConversationResponseEventsItemTwoLineNoMin)
+})).describe('One thing that happened, and where in the log it was said.\n\nThe line number travels with the event because several events can come from\none line, and a client\'s cursor has to be a position in the agent\'s log\nrather than a count of what it drew.')),
+  "lastLine": zod.int().min(getConversationResponseLastLineMin).describe('How far this reply got. Hand it back as `sinceLine` to continue.')
+})
+
+/**
+ * Server-sent events, like the session feed: it only ever flows down, and the
+ * browser supplies reconnection for free. Each event carries its line number
+ * as the SSE id, so a client that drops resumes from `Last-Event-ID` and the
+ * cursor is the platform's problem rather than ours.
+ * @summary The conversation as it happens.
+ */
+export const StreamConversationParams = zod.object({
+  "id": zod.string().describe('Session id')
+})
+
+export const StreamConversationResponse = zod.unknown()
+
+/**
  * Split on the server: it is a pure function over text that is easy to get
  * subtly wrong, and doing it once here beats doing it in every client.
  * @summary What this session changed, file by file.
@@ -230,6 +378,17 @@ export const ListFilesResponseItem = zod.object({
 export const ListFilesResponse = zod.array(ListFilesResponseItem)
 
 /**
+ * @summary Stop what the agent is doing, without ending the session.
+ */
+export const InterruptSessionParams = zod.object({
+  "id": zod.string().describe('Session id')
+})
+
+export const InterruptSessionResponse = zod.object({
+  "sent": zod.boolean()
+})
+
+/**
  * A websocket rather than the event stream: this is the one thing in Firetower
  * that genuinely flows both ways, byte at a time, and where latency is felt.
  *
@@ -293,6 +452,23 @@ export const StopSessionParams = zod.object({
 
 export const StopSessionResponse = zod.object({
   "detail": zod.string()
+})
+
+/**
+ * A message rather than keystrokes, which is the difference that matters: it
+ * cannot arrive while the agent is not listening, and it cannot be half-typed.
+ * @summary Say something to the agent.
+ */
+export const SendTurnParams = zod.object({
+  "id": zod.string().describe('Session id')
+})
+
+export const SendTurnBody = zod.object({
+  "text": zod.string()
+})
+
+export const SendTurnResponse = zod.object({
+  "sent": zod.boolean()
 })
 
 /**

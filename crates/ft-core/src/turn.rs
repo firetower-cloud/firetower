@@ -241,13 +241,18 @@ pub enum RawSource {
 /// The vocabulary the interface draws, and the only thing that crosses out of
 /// the normaliser.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
+// Fields inside a variant are single words on purpose. Serde would happily
+// rename them, but the schema derive does not follow `rename_all_fields`, so a
+// two-word field ships as camelCase on the wire and snake_case in the contract
+// — and the generated client then looks for something nothing sends. A struct
+// is safe (`rename_all` there is honoured by both); a variant is not.
 #[serde(tag = "type")]
 pub enum TurnEvent {
     /// What this session can do, reported once when the agent starts.
     SessionConfigured {
         model: String,
         tools: Vec<String>,
-        slash_commands: Vec<SlashCommand>,
+        commands: Vec<SlashCommand>,
     },
 
     TurnStarted {
@@ -319,7 +324,7 @@ pub enum TurnEvent {
         /// home.
         item: ItemId,
         description: String,
-        agent_type: Option<String>,
+        agent: Option<String>,
     },
     TaskProgress {
         task: TaskId,
@@ -345,9 +350,32 @@ pub enum TurnEvent {
     },
 }
 
+/// One thing somebody typed, in the shape an agent reads.
+///
+/// Here rather than in the worker because it is a value, and because the
+/// control plane builds one too — the worker forwards turns, it does not
+/// author them.
+pub fn user_message(text: &str) -> serde_json::Value {
+    serde_json::json!({
+        "type": "user",
+        "message": {
+            "role": "user",
+            "content": [{ "type": "text", "text": text }],
+        },
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_turn_is_the_shape_the_agent_reads() {
+        let message = user_message("hello");
+        assert_eq!(message["type"], "user");
+        assert_eq!(message["message"]["role"], "user");
+        assert_eq!(message["message"]["content"][0]["text"], "hello");
+    }
 
     #[test]
     fn identifiers_are_what_the_agent_called_them() {

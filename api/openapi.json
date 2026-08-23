@@ -10,7 +10,7 @@
       "name": "AGPL-3.0-only",
       "identifier": "AGPL-3.0-only"
     },
-    "version": "0.4.0"
+    "version": "0.6.0"
   },
   "paths": {
     "/api/v1/agents": {
@@ -1727,6 +1727,86 @@
         }
       }
     },
+    "/api/v1/sessions/{id}/conversation": {
+      "get": {
+        "tags": [
+          "sessions"
+        ],
+        "summary": "Everything the agent has said so far.",
+        "description": "A snapshot. Use the stream for a session that is still running — this is for\none that has finished, and for a first paint that wants to be a single\nrequest rather than a connection.",
+        "operationId": "get_conversation",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Session id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sinceLine",
+            "in": "query",
+            "description": "Continue from this line",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Conversation"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sessions/{id}/conversation/stream": {
+      "get": {
+        "tags": [
+          "sessions"
+        ],
+        "summary": "The conversation as it happens.",
+        "description": "Server-sent events, like the session feed: it only ever flows down, and the\nbrowser supplies reconnection for free. Each event carries its line number\nas the SSE id, so a client that drops resumes from `Last-Event-ID` and the\ncursor is the platform's problem rather than ours.",
+        "operationId": "stream_conversation",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Session id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "text/event-stream of ConversationEvent"
+          }
+        }
+      }
+    },
     "/api/v1/sessions/{id}/diff": {
       "get": {
         "tags": [
@@ -1866,6 +1946,58 @@
                   "items": {
                     "$ref": "#/components/schemas/FileEntry"
                   }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sessions/{id}/interrupt": {
+      "post": {
+        "tags": [
+          "sessions"
+        ],
+        "summary": "Stop what the agent is doing, without ending the session.",
+        "operationId": "interrupt_session",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Session id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Sent"
                 }
               }
             }
@@ -2100,6 +2232,69 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Done"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sessions/{id}/turn": {
+      "post": {
+        "tags": [
+          "sessions"
+        ],
+        "summary": "Say something to the agent.",
+        "description": "A message rather than keystrokes, which is the difference that matters: it\ncannot arrive while the agent is not listening, and it cannot be half-typed.",
+        "operationId": "send_turn",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Session id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Turn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Sent"
                 }
               }
             }
@@ -2660,6 +2855,48 @@
           }
         }
       },
+      "Conversation": {
+        "type": "object",
+        "required": [
+          "events",
+          "lastLine"
+        ],
+        "properties": {
+          "events": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ConversationEvent"
+            }
+          },
+          "lastLine": {
+            "type": "integer",
+            "format": "int64",
+            "description": "How far this reply got. Hand it back as `sinceLine` to continue.",
+            "minimum": 0
+          }
+        }
+      },
+      "ConversationEvent": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/TurnEvent"
+          },
+          {
+            "type": "object",
+            "required": [
+              "lineNo"
+            ],
+            "properties": {
+              "lineNo": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              }
+            }
+          }
+        ],
+        "description": "One thing that happened, and where in the log it was said.\n\nThe line number travels with the event because several events can come from\none line, and a client's cursor has to be a position in the agent's log\nrather than a count of what it drew."
+      },
       "Credentials": {
         "type": "object",
         "required": [
@@ -2674,6 +2911,61 @@
             "type": "string"
           }
         }
+      },
+      "Decision": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "decision"
+            ],
+            "properties": {
+              "decision": {
+                "type": "string",
+                "enum": [
+                  "Allow"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Allow, and stop asking about calls like this one.",
+            "required": [
+              "decision"
+            ],
+            "properties": {
+              "decision": {
+                "type": "string",
+                "enum": [
+                  "AllowAlways"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "decision"
+            ],
+            "properties": {
+              "decision": {
+                "type": "string",
+                "enum": [
+                  "Deny"
+                ]
+              },
+              "reason": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Shown to the agent, which reads it and often tries something else.\nThat is the point of asking for one."
+              }
+            }
+          }
+        ],
+        "description": "What the person decided, when they were asked."
       },
       "Diagnosis": {
         "type": "object",
@@ -3220,6 +3512,35 @@
           "Draining"
         ]
       },
+      "ItemId": {
+        "type": "string",
+        "description": "One thing in the transcript — a message, a thought, a tool call."
+      },
+      "ItemKind": {
+        "type": "string",
+        "description": "What kind of thing an item is, which is what decides how it is drawn.\n\nThe list is short on purpose. It is not a catalogue of every tool an agent\nmight have — that changes weekly and is not knowable — but of the shapes\nFiretower can draw usefully. Anything that doesn't fit is [`Unknown`], which\nstill renders: name, input, output. A wrong guess costs a nicer card, never\nthe event itself.\n\n[`Unknown`]: ItemKind::Unknown",
+        "enum": [
+          "AssistantMessage",
+          "Reasoning",
+          "UserMessage",
+          "CommandExecution",
+          "FileChange",
+          "FileRead",
+          "McpToolCall",
+          "WebSearch",
+          "SubagentCall",
+          "Unknown"
+        ]
+      },
+      "ItemStatus": {
+        "type": "string",
+        "description": "How an item ended, when it has.",
+        "enum": [
+          "Completed",
+          "Failed",
+          "Declined"
+        ]
+      },
       "Me": {
         "type": "object",
         "description": "Who the caller is, and what they belong to.",
@@ -3442,6 +3763,30 @@
           }
         }
       },
+      "PlanStep": {
+        "type": "object",
+        "description": "One line of the agent's plan.",
+        "required": [
+          "step",
+          "status"
+        ],
+        "properties": {
+          "status": {
+            "$ref": "#/components/schemas/PlanStepStatus"
+          },
+          "step": {
+            "type": "string"
+          }
+        }
+      },
+      "PlanStepStatus": {
+        "type": "string",
+        "enum": [
+          "Pending",
+          "InProgress",
+          "Completed"
+        ]
+      },
       "ProbeRequest": {
         "type": "object",
         "required": [
@@ -3545,6 +3890,58 @@
             "type": "string"
           }
         }
+      },
+      "Question": {
+        "type": "object",
+        "description": "Something the agent wants to know before it carries on.",
+        "required": [
+          "question",
+          "header",
+          "options"
+        ],
+        "properties": {
+          "header": {
+            "type": "string",
+            "description": "A few words, for the top of the card."
+          },
+          "multiSelect": {
+            "type": "boolean"
+          },
+          "options": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/QuestionOption"
+            }
+          },
+          "question": {
+            "type": "string",
+            "description": "The answer is keyed by this text, so it has to survive the round trip\nunchanged."
+          }
+        }
+      },
+      "QuestionOption": {
+        "type": "object",
+        "description": "One choice offered by a question.",
+        "required": [
+          "label",
+          "description"
+        ],
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string",
+            "description": "What the agent expects back. Answers are keyed by this, not by position."
+          }
+        }
+      },
+      "RawSource": {
+        "type": "string",
+        "description": "Which agent's output a raw frame came from.\n\nCarried so that a frame kept for later is still interpretable later: the\nbytes alone do not say whose they are.",
+        "enum": [
+          "ClaudeStreamJson"
+        ]
       },
       "Reached": {
         "type": "object",
@@ -3711,6 +4108,20 @@
         "type": "string",
         "description": "Identifies a connected repository."
       },
+      "RequestId": {
+        "type": "string",
+        "description": "One thing the agent is blocked on and needs an answer to."
+      },
+      "RequestKind": {
+        "type": "string",
+        "description": "What an agent is asking permission for.\n\nCoarser than the tool that triggered it, because the question a person is\nbeing asked is \"may this run\", not \"which of forty tools is this\".",
+        "enum": [
+          "CommandExecution",
+          "FileRead",
+          "FileChange",
+          "Tool"
+        ]
+      },
       "RevealedSecret": {
         "type": "object",
         "description": "A value, on its way to a person who asked for it.",
@@ -3741,6 +4152,17 @@
           "token": {
             "type": "string",
             "description": "A new session, because the old one went with every other. Store this\nand carry on — being signed out is not part of changing a password."
+          }
+        }
+      },
+      "Sent": {
+        "type": "object",
+        "required": [
+          "sent"
+        ],
+        "properties": {
+          "sent": {
+            "type": "boolean"
           }
         }
       },
@@ -3924,6 +4346,24 @@
           }
         }
       },
+      "SlashCommand": {
+        "type": "object",
+        "description": "A slash command this session offers, as the agent reported it at startup.",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "type": "string"
+          }
+        }
+      },
       "SshKey": {
         "oneOf": [
           {
@@ -4029,6 +4469,502 @@
               "type": "string"
             },
             "description": "Lines that were skipped, and why — said rather than swallowed, because\na variable that silently never arrives is a long afternoon."
+          }
+        }
+      },
+      "StreamKind": {
+        "type": "string",
+        "description": "Which stream a piece of text belongs to.\n\nSeparate from [`ItemKind`] because one item can carry more than one: a\ncommand has both its own text and its output.",
+        "enum": [
+          "AssistantText",
+          "Reasoning",
+          "ToolOutput",
+          "ToolInput"
+        ]
+      },
+      "TaskId": {
+        "type": "string",
+        "description": "One subagent run, from the moment it was spawned to its report."
+      },
+      "Turn": {
+        "type": "object",
+        "required": [
+          "text"
+        ],
+        "properties": {
+          "text": {
+            "type": "string"
+          }
+        }
+      },
+      "TurnEvent": {
+        "oneOf": [
+          {
+            "type": "object",
+            "description": "What this session can do, reported once when the agent starts.",
+            "required": [
+              "model",
+              "tools",
+              "commands",
+              "type"
+            ],
+            "properties": {
+              "commands": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/SlashCommand"
+                }
+              },
+              "model": {
+                "type": "string"
+              },
+              "tools": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "SessionConfigured"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "turn",
+              "type"
+            ],
+            "properties": {
+              "turn": {
+                "$ref": "#/components/schemas/TurnId"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "TurnStarted"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "turn",
+              "status",
+              "type"
+            ],
+            "properties": {
+              "status": {
+                "$ref": "#/components/schemas/TurnStatus"
+              },
+              "turn": {
+                "$ref": "#/components/schemas/TurnId"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "TurnCompleted"
+                ]
+              },
+              "usage": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/components/schemas/Usage"
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "item",
+              "kind",
+              "type"
+            ],
+            "properties": {
+              "item": {
+                "$ref": "#/components/schemas/ItemId"
+              },
+              "kind": {
+                "$ref": "#/components/schemas/ItemKind"
+              },
+              "task": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/components/schemas/TaskId",
+                    "description": "Set when a subagent owns this item rather than the main thread.\n\nWithout it a subagent's tool calls interleave into the transcript\nand read as though the main agent made them."
+                  }
+                ]
+              },
+              "title": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "What the card is called before there is anything in it."
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "ItemStarted"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Something about an open item changed — usually a tool's arguments\narriving, which come a fragment at a time and are only worth showing\nonce they parse.",
+            "required": [
+              "item",
+              "data",
+              "type"
+            ],
+            "properties": {
+              "data": {},
+              "item": {
+                "$ref": "#/components/schemas/ItemId"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "ItemUpdated"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "item",
+              "status",
+              "type"
+            ],
+            "properties": {
+              "item": {
+                "$ref": "#/components/schemas/ItemId"
+              },
+              "status": {
+                "$ref": "#/components/schemas/ItemStatus"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "ItemCompleted"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "item",
+              "stream",
+              "delta",
+              "type"
+            ],
+            "properties": {
+              "delta": {
+                "type": "string"
+              },
+              "item": {
+                "$ref": "#/components/schemas/ItemId"
+              },
+              "stream": {
+                "$ref": "#/components/schemas/StreamKind"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "ContentDelta"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "The agent is blocked and cannot continue without an answer.",
+            "required": [
+              "req",
+              "kind",
+              "detail",
+              "args",
+              "type"
+            ],
+            "properties": {
+              "args": {
+                "description": "The tool's full input, for a card that wants to show more."
+              },
+              "detail": {
+                "type": "string",
+                "description": "The command, the path — whatever a person needs to decide."
+              },
+              "kind": {
+                "$ref": "#/components/schemas/RequestKind"
+              },
+              "req": {
+                "$ref": "#/components/schemas/RequestId"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "RequestOpened"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "req",
+              "decision",
+              "type"
+            ],
+            "properties": {
+              "decision": {
+                "$ref": "#/components/schemas/Decision"
+              },
+              "req": {
+                "$ref": "#/components/schemas/RequestId"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "RequestResolved"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "req",
+              "questions",
+              "type"
+            ],
+            "properties": {
+              "questions": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/Question"
+                }
+              },
+              "req": {
+                "$ref": "#/components/schemas/RequestId"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "UserInputRequested"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "req",
+              "answers",
+              "type"
+            ],
+            "properties": {
+              "answers": {},
+              "req": {
+                "$ref": "#/components/schemas/RequestId"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "UserInputResolved"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "steps",
+              "type"
+            ],
+            "properties": {
+              "steps": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/PlanStep"
+                }
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "PlanUpdated"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "task",
+              "item",
+              "description",
+              "type"
+            ],
+            "properties": {
+              "agent": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "description": {
+                "type": "string"
+              },
+              "item": {
+                "$ref": "#/components/schemas/ItemId",
+                "description": "The tool call that spawned it, which is how its items find their way\nhome."
+              },
+              "task": {
+                "$ref": "#/components/schemas/TaskId"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "TaskStarted"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "task",
+              "detail",
+              "type"
+            ],
+            "properties": {
+              "detail": {
+                "type": "string"
+              },
+              "task": {
+                "$ref": "#/components/schemas/TaskId"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "TaskProgress"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "task",
+              "status",
+              "type"
+            ],
+            "properties": {
+              "status": {
+                "$ref": "#/components/schemas/ItemStatus"
+              },
+              "summary": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "task": {
+                "$ref": "#/components/schemas/TaskId"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "TaskCompleted"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "A line we kept but could not name.\n\nOnly for what nothing else matched — the complete raw log is already\nwhat Firetower stores, so repeating every mapped line here would double\nthe volume to say nothing new. This is the marker for \"an agent said\nsomething in a shape we have never seen\", which is how a version that\ngrew a new message type shows up as a gap to fill rather than as\nsilence.",
+            "required": [
+              "source",
+              "payload",
+              "type"
+            ],
+            "properties": {
+              "payload": {},
+              "source": {
+                "$ref": "#/components/schemas/RawSource"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "Raw"
+                ]
+              }
+            }
+          }
+        ],
+        "description": "Something an agent said or did.\n\nThe vocabulary the interface draws, and the only thing that crosses out of\nthe normaliser."
+      },
+      "TurnId": {
+        "type": "string",
+        "description": "One exchange: a prompt in, and everything that happened before the agent stopped."
+      },
+      "TurnStatus": {
+        "type": "string",
+        "description": "How a turn ended.",
+        "enum": [
+          "Completed",
+          "Failed",
+          "Interrupted"
+        ]
+      },
+      "Usage": {
+        "type": "object",
+        "description": "What a turn cost.\n\nNot `Eq`, because the cost is a float. Comparing two of these for equality\nis a test convenience, not something to build on.",
+        "required": [
+          "inputTokens",
+          "outputTokens"
+        ],
+        "properties": {
+          "cacheReadTokens": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Absent when the agent does not say.",
+            "minimum": 0
+          },
+          "costUsd": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "The agent's own estimate, in dollars. Its arithmetic, not ours."
+          },
+          "inputTokens": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "outputTokens": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
           }
         }
       },

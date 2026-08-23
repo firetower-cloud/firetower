@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.4.0
+ * OpenAPI spec version: 0.6.0
  */
 
 export * from './accessEntry';
@@ -19,7 +19,10 @@ export * from './cause';
 export * from './clientId';
 export * from './compute';
 export * from './configureAgent';
+export * from './conversation';
+export * from './conversationEvent';
 export * from './credentials';
+export * from './decision';
 export * from './deleteHostParams';
 export * from './destroySessionParams';
 export * from './diagnosis';
@@ -33,10 +36,14 @@ export * from './event';
 export * from './eventKind';
 export * from './fileDiff';
 export * from './fileEntry';
+export * from './getConversationParams';
 export * from './heldSecret';
 export * from './host';
 export * from './hostId';
 export * from './hostState';
+export * from './itemId';
+export * from './itemKind';
+export * from './itemStatus';
 export * from './listEventsParams';
 export * from './listFilesParams';
 export * from './listSessionsParams';
@@ -51,11 +58,16 @@ export * from './newSession';
 export * from './organization';
 export * from './orgId';
 export * from './pendingAuth';
+export * from './planStep';
+export * from './planStepStatus';
 export * from './probeRequest';
 export * from './probeResponse';
 export * from './providerStatus';
 export * from './publicIdentity';
 export * from './pullRequest';
+export * from './question';
+export * from './questionOption';
+export * from './rawSource';
 export * from './reached';
 export * from './remoteRepo';
 export * from './rename';
@@ -64,17 +76,28 @@ export * from './replaceSecret';
 export * from './repo';
 export * from './repoChanges';
 export * from './repoId';
+export * from './requestId';
+export * from './requestKind';
 export * from './revealedSecret';
 export * from './rotated';
+export * from './sent';
 export * from './session';
 export * from './sessionId';
 export * from './sessionPtyParams';
 export * from './sessionStatus';
 export * from './setupState';
 export * from './signedIn';
+export * from './slashCommand';
 export * from './sshKey';
 export * from './step';
 export * from './storedEnv';
+export * from './streamKind';
+export * from './taskId';
+export * from './turn';
+export * from './turnEvent';
+export * from './turnId';
+export * from './turnStatus';
+export * from './usage';
 export * from './user';
 export * from './userId';
 export * from './vaultView';

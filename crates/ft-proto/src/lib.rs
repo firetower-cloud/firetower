@@ -18,7 +18,12 @@ use serde::{Deserialize, Serialize};
 /// then cannot parse the frame, which is a session that hangs in `Starting`
 /// with nothing recorded. That is precisely what this number exists to stop,
 /// and it only works if it is bumped.
-pub const PROTOCOL_VERSION: u32 = 7;
+///
+/// 8 — an agent that speaks a structured protocol is watched rather than
+/// attached to. A worker from before this understands neither the frames that
+/// drive one nor the ones that report it, and a session on it would show an
+/// empty conversation with no indication why.
+pub const PROTOCOL_VERSION: u32 = 8;
 
 mod codec;
 pub use codec::{Codec, CodecError, FrameReader, FrameWriter};
@@ -94,9 +99,46 @@ pub enum ToWorker {
     /// Build a workspace and start an agent in it.
     CreateWorkspace(Box<CreateWorkspace>),
     /// Send text to the agent, as if typed.
+    ///
+    /// For a session running in a terminal. An agent driven through a
+    /// structured protocol takes [`ToWorker::SendTurn`] instead, which is a
+    /// message rather than keystrokes and so cannot arrive while nothing is
+    /// listening for it.
     Reply {
         session_id: SessionId,
         text: String,
+    },
+    /// Send everything the agent has said since `since_line`, then keep
+    /// sending.
+    ///
+    /// Line zero means the whole conversation, which is what a browser opening
+    /// a session asks for. Anything else is a cursor: a reconnecting client
+    /// says where it got to and is not sent the session again.
+    WatchAgent {
+        session_id: SessionId,
+        since_line: u64,
+    },
+    /// Stop sending. The agent keeps working.
+    UnwatchAgent {
+        session_id: SessionId,
+    },
+    /// One message for a structured agent, verbatim.
+    ///
+    /// Opaque here on purpose: what a turn looks like belongs to whoever is
+    /// driving the agent, and a worker forwarding it is not.
+    SendTurn {
+        session_id: SessionId,
+        message: serde_json::Value,
+    },
+    /// The answer to something the agent is blocked on.
+    Answer {
+        session_id: SessionId,
+        req: String,
+        result: serde_json::Value,
+    },
+    /// End the turn in progress. The session stays.
+    Interrupt {
+        session_id: SessionId,
     },
     /// Attach a terminal.
     PtyOpen {
@@ -306,6 +348,28 @@ pub enum ToServer {
         #[serde(default)]
         pty: Pty,
     },
+    /// One line a structured agent printed, and where it sits in the log.
+    ///
+    /// Forwarded exactly as it arrived. Making sense of it happens in the
+    /// control plane, so that a mapping which turns out to be wrong is a deploy
+    /// rather than a fleet upgrade — and so that the stored lines can be read
+    /// again afterwards to derive a corrected history.
+    AgentLine {
+        session_id: SessionId,
+        line_no: u64,
+        line: String,
+    },
+    /// The agent is blocked and will not continue until somebody answers.
+    AgentAsks {
+        session_id: SessionId,
+        req: String,
+        tool_name: String,
+        input: serde_json::Value,
+    },
+    /// Nothing more is coming from this agent.
+    AgentClosed {
+        session_id: SessionId,
+    },
     /// The answer to [`ToWorker::ListFiles`].
     Listed {
         req: ReqId,
@@ -431,11 +495,23 @@ mod tests {
     fn a_terminal_frame_without_a_target_is_the_agents() {
         let older = r#"{"frame":"PtyOpen","session_id":"s_abc","cols":80,"rows":24}"#;
         let back: ToWorker = serde_json::from_str(older).unwrap();
-        assert!(matches!(back, ToWorker::PtyOpen { pty: Pty::Agent, .. }));
+        assert!(matches!(
+            back,
+            ToWorker::PtyOpen {
+                pty: Pty::Agent,
+                ..
+            }
+        ));
 
         let older = r#"{"frame":"PtyOutput","session_id":"s_abc","data":"aGk="}"#;
         let back: ToServer = serde_json::from_str(older).unwrap();
-        assert!(matches!(back, ToServer::PtyOutput { pty: Pty::Agent, .. }));
+        assert!(matches!(
+            back,
+            ToServer::PtyOutput {
+                pty: Pty::Agent,
+                ..
+            }
+        ));
     }
 
     #[test]

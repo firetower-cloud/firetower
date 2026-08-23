@@ -158,7 +158,7 @@ impl ClaudeNormaliser {
             Some("init") => out.push(TurnEvent::SessionConfigured {
                 model: str_at(v, "model").unwrap_or_default().to_string(),
                 tools: string_list(v.get("tools")),
-                slash_commands: slash_commands(v.get("commands")),
+                commands: slash_commands(v.get("commands")),
             }),
             Some("task_started") => {
                 let (Some(task_id), Some(tool_use_id)) =
@@ -173,7 +173,7 @@ impl ClaudeNormaliser {
                     task,
                     item: ItemId::new(tool_use_id),
                     description: str_at(v, "description").unwrap_or_default().to_string(),
-                    agent_type: str_at(v, "subagent_type").map(str::to_string),
+                    agent: str_at(v, "subagent_type").map(str::to_string),
                 });
             }
             Some("task_progress") => {

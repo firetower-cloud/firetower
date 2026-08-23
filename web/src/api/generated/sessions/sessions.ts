@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.4.0
+ * OpenAPI spec version: 0.6.0
  */
 import {
   useMutation,
@@ -27,20 +27,24 @@ import type {
 
 import type {
   ApiError,
+  Conversation,
   DestroySessionParams,
   Done,
   DownloadFileParams,
   EndedAll,
   FileDiff,
   FileEntry,
+  GetConversationParams,
   ListFilesParams,
   ListSessionsParams,
   NewPullRequest,
   NewSession,
   PullRequest,
   RenameSession,
+  Sent,
   Session,
   SessionPtyParams,
+  Turn,
   WorkSummary
 } from '../model';
 
@@ -582,7 +586,265 @@ export const useRenameSession = <TError = ApiError,
       > => {
       return useMutation(getRenameSessionMutationOptions(options), queryClient);
     }
-    export const getSessionDiffUrl = (id: string,) => {
+    export const getGetConversationUrl = (id: string,
+    params?: GetConversationParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/v1/sessions/${id}/conversation?${stringifiedParams}` : `/api/v1/sessions/${id}/conversation`
+}
+
+/**
+ * A snapshot. Use the stream for a session that is still running — this is for
+ * one that has finished, and for a first paint that wants to be a single
+ * request rather than a connection.
+ * @summary Everything the agent has said so far.
+ */
+export const getConversation = async (id: string,
+    params?: GetConversationParams, options?: Parameters<typeof http>[1]): Promise<Conversation> => {
+
+  return http<Conversation>(getGetConversationUrl(id,params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetConversationQueryKey = (id: string,
+    params?: GetConversationParams,) => {
+    return [
+    `/api/v1/sessions/${id}/conversation`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetConversationQueryOptions = <TData = Awaited<ReturnType<typeof getConversation>>, TError = ApiError>(id: string,
+    params?: GetConversationParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getConversation>>, TError, TData>>, request?: SecondParameter<typeof http>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetConversationQueryKey(id,params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getConversation>>> = ({ signal }) => getConversation(id,params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: id !== null && id !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getConversation>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetConversationQueryResult = NonNullable<Awaited<ReturnType<typeof getConversation>>>
+export type GetConversationQueryError = ApiError
+
+
+export function useGetConversation<TData = Awaited<ReturnType<typeof getConversation>>, TError = ApiError>(
+ id: string,
+    params: undefined |  GetConversationParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getConversation>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getConversation>>,
+          TError,
+          Awaited<ReturnType<typeof getConversation>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetConversation<TData = Awaited<ReturnType<typeof getConversation>>, TError = ApiError>(
+ id: string,
+    params?: GetConversationParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getConversation>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getConversation>>,
+          TError,
+          Awaited<ReturnType<typeof getConversation>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetConversation<TData = Awaited<ReturnType<typeof getConversation>>, TError = ApiError>(
+ id: string,
+    params?: GetConversationParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getConversation>>, TError, TData>>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Everything the agent has said so far.
+ */
+
+export function useGetConversation<TData = Awaited<ReturnType<typeof getConversation>>, TError = ApiError>(
+ id: string,
+    params?: GetConversationParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getConversation>>, TError, TData>>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetConversationQueryOptions(id,params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+/**
+ * @summary Everything the agent has said so far.
+ */
+export const useSetGetConversationQueryData = () => {
+  const queryClient = useQueryClient();
+  return (id: string,
+    params: GetConversationParams | undefined,updater: Awaited<ReturnType<typeof getConversation>> | undefined | ((old: Awaited<ReturnType<typeof getConversation>> | undefined) => Awaited<ReturnType<typeof getConversation>> | undefined)) => {
+    queryClient.setQueriesData<Awaited<ReturnType<typeof getConversation>>>({ queryKey: getGetConversationQueryKey(id,params) }, updater);
+  };
+}
+
+/**
+ * @summary Everything the agent has said so far.
+ */
+export const useGetGetConversationQueryData = () => {
+  const queryClient = useQueryClient();
+  return (id: string,
+    params?: GetConversationParams,) =>
+    queryClient.getQueryData<Awaited<ReturnType<typeof getConversation>>>(getGetConversationQueryKey(id,params));
+}
+
+
+export const getStreamConversationUrl = (id: string,) => {
+
+
+
+
+  return `/api/v1/sessions/${id}/conversation/stream`
+}
+
+/**
+ * Server-sent events, like the session feed: it only ever flows down, and the
+ * browser supplies reconnection for free. Each event carries its line number
+ * as the SSE id, so a client that drops resumes from `Last-Event-ID` and the
+ * cursor is the platform's problem rather than ours.
+ * @summary The conversation as it happens.
+ */
+export const streamConversation = async (id: string, options?: Parameters<typeof http>[1]): Promise<void> => {
+
+  return http<void>(getStreamConversationUrl(id),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getStreamConversationQueryKey = (id: string,) => {
+    return [
+    `/api/v1/sessions/${id}/conversation/stream`
+    ] as const;
+    }
+
+
+export const getStreamConversationQueryOptions = <TData = Awaited<ReturnType<typeof streamConversation>>, TError = unknown>(id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof streamConversation>>, TError, TData>>, request?: SecondParameter<typeof http>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getStreamConversationQueryKey(id);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof streamConversation>>> = ({ signal }) => streamConversation(id, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: id !== null && id !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof streamConversation>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type StreamConversationQueryResult = NonNullable<Awaited<ReturnType<typeof streamConversation>>>
+export type StreamConversationQueryError = unknown
+
+
+export function useStreamConversation<TData = Awaited<ReturnType<typeof streamConversation>>, TError = unknown>(
+ id: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof streamConversation>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof streamConversation>>,
+          TError,
+          Awaited<ReturnType<typeof streamConversation>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useStreamConversation<TData = Awaited<ReturnType<typeof streamConversation>>, TError = unknown>(
+ id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof streamConversation>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof streamConversation>>,
+          TError,
+          Awaited<ReturnType<typeof streamConversation>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useStreamConversation<TData = Awaited<ReturnType<typeof streamConversation>>, TError = unknown>(
+ id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof streamConversation>>, TError, TData>>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary The conversation as it happens.
+ */
+
+export function useStreamConversation<TData = Awaited<ReturnType<typeof streamConversation>>, TError = unknown>(
+ id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof streamConversation>>, TError, TData>>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getStreamConversationQueryOptions(id,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+/**
+ * @summary The conversation as it happens.
+ */
+export const useSetStreamConversationQueryData = () => {
+  const queryClient = useQueryClient();
+  return (id: string,updater: Awaited<ReturnType<typeof streamConversation>> | undefined | ((old: Awaited<ReturnType<typeof streamConversation>> | undefined) => Awaited<ReturnType<typeof streamConversation>> | undefined)) => {
+    queryClient.setQueriesData<Awaited<ReturnType<typeof streamConversation>>>({ queryKey: getStreamConversationQueryKey(id) }, updater);
+  };
+}
+
+/**
+ * @summary The conversation as it happens.
+ */
+export const useGetStreamConversationQueryData = () => {
+  const queryClient = useQueryClient();
+  return (id: string,) =>
+    queryClient.getQueryData<Awaited<ReturnType<typeof streamConversation>>>(getStreamConversationQueryKey(id));
+}
+
+
+export const getSessionDiffUrl = (id: string,) => {
 
 
 
@@ -975,7 +1237,77 @@ export const useGetListFilesQueryData = () => {
 }
 
 
-export const getSessionPtyUrl = (id: string,
+export const getInterruptSessionUrl = (id: string,) => {
+
+
+
+
+  return `/api/v1/sessions/${id}/interrupt`
+}
+
+/**
+ * @summary Stop what the agent is doing, without ending the session.
+ */
+export const interruptSession = async (id: string, options?: Parameters<typeof http>[1]): Promise<Sent> => {
+
+  return http<Sent>(getInterruptSessionUrl(id),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getInterruptSessionMutationOptions = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof interruptSession>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof http>}
+): UseMutationOptions<Awaited<ReturnType<typeof interruptSession>>, TError,{id: string}, TContext> => {
+
+const mutationKey = ['interruptSession'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof interruptSession>>, {id: string}> = (props) => {
+          const {id} = props ?? {};
+
+          return  interruptSession(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type InterruptSessionMutationResult = NonNullable<Awaited<ReturnType<typeof interruptSession>>>
+
+    export type InterruptSessionMutationError = ApiError
+
+    /**
+ * @summary Stop what the agent is doing, without ending the session.
+ */
+export const useInterruptSession = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof interruptSession>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof interruptSession>>,
+        TError,
+        {id: string},
+        TContext
+      > => {
+      return useMutation(getInterruptSessionMutationOptions(options), queryClient);
+    }
+    export const getSessionPtyUrl = (id: string,
     params?: SessionPtyParams,) => {
   const normalizedParams = new URLSearchParams();
 
@@ -1326,6 +1658,79 @@ export const useStopSession = <TError = ApiError,
         TContext
       > => {
       return useMutation(getStopSessionMutationOptions(options), queryClient);
+    }
+    export const getSendTurnUrl = (id: string,) => {
+
+
+
+
+  return `/api/v1/sessions/${id}/turn`
+}
+
+/**
+ * A message rather than keystrokes, which is the difference that matters: it
+ * cannot arrive while the agent is not listening, and it cannot be half-typed.
+ * @summary Say something to the agent.
+ */
+export const sendTurn = async (id: string,
+    turn: Turn, options?: Parameters<typeof http>[1]): Promise<Sent> => {
+
+  return http<Sent>(getSendTurnUrl(id),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(turn)
+  }
+);}
+
+
+
+
+
+export const getSendTurnMutationOptions = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof sendTurn>>, TError,{id: string;data: Turn}, TContext>, request?: SecondParameter<typeof http>}
+): UseMutationOptions<Awaited<ReturnType<typeof sendTurn>>, TError,{id: string;data: Turn}, TContext> => {
+
+const mutationKey = ['sendTurn'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof sendTurn>>, {id: string;data: Turn}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  sendTurn(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SendTurnMutationResult = NonNullable<Awaited<ReturnType<typeof sendTurn>>>
+    export type SendTurnMutationBody = Turn
+    export type SendTurnMutationError = ApiError
+
+    /**
+ * @summary Say something to the agent.
+ */
+export const useSendTurn = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof sendTurn>>, TError,{id: string;data: Turn}, TContext>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof sendTurn>>,
+        TError,
+        {id: string;data: Turn},
+        TContext
+      > => {
+      return useMutation(getSendTurnMutationOptions(options), queryClient);
     }
     export const getSessionWorkUrl = (id: string,) => {
 

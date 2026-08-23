@@ -795,6 +795,61 @@ impl Db {
         Ok(())
     }
 
+    /// Keep one line a structured agent printed.
+    ///
+    /// Idempotent because a worker replays from a cursor after a reconnect, so
+    /// the same line arriving twice is ordinary. Its own numbering is the key,
+    /// not an identity of ours: both ends have to agree on what has been seen.
+    pub async fn record_agent_line(
+        &self,
+        session_id: &SessionId,
+        line_no: i64,
+        line: &str,
+    ) -> Result<()> {
+        sqlx::query(
+            "INSERT INTO agent_lines (session_id, line_no, line)
+             VALUES ($1, $2, $3)
+             ON CONFLICT (session_id, line_no) DO NOTHING",
+        )
+        .bind(session_id.as_str())
+        .bind(line_no)
+        .bind(line)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Everything the agent has said, in order, from `since` onward.
+    pub async fn agent_lines_since(
+        &self,
+        session_id: &SessionId,
+        since: i64,
+    ) -> Result<Vec<(i64, String)>> {
+        let rows: Vec<(i64, String)> = sqlx::query_as(
+            "SELECT line_no, line FROM agent_lines
+              WHERE session_id = $1 AND line_no > $2
+              ORDER BY line_no",
+        )
+        .bind(session_id.as_str())
+        .bind(since)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows)
+    }
+
+    /// How far the agent's log has got here.
+    ///
+    /// Sent to a worker as the resume cursor, so a reconnecting control plane
+    /// asks only for what it is missing.
+    pub async fn last_agent_line(&self, session_id: &SessionId) -> Result<i64> {
+        let last: Option<i64> =
+            sqlx::query_scalar("SELECT MAX(line_no) FROM agent_lines WHERE session_id = $1")
+                .bind(session_id.as_str())
+                .fetch_one(&self.pool)
+                .await?;
+        Ok(last.unwrap_or(0))
+    }
+
     pub async fn events_since(&self, since: i64) -> Result<Vec<Event>> {
         self.events_since_for(since, None).await
     }
@@ -1008,7 +1063,9 @@ mod tests {
                     host: "203.0.113.44".into(),
                     user: Some("root".into()),
                     port: Some(2222),
-                    key: ft_core::SshKey::File { path: "~/.ssh/fire".into() },
+                    key: ft_core::SshKey::File {
+                        path: "~/.ssh/fire".into(),
+                    },
                     host_key: None,
                     container: None,
                 },
@@ -1029,7 +1086,9 @@ mod tests {
                 host: "203.0.113.44".into(),
                 user: Some("root".into()),
                 port: Some(2222),
-                key: ft_core::SshKey::File { path: "~/.ssh/fire".into() },
+                key: ft_core::SshKey::File {
+                    path: "~/.ssh/fire".into()
+                },
                 host_key: None,
                 container: None,
             }
@@ -1576,7 +1635,10 @@ mod tests {
 
         let gone = db.session(&id).await.unwrap().unwrap();
         assert_eq!(gone.status, ft_core::SessionStatus::Ended);
-        assert!(gone.forgotten_at.is_some(), "removed here, not by the worker");
+        assert!(
+            gone.forgotten_at.is_some(),
+            "removed here, not by the worker"
+        );
 
         // The machine comes back and says what it has always said.
         db.record_event(
@@ -1629,7 +1691,10 @@ mod tests {
         );
 
         db.forget_session(&id).await.unwrap();
-        assert_eq!(db.owed_cleanup_on(&host.id).await.unwrap(), vec![id.clone()]);
+        assert_eq!(
+            db.owed_cleanup_on(&host.id).await.unwrap(),
+            vec![id.clone()]
+        );
 
         db.mark_cleaned(&id).await.unwrap();
         assert!(

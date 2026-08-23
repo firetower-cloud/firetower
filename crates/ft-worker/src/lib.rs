@@ -33,6 +33,7 @@ pub mod first_run;
 pub mod git;
 pub mod hooks;
 pub mod store;
+pub mod structured;
 pub mod tmux;
 
 use git::GitRoot;
@@ -54,6 +55,11 @@ pub struct Worker {
     forwarded: Mutex<i64>,
     /// One terminal attachment per session, however many people are watching.
     attached: Mutex<HashMap<String, attach::Attachment>>,
+    /// Sessions whose structured agent is being forwarded upward.
+    ///
+    /// Held so a second watcher does not double every line, and so closing a
+    /// session stops the forwarding rather than leaving it talking to nobody.
+    watching: Mutex<HashMap<String, tokio::task::JoinHandle<()>>>,
 }
 
 /// How many frames may be queued for the control plane at once.
@@ -73,6 +79,7 @@ impl Worker {
             store,
             git: GitRoot::new(&root),
             attached: Mutex::new(HashMap::new()),
+            watching: Mutex::new(HashMap::new()),
             root,
             // Everything already in the log predates this connection. A
             // control plane that wants it asks, with `Resume`.
@@ -421,6 +428,78 @@ impl Worker {
                     if let Err(e) = Tmux::named(pty.tmux_name(session_id.as_str())).kill().await {
                         tracing::warn!(session = %session_id, "closing the shell: {e:#}");
                     }
+                }
+            }
+
+            ToWorker::WatchAgent {
+                session_id,
+                since_line,
+            } => {
+                let key = session_id.to_string();
+                let mut watching = self.watching.lock().await;
+                // Already forwarding. A second watcher would double every line,
+                // and the one that exists is already at or ahead of this
+                // cursor.
+                let out = out.clone();
+                let id = session_id.clone();
+                watching.entry(key).or_insert_with(move || {
+                    tokio::spawn(async move {
+                        if let Err(e) = structured::watch(id.clone(), since_line, out.clone()).await
+                        {
+                            tracing::warn!(session = %id, "watching the agent: {e:#}");
+                            let _ = out
+                                .send(ToServer::Error {
+                                    session_id: Some(id.clone()),
+                                    code: "AgentUnavailable".into(),
+                                    message: format!("{e:#}"),
+                                })
+                                .await;
+                            let _ = out.send(ToServer::AgentClosed { session_id: id }).await;
+                        }
+                    })
+                });
+            }
+
+            ToWorker::UnwatchAgent { session_id } => {
+                if let Some(watcher) = self.watching.lock().await.remove(&session_id.to_string()) {
+                    // The agent carries on. Nobody watching is its ordinary
+                    // state — the log is still being written.
+                    watcher.abort();
+                }
+            }
+
+            ToWorker::SendTurn {
+                session_id,
+                message,
+            } => {
+                if let Err(e) =
+                    structured::tell(&session_id, &agentd::ToAgent::Send { message }).await
+                {
+                    tracing::warn!(session = %session_id, "sending a turn: {e:#}");
+                    out.send(ToServer::Error {
+                        session_id: Some(session_id),
+                        code: "AgentUnavailable".into(),
+                        message: format!("{e:#}"),
+                    })
+                    .await?;
+                }
+            }
+
+            ToWorker::Answer {
+                session_id,
+                req,
+                result,
+            } => {
+                if let Err(e) =
+                    structured::tell(&session_id, &agentd::ToAgent::Decide { req, result }).await
+                {
+                    tracing::warn!(session = %session_id, "answering: {e:#}");
+                }
+            }
+
+            ToWorker::Interrupt { session_id } => {
+                if let Err(e) = structured::tell(&session_id, &agentd::ToAgent::Interrupt).await {
+                    tracing::warn!(session = %session_id, "interrupting: {e:#}");
                 }
             }
 
@@ -969,9 +1048,25 @@ impl Worker {
         self.emit(&id, EventKind::StepStarted { step: Step::Launch }, out)
             .await?;
 
+        // Whether a session is a conversation or a terminal is decided here,
+        // by whether the agent has a protocol to speak — never by anybody
+        // choosing. There is no mode to explain and none to get wrong, and the
+        // terminal stops being an option for an agent the moment it stops
+        // needing to be one.
+        let structured = spec.agent.launch_headless(id.as_str()).is_some();
+
         // The agent runs under tmux so it outlives this worker, this
-        // connection, and the laptop that started it.
-        tmux.start(&path, &spec.agent.launch(&spec.prompt), &env)
+        // connection, and the laptop that started it. In a structured session
+        // tmux supervises the supervisor rather than the agent, which changes
+        // nothing about that: the process tree still has tmux at the top.
+        let command = if structured {
+            let exe = std::env::current_exe().context("finding this worker's own path")?;
+            structured::tmux_command(&exe, &id, &path, spec.agent)
+        } else {
+            spec.agent.launch(&spec.prompt)
+        };
+
+        tmux.start(&path, &command, &env)
             .await
             .with_context(|| format!("starting {}", spec.agent.label()))?;
 
@@ -985,6 +1080,26 @@ impl Worker {
         .await?;
         self.emit(&id, EventKind::AgentLaunched { agent: spec.agent }, out)
             .await?;
+
+        // An interactive agent was handed the prompt on its command line. This
+        // one reads messages, so the first one has to be sent — after waiting
+        // for it to be listening, because a turn written into a socket nobody
+        // has bound yet is simply lost.
+        if structured {
+            structured::wait_until_listening(&id)
+                .await
+                .context("waiting for the agent to start")?;
+            if !spec.prompt.trim().is_empty() {
+                structured::tell(
+                    &id,
+                    &agentd::ToAgent::Send {
+                        message: ft_core::turn::user_message(&spec.prompt),
+                    },
+                )
+                .await
+                .context("sending the first turn")?;
+            }
+        }
 
         self.store.set_status(&id, SessionStatus::Working).await?;
         self.emit(
