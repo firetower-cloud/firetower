@@ -24,8 +24,12 @@ export default function Agents() {
       onSuccess: () => queryClient.invalidateQueries({ queryKey: getListAgentsQueryKey() }),
     });
 
-  const configured = agents.filter((a) => a.needsCredential && a.mode).length;
-  const waiting = agents.filter((a) => a.needsCredential && !a.mode).length;
+  // Only the ones Firetower can actually run. Counting an agent it has no
+  // driver for as "still needs a credential" sends somebody to configure a
+  // thing that would not start afterwards.
+  const runnable = agents.filter((a) => a.supported);
+  const configured = runnable.filter((a) => a.needsCredential && a.mode).length;
+  const waiting = runnable.filter((a) => a.needsCredential && !a.mode).length;
 
   return (
     <div className="max-w-[900px] px-8 pt-8 pb-24">
@@ -83,12 +87,12 @@ function AgentRow({
       <div className="flex items-center gap-3">
         <span className="text-[13.5px] text-bone">{agent.label}</span>
         <Mode agent={agent} />
-        {agent.needsCredential && (
+        {agent.supported && agent.needsCredential && (
           <button onClick={onConfigure} className="ml-auto text-[11.5px] text-mute transition-colors hover:text-ember">
             {agent.mode ? "Change" : "Connect"}
           </button>
         )}
-        {agent.mode && agent.needsCredential && (
+        {agent.supported && agent.mode && agent.needsCredential && (
           <button
             onClick={() =>
               forget.mutate(
@@ -105,6 +109,14 @@ function AgentRow({
           </button>
         )}
       </div>
+
+      {!agent.supported && (
+        <p className="mt-2 max-w-[62ch] text-[12.5px] leading-[1.5] text-mute">
+          Firetower has no driver for {agent.label} yet, so it cannot start a session on
+          one. It is listed because it may be installed on your hosts — that is worth
+          seeing, and it is what a driver would use.
+        </p>
+      )}
 
       <div className="mt-3 border-t border-line pt-3">
         <div className="eyebrow mb-2">
@@ -150,6 +162,11 @@ function AgentRow({
 
 /** What the row says about how this agent authenticates. */
 function Mode({ agent }: { agent: AgentView }) {
+  // Before anything about credentials, because none of it applies: an agent
+  // Firetower cannot drive will not start whatever you authenticate it with.
+  if (!agent.supported) {
+    return <Tag warn>not supported yet</Tag>;
+  }
   if (!agent.needsCredential) {
     return <Tag>nothing to authenticate</Tag>;
   }

@@ -93,6 +93,13 @@ pub struct AgentView {
     pub credential_set: bool,
     /// True when nothing needs configuring, which is only the plain shell.
     pub needs_credential: bool,
+    /// Whether Firetower can actually run this one.
+    ///
+    /// An agent Firetower has no driver for is still listed — it is installed
+    /// on your hosts and you can see that it is — but a session cannot be
+    /// started on it, and a row that does not say so is a row that lets
+    /// somebody find out the hard way.
+    pub supported: bool,
     /// What to run locally to get a token, when this agent works that way.
     pub token_command: Option<String>,
     pub hosts: Vec<AgentOnHost>,
@@ -160,6 +167,7 @@ pub(super) async fn list_agents(State(state): State<AppState>) -> ApiResult<Json
             // Whether one is set, never the value itself.
             credential_set,
             needs_credential: kind.needs_credential(),
+            supported: kind.speaks_a_protocol(),
             // What to run, and where. The command happens on your own machine
             // because that is where a browser is.
             token_command: kind.token_setup().map(|(cmd, _)| cmd.to_string()),

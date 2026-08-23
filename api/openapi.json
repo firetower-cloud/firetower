@@ -10,7 +10,7 @@
       "name": "AGPL-3.0-only",
       "identifier": "AGPL-3.0-only"
     },
-    "version": "0.7.0"
+    "version": "0.8.0"
   },
   "paths": {
     "/api/v1/agents": {
@@ -2930,6 +2930,7 @@
           "enabled",
           "credentialSet",
           "needsCredential",
+          "supported",
           "hosts"
         ],
         "properties": {
@@ -2966,6 +2967,10 @@
           "needsCredential": {
             "type": "boolean",
             "description": "True when nothing needs configuring, which is only the plain shell."
+          },
+          "supported": {
+            "type": "boolean",
+            "description": "Whether Firetower can actually run this one.\n\nAn agent Firetower has no driver for is still listed — it is installed\non your hosts and you can see that it is — but a session cannot be\nstarted on it, and a row that does not say so is a row that lets\nsomebody find out the hard way."
           },
           "tokenCommand": {
             "type": [

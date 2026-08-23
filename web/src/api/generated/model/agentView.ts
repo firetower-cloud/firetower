@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.7.0
+ * OpenAPI spec version: 0.8.0
  */
 import type { Agent } from './agent';
 import type { AgentMode } from './agentMode';
@@ -28,6 +28,15 @@ export interface AgentView {
   mode?: null | AgentMode;
   /** True when nothing needs configuring, which is only the plain shell. */
   needsCredential: boolean;
+  /**
+     * Whether Firetower can actually run this one.
+     *
+     * An agent Firetower has no driver for is still listed — it is installed
+     * on your hosts and you can see that it is — but a session cannot be
+     * started on it, and a row that does not say so is a row that lets
+     * somebody find out the hard way.
+     */
+  supported: boolean;
   /**
      * What to run locally to get a token, when this agent works that way.
      * @nullable
