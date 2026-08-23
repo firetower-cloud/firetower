@@ -25,6 +25,7 @@ const MAX_DOWNLOAD: u64 = 100 * 1_048_576;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::{mpsc, Mutex};
 
+pub mod agentd;
 pub mod agents;
 pub mod askpass;
 pub mod attach;
@@ -374,7 +375,11 @@ impl Worker {
                 // Typed characters, verbatim — including the ones that mean
                 // "stop", which is half the reason a terminal is the interface.
                 if let Some(bytes) = ft_proto::decode(&data) {
-                    if let Some(a) = self.attached.lock().await.get(&terminal_key(&session_id, pty))
+                    if let Some(a) = self
+                        .attached
+                        .lock()
+                        .await
+                        .get(&terminal_key(&session_id, pty))
                     {
                         if let Err(e) = a.write(&bytes) {
                             tracing::warn!(session = %session_id, "sending input: {e:#}");
@@ -389,7 +394,12 @@ impl Worker {
                 cols,
                 rows,
             } => {
-                if let Some(a) = self.attached.lock().await.get(&terminal_key(&session_id, pty)) {
+                if let Some(a) = self
+                    .attached
+                    .lock()
+                    .await
+                    .get(&terminal_key(&session_id, pty))
+                {
                     if let Err(e) = a.resize(cols, rows) {
                         tracing::warn!(session = %session_id, "resizing: {e:#}");
                     }
@@ -471,7 +481,11 @@ impl Worker {
     /// Directories first, then files, each alphabetically — the order somebody
     /// scanning for a name expects, rather than whatever the filesystem hands
     /// back.
-    async fn list_files(&self, session_id: &SessionId, path: &str) -> Result<Vec<ft_core::FileEntry>> {
+    async fn list_files(
+        &self,
+        session_id: &SessionId,
+        path: &str,
+    ) -> Result<Vec<ft_core::FileEntry>> {
         let workspace = self.workspace_of(session_id).await?;
         let dir = inside(&workspace, path)?;
 
@@ -497,7 +511,10 @@ impl Worker {
                 name: entry.file_name().to_string_lossy().to_string(),
                 directory: meta.is_dir(),
                 size: if meta.is_dir() { 0 } else { meta.len() },
-                modified: meta.modified().ok().map(chrono::DateTime::<chrono::Utc>::from),
+                modified: meta
+                    .modified()
+                    .ok()
+                    .map(chrono::DateTime::<chrono::Utc>::from),
                 link,
             });
 
@@ -699,7 +716,9 @@ impl Worker {
             tokio::fs::create_dir_all(parent).await.ok();
         }
 
-        let existing = tokio::fs::read_to_string(&exclude).await.unwrap_or_default();
+        let existing = tokio::fs::read_to_string(&exclude)
+            .await
+            .unwrap_or_default();
         if existing.lines().any(|line| line.trim() == path) {
             return;
         }
@@ -1349,8 +1368,13 @@ mod tests {
         git(&["add", "-A"], &mirror);
         git(
             &[
-                "-c", "user.email=a@b", "-c", "user.name=t",
-                "commit", "-qm", "init",
+                "-c",
+                "user.email=a@b",
+                "-c",
+                "user.name=t",
+                "commit",
+                "-qm",
+                "init",
             ],
             &mirror,
         );
@@ -1364,7 +1388,10 @@ mod tests {
             &ft_proto::EnvFile {
                 path: "config/.env".into(),
                 variables: vec![
-                    ("DATABASE_URL".into(), "postgres://user:pa'ss@host/db".into()),
+                    (
+                        "DATABASE_URL".into(),
+                        "postgres://user:pa'ss@host/db".into(),
+                    ),
                     ("NOTE".into(), "two words # not a comment".into()),
                 ],
             },
@@ -1375,7 +1402,10 @@ mod tests {
         let written = std::fs::read_to_string(workspace.join("config/.env")).unwrap();
         let read_back = ft_core::dotenv::parse(&written);
         assert_eq!(read_back.variables.len(), 2);
-        assert_eq!(read_back.variables[0].value, "postgres://user:pa'ss@host/db");
+        assert_eq!(
+            read_back.variables[0].value,
+            "postgres://user:pa'ss@host/db"
+        );
         assert_eq!(read_back.variables[1].value, "two words # not a comment");
 
         let ignored = git(&["check-ignore", "config/.env"], &workspace);
@@ -1397,13 +1427,20 @@ mod tests {
         let common = git(&["rev-parse", "--git-common-dir"], &workspace);
         let common = PathBuf::from(String::from_utf8_lossy(&common.stdout).trim().to_string());
         let exclude = std::fs::read_to_string(
-            if common.is_absolute() { common } else { workspace.join(common) }
-                .join("info")
-                .join("exclude"),
+            if common.is_absolute() {
+                common
+            } else {
+                workspace.join(common)
+            }
+            .join("info")
+            .join("exclude"),
         )
         .unwrap();
         assert_eq!(
-            exclude.lines().filter(|l| l.trim() == "config/.env").count(),
+            exclude
+                .lines()
+                .filter(|l| l.trim() == "config/.env")
+                .count(),
             1,
             "and only once"
         );

@@ -13,6 +13,9 @@ serde.workspace = true
 # The normaliser reads an agent's output, which is JSON, so this is no
 # longer only a test concern.
 serde_json.workspace = true
+# An agent that wants a UUID for its session gets one derived from ours,
+# so resuming needs nothing stored. See `agent_session_uuid`.
+sha2.workspace = true
 thiserror.workspace = true
 ulid.workspace = true
 chrono.workspace = true

@@ -114,6 +114,60 @@ impl Agent {
         }
     }
 
+    /// The command line for driving this agent through a structured protocol
+    /// rather than a terminal.
+    ///
+    /// `None` means this agent has no such protocol here yet, which is an
+    /// answer rather than a failure: it says the session has to run the
+    /// interactive way.
+    ///
+    /// Unlike [`launch`](Agent::launch) this is argv, not a shell line. There
+    /// is no shell in the way — the daemon holds the pipes itself — so there is
+    /// nothing to quote and nothing that could be made to run.
+    ///
+    /// Two flags are worth explaining because they are not obvious:
+    ///
+    /// - `--replay-user-messages` echoes our own turns back out, so the log the
+    ///   worker keeps is the whole conversation rather than half of it.
+    /// - `--session-id` fixes the identifier up front instead of learning it
+    ///   afterwards, which is what makes a session resumable even if the first
+    ///   thing that happens is a crash.
+    ///
+    /// `--bare` is deliberately absent. It skips hooks, skills, MCP servers and
+    /// `CLAUDE.md` — everything that makes an agent useful in somebody's actual
+    /// repository — and refuses to read a subscription login.
+    pub fn launch_headless(&self, session_id: &str) -> Option<Vec<String>> {
+        let agent_session = agent_session_uuid(session_id);
+        match self {
+            Agent::ClaudeCode => Some(
+                [
+                    self.command(),
+                    "-p",
+                    "--input-format",
+                    "stream-json",
+                    "--output-format",
+                    "stream-json",
+                    "--include-partial-messages",
+                    "--verbose",
+                    "--replay-user-messages",
+                    "--session-id",
+                    &agent_session,
+                    // Temporary. Until the permission tool is wired up there is
+                    // nothing to answer a prompt, and an agent that asked would
+                    // wait for somebody who cannot reach it. Narrower than the
+                    // interactive default rather than wider: this approves
+                    // edits, not commands.
+                    "--permission-mode",
+                    "acceptEdits",
+                ]
+                .iter()
+                .map(|s| s.to_string())
+                .collect(),
+            ),
+            Agent::Codex | Agent::Shell => None,
+        }
+    }
+
     /// Whether authenticating this one is even a question.
     pub fn needs_credential(&self) -> bool {
         !matches!(self, Agent::Shell)
@@ -595,6 +649,45 @@ pub enum AgentMode {
     /// Distinct from an absent mode, which means nobody has configured this
     /// agent yet — the response carries `null` for that.
     NotNeeded,
+}
+
+
+/// The identifier an agent is told to call its own session.
+///
+/// Firetower names sessions with a ULID, so `s_01k…` — and Claude Code will not
+/// accept that: it wants a UUID and refuses to start otherwise, which is the
+/// kind of thing only a real session tells you.
+///
+/// Derived from the Firetower id rather than generated, so it is the same every
+/// time. That is what lets a session be resumed without having stored anything:
+/// the name is recomputed, not remembered.
+///
+/// Not a UUIDv5 — that is defined over SHA-1 and this is SHA-256 — so it is
+/// stamped as version 8, which is the one reserved for exactly this.
+pub fn agent_session_uuid(session_id: &str) -> String {
+    use sha2::{Digest, Sha256};
+
+    let digest = Sha256::new()
+        .chain_update(b"firetower/agent-session/")
+        .chain_update(session_id.as_bytes())
+        .finalize();
+
+    let mut bytes = [0u8; 16];
+    bytes.copy_from_slice(&digest[..16]);
+    // Version 8, custom.
+    bytes[6] = (bytes[6] & 0x0f) | 0x80;
+    // Variant 1, the usual one.
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+
+    let hex: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
+    format!(
+        "{}-{}-{}-{}-{}",
+        &hex[0..8],
+        &hex[8..12],
+        &hex[12..16],
+        &hex[16..20],
+        &hex[20..32]
+    )
 }
 
 /// What a host reported about an agent, last time we asked.

@@ -27,6 +27,9 @@ tokio = { version = "1", features = [
   "macros",
   "process",
   "io-util",
+  # A session's agent is reached over a unix socket in its own workspace —
+  # a file, not a port, so a worker still opens nothing on the network.
+  "net",
   "signal",
   "time",
   "sync",
