@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   useSendTurn,
   useInterruptSession,
@@ -81,13 +81,32 @@ export function Chat({
    * understand nothing it does not already. Whatever is in the composer goes
    * with them, so "and also, please…" is one send rather than two.
    */
-  const sendNotes = () => {
+  const sendNotes = useCallback(() => {
     if (send.isPending || notes.length === 0) return;
     const text = asMessage(notes);
     clear();
     echo(text, []);
     send.mutate({ id: sessionId, data: { text, images: [] } });
-  };
+  }, [send, notes, clear, echo, sessionId]);
+
+  /**
+   * ⌘↵ sends the notes.
+   *
+   * Captured rather than bubbled, because the composer takes plain Enter and
+   * would otherwise send an empty draft first. While there are notes waiting,
+   * they are what the modifier means.
+   */
+  useEffect(() => {
+    if (notes.length === 0) return;
+    const key = (e: KeyboardEvent) => {
+      if (e.key !== "Enter" || !(e.metaKey || e.ctrlKey)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      sendNotes();
+    };
+    window.addEventListener("keydown", key, true);
+    return () => window.removeEventListener("keydown", key, true);
+  }, [notes.length, sendNotes]);
 
   /**
    * Change a setting, by saying so to the agent.
@@ -187,9 +206,13 @@ export function Chat({
             <button
               onClick={sendNotes}
               disabled={!live || send.isPending}
-              className="ml-auto min-h-[32px] rounded-[8px] bg-ember px-3.5 text-[13px] font-medium text-ground disabled:opacity-40"
+              title="Send them (⌘↵)"
+              className="ml-auto flex min-h-[32px] items-center gap-2 rounded-[8px] bg-ember px-3.5 text-[13px] font-medium text-ground disabled:opacity-40"
             >
               Send them
+              <span aria-hidden className="font-mono text-[12px] opacity-60">
+                ⌘↵
+              </span>
             </button>
           </div>
         )}
@@ -276,6 +299,10 @@ function Node({
   // Only what the agent said can be annotated. A note on your own message is a
   // note to yourself, and a note on a tool's output is a note about something
   // the agent did not write.
+  // What somebody was asked, and what they said. Its own shape because the
+  // interesting half is the answer, and a tool card puts that behind a fold.
+  if (item.kind === "Question") return <Answered item={item} />;
+
   if (item.kind === "AssistantMessage") {
     return (
       <Says
@@ -408,6 +435,70 @@ function Thought({ item }: { item: Item }) {
       )}
     </li>
   );
+}
+
+/**
+ * A question the agent asked, and what it was told.
+ *
+ * The card that took the answer lives above the composer and is gone the
+ * moment it is answered — which left the answer nowhere, while the agent went
+ * on to act on it. This is where it stays.
+ *
+ * Questions come from the tool's input, which is structured. The answers come
+ * from its result, which is a sentence — so they are read out of it where that
+ * works and shown as the sentence where it does not. A driver that words it
+ * differently loses the arrow, not the answer.
+ */
+function Answered({ item }: { item: Item }) {
+  const asked = (item.input as { questions?: { question: string }[] } | undefined)?.questions ?? [];
+  const said = answers(item.output);
+
+  // Nothing to line up against: no input, or a result we cannot read. Whatever
+  // the agent said happened is better than nothing at all.
+  if (asked.length === 0) {
+    return (
+      <li className="node">
+        <span className="eyebrow">Asked</span>
+        <p className="mt-1 max-w-[72ch] text-[13.5px] text-dim">{item.output ?? "…"}</p>
+      </li>
+    );
+  }
+
+  return (
+    <li className="node">
+      <span className="eyebrow">Asked</span>
+      <ol className="mt-1.5 flex max-w-[72ch] flex-col gap-2">
+        {asked.map((q) => (
+          <li key={q.question}>
+            <p className="text-[13.5px] text-mute">{q.question}</p>
+            <p className="mt-0.5 flex gap-1.5 text-body text-text">
+              <span aria-hidden className="text-ember">
+                ↳
+              </span>
+              <span className="min-w-0">{said[q.question] ?? "—"}</span>
+            </p>
+          </li>
+        ))}
+      </ol>
+    </li>
+  );
+}
+
+/**
+ * The answers, out of the sentence the tool reports.
+ *
+ * Claude Code answers with `"the question"="what was chosen"`, one pair per
+ * question, inside prose. Reading the pairs out is a small guess about wording;
+ * getting it wrong costs the arrow and nothing else, because the caller falls
+ * back to showing the sentence.
+ */
+function answers(output?: string): Record<string, string> {
+  if (!output) return {};
+  const found: Record<string, string> = {};
+  for (const [, question, answer] of output.matchAll(/"([^"]+)"\s*=\s*"([^"]*)"/g)) {
+    found[question] = answer;
+  }
+  return found;
 }
 
 /** What a tool did, as a word rather than its name. */
@@ -718,7 +809,18 @@ function Questions({
   };
 
   return (
-    <div className="mb-4 rounded-[12px] border border-ember-deep bg-panel p-4">
+    // ⌘↵ answers, from anywhere inside the card — which is where the cursor is
+    // once somebody has picked an option or started typing one. Scoped to the
+    // card rather than the window so it cannot fire for a question nobody is
+    // looking at.
+    <div
+      onKeyDown={(e) => {
+        if (e.key !== "Enter" || !(e.metaKey || e.ctrlKey) || !ready) return;
+        e.preventDefault();
+        send();
+      }}
+      className="mb-4 rounded-[12px] border border-ember-deep bg-panel p-4"
+    >
       {asking.questions.map((q) => {
         const picked = chosen[q.question] ?? [];
         const mine = written[q.question];
@@ -785,9 +887,13 @@ function Questions({
       <button
         onClick={send}
         disabled={!ready}
-        className="min-h-[44px] w-full rounded-[8px] bg-ember px-4 text-[13.5px] font-medium text-ground disabled:opacity-40 sm:w-auto"
+        title="Answer (⌘↵)"
+        className="flex min-h-[44px] w-full items-center justify-center gap-2 rounded-[8px] bg-ember px-4 text-[13.5px] font-medium text-ground disabled:opacity-40 sm:w-auto"
       >
         Answer
+        <span aria-hidden className="font-mono text-[12px] opacity-60">
+          ⌘↵
+        </span>
       </button>
     </div>
   );

@@ -100,6 +100,12 @@ pub enum ItemKind {
     WebSearch,
     /// Handing work to a subagent.
     SubagentCall,
+    /// Asking the person a question with options, and what they answered.
+    ///
+    /// Its own kind because it is the one tool call whose interesting half is
+    /// the *result*: what the agent asked matters far less than what somebody
+    /// told it, and a generic card puts that inside a fold.
+    Question,
     /// A tool we have no shape for. Draws generically, on purpose.
     Unknown,
 }

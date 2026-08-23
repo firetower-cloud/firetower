@@ -421,6 +421,22 @@ fn tools_we_have_a_shape_for_get_it() {
     assert_eq!(classify("Grep"), ItemKind::FileRead);
     assert_eq!(classify("WebSearch"), ItemKind::WebSearch);
     assert_eq!(classify("mcp__linear__create_issue"), ItemKind::McpToolCall);
+    assert_eq!(classify("AskUserQuestion"), ItemKind::Question);
+}
+
+#[test]
+fn a_question_is_not_a_command() {
+    // It carries no path and runs nothing, so every generic branch below would
+    // have drawn it as a mystery tool with the answer folded away inside it.
+    assert_eq!(classify("AskUserQuestion"), ItemKind::Question);
+    assert_eq!(classify("ask_user_question"), ItemKind::Question);
+    assert_eq!(classify("user_question"), ItemKind::Question);
+    // Except from a server, where which server asked is the more useful thing
+    // to draw — the MCP check comes first for exactly that reason.
+    assert_eq!(
+        classify("mcp__something__ask_question"),
+        ItemKind::McpToolCall
+    );
 }
 
 #[test]

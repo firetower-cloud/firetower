@@ -30,5 +30,6 @@ export const ItemKind = {
   McpToolCall: 'McpToolCall',
   WebSearch: 'WebSearch',
   SubagentCall: 'SubagentCall',
+  Question: 'Question',
   Unknown: 'Unknown',
 } as const;

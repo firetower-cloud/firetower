@@ -50,6 +50,11 @@ pub fn classify(tool_name: &str) -> ItemKind {
     if name == "task" || name == "agent" || name.contains("subagent") {
         return ItemKind::SubagentCall;
     }
+    // Before the generic checks: this is a question put to a person, not a
+    // tool that did something.
+    if name.contains("question") && (name.contains("ask") || name.contains("user")) {
+        return ItemKind::Question;
+    }
     if name.contains("bash") || name.contains("command") || name.contains("shell") {
         return ItemKind::CommandExecution;
     }
