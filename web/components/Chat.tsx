@@ -222,6 +222,7 @@ export function Chat({
           mode={conversation.mode}
           effort={conversation.effort}
           usage={conversation.usage}
+          limits={conversation.limits}
           branch={branch}
           repo={repo}
           onSend={submit}

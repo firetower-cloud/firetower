@@ -30,8 +30,9 @@ use std::collections::HashMap;
 use serde_json::Value;
 
 use crate::turn::{
-    ItemId, ItemKind, ItemStatus, PlanStep, PlanStepStatus, Question, QuestionOption, RawSource,
-    RequestId, RequestKind, SlashCommand, StreamKind, TaskId, TurnEvent, TurnId, TurnStatus, Usage,
+    ItemId, ItemKind, ItemStatus, ModelUsage, PlanStep, PlanStepStatus, Question, QuestionOption,
+    RawSource, RequestId, RequestKind, SlashCommand, StreamKind, TaskId, TurnEvent, TurnId,
+    TurnStatus, Usage,
 };
 
 /// What a tool's name suggests it does.
@@ -159,7 +160,11 @@ impl ClaudeNormaliser {
             Some("assistant") => self.assistant(v, &mut out),
             Some("user") => self.user(v, &mut out),
             Some("result") => self.result(v, &mut out),
-            // `rate_limit_event` and anything else new. Kept, not named.
+            Some("rate_limit_event") => match limits(v) {
+                Some(event) => out.push(event),
+                None => out.push(raw(v)),
+            },
+            // Anything else new. Kept, not named.
             _ => out.push(raw(v)),
         }
         out
@@ -736,9 +741,88 @@ fn usage(v: &Value) -> Option<Usage> {
             .and_then(Value::as_u64)
             .unwrap_or(0),
         cache_read_tokens: usage.get("cache_read_input_tokens").and_then(Value::as_u64),
+        cache_write_tokens: usage
+            .get("cache_creation_input_tokens")
+            .and_then(Value::as_u64),
+        thinking_tokens: usage
+            .get("output_tokens_details")
+            .and_then(|d| d.get("thinking_tokens"))
+            .and_then(Value::as_u64),
         context_used,
         context_window,
         cost_usd: v.get("total_cost_usd").and_then(Value::as_f64),
+        models: models(v),
+        duration_ms: v.get("duration_ms").and_then(Value::as_u64),
+        first_token_ms: v.get("ttft_ms").and_then(Value::as_u64),
+        denied: denied(v),
+    })
+}
+
+/// What each model did, biggest bill first.
+///
+/// Ordered rather than left as the agent's map, because the point of the list
+/// is "what am I paying for", and a map has no order at all once it has been
+/// through JSON.
+fn models(v: &Value) -> Vec<ModelUsage> {
+    let Some(per_model) = v.get("modelUsage").and_then(Value::as_object) else {
+        return Vec::new();
+    };
+
+    let mut out: Vec<ModelUsage> = per_model
+        .iter()
+        .map(|(name, model)| {
+            let read = |key: &str| model.get(key).and_then(Value::as_u64).unwrap_or(0);
+            ModelUsage {
+                // The canonical name where there is one, so `claude-opus-5[1m]`
+                // and `claude-opus-5` are not two rows for the same model.
+                model: str_at(model, "canonicalModel")
+                    .unwrap_or(name.as_str())
+                    .to_string(),
+                input_tokens: read("inputTokens"),
+                output_tokens: read("outputTokens"),
+                cache_read_tokens: read("cacheReadInputTokens"),
+                cache_write_tokens: read("cacheCreationInputTokens"),
+                context_window: model.get("contextWindow").and_then(Value::as_u64),
+                cost_usd: model.get("costUSD").and_then(Value::as_f64),
+            }
+        })
+        .collect();
+
+    out.sort_by(|a, b| {
+        b.cost_usd
+            .unwrap_or(0.0)
+            .total_cmp(&a.cost_usd.unwrap_or(0.0))
+    });
+    out
+}
+
+/// The tools somebody refused during the turn.
+///
+/// Names only. What was refused and why is already in the transcript, on the
+/// card where it was decided; this is the count for a summary.
+fn denied(v: &Value) -> Vec<String> {
+    v.get("permission_denials")
+        .and_then(Value::as_array)
+        .map(|denials| {
+            denials
+                .iter()
+                .filter_map(|d| str_at(d, "tool_name").map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// What the account's limits say, when the agent mentions them.
+///
+/// Deliberately shallow. The agent reports a window, a status and a reset time
+/// and no proportion of anything, so this carries those three and invents
+/// nothing. A bar without a numerator would be a drawing, not a reading.
+fn limits(v: &Value) -> Option<TurnEvent> {
+    let info = v.get("rate_limit_info")?;
+    Some(TurnEvent::Limited {
+        window: str_at(info, "rateLimitType")?.to_string(),
+        status: str_at(info, "status").unwrap_or("unknown").to_string(),
+        resets_at: info.get("resetsAt").and_then(Value::as_i64),
     })
 }
 

@@ -82,6 +82,16 @@ export type Item = {
   images?: Attached[];
 };
 
+/** What the account's limits allow, as far as the agent has said. */
+export type Limits = {
+  /** `five_hour`, and whatever else turns up. */
+  window: string;
+  /** `allowed`, and whatever else turns up. */
+  status: string;
+  /** Unix seconds, when the agent gives one. */
+  resetsAt: number | null;
+};
+
 export type Conversation = {
   items: Item[];
   plan: PlanStep[];
@@ -136,6 +146,14 @@ export type Conversation = {
    * its own window, and adding up deltas would drift.
    */
   usage?: Usage;
+  /**
+   * What the account's own limits say, as of the last time the agent mentioned
+   * them.
+   *
+   * Thin on purpose: a window, whether we are inside it, and when it starts
+   * again. The agent reports no proportion, so nothing here can draw one.
+   */
+  limits?: Limits;
   /** How far we have read. The resume cursor. */
   lastLine: number;
   /** Set when the stream could not be opened or fell over. */
@@ -262,6 +280,13 @@ export function apply(state: Conversation, event: ConversationEvent): Conversati
 
     case "PlanUpdated":
       return { ...state, plan: event.steps, lastLine };
+
+    case "Limited":
+      return {
+        ...state,
+        limits: { window: event.window, status: event.status, resetsAt: event.resetsAt ?? null },
+        lastLine,
+      };
 
     case "RequestOpened":
       // Re-sent whenever a watcher attaches, so the same question can arrive

@@ -95,6 +95,17 @@ export type TurnEvent = {
   steps: PlanStep[];
   type: 'PlanUpdated';
 } | {
+  /**
+     * Unix seconds.
+     * @nullable
+     */
+  resetsAt?: number | null;
+  /** `allowed`, and whatever else turns up. */
+  status: string;
+  type: 'Limited';
+  /** `five_hour`, and whatever else turns up. */
+  window: string;
+} | {
   /** @nullable */
   agent?: string | null;
   description: string;

@@ -52,6 +52,7 @@ export * from './listEventsParams';
 export * from './listFilesParams';
 export * from './listSessionsParams';
 export * from './me';
+export * from './modelUsage';
 export * from './nameOrganization';
 export * from './newEnv';
 export * from './newHost';

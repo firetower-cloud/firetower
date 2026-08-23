@@ -5,6 +5,7 @@
  * The Firetower control plane: API, scheduling, and worker transports.
  * OpenAPI spec version: 0.6.0
  */
+import type { ModelUsage } from './modelUsage';
 
 /**
  * What a turn cost, and how much room is left.
@@ -19,6 +20,16 @@ export interface Usage {
      * @nullable
      */
   cacheReadTokens?: number | null;
+  /**
+     * What was written into the cache on this turn, and billed as such.
+     *
+     * Reported apart from what was read because they cost different amounts
+     * and mean different things: reading is the session being cheap, writing
+     * is it having said something new and large.
+     * @minimum 0
+     * @nullable
+     */
+  cacheWriteTokens?: number | null;
   /**
      * Everything the model had in front of it on the last request.
      *
@@ -41,8 +52,36 @@ export interface Usage {
      * @nullable
      */
   costUsd?: number | null;
+  /** Tools the person refused during the turn. */
+  denied?: string[];
+  /**
+     * How long the turn took, wall clock.
+     * @minimum 0
+     * @nullable
+     */
+  durationMs?: number | null;
+  /**
+     * How long before it said anything.
+     * @minimum 0
+     * @nullable
+     */
+  firstTokenMs?: number | null;
   /** @minimum 0 */
   inputTokens: number;
+  /**
+     * What each model did, when more than one was involved.
+     *
+     * A turn is rarely one model: something small names things and summarises
+     * alongside the one doing the work, and it is on the bill. Totals hide
+     * that; this does not.
+     */
+  models?: ModelUsage[];
   /** @minimum 0 */
   outputTokens: number;
+  /**
+     * Of the output, how much was reasoning rather than answer.
+     * @minimum 0
+     * @nullable
+     */
+  thinkingTokens?: number | null;
 }

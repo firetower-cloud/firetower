@@ -3893,6 +3893,58 @@
           }
         }
       },
+      "ModelUsage": {
+        "type": "object",
+        "description": "One model's share of a turn.",
+        "required": [
+          "model",
+          "inputTokens",
+          "outputTokens",
+          "cacheReadTokens",
+          "cacheWriteTokens"
+        ],
+        "properties": {
+          "cacheReadTokens": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "cacheWriteTokens": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "contextWindow": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "costUsd": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "inputTokens": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "model": {
+            "type": "string",
+            "description": "The canonical name where the agent gives one, so `claude-opus-5[1m]`\nand `claude-opus-5` are not two rows."
+          },
+          "outputTokens": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
       "NameOrganization": {
         "type": "object",
         "required": [
@@ -5206,6 +5258,39 @@
           },
           {
             "type": "object",
+            "description": "What the account's own limits say.\n\nArrives on its own schedule rather than with a turn, and says less than\nit looks like it should: there is a window, whether we are inside it,\nand when it starts again. No proportion — the agent does not send one,\nand a bar drawn without one would be invented.",
+            "required": [
+              "window",
+              "status",
+              "type"
+            ],
+            "properties": {
+              "resetsAt": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "format": "int64",
+                "description": "Unix seconds."
+              },
+              "status": {
+                "type": "string",
+                "description": "`allowed`, and whatever else turns up."
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "Limited"
+                ]
+              },
+              "window": {
+                "type": "string",
+                "description": "`five_hour`, and whatever else turns up."
+              }
+            }
+          },
+          {
+            "type": "object",
             "required": [
               "task",
               "item",
@@ -5341,6 +5426,15 @@
             "description": "Absent when the agent does not say.",
             "minimum": 0
           },
+          "cacheWriteTokens": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "What was written into the cache on this turn, and billed as such.\n\nReported apart from what was read because they cost different amounts\nand mean different things: reading is the session being cheap, writing\nis it having said something new and large.",
+            "minimum": 0
+          },
           "contextUsed": {
             "type": [
               "integer",
@@ -5367,14 +5461,55 @@
             "format": "double",
             "description": "The agent's own estimate, in dollars. Its arithmetic, not ours."
           },
+          "denied": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Tools the person refused during the turn."
+          },
+          "durationMs": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "How long the turn took, wall clock.",
+            "minimum": 0
+          },
+          "firstTokenMs": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "How long before it said anything.",
+            "minimum": 0
+          },
           "inputTokens": {
             "type": "integer",
             "format": "int64",
             "minimum": 0
           },
+          "models": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ModelUsage"
+            },
+            "description": "What each model did, when more than one was involved.\n\nA turn is rarely one model: something small names things and summarises\nalongside the one doing the work, and it is on the bill. Totals hide\nthat; this does not."
+          },
           "outputTokens": {
             "type": "integer",
             "format": "int64",
+            "minimum": 0
+          },
+          "thinkingTokens": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Of the output, how much was reasoning rather than answer.",
             "minimum": 0
           }
         }

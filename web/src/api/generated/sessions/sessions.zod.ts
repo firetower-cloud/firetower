@@ -263,13 +263,31 @@ export const GetConversationQueryParams = zod.object({
 
 export const getConversationResponseEventsItemOneThreeUsageTwoCacheReadTokensMin = 0;
 
+export const getConversationResponseEventsItemOneThreeUsageTwoCacheWriteTokensMin = 0;
+
 export const getConversationResponseEventsItemOneThreeUsageTwoContextUsedMin = 0;
 
 export const getConversationResponseEventsItemOneThreeUsageTwoContextWindowMin = 0;
 
+export const getConversationResponseEventsItemOneThreeUsageTwoDurationMsMin = 0;
+
+export const getConversationResponseEventsItemOneThreeUsageTwoFirstTokenMsMin = 0;
+
 export const getConversationResponseEventsItemOneThreeUsageTwoInputTokensMin = 0;
 
+export const getConversationResponseEventsItemOneThreeUsageTwoModelsItemCacheReadTokensMin = 0;
+
+export const getConversationResponseEventsItemOneThreeUsageTwoModelsItemCacheWriteTokensMin = 0;
+
+export const getConversationResponseEventsItemOneThreeUsageTwoModelsItemContextWindowMin = 0;
+
+export const getConversationResponseEventsItemOneThreeUsageTwoModelsItemInputTokensMin = 0;
+
+export const getConversationResponseEventsItemOneThreeUsageTwoModelsItemOutputTokensMin = 0;
+
 export const getConversationResponseEventsItemOneThreeUsageTwoOutputTokensMin = 0;
+
+export const getConversationResponseEventsItemOneThreeUsageTwoThinkingTokensMin = 0;
 
 export const getConversationResponseEventsItemTwoLineNoMin = 0;
 
@@ -296,11 +314,25 @@ export const GetConversationResponse = zod.object({
   "type": zod.enum(['TurnCompleted']),
   "usage": zod.union([zod.null(),zod.object({
   "cacheReadTokens": zod.int().min(getConversationResponseEventsItemOneThreeUsageTwoCacheReadTokensMin).nullish().describe('Absent when the agent does not say.'),
+  "cacheWriteTokens": zod.int().min(getConversationResponseEventsItemOneThreeUsageTwoCacheWriteTokensMin).nullish().describe('What was written into the cache on this turn, and billed as such.\n\nReported apart from what was read because they cost different amounts\nand mean different things: reading is the session being cheap, writing\nis it having said something new and large.'),
   "contextUsed": zod.int().min(getConversationResponseEventsItemOneThreeUsageTwoContextUsedMin).nullish().describe('Everything the model had in front of it on the last request.\n\nInput plus both kinds of cache plus what it wrote. This is the number\nthat matters to somebody deciding whether a session has room left —\ninput alone reads as almost nothing once caching is working, which is\nexactly when it is least true.'),
   "contextWindow": zod.int().min(getConversationResponseEventsItemOneThreeUsageTwoContextWindowMin).nullish().describe('How much room the model has at all.'),
   "costUsd": zod.number().nullish().describe('The agent\'s own estimate, in dollars. Its arithmetic, not ours.'),
+  "denied": zod.array(zod.string()).optional().describe('Tools the person refused during the turn.'),
+  "durationMs": zod.int().min(getConversationResponseEventsItemOneThreeUsageTwoDurationMsMin).nullish().describe('How long the turn took, wall clock.'),
+  "firstTokenMs": zod.int().min(getConversationResponseEventsItemOneThreeUsageTwoFirstTokenMsMin).nullish().describe('How long before it said anything.'),
   "inputTokens": zod.int().min(getConversationResponseEventsItemOneThreeUsageTwoInputTokensMin),
-  "outputTokens": zod.int().min(getConversationResponseEventsItemOneThreeUsageTwoOutputTokensMin)
+  "models": zod.array(zod.object({
+  "cacheReadTokens": zod.int().min(getConversationResponseEventsItemOneThreeUsageTwoModelsItemCacheReadTokensMin),
+  "cacheWriteTokens": zod.int().min(getConversationResponseEventsItemOneThreeUsageTwoModelsItemCacheWriteTokensMin),
+  "contextWindow": zod.int().min(getConversationResponseEventsItemOneThreeUsageTwoModelsItemContextWindowMin).nullish(),
+  "costUsd": zod.number().nullish(),
+  "inputTokens": zod.int().min(getConversationResponseEventsItemOneThreeUsageTwoModelsItemInputTokensMin),
+  "model": zod.string().describe('The canonical name where the agent gives one, so `claude-opus-5[1m]`\nand `claude-opus-5` are not two rows.'),
+  "outputTokens": zod.int().min(getConversationResponseEventsItemOneThreeUsageTwoModelsItemOutputTokensMin)
+}).describe('One model\'s share of a turn.')).optional().describe('What each model did, when more than one was involved.\n\nA turn is rarely one model: something small names things and summarises\nalongside the one doing the work, and it is on the bill. Totals hide\nthat; this does not.'),
+  "outputTokens": zod.int().min(getConversationResponseEventsItemOneThreeUsageTwoOutputTokensMin),
+  "thinkingTokens": zod.int().min(getConversationResponseEventsItemOneThreeUsageTwoThinkingTokensMin).nullish().describe('Of the output, how much was reasoning rather than answer.')
 }).describe('What a turn cost, and how much room is left.\n\nNot `Eq`, because the cost is a float. Comparing two of these for equality\nis a test convenience, not something to build on.')]).optional()
 }),zod.object({
   "item": zod.string().describe('One thing in the transcript — a message, a thought, a tool call.'),
@@ -364,6 +396,11 @@ export const GetConversationResponse = zod.object({
 }).describe('One line of the agent\'s plan.')),
   "type": zod.enum(['PlanUpdated'])
 }),zod.object({
+  "resetsAt": zod.int().nullish().describe('Unix seconds.'),
+  "status": zod.string().describe('`allowed`, and whatever else turns up.'),
+  "type": zod.enum(['Limited']),
+  "window": zod.string().describe('`five_hour`, and whatever else turns up.')
+}).describe('What the account\'s own limits say.\n\nArrives on its own schedule rather than with a turn, and says less than\nit looks like it should: there is a window, whether we are inside it,\nand when it starts again. No proportion — the agent does not send one,\nand a bar drawn without one would be invented.'),zod.object({
   "agent": zod.string().nullish(),
   "description": zod.string(),
   "item": zod.string().describe('The tool call that spawned it, which is how its items find their way\nhome.'),

@@ -4,6 +4,8 @@ import { useMemo, useRef, useState } from "react";
 import { useAttachFile, useListFiles } from "@/src/api/generated/sessions/sessions";
 import type { Attached, SlashCommand, Usage } from "@/src/api/generated/model";
 import { Picker, MODELS, MODES, EFFORTS } from "@/components/Settings.chat";
+import { Context } from "@/components/Context.chat";
+import type { Limits } from "@/src/api/conversation";
 
 /**
  * Saying something to the agent.
@@ -23,6 +25,7 @@ export function ChatComposer({
   mode,
   effort,
   usage,
+  limits,
   branch,
   repo,
   onSend,
@@ -38,6 +41,8 @@ export function ChatComposer({
   mode?: string;
   effort?: string;
   usage?: Usage;
+  /** What the account's limits allow, when the agent has said. */
+  limits?: Limits;
   branch?: string | null;
   repo?: string | null;
   onSend: (text: string, images: Attached[]) => void;
@@ -333,7 +338,7 @@ export function ChatComposer({
           />
 
           <div className="ml-auto flex items-center gap-3">
-            {usage && <Context usage={usage} />}
+            {usage && <Context usage={usage} limits={limits} />}
             {working ? (
               <button
                 onClick={onStop}
@@ -379,65 +384,6 @@ export function ChatComposer({
       )}
     </div>
   );
-}
-
-/**
- * How full the model's context is.
- *
- * A ring rather than a number, because the number is meaningless — nobody
- * knows what 121,107 of 1,000,000 feels like — and a ring filling up is
- * immediately readable at the size this is drawn. The figure is there on hover
- * for anybody who does want it.
- *
- * Only ember once it is nearly full. Ember is the colour of something wanting
- * a decision, and a context meter at eleven percent is not asking for one.
- */
-function Context({ usage }: { usage: Usage }) {
-  const full = fullness(usage);
-  if (full === undefined) return null;
-
-  const percent = Math.round(full * 100);
-  const R = 8;
-  const circumference = 2 * Math.PI * R;
-  const tight = full > 0.85;
-
-  return (
-    <span
-      title={`Context ${percent}% full${
-        usage.contextUsed && usage.contextWindow
-          ? ` — ${usage.contextUsed.toLocaleString()} of ${usage.contextWindow.toLocaleString()} tokens`
-          : ""
-      }${usage.costUsd ? ` · $${usage.costUsd.toFixed(3)}` : ""}`}
-      className="relative grid h-10 w-10 place-items-center"
-    >
-      <svg viewBox="0 0 20 20" className="h-[21px] w-[21px] -rotate-90">
-        <circle cx="10" cy="10" r={R} fill="none" strokeWidth="2" className="stroke-line" />
-        <circle
-          cx="10"
-          cy="10"
-          r={R}
-          fill="none"
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeDasharray={circumference}
-          strokeDashoffset={circumference * (1 - full)}
-          className={tight ? "stroke-ember" : "stroke-mute"}
-        />
-      </svg>
-      <span
-        className={`absolute font-mono text-[9.5px] ${tight ? "text-ember" : "text-mute"}`}
-      >
-        {percent}
-      </span>
-    </span>
-  );
-}
-
-/** 0 to 1, when the agent has said enough to work it out. */
-function fullness(usage: Usage): number | undefined {
-  const { contextUsed, contextWindow } = usage;
-  if (!contextUsed || !contextWindow) return undefined;
-  return Math.min(1, Math.max(0, contextUsed / contextWindow));
 }
 
 /** A trigger character and what has been typed after it. */

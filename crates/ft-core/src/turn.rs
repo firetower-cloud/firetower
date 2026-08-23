@@ -191,6 +191,16 @@ pub struct Usage {
     /// Absent when the agent does not say.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cache_read_tokens: Option<u64>,
+    /// What was written into the cache on this turn, and billed as such.
+    ///
+    /// Reported apart from what was read because they cost different amounts
+    /// and mean different things: reading is the session being cheap, writing
+    /// is it having said something new and large.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_write_tokens: Option<u64>,
+    /// Of the output, how much was reasoning rather than answer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thinking_tokens: Option<u64>,
     /// Everything the model had in front of it on the last request.
     ///
     /// Input plus both kinds of cache plus what it wrote. This is the number
@@ -203,6 +213,39 @@ pub struct Usage {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context_window: Option<u64>,
     /// The agent's own estimate, in dollars. Its arithmetic, not ours.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cost_usd: Option<f64>,
+    /// What each model did, when more than one was involved.
+    ///
+    /// A turn is rarely one model: something small names things and summarises
+    /// alongside the one doing the work, and it is on the bill. Totals hide
+    /// that; this does not.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub models: Vec<ModelUsage>,
+    /// How long the turn took, wall clock.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub duration_ms: Option<u64>,
+    /// How long before it said anything.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub first_token_ms: Option<u64>,
+    /// Tools the person refused during the turn.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub denied: Vec<String>,
+}
+
+/// One model's share of a turn.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelUsage {
+    /// The canonical name where the agent gives one, so `claude-opus-5[1m]`
+    /// and `claude-opus-5` are not two rows.
+    pub model: String,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub cache_read_tokens: u64,
+    pub cache_write_tokens: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_window: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cost_usd: Option<f64>,
 }
@@ -360,6 +403,23 @@ pub enum TurnEvent {
 
     PlanUpdated {
         steps: Vec<PlanStep>,
+    },
+
+    /// What the account's own limits say.
+    ///
+    /// Arrives on its own schedule rather than with a turn, and says less than
+    /// it looks like it should: there is a window, whether we are inside it,
+    /// and when it starts again. No proportion — the agent does not send one,
+    /// and a bar drawn without one would be invented.
+    #[serde(rename_all = "camelCase")]
+    Limited {
+        /// `five_hour`, and whatever else turns up.
+        window: String,
+        /// `allowed`, and whatever else turns up.
+        status: String,
+        /// Unix seconds.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        resets_at: Option<i64>,
     },
 
     TaskStarted {
