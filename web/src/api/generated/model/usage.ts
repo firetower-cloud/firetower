@@ -7,7 +7,7 @@
  */
 
 /**
- * What a turn cost.
+ * What a turn cost, and how much room is left.
  *
  * Not `Eq`, because the cost is a float. Comparing two of these for equality
  * is a test convenience, not something to build on.
@@ -19,6 +19,23 @@ export interface Usage {
      * @nullable
      */
   cacheReadTokens?: number | null;
+  /**
+     * Everything the model had in front of it on the last request.
+     *
+     * Input plus both kinds of cache plus what it wrote. This is the number
+     * that matters to somebody deciding whether a session has room left —
+     * input alone reads as almost nothing once caching is working, which is
+     * exactly when it is least true.
+     * @minimum 0
+     * @nullable
+     */
+  contextUsed?: number | null;
+  /**
+     * How much room the model has at all.
+     * @minimum 0
+     * @nullable
+     */
+  contextWindow?: number | null;
   /**
      * The agent's own estimate, in dollars. Its arithmetic, not ours.
      * @nullable

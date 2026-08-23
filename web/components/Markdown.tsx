@@ -84,8 +84,11 @@ export const Markdown = memo(function Markdown({ children }: { children: string 
             // for an unclosed fence too — which is most of a streaming turn.
             const fenced = /language-/.test(className ?? "");
             if (!fenced) {
+              // A chip rather than a tint. Agents write paths and symbols
+              // inline constantly, and at this density a background alone does
+              // not separate them from the sentence around them.
               return (
-                <code className="rounded-[3px] bg-raise px-1 py-[1px] font-mono text-[12px] text-bone">
+                <code className="rounded-[5px] border border-line bg-raise px-[5px] py-[1.5px] font-mono text-[11.5px] whitespace-nowrap text-bone">
                   {children}
                 </code>
               );
@@ -97,7 +100,7 @@ export const Markdown = memo(function Markdown({ children }: { children: string 
             );
           },
           pre: ({ children }) => (
-            <pre className="mb-2 overflow-x-auto rounded-[5px] border border-line bg-ground p-2.5 last:mb-0">
+            <pre className="mb-2.5 overflow-x-auto rounded-[8px] border border-line bg-ground px-3 py-2.5 last:mb-0">
               {children}
             </pre>
           ),
@@ -115,7 +118,7 @@ export const Markdown = memo(function Markdown({ children }: { children: string 
             </th>
           ),
           td: ({ children }) => (
-            <td className="border-b border-line-soft px-2 py-1 align-top">{children}</td>
+            <td className="border-b border-line-soft px-2 py-1.5 align-top">{children}</td>
           ),
         }}
       >

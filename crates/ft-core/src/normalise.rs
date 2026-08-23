@@ -172,7 +172,9 @@ impl ClaudeNormaliser {
             Some("init") => out.push(TurnEvent::SessionConfigured {
                 model: str_at(v, "model").unwrap_or_default().to_string(),
                 tools: string_list(v.get("tools")),
-                commands: slash_commands(v.get("commands")),
+                // `slash_commands`, not `commands`. Reading the wrong key cost
+                // nothing visible until something started drawing the menu.
+                commands: slash_commands(v.get("slash_commands")),
             }),
             Some("task_started") => {
                 let (Some(task_id), Some(tool_use_id)) =
@@ -673,6 +675,7 @@ fn tool_result_text(result: &Value) -> Option<String> {
 
 fn usage(v: &Value) -> Option<Usage> {
     let usage = v.get("usage")?;
+    let (context_used, context_window) = context(v);
     Some(Usage {
         input_tokens: usage
             .get("input_tokens")
@@ -683,8 +686,49 @@ fn usage(v: &Value) -> Option<Usage> {
             .and_then(Value::as_u64)
             .unwrap_or(0),
         cache_read_tokens: usage.get("cache_read_input_tokens").and_then(Value::as_u64),
+        context_used,
+        context_window,
         cost_usd: v.get("total_cost_usd").and_then(Value::as_f64),
     })
+}
+
+/// How full the model's context got, and how big it is.
+///
+/// Read from the per-model breakdown rather than the totals, because a turn can
+/// involve more than one model — a small one summarising or naming things
+/// alongside the one doing the work — and adding their tokens together
+/// describes nothing. The one that matters is whichever did the most, which is
+/// also the one whose window somebody is about to run out of.
+///
+/// Both `None` when the agent does not report a window. Better than guessing it
+/// from a model name, which changes.
+fn context(v: &Value) -> (Option<u64>, Option<u64>) {
+    let Some(per_model) = v.get("modelUsage").and_then(Value::as_object) else {
+        return (None, None);
+    };
+
+    let mut busiest: Option<(u64, u64)> = None;
+    for model in per_model.values() {
+        let read = |key: &str| model.get(key).and_then(Value::as_u64).unwrap_or(0);
+        // Everything the model had in front of it, not just what was billed as
+        // new. Input alone reads as almost nothing once caching is working,
+        // which is exactly when it is least true.
+        let used = read("inputTokens")
+            + read("cacheReadInputTokens")
+            + read("cacheCreationInputTokens")
+            + read("outputTokens");
+        let Some(window) = model.get("contextWindow").and_then(Value::as_u64) else {
+            continue;
+        };
+        if busiest.is_none_or(|(most, _)| used > most) {
+            busiest = Some((used, window));
+        }
+    }
+
+    match busiest {
+        Some((used, window)) => (Some(used), Some(window)),
+        None => (None, None),
+    }
 }
 
 /// The agent's todo list, as a plan.

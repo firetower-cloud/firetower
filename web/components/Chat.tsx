@@ -36,7 +36,17 @@ import type {
  * The vocabulary, kept everywhere below: **mono is what the machine said, sans
  * is speech, narrow is a label.**
  */
-export function Chat({ sessionId, live }: { sessionId: string; live: boolean }) {
+export function Chat({
+  sessionId,
+  live,
+  branch,
+  repo,
+}: {
+  sessionId: string;
+  live: boolean;
+  branch?: string | null;
+  repo?: string | null;
+}) {
   const { conversation, echo, settle } = useConversation(sessionId, live);
   const send = useSendTurn();
   const interrupt = useInterruptSession();
@@ -100,7 +110,7 @@ export function Chat({ sessionId, live }: { sessionId: string; live: boolean }) 
         <div ref={foot} />
       </div>
 
-      <div className="shrink-0 border-t border-line pt-3">
+      <div className="shrink-0 pt-3">
         {/* Above the composer: the thing to deal with before saying anything
             else, and on a phone the part a thumb already reaches. */}
         {conversation.questions.map((asking) => (
@@ -125,6 +135,10 @@ export function Chat({ sessionId, live }: { sessionId: string; live: boolean }) 
           live={live}
           working={conversation.working}
           commands={conversation.commands}
+          model={conversation.model}
+          usage={conversation.usage}
+          branch={branch}
+          repo={repo}
           onSend={submit}
           onStop={() => interrupt.mutate({ id: sessionId })}
           failed={send.isError}
@@ -158,15 +172,14 @@ function Node({ item, tasks, items }: { item: Item; tasks: Task[]; items: Item[]
   // gets no marker. The most common thing on screen is the quietest.
   if (item.kind === "AssistantMessage") return <Says item={item} />;
 
+  // What somebody typed is theirs, and reads as an aside rather than as another
+  // step in the run — so it gets a bubble and steps off the rail.
   if (item.kind === "UserMessage") {
     return (
-      <li className="node">
-        <span className="mark" data-state="you">
-          ◆
-        </span>
-        <p className="max-w-[74ch] text-[13.5px] leading-[1.55] whitespace-pre-wrap text-bone">
-          {item.text}
-        </p>
+      <li className="node flex justify-end">
+        <div className="max-w-[80%] rounded-[12px] rounded-br-[4px] bg-raise px-3 py-2">
+          <p className="text-[13.5px] leading-[1.5] whitespace-pre-wrap text-bone">{item.text}</p>
+        </div>
       </li>
     );
   }

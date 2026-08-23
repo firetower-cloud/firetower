@@ -179,7 +179,7 @@ pub enum Decision {
     },
 }
 
-/// What a turn cost.
+/// What a turn cost, and how much room is left.
 ///
 /// Not `Eq`, because the cost is a float. Comparing two of these for equality
 /// is a test convenience, not something to build on.
@@ -191,9 +191,31 @@ pub struct Usage {
     /// Absent when the agent does not say.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cache_read_tokens: Option<u64>,
+    /// Everything the model had in front of it on the last request.
+    ///
+    /// Input plus both kinds of cache plus what it wrote. This is the number
+    /// that matters to somebody deciding whether a session has room left —
+    /// input alone reads as almost nothing once caching is working, which is
+    /// exactly when it is least true.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_used: Option<u64>,
+    /// How much room the model has at all.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_window: Option<u64>,
     /// The agent's own estimate, in dollars. Its arithmetic, not ours.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cost_usd: Option<f64>,
+}
+
+impl Usage {
+    /// How full the context is, 0 to 1.
+    ///
+    /// `None` when the agent has not said how big the window is, which is
+    /// better than guessing from a model name that changes.
+    pub fn context_fullness(&self) -> Option<f32> {
+        let (used, window) = (self.context_used?, self.context_window?);
+        (window > 0).then(|| (used as f32 / window as f32).clamp(0.0, 1.0))
+    }
 }
 
 /// One line of the agent's plan.

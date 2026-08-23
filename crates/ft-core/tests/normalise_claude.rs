@@ -95,6 +95,47 @@ fn a_turn_that_worked_says_so_and_says_what_it_cost() {
 }
 
 #[test]
+fn a_turn_says_how_much_room_is_left() {
+    // Read from the per-model breakdown, because a turn can involve a second,
+    // smaller model and adding their tokens together describes nothing.
+    let events = replay("edit");
+    let usage = events
+        .iter()
+        .find_map(|e| match e {
+            TurnEvent::TurnCompleted { usage, .. } => usage.clone(),
+            _ => None,
+        })
+        .expect("the turn should complete");
+
+    let window = usage.context_window.expect("the agent reports its window");
+    let used = usage.context_used.expect("and how much of it went");
+    assert!(window >= 200_000, "a real window, got {window}");
+    assert!(used > 0 && used < window, "{used} of {window}");
+
+    let full = usage.context_fullness().expect("both halves are known");
+    assert!((0.0..=1.0).contains(&full), "{full}");
+}
+
+#[test]
+fn context_counts_what_the_model_saw_not_what_was_billed() {
+    // Caching means `input_tokens` can be single digits on a turn that had a
+    // hundred thousand in front of it. Reporting that as the context used
+    // would say a full session was empty.
+    let events = replay("edit");
+    let usage = events
+        .iter()
+        .find_map(|e| match e {
+            TurnEvent::TurnCompleted { usage, .. } => usage.clone(),
+            _ => None,
+        })
+        .expect("usage");
+    assert!(
+        usage.context_used.unwrap() > usage.input_tokens * 100,
+        "cached tokens are still tokens the model read"
+    );
+}
+
+#[test]
 fn what_we_sent_comes_back_as_part_of_the_conversation() {
     // `--replay-user-messages` is why the stored log is the whole exchange
     // rather than half of it. If this stops holding, the transcript loses

@@ -18,6 +18,7 @@ import type {
   Question,
   RequestKind,
   SlashCommand,
+  Usage,
 } from "./generated/model";
 
 /** One subagent, and what it has been up to. */
@@ -110,6 +111,13 @@ export type Conversation = {
    * hand.
    */
   commands: SlashCommand[];
+  /**
+   * What the last finished turn cost, and how full the context got.
+   *
+   * From the turn rather than accumulated here: the agent reports the state of
+   * its own window, and adding up deltas would drift.
+   */
+  usage?: Usage;
   /** How far we have read. The resume cursor. */
   lastLine: number;
   /** Set when the stream could not be opened or fell over. */
@@ -172,7 +180,14 @@ export function apply(state: Conversation, event: ConversationEvent): Conversati
       return { ...state, working: true, lastLine };
 
     case "TurnCompleted":
-      return { ...state, working: false, lastLine };
+      return {
+        ...state,
+        working: false,
+        // Kept when a turn ends without saying, so the meter does not blank
+        // between turns.
+        usage: event.usage ?? state.usage,
+        lastLine,
+      };
 
     case "ItemStarted": {
       // A message somebody typed is shown before it has been anywhere, so the

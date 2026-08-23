@@ -2,7 +2,7 @@
 
 import { useMemo, useRef, useState } from "react";
 import { useListFiles } from "@/src/api/generated/sessions/sessions";
-import type { Attached, SlashCommand } from "@/src/api/generated/model";
+import type { Attached, SlashCommand, Usage } from "@/src/api/generated/model";
 
 /**
  * Saying something to the agent.
@@ -18,6 +18,10 @@ export function ChatComposer({
   live,
   working,
   commands,
+  model,
+  usage,
+  branch,
+  repo,
   onSend,
   onStop,
   failed,
@@ -26,6 +30,10 @@ export function ChatComposer({
   live: boolean;
   working: boolean;
   commands: SlashCommand[];
+  model?: string;
+  usage?: Usage;
+  branch?: string | null;
+  repo?: string | null;
   onSend: (text: string, images: Attached[]) => void;
   onStop: () => void;
   failed: boolean;
@@ -125,7 +133,15 @@ export function ChatComposer({
         </div>
       )}
 
-      <div className="flex items-end gap-2">
+      {/* One box, and everything that belongs to composing a message lives
+          inside it. The controls are on the floor of the box rather than
+          floating beside it, which is what stops a message box reading as a
+          form. */}
+      <div
+        className={`rounded-[14px] border bg-panel transition-colors ${
+          over ? "border-ember" : "border-line focus-within:border-mute"
+        }`}
+      >
         <textarea
           ref={box}
           value={draft}
@@ -172,26 +188,42 @@ export function ChatComposer({
             }
           }}
           rows={2}
-          placeholder={live ? "Reply…" : "This session has finished."}
+          placeholder={
+            live ? "Ask for follow-up changes, or attach an image" : "This session has finished."
+          }
           disabled={!live}
-          className="min-h-[46px] flex-1 resize-none rounded-[6px] border border-line bg-panel px-3 py-2 text-[13.5px] text-text placeholder:text-mute focus:border-ember focus:outline-none disabled:opacity-50"
+          className="min-h-[54px] w-full resize-none bg-transparent px-3.5 pt-3 text-[13.5px] leading-[1.5] text-text placeholder:text-mute focus:outline-none disabled:opacity-50"
         />
-        {working ? (
-          <button
-            onClick={onStop}
-            className="min-h-[44px] rounded-[6px] border border-line px-3.5 text-[12.5px] text-dim transition-colors hover:border-brick hover:text-brick"
-          >
-            Stop
-          </button>
-        ) : (
-          <button
-            onClick={submit}
-            disabled={!live || (!draft.trim() && images.length === 0)}
-            className="min-h-[44px] rounded-[6px] bg-ember px-4 text-[12.5px] font-medium text-ground transition-opacity disabled:opacity-40"
-          >
-            Send
-          </button>
-        )}
+
+        <div className="flex items-center gap-3 px-3 pb-2.5">
+          {model && <span className="eyebrow truncate">{model}</span>}
+          {repo && <span className="eyebrow hidden truncate sm:inline">{repo}</span>}
+          {branch && <span className="eyebrow hidden truncate sm:inline">⑂ {branch}</span>}
+
+          <div className="ml-auto flex items-center gap-2.5">
+            {usage && <Context usage={usage} />}
+            {working ? (
+              <button
+                onClick={onStop}
+                aria-label="Stop the agent"
+                title="Stop"
+                className="grid h-9 w-9 place-items-center rounded-full border border-line text-dim transition-colors hover:border-brick hover:text-brick"
+              >
+                <span className="block h-2.5 w-2.5 rounded-[2px] bg-current" />
+              </button>
+            ) : (
+              <button
+                onClick={submit}
+                disabled={!live || (!draft.trim() && images.length === 0)}
+                aria-label="Send"
+                title="Send"
+                className="grid h-9 w-9 place-items-center rounded-full bg-ember text-[15px] leading-none text-ground transition-opacity disabled:opacity-30"
+              >
+                ↑
+              </button>
+            )}
+          </div>
+        </div>
       </div>
 
       {failed && (
@@ -201,6 +233,65 @@ export function ChatComposer({
       )}
     </div>
   );
+}
+
+/**
+ * How full the model's context is.
+ *
+ * A ring rather than a number, because the number is meaningless — nobody
+ * knows what 121,107 of 1,000,000 feels like — and a ring filling up is
+ * immediately readable at the size this is drawn. The figure is there on hover
+ * for anybody who does want it.
+ *
+ * Only ember once it is nearly full. Ember is the colour of something wanting
+ * a decision, and a context meter at eleven percent is not asking for one.
+ */
+function Context({ usage }: { usage: Usage }) {
+  const full = fullness(usage);
+  if (full === undefined) return null;
+
+  const percent = Math.round(full * 100);
+  const R = 8;
+  const circumference = 2 * Math.PI * R;
+  const tight = full > 0.85;
+
+  return (
+    <span
+      title={`Context ${percent}% full${
+        usage.contextUsed && usage.contextWindow
+          ? ` — ${usage.contextUsed.toLocaleString()} of ${usage.contextWindow.toLocaleString()} tokens`
+          : ""
+      }${usage.costUsd ? ` · $${usage.costUsd.toFixed(3)}` : ""}`}
+      className="relative grid h-9 w-9 place-items-center"
+    >
+      <svg viewBox="0 0 20 20" className="h-[19px] w-[19px] -rotate-90">
+        <circle cx="10" cy="10" r={R} fill="none" strokeWidth="2" className="stroke-line" />
+        <circle
+          cx="10"
+          cy="10"
+          r={R}
+          fill="none"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeDasharray={circumference}
+          strokeDashoffset={circumference * (1 - full)}
+          className={tight ? "stroke-ember" : "stroke-mute"}
+        />
+      </svg>
+      <span
+        className={`absolute font-mono text-[8.5px] ${tight ? "text-ember" : "text-mute"}`}
+      >
+        {percent}
+      </span>
+    </span>
+  );
+}
+
+/** 0 to 1, when the agent has said enough to work it out. */
+function fullness(usage: Usage): number | undefined {
+  const { contextUsed, contextWindow } = usage;
+  if (!contextUsed || !contextWindow) return undefined;
+  return Math.min(1, Math.max(0, contextUsed / contextWindow));
 }
 
 /** A trigger character and what has been typed after it. */

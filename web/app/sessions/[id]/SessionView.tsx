@@ -95,47 +95,53 @@ export default function SessionView() {
 
   return (
     <div className="flex h-screen flex-col">
-      <header className="border-b border-line px-4 pt-5 pb-4 lg:px-8 lg:pt-6">
-        <Link href="/" className="text-[12px] text-mute transition-colors hover:text-text">
-          ← All sessions
+      {/* One thin bar. What a session is, and what you can do to it — nothing
+          else. The old header spent four lines restating things that are
+          either obvious from the conversation or one hover away, and pushed the
+          thing somebody came to read below the fold. */}
+      <header className="flex h-12 shrink-0 items-center gap-2.5 border-b border-line px-3 lg:px-4">
+        <Link
+          href="/"
+          aria-label="All sessions"
+          className="shrink-0 rounded-[6px] px-1.5 py-1 text-[13px] text-mute transition-colors hover:bg-raise hover:text-text"
+        >
+          ←
         </Link>
 
-        <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1.5">
-          <Signal status={session.status} size={8} />
-          {/* The name is what this session is called on every other screen, so
-              it is what the page is titled by. The task it was given follows
-              it, since two agents on one repository are told similar things. */}
-          <h1 className="text-[19px] font-semibold tracking-[-0.01em] text-bone">
-            {session.name}
-          </h1>
-          <button
-            onClick={() => {
-              const next = window.prompt(`Call ${session.name} what?`, session.name);
-              if (!next || next.trim() === session.name) return;
-              rename.mutate(
-                { id: session.id, data: { name: next.trim() } },
-                { onSuccess: () => refetch() },
-              );
-            }}
-            className="text-[11.5px] text-mute transition-colors hover:text-ember"
-          >
-            Rename
-          </button>
-          <span className="rounded-[4px] border border-line px-1.5 py-0.5 font-mono text-[10.5px] text-slate">
-            {STATUS_LABEL[session.status] ?? session.status}
-          </span>
-          <span className="ml-auto font-mono text-[11px] text-mute">
-            {elapsed(minutesSince(session.createdAt))}
-          </span>
-        </div>
+        <Signal status={session.status} size={7} />
 
-        <p className="mt-1 text-[13.5px] text-dim">{session.title}</p>
+        <button
+          onClick={() => {
+            const next = window.prompt(`Call ${session.name} what?`, session.name);
+            if (!next || next.trim() === session.name) return;
+            rename.mutate(
+              { id: session.id, data: { name: next.trim() } },
+              { onSuccess: () => refetch() },
+            );
+          }}
+          title="Rename"
+          className="min-w-0 shrink truncate rounded-[6px] px-1 text-[14px] font-semibold tracking-[-0.01em] text-bone transition-colors hover:text-ember"
+        >
+          {session.name}
+        </button>
 
-        <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 font-mono text-[11.5px] text-mute">
-          <span>{session.repo}</span>
-          <span>⑂ {session.branch}</span>
-          <span>{session.agent}</span>
-        </div>
+        {session.repo && (
+          <span className="hidden shrink-0 rounded-[6px] border border-line px-1.5 py-0.5 font-mono text-[11px] text-dim sm:inline">
+            {session.repo}
+          </span>
+        )}
+        {session.branch && (
+          <span className="hidden min-w-0 shrink truncate font-mono text-[11px] text-mute md:inline">
+            ⑂ {session.branch}
+          </span>
+        )}
+
+        <span className="ml-auto hidden shrink-0 font-mono text-[11px] text-mute sm:inline">
+          {elapsed(minutesSince(session.createdAt))}
+        </span>
+        <span className="shrink-0 rounded-[6px] border border-line px-1.5 py-0.5 font-mono text-[10.5px] text-slate">
+          {STATUS_LABEL[session.status] ?? session.status}
+        </span>
       </header>
 
       {/* One column on a phone, two on a desktop. Mobile is not a fallback
@@ -162,7 +168,7 @@ export default function SessionView() {
               conversation stream and repaint the whole session. */}
           <div className="min-h-0 flex-1">
             <div className={`h-full ${tab === "Chat" ? "" : "hidden"}`}>
-              <Chat sessionId={session.id} live={busy} />
+              <Chat sessionId={session.id} live={busy} branch={session.branch} repo={session.repo} />
             </div>
             {/* Mounted only while you are looking at it: a shell lives for the
                 length of a visit, and opening this tab is what starts one. */}

@@ -212,6 +212,10 @@ export const GetConversationQueryParams = zod.object({
 
 export const getConversationResponseEventsItemOneThreeUsageTwoCacheReadTokensMin = 0;
 
+export const getConversationResponseEventsItemOneThreeUsageTwoContextUsedMin = 0;
+
+export const getConversationResponseEventsItemOneThreeUsageTwoContextWindowMin = 0;
+
 export const getConversationResponseEventsItemOneThreeUsageTwoInputTokensMin = 0;
 
 export const getConversationResponseEventsItemOneThreeUsageTwoOutputTokensMin = 0;
@@ -240,10 +244,12 @@ export const GetConversationResponse = zod.object({
   "type": zod.enum(['TurnCompleted']),
   "usage": zod.union([zod.null(),zod.object({
   "cacheReadTokens": zod.int().min(getConversationResponseEventsItemOneThreeUsageTwoCacheReadTokensMin).nullish().describe('Absent when the agent does not say.'),
+  "contextUsed": zod.int().min(getConversationResponseEventsItemOneThreeUsageTwoContextUsedMin).nullish().describe('Everything the model had in front of it on the last request.\n\nInput plus both kinds of cache plus what it wrote. This is the number\nthat matters to somebody deciding whether a session has room left —\ninput alone reads as almost nothing once caching is working, which is\nexactly when it is least true.'),
+  "contextWindow": zod.int().min(getConversationResponseEventsItemOneThreeUsageTwoContextWindowMin).nullish().describe('How much room the model has at all.'),
   "costUsd": zod.number().nullish().describe('The agent\'s own estimate, in dollars. Its arithmetic, not ours.'),
   "inputTokens": zod.int().min(getConversationResponseEventsItemOneThreeUsageTwoInputTokensMin),
   "outputTokens": zod.int().min(getConversationResponseEventsItemOneThreeUsageTwoOutputTokensMin)
-}).describe('What a turn cost.\n\nNot `Eq`, because the cost is a float. Comparing two of these for equality\nis a test convenience, not something to build on.')]).optional()
+}).describe('What a turn cost, and how much room is left.\n\nNot `Eq`, because the cost is a float. Comparing two of these for equality\nis a test convenience, not something to build on.')]).optional()
 }),zod.object({
   "item": zod.string().describe('One thing in the transcript — a message, a thought, a tool call.'),
   "kind": zod.enum(['AssistantMessage', 'Reasoning', 'UserMessage', 'CommandExecution', 'FileChange', 'FileRead', 'McpToolCall', 'WebSearch', 'SubagentCall', 'Unknown']).describe('What kind of thing an item is, which is what decides how it is drawn.\n\nThe list is short on purpose. It is not a catalogue of every tool an agent\nmight have — that changes weekly and is not knowable — but of the shapes\nFiretower can draw usefully. Anything that doesn\'t fit is [`Unknown`], which\nstill renders: name, input, output. A wrong guess costs a nicer card, never\nthe event itself.\n\n[`Unknown`]: ItemKind::Unknown'),
