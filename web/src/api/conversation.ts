@@ -206,6 +206,11 @@ export function apply(state: Conversation, event: ConversationEvent): Conversati
       };
 
     case "ItemStarted": {
+      // Already here. A stream that reconnects replays, and folding the same
+      // line twice must not draw the same thing twice — React keys on these
+      // ids, so a duplicate is a visible fault rather than a harmless one.
+      if (items.some((i) => i.id === event.item)) return { ...state, lastLine };
+
       // A message somebody typed is shown before it has been anywhere, so the
       // composer feels immediate. The agent echoes it back a moment later —
       // that copy is the real one, and it replaces the placeholder rather than

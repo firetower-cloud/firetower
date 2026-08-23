@@ -432,6 +432,55 @@ fn resuming_a_session_does_not_invent_a_turn_that_never_happened() {
 }
 
 #[test]
+fn no_two_things_on_screen_share_an_identifier() {
+    // A list keyed by these has to be able to tell them apart. It could not:
+    // the instruction handed to a subagent arrives in the same shape as the
+    // message somebody typed, and both were keyed by the turn they were in.
+    for name in ["plain", "edit", "bash", "plan", "failure", "subagent"] {
+        let mut seen = std::collections::HashMap::new();
+        for event in replay(name) {
+            let TurnEvent::ItemStarted { item, kind, .. } = event else {
+                continue;
+            };
+            if let Some(before) = seen.insert(item.clone(), kind) {
+                panic!("{name}: {item} is both {before:?} and {kind:?}");
+            }
+        }
+    }
+}
+
+#[test]
+fn a_subagents_own_instruction_is_not_drawn_as_somebody_typing() {
+    let events = replay("subagent");
+    let task = events
+        .iter()
+        .find_map(|e| match e {
+            TurnEvent::TaskStarted { task, .. } => Some(task.clone()),
+            _ => None,
+        })
+        .expect("delegating should start a task");
+
+    let typed: Vec<_> = events
+        .iter()
+        .filter_map(|e| match e {
+            TurnEvent::ItemStarted {
+                kind: ItemKind::UserMessage,
+                task,
+                ..
+            } => Some(task.clone()),
+            _ => None,
+        })
+        .collect();
+
+    assert_eq!(typed.len(), 2, "the prompt, and the subagent's instruction");
+    assert!(typed.contains(&None), "one of them is the person");
+    assert!(
+        typed.contains(&Some(task)),
+        "and one belongs to the subagent"
+    );
+}
+
+#[test]
 fn reading_the_same_log_twice_names_the_same_things() {
     // The point of derived identifiers. If this fails, re-deriving history
     // after fixing a mapping produces a different history.

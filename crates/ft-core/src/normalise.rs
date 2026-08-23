@@ -493,15 +493,29 @@ impl ClaudeNormaliser {
             .collect();
 
         if results.is_empty() {
-            // Our own turn, echoed back to us. Worth keeping: it is what makes
-            // the stored log the whole conversation rather than half of it.
-            self.begin_turn(out);
-            let item = ItemId::new(format!("{}:user", self.turns_seen));
+            // Two different things arrive in this shape. One is our own turn,
+            // echoed back — worth keeping, because it is what makes the stored
+            // log the whole conversation rather than half of it. The other is
+            // the instruction handed to a subagent, which is that subagent's
+            // first message and not a person typing.
+            let task = self.owning_task(v);
+            if task.is_none() {
+                self.begin_turn(out);
+            }
+
+            // Keyed by the agent's own identifier for the message. It was the
+            // turn number and a word, which two of these in one turn collide
+            // on — and they do, every time work is delegated.
+            let item = ItemId::new(match str_at(v, "uuid") {
+                Some(uuid) => format!("msg:{uuid}"),
+                None => format!("turn-{}:user", self.turns_seen),
+            });
+
             out.push(TurnEvent::ItemStarted {
                 item: item.clone(),
                 kind: ItemKind::UserMessage,
                 title: None,
-                task: None,
+                task,
             });
             let text = blocks
                 .iter()
