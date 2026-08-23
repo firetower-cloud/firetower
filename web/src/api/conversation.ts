@@ -18,6 +18,27 @@ import type {
   RequestKind,
 } from "./generated/model";
 
+/** One subagent, and what it has been up to. */
+export type Task = {
+  id: string;
+  /**
+   * The tool call that spawned it.
+   *
+   * The link between the two halves: the agent asks for a subagent (a tool
+   * call, with its own id) and the runtime reports one starting (a task, with
+   * a different id). Only this field says they are the same thing.
+   */
+  item: string;
+  description: string;
+  /** Which kind of subagent, when the agent says. */
+  agent?: string;
+  status?: ItemStatus;
+  /** The last thing it reported doing. */
+  progress?: string;
+  /** What it came back with. */
+  summary?: string;
+};
+
 /** Something the agent has stopped for and will not continue without. */
 export type Asked = {
   req: string;
@@ -55,6 +76,14 @@ export type Conversation = {
    * goes.
    */
   asked: Asked[];
+  /**
+   * Work handed to subagents, in the order it was handed over.
+   *
+   * Apart from the transcript because it is a different voice. Interleaved,
+   * several subagents narrate over each other and it reads as though the agent
+   * you are talking to did all of it.
+   */
+  tasks: Task[];
   /** True between a turn starting and finishing — the agent is busy. */
   working: boolean;
   /** The model this session is running, once it has said. */
@@ -77,6 +106,7 @@ export const nothing: Conversation = {
   items: [],
   plan: [],
   asked: [],
+  tasks: [],
   working: false,
   lastLine: 0,
 };
@@ -176,6 +206,43 @@ export function apply(state: Conversation, event: ConversationEvent): Conversati
               },
             ],
           };
+
+    case "TaskStarted":
+      return state.tasks.some((t) => t.id === event.task)
+        ? { ...state, lastLine }
+        : {
+            ...state,
+            lastLine,
+            tasks: [
+              ...state.tasks,
+              {
+                id: event.task,
+                item: event.item,
+                description: event.description,
+                agent: event.agent ?? undefined,
+              },
+            ],
+          };
+
+    case "TaskProgress":
+      return {
+        ...state,
+        lastLine,
+        tasks: state.tasks.map((t) =>
+          t.id === event.task ? { ...t, progress: event.detail } : t,
+        ),
+      };
+
+    case "TaskCompleted":
+      return {
+        ...state,
+        lastLine,
+        tasks: state.tasks.map((t) =>
+          t.id === event.task
+            ? { ...t, status: event.status, summary: event.summary ?? undefined }
+            : t,
+        ),
+      };
 
     case "RequestResolved":
       return {

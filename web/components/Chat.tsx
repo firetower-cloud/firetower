@@ -6,7 +6,12 @@ import {
   useInterruptSession,
   useAnswerRequest,
 } from "@/src/api/generated/sessions/sessions";
-import { useConversation, type Asked, type Item } from "@/src/api/conversation";
+import {
+  useConversation,
+  type Asked,
+  type Item,
+  type Task,
+} from "@/src/api/conversation";
 import { Markdown } from "@/components/Markdown";
 import type { Decision, ItemKind, PlanStep, RequestKind } from "@/src/api/generated/model";
 
@@ -59,13 +64,22 @@ export function Chat({ sessionId, live }: { sessionId: string; live: boolean }) 
 
         <ol className="flex flex-col gap-3">
           {conversation.items
-            // A subagent's work belongs to the subagent. Left out rather than
-            // interleaved, which reads as though the agent you are talking to
-            // did it.
+            // A subagent's work belongs to the subagent, and is drawn under it
+            // rather than here. Interleaved, several voices narrate over each
+            // other and it reads as though the agent you are talking to did
+            // all of it.
             .filter((item) => !item.task)
             .map((item) => (
               <li key={item.id}>
-                <Entry item={item} />
+                {item.kind === "SubagentCall" ? (
+                  <Delegated
+                    item={item}
+                    tasks={conversation.tasks}
+                    items={conversation.items}
+                  />
+                ) : (
+                  <Entry item={item} />
+                )}
               </li>
             ))}
         </ol>
@@ -138,6 +152,86 @@ export function Chat({ sessionId, live }: { sessionId: string; live: boolean }) 
           </p>
         )}
       </div>
+    </div>
+  );
+}
+
+/**
+ * Work handed to a subagent.
+ *
+ * Drawn in the transcript where the delegation happened, because that is where
+ * it belongs in the story — but folded, because a subagent's tool calls are
+ * its own business until somebody asks.
+ *
+ * The tool call and the task are separate things that arrive separately: the
+ * agent asks for a subagent, and the runtime reports one starting. They are
+ * matched here by the tool call's id, which is what the runtime names when it
+ * reports the task.
+ */
+function Delegated({
+  item,
+  tasks,
+  items,
+}: {
+  item: Item;
+  tasks: Task[];
+  items: Item[];
+}) {
+  const [open, setOpen] = useState(false);
+  const task = tasks.find((t) => t.item === item.id);
+  const mine = task ? items.filter((i) => i.task === task.id) : [];
+
+  const description =
+    task?.description ??
+    (typeof (item.input as Record<string, unknown> | undefined)?.description === "string"
+      ? ((item.input as Record<string, string>).description)
+      : undefined) ??
+    "a subagent";
+
+  const done = task?.status === "Completed";
+  const failed = task?.status === "Failed" || item.status === "Failed";
+
+  return (
+    <div className="rounded-[6px] border border-line bg-panel">
+      <button
+        onClick={() => setOpen(!open)}
+        className="flex w-full items-baseline gap-2 px-3 py-2 text-left"
+      >
+        <span className={`font-mono text-[11px] ${failed ? "text-brick" : "text-slate"}`}>
+          delegated
+        </span>
+        <span className="min-w-0 flex-1 truncate text-[12.5px] text-dim">{description}</span>
+        {task?.agent && (
+          <span className="rounded-[3px] border border-line px-1 font-mono text-[10px] text-mute">
+            {task.agent}
+          </span>
+        )}
+        <span className="text-[11px] text-mute">
+          {failed ? "failed" : done ? `${mine.length}` : (task?.progress ?? "…")}
+        </span>
+      </button>
+
+      {open && (
+        <div className="border-t border-line-soft px-3 py-2">
+          {mine.length === 0 && !task?.summary && (
+            <p className="text-[11.5px] text-mute">Nothing reported back yet.</p>
+          )}
+          {mine.length > 0 && (
+            <ol className="mb-2 flex flex-col gap-2 border-l border-line pl-3">
+              {mine.map((step) => (
+                <li key={step.id}>
+                  <Entry item={step} />
+                </li>
+              ))}
+            </ol>
+          )}
+          {task?.summary && (
+            <div className="max-w-[75ch]">
+              <Markdown>{task.summary}</Markdown>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
