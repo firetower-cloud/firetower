@@ -14,6 +14,7 @@ import {
   type Task,
 } from "@/src/api/conversation";
 import { Markdown } from "@/components/Markdown";
+import { useReveal } from "@/src/api/reveal";
 import type { Decision, ItemKind, PlanStep, RequestKind } from "@/src/api/generated/model";
 
 /**
@@ -181,15 +182,7 @@ function End({ working, waiting, live }: { working: boolean; waiting: boolean; l
 function Node({ item, tasks, items }: { item: Item; tasks: Task[]; items: Item[] }) {
   // The agent talking is the connective tissue between the things it did, so it
   // gets no marker. The most common thing on screen is the quietest.
-  if (item.kind === "AssistantMessage") {
-    return (
-      <li className="node">
-        <div className="max-w-[74ch]">
-          <Markdown>{item.text}</Markdown>
-        </div>
-      </li>
-    );
-  }
+  if (item.kind === "AssistantMessage") return <Says item={item} />;
 
   if (item.kind === "UserMessage") {
     return (
@@ -208,6 +201,24 @@ function Node({ item, tasks, items }: { item: Item; tasks: Task[]; items: Item[]
   if (item.kind === "SubagentCall") return <Delegated item={item} tasks={tasks} items={items} />;
 
   return <Tool item={item} />;
+}
+
+/**
+ * The agent talking.
+ *
+ * Paced rather than painted, because the text does not arrive smoothly — see
+ * `useReveal`, which explains why that is not something this end can fix and
+ * what it does about it anyway.
+ */
+function Says({ item }: { item: Item }) {
+  const text = useReveal(item.text, item.status !== undefined);
+  return (
+    <li className="node">
+      <div className="max-w-[74ch]">
+        <Markdown>{text}</Markdown>
+      </div>
+    </li>
+  );
 }
 
 /** ○ running · ● done · ✕ refused. State, and nothing else. */
