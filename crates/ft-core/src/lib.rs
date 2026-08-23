@@ -9,8 +9,10 @@ use utoipa::ToSchema;
 
 pub mod dotenv;
 mod ids;
+pub mod normalise;
 pub mod session;
 mod status;
+pub mod turn;
 
 pub use ids::{HostId, OrgId, RepoId, SessionId, UserId, WorkspaceId};
 pub use session::{
@@ -18,6 +20,7 @@ pub use session::{
     WorkspaceSize,
 };
 pub use status::{SessionStatus, TransitionError};
+pub use turn::{ItemId, ItemKind, RequestId, TurnEvent, TurnId};
 
 /// Which agent runs inside a workspace.
 ///
@@ -1288,7 +1291,9 @@ mod launch_tests {
         // Including with no prompt, where somebody is driving it by hand: the
         // agent should not be configured differently for that.
         assert!(
-            Agent::ClaudeCode.launch("").contains("--permission-mode auto"),
+            Agent::ClaudeCode
+                .launch("")
+                .contains("--permission-mode auto"),
             "an empty prompt should not change how the agent runs"
         );
     }
@@ -1630,8 +1635,7 @@ mod ssh_key_tests {
     /// meant "ssh decides", and it still does.
     #[test]
     fn a_row_with_no_key_at_all_still_reads() {
-        let old: Compute =
-            serde_json::from_str(r#"{"type":"Server","host":"fire-03"}"#).unwrap();
+        let old: Compute = serde_json::from_str(r#"{"type":"Server","host":"fire-03"}"#).unwrap();
         let Compute::Server { key, .. } = &old else {
             panic!("not a server")
         };
@@ -1647,7 +1651,6 @@ mod ssh_key_tests {
         assert!(!SshKey::File { path: "/k".into() }.is_held());
     }
 }
-
 
 #[cfg(test)]
 mod reachability_tests {

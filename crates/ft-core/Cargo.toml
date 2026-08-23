@@ -10,11 +10,11 @@ description = "Firetower domain types and the session state machine."
 
 [dependencies]
 serde.workspace = true
+# The normaliser reads an agent's output, which is JSON, so this is no
+# longer only a test concern.
+serde_json.workspace = true
 thiserror.workspace = true
 ulid.workspace = true
 chrono.workspace = true
 utoipa.workspace = true
 
-[dev-dependencies]
-# Only the tests need to look at what a type turns into on the wire.
-serde_json.workspace = true
