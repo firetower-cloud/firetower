@@ -158,6 +158,37 @@ export function Shell({ children }: { children: React.ReactNode }) {
           ))}
         </div>
 
+        {/* Between the fleet and the account, where somebody looks after they
+            have run out of things to try on the screen itself. Off to the
+            website rather than into the app: it is versioned with the release,
+            not with what is running here. */}
+        <a
+          href="https://www.usefiretower.com/docs"
+          target="_blank"
+          rel="noreferrer"
+          className="flex shrink-0 items-center gap-2.5 border-t border-line px-4 py-2.5 text-ui text-mute transition-colors hover:bg-raise/60 hover:text-text"
+        >
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 14 14"
+            fill="none"
+            stroke="currentColor"
+            aria-hidden
+            className="opacity-70"
+          >
+            <path
+              d="M2.4 2.6h3.2c.8 0 1.4.6 1.4 1.4v7c0-.6-.5-1.1-1.1-1.1H2.4zM11.6 2.6H8.4c-.8 0-1.4.6-1.4 1.4v7c0-.6.5-1.1 1.1-1.1h3.5z"
+              strokeWidth="1.1"
+              strokeLinejoin="round"
+            />
+          </svg>
+          Documentation
+          <span aria-hidden className="ml-auto text-[10px] opacity-60">
+            ↗
+          </span>
+        </a>
+
         <WhoAmI />
       </aside>
 
