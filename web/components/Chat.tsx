@@ -148,7 +148,7 @@ export function Chat({
 
           {/* Where the rail stops. The one place the eye goes to answer "is it
               still going?", and the reason there is no spinner anywhere else. */}
-          <End working={conversation.working} waiting={waiting} live={live} />
+          <End working={conversation.working} waiting={waiting} />
 
           {conversation.trouble && (
             <p className="mt-3 font-mono text-[12.5px] text-brick">
@@ -235,19 +235,20 @@ export function Chat({
 }
 
 /**
- * The end of the rail.
+ * Where the transcript stops, when something is still going on there.
  *
- * Three states and no others: working, waiting on you, or handed back. Whatever
- * a spinner somewhere else would have said, this says once.
+ * Two states: working, or waiting on you. Whatever a spinner somewhere else
+ * would have said, this says once — and when the session has handed back it
+ * says nothing at all.
  */
-function End({ working, waiting, live }: { working: boolean; waiting: boolean; live: boolean }) {
-  if (!live && !waiting) return <div className="spine-end" />;
+function End({ working, waiting }: { working: boolean; waiting: boolean }) {
+  // A grey dot for a session that has handed back is a marker for the absence
+  // of anything, drawn every time nothing is happening — which is most of the
+  // time. Nothing is happening, so nothing is drawn.
+  if (!working && !waiting) return null;
   return (
     <div className="spine-end">
-      <span
-        className={`tip ${working && !waiting ? "breathe" : ""}`}
-        style={waiting || working ? undefined : { background: "var(--color-line)" }}
-      />
+      <span className={`tip ${working && !waiting ? "breathe" : ""}`} />
     </div>
   );
 }
