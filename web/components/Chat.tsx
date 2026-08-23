@@ -650,6 +650,14 @@ function Approval({
  * Buttons rather than a permission card: it did not ask whether it may do
  * something, it asked which of several things to do, and "allow" is not an
  * answer to that.
+ *
+ * ## There is always a way to say something else
+ *
+ * The options are the agent's guesses, and a set of guesses that happens to
+ * miss used to leave somebody stuck: the card blocks the session, and nothing
+ * on it could be pressed. So every question carries a way to answer in your own
+ * words, which is what a person would do if this were a conversation — which it
+ * is.
  */
 function Questions({
   sessionId,
@@ -662,6 +670,8 @@ function Questions({
 }) {
   const answer = useAnswerRequest();
   const [chosen, setChosen] = useState<Record<string, string[]>>({});
+  /** What has been typed instead. Absent means the box is not open. */
+  const [written, setWritten] = useState<Record<string, string | undefined>>({});
 
   const pick = (question: string, label: string, many: boolean) => {
     setChosen((current) => {
@@ -672,9 +682,24 @@ function Questions({
         [question]: had.includes(label) ? had.filter((l) => l !== label) : [...had, label],
       };
     });
+    // On a pick-one question, choosing an option is choosing it instead of
+    // whatever was being typed.
+    if (!many) setWritten((current) => ({ ...current, [question]: undefined }));
   };
 
-  const ready = asking.questions.every((q) => (chosen[q.question] ?? []).length > 0);
+  const say = (question: string, text: string, many: boolean) => {
+    setWritten((current) => ({ ...current, [question]: text }));
+    if (!many) setChosen((current) => ({ ...current, [question]: [] }));
+  };
+
+  /** Everything that would be sent for one question — options and own words. */
+  const answered = (question: string): string[] => {
+    const own = written[question]?.trim();
+    const picked = chosen[question] ?? [];
+    return own ? [...picked, own] : picked;
+  };
+
+  const ready = asking.questions.every((q) => answered(q.question).length > 0);
 
   const send = () => {
     onAnswered();
@@ -685,7 +710,7 @@ function Questions({
         decision: {
           decision: "Answered",
           answers: Object.fromEntries(
-            Object.entries(chosen).map(([question, labels]) => [question, labels.join(", ")]),
+            asking.questions.map((q) => [q.question, answered(q.question).join(", ")]),
           ),
         },
       },
@@ -696,6 +721,7 @@ function Questions({
     <div className="mb-4 rounded-[12px] border border-ember-deep bg-panel p-4">
       {asking.questions.map((q) => {
         const picked = chosen[q.question] ?? [];
+        const mine = written[q.question];
         return (
           <div key={q.question} className="mb-3 last:mb-2">
             <div className="flex items-baseline gap-2">
@@ -724,6 +750,33 @@ function Questions({
                   </button>
                 );
               })}
+
+              {/* Last, and quieter than the options: it is the way out, not the
+                  expected answer. */}
+              {mine === undefined ? (
+                <button
+                  onClick={() => say(q.question, "", q.multiSelect ?? false)}
+                  className="min-h-[44px] rounded-[8px] border border-dashed border-line px-3 py-2 text-left text-[13.5px] text-mute transition-colors hover:border-mute hover:text-text"
+                >
+                  Something else…
+                </button>
+              ) : (
+                <div className="rounded-[8px] border border-ember bg-raise px-3 py-2">
+                  <input
+                    autoFocus
+                    value={mine}
+                    onChange={(e) => say(q.question, e.target.value, q.multiSelect ?? false)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Escape") {
+                        e.preventDefault();
+                        setWritten((current) => ({ ...current, [q.question]: undefined }));
+                      }
+                    }}
+                    placeholder="Say what instead"
+                    className="min-h-[28px] w-full bg-transparent text-[13.5px] text-bone placeholder:text-mute focus:outline-none"
+                  />
+                </div>
+              )}
             </div>
           </div>
         );
