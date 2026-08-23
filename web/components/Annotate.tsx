@@ -38,8 +38,8 @@ function look() {
  * Selecting a passage and saying something about it.
  *
  * Wraps one message. Selecting text inside it offers a button by the selection;
- * pressing it opens a box; what gets written is kept against the words it was
- * written about.
+ * pressing it — or simply typing — opens a box, and what gets written is kept
+ * against the words it was written about.
  *
  * The offer only appears for a selection that is actually inside this message.
  * A drag that starts in the transcript and ends in the composer is not somebody
@@ -55,6 +55,7 @@ export function Annotatable({
   children: React.ReactNode;
 }) {
   const area = useRef<HTMLDivElement>(null);
+  const box = useRef<HTMLTextAreaElement>(null);
   const [offer, setOffer] = useState<{ quote: string; x: number; y: number } | null>(null);
   const [writing, setWriting] = useState<string | null>(null);
   const [note, setNote] = useState("");
@@ -83,6 +84,61 @@ export function Annotatable({
     });
   }, [writing]);
 
+  /**
+   * Start writing the moment somebody types.
+   *
+   * The button is the discoverable way in; typing is the fast one, and it is
+   * what anybody who has just highlighted a sentence in order to say something
+   * about it will do anyway. The first keystroke is kept — it is the start of
+   * the note, not the price of opening the box.
+   */
+  useEffect(() => {
+    if (!offer || writing !== null) return;
+
+    const key = (e: KeyboardEvent) => {
+      // Somebody typing into the composer is typing into the composer, even
+      // with a selection sitting in the transcript behind them.
+      const on = e.target as HTMLElement | null;
+      if (on && (on.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(on.tagName))) return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+
+      if (e.key === "Escape") {
+        setOffer(null);
+        window.getSelection()?.removeAllRanges();
+        return;
+      }
+
+      // A character starts the note with it; Enter opens an empty box. Arrows,
+      // tab and the rest are somebody navigating, and are left alone.
+      const first = e.key.length === 1 ? e.key : e.key === "Enter" ? "" : null;
+      if (first === null) return;
+
+      e.preventDefault();
+      setWriting(offer.quote);
+      setNote(first);
+      setOffer(null);
+    };
+
+    window.addEventListener("keydown", key);
+    return () => window.removeEventListener("keydown", key);
+  }, [offer, writing]);
+
+  /**
+   * Put the cursor after what is already there.
+   *
+   * `autoFocus` alone focuses the box but leaves the caret at the start, so the
+   * character that opened it ended up at the end of everything typed after it —
+   * "doit" arriving as "oitd". Focus and caret are set together, once, when the
+   * box opens.
+   */
+  useEffect(() => {
+    if (writing === null) return;
+    const el = box.current;
+    if (!el) return;
+    el.focus();
+    el.setSelectionRange(el.value.length, el.value.length);
+  }, [writing]);
+
   const save = () => {
     const said = note.trim();
     if (writing && said) onAdd(item, writing, said);
@@ -107,7 +163,7 @@ export function Annotatable({
           style={{ left: offer.x, top: offer.y }}
           className="absolute z-20 -translate-x-1/2 -translate-y-[calc(100%+6px)] rounded-[8px] border border-line bg-panel px-2.5 py-1.5 text-[12.5px] text-dim shadow-[0_8px_24px_-10px_rgba(0,0,0,0.8)] transition-colors hover:border-ember hover:text-bone"
         >
-          Annotate
+          Start typing to annotate
         </button>
       )}
 
@@ -117,7 +173,7 @@ export function Annotatable({
             {writing.length > 240 ? `${writing.slice(0, 240)}…` : writing}
           </blockquote>
           <textarea
-            autoFocus
+            ref={box}
             value={note}
             onChange={(e) => setNote(e.target.value)}
             onKeyDown={(e) => {
@@ -138,9 +194,13 @@ export function Annotatable({
             <button
               onClick={save}
               disabled={!note.trim()}
-              className="min-h-[34px] rounded-[8px] bg-ember px-3.5 text-[13px] font-medium text-ground disabled:opacity-40"
+              title="Keep (↵)"
+              className="flex min-h-[34px] items-center gap-2 rounded-[8px] bg-ember px-3.5 text-[13px] font-medium text-ground disabled:opacity-40"
             >
               Keep
+              <span aria-hidden className="font-mono text-[12px] opacity-60">
+                ↵
+              </span>
             </button>
             <button
               onClick={() => {
