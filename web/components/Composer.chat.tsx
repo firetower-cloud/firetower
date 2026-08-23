@@ -378,10 +378,7 @@ function useSuggestions(
     const query = token.query.toLowerCase();
 
     if (token.kind === "/") {
-      return commands
-        .filter((c) => c.name.toLowerCase().startsWith(query))
-        .slice(0, 8)
-        .map((c) => ({ value: c.name, hint: c.description ?? undefined }));
+      return rank(commands, query).slice(0, 8);
     }
 
     const within = directoryOf(token.query);
@@ -394,6 +391,75 @@ function useSuggestions(
         hint: f.directory ? "directory" : undefined,
       }));
   }, [token, commands, files]);
+}
+
+/**
+ * Commands nobody types.
+ *
+ * The agent reports everything it can dispatch, which includes machinery: hooks
+ * into its own workflow engine, a heap dump, consent prompts. Offering those in
+ * a menu is offering somebody a way to break their session.
+ */
+const INTERNAL = new Set([
+  "heapdump",
+  "reload-skills",
+  "workflow-launch-exec",
+  "design-consent",
+  "design-revoke",
+  "auto-mode-setup",
+  "run-skill-generator",
+]);
+
+/**
+ * The ones worth putting first before anything has been typed.
+ *
+ * Chosen by testing which actually answer in a headless session rather than by
+ * reading a list: `/context`, `/usage` and `/mcp` all return something useful,
+ * while several of their neighbours return an empty string.
+ *
+ * `model` and `effort` are here too, even though the row below has pickers for
+ * both — somebody who knows the command should not have to hunt for the button.
+ */
+const USEFUL = ["context", "usage", "compact", "mcp", "model", "effort", "config", "rename"];
+
+/**
+ * Order the commands by how likely this one is the one wanted.
+ *
+ * The agent hands over its whole list in whatever order it holds them, which on
+ * a machine with a couple of dozen skills installed means the menu opens on
+ * twenty-five variations of the same one. What somebody has typed comes first,
+ * then what is short, then everything else.
+ */
+function rank(commands: SlashCommand[], query: string): Suggestion[] {
+  const usable = commands.filter(
+    (c) => !c.name.startsWith("__") && !INTERNAL.has(c.name),
+  );
+
+  if (!query) {
+    const first = USEFUL.map((name) => usable.find((c) => c.name === name)).filter(
+      (c): c is SlashCommand => c !== undefined,
+    );
+    const rest = usable.filter((c) => !USEFUL.includes(c.name));
+    return [...first, ...rest].map(described);
+  }
+
+  const scored = usable
+    .map((c) => {
+      const name = c.name.toLowerCase();
+      // A name that starts with what was typed beats one that merely contains
+      // it, and a short name beats a long one — `model` before
+      // `some-plugin:model-helper`.
+      const where = name.startsWith(query) ? 0 : name.includes(query) ? 1 : -1;
+      return { c, where };
+    })
+    .filter(({ where }) => where >= 0)
+    .sort((a, b) => a.where - b.where || a.c.name.length - b.c.name.length);
+
+  return scored.map(({ c }) => described(c));
+}
+
+function described(c: SlashCommand): Suggestion {
+  return { value: c.name, hint: c.description ?? undefined };
 }
 
 /** The part of a half-typed path that is already a directory. */
