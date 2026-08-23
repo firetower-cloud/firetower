@@ -219,9 +219,13 @@ async fn main() -> Result<()> {
         Some(Command::Hook { event }) => {
             // Never fatal, never noisy. A hook that fails must not become a
             // hook that interrupts the agent it is reporting on.
-            if let Err(e) = ft_worker::hooks::report(&event, &default_home().join("worker")).await {
-                tracing::debug!("hook {event}: {e:#}");
-            }
+            // Nothing. Firetower no longer asks an agent to report on itself —
+            // it says what it is doing as part of saying anything — and the
+            // entries a previous version installed are removed when a session
+            // next starts. This stays so that one firing in the window before
+            // that does nothing, quietly, rather than failing in the middle of
+            // somebody's own session.
+            tracing::debug!("ignoring hook {event}: Firetower no longer uses them");
             Ok(())
         }
 

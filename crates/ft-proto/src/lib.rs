@@ -23,7 +23,11 @@ use serde::{Deserialize, Serialize};
 /// attached to. A worker from before this understands neither the frames that
 /// drive one nor the ones that report it, and a session on it would show an
 /// empty conversation with no indication why.
-pub const PROTOCOL_VERSION: u32 = 8;
+///
+/// 9 — the agent's own terminal is gone, along with typing at it. `Pty` now
+/// names only the shell somebody opens for themselves, and an older worker
+/// would read a shell frame as a request to attach to the agent.
+pub const PROTOCOL_VERSION: u32 = 9;
 
 mod codec;
 pub use codec::{Codec, CodecError, FrameReader, FrameWriter};
@@ -98,16 +102,6 @@ pub enum ToWorker {
     },
     /// Build a workspace and start an agent in it.
     CreateWorkspace(Box<CreateWorkspace>),
-    /// Send text to the agent, as if typed.
-    ///
-    /// For a session running in a terminal. An agent driven through a
-    /// structured protocol takes [`ToWorker::SendTurn`] instead, which is a
-    /// message rather than keystrokes and so cannot arrive while nothing is
-    /// listening for it.
-    Reply {
-        session_id: SessionId,
-        text: String,
-    },
     /// Send everything the agent has said since `since_line`, then keep
     /// sending.
     ///
@@ -280,20 +274,21 @@ pub struct CreateWorkspace {
 /// frame from a control plane that has it, and means the agent by it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum Pty {
-    /// The agent's own terminal, under `firetower-<session>`.
-    #[default]
-    Agent,
     /// A shell of your own, in the same directory with the same environment.
+    ///
+    /// The only kind left. An agent used to have one too — you attached to its
+    /// terminal and typed at it — and it does not any more: it speaks a
+    /// protocol, and what it is doing is a conversation rather than a screen.
+    /// This one is untouched by that, and is still how you go and look at a
+    /// workspace yourself.
+    #[default]
     Shell,
 }
 
 impl Pty {
     /// The tmux session it lives in.
     pub fn tmux_name(&self, session: &str) -> String {
-        match self {
-            Pty::Agent => format!("firetower-{session}"),
-            Pty::Shell => format!("firetower-{session}-shell"),
-        }
+        format!("firetower-{session}-shell")
     }
 }
 
@@ -498,7 +493,7 @@ mod tests {
         assert!(matches!(
             back,
             ToWorker::PtyOpen {
-                pty: Pty::Agent,
+                pty: Pty::Shell,
                 ..
             }
         ));
@@ -508,7 +503,7 @@ mod tests {
         assert!(matches!(
             back,
             ToServer::PtyOutput {
-                pty: Pty::Agent,
+                pty: Pty::Shell,
                 ..
             }
         ));
@@ -519,17 +514,5 @@ mod tests {
         // Frames get read by humans in logs. The tag should say what it is.
         let json = serde_json::to_string(&ToWorker::Ping).unwrap();
         assert!(json.contains("\"frame\":\"Ping\""), "{json}");
-    }
-
-    #[test]
-    fn a_frame_never_spans_lines() {
-        // The codec is newline-delimited, so an embedded newline would split a
-        // frame in half. serde_json escapes them; this guards the assumption.
-        let frame = ToWorker::Reply {
-            session_id: SessionId::from_stored("s_abc"),
-            text: "first\nsecond".into(),
-        };
-        let json = serde_json::to_string(&frame).unwrap();
-        assert!(!json.contains('\n'), "{json}");
     }
 }

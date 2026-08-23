@@ -191,11 +191,10 @@ fn asking_about(tool: &str, args: &serde_json::Value) -> String {
 
 /// One terminal of one session.
 ///
-/// A session has more than one now — the agent's, and a shell of your own — and
-/// everything here used to key on the session alone.
+/// One kind is left, and the key still names it: a session that grows a second
+/// terminal should not need every map in two files rewritten again.
 fn terminal_key(session_id: &SessionId, pty: Pty) -> String {
     match pty {
-        Pty::Agent => session_id.to_string(),
         Pty::Shell => format!("{session_id}:shell"),
     }
 }

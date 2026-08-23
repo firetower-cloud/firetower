@@ -141,11 +141,10 @@ async fn main() -> Result<()> {
             return Ok(());
         }
         Some(Command::Hook { event }) => {
-            // Never fatal, never noisy. A hook that fails must not become a
-            // hook that interrupts the agent it is reporting on.
-            if let Err(e) = ft_worker::hooks::report(&event, &default_root()).await {
-                tracing::debug!("hook {event}: {e:#}");
-            }
+            // Nothing. See the same arm on the `firetower` binary: hooks are
+            // gone, and this remains only so that a stale one does nothing
+            // instead of failing inside somebody's own session.
+            tracing::debug!("ignoring hook {event}: Firetower no longer uses them");
             return Ok(());
         }
         Some(Command::AgentRun {

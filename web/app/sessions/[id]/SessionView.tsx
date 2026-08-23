@@ -21,17 +21,7 @@ import { ApiError } from "@/src/api/http";
  * Client-side on purpose: session ids don't exist when the interface is built,
  * so nothing here can be pre-rendered per session.
  */
-type Tab = "Chat" | "Terminal" | "Shell" | "Files" | "Changes";
-
-/**
- * Which agents are driven through a protocol rather than a terminal.
- *
- * Not a setting. A session is a conversation when its agent has something to
- * converse over, and a terminal when it does not — so there is no mode for
- * anybody to pick, and the Terminal tab stops being offered for an agent the
- * moment it stops needing one.
- */
-const TALKS: ReadonlyArray<string> = ["ClaudeCode"];
+type Tab = "Chat" | "Shell" | "Files" | "Changes";
 
 /**
  * The id, taken from the address bar rather than from the router.
@@ -52,7 +42,7 @@ function useSessionId(): string {
 
 export default function SessionView() {
   const id = useSessionId();
-  const [tab, setTab] = useState<Tab | null>(null);
+  const [tab, setTab] = useState<Tab>("Chat");
 
   // The stream is how this stays live, and it is fast. It is not, however,
   // something to bet the page on: a stream that silently stops leaves a session
@@ -73,10 +63,6 @@ export default function SessionView() {
   const rename = useRenameSession();
 
   const busy = !!session && unfinished(session);
-  const talks = !!session && TALKS.includes(session.agent);
-  // Chosen once the session has loaded, because until then we do not know
-  // whether this agent has a conversation to show.
-  const showing: Tab = tab ?? (talks ? "Chat" : "Terminal");
   const { data: events = [] } = useListEvents(
     { since: 0, sessionId: id },
     { query: { refetchInterval: busy ? 1_500 : false } },
@@ -159,14 +145,12 @@ export default function SessionView() {
       <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[1fr_320px]">
         <section className="flex min-w-0 flex-col overflow-hidden px-4 py-4 lg:border-r lg:border-line lg:p-6">
           <div className="mb-3 flex gap-1">
-            {((talks
-              ? ["Chat", "Shell", "Files", "Changes"]
-              : ["Terminal", "Shell", "Files", "Changes"]) as Tab[]).map((t) => (
+            {(["Chat", "Shell", "Files", "Changes"] as Tab[]).map((t) => (
               <button
                 key={t}
                 onClick={() => setTab(t)}
                 className={`rounded-[5px] px-2.5 py-1 text-[12px] transition-colors ${
-                  showing === t ? "bg-raise text-bone" : "text-mute hover:text-text"
+                  tab === t ? "bg-raise text-bone" : "text-mute hover:text-text"
                 }`}
               >
                 {t}
@@ -174,33 +158,25 @@ export default function SessionView() {
             ))}
           </div>
 
-          {/* Both stay mounted: switching tabs shouldn't drop the terminal
-              connection and lose everything on screen. */}
+          {/* Chat and Changes stay mounted: switching tabs should not drop the
+              conversation stream and repaint the whole session. */}
           <div className="min-h-0 flex-1">
-            {/* One or the other, never both: an agent that speaks a protocol
-                is not also running in a pane to attach to. */}
-            {talks ? (
-              <div className={`h-full ${showing === "Chat" ? "" : "hidden"}`}>
-                <Chat sessionId={session.id} live={busy} />
-              </div>
-            ) : (
-              <div className={`h-full ${showing === "Terminal" ? "" : "hidden"}`}>
-                <Terminal sessionId={session.id} live={busy} showing={showing === "Terminal"} />
-              </div>
-            )}
+            <div className={`h-full ${tab === "Chat" ? "" : "hidden"}`}>
+              <Chat sessionId={session.id} live={busy} />
+            </div>
             {/* Mounted only while you are looking at it: a shell lives for the
                 length of a visit, and opening this tab is what starts one. */}
-            {showing === "Shell" && (
+            {tab === "Shell" && (
               <div className="h-full">
-                <Terminal sessionId={session.id} live={busy} shell showing />
+                <Terminal sessionId={session.id} live={busy} showing />
               </div>
             )}
-            {showing === "Files" && (
+            {tab === "Files" && (
               <div className="h-full">
                 <Files sessionId={session.id} />
               </div>
             )}
-            <div className={`h-full ${showing === "Changes" ? "" : "hidden"}`}>
+            <div className={`h-full ${tab === "Changes" ? "" : "hidden"}`}>
               <Diff sessionId={session.id} />
             </div>
           </div>

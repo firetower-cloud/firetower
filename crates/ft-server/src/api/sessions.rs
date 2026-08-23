@@ -150,6 +150,23 @@ pub(super) async fn create_session(
         ));
     }
 
+    // An agent Firetower cannot hold a conversation with cannot be started.
+    //
+    // There used to be a second way — run it in a terminal and let somebody
+    // attach and type — and that is gone. Refusing here says why; starting one
+    // and showing an empty conversation would not. This is the control plane's
+    // question rather than the worker's: a worker does what it is told, and
+    // what is allowed is policy.
+    if !req.agent.speaks_a_protocol() {
+        return Err(ApiError::new(
+            ErrorCode::InvalidRequest,
+            format!(
+                "Firetower has no driver for {} yet, so it cannot run one",
+                req.agent.label()
+            ),
+        ));
+    }
+
     // No repository is a bare agent: a workspace with nothing checked out.
     let repo = match &req.repo_id {
         None => None,

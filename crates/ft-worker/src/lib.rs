@@ -547,7 +547,7 @@ impl Worker {
                 }
             },
 
-            ToWorker::Reply { session_id, .. } | ToWorker::Stop { session_id } => {
+            ToWorker::Stop { session_id } => {
                 tracing::debug!("superseded by RunAction ({session_id})");
             }
         }
@@ -965,17 +965,14 @@ impl Worker {
         )
         .await?;
 
-        // What a hook needs to find its way home: which session it belongs to,
-        // and where this worker keeps its log. Inherited by the agent, by the
-        // setup script, and by everything either of them runs.
-        //
-        // The session variable is also the guard. A hook that finds no session
-        // is not ours — somebody's own agent, sharing the same settings file —
-        // and does nothing.
+        // Which session this is, and where this worker keeps its state.
+        // Inherited by the agent, by the setup script, and by everything either
+        // of them runs — a script that wants to know which session it is
+        // running inside has nowhere else to look.
         let mut env = spec.env.clone();
-        env.push((ft_core::hooks::SESSION_ENV.to_string(), id.to_string()));
+        env.push((ft_core::SESSION_ENV.to_string(), id.to_string()));
         env.push((
-            ft_core::hooks::ROOT_ENV.to_string(),
+            ft_core::WORKER_ROOT_ENV.to_string(),
             self.root.display().to_string(),
         ));
 
@@ -1033,49 +1030,35 @@ impl Worker {
             }
         }
 
-        // Ask the agent to tell us when it stops — only if it has no other way
-        // of saying so. An agent that speaks a protocol reports its own
-        // lifecycle, and installing hooks as well means two things writing one
-        // field. See `Agent::has_status_hooks`.
+        // Take out anything a previous version installed. The agent reports its
+        // own lifecycle now, so a hook doing the same job is a second writer of
+        // one field, and one left behind keeps firing for sessions that have
+        // long moved on.
         if let Some(home) = std::env::var_os("HOME").map(std::path::PathBuf::from) {
-            if spec.agent.speaks_a_protocol() {
-                // Taken back out rather than merely not added. An agent that
-                // gained a protocol since the last session still has ours in
-                // its configuration, and one that keeps firing is a second
-                // writer of the same field — which showed up as a session that
-                // had just been asked something displaying a sentence from the
-                // turn before it.
-                if let Err(e) = hooks::remove(&home, spec.agent).await {
-                    tracing::warn!("could not remove {} hooks: {e:#}", spec.agent.label());
-                }
-            } else if let Ok(exe) = std::env::current_exe() {
-                if let Err(e) = hooks::install(&home, spec.agent, &exe).await {
-                    tracing::warn!("could not install {} hooks: {e:#}", spec.agent.label());
-                }
+            if let Err(e) = hooks::remove(&home, spec.agent).await {
+                tracing::warn!("could not remove {} hooks: {e:#}", spec.agent.label());
             }
         }
 
         self.emit(&id, EventKind::StepStarted { step: Step::Launch }, out)
             .await?;
 
-        // Whether a session is a conversation or a terminal is decided here,
-        // by whether the agent has a protocol to speak — never by anybody
-        // choosing. There is no mode to explain and none to get wrong, and the
-        // terminal stops being an option for an agent the moment it stops
-        // needing to be one.
+        // Whether an agent can be driven at all is the control plane's
+        // question, asked before a session is created — a worker does what it
+        // is told. What it decides here is only how: a supervisor holding the
+        // agent's pipes, or the agent itself in a pane.
         let structured = spec.agent.speaks_a_protocol();
 
-        // The agent runs under tmux so it outlives this worker, this
-        // connection, and the laptop that started it. In a structured session
-        // tmux supervises the supervisor rather than the agent, which changes
-        // nothing about that: the process tree still has tmux at the top.
+        // Either way it runs under tmux, so it outlives this worker, this
+        // connection, and the laptop that started it. For a structured session
+        // tmux supervises the supervisor, which changes nothing about that: the
+        // process tree still has tmux at the top.
         let command = if structured {
             let exe = std::env::current_exe().context("finding this worker's own path")?;
             structured::tmux_command(&exe, &id, &path, spec.agent)
         } else {
             spec.agent.launch(&spec.prompt)
         };
-
         tmux.start(&path, &command, &env)
             .await
             .with_context(|| format!("starting {}", spec.agent.label()))?;
@@ -1247,11 +1230,6 @@ impl Worker {
         let tmux = Tmux::named(pty.tmux_name(session_id.as_str()));
 
         match pty {
-            Pty::Agent => {
-                if !tmux.exists().await {
-                    anyhow::bail!("nothing is running for this session");
-                }
-            }
             // A shell is made when you ask for one, in the directory the agent
             // works in and carrying what the agent carries — read back out of
             // the agent's own tmux session, which is the only place those
@@ -1409,11 +1387,13 @@ fn takes_a_while(frame: &ToWorker) -> bool {
     )
 }
 
-/// One terminal of one session — what both maps key on now that a session has
-/// more than one.
+/// One terminal of one session.
+///
+/// Still keyed by kind rather than by session alone, even though only one kind
+/// is left: a session that grows a second terminal should not need every map in
+/// two files rewritten again.
 fn terminal_key(session_id: &SessionId, pty: Pty) -> String {
     match pty {
-        Pty::Agent => session_id.to_string(),
         Pty::Shell => format!("{session_id}:shell"),
     }
 }

@@ -12,17 +12,19 @@ import "@xterm/xterm/css/xterm.css";
 type State = "connecting" | "live" | "closed";
 
 /**
- * The agent's terminal, as it is.
+ * A shell in the session's workspace.
  *
- * Not a transcript and not a message box: keystrokes go through untouched, so
- * arrow keys, tab completion and `Ctrl-C` all reach the agent. That's the point
- * — you're driving the CLI, not talking to a wrapper around it.
+ * Yours, not the agent's. Keystrokes go through untouched — arrow keys, tab
+ * completion, `Ctrl-C` — because this is a real terminal for going and looking
+ * at what the agent has been doing to a checkout.
+ *
+ * The agent used to have one of these too, and you drove it by typing at it.
+ * It speaks a protocol now, so what it is doing is read as a conversation and
+ * answered with messages, and this is the only terminal left.
  */
 export function Terminal({
   sessionId,
   live,
-  /** A shell of your own rather than the terminal the agent is running in. */
-  shell = false,
   /**
    * Whether the terminal is the panel on screen.
    *
@@ -33,7 +35,6 @@ export function Terminal({
 }: {
   sessionId: string;
   live: boolean;
-  shell?: boolean;
   showing?: boolean;
 }) {
   const host = useRef<HTMLDivElement>(null);
@@ -98,7 +99,7 @@ export function Terminal({
       instance.current = term;
 
       const url = new URL(`${wsBase()}/api/v1/sessions/${sessionId}/pty`);
-      if (shell) url.searchParams.set("shell", "true");
+      url.searchParams.set("shell", "true");
       url.searchParams.set("cols", String(term.cols));
       url.searchParams.set("rows", String(term.rows));
       const auth = token();
@@ -150,7 +151,7 @@ export function Terminal({
       disposed = true;
       cleanup();
     };
-  }, [sessionId, shell, attempt]);
+  }, [sessionId, attempt]);
 
   // Opening a session and being unable to type into it was a click that never
   // did anything else. Focus follows the tab rather than the mount: the
@@ -174,13 +175,7 @@ export function Terminal({
           }`}
         />
         <span className="font-narrow text-[9.5px] font-semibold tracking-[0.14em] text-mute uppercase">
-          {state === "live"
-            ? shell
-              ? "Shell"
-              : "Terminal"
-            : state === "connecting"
-              ? "Connecting"
-              : "Detached"}
+          {state === "live" ? "Shell" : state === "connecting" ? "Connecting" : "Detached"}
         </span>
         {state === "closed" && (
           <button
