@@ -50,7 +50,8 @@ async fn arrange_asking(session: &str, workspace: &std::path::Path) -> Result<ft
     tokio::fs::create_dir_all(&dir).await?;
 
     let config = dir.join("mcp.json");
-    let contents = serde_json::to_vec_pretty(&crate::approver::mcp_config(&exe, session))?;
+    let contents =
+        serde_json::to_vec_pretty(&crate::approver::mcp_config(&exe, session, workspace))?;
     tokio::fs::write(&config, contents).await?;
 
     Ok(ft_core::Asking::Ask {

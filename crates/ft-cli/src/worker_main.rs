@@ -104,6 +104,10 @@ enum Command {
     McpApprove {
         #[arg(long)]
         session: String,
+        /// The worktree, named rather than inherited: this process is started
+        /// by the agent, so its working directory is the agent's business.
+        #[arg(long)]
+        workspace: PathBuf,
     },
     /// Watch a running agent, as the control plane would see it.
     ///
@@ -162,8 +166,8 @@ async fn main() -> Result<()> {
 
             return ft_worker::entry::run_agent(&session, workspace, &agent).await;
         }
-        Some(Command::McpApprove { session }) => {
-            return ft_worker::approver::serve(&session).await;
+        Some(Command::McpApprove { session, workspace }) => {
+            return ft_worker::approver::serve(&session, &workspace).await;
         }
         Some(Command::AgentTail {
             session,

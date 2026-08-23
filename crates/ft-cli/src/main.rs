@@ -174,6 +174,8 @@ enum Command {
     McpApprove {
         #[arg(long)]
         session: String,
+        #[arg(long)]
+        workspace: std::path::PathBuf,
     },
 
     /// Watch a running agent, as the control plane would see it.
@@ -233,10 +235,10 @@ async fn main() -> Result<()> {
             ft_worker::entry::run_agent(&session, workspace, &agent).await
         }
 
-        Some(Command::McpApprove { session }) => {
+        Some(Command::McpApprove { session, workspace }) => {
             // No tracing anywhere near this: stdout carries the protocol, and
             // a stray log line would be read as a malformed frame.
-            ft_worker::approver::serve(&session).await
+            ft_worker::approver::serve(&session, &workspace).await
         }
 
         Some(Command::AgentTail {

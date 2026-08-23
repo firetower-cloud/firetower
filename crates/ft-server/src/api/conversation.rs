@@ -354,9 +354,20 @@ pub(super) async fn answer_request(
 fn permission_result(decision: &ft_core::turn::Decision) -> serde_json::Value {
     use ft_core::turn::Decision;
     match decision {
-        Decision::Allow | Decision::AllowAlways => serde_json::json!({
+        Decision::Allow => serde_json::json!({
             "behavior": "allow",
             "updatedInput": serde_json::Value::Null,
+        }),
+        // The second half of "always" is not something the agent is told. The
+        // callback its own SDK offers a host arrives with ready-made rules to
+        // hand back; the tool call this arrives through does not carry them, so
+        // the far end writes the rule into the workspace instead. This flag is
+        // how it knows to, and it is taken back off before the agent sees any
+        // of it.
+        Decision::AllowAlways => serde_json::json!({
+            "behavior": "allow",
+            "updatedInput": serde_json::Value::Null,
+            "firetowerAlways": true,
         }),
         Decision::Deny { reason } => serde_json::json!({
             "behavior": "deny",
