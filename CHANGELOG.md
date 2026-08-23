@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.8.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.7.0...firetower-v0.8.0) (2026-08-23)
+
+
+### Features
+
+* a session can hold more than one repository ([03f105a](https://github.com/firetower-cloud/firetower/commit/03f105a4a52b608d854401b6e271e7ad0e9fc117))
+
+
+### Bug Fixes
+
+* add the checkout's pull request in its own migration ([c2308f3](https://github.com/firetower-cloud/firetower/commit/c2308f34edc79bd517677811eba510c03132b2ee))
+* **web:** a base branch per repository, and Escape lets you back in ([0946199](https://github.com/firetower-cloud/firetower/commit/0946199a601133c02bb78599cf69f674c6212432))
+* **web:** the repository picker opens outside the composer ([46da6f2](https://github.com/firetower-cloud/firetower/commit/46da6f2a5de988d196f4aa57b37f336fd656ce05))
+
 ## [0.7.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.6.0...firetower-v0.7.0) (2026-08-23)
 
 
