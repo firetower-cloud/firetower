@@ -3,17 +3,19 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.4.0
+ * OpenAPI spec version: 0.6.0
  */
 
 export interface NewPullRequest {
   /**
-     * Defaults to the session's prompt.
+     * Falls back to what the agent proposed, then to the session's prompt.
      * @nullable
      */
   body?: string | null;
+  /** Open it as a draft. */
+  draft?: boolean;
   /**
-     * Written by whoever opens it.
+     * Written by whoever opens it, or what the agent proposed.
      * @nullable
      */
   title?: string | null;

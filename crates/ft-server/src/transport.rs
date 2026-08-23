@@ -293,13 +293,11 @@ impl SshTransport {
     /// on before something ssh can notice.
     fn known_hosts(&self) -> Result<std::path::PathBuf> {
         let dir = self.home.join("ssh");
-        std::fs::create_dir_all(&dir)
-            .with_context(|| format!("making {}", dir.display()))?;
+        std::fs::create_dir_all(&dir).with_context(|| format!("making {}", dir.display()))?;
 
         let path = dir.join("known_hosts");
         if !path.exists() {
-            std::fs::write(&path, "")
-                .with_context(|| format!("creating {}", path.display()))?;
+            std::fs::write(&path, "").with_context(|| format!("creating {}", path.display()))?;
         }
 
         Ok(path)
@@ -571,7 +569,9 @@ mod tests {
         // so the line has to say which key and which port were actually used.
         let described = SshTransport {
             port: Some(2222),
-            key: ft_core::SshKey::File { path: "~/.ssh/fire".into() },
+            key: ft_core::SshKey::File {
+                path: "~/.ssh/fire".into(),
+            },
             ..ssh("deploy@fire-01")
         }
         .describe();

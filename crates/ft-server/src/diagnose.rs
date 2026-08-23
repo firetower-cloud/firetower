@@ -270,8 +270,10 @@ mod tests {
     #[test]
     fn an_image_without_the_worker_binary_is_a_missing_worker() {
         let d = read(
-            &["OCI runtime exec failed: exec failed: unable to start container \
-               process: exec: \"firetower-worker\": executable file not found in $PATH: unknown"],
+            &[
+                "OCI runtime exec failed: exec failed: unable to start container \
+               process: exec: \"firetower-worker\": executable file not found in $PATH: unknown",
+            ],
             &in_container(),
         );
 

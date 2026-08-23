@@ -52,7 +52,10 @@ const COMMENT: &str = "firetower";
 
 fn describe(key: &PrivateKey) -> Result<PublicIdentity> {
     Ok(PublicIdentity {
-        public_key: key.public_key().to_openssh().context("encoding the public key")?,
+        public_key: key
+            .public_key()
+            .to_openssh()
+            .context("encoding the public key")?,
         fingerprint: key.fingerprint(Default::default()).to_string(),
         algorithm: key.algorithm().to_string(),
     })
@@ -131,8 +134,7 @@ pub async fn materialise(vault: &Vault, home: &Path, reason: &str) -> Result<Pat
         _ => (home.join("ssh"), false),
     };
 
-    std::fs::create_dir_all(&dir)
-        .with_context(|| format!("making {}", dir.display()))?;
+    std::fs::create_dir_all(&dir).with_context(|| format!("making {}", dir.display()))?;
     restrict(&dir, 0o700)?;
 
     if !in_memory {
@@ -235,7 +237,9 @@ mod tests {
         let described = describe(&key).unwrap();
 
         // One line, and the shape authorized_keys wants.
-        assert!(described.public_key.starts_with("ssh-ed25519 AAAAC3NzaC1lZDI1NTE5"));
+        assert!(described
+            .public_key
+            .starts_with("ssh-ed25519 AAAAC3NzaC1lZDI1NTE5"));
         assert!(described.public_key.ends_with(" firetower"));
         assert!(!described.public_key.contains('\n'));
 

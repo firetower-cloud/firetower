@@ -15,6 +15,7 @@ mod container;
 pub mod db;
 pub mod diagnose;
 pub mod fleet;
+pub mod notify;
 pub mod oauth;
 pub mod providers;
 pub mod sshkey;

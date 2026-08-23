@@ -25,13 +25,19 @@ const MAX_DOWNLOAD: u64 = 100 * 1_048_576;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::{mpsc, Mutex};
 
+pub mod agentd;
 pub mod agents;
+pub mod approver;
 pub mod askpass;
 pub mod attach;
+pub mod attachments;
+pub mod describe;
+pub mod entry;
 pub mod first_run;
 pub mod git;
 pub mod hooks;
 pub mod store;
+pub mod structured;
 pub mod tmux;
 
 use git::GitRoot;
@@ -53,6 +59,11 @@ pub struct Worker {
     forwarded: Mutex<i64>,
     /// One terminal attachment per session, however many people are watching.
     attached: Mutex<HashMap<String, attach::Attachment>>,
+    /// Sessions whose structured agent is being forwarded upward.
+    ///
+    /// Held so a second watcher does not double every line, and so closing a
+    /// session stops the forwarding rather than leaving it talking to nobody.
+    watching: Mutex<HashMap<String, tokio::task::JoinHandle<()>>>,
 }
 
 /// How many frames may be queued for the control plane at once.
@@ -72,6 +83,7 @@ impl Worker {
             store,
             git: GitRoot::new(&root),
             attached: Mutex::new(HashMap::new()),
+            watching: Mutex::new(HashMap::new()),
             root,
             // Everything already in the log predates this connection. A
             // control plane that wants it asks, with `Resume`.
@@ -374,7 +386,11 @@ impl Worker {
                 // Typed characters, verbatim — including the ones that mean
                 // "stop", which is half the reason a terminal is the interface.
                 if let Some(bytes) = ft_proto::decode(&data) {
-                    if let Some(a) = self.attached.lock().await.get(&terminal_key(&session_id, pty))
+                    if let Some(a) = self
+                        .attached
+                        .lock()
+                        .await
+                        .get(&terminal_key(&session_id, pty))
                     {
                         if let Err(e) = a.write(&bytes) {
                             tracing::warn!(session = %session_id, "sending input: {e:#}");
@@ -389,7 +405,12 @@ impl Worker {
                 cols,
                 rows,
             } => {
-                if let Some(a) = self.attached.lock().await.get(&terminal_key(&session_id, pty)) {
+                if let Some(a) = self
+                    .attached
+                    .lock()
+                    .await
+                    .get(&terminal_key(&session_id, pty))
+                {
                     if let Err(e) = a.resize(cols, rows) {
                         tracing::warn!(session = %session_id, "resizing: {e:#}");
                     }
@@ -411,6 +432,75 @@ impl Worker {
                     if let Err(e) = Tmux::named(pty.tmux_name(session_id.as_str())).kill().await {
                         tracing::warn!(session = %session_id, "closing the shell: {e:#}");
                     }
+                }
+            }
+
+            ToWorker::WatchAgent {
+                session_id,
+                since_line,
+            } => {
+                let key = session_id.to_string();
+                let mut watching = self.watching.lock().await;
+                // Already forwarding. A second watcher would double every line,
+                // and the one that exists is already at or ahead of this
+                // cursor.
+                let out = out.clone();
+                let id = session_id.clone();
+                watching.entry(key).or_insert_with(move || {
+                    tokio::spawn(async move {
+                        if let Err(e) = structured::watch(id.clone(), since_line, out.clone()).await
+                        {
+                            // Ordinary rather than exceptional: a session
+                            // running in a terminal has no agent to watch, and
+                            // the control plane asks about all of them rather
+                            // than remembering which is which.
+                            tracing::debug!(session = %id, "no conversation to follow: {e:#}");
+                            let _ = out.send(ToServer::AgentClosed { session_id: id }).await;
+                        }
+                    })
+                });
+            }
+
+            ToWorker::UnwatchAgent { session_id } => {
+                if let Some(watcher) = self.watching.lock().await.remove(&session_id.to_string()) {
+                    // The agent carries on. Nobody watching is its ordinary
+                    // state — the log is still being written.
+                    watcher.abort();
+                }
+            }
+
+            ToWorker::SendTurn {
+                session_id,
+                message,
+            } => {
+                if let Err(e) =
+                    structured::tell(&session_id, &agentd::ToAgent::Send { message }).await
+                {
+                    tracing::warn!(session = %session_id, "sending a turn: {e:#}");
+                    out.send(ToServer::Error {
+                        session_id: Some(session_id),
+                        code: "AgentUnavailable".into(),
+                        message: format!("{e:#}"),
+                    })
+                    .await?;
+                }
+            }
+
+            ToWorker::Answer {
+                session_id,
+                req,
+                result,
+            } => {
+                if let Err(e) =
+                    structured::tell(&session_id, &agentd::ToAgent::Decide { req, result }).await
+                {
+                    tracing::warn!(session = %session_id, "answering: {e:#}");
+                }
+            }
+
+            ToWorker::Interrupt { session_id } => {
+                if let Err(e) = structured::tell(&session_id, &agentd::ToAgent::Interrupt).await {
+                    tracing::warn!(session = %session_id, "interrupting: {e:#}");
                 }
             }
 
@@ -459,7 +549,7 @@ impl Worker {
                 }
             },
 
-            ToWorker::Reply { session_id, .. } | ToWorker::Stop { session_id } => {
+            ToWorker::Stop { session_id } => {
                 tracing::debug!("superseded by RunAction ({session_id})");
             }
         }
@@ -471,7 +561,11 @@ impl Worker {
     /// Directories first, then files, each alphabetically — the order somebody
     /// scanning for a name expects, rather than whatever the filesystem hands
     /// back.
-    async fn list_files(&self, session_id: &SessionId, path: &str) -> Result<Vec<ft_core::FileEntry>> {
+    async fn list_files(
+        &self,
+        session_id: &SessionId,
+        path: &str,
+    ) -> Result<Vec<ft_core::FileEntry>> {
         let workspace = self.workspace_of(session_id).await?;
         let dir = inside(&workspace, path)?;
 
@@ -497,7 +591,10 @@ impl Worker {
                 name: entry.file_name().to_string_lossy().to_string(),
                 directory: meta.is_dir(),
                 size: if meta.is_dir() { 0 } else { meta.len() },
-                modified: meta.modified().ok().map(chrono::DateTime::<chrono::Utc>::from),
+                modified: meta
+                    .modified()
+                    .ok()
+                    .map(chrono::DateTime::<chrono::Utc>::from),
                 link,
             });
 
@@ -699,7 +796,9 @@ impl Worker {
             tokio::fs::create_dir_all(parent).await.ok();
         }
 
-        let existing = tokio::fs::read_to_string(&exclude).await.unwrap_or_default();
+        let existing = tokio::fs::read_to_string(&exclude)
+            .await
+            .unwrap_or_default();
         if existing.lines().any(|line| line.trim() == path) {
             return;
         }
@@ -853,6 +952,13 @@ impl Worker {
             }
         };
 
+        // Firetower's own files live in the workspace, which means git can see
+        // them. The supervisor's log is written on every line an agent prints,
+        // so without this it is the largest change in every diff, it is what a
+        // description gets asked about, and committing everything would put it
+        // in somebody's repository.
+        Self::exclude_from_git(&path, &format!("{}/", agentd::DIR)).await;
+
         let tmux = Tmux::for_session(id.as_str());
         self.store
             .record_workspace(&id, path.to_str().unwrap_or_default(), tmux.name())
@@ -868,17 +974,14 @@ impl Worker {
         )
         .await?;
 
-        // What a hook needs to find its way home: which session it belongs to,
-        // and where this worker keeps its log. Inherited by the agent, by the
-        // setup script, and by everything either of them runs.
-        //
-        // The session variable is also the guard. A hook that finds no session
-        // is not ours — somebody's own agent, sharing the same settings file —
-        // and does nothing.
+        // Which session this is, and where this worker keeps its state.
+        // Inherited by the agent, by the setup script, and by everything either
+        // of them runs — a script that wants to know which session it is
+        // running inside has nowhere else to look.
         let mut env = spec.env.clone();
-        env.push((ft_core::hooks::SESSION_ENV.to_string(), id.to_string()));
+        env.push((ft_core::SESSION_ENV.to_string(), id.to_string()));
         env.push((
-            ft_core::hooks::ROOT_ENV.to_string(),
+            ft_core::WORKER_ROOT_ENV.to_string(),
             self.root.display().to_string(),
         ));
 
@@ -936,23 +1039,36 @@ impl Worker {
             }
         }
 
-        // Ask the agent to tell us when it stops. Without this nothing ever
-        // moves a session off `Working`: Firetower would know what it started
-        // and never what happened next.
+        // Take out anything a previous version installed. The agent reports its
+        // own lifecycle now, so a hook doing the same job is a second writer of
+        // one field, and one left behind keeps firing for sessions that have
+        // long moved on.
         if let Some(home) = std::env::var_os("HOME").map(std::path::PathBuf::from) {
-            if let Ok(exe) = std::env::current_exe() {
-                if let Err(e) = hooks::install(&home, spec.agent, &exe).await {
-                    tracing::warn!("could not install {} hooks: {e:#}", spec.agent.label());
-                }
+            if let Err(e) = hooks::remove(&home, spec.agent).await {
+                tracing::warn!("could not remove {} hooks: {e:#}", spec.agent.label());
             }
         }
 
         self.emit(&id, EventKind::StepStarted { step: Step::Launch }, out)
             .await?;
 
-        // The agent runs under tmux so it outlives this worker, this
-        // connection, and the laptop that started it.
-        tmux.start(&path, &spec.agent.launch(&spec.prompt), &env)
+        // Whether an agent can be driven at all is the control plane's
+        // question, asked before a session is created — a worker does what it
+        // is told. What it decides here is only how: a supervisor holding the
+        // agent's pipes, or the agent itself in a pane.
+        let structured = spec.agent.speaks_a_protocol();
+
+        // Either way it runs under tmux, so it outlives this worker, this
+        // connection, and the laptop that started it. For a structured session
+        // tmux supervises the supervisor, which changes nothing about that: the
+        // process tree still has tmux at the top.
+        let command = if structured {
+            let exe = std::env::current_exe().context("finding this worker's own path")?;
+            structured::tmux_command(&exe, &id, &path, spec.agent)
+        } else {
+            spec.agent.launch(&spec.prompt)
+        };
+        tmux.start(&path, &command, &env)
             .await
             .with_context(|| format!("starting {}", spec.agent.label()))?;
 
@@ -966,6 +1082,41 @@ impl Worker {
         .await?;
         self.emit(&id, EventKind::AgentLaunched { agent: spec.agent }, out)
             .await?;
+
+        // An interactive agent was handed the prompt on its command line. This
+        // one reads messages, so the first one has to be sent — after waiting
+        // for it to be listening, because a turn written into a socket nobody
+        // has bound yet is simply lost.
+        if structured {
+            structured::wait_until_listening(&id)
+                .await
+                .context("waiting for the agent to start")?;
+            if !spec.prompt.trim().is_empty() {
+                structured::tell(
+                    &id,
+                    &agentd::ToAgent::Send {
+                        message: ft_core::turn::user_message(&spec.prompt),
+                    },
+                )
+                .await
+                .context("sending the first turn")?;
+            }
+
+            // Start forwarding now rather than when somebody opens the session.
+            // What the agent says is how the control plane learns that it
+            // finished, or stopped to ask something — and a session nobody is
+            // watching is exactly the one that most needs to be able to say so.
+            let watcher = out.clone();
+            let watched = id.clone();
+            self.watching.lock().await.insert(
+                id.to_string(),
+                tokio::spawn(async move {
+                    if let Err(e) = structured::watch(watched.clone(), 0, watcher).await {
+                        tracing::warn!(session = %watched, "following the agent: {e:#}");
+                    }
+                }),
+            );
+        }
 
         self.store.set_status(&id, SessionStatus::Working).await?;
         self.emit(
@@ -1033,14 +1184,38 @@ impl Worker {
                 Ok("stopped".to_string())
             }
 
-            ft_proto::Action::Commit { message } => {
+            ft_proto::Action::Commit { message, paths } => {
                 let dest = self.workspace_of(session_id).await?;
-                self.git.commit(&dest, &message).await
+                self.git.commit(&dest, &message, &paths).await
             }
 
             ft_proto::Action::Push => {
                 let dest = self.workspace_of(session_id).await?;
                 self.git.push(&dest, &branch().await?, credential).await
+            }
+
+            ft_proto::Action::Attach { name, data } => {
+                let dest = self.workspace_of(session_id).await?;
+                let bytes = ft_proto::decode(&data).context("that attachment was not base64")?;
+                attachments::keep(&dest, &name, &bytes).await
+            }
+
+            ft_proto::Action::Describe => {
+                let dest = self.workspace_of(session_id).await?;
+                let (agent, prompt) = self.store.session_brief(session_id).await?;
+                let base = self
+                    .store
+                    .refs_of(session_id)
+                    .await?
+                    .map(|(_, base)| base)
+                    .unwrap_or_default();
+                let diff = self.git.diff(&dest, &base).await?;
+
+                let proposal = describe::propose(agent, &dest, &prompt, &diff).await?;
+                // Two values through a channel that carries one string. The
+                // shape the control plane reads it back with is right beside
+                // this, in `sessions::describe`.
+                Ok(format!("{}\n\n{}", proposal.title, proposal.body))
             }
 
             ft_proto::Action::Diff => {
@@ -1088,11 +1263,6 @@ impl Worker {
         let tmux = Tmux::named(pty.tmux_name(session_id.as_str()));
 
         match pty {
-            Pty::Agent => {
-                if !tmux.exists().await {
-                    anyhow::bail!("nothing is running for this session");
-                }
-            }
             // A shell is made when you ask for one, in the directory the agent
             // works in and carrying what the agent carries — read back out of
             // the agent's own tmux session, which is the only place those
@@ -1250,11 +1420,13 @@ fn takes_a_while(frame: &ToWorker) -> bool {
     )
 }
 
-/// One terminal of one session — what both maps key on now that a session has
-/// more than one.
+/// One terminal of one session.
+///
+/// Still keyed by kind rather than by session alone, even though only one kind
+/// is left: a session that grows a second terminal should not need every map in
+/// two files rewritten again.
 fn terminal_key(session_id: &SessionId, pty: Pty) -> String {
     match pty {
-        Pty::Agent => session_id.to_string(),
         Pty::Shell => format!("{session_id}:shell"),
     }
 }
@@ -1349,8 +1521,13 @@ mod tests {
         git(&["add", "-A"], &mirror);
         git(
             &[
-                "-c", "user.email=a@b", "-c", "user.name=t",
-                "commit", "-qm", "init",
+                "-c",
+                "user.email=a@b",
+                "-c",
+                "user.name=t",
+                "commit",
+                "-qm",
+                "init",
             ],
             &mirror,
         );
@@ -1364,7 +1541,10 @@ mod tests {
             &ft_proto::EnvFile {
                 path: "config/.env".into(),
                 variables: vec![
-                    ("DATABASE_URL".into(), "postgres://user:pa'ss@host/db".into()),
+                    (
+                        "DATABASE_URL".into(),
+                        "postgres://user:pa'ss@host/db".into(),
+                    ),
                     ("NOTE".into(), "two words # not a comment".into()),
                 ],
             },
@@ -1375,7 +1555,10 @@ mod tests {
         let written = std::fs::read_to_string(workspace.join("config/.env")).unwrap();
         let read_back = ft_core::dotenv::parse(&written);
         assert_eq!(read_back.variables.len(), 2);
-        assert_eq!(read_back.variables[0].value, "postgres://user:pa'ss@host/db");
+        assert_eq!(
+            read_back.variables[0].value,
+            "postgres://user:pa'ss@host/db"
+        );
         assert_eq!(read_back.variables[1].value, "two words # not a comment");
 
         let ignored = git(&["check-ignore", "config/.env"], &workspace);
@@ -1397,13 +1580,20 @@ mod tests {
         let common = git(&["rev-parse", "--git-common-dir"], &workspace);
         let common = PathBuf::from(String::from_utf8_lossy(&common.stdout).trim().to_string());
         let exclude = std::fs::read_to_string(
-            if common.is_absolute() { common } else { workspace.join(common) }
-                .join("info")
-                .join("exclude"),
+            if common.is_absolute() {
+                common
+            } else {
+                workspace.join(common)
+            }
+            .join("info")
+            .join("exclude"),
         )
         .unwrap();
         assert_eq!(
-            exclude.lines().filter(|l| l.trim() == "config/.env").count(),
+            exclude
+                .lines()
+                .filter(|l| l.trim() == "config/.env")
+                .count(),
             1,
             "and only once"
         );

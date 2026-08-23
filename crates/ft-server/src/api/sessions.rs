@@ -150,6 +150,23 @@ pub(super) async fn create_session(
         ));
     }
 
+    // An agent Firetower cannot hold a conversation with cannot be started.
+    //
+    // There used to be a second way — run it in a terminal and let somebody
+    // attach and type — and that is gone. Refusing here says why; starting one
+    // and showing an empty conversation would not. This is the control plane's
+    // question rather than the worker's: a worker does what it is told, and
+    // what is allowed is policy.
+    if !req.agent.speaks_a_protocol() {
+        return Err(ApiError::new(
+            ErrorCode::InvalidRequest,
+            format!(
+                "Firetower has no driver for {} yet, so it cannot run one",
+                req.agent.label()
+            ),
+        ));
+    }
+
     // No repository is a bare agent: a workspace with nothing checked out.
     let repo = match &req.repo_id {
         None => None,
@@ -752,6 +769,120 @@ pub(super) async fn push_session(
     act(&state, &SessionId::from_stored(id), ft_proto::Action::Push).await
 }
 
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct Commit {
+    /// The commit message. Falls back to what the agent proposed.
+    #[serde(default)]
+    pub message: Option<String>,
+    /// Which files to include. Empty means everything that changed.
+    #[serde(default)]
+    pub paths: Vec<String>,
+}
+
+/// Commit the work, or the part of it somebody kept.
+///
+/// Everything by default, because that is what an unattended session wants.
+/// Naming files is for the review sheet, where somebody has just looked at each
+/// one and unticked the lockfile.
+#[utoipa::path(
+    post, path = "/api/v1/sessions/{id}/commit", tag = "sessions",
+    params(("id" = String, Path, description = "Session id")),
+    request_body = Commit,
+    responses((status = 200, body = Done), (status = 404, body = ApiError), (status = 409, body = ApiError)),
+)]
+pub(super) async fn commit_session(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(req): Json<Commit>,
+) -> ApiResult<Json<Done>> {
+    let id = SessionId::from_stored(id);
+    let (session, _) = session_context(&state, &id).await?;
+
+    let message = req
+        .message
+        .clone()
+        .or_else(|| session.proposed_title.clone())
+        .map(|m| m.trim().to_string())
+        .filter(|m| !m.is_empty())
+        .ok_or_else(|| ApiError::new(ErrorCode::InvalidRequest, "a commit needs a message"))?;
+
+    act(
+        &state,
+        &id,
+        ft_proto::Action::Commit {
+            message,
+            paths: req.paths,
+        },
+    )
+    .await
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct Proposal {
+    pub title: String,
+    pub body: String,
+}
+
+/// What the agent would call this work.
+///
+/// Runs on the host, where the code is — a short-lived agent reading the diff,
+/// not a turn in the session. A hidden turn is still a turn: it would land in
+/// the transcript, spend the session's tokens and move its context meter, and a
+/// session somebody is about to carry on working in should not be closer to
+/// full because something wanted a sentence for a form.
+#[utoipa::path(
+    post, path = "/api/v1/sessions/{id}/describe", tag = "sessions",
+    params(("id" = String, Path, description = "Session id")),
+    responses((status = 200, body = Proposal), (status = 404, body = ApiError), (status = 409, body = ApiError)),
+)]
+pub(super) async fn describe_session(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> ApiResult<Json<Proposal>> {
+    let id = SessionId::from_stored(id);
+    let proposal = propose(&state, &id).await?;
+    Ok(Json(proposal))
+}
+
+/// Ask the host what this work should be called, and remember the answer.
+///
+/// Shared with the moment a session hands back, which is when this happens
+/// without anybody asking.
+pub(crate) async fn propose(state: &AppState, id: &SessionId) -> ApiResult<Proposal> {
+    let (session, host) = session_context(state, id).await?;
+    if session.repo.is_none() {
+        return Err(ApiError::new(
+            ErrorCode::InvalidRequest,
+            "this session has no repository, so there is nothing to describe",
+        ));
+    }
+
+    let answer = state
+        .fleet
+        .run_action(&host, id, ft_proto::Action::Describe, None)
+        .await
+        .map_err(|e| ApiError::new(ErrorCode::HostUnreachable, format!("{e:#}")))?
+        .map_err(|why| ApiError::new(ErrorCode::ActionFailed, why))?;
+
+    // Title, blank line, body — the shape the worker sends it in.
+    let (title, body) = answer.split_once("\n\n").unwrap_or((answer.as_str(), ""));
+    let proposal = Proposal {
+        title: title.trim().to_string(),
+        body: body.trim().to_string(),
+    };
+
+    if let Err(e) = state
+        .db
+        .record_proposal(id, &proposal.title, &proposal.body)
+        .await
+    {
+        tracing::warn!(session = %id, "could not keep the proposal: {e:#}");
+    }
+    Ok(proposal)
+}
+
 /// What is in this workspace that isn't safely elsewhere.
 #[utoipa::path(
     get, path = "/api/v1/sessions/{id}/work", tag = "sessions",
@@ -830,13 +961,14 @@ pub(super) async fn open_pull_request(
     let id = SessionId::from_stored(id);
     let (session, _) = session_context(&state, &id).await?;
 
-    // Required rather than derived. A title made from the opening sentence of a
-    // prompt reads like "I would like remove", and it is the first thing a
-    // reviewer sees.
+    // Written, or proposed by the agent when it finished — never derived from
+    // the prompt. A title cut from the opening sentence of a request reads like
+    // "I would like remove", and it is the first thing a reviewer sees.
     let title = req
         .title
-        .as_deref()
-        .map(str::trim)
+        .clone()
+        .or_else(|| session.proposed_title.clone())
+        .map(|t| t.trim().to_string())
         .filter(|t| !t.is_empty())
         .ok_or_else(|| ApiError::new(ErrorCode::InvalidRequest, "a pull request needs a title"))?;
 
@@ -875,29 +1007,47 @@ pub(super) async fn open_pull_request(
             )
         })?;
 
-    oauth::open_pull_request(
+    let url = oauth::open_pull_request(
         provider,
         &token,
-        &repo.slug,
-        session.branch.as_deref().unwrap_or_default(),
-        session.base.as_deref().unwrap_or_default(),
-        title,
-        // The description is the prompt: what was asked for is the most useful
-        // thing a reviewer can be told, and nobody wants to retype it.
-        req.body.as_deref().unwrap_or(&session.prompt),
+        oauth::Opening {
+            slug: &repo.slug,
+            head: session.branch.as_deref().unwrap_or_default(),
+            base: session.base.as_deref().unwrap_or_default(),
+            title: &title,
+            // In order: what somebody typed, then what the agent proposed when
+            // it finished, then the prompt. The last is a poor description of
+            // what happened, but it is never nothing.
+            body: req
+                .body
+                .as_deref()
+                .or(session.proposed_body.as_deref())
+                .unwrap_or(&session.prompt),
+            draft: req.draft,
+        },
     )
     .await
-    .map(|url| Json(PullRequest { url }))
-    .map_err(|e| ApiError::new(ErrorCode::ActionFailed, format!("{e:#}")))
+    .map_err(|e| ApiError::new(ErrorCode::ActionFailed, format!("{e:#}")))?;
+
+    // Remembered, so the next screen can tell "pushed" from "already open" and
+    // offer the one control that makes sense.
+    if let Err(e) = state.db.record_pull_request(&id, &url).await {
+        tracing::warn!(session = %id, "opened a pull request but could not record it: {e:#}");
+    }
+
+    Ok(Json(PullRequest { url }))
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct NewPullRequest {
-    /// Written by whoever opens it.
+    /// Written by whoever opens it, or what the agent proposed.
     pub title: Option<String>,
-    /// Defaults to the session's prompt.
+    /// Falls back to what the agent proposed, then to the session's prompt.
     pub body: Option<String>,
+    /// Open it as a draft.
+    #[serde(default)]
+    pub draft: bool,
 }
 
 #[derive(Debug, Serialize, ToSchema)]

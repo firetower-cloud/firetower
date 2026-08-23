@@ -79,6 +79,53 @@ enum Command {
         /// The hook that fired: `Notification`, `Stop`, `StopFailure`…
         event: String,
     },
+    /// Supervise one session's agent, holding its pipes.
+    ///
+    /// Started by the worker under tmux, exactly where an interactive agent
+    /// would have gone. Runs until the agent exits.
+    AgentRun {
+        /// The session this agent belongs to, and the identifier the agent is
+        /// told to use for itself so it can be resumed later.
+        #[arg(long)]
+        session: String,
+        /// The worktree the agent runs in. Its own files go in a directory
+        /// underneath.
+        #[arg(long)]
+        workspace: PathBuf,
+        /// Which agent to start.
+        #[arg(long, default_value = "ClaudeCode")]
+        agent: String,
+    },
+    /// Answer the agent's permission prompts. Run by the agent, never by hand.
+    ///
+    /// An MCP server the agent starts for itself, from the configuration the
+    /// supervisor wrote. Its stdout is the protocol, so nothing else may be
+    /// written there.
+    McpApprove {
+        #[arg(long)]
+        session: String,
+        /// The worktree, named rather than inherited: this process is started
+        /// by the agent, so its working directory is the agent's business.
+        #[arg(long)]
+        workspace: PathBuf,
+    },
+    /// Watch a running agent, as the control plane would see it.
+    ///
+    /// A debugging tool, and the quickest way to tell whether a session is
+    /// producing anything worth drawing. Normalising here duplicates what the
+    /// control plane does — that is the point: it answers "is the agent fine
+    /// and the wiring broken, or the other way round" without a browser.
+    AgentTail {
+        #[arg(long)]
+        session: String,
+        /// Start from a line, for picking up where a previous look stopped.
+        #[arg(long, default_value_t = 0)]
+        from_line: u64,
+        /// Show the lines as the agent wrote them instead of what we made of
+        /// them.
+        #[arg(long)]
+        raw: bool,
+    },
 }
 
 #[tokio::main]
@@ -94,14 +141,39 @@ async fn main() -> Result<()> {
             return Ok(());
         }
         Some(Command::Hook { event }) => {
-            // Never fatal, never noisy. A hook that fails must not become a
-            // hook that interrupts the agent it is reporting on.
-            if let Err(e) =
-                ft_worker::hooks::report(&event, &default_root()).await
-            {
-                tracing::debug!("hook {event}: {e:#}");
-            }
+            // Nothing. See the same arm on the `firetower` binary: hooks are
+            // gone, and this remains only so that a stale one does nothing
+            // instead of failing inside somebody's own session.
+            tracing::debug!("ignoring hook {event}: Firetower no longer uses them");
             return Ok(());
+        }
+        Some(Command::AgentRun {
+            session,
+            workspace,
+            agent,
+        }) => {
+            // This one *is* a daemon, and it is the only subcommand that keeps
+            // running. Its logging goes to stderr like the worker's, which
+            // under tmux is where somebody debugging a host will look.
+            tracing_subscriber::fmt()
+                .with_writer(std::io::stderr)
+                .with_env_filter(
+                    tracing_subscriber::EnvFilter::try_from_default_env()
+                        .unwrap_or_else(|_| "info".into()),
+                )
+                .init();
+
+            return ft_worker::entry::run_agent(&session, workspace, &agent).await;
+        }
+        Some(Command::McpApprove { session, workspace }) => {
+            return ft_worker::approver::serve(&session, &workspace).await;
+        }
+        Some(Command::AgentTail {
+            session,
+            from_line,
+            raw,
+        }) => {
+            return ft_worker::entry::tail_agent(&session, from_line, raw).await;
         }
         None => {}
     }
@@ -113,8 +185,7 @@ async fn main() -> Result<()> {
     tracing_subscriber::fmt()
         .with_writer(std::io::stderr)
         .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "info".into()),
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
         )
         .init();
 

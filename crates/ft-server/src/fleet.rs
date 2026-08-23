@@ -7,6 +7,7 @@
 
 use crate::db::Db;
 use anyhow::{Context, Result};
+use ft_core::SessionStatus;
 use ft_core::{AgentPresence, Event, HostId, SessionId, WorkSummary};
 use ft_proto::{
     decode, encode, Codec, CodecError, Credential, ProbeFailure, Pty, RemoteInfo, ReqId, ToServer,
@@ -53,13 +54,189 @@ pub enum Terminal {
     Closed,
 }
 
+/// What a structured agent is saying, live.
+///
+/// Lines are unread here on purpose — the same bytes the agent wrote. Each
+/// subscriber makes its own sense of them, because arriving in the middle of a
+/// conversation means replaying what came before to get there.
+#[derive(Clone, Debug)]
+pub enum AgentSpeech {
+    Line {
+        line_no: u64,
+        line: String,
+    },
+    /// The agent is blocked and will not continue until somebody answers.
+    Asks {
+        req: String,
+        tool_name: String,
+        input: serde_json::Value,
+    },
+    /// Nothing more is coming.
+    Closed,
+}
+
+/// One session's lines, read for what they say about the session.
+#[derive(Default)]
+struct Progress {
+    reader: ft_core::normalise::ClaudeNormaliser,
+    /// The last thing the agent said, kept for the moment it stops.
+    ///
+    /// A session that handed work back is worth a sentence in the inbox, and
+    /// this is the accurate version of what the old `Stop` hook was scraping
+    /// out of a transcript file.
+    said: String,
+}
+
+impl Progress {
+    /// What this line means for the session, if anything.
+    fn read(&mut self, line: &str) -> Option<(SessionStatus, Option<String>)> {
+        use ft_core::turn::{StreamKind, TurnEvent as E, TurnStatus};
+
+        let mut moved = None;
+        for event in self.reader.push(line) {
+            match event {
+                // Assistant text only. A tool's output is not the agent
+                // speaking, and reasoning is not what it chose to say.
+                E::ContentDelta {
+                    stream: StreamKind::AssistantText,
+                    delta,
+                    ..
+                } => self.said.push_str(&delta),
+
+                E::TurnStarted { .. } => {
+                    self.said.clear();
+                    moved = Some((SessionStatus::Working, None));
+                }
+                E::TurnCompleted { status, .. } => {
+                    let note = summarise(&self.said);
+                    moved = Some(match status {
+                        TurnStatus::Failed => (SessionStatus::Failed, note),
+                        // Handed back rather than finished: it did a turn and
+                        // is waiting for the next thing, which is a resting
+                        // state and not an end.
+                        _ => (SessionStatus::HandedBack, note),
+                    });
+                }
+                E::RequestOpened { detail, args, .. } => {
+                    moved = Some((SessionStatus::NeedsYou, Some(asking_about(&detail, &args))));
+                }
+                _ => {}
+            }
+        }
+        moved
+    }
+}
+
+/// The last thing said, short enough for a card.
+///
+/// The end rather than the beginning: an agent that worked for ten minutes
+/// opens with what it set out to do and closes with what happened, and the
+/// second is the one worth reading in a list.
+fn summarise(said: &str) -> Option<String> {
+    let said = said.trim();
+    if said.is_empty() {
+        return None;
+    }
+    // A paragraph is a better unit than a character count — it ends where the
+    // agent decided it ended.
+    let tail = said.rsplit("\n\n").next().unwrap_or(said).trim();
+    let tail = if tail.is_empty() { said } else { tail };
+
+    const ROOM: usize = 200;
+    if tail.chars().count() <= ROOM {
+        return Some(tail.to_string());
+    }
+    Some(format!(
+        "{}…",
+        tail.chars().take(ROOM).collect::<String>().trim_end()
+    ))
+}
+
+/// Ask the host what this session's work should be called.
+///
+/// Off the connection loop, because it starts a short-lived agent on that
+/// machine and takes seconds — and nothing is waiting for the answer. It lands
+/// in the session, where the review sheet finds it already written.
+///
+/// Quiet about failing. A session that finished is finished whether or not
+/// anybody could think of a name for it, and the sheet works with an empty box.
+async fn describe(fleet: &Fleet, db: &Db, host_id: &HostId, session_id: &SessionId) {
+    // Nothing to describe without a checkout, and nothing to open either.
+    match db.session(session_id).await {
+        Ok(Some(session)) if session.repo.is_some() => {}
+        _ => return,
+    }
+
+    let answer = match fleet
+        .run_action(host_id, session_id, ft_proto::Action::Describe, None)
+        .await
+    {
+        Ok(Ok(answer)) => answer,
+        Ok(Err(why)) => {
+            tracing::debug!(session = %session_id, "nothing to describe: {why}");
+            return;
+        }
+        Err(e) => {
+            tracing::debug!(session = %session_id, "could not describe: {e:#}");
+            return;
+        }
+    };
+
+    let (title, body) = answer.split_once("\n\n").unwrap_or((answer.as_str(), ""));
+    if title.trim().is_empty() {
+        return;
+    }
+    if let Err(e) = db
+        .record_proposal(session_id, title.trim(), body.trim())
+        .await
+    {
+        tracing::warn!(session = %session_id, "could not keep the proposal: {e:#}");
+    }
+}
+
+/// Tell whoever asked to be told.
+///
+/// Named by the session rather than by its id, because a notification arriving
+/// on a phone has to say which of four agents wants something before anybody
+/// will open it.
+async fn tell(
+    db: &Db,
+    notify: &crate::notify::Notifier,
+    session_id: &SessionId,
+    note: Option<&str>,
+) {
+    if !notify.configured() {
+        return;
+    }
+    let name = match db.session(session_id).await {
+        Ok(Some(session)) => session.name,
+        // Worth telling somebody even when we cannot name it nicely.
+        _ => session_id.to_string(),
+    };
+    notify.stopped(
+        session_id,
+        &name,
+        note.unwrap_or("It stopped and is waiting for you."),
+        std::env::var("FIRETOWER_PUBLIC_URL").ok().as_deref(),
+    );
+}
+
+/// A question, short enough for a card in the inbox.
+fn asking_about(tool: &str, args: &serde_json::Value) -> String {
+    for key in ["command", "file_path", "path", "url"] {
+        if let Some(value) = args.get(key).and_then(|v| v.as_str()) {
+            return format!("{tool}: {value}");
+        }
+    }
+    tool.to_string()
+}
+
 /// One terminal of one session.
 ///
-/// A session has more than one now — the agent's, and a shell of your own — and
-/// everything here used to key on the session alone.
+/// One kind is left, and the key still names it: a session that grows a second
+/// terminal should not need every map in two files rewritten again.
 fn terminal_key(session_id: &SessionId, pty: Pty) -> String {
     match pty {
-        Pty::Agent => session_id.to_string(),
         Pty::Shell => format!("{session_id}:shell"),
     }
 }
@@ -105,6 +282,31 @@ pub struct Fleet {
     /// Live terminals, one broadcast per session. The worker holds a single
     /// attachment; this is where it fans out to however many are watching.
     terminals: Arc<RwLock<HashMap<String, broadcast::Sender<Terminal>>>>,
+    /// One reader per session, folding its lines into what the session is
+    /// doing.
+    ///
+    /// Separate from the readers each browser builds: those describe a
+    /// transcript to somebody looking at it, this decides what the inbox says.
+    /// The same events, read for a different purpose, and neither can stall
+    /// the other.
+    progress: Arc<RwLock<HashMap<String, Progress>>>,
+    /// How somebody is told a session stopped, when they asked to be.
+    notify: crate::notify::Notifier,
+    /// Questions each session is blocked on, until they are answered.
+    ///
+    /// Held here because nothing else can hold them for a browser: a question
+    /// is not in the agent's log — it is blocked, not talking — and the live
+    /// broadcast has no history. Without this, opening a session that is
+    /// already waiting shows an agent doing nothing, with no way to find out
+    /// why.
+    asked: Arc<RwLock<HashMap<String, Vec<AgentSpeech>>>>,
+    /// Live conversations, one broadcast per session.
+    ///
+    /// Carries lines as the agent wrote them. Turning them into something an
+    /// interface can draw happens per subscriber, because a subscriber that
+    /// joined late has to replay the stored lines through a normaliser of its
+    /// own to arrive in the right state.
+    conversations: Arc<RwLock<HashMap<String, broadcast::Sender<AgentSpeech>>>>,
     /// One per host we are keeping connected, whether or not it is answering.
     ///
     /// A host is in here from the moment it is added until it is removed, which
@@ -164,6 +366,10 @@ impl Fleet {
             events,
             probes: Arc::new(RwLock::new(HashMap::new())),
             terminals: Arc::new(RwLock::new(HashMap::new())),
+            conversations: Arc::new(RwLock::new(HashMap::new())),
+            asked: Arc::new(RwLock::new(HashMap::new())),
+            progress: Arc::new(RwLock::new(HashMap::new())),
+            notify: crate::notify::Notifier::from_env(),
             supervised: Arc::new(RwLock::new(HashMap::new())),
         }
     }
@@ -539,6 +745,30 @@ impl Fleet {
         let since = self.db.last_seq(&host_id).await?;
         codec.write(&ToWorker::Resume { since }).await?;
 
+        // Start mirroring every conversation this host is still holding.
+        //
+        // Not left until somebody opens one in a browser: the control plane is
+        // what turns "the agent asked a question" into a session that needs
+        // you, and it cannot do that from lines it never asked for. Each
+        // session resumes from what is already stored, so a reconnection costs
+        // the difference rather than the history.
+        for session in self
+            .db
+            .live_session_ids_on(&host_id)
+            .await
+            .unwrap_or_default()
+        {
+            let since_line = self.db.last_agent_line(&session).await.unwrap_or(0).max(0) as u64;
+            // A session running in a terminal has no conversation, and its
+            // worker answers this by finding no agent to watch.
+            codec
+                .write(&ToWorker::WatchAgent {
+                    session_id: session,
+                    since_line,
+                })
+                .await?;
+        }
+
         let (tx, mut rx) = mpsc::channel::<ToWorker>(64);
         self.workers.write().await.insert(host_id.to_string(), tx);
 
@@ -619,6 +849,11 @@ impl Fleet {
         let workers = self.workers.clone();
         let probes = self.probes.clone();
         let terminals = self.terminals.clone();
+        let conversations = self.conversations.clone();
+        let asked = self.asked.clone();
+        let progress = self.progress.clone();
+        let notify = self.notify.clone();
+        let describing = self.clone();
 
         {
             // conn is moved in so the child process outlives this scope
@@ -694,6 +929,123 @@ impl Fleet {
                                     // An error only means nobody is watching.
                                     let _ = tx.send(Terminal::Data(bytes));
                                 }
+                            }
+                        }
+                        Ok(ToServer::AgentLine { session_id, line_no, line }) => {
+                            // Stored before it is broadcast. A subscriber that
+                            // arrives a moment later replays from the table, so
+                            // a line that was announced but not yet written
+                            // would be one nobody ever sees again.
+                            if let Err(e) = db.record_agent_line(&session_id, line_no as i64, &line).await {
+                                tracing::error!(session = %session_id, "recording a line: {e:#}");
+                                continue;
+                            }
+                            // What this line means for the session, before it
+                            // means anything to a screen. This is the only
+                            // thing that moves a structured session off
+                            // `Working`, now that hooks do not.
+                            let moved = {
+                                let mut readers = progress.write().await;
+                                readers
+                                    .entry(session_id.to_string())
+                                    .or_default()
+                                    .read(&line)
+                            };
+                            if let Some((status, note)) = moved {
+                                let was_waiting = db
+                                    .session_status(&session_id)
+                                    .await
+                                    .ok()
+                                    .flatten()
+                                    .is_some_and(|s| s.needs_you());
+                                if let Err(e) = db
+                                    .set_session_state(&session_id, status, note.as_deref())
+                                    .await
+                                {
+                                    tracing::warn!(session = %session_id, "recording progress: {e:#}");
+                                }
+                                // On the change into needing somebody, not
+                                // every time we are told it still does.
+                                if status.needs_you() && !was_waiting {
+                                    tell(&db, &notify, &session_id, note.as_deref()).await;
+                                }
+
+                                // The moment it stops is the moment something
+                                // on that host knows most about what changed,
+                                // so it is asked then rather than when somebody
+                                // eventually opens the review sheet — by which
+                                // time they are waiting on it.
+                                if status == SessionStatus::HandedBack {
+                                    let describing = describing.clone();
+                                    let db = db.clone();
+                                    let session_id = session_id.clone();
+                                    let host_id = host_id.clone();
+                                    tokio::spawn(async move {
+                                        describe(&describing, &db, &host_id, &session_id).await;
+                                    });
+                                }
+                            }
+
+                            if let Some(tx) = conversations.read().await.get(session_id.as_str()) {
+                                // An error only means nobody is watching.
+                                let _ = tx.send(AgentSpeech::Line { line_no, line });
+                            }
+                        }
+                        Ok(ToServer::AgentAsks { session_id, req, tool_name, input }) => {
+                            let input_for_note = input.clone();
+                            let question = AgentSpeech::Asks { req: req.clone(), tool_name: tool_name.clone(), input };
+
+                            // Kept before it is announced, so a browser that
+                            // opens a moment later still finds it.
+                            let news = {
+                                let mut held = asked.write().await;
+                                let waiting = held.entry(session_id.to_string()).or_default();
+                                let known = waiting.iter().any(|q| matches!(q, AgentSpeech::Asks { req: seen, .. } if *seen == req));
+                                if !known {
+                                    waiting.push(question.clone());
+                                }
+                                !known
+                            };
+
+                            // Read before the write, or this always says it was
+                            // already waiting and nobody is ever told anything.
+                            let already = db
+                                .session_status(&session_id)
+                                .await
+                                .ok()
+                                .flatten()
+                                .is_some_and(|s| s.needs_you());
+
+                            // A permission prompt is never in the log — the
+                            // agent is blocked, not talking — so this frame is
+                            // the only thing that can say the session stopped.
+                            let note = asking_about(&tool_name, &input_for_note);
+                            if let Err(e) = db
+                                .set_session_state(&session_id, SessionStatus::NeedsYou, Some(&note))
+                                .await
+                            {
+                                tracing::warn!(session = %session_id, "marking as waiting: {e:#}");
+                            }
+
+                            // A watcher attaching re-announces everything the
+                            // agent is already blocked on, which is right for
+                            // drawing it and wrong for telling somebody: four
+                            // waiting sessions would notify four times on every
+                            // reconnect.
+                            tracing::debug!(session = %session_id, news, already, "deciding whether to notify");
+                            if news && !already {
+                                tell(&db, &notify, &session_id, Some(&note)).await;
+                            }
+
+                            if let Some(tx) = conversations.read().await.get(session_id.as_str()) {
+                                let _ = tx.send(question);
+                            }
+                        }
+                        Ok(ToServer::AgentClosed { session_id }) => {
+                            asked.write().await.remove(session_id.as_str());
+                            progress.write().await.remove(session_id.as_str());
+                            if let Some(tx) = conversations.write().await.remove(session_id.as_str()) {
+                                let _ = tx.send(AgentSpeech::Closed);
                             }
                         }
                         Ok(ToServer::PtyClosed { session_id, pty }) => {
@@ -963,6 +1315,121 @@ impl Fleet {
         .await?;
 
         Ok(receiver)
+    }
+
+    /// Follow a session's conversation, and ask its worker to start sending.
+    ///
+    /// The cursor is what this control plane already has, so a worker that has
+    /// been talking to nobody sends only the difference.
+    pub async fn watch_agent(
+        &self,
+        host_id: &HostId,
+        session_id: &SessionId,
+        since_line: u64,
+    ) -> Result<broadcast::Receiver<AgentSpeech>> {
+        let mut conversations = self.conversations.write().await;
+        let receiver = match conversations.get(session_id.as_str()) {
+            Some(existing) => existing.subscribe(),
+            None => {
+                // Deep enough to absorb replaying a long session into a
+                // subscriber that is still setting itself up.
+                let (tx, rx) = broadcast::channel(4096);
+                conversations.insert(session_id.to_string(), tx);
+                rx
+            }
+        };
+        drop(conversations);
+
+        self.send(
+            host_id,
+            ToWorker::WatchAgent {
+                session_id: session_id.clone(),
+                since_line,
+            },
+        )
+        .await?;
+
+        Ok(receiver)
+    }
+
+    /// One message for the agent.
+    pub async fn send_turn(
+        &self,
+        host_id: &HostId,
+        session_id: &SessionId,
+        message: serde_json::Value,
+    ) -> Result<()> {
+        self.send(
+            host_id,
+            ToWorker::SendTurn {
+                session_id: session_id.clone(),
+                message,
+            },
+        )
+        .await
+    }
+
+    /// What this session is blocked on, if anything.
+    pub async fn asked(&self, session_id: &SessionId) -> Vec<AgentSpeech> {
+        self.asked
+            .read()
+            .await
+            .get(session_id.as_str())
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    /// Answer something the agent is blocked on.
+    pub async fn answer(
+        &self,
+        host_id: &HostId,
+        session_id: &SessionId,
+        req: String,
+        result: serde_json::Value,
+    ) -> Result<()> {
+        // Forgotten here rather than when the agent acknowledges, because it
+        // does not acknowledge — it simply carries on, and the next thing it
+        // says is the proof.
+        let still_waiting = {
+            let mut held = self.asked.write().await;
+            let waiting = held.entry(session_id.to_string()).or_default();
+            waiting.retain(|q| !matches!(q, AgentSpeech::Asks { req: seen, .. } if *seen == req));
+            !waiting.is_empty()
+        };
+
+        // Back to working, unless something else is still blocked. Nothing in
+        // the stream says this: the agent does not announce that it has been
+        // unblocked, it simply carries on.
+        if !still_waiting {
+            if let Err(e) = self
+                .db
+                .set_session_state(session_id, SessionStatus::Working, None)
+                .await
+            {
+                tracing::warn!(session = %session_id, "clearing the question: {e:#}");
+            }
+        }
+
+        self.send(
+            host_id,
+            ToWorker::Answer {
+                session_id: session_id.clone(),
+                req,
+                result,
+            },
+        )
+        .await
+    }
+
+    /// End the turn in progress, leaving the session alive.
+    pub async fn interrupt(&self, host_id: &HostId, session_id: &SessionId) -> Result<()> {
+        self.send(
+            host_id,
+            ToWorker::Interrupt {
+                session_id: session_id.clone(),
+            },
+        )
+        .await
     }
 
     pub async fn send_input(

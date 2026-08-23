@@ -45,6 +45,22 @@ pub struct Session {
     /// moment, and the agent may well still be running there.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub forgotten_at: Option<chrono::DateTime<chrono::Utc>>,
+    /// Where the pull request is, once one has been opened.
+    ///
+    /// Remembered so a screen can tell "pushed" from "already open" without
+    /// asking GitHub, which is what lets one control name the next step rather
+    /// than offering every verb at once.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pull_request: Option<String>,
+    /// What the agent proposed calling this work, when it finished.
+    ///
+    /// A draft to edit rather than a box to fill. Nothing acts on it: it is
+    /// what the review sheet starts with, and whoever is shipping decides what
+    /// it actually says.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proposed_title: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proposed_body: Option<String>,
     pub host_id: HostId,
     pub workspace_id: Option<WorkspaceId>,
     /// What this session is going to do, in order, decided when it was created.

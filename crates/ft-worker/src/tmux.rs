@@ -20,8 +20,13 @@ pub struct Tmux {
 impl Tmux {
     /// Named after the session, so `tmux ls` on a host is readable by a human
     /// wondering what Firetower has running.
+    ///
+    /// What runs in here is the supervisor holding an agent's pipes, not a
+    /// terminal anybody attaches to. tmux is here for what it was always here
+    /// for — being the parent that outlives a worker — and no longer for being
+    /// a screen.
     pub fn for_session(session_id: &str) -> Self {
-        Self::named(ft_proto::Pty::Agent.tmux_name(session_id))
+        Self::named(format!("firetower-{session_id}"))
     }
 
     /// A tmux session by name — the shell a session opens alongside its agent.

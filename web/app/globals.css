@@ -1,18 +1,35 @@
 @import "tailwindcss";
 
 @theme {
-  /* ── Ground: warm ash, not neutral black ──────────────────── */
-  --color-ground: #0c0b0a;
-  --color-panel: #131211;
-  --color-raise: #1a1816;
-  --color-line: #262320;
-  --color-line-soft: #1c1a18;
+  /* ── Ground: warm ash, not neutral black ────────────────────
+     Five surfaces, far enough apart to tell without a border. The old set
+     lived inside four points of lightness, so a card on the page and the page
+     under it were the same colour and everything had to be drawn with a line.
+     Nothing here is #000: the hue is ash, and ash is warm. */
+  --color-ground: #171411;
+  --color-panel: #201c18;
+  --color-raise: #2b2620;
+  --color-line: #3a342c;
+  --color-line-soft: #2b2620;
 
   /* ── Text ─────────────────────────────────────────────────── */
-  --color-mute: #6b645d;
-  --color-dim: #948c83;
-  --color-text: #cfc8bf;
-  --color-bone: #f4f0e9;
+  --color-mute: #857b70;
+  --color-dim: #a89e93;
+  --color-text: #ddd5ca;
+  --color-bone: #f7f3ec;
+
+  /* ── Type: four sizes, and a name for each ──────────────────
+     Sizes were written at the point of use, so a label and a sentence and a
+     caption drifted a half-pixel apart in twenty files. These are the sizes;
+     anything not one of them is a mistake. */
+  --text-body: 0.9375rem; /* 15px — what somebody reads: prose, a message */
+  --text-body--line-height: 1.7;
+  --text-ui: 0.8125rem; /* 13px — controls and labels */
+  --text-ui--line-height: 1.45;
+  --text-meta: 0.75rem; /* 12px — captions, counts, paths */
+  --text-meta--line-height: 1.45;
+  --text-code: 0.8125rem; /* 13px — what the machine said */
+  --text-code--line-height: 1.6;
 
   /* ── Signals: only ember is allowed to be loud ────────────── */
   --color-ember: #ff6b2c;
@@ -26,7 +43,7 @@
   --font-narrow: var(--font-archivo-narrow), ui-sans-serif, system-ui, sans-serif;
   --font-mono: var(--font-jetbrains), ui-monospace, "SF Mono", monospace;
 
-  --radius: 6px;
+  --radius: 10px;
 }
 
 @layer base {
@@ -61,11 +78,11 @@
     background: transparent;
   }
   ::-webkit-scrollbar-thumb {
-    background: var(--color-line);
+    background: var(--color-raise);
     border-radius: 99px;
   }
   ::-webkit-scrollbar-thumb:hover {
-    background: #33302c;
+    background: var(--color-line);
   }
 }
 
@@ -73,9 +90,9 @@
   /* Instrument-panel label: the map-legend voice of the UI */
   .eyebrow {
     font-family: var(--font-narrow);
-    font-size: 10px;
+    font-size: 10.5px;
     font-weight: 600;
-    letter-spacing: 0.16em;
+    letter-spacing: 0.18em;
     text-transform: uppercase;
     color: var(--color-mute);
   }
@@ -157,6 +174,84 @@
 }
 .caret {
   animation: caret 1.05s step-end infinite;
+}
+
+/* ── The rail: a session read at a glance ───────────────────
+   A transcript is not a chat log here. Somebody arriving at a session wants to
+   know where the agent got to and what stopped it, then leave — so the shape of
+   the run has to be readable before any of the words are.
+
+   Markers in the left margin carry that: the marker says *state* — running,
+   done, refused — and the label beside it says *kind*. Prose has no marker at
+   all, because the agent talking is the connective tissue between the things it
+   did, and the most common thing on screen should be the quietest.
+
+   There is no line joining them. A hairline down a whole conversation is a
+   thousand pixels of furniture drawn to say something the markers already say,
+   and it turns every message into an entry in a ledger.
+
+   The rule the whole screen follows: mono is what the machine said, sans is
+   speech, narrow is a label.
+
+   Geometry is derived from two values so a nested group lines up without a
+   second set of numbers. */
+.spine,
+.spine-end {
+  --rail: 13px;
+  --gap: 18px;
+}
+
+.spine {
+  position: relative;
+  padding-left: calc(var(--rail) + var(--gap));
+}
+
+.node {
+  position: relative;
+}
+/* In the margin, centred on where the rail used to be, so nested groups reuse
+   this untouched. */
+.node > .mark {
+  position: absolute;
+  left: calc((var(--rail) + var(--gap)) * -1);
+  top: 6px;
+  width: calc(var(--rail) * 2);
+  display: flex;
+  justify-content: center;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1.4;
+  color: var(--color-mute);
+}
+.node > .mark[data-state="running"] {
+  color: var(--color-slate);
+}
+.node > .mark[data-state="failed"] {
+  color: var(--color-brick);
+}
+.node > .mark[data-state="you"] {
+  color: var(--color-ember);
+}
+
+/* Where it stops, which is the answer to "what is it doing". */
+.spine-end {
+  position: relative;
+  height: 16px;
+}
+.spine-end > .tip {
+  position: absolute;
+  left: calc(var(--rail) - 2px);
+  top: 6px;
+  width: 6px;
+  height: 6px;
+  border-radius: 99px;
+  background: var(--color-ember);
+}
+
+/* A subagent gets its own margin, one level in. Same rules, quieter. */
+.spine-nested {
+  --rail: 5px;
+  --gap: 13px;
 }
 
 @media (prefers-reduced-motion: reduce) {

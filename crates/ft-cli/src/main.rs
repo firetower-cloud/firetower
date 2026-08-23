@@ -148,6 +148,46 @@ enum Command {
         /// the password.
         prompt: Vec<String>,
     },
+
+    /// Supervise one session's agent, holding its pipes. Run by tmux.
+    ///
+    /// Here as well as on `firetower-worker` because localhost's worker is
+    /// this binary: the control plane spawns its own executable with a
+    /// subcommand, so a session started on this machine asks this program for
+    /// something only the other one used to answer.
+    #[command(hide = true)]
+    AgentRun {
+        #[arg(long)]
+        session: String,
+        #[arg(long)]
+        workspace: std::path::PathBuf,
+        #[arg(long, default_value = "ClaudeCode")]
+        agent: String,
+    },
+
+    /// Answer the agent's permission prompts. Run by the agent, never by hand.
+    ///
+    /// Here as well as on `firetower-worker` for the same reason `agent-run`
+    /// is: localhost's worker is this binary, so a session on this machine
+    /// starts this program to ask its questions.
+    #[command(hide = true)]
+    McpApprove {
+        #[arg(long)]
+        session: String,
+        #[arg(long)]
+        workspace: std::path::PathBuf,
+    },
+
+    /// Watch a running agent, as the control plane would see it.
+    #[command(hide = true)]
+    AgentTail {
+        #[arg(long)]
+        session: String,
+        #[arg(long, default_value_t = 0)]
+        from_line: u64,
+        #[arg(long)]
+        raw: bool,
+    },
 }
 
 /// Settings that belong to an install rather than to the source.
@@ -179,13 +219,37 @@ async fn main() -> Result<()> {
         Some(Command::Hook { event }) => {
             // Never fatal, never noisy. A hook that fails must not become a
             // hook that interrupts the agent it is reporting on.
-            if let Err(e) =
-                ft_worker::hooks::report(&event, &default_home().join("worker")).await
-            {
-                tracing::debug!("hook {event}: {e:#}");
-            }
+            // Nothing. Firetower no longer asks an agent to report on itself —
+            // it says what it is doing as part of saying anything — and the
+            // entries a previous version installed are removed when a session
+            // next starts. This stays so that one firing in the window before
+            // that does nothing, quietly, rather than failing in the middle of
+            // somebody's own session.
+            tracing::debug!("ignoring hook {event}: Firetower no longer uses them");
             Ok(())
         }
+
+        Some(Command::AgentRun {
+            session,
+            workspace,
+            agent,
+        }) => {
+            // A daemon, so it logs like one — to stderr, where tmux keeps it.
+            init_tracing(true, false);
+            ft_worker::entry::run_agent(&session, workspace, &agent).await
+        }
+
+        Some(Command::McpApprove { session, workspace }) => {
+            // No tracing anywhere near this: stdout carries the protocol, and
+            // a stray log line would be read as a malformed frame.
+            ft_worker::approver::serve(&session, &workspace).await
+        }
+
+        Some(Command::AgentTail {
+            session,
+            from_line,
+            raw,
+        }) => ft_worker::entry::tail_agent(&session, from_line, raw).await,
 
         Some(Command::Passwd {
             username,
@@ -272,16 +336,6 @@ async fn main() -> Result<()> {
         }
     }
 }
-
-
-
-
-
-
-
-
-
-
 
 /// Ask twice, then replace it.
 ///

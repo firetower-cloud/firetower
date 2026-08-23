@@ -9,8 +9,10 @@ use utoipa::ToSchema;
 
 pub mod dotenv;
 mod ids;
+pub mod normalise;
 pub mod session;
 mod status;
+pub mod turn;
 
 pub use ids::{HostId, OrgId, RepoId, SessionId, UserId, WorkspaceId};
 pub use session::{
@@ -18,6 +20,16 @@ pub use session::{
     WorkspaceSize,
 };
 pub use status::{SessionStatus, TransitionError};
+pub use turn::{ItemId, ItemKind, RequestId, TurnEvent, TurnId};
+
+/// Which session a process is running inside.
+///
+/// Set on the agent and inherited by everything it starts, so a setup script or
+/// a tool can tell. Named here rather than in the worker because both ends read
+/// it.
+pub const SESSION_ENV: &str = "FIRETOWER_SESSION";
+/// Where the worker on this machine keeps its state.
+pub const WORKER_ROOT_ENV: &str = "FIRETOWER_WORKER_ROOT";
 
 /// Which agent runs inside a workspace.
 ///
@@ -111,6 +123,91 @@ impl Agent {
         }
     }
 
+    /// The command line for driving this agent through a structured protocol
+    /// rather than a terminal.
+    ///
+    /// `None` means this agent has no such protocol here yet, which is an
+    /// answer rather than a failure: it says the session has to run the
+    /// interactive way.
+    ///
+    /// Unlike [`launch`](Agent::launch) this is argv, not a shell line. There
+    /// is no shell in the way — the daemon holds the pipes itself — so there is
+    /// nothing to quote and nothing that could be made to run.
+    ///
+    /// Two flags are worth explaining because they are not obvious:
+    ///
+    /// - `--replay-user-messages` echoes our own turns back out, so the log the
+    ///   worker keeps is the whole conversation rather than half of it.
+    /// - `--session-id` fixes the identifier up front instead of learning it
+    ///   afterwards, which is what makes a session resumable even if the first
+    ///   thing that happens is a crash.
+    ///
+    /// `--bare` is deliberately absent. It skips hooks, skills, MCP servers and
+    /// `CLAUDE.md` — everything that makes an agent useful in somebody's actual
+    /// repository — and refuses to read a subscription login.
+    pub fn launch_headless(&self, session_id: &str, asking: &Asking) -> Option<Vec<String>> {
+        let agent_session = agent_session_uuid(session_id);
+        match self {
+            Agent::ClaudeCode => {
+                let mut argv: Vec<String> = [
+                    self.command(),
+                    "-p",
+                    "--input-format",
+                    "stream-json",
+                    "--output-format",
+                    "stream-json",
+                    "--include-partial-messages",
+                    "--verbose",
+                    "--replay-user-messages",
+                    "--session-id",
+                    &agent_session,
+                ]
+                .iter()
+                .map(|s| s.to_string())
+                .collect();
+
+                // The biggest one, asked for rather than inherited.
+                //
+                // Left to itself the CLI picks, and what it picks moves — a
+                // machine configured for Opus was quietly running Sonnet,
+                // because usage-based switching is a thing and nothing said so.
+                // A session that takes an hour should not be run by whichever
+                // model was cheapest at the moment it started.
+                argv.extend(["--model".into(), BIGGEST.into()]);
+
+                match asking {
+                    // The agent stops and asks, and the question is routed to
+                    // whoever is watching. This is the point of the whole
+                    // arrangement, so it is the ordinary case.
+                    //
+                    // `auto` rather than `default`: a session here is unattended
+                    // by construction, so an agent that stops to ask *may I run
+                    // this* stops for somebody who is not there. A classifier
+                    // takes the ordinary ones and everything else still reaches
+                    // the person watching, which is the whole arrangement — it
+                    // is who answers the easy ones that differs, not whether
+                    // anybody is asked.
+                    Asking::Ask { tool, config } => argv.extend([
+                        "--permission-mode".into(),
+                        "auto".into(),
+                        "--permission-prompt-tool".into(),
+                        tool.clone(),
+                        "--mcp-config".into(),
+                        config.clone(),
+                    ]),
+                    // Nothing can answer, so nothing may be asked. Narrower
+                    // than the interactive default rather than wider: this
+                    // approves edits, not commands.
+                    Asking::CannotAsk => {
+                        argv.extend(["--permission-mode".into(), "acceptEdits".into()])
+                    }
+                }
+                Some(argv)
+            }
+            Agent::Codex | Agent::Shell => None,
+        }
+    }
+
     /// Whether authenticating this one is even a question.
     pub fn needs_credential(&self) -> bool {
         !matches!(self, Agent::Shell)
@@ -121,12 +218,13 @@ impl Agent {
         Agent::all().into_iter().find(|a| format!("{a:?}") == name)
     }
 
-    /// Whether this agent can report its own status, or has to be guessed at.
+    /// Whether this agent can be driven through a protocol at all.
     ///
-    /// Claude Code fires hooks the worker listens for; everything else falls
-    /// back to output heuristics and an idle timer.
-    pub fn has_status_hooks(&self) -> bool {
-        matches!(self, Agent::ClaudeCode)
+    /// The single question behind every choice that used to be a mode: which
+    /// tab a session gets, whether it is watched or attached to, and whether
+    /// it is asked to report on itself.
+    pub fn speaks_a_protocol(&self) -> bool {
+        self.launch_headless("probe", &Asking::CannotAsk).is_some()
     }
 }
 
@@ -594,6 +692,68 @@ pub enum AgentMode {
     NotNeeded,
 }
 
+/// The model a session runs unless somebody changes it.
+///
+/// The flagship, with the long context window. Sessions here are unattended and
+/// often long, which is exactly the shape of work that a smaller model does
+/// worse and that runs out of room.
+///
+/// Changeable per session — see the composer — so this is a starting point
+/// rather than a policy.
+pub const BIGGEST: &str = "opus[1m]";
+
+/// Whether there is anybody to answer a permission prompt.
+///
+/// An agent that asks a question nobody can hear is worse than one that was
+/// never allowed to ask: it waits, and the session looks hung. So the two are
+/// one decision, made once, rather than a flag that can be set without the
+/// machinery behind it.
+#[derive(Debug, Clone)]
+pub enum Asking {
+    /// Route questions through this tool, configured by this file.
+    Ask { tool: String, config: String },
+    /// Approve what can be approved without asking, and refuse the rest.
+    CannotAsk,
+}
+
+/// The identifier an agent is told to call its own session.
+///
+/// Firetower names sessions with a ULID, so `s_01k…` — and Claude Code will not
+/// accept that: it wants a UUID and refuses to start otherwise, which is the
+/// kind of thing only a real session tells you.
+///
+/// Derived from the Firetower id rather than generated, so it is the same every
+/// time. That is what lets a session be resumed without having stored anything:
+/// the name is recomputed, not remembered.
+///
+/// Not a UUIDv5 — that is defined over SHA-1 and this is SHA-256 — so it is
+/// stamped as version 8, which is the one reserved for exactly this.
+pub fn agent_session_uuid(session_id: &str) -> String {
+    use sha2::{Digest, Sha256};
+
+    let digest = Sha256::new()
+        .chain_update(b"firetower/agent-session/")
+        .chain_update(session_id.as_bytes())
+        .finalize();
+
+    let mut bytes = [0u8; 16];
+    bytes.copy_from_slice(&digest[..16]);
+    // Version 8, custom.
+    bytes[6] = (bytes[6] & 0x0f) | 0x80;
+    // Variant 1, the usual one.
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+
+    let hex: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
+    format!(
+        "{}-{}-{}-{}-{}",
+        &hex[0..8],
+        &hex[8..12],
+        &hex[12..16],
+        &hex[16..20],
+        &hex[20..32]
+    )
+}
+
 /// What a host reported about an agent, last time we asked.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
@@ -747,210 +907,6 @@ pub struct FirstRun {
     /// Everything asked so far is a yes, hence `bool`; widen it when something
     /// needs otherwise.
     pub answers: Vec<(Vec<String>, bool)>,
-}
-
-/// What an agent's hooks tell Firetower.
-///
-/// The whole point of the product is knowing when an agent stopped being useful
-/// without you, and the agent is the only thing that actually knows. Watching
-/// its terminal is guesswork; a hook is the agent saying so.
-pub mod hooks {
-    use super::SessionStatus;
-
-    /// The environment a hook needs to find its way home.
-    ///
-    /// Which session this is, and where the worker keeps its log. Set on the
-    /// agent's process, and inherited by every hook it runs.
-    pub const SESSION_ENV: &str = "FIRETOWER_SESSION";
-    pub const ROOT_ENV: &str = "FIRETOWER_WORKER_ROOT";
-
-    /// What a fired hook means for the session.
-    ///
-    /// `None` for the events we install but do not act on — they are worth
-    /// having in the log without being worth a status.
-    ///
-    /// `notification_type` matters because `Notification` covers both "it wants
-    /// permission" and "it just authenticated": one is you, the other is not.
-    pub fn status_for(event: &str, notification_type: Option<&str>) -> Option<SessionStatus> {
-        match event {
-            // Blocked on a person. `agent_completed` arrives here too — it is
-            // the agent saying it has nothing left to do, which in an inbox is
-            // the same as your move.
-            "Notification" => match notification_type {
-                Some("auth_success") => None,
-                Some("agent_completed") => Some(SessionStatus::HandedBack),
-                // permission_prompt, idle_prompt, agent_needs_input,
-                // elicitation_dialog, and anything added later: all of them
-                // mean it is waiting on somebody.
-                _ => Some(SessionStatus::NeedsYou),
-            },
-
-            // An MCP server asking a question mid-tool-call.
-            "Elicitation" => Some(SessionStatus::NeedsYou),
-
-            // Finished a turn. A resting state, not an end.
-            "Stop" => Some(SessionStatus::HandedBack),
-
-            // The turn ended on an API error — a rate limit, an expired
-            // credential, a billing problem. Yours to deal with, and the one
-            // the README promises to route to you.
-            "StopFailure" => Some(SessionStatus::Failed),
-
-            // You said something, so it is working again.
-            "UserPromptSubmit" => Some(SessionStatus::Working),
-
-            // And so is running a tool — which is the one that matters.
-            //
-            // Answering a permission prompt is not submitting a prompt, so
-            // `UserPromptSubmit` never fires for it and a session that was
-            // unblocked by pressing `1` stayed on `NeedsYou` while the agent
-            // worked. A tool call is the first thing that happens afterwards,
-            // whatever unblocked it.
-            //
-            // This fires on every tool call — hundreds a session — so it costs
-            // nothing only because a report that changes nothing is dropped
-            // before it is written. See the caller.
-            "PreToolUse" => Some(SessionStatus::Working),
-
-            // About to ask whether it may do something specific, which is the
-            // same block as `Notification` with the detail attached.
-            "PermissionRequest" => Some(SessionStatus::NeedsYou),
-
-            // The agent exited. Not `Ended`: the workspace and the branch are
-            // still there, and what to do with them is yours to decide.
-            "SessionEnd" => Some(SessionStatus::HandedBack),
-
-            _ => None,
-        }
-    }
-
-    /// Where the agent's own words live, by event, most specific first.
-    ///
-    /// Each hook carries what it stopped for under a different key and none of
-    /// them are guaranteed. The caller does the JSON — this crate describes
-    /// the protocol and stays free of a parser.
-    pub const NOTE_KEYS: &[&str] = &[
-        "notification_message",   // Notification
-        "last_assistant_message", // Stop, SubagentStop
-        "error_message",          // StopFailure
-        "elicitation_prompt",     // Elicitation
-        "message",                // UserPromptSubmit
-    ];
-
-    /// How much a note actually tells you.
-    ///
-    /// A blocked agent reports more than once and from more than one hook, so
-    /// notes arrive out of order and compete. Ranking them is what stops the
-    /// worse one landing last: `Stop` reading a stale sentence out of the
-    /// transcript six seconds after `PermissionRequest` said exactly what was
-    /// being asked.
-    ///
-    /// A boolean was not enough. Both of those are "specific"; only one of them
-    /// is the question.
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-    pub enum Detail {
-        /// "Claude needs your permission" — true of every permission prompt.
-        Message = 0,
-        /// The last thing the agent said, which may be about something else by
-        /// the time it blocks.
-        Said = 1,
-        /// The tool it is waiting to use, and its arguments.
-        Tool = 2,
-        /// The question itself. Nothing beats being asked.
-        Question = 3,
-    }
-
-    /// Whether a note is worth replacing what is already on the card.
-    ///
-    /// Equal ranks replace — a new question supersedes an older question — and
-    /// lower ones never do.
-    pub fn worth_replacing(existing: Detail, incoming: Detail) -> bool {
-        incoming >= existing
-    }
-
-    /// A question the agent asked, as one line.
-    ///
-    /// The options belong on the card. The point of the inbox is deciding
-    /// without opening a terminal, and a question with its choices hidden still
-    /// makes you go and look.
-    pub fn note_for_question(question: &str, options: &[String]) -> String {
-        let question = question.trim();
-        if options.is_empty() {
-            return question.to_string();
-        }
-        format!("{question} — {}", options.join(" / "))
-    }
-
-    /// Emphasis, as characters.
-    ///
-    /// Notes are prose an agent wrote, so they arrive with markdown in them,
-    /// and the card is one line of plain text — `**Option A**` renders as
-    /// exactly that, asterisks and all.
-    pub fn plain(text: &str) -> String {
-        let mut out = String::with_capacity(text.len());
-        let mut chars = text.chars().peekable();
-
-        while let Some(c) = chars.next() {
-            match c {
-                // `**bold**` and `*italic*` alike: the markers go, the words
-                // stay.
-                '*' | '_' => {
-                    while chars.peek() == Some(&c) {
-                        chars.next();
-                    }
-                }
-                '`' => {}
-                other => out.push(other),
-            }
-        }
-
-        out
-    }
-
-    /// What the agent wants to do, in a phrase.
-    ///
-    /// `Notification` says "Claude needs your permission" whatever it is
-    /// asking, which tells you only that you are needed. `PermissionRequest`
-    /// carries the tool and its arguments, so this can say what for.
-    pub fn note_for_tool(tool: &str, detail: Option<&str>) -> String {
-        let verb = match tool {
-            "Bash" => "wants to run",
-            "Edit" | "Write" | "NotebookEdit" => "wants to edit",
-            "Read" => "wants to read",
-            "WebFetch" => "wants to fetch",
-            _ => "wants to use",
-        };
-
-        match detail.map(str::trim).filter(|d| !d.is_empty()) {
-            Some(detail) => format!("{verb} {detail}"),
-            // Better than nothing: the tool's name is still more than
-            // "needs your permission".
-            None => format!("{verb} {tool}"),
-        }
-    }
-
-    /// Where the interesting part of a tool call lives, by tool.
-    ///
-    /// The caller does the JSON; this crate keeps the knowledge of which key
-    /// matters without taking a parser as a dependency.
-    pub const TOOL_DETAIL_KEYS: &[&str] = &["command", "file_path", "url", "path", "pattern"];
-
-    /// One line for an inbox, out of whatever the agent said.
-    ///
-    /// The rest is in the terminal, one click away. A card that grows to fit a
-    /// wall of text buries every other session on the screen.
-    pub fn trim_note(text: &str) -> Option<String> {
-        let text = text.trim();
-        if text.is_empty() {
-            return None;
-        }
-
-        const LIMIT: usize = 240;
-        Some(match text.char_indices().nth(LIMIT) {
-            None => text.to_string(),
-            Some((cut, _)) => format!("{}…", text[..cut].trim_end()),
-        })
-    }
 }
 
 /// A repository Firetower can cut worktrees from.
@@ -1288,7 +1244,9 @@ mod launch_tests {
         // Including with no prompt, where somebody is driving it by hand: the
         // agent should not be configured differently for that.
         assert!(
-            Agent::ClaudeCode.launch("").contains("--permission-mode auto"),
+            Agent::ClaudeCode
+                .launch("")
+                .contains("--permission-mode auto"),
             "an empty prompt should not change how the agent runs"
         );
     }
@@ -1519,82 +1477,6 @@ mod contract_tests {
 }
 
 #[cfg(test)]
-mod hook_tests {
-    use super::hooks::*;
-    use super::SessionStatus;
-
-    /// The one that was broken: answering a permission prompt is not
-    /// submitting a prompt, so nothing said the agent had resumed and the
-    /// session sat on `NeedsYou` while it worked.
-    #[test]
-    fn a_tool_call_means_the_agent_is_working_again() {
-        assert_eq!(
-            status_for("PreToolUse", None),
-            Some(SessionStatus::Working),
-            "whatever unblocked it, this is the first thing that happens after"
-        );
-    }
-
-    #[test]
-    fn the_notifications_that_mean_you_and_the_ones_that_do_not() {
-        for kind in ["permission_prompt", "idle_prompt", "agent_needs_input"] {
-            assert_eq!(
-                status_for("Notification", Some(kind)),
-                Some(SessionStatus::NeedsYou),
-                "{kind}"
-            );
-        }
-
-        assert_eq!(
-            status_for("Notification", Some("auth_success")),
-            None,
-            "signing in is not somebody's move"
-        );
-        assert_eq!(
-            status_for("Notification", Some("agent_completed")),
-            Some(SessionStatus::HandedBack)
-        );
-    }
-
-    #[test]
-    fn an_api_error_is_yours_to_deal_with() {
-        assert_eq!(status_for("StopFailure", None), Some(SessionStatus::Failed));
-    }
-
-    #[test]
-    fn a_hook_we_do_not_act_on_changes_nothing() {
-        assert_eq!(status_for("PostToolUse", None), None);
-        assert_eq!(status_for("PreCompact", None), None);
-    }
-
-    /// "Claude needs your permission" tells you only that you are needed.
-    #[test]
-    fn a_tool_call_reads_as_what_it_wants_to_do() {
-        assert_eq!(
-            note_for_tool("Bash", Some("git push --force origin main")),
-            "wants to run git push --force origin main"
-        );
-        assert_eq!(
-            note_for_tool("Edit", Some("src/lib.rs")),
-            "wants to edit src/lib.rs"
-        );
-        // No arguments is still more than "needs your permission".
-        assert_eq!(note_for_tool("Bash", None), "wants to run Bash");
-    }
-
-    #[test]
-    fn a_note_is_one_line_rather_than_a_transcript() {
-        assert_eq!(trim_note("   "), None);
-        assert_eq!(trim_note(" hello "), Some("hello".to_string()));
-
-        let long = "x".repeat(400);
-        let trimmed = trim_note(&long).unwrap();
-        assert!(trimmed.len() < long.len());
-        assert!(trimmed.ends_with('…'), "and says that it was cut");
-    }
-}
-
-#[cfg(test)]
 mod ssh_key_tests {
     use super::*;
 
@@ -1630,8 +1512,7 @@ mod ssh_key_tests {
     /// meant "ssh decides", and it still does.
     #[test]
     fn a_row_with_no_key_at_all_still_reads() {
-        let old: Compute =
-            serde_json::from_str(r#"{"type":"Server","host":"fire-03"}"#).unwrap();
+        let old: Compute = serde_json::from_str(r#"{"type":"Server","host":"fire-03"}"#).unwrap();
         let Compute::Server { key, .. } = &old else {
             panic!("not a server")
         };
@@ -1647,7 +1528,6 @@ mod ssh_key_tests {
         assert!(!SshKey::File { path: "/k".into() }.is_held());
     }
 }
-
 
 #[cfg(test)]
 mod reachability_tests {

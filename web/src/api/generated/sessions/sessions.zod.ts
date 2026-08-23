@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.4.0
+ * OpenAPI spec version: 0.6.0
  */
 import * as zod from 'zod';
 
@@ -35,6 +35,9 @@ export const ListSessionsResponseItem = zod.object({
   "note": zod.string().nullish().describe('Why it is in that status, when whatever set it knew.\n\nOnly ever the agent\'s own words, and only for the statuses that mean\nyour move. Cleared when it goes back to working — a question that has\nbeen answered is not worth keeping on screen.'),
   "number": zod.int().describe('Assigned once, never reused, and the same for as long as the session\nexists. What `name` is derived from, and what a name that has been\nchanged can always be traced back to.'),
   "prompt": zod.string(),
+  "proposedBody": zod.string().nullish(),
+  "proposedTitle": zod.string().nullish().describe('What the agent proposed calling this work, when it finished.\n\nA draft to edit rather than a box to fill. Nothing acts on it: it is\nwhat the review sheet starts with, and whoever is shipping decides what\nit actually says.'),
+  "pullRequest": zod.string().nullish().describe('Where the pull request is, once one has been opened.\n\nRemembered so a screen can tell \"pushed\" from \"already open\" without\nasking GitHub, which is what lets one control name the next step rather\nthan offering every verb at once.'),
   "repo": zod.string().nullish().describe('`None` for a bare agent: a workspace with nothing checked out.'),
   "size": zod.enum(['Small', 'Medium', 'Large']),
   "status": zod.enum(['Starting', 'Working', 'NeedsYou', 'HandedBack', 'Failed', 'Ended']),
@@ -67,6 +70,9 @@ export const CreateSessionResponse = zod.object({
   "note": zod.string().nullish().describe('Why it is in that status, when whatever set it knew.\n\nOnly ever the agent\'s own words, and only for the statuses that mean\nyour move. Cleared when it goes back to working — a question that has\nbeen answered is not worth keeping on screen.'),
   "number": zod.int().describe('Assigned once, never reused, and the same for as long as the session\nexists. What `name` is derived from, and what a name that has been\nchanged can always be traced back to.'),
   "prompt": zod.string(),
+  "proposedBody": zod.string().nullish(),
+  "proposedTitle": zod.string().nullish().describe('What the agent proposed calling this work, when it finished.\n\nA draft to edit rather than a box to fill. Nothing acts on it: it is\nwhat the review sheet starts with, and whoever is shipping decides what\nit actually says.'),
+  "pullRequest": zod.string().nullish().describe('Where the pull request is, once one has been opened.\n\nRemembered so a screen can tell \"pushed\" from \"already open\" without\nasking GitHub, which is what lets one control name the next step rather\nthan offering every verb at once.'),
   "repo": zod.string().nullish().describe('`None` for a bare agent: a workspace with nothing checked out.'),
   "size": zod.enum(['Small', 'Medium', 'Large']),
   "status": zod.enum(['Starting', 'Working', 'NeedsYou', 'HandedBack', 'Failed', 'Ended']),
@@ -109,6 +115,9 @@ export const GetSessionResponse = zod.object({
   "note": zod.string().nullish().describe('Why it is in that status, when whatever set it knew.\n\nOnly ever the agent\'s own words, and only for the statuses that mean\nyour move. Cleared when it goes back to working — a question that has\nbeen answered is not worth keeping on screen.'),
   "number": zod.int().describe('Assigned once, never reused, and the same for as long as the session\nexists. What `name` is derived from, and what a name that has been\nchanged can always be traced back to.'),
   "prompt": zod.string(),
+  "proposedBody": zod.string().nullish(),
+  "proposedTitle": zod.string().nullish().describe('What the agent proposed calling this work, when it finished.\n\nA draft to edit rather than a box to fill. Nothing acts on it: it is\nwhat the review sheet starts with, and whoever is shipping decides what\nit actually says.'),
+  "pullRequest": zod.string().nullish().describe('Where the pull request is, once one has been opened.\n\nRemembered so a screen can tell \"pushed\" from \"already open\" without\nasking GitHub, which is what lets one control name the next step rather\nthan offering every verb at once.'),
   "repo": zod.string().nullish().describe('`None` for a bare agent: a workspace with nothing checked out.'),
   "size": zod.enum(['Small', 'Medium', 'Large']),
   "status": zod.enum(['Starting', 'Working', 'NeedsYou', 'HandedBack', 'Failed', 'Ended']),
@@ -154,6 +163,9 @@ export const RenameSessionResponse = zod.object({
   "note": zod.string().nullish().describe('Why it is in that status, when whatever set it knew.\n\nOnly ever the agent\'s own words, and only for the statuses that mean\nyour move. Cleared when it goes back to working — a question that has\nbeen answered is not worth keeping on screen.'),
   "number": zod.int().describe('Assigned once, never reused, and the same for as long as the session\nexists. What `name` is derived from, and what a name that has been\nchanged can always be traced back to.'),
   "prompt": zod.string(),
+  "proposedBody": zod.string().nullish(),
+  "proposedTitle": zod.string().nullish().describe('What the agent proposed calling this work, when it finished.\n\nA draft to edit rather than a box to fill. Nothing acts on it: it is\nwhat the review sheet starts with, and whoever is shipping decides what\nit actually says.'),
+  "pullRequest": zod.string().nullish().describe('Where the pull request is, once one has been opened.\n\nRemembered so a screen can tell \"pushed\" from \"already open\" without\nasking GitHub, which is what lets one control name the next step rather\nthan offering every verb at once.'),
   "repo": zod.string().nullish().describe('`None` for a bare agent: a workspace with nothing checked out.'),
   "size": zod.enum(['Small', 'Medium', 'Large']),
   "status": zod.enum(['Starting', 'Working', 'NeedsYou', 'HandedBack', 'Failed', 'Ended']),
@@ -162,6 +174,286 @@ export const RenameSessionResponse = zod.object({
   "updatedAt": zod.iso.datetime({"offset":true}),
   "workspaceId": zod.union([zod.null(),zod.string().describe('Identifies a workspace — the compute a session runs on.')]).optional()
 }).describe('A line of work with a conversation attached and a branch at the end.')
+
+/**
+ * Until this arrives the agent is stopped, holding the tool call open. There
+ * is no timeout anywhere on that path: somebody may be asleep, and an agent
+ * that gave up and denied would be worse than one that waited.
+ * @summary Answer something the agent is waiting on.
+ */
+export const AnswerRequestParams = zod.object({
+  "id": zod.string().describe('Session id')
+})
+
+export const AnswerRequestBody = zod.object({
+  "decision": zod.union([zod.object({
+  "decision": zod.enum(['Allow'])
+}),zod.object({
+  "decision": zod.enum(['AllowAlways'])
+}).describe('Allow, and stop asking about calls like this one.'),zod.object({
+  "decision": zod.enum(['Deny']),
+  "reason": zod.string().nullish().describe('Shown to the agent, which reads it and often tries something else.\nThat is the point of asking for one.')
+}),zod.object({
+  "answers": zod.unknown(),
+  "decision": zod.enum(['Answered'])
+}).describe('The answers to a question the agent asked.\n\nNot an allow with extra: a question is answered, not permitted, and\nletting it through without the answers gives the agent a tool result\nsaying nothing. Keyed by the question\'s own text, valued by the label\nof the option chosen — the agent matches on both, so neither may be\nparaphrased on the way back.')]).describe('What the person decided, when they were asked.'),
+  "req": zod.string().describe('Which question. The agent\'s own id for the call it is blocked on.')
+})
+
+export const AnswerRequestResponse = zod.object({
+  "sent": zod.boolean()
+})
+
+/**
+ * For everything that is not a picture. A picture goes inside the message,
+ * because the model looks at it; anything else is better as a file the agent
+ * can read, grep, unzip or edit with the tools it already has — and it costs
+ * nothing until it does, so a large archive never has to fit in a prompt.
+ * @summary Put a file into the session's workspace.
+ */
+export const AttachFileParams = zod.object({
+  "id": zod.string().describe('Session id')
+})
+
+export const AttachFileBody = zod.object({
+  "data": zod.string().describe('The bytes, base64.'),
+  "name": zod.string().describe('What it was called. Only the last part is kept, and it is scrubbed.')
+})
+
+export const AttachFileResponse = zod.object({
+  "path": zod.string().describe('Where it landed, relative to the workspace — which is what to say to the\nagent, and what it can act on.')
+})
+
+/**
+ * Everything by default, because that is what an unattended session wants.
+ * Naming files is for the review sheet, where somebody has just looked at each
+ * one and unticked the lockfile.
+ * @summary Commit the work, or the part of it somebody kept.
+ */
+export const CommitSessionParams = zod.object({
+  "id": zod.string().describe('Session id')
+})
+
+export const CommitSessionBody = zod.object({
+  "message": zod.string().nullish().describe('The commit message. Falls back to what the agent proposed.'),
+  "paths": zod.array(zod.string()).optional().describe('Which files to include. Empty means everything that changed.')
+})
+
+export const CommitSessionResponse = zod.object({
+  "detail": zod.string()
+})
+
+/**
+ * A snapshot. Use the stream for a session that is still running — this is for
+ * one that has finished, and for a first paint that wants to be a single
+ * request rather than a connection.
+ * @summary Everything the agent has said so far.
+ */
+export const GetConversationParams = zod.object({
+  "id": zod.string().describe('Session id')
+})
+
+export const getConversationQuerySinceLineMin = 0;
+
+
+
+export const GetConversationQueryParams = zod.object({
+  "sinceLine": zod.int().min(getConversationQuerySinceLineMin).optional().describe('Continue from this line')
+})
+
+export const getConversationResponseEventsItemOneThreeUsageTwoCacheReadTokensMin = 0;
+
+export const getConversationResponseEventsItemOneThreeUsageTwoCacheWriteTokensMin = 0;
+
+export const getConversationResponseEventsItemOneThreeUsageTwoContextUsedMin = 0;
+
+export const getConversationResponseEventsItemOneThreeUsageTwoContextWindowMin = 0;
+
+export const getConversationResponseEventsItemOneThreeUsageTwoDurationMsMin = 0;
+
+export const getConversationResponseEventsItemOneThreeUsageTwoFirstTokenMsMin = 0;
+
+export const getConversationResponseEventsItemOneThreeUsageTwoInputTokensMin = 0;
+
+export const getConversationResponseEventsItemOneThreeUsageTwoModelsItemCacheReadTokensMin = 0;
+
+export const getConversationResponseEventsItemOneThreeUsageTwoModelsItemCacheWriteTokensMin = 0;
+
+export const getConversationResponseEventsItemOneThreeUsageTwoModelsItemContextWindowMin = 0;
+
+export const getConversationResponseEventsItemOneThreeUsageTwoModelsItemInputTokensMin = 0;
+
+export const getConversationResponseEventsItemOneThreeUsageTwoModelsItemOutputTokensMin = 0;
+
+export const getConversationResponseEventsItemOneThreeUsageTwoOutputTokensMin = 0;
+
+export const getConversationResponseEventsItemOneThreeUsageTwoThinkingTokensMin = 0;
+
+export const getConversationResponseEventsItemTwoLineNoMin = 0;
+
+export const getConversationResponseLastLineMin = 0;
+
+
+
+export const GetConversationResponse = zod.object({
+  "events": zod.array(zod.union([zod.object({
+  "commands": zod.array(zod.object({
+  "description": zod.string().nullish(),
+  "name": zod.string()
+}).describe('A slash command this session offers, as the agent reported it at startup.')),
+  "mode": zod.string().describe('What the agent may do without asking, as it reported it.\n\nRead rather than remembered: it is restated at the start of every\nturn, so a control showing it is showing what is in force rather\nthan what was last requested.'),
+  "model": zod.string(),
+  "tools": zod.array(zod.string()),
+  "type": zod.enum(['SessionConfigured'])
+}).describe('What this session can do, reported once when the agent starts.'),zod.object({
+  "turn": zod.string().describe('One exchange: a prompt in, and everything that happened before the agent stopped.'),
+  "type": zod.enum(['TurnStarted'])
+}),zod.object({
+  "status": zod.enum(['Completed', 'Failed', 'Interrupted']).describe('How a turn ended.'),
+  "turn": zod.string().describe('One exchange: a prompt in, and everything that happened before the agent stopped.'),
+  "type": zod.enum(['TurnCompleted']),
+  "usage": zod.union([zod.null(),zod.object({
+  "cacheReadTokens": zod.int().min(getConversationResponseEventsItemOneThreeUsageTwoCacheReadTokensMin).nullish().describe('Absent when the agent does not say.'),
+  "cacheWriteTokens": zod.int().min(getConversationResponseEventsItemOneThreeUsageTwoCacheWriteTokensMin).nullish().describe('What was written into the cache on this turn, and billed as such.\n\nReported apart from what was read because they cost different amounts\nand mean different things: reading is the session being cheap, writing\nis it having said something new and large.'),
+  "contextUsed": zod.int().min(getConversationResponseEventsItemOneThreeUsageTwoContextUsedMin).nullish().describe('Everything the model had in front of it on the last request.\n\nInput plus both kinds of cache plus what it wrote. This is the number\nthat matters to somebody deciding whether a session has room left —\ninput alone reads as almost nothing once caching is working, which is\nexactly when it is least true.'),
+  "contextWindow": zod.int().min(getConversationResponseEventsItemOneThreeUsageTwoContextWindowMin).nullish().describe('How much room the model has at all.'),
+  "costUsd": zod.number().nullish().describe('The agent\'s own estimate, in dollars. Its arithmetic, not ours.'),
+  "denied": zod.array(zod.string()).optional().describe('Tools the person refused during the turn.'),
+  "durationMs": zod.int().min(getConversationResponseEventsItemOneThreeUsageTwoDurationMsMin).nullish().describe('How long the turn took, wall clock.'),
+  "firstTokenMs": zod.int().min(getConversationResponseEventsItemOneThreeUsageTwoFirstTokenMsMin).nullish().describe('How long before it said anything.'),
+  "inputTokens": zod.int().min(getConversationResponseEventsItemOneThreeUsageTwoInputTokensMin),
+  "models": zod.array(zod.object({
+  "cacheReadTokens": zod.int().min(getConversationResponseEventsItemOneThreeUsageTwoModelsItemCacheReadTokensMin),
+  "cacheWriteTokens": zod.int().min(getConversationResponseEventsItemOneThreeUsageTwoModelsItemCacheWriteTokensMin),
+  "contextWindow": zod.int().min(getConversationResponseEventsItemOneThreeUsageTwoModelsItemContextWindowMin).nullish(),
+  "costUsd": zod.number().nullish(),
+  "inputTokens": zod.int().min(getConversationResponseEventsItemOneThreeUsageTwoModelsItemInputTokensMin),
+  "model": zod.string().describe('The canonical name where the agent gives one, so `claude-opus-5[1m]`\nand `claude-opus-5` are not two rows.'),
+  "outputTokens": zod.int().min(getConversationResponseEventsItemOneThreeUsageTwoModelsItemOutputTokensMin)
+}).describe('One model\'s share of a turn.')).optional().describe('What each model did, when more than one was involved.\n\nA turn is rarely one model: something small names things and summarises\nalongside the one doing the work, and it is on the bill. Totals hide\nthat; this does not.'),
+  "outputTokens": zod.int().min(getConversationResponseEventsItemOneThreeUsageTwoOutputTokensMin),
+  "thinkingTokens": zod.int().min(getConversationResponseEventsItemOneThreeUsageTwoThinkingTokensMin).nullish().describe('Of the output, how much was reasoning rather than answer.')
+}).describe('What a turn cost, and how much room is left.\n\nNot `Eq`, because the cost is a float. Comparing two of these for equality\nis a test convenience, not something to build on.')]).optional()
+}),zod.object({
+  "item": zod.string().describe('One thing in the transcript — a message, a thought, a tool call.'),
+  "kind": zod.enum(['AssistantMessage', 'Reasoning', 'UserMessage', 'CommandExecution', 'FileChange', 'FileRead', 'McpToolCall', 'WebSearch', 'SubagentCall', 'Question', 'Unknown']).describe('What kind of thing an item is, which is what decides how it is drawn.\n\nThe list is short on purpose. It is not a catalogue of every tool an agent\nmight have — that changes weekly and is not knowable — but of the shapes\nFiretower can draw usefully. Anything that doesn\'t fit is [`Unknown`], which\nstill renders: name, input, output. A wrong guess costs a nicer card, never\nthe event itself.\n\n[`Unknown`]: ItemKind::Unknown'),
+  "task": zod.union([zod.null(),zod.string().describe('Set when a subagent owns this item rather than the main thread.\n\nWithout it a subagent\'s tool calls interleave into the transcript\nand read as though the main agent made them.')]).optional(),
+  "title": zod.string().nullish().describe('What the card is called before there is anything in it.'),
+  "type": zod.enum(['ItemStarted'])
+}),zod.object({
+  "data": zod.unknown(),
+  "item": zod.string().describe('One thing in the transcript — a message, a thought, a tool call.'),
+  "type": zod.enum(['ItemUpdated'])
+}).describe('Something about an open item changed — usually a tool\'s arguments\narriving, which come a fragment at a time and are only worth showing\nonce they parse.'),zod.object({
+  "item": zod.string().describe('One thing in the transcript — a message, a thought, a tool call.'),
+  "status": zod.enum(['Completed', 'Failed', 'Declined']).describe('How an item ended, when it has.'),
+  "type": zod.enum(['ItemCompleted'])
+}),zod.object({
+  "delta": zod.string(),
+  "item": zod.string().describe('One thing in the transcript — a message, a thought, a tool call.'),
+  "stream": zod.enum(['AssistantText', 'UserText', 'Reasoning', 'ToolOutput', 'ToolInput']).describe('Which stream a piece of text belongs to.\n\nSeparate from [`ItemKind`] because one item can carry more than one: a\ncommand has both its own text and its output.'),
+  "type": zod.enum(['ContentDelta'])
+}),zod.object({
+  "args": zod.unknown().describe('The tool\'s full input, for a card that wants to show more.'),
+  "detail": zod.string().describe('The command, the path — whatever a person needs to decide.'),
+  "kind": zod.enum(['CommandExecution', 'FileRead', 'FileChange', 'Tool']).describe('What an agent is asking permission for.\n\nCoarser than the tool that triggered it, because the question a person is\nbeing asked is \"may this run\", not \"which of forty tools is this\".'),
+  "req": zod.string().describe('One thing the agent is blocked on and needs an answer to.'),
+  "type": zod.enum(['RequestOpened'])
+}).describe('The agent is blocked and cannot continue without an answer.'),zod.object({
+  "decision": zod.union([zod.object({
+  "decision": zod.enum(['Allow'])
+}),zod.object({
+  "decision": zod.enum(['AllowAlways'])
+}).describe('Allow, and stop asking about calls like this one.'),zod.object({
+  "decision": zod.enum(['Deny']),
+  "reason": zod.string().nullish().describe('Shown to the agent, which reads it and often tries something else.\nThat is the point of asking for one.')
+}),zod.object({
+  "answers": zod.unknown(),
+  "decision": zod.enum(['Answered'])
+}).describe('The answers to a question the agent asked.\n\nNot an allow with extra: a question is answered, not permitted, and\nletting it through without the answers gives the agent a tool result\nsaying nothing. Keyed by the question\'s own text, valued by the label\nof the option chosen — the agent matches on both, so neither may be\nparaphrased on the way back.')]).describe('What the person decided, when they were asked.'),
+  "req": zod.string().describe('One thing the agent is blocked on and needs an answer to.'),
+  "type": zod.enum(['RequestResolved'])
+}),zod.object({
+  "questions": zod.array(zod.object({
+  "header": zod.string().describe('A few words, for the top of the card.'),
+  "multiSelect": zod.boolean().optional(),
+  "options": zod.array(zod.object({
+  "description": zod.string(),
+  "label": zod.string().describe('What the agent expects back. Answers are keyed by this, not by position.')
+}).describe('One choice offered by a question.')),
+  "question": zod.string().describe('The answer is keyed by this text, so it has to survive the round trip\nunchanged.')
+}).describe('Something the agent wants to know before it carries on.')),
+  "req": zod.string().describe('One thing the agent is blocked on and needs an answer to.'),
+  "type": zod.enum(['UserInputRequested'])
+}),zod.object({
+  "answers": zod.unknown(),
+  "req": zod.string().describe('One thing the agent is blocked on and needs an answer to.'),
+  "type": zod.enum(['UserInputResolved'])
+}),zod.object({
+  "steps": zod.array(zod.object({
+  "status": zod.enum(['Pending', 'InProgress', 'Completed']),
+  "step": zod.string()
+}).describe('One line of the agent\'s plan.')),
+  "type": zod.enum(['PlanUpdated'])
+}),zod.object({
+  "resetsAt": zod.int().nullish().describe('Unix seconds.'),
+  "status": zod.string().describe('`allowed`, and whatever else turns up.'),
+  "type": zod.enum(['Limited']),
+  "window": zod.string().describe('`five_hour`, and whatever else turns up.')
+}).describe('What the account\'s own limits say.\n\nArrives on its own schedule rather than with a turn, and says less than\nit looks like it should: there is a window, whether we are inside it,\nand when it starts again. No proportion — the agent does not send one,\nand a bar drawn without one would be invented.'),zod.object({
+  "agent": zod.string().nullish(),
+  "description": zod.string(),
+  "item": zod.string().describe('The tool call that spawned it, which is how its items find their way\nhome.'),
+  "task": zod.string().describe('One subagent run, from the moment it was spawned to its report.'),
+  "type": zod.enum(['TaskStarted'])
+}),zod.object({
+  "detail": zod.string(),
+  "task": zod.string().describe('One subagent run, from the moment it was spawned to its report.'),
+  "type": zod.enum(['TaskProgress'])
+}),zod.object({
+  "status": zod.enum(['Completed', 'Failed', 'Declined']).describe('How an item ended, when it has.'),
+  "summary": zod.string().nullish(),
+  "task": zod.string().describe('One subagent run, from the moment it was spawned to its report.'),
+  "type": zod.enum(['TaskCompleted'])
+}),zod.object({
+  "payload": zod.unknown(),
+  "source": zod.enum(['ClaudeStreamJson']).describe('Which agent\'s output a raw frame came from.\n\nCarried so that a frame kept for later is still interpretable later: the\nbytes alone do not say whose they are.'),
+  "type": zod.enum(['Raw'])
+}).describe('A line we kept but could not name.\n\nOnly for what nothing else matched — the complete raw log is already\nwhat Firetower stores, so repeating every mapped line here would double\nthe volume to say nothing new. This is the marker for \"an agent said\nsomething in a shape we have never seen\", which is how a version that\ngrew a new message type shows up as a gap to fill rather than as\nsilence.')]).describe('Something an agent said or did.\n\nThe vocabulary the interface draws, and the only thing that crosses out of\nthe normaliser.').and(zod.object({
+  "lineNo": zod.int().min(getConversationResponseEventsItemTwoLineNoMin)
+})).describe('One thing that happened, and where in the log it was said.\n\nThe line number travels with the event because several events can come from\none line, and a client\'s cursor has to be a position in the agent\'s log\nrather than a count of what it drew.')),
+  "lastLine": zod.int().min(getConversationResponseLastLineMin).describe('How far this reply got. Hand it back as `sinceLine` to continue.')
+})
+
+/**
+ * Server-sent events, like the session feed: it only ever flows down, and the
+ * browser supplies reconnection for free. Each event carries its line number
+ * as the SSE id, so a client that drops resumes from `Last-Event-ID` and the
+ * cursor is the platform's problem rather than ours.
+ * @summary The conversation as it happens.
+ */
+export const StreamConversationParams = zod.object({
+  "id": zod.string().describe('Session id')
+})
+
+export const StreamConversationResponse = zod.unknown()
+
+/**
+ * Runs on the host, where the code is — a short-lived agent reading the diff,
+ * not a turn in the session. A hidden turn is still a turn: it would land in
+ * the transcript, spend the session's tokens and move its context meter, and a
+ * session somebody is about to carry on working in should not be closer to
+ * full because something wanted a sentence for a form.
+ * @summary What the agent would call this work.
+ */
+export const DescribeSessionParams = zod.object({
+  "id": zod.string().describe('Session id')
+})
+
+export const DescribeSessionResponse = zod.object({
+  "body": zod.string(),
+  "title": zod.string()
+})
 
 /**
  * Split on the server: it is a pure function over text that is easy to get
@@ -230,6 +522,17 @@ export const ListFilesResponseItem = zod.object({
 export const ListFilesResponse = zod.array(ListFilesResponseItem)
 
 /**
+ * @summary Stop what the agent is doing, without ending the session.
+ */
+export const InterruptSessionParams = zod.object({
+  "id": zod.string().describe('Session id')
+})
+
+export const InterruptSessionResponse = zod.object({
+  "sent": zod.boolean()
+})
+
+/**
  * A websocket rather than the event stream: this is the one thing in Firetower
  * that genuinely flows both ways, byte at a time, and where latency is felt.
  *
@@ -265,8 +568,9 @@ export const OpenPullRequestParams = zod.object({
 })
 
 export const OpenPullRequestBody = zod.object({
-  "body": zod.string().nullish().describe('Defaults to the session\'s prompt.'),
-  "title": zod.string().nullish().describe('Written by whoever opens it.')
+  "body": zod.string().nullish().describe('Falls back to what the agent proposed, then to the session\'s prompt.'),
+  "draft": zod.boolean().optional().describe('Open it as a draft.'),
+  "title": zod.string().nullish().describe('Written by whoever opens it, or what the agent proposed.')
 })
 
 export const OpenPullRequestResponse = zod.object({
@@ -293,6 +597,27 @@ export const StopSessionParams = zod.object({
 
 export const StopSessionResponse = zod.object({
   "detail": zod.string()
+})
+
+/**
+ * A message rather than keystrokes, which is the difference that matters: it
+ * cannot arrive while the agent is not listening, and it cannot be half-typed.
+ * @summary Say something to the agent.
+ */
+export const SendTurnParams = zod.object({
+  "id": zod.string().describe('Session id')
+})
+
+export const SendTurnBody = zod.object({
+  "images": zod.array(zod.object({
+  "data": zod.string().describe('The bytes, base64, without a data-url prefix.'),
+  "mediaType": zod.string().describe('`image\/png` and friends.')
+}).describe('An image somebody put in the composer.')).optional().describe('Pictures pasted or dropped into the composer.\n\nCarried inside the message rather than written to the workspace: there\nis nothing to clean up afterwards and no approval prompt for reading a\nfile somebody just handed over.'),
+  "text": zod.string()
+})
+
+export const SendTurnResponse = zod.object({
+  "sent": zod.boolean()
 })
 
 /**

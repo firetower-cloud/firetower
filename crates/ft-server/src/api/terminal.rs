@@ -45,9 +45,13 @@ pub(super) async fn session_pty(
 pub struct TerminalSize {
     pub cols: Option<u16>,
     pub rows: Option<u16>,
-    /// A shell in the same directory with the same environment, rather than
-    /// the terminal the agent is running in.
+    /// Accepted and ignored.
+    ///
+    /// There used to be two kinds of terminal and this chose between them. Only
+    /// the shell is left, so it means nothing — kept so an open tab or a
+    /// bookmarked address from before does not start failing to parse.
     #[serde(default)]
+    #[allow(dead_code)]
     pub shell: bool,
 }
 
@@ -73,11 +77,10 @@ async fn drive_terminal(
 
     let host = session.host_id;
     let (cols, rows) = (size.cols.unwrap_or(120), size.rows.unwrap_or(32));
-    let pty = if size.shell {
-        ft_proto::Pty::Shell
-    } else {
-        ft_proto::Pty::Agent
-    };
+    // Only one kind of terminal is left: your own shell in the session's
+    // workspace. The agent had one, and does not any more — it speaks a
+    // protocol, and what it is doing is read as a conversation.
+    let pty = ft_proto::Pty::Shell;
 
     let mut output = match state.fleet.watch(&host, &session_id, pty, cols, rows).await {
         Ok(rx) => rx,

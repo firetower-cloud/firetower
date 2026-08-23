@@ -1,14 +1,19 @@
 "use client";
 
 import { usePathname } from "next/navigation";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import Link from "next/link";
 import { useGetSession, useRenameSession } from "@/src/api/generated/sessions/sessions";
 import { useListEvents } from "@/src/api/generated/events/events";
-import { Steps, STEP_EVENTS } from "@/components/Steps";
+import { useSessionWork } from "@/src/api/generated/sessions/sessions";
+import type { Session, WorkSummary } from "@/src/api/generated/model";
+import { stepLines } from "@/components/Steps";
 import { Signal } from "@/components/Signal";
 import { Terminal } from "@/components/Terminal";
-import { SessionActions } from "@/components/SessionActions";
+import { Chat } from "@/components/Chat";
+import { Review } from "@/components/Review";
+import { shipping, ready } from "@/src/api/ship";
+import { SessionMenu } from "@/components/SessionActions";
 import { Diff } from "@/components/Diff";
 import { Files } from "@/components/Files";
 import { elapsed, minutesSince, unfinished, STATUS_LABEL } from "@/src/api/view";
@@ -20,7 +25,7 @@ import { ApiError } from "@/src/api/http";
  * Client-side on purpose: session ids don't exist when the interface is built,
  * so nothing here can be pre-rendered per session.
  */
-type Tab = "Terminal" | "Shell" | "Files" | "Changes";
+type Tab = "Chat" | "Shell" | "Files" | "Changes";
 
 /**
  * The id, taken from the address bar rather than from the router.
@@ -33,6 +38,40 @@ type Tab = "Terminal" | "Shell" | "Files" | "Changes";
  * than the session actually being looked at, on the deployment that matters
  * most. The address bar is always right.
  */
+/**
+ * The one control for getting the work out.
+ *
+ * Disabled with a reason rather than hidden — "nothing changed yet" is
+ * information, and a button that vanishes teaches somebody to go looking for
+ * where it went.
+ */
+function Ship({
+  session,
+  work,
+  onReview,
+}: {
+  session: Session;
+  work?: WorkSummary;
+  onReview: () => void;
+}) {
+  const ship = shipping(session, work);
+  const can = ready(ship);
+  return (
+    <button
+      onClick={onReview}
+      disabled={!can}
+      title={ship.blocked ?? ship.label}
+      className={`shrink-0 rounded-[9px] px-3 py-1.5 text-ui font-medium transition-colors ${
+        can
+          ? "bg-ember text-ground"
+          : "border border-line text-mute"
+      }`}
+    >
+      {ship.label}
+    </button>
+  );
+}
+
 function useSessionId(): string {
   const pathname = usePathname();
   const last = pathname.split("/").filter(Boolean).pop() ?? "";
@@ -41,7 +80,18 @@ function useSessionId(): string {
 
 export default function SessionView() {
   const id = useSessionId();
-  const [tab, setTab] = useState<Tab>("Terminal");
+  const [tab, setTab] = useState<Tab>("Chat");
+  const [reviewing, setReviewing] = useState(false);
+  /** The name being edited, when it is. Absent means it is not. */
+  const [naming, setNaming] = useState<string | null>(null);
+  /**
+   * Set by Escape, read by the blur that follows it.
+   *
+   * Leaving a field keeps what is in it, so cancelling has to say so before it
+   * lets go — otherwise the blur that Escape causes saves the thing Escape was
+   * pressed to discard.
+   */
+  const dropping = useRef(false);
 
   // The stream is how this stays live, and it is fast. It is not, however,
   // something to bet the page on: a stream that silently stops leaves a session
@@ -62,30 +112,35 @@ export default function SessionView() {
   const rename = useRenameSession();
 
   const busy = !!session && unfinished(session);
+  // What is in the workspace that is not safely elsewhere. Asked while the
+  // session is running because it changes under you, and once afterwards.
+  const { data: work } = useSessionWork(id, {
+    query: { enabled: !!session?.repo, refetchInterval: busy ? 10_000 : false },
+  });
   const { data: events = [] } = useListEvents(
     { since: 0, sessionId: id },
     { query: { refetchInterval: busy ? 1_500 : false } },
   );
 
   if (isLoading) {
-    return <Frame><p className="text-[13px] text-mute">Looking…</p></Frame>;
+    return <Frame><p className="text-[14px] text-mute">Looking…</p></Frame>;
   }
 
   if (error || !session) {
     const missing = error instanceof ApiError && error.status === 404;
     return (
       <Frame>
-        <h1 className="text-[20px] font-semibold text-bone">
+        <h1 className="text-[21px] font-semibold text-bone">
           {missing ? "No such session." : "Couldn't load that session."}
         </h1>
-        <p className="mt-2 max-w-[52ch] text-[13.5px] text-dim">
+        <p className="mt-2 max-w-[52ch] text-[15px] text-dim">
           {missing
             ? "It may have ended and been cleaned up — ending a session removes its workspace."
             : error instanceof ApiError
               ? error.message
               : "The control plane didn't answer."}
         </p>
-        <Link href="/" className="mt-4 inline-block text-[13px] text-ember hover:underline">
+        <Link href="/" className="mt-4 inline-block text-[14px] text-ember hover:underline">
           ← All sessions
         </Link>
       </Frame>
@@ -93,151 +148,136 @@ export default function SessionView() {
   }
 
   return (
-    <div className="flex h-screen flex-col">
-      <header className="border-b border-line px-8 pt-6 pb-4">
-        <Link href="/" className="text-[12px] text-mute transition-colors hover:text-text">
-          ← All sessions
+    <div className="flex h-full min-h-0 flex-col">
+      {/* One thin bar. What a session is, and what you can do to it — nothing
+          else. The old header spent four lines restating things that are
+          either obvious from the conversation or one hover away, and pushed the
+          thing somebody came to read below the fold. */}
+      <header className="flex h-14 shrink-0 items-center gap-3 border-b border-line px-3 lg:px-5">
+        <Link
+          href="/"
+          aria-label="All sessions"
+          className="shrink-0 rounded-[8px] px-2 py-1.5 text-[15px] text-mute transition-colors hover:bg-raise hover:text-text"
+        >
+          ←
         </Link>
 
-        <div className="mt-2 flex items-center gap-3">
-          <Signal status={session.status} size={8} />
-          {/* The name is what this session is called on every other screen, so
-              it is what the page is titled by. The task it was given follows
-              it, since two agents on one repository are told similar things. */}
-          <h1 className="text-[19px] font-semibold tracking-[-0.01em] text-bone">
-            {session.name}
-          </h1>
+        <Signal status={session.status} size={7} />
+
+        {/* The name is edited where it sits. A prompt box is a modal for one
+            short string: it covers the thing being renamed, and it cannot be
+            corrected once dismissed. */}
+        {naming === null ? (
           <button
-            onClick={() => {
-              const next = window.prompt(`Call ${session.name} what?`, session.name);
-              if (!next || next.trim() === session.name) return;
+            onClick={() => setNaming(session.name)}
+            title="Rename"
+            className="min-w-0 shrink truncate rounded-[8px] px-1 text-[15.5px] font-semibold tracking-[-0.01em] text-bone transition-colors hover:text-ember"
+          >
+            {session.name}
+          </button>
+        ) : (
+          <input
+            autoFocus
+            value={naming}
+            onChange={(e) => setNaming(e.target.value)}
+            onFocus={(e) => e.currentTarget.select()}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                e.currentTarget.blur();
+              }
+              if (e.key === "Escape") {
+                e.preventDefault();
+                dropping.current = true;
+                e.currentTarget.blur();
+              }
+            }}
+            // Clicking away keeps it, which is what happens to a field you have
+            // finished with. Escape is the way to change your mind.
+            onBlur={() => {
+              const next = naming.trim();
+              const dropped = dropping.current;
+              dropping.current = false;
+              setNaming(null);
+              if (dropped || !next || next === session.name) return;
               rename.mutate(
-                { id: session.id, data: { name: next.trim() } },
+                { id: session.id, data: { name: next } },
                 { onSuccess: () => refetch() },
               );
             }}
-            className="text-[11.5px] text-mute transition-colors hover:text-ember"
-          >
-            Rename
-          </button>
-          <span className="rounded-[4px] border border-line px-1.5 py-0.5 font-mono text-[10.5px] text-slate">
-            {STATUS_LABEL[session.status] ?? session.status}
-          </span>
-          <span className="ml-auto font-mono text-[11px] text-mute">
-            {elapsed(minutesSince(session.createdAt))}
-          </span>
-        </div>
+            style={{ width: `${Math.min(Math.max(naming.length, 10) + 2, 40)}ch` }}
+            className="min-w-0 shrink rounded-[8px] border border-ember-deep bg-raise px-1.5 py-0.5 text-[15.5px] font-semibold tracking-[-0.01em] text-bone focus:border-ember focus:outline-none"
+          />
+        )}
 
-        <p className="mt-1 text-[13.5px] text-dim">{session.title}</p>
+        <span className="ml-auto hidden shrink-0 font-mono text-meta text-mute sm:inline">
+          {elapsed(minutesSince(session.createdAt))}
+        </span>
+        <span className="shrink-0 rounded-[7px] border border-line px-2 py-1 font-mono text-[11px] text-slate">
+          {STATUS_LABEL[session.status] ?? session.status}
+        </span>
 
-        <div className="mt-2 flex items-center gap-4 font-mono text-[11.5px] text-mute">
-          <span>{session.repo}</span>
-          <span>⑂ {session.branch}</span>
-          <span>{session.agent}</span>
-        </div>
+        {/* One control, saying the next honest thing. A session is always at
+            exactly one point on the way out, so offering every verb and letting
+            somebody work out which applies is work the screen can do. */}
+        {session.repo && <Ship session={session} work={work} onReview={() => setReviewing(true)} />}
+
+        <SessionMenu session={session} work={work} />
       </header>
 
-      <div className="grid min-h-0 flex-1 grid-cols-[1fr_320px]">
-        <section className="flex min-w-0 flex-col overflow-hidden border-r border-line p-6">
-          <div className="mb-3 flex gap-1">
-            {(["Terminal", "Shell", "Files", "Changes"] as Tab[]).map((t) => (
-              <button
-                key={t}
-                onClick={() => setTab(t)}
-                className={`rounded-[5px] px-2.5 py-1 text-[12px] transition-colors ${
-                  tab === t ? "bg-raise text-bone" : "text-mute hover:text-text"
-                }`}
-              >
-                {t}
-              </button>
-            ))}
+      {reviewing && (
+        <Review session={session} work={work} onClose={() => setReviewing(false)} />
+      )}
+
+      <section className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden px-4 py-4 lg:px-6 lg:py-5">
+        <div className="mb-4 flex gap-1">
+          {(["Chat", "Shell", "Files", "Changes"] as Tab[]).map((t) => (
+            <button
+              key={t}
+              onClick={() => setTab(t)}
+              className={`rounded-[8px] px-3 py-1.5 text-ui transition-colors ${
+                tab === t ? "bg-raise text-bone" : "text-mute hover:text-text"
+              }`}
+            >
+              {t}
+            </button>
+          ))}
+        </div>
+
+        {/* Chat and Changes stay mounted: switching tabs should not drop the
+            conversation stream and repaint the whole session. */}
+        <div className="min-h-0 flex-1">
+          <div className={`h-full ${tab === "Chat" ? "" : "hidden"}`}>
+            <Chat
+              sessionId={session.id}
+              live={busy}
+              branch={session.branch}
+              repo={session.repo}
+              steps={stepLines(session, events)}
+            />
           </div>
-
-          {/* Both stay mounted: switching tabs shouldn't drop the terminal
-              connection and lose everything on screen. */}
-          <div className="min-h-0 flex-1">
-            <div className={`h-full ${tab === "Terminal" ? "" : "hidden"}`}>
-              <Terminal sessionId={session.id} live={busy} showing={tab === "Terminal"} />
+          {/* Mounted only while you are looking at it: a shell lives for the
+              length of a visit, and opening this tab is what starts one. */}
+          {tab === "Shell" && (
+            <div className="h-full">
+              <Terminal sessionId={session.id} live={busy} showing />
             </div>
-            {/* Mounted only while you are looking at it: a shell lives for the
-                length of a visit, and opening this tab is what starts one. */}
-            {tab === "Shell" && (
-              <div className="h-full">
-                <Terminal sessionId={session.id} live={busy} shell showing />
-              </div>
-            )}
-            {tab === "Files" && (
-              <div className="h-full">
-                <Files sessionId={session.id} />
-              </div>
-            )}
-            <div className={`h-full ${tab === "Changes" ? "" : "hidden"}`}>
-              <Diff sessionId={session.id} />
+          )}
+          {tab === "Files" && (
+            <div className="h-full">
+              <Files sessionId={session.id} />
             </div>
+          )}
+          <div className={`h-full ${tab === "Changes" ? "" : "hidden"}`}>
+            <Diff sessionId={session.id} />
           </div>
-        </section>
+        </div>
+      </section>
 
-        <aside className="min-h-0 overflow-y-auto p-5">
-          <SessionActions session={session} />
-
-          <div className="eyebrow mt-5 mb-3">Bringing it up</div>
-          <Steps session={session} events={events} />
-
-          <div className="eyebrow mt-5 mb-3">Activity</div>
-          <ol className="flex flex-col gap-2.5">
-            {/* What the checklist above already says, without saying it twice. */}
-            {events
-              .filter((e) => !STEP_EVENTS.has((e.kind as { type?: string }).type ?? ""))
-              .map((e) => (
-              <li key={e.seq} className="flex gap-2.5">
-                <span className="mt-[6px] h-[3px] w-[3px] shrink-0 rounded-full bg-mute" />
-                <span className="min-w-0">
-                  <span className="block text-[12.5px] text-dim">{label(e.kind)}</span>
-                  <span className="block truncate font-mono text-[11px] text-mute">
-                    {detail(e.kind)}
-                  </span>
-                </span>
-              </li>
-            ))}
-            {events.length === 0 && (
-              <li className="text-[12px] text-mute">Waiting for the host to answer.</li>
-            )}
-          </ol>
-        </aside>
-      </div>
     </div>
   );
 }
 
 function Frame({ children }: { children: React.ReactNode }) {
   return <div className="max-w-[900px] px-8 pt-8">{children}</div>;
-}
-
-/* The wire tags each event with its variant name; these turn that into prose. */
-const LABELS: Record<string, string> = {
-  SessionCreated: "Session created",
-  HostSelected: "Picked a host",
-  RepoFetched: "Fetched the repository",
-  WorktreeAdded: "Added a worktree",
-  WorkspaceStarted: "Started the workspace",
-  SetupFinished: "Ran the setup script",
-  TmuxOpened: "Opened tmux",
-  AgentLaunched: "Launched the agent",
-  StatusChanged: "Status",
-  Failed: "Failed",
-};
-
-type EventKind = Record<string, unknown> & { type?: string };
-
-function label(kind: EventKind) {
-  return LABELS[kind.type ?? ""] ?? (kind.type ?? "Event");
-}
-
-/** Whichever field this variant carries — they never carry two. */
-function detail(kind: EventKind) {
-  for (const key of ["detail", "branch", "name", "status", "message", "prompt"]) {
-    const value = kind[key];
-    if (typeof value === "string") return value;
-  }
-  return "";
 }

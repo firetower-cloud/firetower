@@ -245,14 +245,38 @@ EMPTY=
     #[test]
     fn writing_and_reading_are_the_same_round_trip() {
         let awkward = vec![
-            Variable { name: "PLAIN".into(), value: "simple".into() },
-            Variable { name: "SPACES".into(), value: "two words".into() },
-            Variable { name: "QUOTE".into(), value: "it's mine".into() },
-            Variable { name: "HASH".into(), value: "a#b".into() },
-            Variable { name: "DOLLAR".into(), value: "$HOME and `date`".into() },
-            Variable { name: "EMPTY".into(), value: String::new() },
-            Variable { name: "KEY".into(), value: "-----BEGIN-----\nline two\n-----END-----".into() },
-            Variable { name: "BACKSLASH".into(), value: "C:\\path\\to".into() },
+            Variable {
+                name: "PLAIN".into(),
+                value: "simple".into(),
+            },
+            Variable {
+                name: "SPACES".into(),
+                value: "two words".into(),
+            },
+            Variable {
+                name: "QUOTE".into(),
+                value: "it's mine".into(),
+            },
+            Variable {
+                name: "HASH".into(),
+                value: "a#b".into(),
+            },
+            Variable {
+                name: "DOLLAR".into(),
+                value: "$HOME and `date`".into(),
+            },
+            Variable {
+                name: "EMPTY".into(),
+                value: String::new(),
+            },
+            Variable {
+                name: "KEY".into(),
+                value: "-----BEGIN-----\nline two\n-----END-----".into(),
+            },
+            Variable {
+                name: "BACKSLASH".into(),
+                value: "C:\\path\\to".into(),
+            },
         ];
 
         let back = parse(&render(&awkward));

@@ -795,6 +795,145 @@ impl Db {
         Ok(())
     }
 
+    /// Keep one line a structured agent printed.
+    ///
+    /// Idempotent because a worker replays from a cursor after a reconnect, so
+    /// the same line arriving twice is ordinary. Its own numbering is the key,
+    /// not an identity of ours: both ends have to agree on what has been seen.
+    pub async fn record_agent_line(
+        &self,
+        session_id: &SessionId,
+        line_no: i64,
+        line: &str,
+    ) -> Result<()> {
+        sqlx::query(
+            "INSERT INTO agent_lines (session_id, line_no, line)
+             VALUES ($1, $2, $3)
+             ON CONFLICT (session_id, line_no) DO NOTHING",
+        )
+        .bind(session_id.as_str())
+        .bind(line_no)
+        .bind(line)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Remember where a session's pull request is.
+    ///
+    /// Written once it exists, so a screen can tell "pushed" from "already
+    /// open" without asking GitHub every time somebody looks.
+    pub async fn record_pull_request(&self, session_id: &SessionId, url: &str) -> Result<()> {
+        sqlx::query("UPDATE sessions SET pull_request = $1, updated_at = now() WHERE id = $2")
+            .bind(url)
+            .bind(session_id.as_str())
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    /// Keep what the agent proposed calling its work.
+    ///
+    /// Replaced whenever a newer one arrives: a session that carried on working
+    /// has a newer answer, and the older one describes a diff that no longer
+    /// exists.
+    pub async fn record_proposal(
+        &self,
+        session_id: &SessionId,
+        title: &str,
+        body: &str,
+    ) -> Result<()> {
+        sqlx::query(
+            "UPDATE sessions SET proposed_title = $1, proposed_body = $2, updated_at = now()
+              WHERE id = $3",
+        )
+        .bind(title)
+        .bind(body)
+        .bind(session_id.as_str())
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// What this session is currently reported as doing.
+    ///
+    /// Read before writing, so a notification can be sent on the *change* into
+    /// needing somebody rather than every time we are reminded that it does.
+    /// Without it, a reconnect re-announces every waiting session and somebody
+    /// with four of them gets four notifications for things they already knew.
+    pub async fn session_status(&self, session_id: &SessionId) -> Result<Option<SessionStatus>> {
+        let stored: Option<String> =
+            sqlx::query_scalar("SELECT status FROM sessions WHERE id = $1")
+                .bind(session_id.as_str())
+                .fetch_optional(&self.pool)
+                .await?;
+        Ok(stored.and_then(|s| serde_json::from_str(&format!("\"{s}\"")).ok()))
+    }
+
+    /// Say where a session has got to, from what its agent said.
+    ///
+    /// The only writer of this field for an agent that speaks a protocol —
+    /// hooks are not installed for those, precisely so that this is not one of
+    /// two mechanisms racing to describe the same moment.
+    ///
+    /// The note is replaced every time, including with nothing: a question that
+    /// has been answered should not still be on the card after the agent went
+    /// back to work.
+    ///
+    /// Not for a session somebody removed while its host was away. The worker
+    /// knows nothing about that and will happily go on reporting; applying it
+    /// here would put a ghost back in the inbox.
+    pub async fn set_session_state(
+        &self,
+        session_id: &SessionId,
+        status: SessionStatus,
+        note: Option<&str>,
+    ) -> Result<()> {
+        sqlx::query(
+            "UPDATE sessions SET status = $1, note = $2, updated_at = now()
+              WHERE id = $3 AND forgotten_at IS NULL AND status <> $4",
+        )
+        .bind(format!("{status:?}"))
+        .bind(note)
+        .bind(session_id.as_str())
+        // Nothing leaves `Ended`.
+        .bind(format!("{:?}", SessionStatus::Ended))
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Everything the agent has said, in order, from `since` onward.
+    pub async fn agent_lines_since(
+        &self,
+        session_id: &SessionId,
+        since: i64,
+    ) -> Result<Vec<(i64, String)>> {
+        let rows: Vec<(i64, String)> = sqlx::query_as(
+            "SELECT line_no, line FROM agent_lines
+              WHERE session_id = $1 AND line_no > $2
+              ORDER BY line_no",
+        )
+        .bind(session_id.as_str())
+        .bind(since)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows)
+    }
+
+    /// How far the agent's log has got here.
+    ///
+    /// Sent to a worker as the resume cursor, so a reconnecting control plane
+    /// asks only for what it is missing.
+    pub async fn last_agent_line(&self, session_id: &SessionId) -> Result<i64> {
+        let last: Option<i64> =
+            sqlx::query_scalar("SELECT MAX(line_no) FROM agent_lines WHERE session_id = $1")
+                .bind(session_id.as_str())
+                .fetch_one(&self.pool)
+                .await?;
+        Ok(last.unwrap_or(0))
+    }
+
     pub async fn events_since(&self, since: i64) -> Result<Vec<Event>> {
         self.events_since_for(since, None).await
     }
@@ -969,6 +1108,9 @@ fn session_from_row(r: sqlx::postgres::PgRow) -> Result<Session> {
         status: serde_json::from_str::<SessionStatus>(&format!("\"{status}\""))
             .context("decoding session status")?,
         forgotten_at: r.get("forgotten_at"),
+        pull_request: r.get("pull_request"),
+        proposed_title: r.get("proposed_title"),
+        proposed_body: r.get("proposed_body"),
         host_id: HostId::from_stored(r.get::<String, _>("host_id")),
         workspace_id: None,
         // Sessions created before steps were recorded have none, which renders
@@ -1008,7 +1150,9 @@ mod tests {
                     host: "203.0.113.44".into(),
                     user: Some("root".into()),
                     port: Some(2222),
-                    key: ft_core::SshKey::File { path: "~/.ssh/fire".into() },
+                    key: ft_core::SshKey::File {
+                        path: "~/.ssh/fire".into(),
+                    },
                     host_key: None,
                     container: None,
                 },
@@ -1029,7 +1173,9 @@ mod tests {
                 host: "203.0.113.44".into(),
                 user: Some("root".into()),
                 port: Some(2222),
-                key: ft_core::SshKey::File { path: "~/.ssh/fire".into() },
+                key: ft_core::SshKey::File {
+                    path: "~/.ssh/fire".into()
+                },
                 host_key: None,
                 container: None,
             }
@@ -1576,7 +1722,10 @@ mod tests {
 
         let gone = db.session(&id).await.unwrap().unwrap();
         assert_eq!(gone.status, ft_core::SessionStatus::Ended);
-        assert!(gone.forgotten_at.is_some(), "removed here, not by the worker");
+        assert!(
+            gone.forgotten_at.is_some(),
+            "removed here, not by the worker"
+        );
 
         // The machine comes back and says what it has always said.
         db.record_event(
@@ -1629,7 +1778,10 @@ mod tests {
         );
 
         db.forget_session(&id).await.unwrap();
-        assert_eq!(db.owed_cleanup_on(&host.id).await.unwrap(), vec![id.clone()]);
+        assert_eq!(
+            db.owed_cleanup_on(&host.id).await.unwrap(),
+            vec![id.clone()]
+        );
 
         db.mark_cleaned(&id).await.unwrap();
         assert!(

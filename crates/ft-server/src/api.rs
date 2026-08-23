@@ -11,6 +11,7 @@
 
 mod agents;
 mod auth;
+mod conversation;
 mod events;
 mod hosts;
 mod providers;
@@ -252,9 +253,17 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(sessions::stop_session))
         .routes(routes!(sessions::rename_session))
         .routes(routes!(sessions::push_session))
+        .routes(routes!(sessions::commit_session))
+        .routes(routes!(sessions::describe_session))
         .routes(routes!(sessions::session_diff))
         .routes(routes!(sessions::open_pull_request))
         .routes(routes!(sessions::session_work))
+        .routes(routes!(conversation::get_conversation))
+        .routes(routes!(conversation::stream_conversation))
+        .routes(routes!(conversation::send_turn))
+        .routes(routes!(conversation::interrupt_session))
+        .routes(routes!(conversation::answer_request))
+        .routes(routes!(conversation::attach_file))
 }
 
 #[cfg(test)]
