@@ -109,12 +109,12 @@ export default function SessionView() {
 
   return (
     <div className="flex h-screen flex-col">
-      <header className="border-b border-line px-8 pt-6 pb-4">
+      <header className="border-b border-line px-4 pt-5 pb-4 lg:px-8 lg:pt-6">
         <Link href="/" className="text-[12px] text-mute transition-colors hover:text-text">
           ← All sessions
         </Link>
 
-        <div className="mt-2 flex items-center gap-3">
+        <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1.5">
           <Signal status={session.status} size={8} />
           {/* The name is what this session is called on every other screen, so
               it is what the page is titled by. The task it was given follows
@@ -145,15 +145,19 @@ export default function SessionView() {
 
         <p className="mt-1 text-[13.5px] text-dim">{session.title}</p>
 
-        <div className="mt-2 flex items-center gap-4 font-mono text-[11.5px] text-mute">
+        <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 font-mono text-[11.5px] text-mute">
           <span>{session.repo}</span>
           <span>⑂ {session.branch}</span>
           <span>{session.agent}</span>
         </div>
       </header>
 
-      <div className="grid min-h-0 flex-1 grid-cols-[1fr_320px]">
-        <section className="flex min-w-0 flex-col overflow-hidden border-r border-line p-6">
+      {/* One column on a phone, two on a desktop. Mobile is not a fallback
+          here — routing an agent's blocking to somebody who is not at a desk is
+          the entire point of the product, so the narrow case is the one that
+          has to be right. */}
+      <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[1fr_320px]">
+        <section className="flex min-w-0 flex-col overflow-hidden px-4 py-4 lg:border-r lg:border-line lg:p-6">
           <div className="mb-3 flex gap-1">
             {((talks
               ? ["Chat", "Shell", "Files", "Changes"]
@@ -202,7 +206,10 @@ export default function SessionView() {
           </div>
         </section>
 
-        <aside className="min-h-0 overflow-y-auto p-5">
+        {/* Below the work on a phone rather than beside it: what the agent is
+            saying comes first, and how the workspace was built is something you
+            scroll to when you want it. */}
+        <aside className="min-h-0 overflow-y-auto border-t border-line px-4 py-5 lg:border-t-0 lg:p-5">
           <SessionActions session={session} />
 
           <div className="eyebrow mt-5 mb-3">Bringing it up</div>

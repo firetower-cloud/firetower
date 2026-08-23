@@ -159,6 +159,106 @@
   animation: caret 1.05s step-end infinite;
 }
 
+/* ── The spine: a session read at a glance ──────────────────
+   A transcript is not a chat log here. Somebody arriving at a session wants to
+   know where the agent got to and what stopped it, then leave — so the shape of
+   the run has to be readable before any of the words are.
+
+   One hairline runs the height of the transcript and everything hangs off it.
+   The marker on the rail says *state*: running, done, refused. The label beside
+   it says *kind*. Prose has no marker at all, because the agent talking is the
+   connective tissue between the things it did, and the most common thing on
+   screen should be the quietest.
+
+   The rule the whole screen follows: mono is what the machine said, sans is
+   speech, narrow is a label.
+
+   Geometry is derived from two values so a nested rail lines up without a
+   second set of numbers. Both are declared on every element that draws part of
+   the rail — the end of it is a sibling of the list, not a child, and inherits
+   nothing. */
+.spine,
+.spine-end {
+  --rail: 13px;
+  --gap: 14px;
+}
+
+.spine {
+  position: relative;
+  padding-left: calc(var(--rail) + var(--gap));
+}
+.spine::before {
+  content: "";
+  position: absolute;
+  left: var(--rail);
+  top: 4px;
+  bottom: 4px;
+  width: 1px;
+  background: var(--color-line);
+}
+
+.node {
+  position: relative;
+}
+/* Sits on the rail, not beside it: the marker's centre lands on the line for
+   any rail and gap, which is what lets a nested spine reuse this untouched. */
+.node > .mark {
+  position: absolute;
+  left: calc((var(--rail) + var(--gap)) * -1);
+  top: 4px;
+  width: calc(var(--rail) * 2);
+  display: flex;
+  justify-content: center;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1.4;
+  color: var(--color-mute);
+  /* The rail must not show through a marker. */
+  background: var(--color-ground);
+}
+.node > .mark[data-state="running"] {
+  color: var(--color-slate);
+}
+.node > .mark[data-state="failed"] {
+  color: var(--color-brick);
+}
+.node > .mark[data-state="you"] {
+  color: var(--color-ember);
+}
+
+/* Where the rail stops, which is the answer to "what is it doing". */
+.spine-end {
+  position: relative;
+  height: 16px;
+}
+.spine-end::before {
+  content: "";
+  position: absolute;
+  left: var(--rail);
+  top: 0;
+  width: 1px;
+  height: 10px;
+  background: linear-gradient(to bottom, var(--color-line), transparent);
+}
+.spine-end > .tip {
+  position: absolute;
+  left: calc(var(--rail) - 2px);
+  top: 8px;
+  width: 5px;
+  height: 5px;
+  border-radius: 99px;
+  background: var(--color-ember);
+}
+
+/* A subagent gets its own rail, one level in. Same rules, quieter. */
+.spine-nested {
+  --rail: 5px;
+  --gap: 13px;
+}
+.spine-nested::before {
+  background: var(--color-line-soft);
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
