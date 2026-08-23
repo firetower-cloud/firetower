@@ -157,7 +157,7 @@ export function Chat({
           )}
         </div>
 
-        <div ref={foot} />
+        <div ref={foot} className="h-12" />
       </div>
 
       <div className="relative mx-auto w-full max-w-[860px] shrink-0 bg-ground pt-3">
@@ -361,12 +361,20 @@ function Says({
   );
 }
 
-/** ○ running · ● done · ✕ refused. State, and nothing else. */
+/**
+ * ○ running · ✕ refused, and nothing at all for something that worked.
+ *
+ * A marker beside every finished step is a column of dots saying "this
+ * happened", which the line itself already says. What is worth a mark is what
+ * has not finished and what went wrong — so those are the only two that get
+ * one, and the eye goes straight to them.
+ */
 function Mark({ status }: { status?: Item["status"] }) {
   const state = !status ? "running" : status === "Failed" ? "failed" : "done";
+  if (state === "done") return null;
   return (
     <span className="mark" data-state={state}>
-      {state === "running" ? "○" : state === "failed" ? "✕" : "●"}
+      {state === "running" ? "○" : "✕"}
     </span>
   );
 }

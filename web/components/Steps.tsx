@@ -88,11 +88,11 @@ export function stepLines(session: Session, events: Event[]): Line[] {
 }
 
 /**
- * The bring-up, on the transcript's rail.
+ * The bring-up, in the transcript's margin.
  *
- * Same marks as everything else on it — ○ running, ● done, ✕ failed — because
- * these are events in the same run and reading them should take no new
- * vocabulary.
+ * Same marks as everything else there — ○ running, ✕ failed, and nothing for a
+ * step that simply worked — because these are events in the same run and
+ * reading them should take no new vocabulary.
  */
 export function Bringup({ lines }: { lines: Line[] }) {
   const started = lines.filter((l) => l.state !== "pending");
@@ -102,9 +102,11 @@ export function Bringup({ lines }: { lines: Line[] }) {
     <ol className="spine mb-2.5 flex flex-col gap-2.5">
       {started.map((line) => (
         <li key={line.step} className="node">
-          <span className="mark" data-state={line.state === "done" ? undefined : line.state}>
-            {line.state === "running" ? "\u25CB" : line.state === "failed" ? "\u2715" : "\u25CF"}
-          </span>
+          {line.state !== "done" && (
+            <span className="mark" data-state={line.state}>
+              {line.state === "running" ? "\u25CB" : "\u2715"}
+            </span>
+          )}
           <span
             className={`text-[13.5px] ${line.state === "failed" ? "text-brick" : "text-dim"}`}
           >
