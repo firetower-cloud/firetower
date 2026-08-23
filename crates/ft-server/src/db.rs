@@ -819,20 +819,34 @@ impl Db {
         Ok(())
     }
 
-    /// Record that a session has stopped and is waiting for somebody.
+    /// Say where a session has got to, from what its agent said.
     ///
-    /// Written as an event rather than only as a column, so the inbox, the
-    /// activity list and anything watching the feed all learn it the same way
-    /// they learn everything else. The sequence is this host's, continuing the
-    /// numbering the worker uses, so a client's cursor still means one thing.
-    pub async fn note_session_asked(&self, session_id: &SessionId, note: &str) -> Result<()> {
+    /// The only writer of this field for an agent that speaks a protocol —
+    /// hooks are not installed for those, precisely so that this is not one of
+    /// two mechanisms racing to describe the same moment.
+    ///
+    /// The note is replaced every time, including with nothing: a question that
+    /// has been answered should not still be on the card after the agent went
+    /// back to work.
+    ///
+    /// Not for a session somebody removed while its host was away. The worker
+    /// knows nothing about that and will happily go on reporting; applying it
+    /// here would put a ghost back in the inbox.
+    pub async fn set_session_state(
+        &self,
+        session_id: &SessionId,
+        status: SessionStatus,
+        note: Option<&str>,
+    ) -> Result<()> {
         sqlx::query(
             "UPDATE sessions SET status = $1, note = $2, updated_at = now()
-              WHERE id = $3 AND forgotten_at IS NULL",
+              WHERE id = $3 AND forgotten_at IS NULL AND status <> $4",
         )
-        .bind(format!("{:?}", SessionStatus::NeedsYou))
+        .bind(format!("{status:?}"))
         .bind(note)
         .bind(session_id.as_str())
+        // Nothing leaves `Ended`.
+        .bind(format!("{:?}", SessionStatus::Ended))
         .execute(&self.pool)
         .await?;
         Ok(())

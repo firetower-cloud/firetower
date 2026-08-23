@@ -1033,11 +1033,22 @@ impl Worker {
             }
         }
 
-        // Ask the agent to tell us when it stops. Without this nothing ever
-        // moves a session off `Working`: Firetower would know what it started
-        // and never what happened next.
+        // Ask the agent to tell us when it stops — only if it has no other way
+        // of saying so. An agent that speaks a protocol reports its own
+        // lifecycle, and installing hooks as well means two things writing one
+        // field. See `Agent::has_status_hooks`.
         if let Some(home) = std::env::var_os("HOME").map(std::path::PathBuf::from) {
-            if let Ok(exe) = std::env::current_exe() {
+            if spec.agent.speaks_a_protocol() {
+                // Taken back out rather than merely not added. An agent that
+                // gained a protocol since the last session still has ours in
+                // its configuration, and one that keeps firing is a second
+                // writer of the same field — which showed up as a session that
+                // had just been asked something displaying a sentence from the
+                // turn before it.
+                if let Err(e) = hooks::remove(&home, spec.agent).await {
+                    tracing::warn!("could not remove {} hooks: {e:#}", spec.agent.label());
+                }
+            } else if let Ok(exe) = std::env::current_exe() {
                 if let Err(e) = hooks::install(&home, spec.agent, &exe).await {
                     tracing::warn!("could not install {} hooks: {e:#}", spec.agent.label());
                 }
@@ -1052,13 +1063,7 @@ impl Worker {
         // choosing. There is no mode to explain and none to get wrong, and the
         // terminal stops being an option for an agent the moment it stops
         // needing to be one.
-        // Asked with a placeholder arrangement, because this question is only
-        // "does this agent have a protocol at all" — how it asks for
-        // permission is settled by the supervisor, which knows the workspace.
-        let structured = spec
-            .agent
-            .launch_headless(id.as_str(), &ft_core::Asking::CannotAsk)
-            .is_some();
+        let structured = spec.agent.speaks_a_protocol();
 
         // The agent runs under tmux so it outlives this worker, this
         // connection, and the laptop that started it. In a structured session

@@ -7,6 +7,7 @@
 
 use crate::db::Db;
 use anyhow::{Context, Result};
+use ft_core::SessionStatus;
 use ft_core::{AgentPresence, Event, HostId, SessionId, WorkSummary};
 use ft_proto::{
     decode, encode, Codec, CodecError, Credential, ProbeFailure, Pty, RemoteInfo, ReqId, ToServer,
@@ -74,17 +75,91 @@ pub enum AgentSpeech {
     Closed,
 }
 
-/// The part of a question worth putting on a card in the inbox.
-fn detail_of(question: &AgentSpeech) -> String {
-    let AgentSpeech::Asks { input, .. } = question else {
-        return String::new();
-    };
+/// One session's lines, read for what they say about the session.
+#[derive(Default)]
+struct Progress {
+    reader: ft_core::normalise::ClaudeNormaliser,
+    /// The last thing the agent said, kept for the moment it stops.
+    ///
+    /// A session that handed work back is worth a sentence in the inbox, and
+    /// this is the accurate version of what the old `Stop` hook was scraping
+    /// out of a transcript file.
+    said: String,
+}
+
+impl Progress {
+    /// What this line means for the session, if anything.
+    fn read(&mut self, line: &str) -> Option<(SessionStatus, Option<String>)> {
+        use ft_core::turn::{StreamKind, TurnEvent as E, TurnStatus};
+
+        let mut moved = None;
+        for event in self.reader.push(line) {
+            match event {
+                // Assistant text only. A tool's output is not the agent
+                // speaking, and reasoning is not what it chose to say.
+                E::ContentDelta {
+                    stream: StreamKind::AssistantText,
+                    delta,
+                    ..
+                } => self.said.push_str(&delta),
+
+                E::TurnStarted { .. } => {
+                    self.said.clear();
+                    moved = Some((SessionStatus::Working, None));
+                }
+                E::TurnCompleted { status, .. } => {
+                    let note = summarise(&self.said);
+                    moved = Some(match status {
+                        TurnStatus::Failed => (SessionStatus::Failed, note),
+                        // Handed back rather than finished: it did a turn and
+                        // is waiting for the next thing, which is a resting
+                        // state and not an end.
+                        _ => (SessionStatus::HandedBack, note),
+                    });
+                }
+                E::RequestOpened { detail, args, .. } => {
+                    moved = Some((SessionStatus::NeedsYou, Some(asking_about(&detail, &args))));
+                }
+                _ => {}
+            }
+        }
+        moved
+    }
+}
+
+/// The last thing said, short enough for a card.
+///
+/// The end rather than the beginning: an agent that worked for ten minutes
+/// opens with what it set out to do and closes with what happened, and the
+/// second is the one worth reading in a list.
+fn summarise(said: &str) -> Option<String> {
+    let said = said.trim();
+    if said.is_empty() {
+        return None;
+    }
+    // A paragraph is a better unit than a character count — it ends where the
+    // agent decided it ended.
+    let tail = said.rsplit("\n\n").next().unwrap_or(said).trim();
+    let tail = if tail.is_empty() { said } else { tail };
+
+    const ROOM: usize = 200;
+    if tail.chars().count() <= ROOM {
+        return Some(tail.to_string());
+    }
+    Some(format!(
+        "{}…",
+        tail.chars().take(ROOM).collect::<String>().trim_end()
+    ))
+}
+
+/// A question, short enough for a card in the inbox.
+fn asking_about(tool: &str, args: &serde_json::Value) -> String {
     for key in ["command", "file_path", "path", "url"] {
-        if let Some(value) = input.get(key).and_then(|v| v.as_str()) {
-            return value.to_string();
+        if let Some(value) = args.get(key).and_then(|v| v.as_str()) {
+            return format!("{tool}: {value}");
         }
     }
-    String::new()
+    tool.to_string()
 }
 
 /// One terminal of one session.
@@ -139,6 +214,14 @@ pub struct Fleet {
     /// Live terminals, one broadcast per session. The worker holds a single
     /// attachment; this is where it fans out to however many are watching.
     terminals: Arc<RwLock<HashMap<String, broadcast::Sender<Terminal>>>>,
+    /// One reader per session, folding its lines into what the session is
+    /// doing.
+    ///
+    /// Separate from the readers each browser builds: those describe a
+    /// transcript to somebody looking at it, this decides what the inbox says.
+    /// The same events, read for a different purpose, and neither can stall
+    /// the other.
+    progress: Arc<RwLock<HashMap<String, Progress>>>,
     /// Questions each session is blocked on, until they are answered.
     ///
     /// Held here because nothing else can hold them for a browser: a question
@@ -215,6 +298,7 @@ impl Fleet {
             terminals: Arc::new(RwLock::new(HashMap::new())),
             conversations: Arc::new(RwLock::new(HashMap::new())),
             asked: Arc::new(RwLock::new(HashMap::new())),
+            progress: Arc::new(RwLock::new(HashMap::new())),
             supervised: Arc::new(RwLock::new(HashMap::new())),
         }
     }
@@ -696,6 +780,7 @@ impl Fleet {
         let terminals = self.terminals.clone();
         let conversations = self.conversations.clone();
         let asked = self.asked.clone();
+        let progress = self.progress.clone();
 
         {
             // conn is moved in so the child process outlives this scope
@@ -782,12 +867,33 @@ impl Fleet {
                                 tracing::error!(session = %session_id, "recording a line: {e:#}");
                                 continue;
                             }
+                            // What this line means for the session, before it
+                            // means anything to a screen. This is the only
+                            // thing that moves a structured session off
+                            // `Working`, now that hooks do not.
+                            let moved = {
+                                let mut readers = progress.write().await;
+                                readers
+                                    .entry(session_id.to_string())
+                                    .or_default()
+                                    .read(&line)
+                            };
+                            if let Some((status, note)) = moved {
+                                if let Err(e) = db
+                                    .set_session_state(&session_id, status, note.as_deref())
+                                    .await
+                                {
+                                    tracing::warn!(session = %session_id, "recording progress: {e:#}");
+                                }
+                            }
+
                             if let Some(tx) = conversations.read().await.get(session_id.as_str()) {
                                 // An error only means nobody is watching.
                                 let _ = tx.send(AgentSpeech::Line { line_no, line });
                             }
                         }
                         Ok(ToServer::AgentAsks { session_id, req, tool_name, input }) => {
+                            let input_for_note = input.clone();
                             let question = AgentSpeech::Asks { req: req.clone(), tool_name: tool_name.clone(), input };
 
                             // Kept before it is announced, so a browser that
@@ -804,8 +910,14 @@ impl Fleet {
                             // and needs somebody. Recorded as an event so the
                             // inbox and the activity list learn it the same way
                             // they learn everything else.
-                            let note = format!("{tool_name}: {}", detail_of(&question));
-                            if let Err(e) = db.note_session_asked(&session_id, &note).await {
+                            // A permission prompt is never in the log — the
+                            // agent is blocked, not talking — so this frame is
+                            // the only thing that can say the session stopped.
+                            let note = asking_about(&tool_name, &input_for_note);
+                            if let Err(e) = db
+                                .set_session_state(&session_id, SessionStatus::NeedsYou, Some(&note))
+                                .await
+                            {
                                 tracing::warn!(session = %session_id, "marking as waiting: {e:#}");
                             }
 
@@ -815,6 +927,7 @@ impl Fleet {
                         }
                         Ok(ToServer::AgentClosed { session_id }) => {
                             asked.write().await.remove(session_id.as_str());
+                            progress.write().await.remove(session_id.as_str());
                             if let Some(tx) = conversations.write().await.remove(session_id.as_str()) {
                                 let _ = tx.send(AgentSpeech::Closed);
                             }
@@ -1161,8 +1274,24 @@ impl Fleet {
         // Forgotten here rather than when the agent acknowledges, because it
         // does not acknowledge — it simply carries on, and the next thing it
         // says is the proof.
-        if let Some(waiting) = self.asked.write().await.get_mut(session_id.as_str()) {
+        let still_waiting = {
+            let mut held = self.asked.write().await;
+            let waiting = held.entry(session_id.to_string()).or_default();
             waiting.retain(|q| !matches!(q, AgentSpeech::Asks { req: seen, .. } if *seen == req));
+            !waiting.is_empty()
+        };
+
+        // Back to working, unless something else is still blocked. Nothing in
+        // the stream says this: the agent does not announce that it has been
+        // unblocked, it simply carries on.
+        if !still_waiting {
+            if let Err(e) = self
+                .db
+                .set_session_state(session_id, SessionStatus::Working, None)
+                .await
+            {
+                tracing::warn!(session = %session_id, "clearing the question: {e:#}");
+            }
         }
 
         self.send(

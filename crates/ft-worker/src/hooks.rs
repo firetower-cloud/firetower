@@ -125,6 +125,81 @@ pub async fn install(home: &Path, agent: Agent, exe: &Path) -> Result<()> {
     .await
 }
 
+/// Take Firetower's hooks back out of an agent's configuration.
+///
+/// For an agent that has since gained a protocol to speak. It reports its own
+/// lifecycle now, so a hook doing the same job is a second writer of one field
+/// — and leaving one installed is worse than never having added it, because it
+/// keeps firing for sessions that have moved on.
+///
+/// The same rule as installing: only ever ours, only ever by the `hook`
+/// subcommand, and a file we cannot parse is left exactly as it is. Somebody
+/// else's hooks on the same event survive.
+pub async fn remove(home: &Path, agent: Agent) -> Result<()> {
+    let (Some(file), events) = (agent.hooks_file(), agent.hooks()) else {
+        return Ok(());
+    };
+    let path = home.join(file);
+
+    let Ok(text) = tokio::fs::read_to_string(&path).await else {
+        // Nothing there is the desired state.
+        return Ok(());
+    };
+    let Ok(Value::Object(mut config)) = serde_json::from_str::<Value>(&text) else {
+        return Ok(());
+    };
+
+    let Some(hooks) = config.get_mut("hooks").and_then(Value::as_object_mut) else {
+        return Ok(());
+    };
+
+    let mut changed = false;
+    for event in events {
+        let Some(matchers) = hooks.get_mut(*event).and_then(Value::as_array_mut) else {
+            continue;
+        };
+        let before = matchers.len();
+        matchers.retain(|m| !is_ours(m));
+        changed |= matchers.len() != before;
+    }
+    // An event we emptied is left as an empty list rather than deleted: the
+    // agent reads either the same way, and removing a key we did not create is
+    // more than we were asked to do.
+
+    if !changed {
+        return Ok(());
+    }
+
+    write_atomically(
+        &path,
+        &serde_json::to_string_pretty(&Value::Object(config))?,
+    )
+    .await
+}
+
+/// One of ours, wherever the binary that installed it now lives.
+///
+/// Looser than [`is_a_stale_firetower_hook`], which only recognises entries
+/// pointing somewhere other than the current binary. Removing has to catch
+/// every one of ours, including the ones that still work.
+fn is_ours(matcher: &Value) -> bool {
+    matcher
+        .get("hooks")
+        .and_then(|h| h.as_array())
+        .map(|hooks| {
+            hooks.iter().any(|h| {
+                h.get("command")
+                    .and_then(|c| c.as_str())
+                    .map(|c| {
+                        let c = c.trim();
+                        c.contains("firetower") && c.contains(" hook ")
+                    })
+                    .unwrap_or(false)
+            })
+        })
+        .unwrap_or(false)
+}
+
 /// One of ours, from a binary that is no longer where it was.
 fn is_a_stale_firetower_hook(matcher: &Value, command: &str) -> bool {
     matcher
@@ -189,7 +264,6 @@ async fn write_atomically(path: &Path, contents: &str) -> Result<()> {
 /// Reads the hook's JSON payload from stdin — that is the contract every agent
 /// hook uses — and appends an event to the worker's log on this machine.
 pub async fn report(event: &str, default_root: &Path) -> Result<()> {
-
     // Not ours. The agent's hook configuration is shared with whatever else
     // somebody runs on this machine, and a session of their own has no
     // Firetower environment around it.
@@ -606,6 +680,58 @@ mod tests {
             .clone();
         assert_eq!(stop.len(), 2);
         assert_eq!(stop[0]["hooks"][0]["command"], "/usr/bin/say done");
+    }
+
+    #[tokio::test]
+    async fn hooks_are_taken_back_out_when_the_agent_gains_a_protocol() {
+        let home = tempfile::tempdir().unwrap();
+        install(home.path(), Agent::ClaudeCode, &exe())
+            .await
+            .unwrap();
+        let path = home.path().join(Agent::ClaudeCode.hooks_file().unwrap());
+        assert!(!read(&path).await["hooks"]["Stop"]
+            .as_array()
+            .unwrap()
+            .is_empty());
+
+        remove(home.path(), Agent::ClaudeCode).await.unwrap();
+        let stop = read(&path).await["hooks"]["Stop"].as_array().unwrap().len();
+        assert_eq!(stop, 0, "our own hook should be gone");
+    }
+
+    #[tokio::test]
+    async fn removing_ours_leaves_somebody_elses_alone() {
+        // The file belongs to the person, not to us. Theirs survives whatever
+        // we do to our own.
+        let home = tempfile::tempdir().unwrap();
+        let path = home.path().join(Agent::ClaudeCode.hooks_file().unwrap());
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(
+            &path,
+            serde_json::to_string_pretty(&json!({
+                "hooks": { "Stop": [{ "hooks": [{ "type": "command", "command": "/usr/bin/say done" }] }] }
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        install(home.path(), Agent::ClaudeCode, &exe())
+            .await
+            .unwrap();
+        remove(home.path(), Agent::ClaudeCode).await.unwrap();
+
+        let stop = read(&path).await["hooks"]["Stop"]
+            .as_array()
+            .unwrap()
+            .clone();
+        assert_eq!(stop.len(), 1);
+        assert_eq!(stop[0]["hooks"][0]["command"], "/usr/bin/say done");
+    }
+
+    #[tokio::test]
+    async fn removing_from_a_home_that_has_nothing_is_not_a_failure() {
+        let home = tempfile::tempdir().unwrap();
+        remove(home.path(), Agent::ClaudeCode).await.unwrap();
     }
 
     #[tokio::test]

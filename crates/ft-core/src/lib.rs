@@ -192,12 +192,25 @@ impl Agent {
         Agent::all().into_iter().find(|a| format!("{a:?}") == name)
     }
 
-    /// Whether this agent can report its own status, or has to be guessed at.
+    /// Whether this agent has to be asked to report on itself.
     ///
-    /// Claude Code fires hooks the worker listens for; everything else falls
-    /// back to output heuristics and an idle timer.
+    /// Only for an agent watched from outside. One driven through a protocol
+    /// says what it is doing as part of saying anything, so installing hooks
+    /// as well gives two mechanisms writing the same field: they race, and the
+    /// loser is whichever arrived first. What that looked like in practice was
+    /// a session that had just been asked a question showing a scraped
+    /// sentence from the turn before it.
     pub fn has_status_hooks(&self) -> bool {
-        matches!(self, Agent::ClaudeCode)
+        matches!(self, Agent::ClaudeCode) && !self.speaks_a_protocol()
+    }
+
+    /// Whether this agent can be driven through a protocol at all.
+    ///
+    /// The single question behind every choice that used to be a mode: which
+    /// tab a session gets, whether it is watched or attached to, and whether
+    /// it is asked to report on itself.
+    pub fn speaks_a_protocol(&self) -> bool {
+        self.launch_headless("probe", &Asking::CannotAsk).is_some()
     }
 }
 
