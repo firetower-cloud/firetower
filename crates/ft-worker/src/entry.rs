@@ -122,6 +122,7 @@ fn summarise(event: &ft_core::TurnEvent) -> String {
         }
         E::UserInputResolved { .. } => "answered  questions".into(),
         E::PlanUpdated { steps } => format!("plan      {} step(s)", steps.len()),
+        E::Limited { window, status, .. } => format!("limit     {window} {status}"),
         E::TaskStarted { description, .. } => format!("subagent  {description}"),
         E::TaskProgress { detail, .. } => format!("subagent  {detail}"),
         E::TaskCompleted { status, .. } => format!("subagent  {status:?}"),
