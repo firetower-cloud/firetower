@@ -39,13 +39,26 @@ pub const WORKER_ROOT_ENV: &str = "FIRETOWER_WORKER_ROOT";
 pub enum Agent {
     ClaudeCode,
     Codex,
+    /// A plain shell. Not offered — see [`Agent::all`].
     Shell,
 }
 
 impl Agent {
-    /// Every kind, for screens that have to list them all.
-    pub fn all() -> [Agent; 3] {
-        [Agent::ClaudeCode, Agent::Codex, Agent::Shell]
+    /// Every kind Firetower offers, for screens that have to list them.
+    ///
+    /// [`Shell`] is not among them. It was a session that is only a shell,
+    /// which the Shell tab on any session now does better — and since agents
+    /// became things Firetower drives rather than types at, it has had no
+    /// driver, so starting one has been refused for as long as the refusal has
+    /// existed. Listing it offered something that could not happen.
+    ///
+    /// The variant stays: the worker still understands it, which is how the
+    /// tests launch a workspace without launching anything that talks to a
+    /// network, and a session row that already says `Shell` still decodes.
+    ///
+    /// [`Shell`]: Agent::Shell
+    pub fn all() -> [Agent; 2] {
+        [Agent::ClaudeCode, Agent::Codex]
     }
 
     /// What it's called in the interface.
@@ -213,9 +226,23 @@ impl Agent {
         !matches!(self, Agent::Shell)
     }
 
+    /// Every variant, including the ones not offered.
+    ///
+    /// Reading a value back and offering a choice are different questions.
+    /// A session started before [`Shell`] stopped being offered still says so
+    /// in the database, and it has to keep decoding — dropping it from
+    /// [`all`](Agent::all) must not turn an old row into an error.
+    ///
+    /// [`Shell`]: Agent::Shell
+    pub fn every() -> [Agent; 3] {
+        [Agent::ClaudeCode, Agent::Codex, Agent::Shell]
+    }
+
     /// Parsed back from how it is stored and sent.
     pub fn from_name(name: &str) -> Option<Agent> {
-        Agent::all().into_iter().find(|a| format!("{a:?}") == name)
+        Agent::every()
+            .into_iter()
+            .find(|a| format!("{a:?}") == name)
     }
 
     /// Whether this agent can be driven through a protocol at all.
@@ -1295,6 +1322,16 @@ mod launch_tests {
                 .contains("--permission-mode auto"),
             "an empty prompt should not change how the agent runs"
         );
+    }
+
+    #[test]
+    fn a_session_started_on_a_shell_still_decodes() {
+        // Shell is no longer offered, and rows that already say so must keep
+        // reading. Dropping it from the list of choices is not the same as
+        // dropping it from the vocabulary.
+        assert_eq!(Agent::from_name("Shell"), Some(Agent::Shell));
+        assert!(!Agent::all().contains(&Agent::Shell));
+        assert!(Agent::every().contains(&Agent::Shell));
     }
 
     /// Only the one we have checked. A flag Codex does not know would stop it

@@ -97,11 +97,18 @@ mod tests {
 
     #[tokio::test]
     async fn probing_reports_every_kind_whether_present_or_not() {
+        // Absent is an ordinary answer: a row for every kind, whether or not
+        // this machine has it. That is what lets the agents page say "not
+        // installed here" rather than leaving a gap somebody has to interpret.
         let found = probe().await;
         assert_eq!(found.len(), Agent::all().len());
-        // bash is on every machine this runs on, so it anchors the happy path
-        let shell = found.iter().find(|a| a.kind == Agent::Shell).unwrap();
-        assert!(shell.installed, "bash should be present");
-        assert!(shell.version.is_some());
+        for kind in Agent::all() {
+            let seen = found.iter().find(|a| a.kind == kind).unwrap();
+            assert_eq!(
+                seen.installed,
+                seen.version.is_some(),
+                "{kind:?} should report a version exactly when it is installed"
+            );
+        }
     }
 }
