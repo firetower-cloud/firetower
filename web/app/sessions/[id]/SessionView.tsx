@@ -1,7 +1,7 @@
 "use client";
 
 import { usePathname } from "next/navigation";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import Link from "next/link";
 import { useGetSession, useRenameSession } from "@/src/api/generated/sessions/sessions";
 import { useListEvents } from "@/src/api/generated/events/events";
@@ -82,6 +82,16 @@ export default function SessionView() {
   const id = useSessionId();
   const [tab, setTab] = useState<Tab>("Chat");
   const [reviewing, setReviewing] = useState(false);
+  /** The name being edited, when it is. Absent means it is not. */
+  const [naming, setNaming] = useState<string | null>(null);
+  /**
+   * Set by Escape, read by the blur that follows it.
+   *
+   * Leaving a field keeps what is in it, so cancelling has to say so before it
+   * lets go — otherwise the blur that Escape causes saves the thing Escape was
+   * pressed to discard.
+   */
+  const dropping = useRef(false);
 
   // The stream is how this stays live, and it is fast. It is not, however,
   // something to bet the page on: a stream that silently stops leaves a session
@@ -154,30 +164,50 @@ export default function SessionView() {
 
         <Signal status={session.status} size={7} />
 
-        <button
-          onClick={() => {
-            const next = window.prompt(`Call ${session.name} what?`, session.name);
-            if (!next || next.trim() === session.name) return;
-            rename.mutate(
-              { id: session.id, data: { name: next.trim() } },
-              { onSuccess: () => refetch() },
-            );
-          }}
-          title="Rename"
-          className="min-w-0 shrink truncate rounded-[8px] px-1 text-[15.5px] font-semibold tracking-[-0.01em] text-bone transition-colors hover:text-ember"
-        >
-          {session.name}
-        </button>
-
-        {session.repo && (
-          <span className="hidden shrink-0 rounded-[7px] border border-line px-2 py-1 font-mono text-meta text-dim sm:inline">
-            {session.repo}
-          </span>
-        )}
-        {session.branch && (
-          <span className="hidden min-w-0 shrink truncate font-mono text-meta text-mute md:inline">
-            ⑂ {session.branch}
-          </span>
+        {/* The name is edited where it sits. A prompt box is a modal for one
+            short string: it covers the thing being renamed, and it cannot be
+            corrected once dismissed. */}
+        {naming === null ? (
+          <button
+            onClick={() => setNaming(session.name)}
+            title="Rename"
+            className="min-w-0 shrink truncate rounded-[8px] px-1 text-[15.5px] font-semibold tracking-[-0.01em] text-bone transition-colors hover:text-ember"
+          >
+            {session.name}
+          </button>
+        ) : (
+          <input
+            autoFocus
+            value={naming}
+            onChange={(e) => setNaming(e.target.value)}
+            onFocus={(e) => e.currentTarget.select()}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                e.currentTarget.blur();
+              }
+              if (e.key === "Escape") {
+                e.preventDefault();
+                dropping.current = true;
+                e.currentTarget.blur();
+              }
+            }}
+            // Clicking away keeps it, which is what happens to a field you have
+            // finished with. Escape is the way to change your mind.
+            onBlur={() => {
+              const next = naming.trim();
+              const dropped = dropping.current;
+              dropping.current = false;
+              setNaming(null);
+              if (dropped || !next || next === session.name) return;
+              rename.mutate(
+                { id: session.id, data: { name: next } },
+                { onSuccess: () => refetch() },
+              );
+            }}
+            style={{ width: `${Math.min(Math.max(naming.length, 10) + 2, 40)}ch` }}
+            className="min-w-0 shrink rounded-[8px] border border-ember-deep bg-raise px-1.5 py-0.5 text-[15.5px] font-semibold tracking-[-0.01em] text-bone focus:border-ember focus:outline-none"
+          />
         )}
 
         <span className="ml-auto hidden shrink-0 font-mono text-meta text-mute sm:inline">
