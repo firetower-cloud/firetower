@@ -140,16 +140,16 @@ export function Picker({
       <button
         onClick={() => setOpen(!open)}
         disabled={disabled}
-        className="eyebrow flex items-center gap-1 rounded-[5px] px-1 py-0.5 transition-colors hover:bg-raise hover:text-dim disabled:opacity-50"
+        className="flex h-8 items-center gap-1.5 rounded-full px-3 text-ui text-dim transition-colors hover:bg-raise hover:text-bone disabled:opacity-50"
       >
         {showing?.label ?? fallback}
-        <span aria-hidden className="text-[8px] opacity-60">
-          ▾
-        </span>
+        <svg viewBox="0 0 10 10" aria-hidden className="h-2.5 w-2.5 opacity-50" fill="none" stroke="currentColor">
+          <path d="M2.5 4l2.5 2.5L7.5 4" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
       </button>
 
       {open && (
-        <ul className="absolute bottom-full left-0 z-20 mb-1.5 max-h-[320px] w-[248px] overflow-y-auto rounded-[8px] border border-line bg-panel py-1 shadow-lg">
+        <ul className="absolute bottom-full left-0 z-20 mb-2 max-h-[340px] w-[264px] overflow-y-auto rounded-[14px] border border-line bg-panel py-1.5 shadow-[0_12px_36px_-14px_rgba(0,0,0,0.85)]">
           {choices.map((choice, i) => {
             const on = matches(choice.value, current);
             const first = choice.grave && !choices[i - 1]?.grave;
@@ -160,17 +160,17 @@ export function Picker({
                     setOpen(false);
                     if (!on) onPick(choice.value);
                   }}
-                  className="w-full px-2.5 py-1.5 text-left transition-colors hover:bg-raise"
+                  className="w-full px-3.5 py-2 text-left transition-colors hover:bg-raise"
                 >
                   <span
-                    className={`block text-[12.5px] ${
+                    className={`block text-ui ${
                       on ? "text-ember" : choice.grave ? "text-dim" : "text-text"
                     }`}
                   >
                     {choice.label}
                   </span>
                   {choice.note && (
-                    <span className="block text-[11px] text-mute">{choice.note}</span>
+                    <span className="mt-0.5 block text-meta text-mute">{choice.note}</span>
                   )}
                 </button>
               </li>

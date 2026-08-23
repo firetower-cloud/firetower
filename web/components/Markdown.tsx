@@ -27,13 +27,13 @@ import remarkGfm from "remark-gfm";
  */
 export const Markdown = memo(function Markdown({ children }: { children: string }) {
   return (
-    <div className="ft-md text-[13.5px] leading-[1.6] text-text">
+    <div className="ft-md text-body text-text">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={{
           // Paragraph spacing lives here rather than in a stylesheet so the
           // last one does not push the next item away.
-          p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
+          p: ({ children }) => <p className="mb-3.5 last:mb-0">{children}</p>,
 
           h1: ({ children }) => <Heading level={1}>{children}</Heading>,
           h2: ({ children }) => <Heading level={2}>{children}</Heading>,
@@ -43,12 +43,12 @@ export const Markdown = memo(function Markdown({ children }: { children: string 
           h6: ({ children }) => <Heading level={3}>{children}</Heading>,
 
           ul: ({ children }) => (
-            <ul className="mb-2 flex list-disc flex-col gap-0.5 pl-5 last:mb-0 marker:text-mute">
+            <ul className="mb-3.5 flex list-disc flex-col gap-1.5 pl-5 last:mb-0 marker:text-mute">
               {children}
             </ul>
           ),
           ol: ({ children }) => (
-            <ol className="mb-2 flex list-decimal flex-col gap-0.5 pl-5 last:mb-0 marker:text-mute">
+            <ol className="mb-3.5 flex list-decimal flex-col gap-1.5 pl-5 last:mb-0 marker:text-mute">
               {children}
             </ol>
           ),
@@ -72,11 +72,11 @@ export const Markdown = memo(function Markdown({ children }: { children: string 
           del: ({ children }) => <del className="text-mute line-through">{children}</del>,
 
           blockquote: ({ children }) => (
-            <blockquote className="mb-2 border-l-2 border-line pl-3 text-dim last:mb-0">
+            <blockquote className="mb-3.5 border-l-2 border-line pl-4 text-dim last:mb-0">
               {children}
             </blockquote>
           ),
-          hr: () => <hr className="my-3 border-line" />,
+          hr: () => <hr className="my-5 border-line" />,
 
           code: ({ className, children }) => {
             // A fenced block gets a language class; an inline span does not.
@@ -88,19 +88,19 @@ export const Markdown = memo(function Markdown({ children }: { children: string 
               // inline constantly, and at this density a background alone does
               // not separate them from the sentence around them.
               return (
-                <code className="rounded-[5px] border border-line bg-raise px-[5px] py-[1.5px] font-mono text-[11.5px] whitespace-nowrap text-bone">
+                <code className="rounded-[5px] border border-line bg-raise px-[5px] py-[1.5px] font-mono text-[12.5px] whitespace-nowrap text-bone">
                   {children}
                 </code>
               );
             }
             return (
-              <code className="block overflow-x-auto font-mono text-[12px] leading-[1.5] whitespace-pre">
+              <code className="block overflow-x-auto font-mono text-code whitespace-pre">
                 {children}
               </code>
             );
           },
           pre: ({ children }) => (
-            <pre className="mb-2.5 overflow-x-auto rounded-[8px] border border-line bg-ground px-3 py-2.5 last:mb-0">
+            <pre className="mb-4 overflow-x-auto rounded-[10px] border border-line-soft bg-panel px-4 py-3.5 last:mb-0">
               {children}
             </pre>
           ),
@@ -108,17 +108,17 @@ export const Markdown = memo(function Markdown({ children }: { children: string 
           // Tables come from the GitHub extension, and an agent reaching for
           // one usually has something worth lining up.
           table: ({ children }) => (
-            <div className="mb-2 overflow-x-auto last:mb-0">
-              <table className="w-full border-collapse text-[12.5px]">{children}</table>
+            <div className="mb-3.5 overflow-x-auto last:mb-0">
+              <table className="w-full border-collapse text-ui">{children}</table>
             </div>
           ),
           th: ({ children }) => (
-            <th className="border-b border-line px-2 py-1 text-left font-medium text-dim">
+            <th className="border-b border-line px-2.5 py-1.5 text-left font-medium text-dim">
               {children}
             </th>
           ),
           td: ({ children }) => (
-            <td className="border-b border-line-soft px-2 py-1.5 align-top">{children}</td>
+            <td className="border-b border-line-soft px-2.5 py-2 align-top">{children}</td>
           ),
         }}
       >
@@ -136,8 +136,8 @@ export const Markdown = memo(function Markdown({ children }: { children: string 
  * structure without a chat message shouting.
  */
 function Heading({ level, children }: { level: 1 | 2 | 3; children: React.ReactNode }) {
-  const size = level === 1 ? "text-[15px]" : level === 2 ? "text-[14px]" : "text-[13.5px]";
+  const size = level === 1 ? "text-[17px]" : level === 2 ? "text-[15.5px]" : "text-body";
   return (
-    <p className={`mt-3 mb-1.5 font-semibold text-bone first:mt-0 ${size}`}>{children}</p>
+    <p className={`mt-5 mb-2 font-semibold text-bone first:mt-0 ${size}`}>{children}</p>
   );
 }

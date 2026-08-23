@@ -77,15 +77,15 @@ export function SessionMenu({ session, work }: { session: Session; work?: WorkSu
       <button
         onClick={() => (open ? close() : setOpen(true))}
         aria-label="More"
-        className="rounded-[6px] px-2 py-1 text-[14px] leading-none text-mute transition-colors hover:bg-raise hover:text-text"
+        className="rounded-[8px] px-2 py-1.5 text-[16px] leading-none text-mute transition-colors hover:bg-raise hover:text-text"
       >
         ⋯
       </button>
 
       {open && (
-        <div className="absolute top-full right-0 z-30 mt-1.5 w-[276px] rounded-[8px] border border-line bg-panel p-1.5 shadow-lg">
+        <div className="absolute top-full right-0 z-30 mt-2 w-[292px] rounded-[14px] border border-line bg-panel p-1.5 shadow-[0_12px_36px_-14px_rgba(0,0,0,0.85)]">
           {ended ? (
-            <p className="px-2 py-1.5 text-[12px] leading-[1.5] text-mute">
+            <p className="px-2 py-1.5 text-[13px] leading-[1.5] text-mute">
               {session.forgottenAt
                 ? // It did not end — it was taken off the inbox. Saying the
                   // workspace was removed would be untrue, and this is the one
@@ -96,7 +96,7 @@ export function SessionMenu({ session, work }: { session: Session; work?: WorkSu
           ) : (
             <>
               {unreachable && (
-                <p className="mb-1 rounded-[6px] bg-ember/[0.06] px-2 py-1.5 text-[11.5px] leading-[1.5] text-bone">
+                <p className="mb-1 rounded-[6px] bg-ember/[0.06] px-2 py-1.5 text-[12.5px] leading-[1.5] text-bone">
                   {host?.name ?? "This session's host"} isn&apos;t answering. Nothing
                   here reaches the agent until it does — you can still remove the
                   session from Firetower.
@@ -139,7 +139,7 @@ export function SessionMenu({ session, work }: { session: Session; work?: WorkSu
                     // means. Nothing is torn down here — the agent is still
                     // running on a machine we cannot reach, and this only stops
                     // it filling the inbox.
-                    <p className="text-[11.5px] leading-[1.5] text-dim">
+                    <p className="text-[12.5px] leading-[1.5] text-dim">
                       {host?.name ?? "That machine"} isn&apos;t answering, so the
                       workspace can&apos;t be removed. The agent keeps running
                       there, holding its worktree and its terminal. If that
@@ -148,7 +148,7 @@ export function SessionMenu({ session, work }: { session: Session; work?: WorkSu
                       reach it to look.
                     </p>
                   ) : (
-                    <p className="text-[11.5px] leading-[1.5] text-dim">
+                    <p className="text-[12.5px] leading-[1.5] text-dim">
                       {session.repo && atRisk(work)
                         ? "This removes the workspace. What hasn't been pushed is gone."
                         : "This removes the workspace. Everything is pushed."}
@@ -171,7 +171,7 @@ export function SessionMenu({ session, work }: { session: Session; work?: WorkSu
                         )
                       }
                       disabled={busy}
-                      className="rounded-[5px] bg-ember px-2.5 py-1 text-[11.5px] font-semibold text-ground transition-opacity hover:opacity-90 disabled:opacity-60"
+                      className="rounded-[5px] bg-ember px-2.5 py-1 text-[12.5px] font-semibold text-ground transition-opacity hover:opacity-90 disabled:opacity-60"
                     >
                       {destroy.isPending
                         ? unreachable
@@ -183,7 +183,7 @@ export function SessionMenu({ session, work }: { session: Session; work?: WorkSu
                     </button>
                     <button
                       onClick={() => setConfirming(false)}
-                      className="text-[11.5px] text-mute transition-colors hover:text-text"
+                      className="text-[12.5px] text-mute transition-colors hover:text-text"
                     >
                       Cancel
                     </button>
@@ -194,7 +194,7 @@ export function SessionMenu({ session, work }: { session: Session; work?: WorkSu
           )}
 
           {failed && (
-            <p className="mt-1 rounded-[6px] bg-ember/[0.06] px-2 py-1.5 text-[11.5px] text-bone">
+            <p className="mt-1 rounded-[6px] bg-ember/[0.06] px-2 py-1.5 text-[12.5px] text-bone">
               {failed}
             </p>
           )}
@@ -226,10 +226,10 @@ function Item({
     <button
       onClick={onClick}
       disabled={disabled}
-      className="w-full rounded-[6px] px-2 py-1.5 text-left transition-colors hover:bg-raise disabled:opacity-45 disabled:hover:bg-transparent"
+      className="w-full rounded-[10px] px-3 py-2 text-left transition-colors hover:bg-raise disabled:opacity-45 disabled:hover:bg-transparent"
     >
-      <span className={`block text-[12.5px] ${grave ? "text-dim" : "text-text"}`}>{label}</span>
-      {hint && <span className="block text-[11px] text-mute">{hint}</span>}
+      <span className={`block text-[13.5px] ${grave ? "text-dim" : "text-text"}`}>{label}</span>
+      {hint && <span className="block text-[12px] text-mute">{hint}</span>}
     </button>
   );
 }

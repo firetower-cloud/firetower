@@ -61,7 +61,7 @@ function Ship({
       onClick={onReview}
       disabled={!can}
       title={ship.blocked ?? ship.label}
-      className={`shrink-0 rounded-[7px] px-2.5 py-1 text-[12px] font-medium transition-colors ${
+      className={`shrink-0 rounded-[9px] px-3 py-1.5 text-ui font-medium transition-colors ${
         can
           ? "bg-ember text-ground"
           : "border border-line text-mute"
@@ -113,24 +113,24 @@ export default function SessionView() {
   );
 
   if (isLoading) {
-    return <Frame><p className="text-[13px] text-mute">Looking…</p></Frame>;
+    return <Frame><p className="text-[14px] text-mute">Looking…</p></Frame>;
   }
 
   if (error || !session) {
     const missing = error instanceof ApiError && error.status === 404;
     return (
       <Frame>
-        <h1 className="text-[20px] font-semibold text-bone">
+        <h1 className="text-[21px] font-semibold text-bone">
           {missing ? "No such session." : "Couldn't load that session."}
         </h1>
-        <p className="mt-2 max-w-[52ch] text-[13.5px] text-dim">
+        <p className="mt-2 max-w-[52ch] text-[15px] text-dim">
           {missing
             ? "It may have ended and been cleaned up — ending a session removes its workspace."
             : error instanceof ApiError
               ? error.message
               : "The control plane didn't answer."}
         </p>
-        <Link href="/" className="mt-4 inline-block text-[13px] text-ember hover:underline">
+        <Link href="/" className="mt-4 inline-block text-[14px] text-ember hover:underline">
           ← All sessions
         </Link>
       </Frame>
@@ -143,11 +143,11 @@ export default function SessionView() {
           else. The old header spent four lines restating things that are
           either obvious from the conversation or one hover away, and pushed the
           thing somebody came to read below the fold. */}
-      <header className="flex h-12 shrink-0 items-center gap-2.5 border-b border-line px-3 lg:px-4">
+      <header className="flex h-14 shrink-0 items-center gap-3 border-b border-line px-3 lg:px-5">
         <Link
           href="/"
           aria-label="All sessions"
-          className="shrink-0 rounded-[6px] px-1.5 py-1 text-[13px] text-mute transition-colors hover:bg-raise hover:text-text"
+          className="shrink-0 rounded-[8px] px-2 py-1.5 text-[15px] text-mute transition-colors hover:bg-raise hover:text-text"
         >
           ←
         </Link>
@@ -164,26 +164,26 @@ export default function SessionView() {
             );
           }}
           title="Rename"
-          className="min-w-0 shrink truncate rounded-[6px] px-1 text-[14px] font-semibold tracking-[-0.01em] text-bone transition-colors hover:text-ember"
+          className="min-w-0 shrink truncate rounded-[8px] px-1 text-[15.5px] font-semibold tracking-[-0.01em] text-bone transition-colors hover:text-ember"
         >
           {session.name}
         </button>
 
         {session.repo && (
-          <span className="hidden shrink-0 rounded-[6px] border border-line px-1.5 py-0.5 font-mono text-[11px] text-dim sm:inline">
+          <span className="hidden shrink-0 rounded-[7px] border border-line px-2 py-1 font-mono text-meta text-dim sm:inline">
             {session.repo}
           </span>
         )}
         {session.branch && (
-          <span className="hidden min-w-0 shrink truncate font-mono text-[11px] text-mute md:inline">
+          <span className="hidden min-w-0 shrink truncate font-mono text-meta text-mute md:inline">
             ⑂ {session.branch}
           </span>
         )}
 
-        <span className="ml-auto hidden shrink-0 font-mono text-[11px] text-mute sm:inline">
+        <span className="ml-auto hidden shrink-0 font-mono text-meta text-mute sm:inline">
           {elapsed(minutesSince(session.createdAt))}
         </span>
-        <span className="shrink-0 rounded-[6px] border border-line px-1.5 py-0.5 font-mono text-[10.5px] text-slate">
+        <span className="shrink-0 rounded-[7px] border border-line px-2 py-1 font-mono text-[11px] text-slate">
           {STATUS_LABEL[session.status] ?? session.status}
         </span>
 
@@ -200,12 +200,12 @@ export default function SessionView() {
       )}
 
       <section className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden px-4 py-4 lg:px-6 lg:py-5">
-        <div className="mb-3 flex gap-1">
+        <div className="mb-4 flex gap-1">
           {(["Chat", "Shell", "Files", "Changes"] as Tab[]).map((t) => (
             <button
               key={t}
               onClick={() => setTab(t)}
-              className={`rounded-[5px] px-2.5 py-1 text-[12px] transition-colors ${
+              className={`rounded-[8px] px-3 py-1.5 text-ui transition-colors ${
                 tab === t ? "bg-raise text-bone" : "text-mute hover:text-text"
               }`}
             >

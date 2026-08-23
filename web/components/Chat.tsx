@@ -118,18 +118,18 @@ export function Chat({
         {/* A column, centred, rather than a line of text as wide as the
             window. The scroller stays full width so the bar sits at the edge
             of the pane and not in the middle of the reading. */}
-        <div className="mx-auto w-full max-w-[860px]">
+        <div className="mx-auto w-full max-w-[860px] pt-1">
           <Bringup lines={steps} />
 
           {conversation.items.length === 0 && !conversation.trouble && steps.length === 0 && (
-            <p className="py-10 text-[13px] text-mute">
+            <p className="py-10 text-[14px] text-mute">
               {live ? "Waiting for the agent." : "This session said nothing."}
             </p>
           )}
 
           {conversation.plan.length > 0 && <Plan steps={conversation.plan} />}
 
-          <ol className="spine flex flex-col gap-2.5">
+          <ol className="spine flex flex-col gap-5">
             {conversation.items
               // A subagent's steps are drawn under the delegation, not here.
               .filter((item) => !item.task)
@@ -151,7 +151,7 @@ export function Chat({
           <End working={conversation.working} waiting={waiting} live={live} />
 
           {conversation.trouble && (
-            <p className="mt-3 font-mono text-[11.5px] text-brick">
+            <p className="mt-3 font-mono text-[12.5px] text-brick">
               Lost the stream.{live ? " Reconnecting." : ""}
             </p>
           )}
@@ -160,23 +160,34 @@ export function Chat({
         <div ref={foot} />
       </div>
 
-      <div className="mx-auto w-full max-w-[860px] shrink-0 pt-3">
+      <div className="relative mx-auto w-full max-w-[860px] shrink-0 bg-ground pt-3">
+        {/* The transcript scrolls under this, so without a fade the last line
+            is cut in half by the composer's top edge. */}
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-x-0 bottom-full h-12"
+          style={{
+            background:
+              "linear-gradient(to top, var(--color-ground), color-mix(in srgb, var(--color-ground) 0%, transparent))",
+          }}
+        />
+
         {/* Written against the transcript, waiting to go. */}
         {notes.length > 0 && (
-          <div className="mb-2 flex items-center gap-3 rounded-[8px] border border-ember-deep bg-panel px-3 py-2">
-            <span className="text-[12.5px] text-dim">
+          <div className="mb-2 flex items-center gap-3 rounded-[12px] border border-ember-deep bg-panel px-4 py-2.5">
+            <span className="text-[13.5px] text-dim">
               {notes.length} {notes.length === 1 ? "note" : "notes"} on this conversation
             </span>
             <button
               onClick={clear}
-              className="text-[11.5px] text-mute transition-colors hover:text-brick"
+              className="text-[12.5px] text-mute transition-colors hover:text-brick"
             >
               Discard
             </button>
             <button
               onClick={sendNotes}
               disabled={!live || send.isPending}
-              className="ml-auto min-h-[32px] rounded-[6px] bg-ember px-3 text-[12px] font-medium text-ground disabled:opacity-40"
+              className="ml-auto min-h-[32px] rounded-[8px] bg-ember px-3.5 text-[13px] font-medium text-ground disabled:opacity-40"
             >
               Send them
             </button>
@@ -279,7 +290,7 @@ function Node({
   if (item.kind === "UserMessage") {
     return (
       <li className="node flex justify-end">
-        <div className="max-w-[80%] rounded-[12px] rounded-br-[4px] bg-raise px-3 py-2">
+        <div className="max-w-[80%] rounded-[18px] rounded-br-[6px] bg-raise px-4 py-3 text-body">
           {item.images && item.images.length > 0 && (
             <div className={`flex flex-wrap gap-1.5 ${item.text ? "mb-2" : ""}`}>
               {item.images.map((image, i) => (
@@ -288,13 +299,13 @@ function Node({
                   key={i}
                   src={`data:${image.mediaType};base64,${image.data}`}
                   alt="Attached"
-                  className="max-h-[160px] max-w-full rounded-[6px] border border-line object-contain"
+                  className="max-h-[200px] max-w-full rounded-[10px] border border-line object-contain"
                 />
               ))}
             </div>
           )}
           {item.text && (
-            <p className="text-[13.5px] leading-[1.5] whitespace-pre-wrap text-bone">{item.text}</p>
+            <p className="text-[15px] leading-[1.5] whitespace-pre-wrap text-bone">{item.text}</p>
           )}
         </div>
       </li>
@@ -329,7 +340,7 @@ function Says({
   const text = useReveal(item.text, settled);
 
   const body = (
-    <div className="max-w-[74ch]">
+    <div className="max-w-[72ch]">
       <Markdown>{text}</Markdown>
     </div>
   );
@@ -416,7 +427,7 @@ function Tool({ item }: { item: Item }) {
       <button onClick={() => setOpen(!open)} className="flex w-full items-baseline gap-2 text-left">
         <span className="eyebrow shrink-0">{DID[item.kind] ?? "used"}</span>
         <span
-          className={`min-w-0 flex-1 truncate font-mono text-[12px] ${
+          className={`min-w-0 flex-1 truncate font-mono text-[13px] ${
             failed ? "text-brick" : "text-dim"
           }`}
         >
@@ -427,13 +438,13 @@ function Tool({ item }: { item: Item }) {
       {open && (
         <div className="mt-1.5 flex flex-col gap-1.5">
           {item.input !== undefined && (
-            <pre className="overflow-x-auto rounded-[4px] bg-panel px-2.5 py-2 font-mono text-[11px] whitespace-pre-wrap text-mute">
+            <pre className="overflow-x-auto rounded-[8px] bg-panel px-3 py-2.5 font-mono text-[12px] whitespace-pre-wrap text-mute">
               {JSON.stringify(item.input, null, 2)}
             </pre>
           )}
           {item.output && (
             <pre
-              className={`max-h-[320px] overflow-auto rounded-[4px] bg-panel px-2.5 py-2 font-mono text-[11px] whitespace-pre-wrap ${
+              className={`max-h-[320px] overflow-auto rounded-[8px] bg-panel px-3 py-2.5 font-mono text-[12px] whitespace-pre-wrap ${
                 failed ? "text-brick" : "text-dim"
               }`}
             >
@@ -470,14 +481,14 @@ function Delegated({ item, tasks, items }: { item: Item; tasks: Task[]; items: I
       <Mark status={failed ? "Failed" : (task?.status ?? item.status)} />
       <button onClick={() => setOpen(!open)} className="flex w-full items-baseline gap-2 text-left">
         <span className="eyebrow shrink-0">sent</span>
-        <span className="min-w-0 flex-1 truncate text-[12.5px] text-dim">{description}</span>
+        <span className="min-w-0 flex-1 truncate text-[13.5px] text-dim">{description}</span>
         {task?.agent && <span className="eyebrow shrink-0">{task.agent}</span>}
       </button>
 
       {open && (
         <div className="mt-2">
           {mine.length > 0 && (
-            <ol className="spine spine-nested flex flex-col gap-2">
+            <ol className="spine spine-nested flex flex-col gap-4">
               {mine.map((step) => (
                 <Node key={step.id} item={step} tasks={tasks} items={items} />
               ))}
@@ -489,7 +500,7 @@ function Delegated({ item, tasks, items }: { item: Item; tasks: Task[]; items: I
             </div>
           )}
           {mine.length === 0 && !task?.summary && (
-            <p className="text-[11.5px] text-mute">Nothing back yet.</p>
+            <p className="text-[12.5px] text-mute">Nothing back yet.</p>
           )}
         </div>
       )}
@@ -506,15 +517,15 @@ function Delegated({ item, tasks, items }: { item: Item; tasks: Task[]; items: I
 function Plan({ steps }: { steps: PlanStep[] }) {
   const done = steps.filter((s) => s.status === "Completed").length;
   return (
-    <div className="mb-4 rounded-[6px] border border-line bg-panel px-3 py-2.5">
+    <div className="mb-5 rounded-[12px] border border-line bg-panel px-4 py-3.5">
       <div className="eyebrow mb-2">
         Plan · {done} of {steps.length}
       </div>
       <ol className="flex flex-col gap-1">
         {steps.map((step, i) => (
-          <li key={i} className="flex items-baseline gap-2 text-[12.5px]">
+          <li key={i} className="flex items-baseline gap-2 text-[13.5px]">
             <span
-              className={`font-mono text-[10px] ${
+              className={`font-mono text-[11px] ${
                 step.status === "Completed"
                   ? "text-sage"
                   : step.status === "InProgress"
@@ -568,12 +579,12 @@ function Approval({
   };
 
   return (
-    <div className="mb-3 rounded-[6px] border border-ember-deep bg-panel">
+    <div className="mb-4 rounded-[12px] border border-ember-deep bg-panel">
       <div className="px-3 pt-2.5">
         <span className="eyebrow text-ember">{ASKING[asked.kind]}</span>
       </div>
 
-      <pre className="mx-3 mt-1.5 max-h-[180px] overflow-auto rounded-[4px] bg-ground px-2.5 py-2 font-mono text-[12px] whitespace-pre-wrap text-text">
+      <pre className="mx-3 mt-1.5 max-h-[180px] overflow-auto rounded-[8px] bg-ground px-3 py-2.5 font-mono text-[13px] whitespace-pre-wrap text-text">
         {what(asked)}
       </pre>
 
@@ -588,11 +599,11 @@ function Approval({
               if (e.key === "Escape") setExplaining(false);
             }}
             placeholder="Why not? The agent reads this."
-            className="min-h-[44px] min-w-[12rem] flex-1 rounded-[5px] border border-line bg-ground px-2.5 text-[12.5px] text-text placeholder:text-mute focus:border-ember focus:outline-none"
+            className="min-h-[44px] min-w-[12rem] flex-1 rounded-[8px] border border-line bg-ground px-2.5 text-[13.5px] text-text placeholder:text-mute focus:border-ember focus:outline-none"
           />
           <button
             onClick={() => decide({ decision: "Deny", reason: reason.trim() || null })}
-            className="min-h-[44px] rounded-[5px] border border-brick px-3.5 text-[12px] text-brick"
+            className="min-h-[44px] rounded-[8px] border border-brick px-3.5 text-[13px] text-brick"
           >
             Deny
           </button>
@@ -601,19 +612,19 @@ function Approval({
         <div className="flex flex-wrap gap-2 p-3">
           <button
             onClick={() => decide({ decision: "Allow" })}
-            className="min-h-[44px] flex-1 rounded-[5px] bg-ember px-4 text-[12.5px] font-medium text-ground sm:flex-none"
+            className="min-h-[44px] flex-1 rounded-[8px] bg-ember px-4 text-[13.5px] font-medium text-ground sm:flex-none"
           >
             Allow
           </button>
           <button
             onClick={() => decide({ decision: "AllowAlways" })}
-            className="min-h-[44px] rounded-[5px] border border-line px-3.5 text-[12.5px] text-dim transition-colors hover:text-bone"
+            className="min-h-[44px] rounded-[8px] border border-line px-3.5 text-[13.5px] text-dim transition-colors hover:text-bone"
           >
             Always
           </button>
           <button
             onClick={() => setExplaining(true)}
-            className="ml-auto min-h-[44px] rounded-[5px] border border-line px-3.5 text-[12.5px] text-dim transition-colors hover:border-brick hover:text-brick"
+            className="ml-auto min-h-[44px] rounded-[8px] border border-line px-3.5 text-[13.5px] text-dim transition-colors hover:border-brick hover:text-brick"
           >
             Deny
           </button>
@@ -672,7 +683,7 @@ function Questions({
   };
 
   return (
-    <div className="mb-3 rounded-[6px] border border-ember-deep bg-panel p-3">
+    <div className="mb-4 rounded-[12px] border border-ember-deep bg-panel p-4">
       {asking.questions.map((q) => {
         const picked = chosen[q.question] ?? [];
         return (
@@ -681,7 +692,7 @@ function Questions({
               <span className="eyebrow text-ember">{q.header}</span>
               {q.multiSelect && <span className="eyebrow">any</span>}
             </div>
-            <p className="mt-1 mb-2 text-[13px] text-text">{q.question}</p>
+            <p className="mt-1 mb-2 text-[14px] text-text">{q.question}</p>
 
             <div className="flex flex-col gap-1.5">
               {q.options.map((option) => {
@@ -690,15 +701,15 @@ function Questions({
                   <button
                     key={option.label}
                     onClick={() => pick(q.question, option.label, q.multiSelect ?? false)}
-                    className={`min-h-[44px] rounded-[5px] border px-2.5 py-1.5 text-left transition-colors ${
+                    className={`min-h-[44px] rounded-[8px] border px-3 py-2 text-left transition-colors ${
                       on ? "border-ember bg-raise" : "border-line hover:border-mute"
                     }`}
                   >
-                    <span className={`block text-[12.5px] ${on ? "text-bone" : "text-text"}`}>
+                    <span className={`block text-[13.5px] ${on ? "text-bone" : "text-text"}`}>
                       {option.label}
                     </span>
                     {option.description && (
-                      <span className="block text-[11.5px] text-mute">{option.description}</span>
+                      <span className="block text-[12.5px] text-mute">{option.description}</span>
                     )}
                   </button>
                 );
@@ -711,7 +722,7 @@ function Questions({
       <button
         onClick={send}
         disabled={!ready}
-        className="min-h-[44px] w-full rounded-[5px] bg-ember px-4 text-[12.5px] font-medium text-ground disabled:opacity-40 sm:w-auto"
+        className="min-h-[44px] w-full rounded-[8px] bg-ember px-4 text-[13.5px] font-medium text-ground disabled:opacity-40 sm:w-auto"
       >
         Answer
       </button>

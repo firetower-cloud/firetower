@@ -143,22 +143,22 @@ export function ChatComposer({
         setOver(false);
         await take(Array.from(e.dataTransfer.files));
       }}
-      className={`rounded-[6px] transition-colors ${over ? "bg-raise" : ""}`}
+      className={`rounded-[20px] transition-colors ${over ? "bg-raise" : ""}`}
     >
       {suggestions.length > 0 && (
-        <ul className="mb-2 max-h-[220px] overflow-y-auto rounded-[6px] border border-line bg-panel py-1">
+        <ul className="mb-2 max-h-[280px] overflow-y-auto rounded-[14px] border border-line bg-panel py-1.5 shadow-[0_8px_28px_-12px_rgba(0,0,0,0.7)]">
           {suggestions.map((s, i) => (
             <li key={s.value}>
               <button
                 onMouseEnter={() => move(i)}
                 onClick={() => finish(s.value)}
-                className={`flex w-full items-baseline gap-2 px-2.5 py-1.5 text-left ${
+                className={`flex w-full items-baseline gap-2.5 px-3.5 py-2 text-left ${
                   i === highlighted ? "bg-raise" : ""
                 }`}
               >
-                <span className="font-mono text-[12px] text-bone">{s.value}</span>
+                <span className="font-mono text-[13px] text-bone">{s.value}</span>
                 {s.hint && (
-                  <span className="min-w-0 truncate text-[11.5px] text-mute">{s.hint}</span>
+                  <span className="min-w-0 truncate text-[12.5px] text-mute">{s.hint}</span>
                 )}
               </button>
             </li>
@@ -167,7 +167,7 @@ export function ChatComposer({
       )}
 
       {refused && (
-        <p className="mb-2 text-[11.5px] text-brick">{refused}</p>
+        <p className="mb-2 text-[12.5px] text-brick">{refused}</p>
       )}
 
       {files.length > 0 && (
@@ -178,13 +178,13 @@ export function ChatComposer({
               className="flex items-center gap-1.5 rounded-[6px] border border-line bg-panel px-2 py-1"
               title={file.path}
             >
-              <span className="max-w-[180px] truncate font-mono text-[11.5px] text-dim">
+              <span className="max-w-[180px] truncate font-mono text-[12.5px] text-dim">
                 {file.name}
               </span>
               <button
                 onClick={() => setFiles((held) => held.filter((_, at) => at !== i))}
                 aria-label={`Remove ${file.name}`}
-                className="text-[11px] text-mute hover:text-bone"
+                className="text-[12px] text-mute hover:text-bone"
               >
                 ×
               </button>
@@ -194,7 +194,7 @@ export function ChatComposer({
       )}
 
       {attach.isPending && (
-        <p className="mb-2 text-[11.5px] text-mute">Putting it in the workspace…</p>
+        <p className="mb-2 text-[12.5px] text-mute">Putting it in the workspace…</p>
       )}
 
       {images.length > 0 && (
@@ -210,7 +210,7 @@ export function ChatComposer({
               <button
                 onClick={() => setImages((held) => held.filter((_, at) => at !== i))}
                 aria-label="Remove image"
-                className="absolute -top-1.5 -right-1.5 h-5 w-5 rounded-full border border-line bg-ground text-[11px] text-dim hover:text-bone"
+                className="absolute -top-1.5 -right-1.5 h-5 w-5 rounded-full border border-line bg-ground text-[12px] text-dim hover:text-bone"
               >
                 ×
               </button>
@@ -224,8 +224,10 @@ export function ChatComposer({
           floating beside it, which is what stops a message box reading as a
           form. */}
       <div
-        className={`rounded-[14px] border bg-panel transition-colors ${
-          over ? "border-ember" : "border-line focus-within:border-mute"
+        className={`rounded-[20px] border bg-panel shadow-[0_1px_0_rgba(255,255,255,0.03)_inset,0_10px_30px_-18px_rgba(0,0,0,0.9)] transition-colors ${
+          over
+            ? "border-ember"
+            : "border-line focus-within:border-ember-deep focus-within:bg-raise/40"
         }`}
       >
         <textarea
@@ -274,15 +276,15 @@ export function ChatComposer({
           }}
           rows={2}
           placeholder={
-            live ? "Ask for follow-up changes, or attach an image" : "This session has finished."
+            live ? "Ask for follow-up changes, or attach a file" : "This session has finished."
           }
           disabled={!live}
-          className="min-h-[54px] w-full resize-none bg-transparent px-3.5 pt-3 text-[13.5px] leading-[1.5] text-text placeholder:text-mute focus:outline-none disabled:opacity-50"
+          className="min-h-[52px] w-full resize-none bg-transparent px-4.5 pt-3.5 text-body text-text placeholder:text-mute focus:outline-none disabled:opacity-50"
         />
 
         {/* Controls, not captions. Everything here changes something; what is
             merely true about the session moved to the line underneath. */}
-        <div className="flex items-center gap-1.5 px-2.5 pb-2">
+        <div className="flex items-center gap-0.5 px-3 pb-2.5">
           {/* Discoverable. Pasting and dropping both work and neither announces
               itself, so somebody who has not been told cannot know they can. */}
           <button
@@ -290,9 +292,11 @@ export function ChatComposer({
             disabled={!live}
             aria-label="Attach a file"
             title="Attach a file or an image"
-            className="grid h-6 w-6 shrink-0 place-items-center rounded-[5px] text-[15px] leading-none text-mute transition-colors hover:bg-raise hover:text-bone disabled:opacity-40"
+            className="grid h-8 w-8 shrink-0 place-items-center rounded-full text-mute transition-colors hover:bg-raise hover:text-bone disabled:opacity-40"
           >
-            +
+            <svg viewBox="0 0 16 16" className="h-4 w-4" fill="none" stroke="currentColor">
+              <path d="M8 3.5v9M3.5 8h9" strokeWidth="1.5" strokeLinecap="round" />
+            </svg>
           </button>
           <input
             ref={picker}
@@ -328,26 +332,33 @@ export function ChatComposer({
             onPick={(v) => onSet("effort", v)}
           />
 
-          <div className="ml-auto flex items-center gap-2.5">
+          <div className="ml-auto flex items-center gap-3">
             {usage && <Context usage={usage} />}
             {working ? (
               <button
                 onClick={onStop}
                 aria-label="Stop the agent"
                 title="Stop"
-                className="grid h-9 w-9 place-items-center rounded-full border border-line text-dim transition-colors hover:border-brick hover:text-brick"
+                className="grid h-10 w-10 place-items-center rounded-full border border-line text-dim transition-colors hover:border-brick hover:text-brick"
               >
-                <span className="block h-2.5 w-2.5 rounded-[2px] bg-current" />
+                <span className="block h-3 w-3 rounded-[3px] bg-current" />
               </button>
             ) : (
               <button
                 onClick={submit}
-                disabled={!live || (!draft.trim() && images.length === 0)}
+                disabled={!live || (!draft.trim() && images.length === 0 && files.length === 0)}
                 aria-label="Send"
                 title="Send"
-                className="grid h-9 w-9 place-items-center rounded-full bg-ember text-[15px] leading-none text-ground transition-opacity disabled:opacity-30"
+                className="grid h-10 w-10 place-items-center rounded-full bg-ember text-ground transition-opacity hover:opacity-90 disabled:bg-raise disabled:text-mute"
               >
-                ↑
+                <svg viewBox="0 0 16 16" className="h-4 w-4" fill="none" stroke="currentColor">
+                  <path
+                    d="M8 13V3.5M3.75 7.75L8 3.5l4.25 4.25"
+                    strokeWidth="1.75"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
               </button>
             )}
           </div>
@@ -355,14 +366,14 @@ export function ChatComposer({
       </div>
 
       {(repo || branch) && (
-        <div className="mt-1.5 flex items-center gap-3 px-1 font-mono text-[11px] text-mute">
+        <div className="mt-2.5 flex items-center gap-3 px-2 font-mono text-meta text-mute">
           {repo && <span className="truncate">{repo}</span>}
           {branch && <span className="min-w-0 truncate">⑂ {branch}</span>}
         </div>
       )}
 
       {failed && (
-        <p className="mt-1.5 text-[11.5px] text-brick">
+        <p className="mt-1.5 text-[12.5px] text-brick">
           That didn&apos;t reach the agent. It may have stopped.
         </p>
       )}
@@ -397,9 +408,9 @@ function Context({ usage }: { usage: Usage }) {
           ? ` — ${usage.contextUsed.toLocaleString()} of ${usage.contextWindow.toLocaleString()} tokens`
           : ""
       }${usage.costUsd ? ` · $${usage.costUsd.toFixed(3)}` : ""}`}
-      className="relative grid h-9 w-9 place-items-center"
+      className="relative grid h-10 w-10 place-items-center"
     >
-      <svg viewBox="0 0 20 20" className="h-[19px] w-[19px] -rotate-90">
+      <svg viewBox="0 0 20 20" className="h-[21px] w-[21px] -rotate-90">
         <circle cx="10" cy="10" r={R} fill="none" strokeWidth="2" className="stroke-line" />
         <circle
           cx="10"
@@ -414,7 +425,7 @@ function Context({ usage }: { usage: Usage }) {
         />
       </svg>
       <span
-        className={`absolute font-mono text-[8.5px] ${tight ? "text-ember" : "text-mute"}`}
+        className={`absolute font-mono text-[9.5px] ${tight ? "text-ember" : "text-mute"}`}
       >
         {percent}
       </span>
