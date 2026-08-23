@@ -263,6 +263,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(conversation::send_turn))
         .routes(routes!(conversation::interrupt_session))
         .routes(routes!(conversation::answer_request))
+        .routes(routes!(conversation::attach_file))
 }
 
 #[cfg(test)]

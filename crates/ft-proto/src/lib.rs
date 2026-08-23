@@ -239,6 +239,19 @@ pub enum Action {
     Push,
     /// Everything this session changed, as a unified diff.
     Diff,
+    /// Put a file somebody handed over into the workspace, and say where it
+    /// landed.
+    ///
+    /// For everything that is not a picture. A picture goes inside the message,
+    /// because the model looks at it; anything else is better as a file the
+    /// agent can read, grep, unzip or edit with the tools it already has — and
+    /// it costs no context until it actually does.
+    Attach {
+        /// What it was called. Only the last part is used, and it is scrubbed.
+        name: String,
+        /// base64
+        data: String,
+    },
     /// What the agent would call this work: a title and a body, for a commit
     /// message and a pull request.
     ///

@@ -30,6 +30,7 @@ pub mod agents;
 pub mod approver;
 pub mod askpass;
 pub mod attach;
+pub mod attachments;
 pub mod describe;
 pub mod entry;
 pub mod first_run;
@@ -1191,6 +1192,12 @@ impl Worker {
             ft_proto::Action::Push => {
                 let dest = self.workspace_of(session_id).await?;
                 self.git.push(&dest, &branch().await?, credential).await
+            }
+
+            ft_proto::Action::Attach { name, data } => {
+                let dest = self.workspace_of(session_id).await?;
+                let bytes = ft_proto::decode(&data).context("that attachment was not base64")?;
+                attachments::keep(&dest, &name, &bytes).await
             }
 
             ft_proto::Action::Describe => {

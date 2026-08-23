@@ -426,6 +426,61 @@ fn denial(reason: Option<&str>) -> String {
     }
 }
 
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct Attachment {
+    /// What it was called. Only the last part is kept, and it is scrubbed.
+    pub name: String,
+    /// The bytes, base64.
+    pub data: String,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct Placed {
+    /// Where it landed, relative to the workspace — which is what to say to the
+    /// agent, and what it can act on.
+    pub path: String,
+}
+
+/// Put a file into the session's workspace.
+///
+/// For everything that is not a picture. A picture goes inside the message,
+/// because the model looks at it; anything else is better as a file the agent
+/// can read, grep, unzip or edit with the tools it already has — and it costs
+/// nothing until it does, so a large archive never has to fit in a prompt.
+#[utoipa::path(
+    post, path = "/api/v1/sessions/{id}/attach", tag = "sessions",
+    params(("id" = String, Path, description = "Session id")),
+    request_body = Attachment,
+    responses((status = 200, body = Placed), (status = 404, body = ApiError), (status = 409, body = ApiError)),
+)]
+pub(super) async fn attach_file(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(file): Json<Attachment>,
+) -> ApiResult<Json<Placed>> {
+    let id = SessionId::from_stored(id);
+    let host = host_of(&state, &id).await?;
+
+    let path = state
+        .fleet
+        .run_action(
+            &host,
+            &id,
+            ft_proto::Action::Attach {
+                name: file.name,
+                data: file.data,
+            },
+            None,
+        )
+        .await
+        .map_err(|e| ApiError::new(ErrorCode::HostUnreachable, format!("{e:#}")))?
+        .map_err(|why| ApiError::new(ErrorCode::ActionFailed, why))?;
+
+    Ok(Json(Placed { path }))
+}
+
 /// Which machine is holding this session's agent.
 async fn host_of(state: &AppState, id: &SessionId) -> ApiResult<ft_core::HostId> {
     let session = state

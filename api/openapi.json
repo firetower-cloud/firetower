@@ -1790,6 +1790,69 @@
         }
       }
     },
+    "/api/v1/sessions/{id}/attach": {
+      "post": {
+        "tags": [
+          "sessions"
+        ],
+        "summary": "Put a file into the session's workspace.",
+        "description": "For everything that is not a picture. A picture goes inside the message,\nbecause the model looks at it; anything else is better as a file the agent\ncan read, grep, unzip or edit with the tools it already has — and it costs\nnothing until it does, so a large archive never has to fit in a prompt.",
+        "operationId": "attach_file",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Session id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Attachment"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Placed"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/sessions/{id}/commit": {
       "post": {
         "tags": [
@@ -2885,6 +2948,23 @@
           "mediaType": {
             "type": "string",
             "description": "`image/png` and friends."
+          }
+        }
+      },
+      "Attachment": {
+        "type": "object",
+        "required": [
+          "name",
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "type": "string",
+            "description": "The bytes, base64."
+          },
+          "name": {
+            "type": "string",
+            "description": "What it was called. Only the last part is kept, and it is scrubbed."
           }
         }
       },
@@ -4013,6 +4093,18 @@
           "verificationUri": {
             "type": "string",
             "description": "Where to type it."
+          }
+        }
+      },
+      "Placed": {
+        "type": "object",
+        "required": [
+          "path"
+        ],
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Where it landed, relative to the workspace — which is what to say to the\nagent, and what it can act on."
           }
         }
       },

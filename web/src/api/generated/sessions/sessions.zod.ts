@@ -205,6 +205,26 @@ export const AnswerRequestResponse = zod.object({
 })
 
 /**
+ * For everything that is not a picture. A picture goes inside the message,
+ * because the model looks at it; anything else is better as a file the agent
+ * can read, grep, unzip or edit with the tools it already has — and it costs
+ * nothing until it does, so a large archive never has to fit in a prompt.
+ * @summary Put a file into the session's workspace.
+ */
+export const AttachFileParams = zod.object({
+  "id": zod.string().describe('Session id')
+})
+
+export const AttachFileBody = zod.object({
+  "data": zod.string().describe('The bytes, base64.'),
+  "name": zod.string().describe('What it was called. Only the last part is kept, and it is scrubbed.')
+})
+
+export const AttachFileResponse = zod.object({
+  "path": zod.string().describe('Where it landed, relative to the workspace — which is what to say to the\nagent, and what it can act on.')
+})
+
+/**
  * Everything by default, because that is what an unattended session wants.
  * Naming files is for the review sheet, where somebody has just looked at each
  * one and unticked the lockfile.

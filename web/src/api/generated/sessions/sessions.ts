@@ -28,6 +28,7 @@ import type {
 import type {
   Answer,
   ApiError,
+  Attachment,
   Commit,
   Conversation,
   DestroySessionParams,
@@ -41,6 +42,7 @@ import type {
   ListSessionsParams,
   NewPullRequest,
   NewSession,
+  Placed,
   Proposal,
   PullRequest,
   RenameSession,
@@ -662,6 +664,81 @@ export const useAnswerRequest = <TError = ApiError,
         TContext
       > => {
       return useMutation(getAnswerRequestMutationOptions(options), queryClient);
+    }
+    export const getAttachFileUrl = (id: string,) => {
+
+
+
+
+  return `/api/v1/sessions/${id}/attach`
+}
+
+/**
+ * For everything that is not a picture. A picture goes inside the message,
+ * because the model looks at it; anything else is better as a file the agent
+ * can read, grep, unzip or edit with the tools it already has — and it costs
+ * nothing until it does, so a large archive never has to fit in a prompt.
+ * @summary Put a file into the session's workspace.
+ */
+export const attachFile = async (id: string,
+    attachment: Attachment, options?: Parameters<typeof http>[1]): Promise<Placed> => {
+
+  return http<Placed>(getAttachFileUrl(id),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(attachment)
+  }
+);}
+
+
+
+
+
+export const getAttachFileMutationOptions = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof attachFile>>, TError,{id: string;data: Attachment}, TContext>, request?: SecondParameter<typeof http>}
+): UseMutationOptions<Awaited<ReturnType<typeof attachFile>>, TError,{id: string;data: Attachment}, TContext> => {
+
+const mutationKey = ['attachFile'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof attachFile>>, {id: string;data: Attachment}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  attachFile(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type AttachFileMutationResult = NonNullable<Awaited<ReturnType<typeof attachFile>>>
+    export type AttachFileMutationBody = Attachment
+    export type AttachFileMutationError = ApiError
+
+    /**
+ * @summary Put a file into the session's workspace.
+ */
+export const useAttachFile = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof attachFile>>, TError,{id: string;data: Attachment}, TContext>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof attachFile>>,
+        TError,
+        {id: string;data: Attachment},
+        TContext
+      > => {
+      return useMutation(getAttachFileMutationOptions(options), queryClient);
     }
     export const getCommitSessionUrl = (id: string,) => {
 

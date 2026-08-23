@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useRef, useState } from "react";
-import { useListFiles } from "@/src/api/generated/sessions/sessions";
+import { useAttachFile, useListFiles } from "@/src/api/generated/sessions/sessions";
 import type { Attached, SlashCommand, Usage } from "@/src/api/generated/model";
 import { Picker, MODELS, MODES, EFFORTS } from "@/components/Settings.chat";
 
@@ -50,15 +50,46 @@ export function ChatComposer({
   const [images, setImages] = useState<Attached[]>([]);
   const [over, setOver] = useState(false);
   const [refused, setRefused] = useState<string | null>(null);
+  /** Files put into the workspace, waiting to be mentioned in a message. */
+  const [files, setFiles] = useState<{ name: string; path: string }[]>([]);
+  const attach = useAttachFile();
   const box = useRef<HTMLTextAreaElement>(null);
   const picker = useRef<HTMLInputElement>(null);
 
-  /** Take what we can, and say plainly what we could not. */
-  const take = async (files: File[]) => {
-    const { kept, why } = await readImages(files);
-    setRefused(why ?? null);
+  /**
+   * Take what somebody handed over, by whichever route suits it.
+   *
+   * Pictures go inside the message, because the model looks at them. Everything
+   * else goes into the workspace, where the agent can read, grep, unzip or edit
+   * it with the tools it already has — and where it costs nothing until it
+   * does, so an archive never has to fit in a prompt.
+   */
+  const take = async (chosen: File[]) => {
+    setRefused(null);
+    const pictures = chosen.filter((f) => f.type.startsWith("image/"));
+    const rest = chosen.filter((f) => !f.type.startsWith("image/"));
+
+    const { kept, why } = await readImages(pictures);
     if (kept.length) setImages((held) => [...held, ...kept]);
-    return kept.length > 0;
+
+    const complaints = why ? [why] : [];
+    for (const file of rest) {
+      if (file.size > BIGGEST_FILE) {
+        complaints.push(`${file.name} is over ${BIGGEST_FILE / 1024 / 1024} MB.`);
+        continue;
+      }
+      try {
+        const { path } = await attach.mutateAsync({
+          id: sessionId,
+          data: { name: file.name, data: await base64(file) },
+        });
+        setFiles((held) => [...held, { name: file.name, path }]);
+      } catch {
+        complaints.push(`${file.name} could not be put in the workspace.`);
+      }
+    }
+
+    if (complaints.length) setRefused(complaints.join(" "));
   };
 
   /** What is being typed after a trigger character, if anything. */
@@ -85,10 +116,17 @@ export function ChatComposer({
 
   const submit = () => {
     const text = draft.trim();
-    if (!text && images.length === 0) return;
+    if (!text && images.length === 0 && files.length === 0) return;
+
+    // Named, not described. The agent has its own tools for reading a file; all
+    // it needs is where the file is.
+    const mentioned = files.map((f) => f.path).join("\n");
+    const message = mentioned ? (text ? `${text}\n\n${mentioned}` : mentioned) : text;
+
     setDraft("");
     setImages([]);
-    onSend(text, images);
+    setFiles([]);
+    onSend(message, images);
   };
 
   return (
@@ -130,6 +168,33 @@ export function ChatComposer({
 
       {refused && (
         <p className="mb-2 text-[11.5px] text-brick">{refused}</p>
+      )}
+
+      {files.length > 0 && (
+        <div className="mb-2 flex flex-wrap gap-1.5">
+          {files.map((file, i) => (
+            <span
+              key={file.path}
+              className="flex items-center gap-1.5 rounded-[6px] border border-line bg-panel px-2 py-1"
+              title={file.path}
+            >
+              <span className="max-w-[180px] truncate font-mono text-[11.5px] text-dim">
+                {file.name}
+              </span>
+              <button
+                onClick={() => setFiles((held) => held.filter((_, at) => at !== i))}
+                aria-label={`Remove ${file.name}`}
+                className="text-[11px] text-mute hover:text-bone"
+              >
+                ×
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+
+      {attach.isPending && (
+        <p className="mb-2 text-[11.5px] text-mute">Putting it in the workspace…</p>
       )}
 
       {images.length > 0 && (
@@ -223,8 +288,8 @@ export function ChatComposer({
           <button
             onClick={() => picker.current?.click()}
             disabled={!live}
-            aria-label="Attach an image"
-            title="Attach an image"
+            aria-label="Attach a file"
+            title="Attach a file or an image"
             className="grid h-6 w-6 shrink-0 place-items-center rounded-[5px] text-[15px] leading-none text-mute transition-colors hover:bg-raise hover:text-bone disabled:opacity-40"
           >
             +
@@ -232,7 +297,6 @@ export function ChatComposer({
           <input
             ref={picker}
             type="file"
-            accept="image/*"
             multiple
             hidden
             onChange={async (e) => {
@@ -517,23 +581,42 @@ function directoryOf(query: string): string {
 const BIGGEST = 5 * 1024 * 1024;
 
 /**
- * Read dropped or pasted images into something a message can carry.
+ * How large any other file may be.
  *
- * Images only. Anything else needs to be written into the workspace and
- * mentioned by path, which is a different thing and not this.
+ * More generous than an image, because this never enters the model's context —
+ * it lands in the workspace and stays there until the agent reads it. Still
+ * bounded: it travels as base64 in one JSON frame, and every hop between here
+ * and the workspace holds that line whole.
+ */
+const BIGGEST_FILE = 10 * 1024 * 1024;
+
+/** A file's bytes, base64, without the data-url prefix. */
+function base64(file: File): Promise<string> {
+  return new Promise((done, fail) => {
+    const reader = new FileReader();
+    reader.onerror = () => fail(reader.error);
+    reader.onload = () => {
+      const url = String(reader.result);
+      done(url.slice(url.indexOf(",") + 1));
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+/**
+ * Read pictures into something a message can carry.
  *
- * Says what it refused rather than dropping it silently: somebody who drags in
- * a PDF and sees nothing happen concludes attachments are broken.
+ * Only pictures reach this — everything else goes to the workspace instead —
+ * so what it refuses is only what is too large, and it says so rather than
+ * dropping it silently.
  */
 async function readImages(
   files: File[],
 ): Promise<{ kept: Attached[]; why?: string }> {
   if (files.length === 0) return { kept: [] };
 
-  const pictures = files.filter((f) => f.type.startsWith("image/"));
-  const wrongKind = files.length - pictures.length;
-  const small = pictures.filter((f) => f.size <= BIGGEST);
-  const tooBig = pictures.length - small.length;
+  const small = files.filter((f) => f.size <= BIGGEST);
+  const tooBig = files.length - small.length;
 
   const kept = await Promise.all(
     small.map(
@@ -552,13 +635,6 @@ async function readImages(
   );
 
   const complaints: string[] = [];
-  if (wrongKind > 0) {
-    complaints.push(
-      wrongKind === 1
-        ? "That is not an image — only images can be attached."
-        : `${wrongKind} of those are not images — only images can be attached.`,
-    );
-  }
   if (tooBig > 0) {
     complaints.push(
       `${tooBig === 1 ? "That image is" : `${tooBig} images are`} over 5 MB.`,
