@@ -15,6 +15,7 @@ import {
 } from "@/src/api/conversation";
 import { Markdown } from "@/components/Markdown";
 import { ChatComposer } from "@/components/Composer.chat";
+import { command } from "@/components/Settings.chat";
 import { useReveal } from "@/src/api/reveal";
 import type {
   Attached,
@@ -47,7 +48,7 @@ export function Chat({
   branch?: string | null;
   repo?: string | null;
 }) {
-  const { conversation, echo, settle } = useConversation(sessionId, live);
+  const { conversation, echo, settle, remember } = useConversation(sessionId, live);
   const send = useSendTurn();
   const interrupt = useInterruptSession();
   const foot = useRef<HTMLDivElement>(null);
@@ -64,6 +65,23 @@ export function Chat({
     if (send.isPending) return;
     echo(text || "(image)");
     send.mutate({ id: sessionId, data: { text, images } });
+  };
+
+  /**
+   * Change a setting, by saying so to the agent.
+   *
+   * A slash command down the ordinary path — there is no separate control
+   * channel and none is needed. The agent answers with a sentence saying what
+   * it did, which lands in the transcript rather than being swallowed: a
+   * setting that changed silently is one nobody trusts.
+   */
+  const set = (kind: "model" | "mode" | "effort", value: string) => {
+    // Shown as chosen straight away. The agent restates the model and the mode,
+    // but only at the start of the next turn, so waiting for that reads as the
+    // click not having worked — and `init` overwrites this when it comes, so a
+    // request that was refused corrects itself.
+    remember(kind, value);
+    send.mutate({ id: sessionId, data: { text: command(kind, value), images: [] } });
   };
 
   return (
@@ -136,10 +154,13 @@ export function Chat({
           working={conversation.working}
           commands={conversation.commands}
           model={conversation.model}
+          mode={conversation.mode}
+          effort={conversation.effort}
           usage={conversation.usage}
           branch={branch}
           repo={repo}
           onSend={submit}
+          onSet={set}
           onStop={() => interrupt.mutate({ id: sessionId })}
           failed={send.isError}
         />

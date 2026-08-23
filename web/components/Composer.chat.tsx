@@ -3,6 +3,7 @@
 import { useMemo, useRef, useState } from "react";
 import { useListFiles } from "@/src/api/generated/sessions/sessions";
 import type { Attached, SlashCommand, Usage } from "@/src/api/generated/model";
+import { Picker, MODELS, MODES, EFFORTS } from "@/components/Settings.chat";
 
 /**
  * Saying something to the agent.
@@ -19,10 +20,13 @@ export function ChatComposer({
   working,
   commands,
   model,
+  mode,
+  effort,
   usage,
   branch,
   repo,
   onSend,
+  onSet,
   onStop,
   failed,
 }: {
@@ -31,10 +35,14 @@ export function ChatComposer({
   working: boolean;
   commands: SlashCommand[];
   model?: string;
+  mode?: string;
+  effort?: string;
   usage?: Usage;
   branch?: string | null;
   repo?: string | null;
   onSend: (text: string, images: Attached[]) => void;
+  /** Put a setting into force, by saying so to the agent. */
+  onSet: (kind: "model" | "mode" | "effort", value: string) => void;
   onStop: () => void;
   failed: boolean;
 }) {
@@ -195,10 +203,30 @@ export function ChatComposer({
           className="min-h-[54px] w-full resize-none bg-transparent px-3.5 pt-3 text-[13.5px] leading-[1.5] text-text placeholder:text-mute focus:outline-none disabled:opacity-50"
         />
 
-        <div className="flex items-center gap-3 px-3 pb-2.5">
-          {model && <span className="eyebrow truncate">{model}</span>}
-          {repo && <span className="eyebrow hidden truncate sm:inline">{repo}</span>}
-          {branch && <span className="eyebrow hidden truncate sm:inline">⑂ {branch}</span>}
+        {/* Controls, not captions. Everything here changes something; what is
+            merely true about the session moved to the line underneath. */}
+        <div className="flex items-center gap-1.5 px-2.5 pb-2">
+          <Picker
+            choices={MODELS}
+            current={model}
+            fallback="Model"
+            disabled={!live}
+            onPick={(v) => onSet("model", v)}
+          />
+          <Picker
+            choices={MODES}
+            current={mode}
+            fallback="Permissions"
+            disabled={!live}
+            onPick={(v) => onSet("mode", v)}
+          />
+          <Picker
+            choices={EFFORTS}
+            current={effort}
+            fallback="Effort"
+            disabled={!live}
+            onPick={(v) => onSet("effort", v)}
+          />
 
           <div className="ml-auto flex items-center gap-2.5">
             {usage && <Context usage={usage} />}
@@ -225,6 +253,13 @@ export function ChatComposer({
           </div>
         </div>
       </div>
+
+      {(repo || branch) && (
+        <div className="mt-1.5 flex items-center gap-3 px-1 font-mono text-[11px] text-mute">
+          {repo && <span className="truncate">{repo}</span>}
+          {branch && <span className="min-w-0 truncate">⑂ {branch}</span>}
+        </div>
+      )}
 
       {failed && (
         <p className="mt-1.5 text-[11.5px] text-brick">

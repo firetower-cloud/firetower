@@ -49,13 +49,20 @@ fn started(events: &[TurnEvent]) -> Vec<(ItemKind, Option<String>)> {
 #[test]
 fn a_session_reports_what_it_can_do_before_it_does_anything() {
     let events = replay("plain");
-    let TurnEvent::SessionConfigured { model, tools, .. } = &events[0] else {
+    let TurnEvent::SessionConfigured {
+        model, mode, tools, ..
+    } = &events[0]
+    else {
         panic!(
             "expected the first event to be SessionConfigured, got {:?}",
             events[0]
         );
     };
     assert!(!model.is_empty(), "a session should name its model");
+    assert!(
+        !mode.is_empty(),
+        "and what it may do without asking, so a control can show it"
+    );
     assert!(
         tools.iter().any(|t| t == "Bash"),
         "the tool list should be real, got {tools:?}"

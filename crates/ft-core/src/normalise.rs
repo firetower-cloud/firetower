@@ -171,6 +171,7 @@ impl ClaudeNormaliser {
         match str_at(v, "subtype") {
             Some("init") => out.push(TurnEvent::SessionConfigured {
                 model: str_at(v, "model").unwrap_or_default().to_string(),
+                mode: str_at(v, "permissionMode").unwrap_or_default().to_string(),
                 tools: string_list(v.get("tools")),
                 // `slash_commands`, not `commands`. Reading the wrong key cost
                 // nothing visible until something started drawing the menu.

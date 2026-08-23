@@ -263,6 +263,7 @@ export const GetConversationResponse = zod.object({
   "description": zod.string().nullish(),
   "name": zod.string()
 }).describe('A slash command this session offers, as the agent reported it at startup.')),
+  "mode": zod.string().describe('What the agent may do without asking, as it reported it.\n\nRead rather than remembered: it is restated at the start of every\nturn, so a control showing it is showing what is in force rather\nthan what was last requested.'),
   "model": zod.string(),
   "tools": zod.array(zod.string()),
   "type": zod.enum(['SessionConfigured'])

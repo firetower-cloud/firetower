@@ -29,6 +29,14 @@ import type { Usage } from './usage';
  */
 export type TurnEvent = {
   commands: SlashCommand[];
+  /**
+     * What the agent may do without asking, as it reported it.
+     *
+     * Read rather than remembered: it is restated at the start of every
+     * turn, so a control showing it is showing what is in force rather
+     * than what was last requested.
+     */
+  mode: string;
   model: string;
   tools: string[];
   type: 'SessionConfigured';

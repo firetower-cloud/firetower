@@ -166,13 +166,30 @@ impl Agent {
                 .map(|s| s.to_string())
                 .collect();
 
+                // The biggest one, asked for rather than inherited.
+                //
+                // Left to itself the CLI picks, and what it picks moves — a
+                // machine configured for Opus was quietly running Sonnet,
+                // because usage-based switching is a thing and nothing said so.
+                // A session that takes an hour should not be run by whichever
+                // model was cheapest at the moment it started.
+                argv.extend(["--model".into(), BIGGEST.into()]);
+
                 match asking {
                     // The agent stops and asks, and the question is routed to
                     // whoever is watching. This is the point of the whole
                     // arrangement, so it is the ordinary case.
+                    //
+                    // `auto` rather than `default`: a session here is unattended
+                    // by construction, so an agent that stops to ask *may I run
+                    // this* stops for somebody who is not there. A classifier
+                    // takes the ordinary ones and everything else still reaches
+                    // the person watching, which is the whole arrangement — it
+                    // is who answers the easy ones that differs, not whether
+                    // anybody is asked.
                     Asking::Ask { tool, config } => argv.extend([
                         "--permission-mode".into(),
-                        "default".into(),
+                        "auto".into(),
                         "--permission-prompt-tool".into(),
                         tool.clone(),
                         "--mcp-config".into(),
@@ -674,6 +691,16 @@ pub enum AgentMode {
     /// agent yet — the response carries `null` for that.
     NotNeeded,
 }
+
+/// The model a session runs unless somebody changes it.
+///
+/// The flagship, with the long context window. Sessions here are unattended and
+/// often long, which is exactly the shape of work that a smaller model does
+/// worse and that runs out of room.
+///
+/// Changeable per session — see the composer — so this is a starting point
+/// rather than a policy.
+pub const BIGGEST: &str = "opus[1m]";
 
 /// Whether there is anybody to answer a permission prompt.
 ///

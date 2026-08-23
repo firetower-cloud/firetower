@@ -105,6 +105,21 @@ export type Conversation = {
   /** The model this session is running, once it has said. */
   model?: string;
   /**
+   * What the agent may do without asking.
+   *
+   * Restated at the start of every turn, so a control showing this is showing
+   * what is in force rather than what was last asked for.
+   */
+  mode?: string;
+  /**
+   * How hard it has been told to think.
+   *
+   * Remembered rather than reported: the agent does not restate it, so this is
+   * only what was chosen in this browser. Absent means nobody has chosen, which
+   * a control should say by staying quiet rather than claiming a default.
+   */
+  effort?: string;
+  /**
    * The commands this install offers, as the agent reported them at startup.
    *
    * Whatever that machine actually has, rather than a list kept in step by
@@ -172,6 +187,7 @@ export function apply(state: Conversation, event: ConversationEvent): Conversati
       return {
         ...state,
         model: event.model,
+        mode: event.mode || state.mode,
         commands: event.commands.length ? event.commands : state.commands,
         lastLine,
       };
@@ -414,6 +430,21 @@ export function useConversation(sessionId: string, live: boolean) {
     };
   }, [sessionId, live, attempt]);
 
+  /**
+   * Show a setting as chosen before the agent confirms it.
+   *
+   * `init` restates the model and the mode, but only at the *start of the next
+   * turn* — so without this a picker sits on the old value until somebody says
+   * something else, which reads as the click not having worked.
+   *
+   * Overwritten by `init` when it arrives, so a request that was refused
+   * corrects itself rather than lying indefinitely. Effort is never restated at
+   * all, so for that this is the only record.
+   */
+  const remember = useCallback((of: "model" | "mode" | "effort", value: string) => {
+    setState((current) => ({ ...current, [of]: value }));
+  }, []);
+
   /** Optimistically show what somebody just typed, before it comes back. */
   const echo = useCallback((text: string) => {
     setState((current) => ({
@@ -440,5 +471,5 @@ export function useConversation(sessionId: string, live: boolean) {
     }));
   }, []);
 
-  return { conversation: state, echo, settle };
+  return { conversation: state, echo, settle, remember };
 }
