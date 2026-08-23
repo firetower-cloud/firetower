@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useCallback, useState, useRef, useEffect } from "react";
+import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { useListRepos, useRepoBranches } from "@/src/api/generated/repos/repos";
 import { useListAgents } from "@/src/api/generated/agents/agents";
@@ -223,50 +224,44 @@ export function Composer() {
 
             {/* One more, and the list of what is left. Search because a fleet
                 has more repositories than a menu can hold. */}
-            <span className="relative">
-              <button
-                onClick={() => {
-                  setAdding(!adding);
-                  setSearch("");
-                }}
-                className="flex items-center gap-1.5 rounded-[5px] border border-line border-dashed bg-panel px-2 py-1 text-[12px] text-mute transition-colors hover:border-ember/40 hover:text-text"
-              >
-                + {checkouts.length === 0 ? "repository" : "another"}
-              </button>
-
-              {adding && (
-                <div className="absolute bottom-full left-0 z-30 mb-1.5 w-[300px] rounded-[10px] border border-line bg-panel p-1.5 shadow-[0_12px_36px_-14px_rgba(0,0,0,0.85)]">
-                  <input
-                    autoFocus
-                    value={search}
-                    onChange={(e) => setSearch(e.target.value)}
-                    onKeyDown={(e) => e.key === "Escape" && setAdding(false)}
-                    placeholder="Search repositories"
-                    className="mb-1 w-full rounded-[6px] bg-ground px-2.5 py-1.5 text-[12.5px] text-bone placeholder:text-mute focus:outline-none"
-                  />
-                  <ul className="max-h-[240px] overflow-y-auto">
-                    {unpicked.length === 0 && (
-                      <li className="px-2.5 py-2 text-[12px] text-mute">
-                        {repos.length === 0 ? "Nothing connected yet." : "All of them are in."}
-                      </li>
-                    )}
-                    {unpicked.map((r) => (
-                      <li key={r.id}>
-                        <button
-                          onClick={() => {
-                            setCheckouts((held) => [...held, { id: r.id, slug: r.slug }]);
-                            setAdding(false);
-                          }}
-                          className="w-full rounded-[6px] px-2.5 py-1.5 text-left font-mono text-[12px] text-text transition-colors hover:bg-raise"
-                        >
-                          {r.slug}
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-            </span>
+            <Picker
+              label={`+ ${checkouts.length === 0 ? "repository" : "another"}`}
+              open={adding}
+              onOpen={() => {
+                setAdding(!adding);
+                setSearch("");
+              }}
+              onClose={() => setAdding(false)}
+            >
+              <input
+                autoFocus
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                onKeyDown={(e) => e.key === "Escape" && setAdding(false)}
+                placeholder="Search repositories"
+                className="mb-1 w-full rounded-[6px] bg-ground px-2.5 py-1.5 text-[12.5px] text-bone placeholder:text-mute focus:outline-none"
+              />
+              <ul className="max-h-[240px] overflow-y-auto">
+                {unpicked.length === 0 && (
+                  <li className="px-2.5 py-2 text-[12px] text-mute">
+                    {repos.length === 0 ? "Nothing connected yet." : "All of them are in."}
+                  </li>
+                )}
+                {unpicked.map((r) => (
+                  <li key={r.id}>
+                    <button
+                      onClick={() => {
+                        setCheckouts((held) => [...held, { id: r.id, slug: r.slug }]);
+                        setAdding(false);
+                      }}
+                      className="w-full rounded-[6px] px-2.5 py-1.5 text-left font-mono text-[12px] text-text transition-colors hover:bg-raise"
+                    >
+                      {r.slug}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </Picker>
 
             {repo && (
             <Chip
@@ -471,6 +466,99 @@ const GLYPHS: Record<string, React.ReactNode> = {
   agent: "◈",
   host: "⌂",
 };
+
+/**
+ * A menu that opens outside the box it belongs to.
+ *
+ * The composer clips its own corners, which is right — and it means anything
+ * absolutely positioned inside it is cut off at the edge. The chips beside this
+ * one get away with a native `<select>`, which the browser draws over
+ * everything; this one needs a search field, so it is drawn into the document
+ * and positioned against its own button.
+ *
+ * Above the button when there is room, which there usually is: the composer
+ * sits at the bottom of the page.
+ */
+function Picker({
+  label,
+  open,
+  onOpen,
+  onClose,
+  children,
+}: {
+  label: string;
+  open: boolean;
+  onOpen: () => void;
+  onClose: () => void;
+  children: React.ReactNode;
+}) {
+  const trigger = useRef<HTMLButtonElement>(null);
+  const menu = useRef<HTMLDivElement>(null);
+  const [at, setAt] = useState<{ left: number; top?: number; bottom?: number } | null>(null);
+
+  // Measured when it opens and whenever the page moves under it, never during
+  // a render — the position comes from the DOM, so it is read where the DOM is
+  // already settled.
+  const place = useCallback(() => {
+    const box = trigger.current?.getBoundingClientRect();
+    if (!box) return;
+    setAt(
+      box.top > 280
+        ? { left: box.left, bottom: window.innerHeight - box.top + 6 }
+        : { left: box.left, top: box.bottom + 6 },
+    );
+  }, []);
+
+  useEffect(() => {
+    if (!open) return;
+
+    const away = (e: MouseEvent) => {
+      const on = e.target as Node;
+      if (!trigger.current?.contains(on) && !menu.current?.contains(on)) onClose();
+    };
+    const key = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+
+    window.addEventListener("mousedown", away);
+    window.addEventListener("keydown", key);
+    // Anchored to the button, so it has to follow it.
+    window.addEventListener("resize", place);
+    window.addEventListener("scroll", place, true);
+    return () => {
+      window.removeEventListener("mousedown", away);
+      window.removeEventListener("keydown", key);
+      window.removeEventListener("resize", place);
+      window.removeEventListener("scroll", place, true);
+    };
+  }, [open, onClose, place]);
+
+  return (
+    <>
+      <button
+        ref={trigger}
+        onClick={() => {
+          place();
+          onOpen();
+        }}
+        className="flex items-center gap-1.5 rounded-[5px] border border-dashed border-line bg-panel px-2 py-1 text-[12px] text-mute transition-colors hover:border-ember/40 hover:text-text"
+      >
+        {label}
+      </button>
+
+      {open &&
+        at &&
+        createPortal(
+          <div
+            ref={menu}
+            style={{ left: at.left, top: at.top, bottom: at.bottom }}
+            className="fixed z-50 w-[300px] rounded-[10px] border border-line bg-panel p-1.5 shadow-[0_12px_36px_-14px_rgba(0,0,0,0.85)]"
+          >
+            {children}
+          </div>,
+          document.body,
+        )}
+    </>
+  );
+}
 
 function Chip({
   glyph,
