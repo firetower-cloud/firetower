@@ -11,7 +11,7 @@ import {
   getSessionWorkQueryKey,
   getGetSessionQueryKey,
 } from "@/src/api/generated/sessions/sessions";
-import type { FileDiff, Session, WorkSummary } from "@/src/api/generated/model";
+import type { CheckoutWork, FileDiff, Session } from "@/src/api/generated/model";
 import { shipping } from "@/src/api/ship";
 import { ApiError } from "@/src/api/http";
 
@@ -32,11 +32,11 @@ export function Review({
   onClose,
 }: {
   session: Session;
-  work?: WorkSummary;
+  work?: CheckoutWork[];
   onClose: () => void;
 }) {
   const cache = useQueryClient();
-  const { data: files = [], isLoading } = useSessionDiff(session.id, {
+  const { data: files = [], isLoading } = useSessionDiff(session.id, undefined, {
     query: { refetchInterval: 15_000 },
   });
 
@@ -86,7 +86,7 @@ export function Review({
   const go = async () => {
     setTrouble(null);
     try {
-      if (ship.stage === "open" && !work?.ahead) {
+      if (ship.stage === "open" && ship.url && !work?.some((c) => c.ahead > 0)) {
         window.open(ship.url, "_blank", "noreferrer");
         return;
       }
@@ -153,25 +153,45 @@ export function Review({
             {!isLoading && files.length === 0 && (
               <p className="p-4 text-[12.5px] text-mute">Nothing has changed.</p>
             )}
-            <ul className="py-1">
-              {files.map((file) => (
-                <FileRow
-                  key={file.path}
-                  file={file}
-                  chosen={!dropped.has(file.path)}
-                  looking={showing?.path === file.path}
-                  onLook={() => setLooking(file.path)}
-                  onToggle={() =>
-                    setDropped((held) => {
-                      const next = new Set(held);
-                      if (next.has(file.path)) next.delete(file.path);
-                      else next.add(file.path);
-                      return next;
-                    })
-                  }
-                />
-              ))}
-            </ul>
+            {/* Grouped by repository, because a session holds any number of
+                them and `src/index.ts` in two of them is two different files.
+                One repository draws no heading — there is nothing to tell
+                apart. */}
+            {byRepo(files, work).map((group) => (
+              <div key={group.slug || "."}>
+                {group.slug && (
+                  <div className="flex items-baseline gap-2 px-3 pt-3 pb-1">
+                    <span className="eyebrow">{group.slug}</span>
+                    <span className="font-mono text-[11px] text-mute">
+                      <span className="text-sage">+{group.added}</span>{" "}
+                      <span className="text-brick">−{group.removed}</span>
+                    </span>
+                  </div>
+                )}
+                <ul className="py-1">
+                  {group.files.map((file) => (
+                    <FileRow
+                      key={file.path}
+                      file={file}
+                      // The heading says which repository, so the row says the
+                      // path inside it.
+                      label={group.path ? file.path.slice(group.path.length + 1) : file.path}
+                      chosen={!dropped.has(file.path)}
+                      looking={showing?.path === file.path}
+                      onLook={() => setLooking(file.path)}
+                      onToggle={() =>
+                        setDropped((held) => {
+                          const next = new Set(held);
+                          if (next.has(file.path)) next.delete(file.path);
+                          else next.add(file.path);
+                          return next;
+                        })
+                      }
+                    />
+                  ))}
+                </ul>
+              </div>
+            ))}
           </div>
 
           <div className="min-h-0 overflow-auto">
@@ -236,7 +256,8 @@ export function Review({
 
           <div className="mt-3 flex flex-wrap items-center gap-3">
             <span className="font-mono text-[11.5px] text-mute">
-              ⑂ {session.branch} → {session.base ?? "default"}
+              ⑂ {session.branch}
+              {(work?.length ?? 0) > 1 && ` · ${work?.length} repositories`}
             </span>
             {ship.stage !== "open" && (
               <label className="flex cursor-pointer items-center gap-1.5 text-[12px] text-dim">
@@ -263,22 +284,61 @@ export function Review({
   );
 }
 
+/**
+ * The files, under the repository each came from.
+ *
+ * The server prefixes every path with its checkout's directory when a session
+ * holds more than one, so grouping is a matter of reading that prefix back off.
+ * A session with one repository has no prefix and gets one unlabelled group,
+ * which is the same list it always had.
+ */
+function byRepo(files: FileDiff[], work?: CheckoutWork[]) {
+  const held = (work ?? []).filter((c) => c.path);
+  if (held.length < 2) {
+    return [
+      {
+        slug: "",
+        path: "",
+        files,
+        added: files.reduce((n, f) => n + f.added, 0),
+        removed: files.reduce((n, f) => n + f.removed, 0),
+      },
+    ];
+  }
+
+  return held
+    .map((c) => {
+      const mine = files.filter((f) => f.path.startsWith(`${c.path}/`));
+      return {
+        slug: c.slug,
+        path: c.path,
+        files: mine,
+        added: mine.reduce((n, f) => n + f.added, 0),
+        removed: mine.reduce((n, f) => n + f.removed, 0),
+      };
+    })
+    .filter((group) => group.files.length > 0);
+}
+
 /** One file, and whether it is going. */
 function FileRow({
   file,
+  label,
   chosen,
   looking,
   onLook,
   onToggle,
 }: {
   file: FileDiff;
+  /** What to call it here, which is its path inside its own repository. */
+  label: string;
   chosen: boolean;
   looking: boolean;
   onLook: () => void;
   onToggle: () => void;
 }) {
-  const name = file.path.split("/").pop() ?? file.path;
-  const where = file.path.slice(0, file.path.length - name.length);
+  const name = label.split("/").pop() ?? label;
+  const where = label.slice(0, label.length - name.length);
 
   return (
     <li className={`flex items-center gap-2 px-2.5 py-1 ${looking ? "bg-raise" : ""}`}>

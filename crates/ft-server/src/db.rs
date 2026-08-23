@@ -6,8 +6,8 @@
 
 use anyhow::{Context, Result};
 use ft_core::{
-    Agent, AgentMode, AgentPresence, Compute, Event, EventKind, Host, HostId, HostState, Repo,
-    RepoId, Session, SessionId, SessionStatus, WorkspaceSize,
+    session::Checkout, Agent, AgentMode, AgentPresence, Compute, Event, EventKind, Host, HostId,
+    HostState, Repo, RepoId, Session, SessionId, SessionStatus, WorkspaceSize,
 };
 use sqlx::postgres::PgPoolOptions;
 use sqlx::{PgPool, Row};
@@ -703,7 +703,7 @@ impl Db {
         .fetch_all(&self.pool)
         .await?;
 
-        rows.into_iter().map(session_from_row).collect()
+        self.with_checkouts(rows).await
     }
 
     /// Every session that hasn't ended, for stopping them all at once.
@@ -713,7 +713,7 @@ impl Db {
             .fetch_all(&self.pool)
             .await?;
 
-        rows.into_iter().map(session_from_row).collect()
+        self.with_checkouts(rows).await
     }
 
     pub async fn session(&self, id: &SessionId) -> Result<Option<Session>> {
@@ -721,7 +721,136 @@ impl Db {
             .bind(id.as_str())
             .fetch_optional(&self.pool)
             .await?;
-        row.map(session_from_row).transpose()
+        let Some(row) = row else { return Ok(None) };
+        Ok(self.with_checkouts(vec![row]).await?.pop())
+    }
+
+    /// Fill in what each of these sessions has checked out.
+    ///
+    /// One query for the lot rather than one per session: the dashboard asks
+    /// for every session there is, and a list that costs a round trip per row
+    /// is a list that gets slower the more you use Firetower.
+    async fn with_checkouts(&self, rows: Vec<sqlx::postgres::PgRow>) -> Result<Vec<Session>> {
+        let mut sessions: Vec<Session> = rows
+            .into_iter()
+            .map(session_from_row)
+            .collect::<Result<_>>()?;
+
+        let ids: Vec<String> = sessions.iter().map(|s| s.id.as_str().to_string()).collect();
+        if ids.is_empty() {
+            return Ok(sessions);
+        }
+
+        let rows = sqlx::query(
+            "SELECT session_id, repo_id, slug, base, branch, path, trouble, pull_request
+               FROM session_repos
+              WHERE session_id = ANY($1)
+              ORDER BY session_id, position",
+        )
+        .bind(&ids)
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mut by_session: std::collections::HashMap<String, Vec<Checkout>> =
+            std::collections::HashMap::new();
+        for r in rows {
+            by_session
+                .entry(r.get::<String, _>("session_id"))
+                .or_default()
+                .push(Checkout {
+                    repo_id: r
+                        .get::<Option<String>, _>("repo_id")
+                        .map(RepoId::from_stored),
+                    slug: r.get("slug"),
+                    base: r.get("base"),
+                    branch: r.get("branch"),
+                    path: r.get("path"),
+                    trouble: r.get("trouble"),
+                    pull_request: r.get("pull_request"),
+                });
+        }
+
+        for session in &mut sessions {
+            session.checkouts = by_session.remove(session.id.as_str()).unwrap_or_default();
+        }
+        Ok(sessions)
+    }
+
+    /// Write down what a session is checking out, replacing whatever was there.
+    pub async fn record_checkouts(&self, id: &SessionId, checkouts: &[Checkout]) -> Result<()> {
+        let mut tx = self.pool.begin().await?;
+        sqlx::query("DELETE FROM session_repos WHERE session_id = $1")
+            .bind(id.as_str())
+            .execute(&mut *tx)
+            .await?;
+
+        for (position, c) in checkouts.iter().enumerate() {
+            sqlx::query(
+                "INSERT INTO session_repos
+                   (session_id, position, repo_id, slug, base, branch, path, trouble, pull_request)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+            )
+            .bind(id.as_str())
+            .bind(position as i32)
+            .bind(c.repo_id.as_ref().map(|r| r.as_str()))
+            .bind(&c.slug)
+            .bind(&c.base)
+            .bind(&c.branch)
+            .bind(&c.path)
+            .bind(c.trouble.as_deref())
+            .bind(c.pull_request.as_deref())
+            .execute(&mut *tx)
+            .await?;
+        }
+
+        tx.commit().await?;
+        Ok(())
+    }
+
+    /// Add one to a session that is already running.
+    pub async fn add_checkout(&self, id: &SessionId, c: &Checkout) -> Result<()> {
+        let next: i64 = sqlx::query_scalar(
+            "SELECT COALESCE(MAX(position) + 1, 0) FROM session_repos WHERE session_id = $1",
+        )
+        .bind(id.as_str())
+        .fetch_one(&self.pool)
+        .await?;
+
+        sqlx::query(
+            "INSERT INTO session_repos
+               (session_id, position, repo_id, slug, base, branch, path, trouble, pull_request)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+        )
+        .bind(id.as_str())
+        .bind(next as i32)
+        .bind(c.repo_id.as_ref().map(|r| r.as_str()))
+        .bind(&c.slug)
+        .bind(&c.base)
+        .bind(&c.branch)
+        .bind(&c.path)
+        .bind(c.trouble.as_deref())
+        .bind(c.pull_request.as_deref())
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Remember where one checkout's pull request went.
+    pub async fn set_checkout_pull_request(
+        &self,
+        id: &SessionId,
+        path: &str,
+        url: &str,
+    ) -> Result<()> {
+        sqlx::query(
+            "UPDATE session_repos SET pull_request = $1 WHERE session_id = $2 AND path = $3",
+        )
+        .bind(url)
+        .bind(id.as_str())
+        .bind(path)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
     }
 
     // ── events ─────────────────────────────────────────────────────────
@@ -756,13 +885,44 @@ impl Db {
         // The worker may have had to disambiguate the branch name, so the
         // authoritative value arrives with the event rather than being what we
         // asked for.
-        if let EventKind::WorktreeAdded { branch } = kind {
-            sqlx::query("UPDATE sessions SET branch = $1, updated_at = $2 WHERE id = $3")
+        if let EventKind::WorktreeAdded { branch, repo } = kind {
+            // Which checkout, when the worker says. Git may have numbered the
+            // name differently in each repository, so the correction belongs to
+            // one row rather than to the session.
+            if let Some(slug) = repo {
+                sqlx::query(
+                    "UPDATE session_repos SET branch = $1
+                      WHERE session_id = $2 AND slug = $3",
+                )
                 .bind(branch)
-                .bind(at)
                 .bind(session_id.as_str())
+                .bind(slug)
                 .execute(&mut *tx)
                 .await?;
+            }
+
+            // The session's own branch is the first checkout's, and is what a
+            // caption shows. Left alone for any other checkout.
+            let first = match repo {
+                Some(slug) => sqlx::query_scalar::<_, i64>(
+                    "SELECT position FROM session_repos WHERE session_id = $1 AND slug = $2",
+                )
+                .bind(session_id.as_str())
+                .bind(slug)
+                .fetch_optional(&mut *tx)
+                .await?
+                .is_some_and(|position| position == 0),
+                None => true,
+            };
+
+            if first {
+                sqlx::query("UPDATE sessions SET branch = $1, updated_at = $2 WHERE id = $3")
+                    .bind(branch)
+                    .bind(at)
+                    .bind(session_id.as_str())
+                    .execute(&mut *tx)
+                    .await?;
+            }
         }
 
         if let EventKind::StatusChanged { status, note } = kind {
@@ -1091,6 +1251,8 @@ fn session_from_row(r: sqlx::postgres::PgRow) -> Result<Session> {
 
     Ok(Session {
         number: r.get("number"),
+        // Filled in by `with_checkouts`, which asks for the lot in one query.
+        checkouts: Vec::new(),
         // Written when the session is created, so this is only ever absent for
         // a row from before names existed.
         name: r
@@ -1392,6 +1554,7 @@ mod tests {
             &id,
             &EventKind::WorktreeAdded {
                 branch: "agent/fix-2".into(),
+                repo: None,
             },
             chrono::Utc::now(),
         )
@@ -1426,6 +1589,7 @@ mod tests {
 
         let kind = EventKind::WorktreeAdded {
             branch: "agent/fix".into(),
+            repo: None,
         };
         let now = chrono::Utc::now();
 

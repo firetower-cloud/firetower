@@ -8,7 +8,7 @@
 use crate::db::Db;
 use anyhow::{Context, Result};
 use ft_core::SessionStatus;
-use ft_core::{AgentPresence, Event, HostId, SessionId, WorkSummary};
+use ft_core::{AgentPresence, CheckoutSummary, Event, HostId, SessionId};
 use ft_proto::{
     decode, encode, Codec, CodecError, Credential, ProbeFailure, Pty, RemoteInfo, ReqId, ToServer,
     ToWorker, PROTOCOL_VERSION,
@@ -257,7 +257,7 @@ enum Waiting {
     },
     Agents(oneshot::Sender<Vec<AgentPresence>>),
     Action(oneshot::Sender<Result<String, String>>),
-    Summary(oneshot::Sender<WorkSummary>),
+    Summary(oneshot::Sender<Vec<CheckoutSummary>>),
 }
 
 /// A request waiting on an answer, and which host owes it.
@@ -1108,9 +1108,9 @@ impl Fleet {
                                 None => tracing::debug!("an action finished after its request gave up"),
                             }
                         }
-                        Ok(ToServer::Summarized { req, summary }) => {
+                        Ok(ToServer::Summarized { req, summaries }) => {
                             match probes.write().await.remove(&req) {
-                                Some(Asked { waiting: Waiting::Summary(reply), .. }) => { let _ = reply.send(summary); }
+                                Some(Asked { waiting: Waiting::Summary(reply), .. }) => { let _ = reply.send(summaries); }
                                 Some(other) => { probes.write().await.insert(req, other); }
                                 None => tracing::debug!("a summary arrived after its request gave up"),
                             }
@@ -1641,7 +1641,11 @@ impl Fleet {
     }
 
     /// What is in a session's workspace that isn't safely elsewhere.
-    pub async fn summarize(&self, host_id: &HostId, session_id: &SessionId) -> Result<WorkSummary> {
+    pub async fn summarize(
+        &self,
+        host_id: &HostId,
+        session_id: &SessionId,
+    ) -> Result<Vec<CheckoutSummary>> {
         let req = ulid::Ulid::new().to_string();
         let (tx, rx) = oneshot::channel();
         self.probes.write().await.insert(

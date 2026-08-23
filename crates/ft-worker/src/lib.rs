@@ -45,6 +45,13 @@ use store::Store;
 use tmux::Tmux;
 
 /// Everything a worker needs to do its job on one machine.
+/// A checkout with its place on disk resolved.
+struct Located {
+    dest: PathBuf,
+    slug: String,
+    base: String,
+}
+
 pub struct Worker {
     store: Store,
     git: GitRoot,
@@ -322,27 +329,53 @@ impl Worker {
                     .kill()
                     .await?;
 
-                // The worktree is registered against its mirror, so removing it
-                // means finding the mirror the session was cut from.
-                if let Some(slug) = self.store.repo_of(&session_id).await? {
-                    let mirror = self.git.mirror_path(&slug);
-                    // Named by whoever started it, so the directory is whatever
-                    // the path we recorded ends with.
-                    let name = self
+                // Each worktree is registered against its own mirror, so
+                // removing one means finding the mirror it was cut from. A
+                // session holds any number of them.
+                let workspace = self.store.workspace_path(&session_id).await?;
+                if let Some(workspace) = workspace.as_deref().map(std::path::Path::new) {
+                    for c in self
                         .store
-                        .workspace_path(&session_id)
-                        .await?
-                        .and_then(|p| {
-                            std::path::Path::new(&p)
-                                .file_name()
-                                .map(|n| n.to_string_lossy().to_string())
-                        })
-                        .unwrap_or_else(|| session_id.to_string());
+                        .checkouts_of(&session_id)
+                        .await
+                        .unwrap_or_default()
+                    {
+                        let mirror = self.git.mirror_path(&c.slug);
+                        let dest = if c.path.is_empty() {
+                            workspace.to_path_buf()
+                        } else {
+                            workspace.join(&c.path)
+                        };
+                        if let Err(e) = self.git.remove_worktree_at(&mirror, &dest).await {
+                            // Worth saying out loud: a worktree left behind is
+                            // disk that never comes back on its own.
+                            tracing::error!(session = %session_id, repo = %c.slug, "removing the worktree: {e:#}");
+                        }
+                    }
 
-                    if let Err(e) = self.git.remove_worktree(&mirror, &name).await {
-                        // Worth saying out loud: a worktree left behind is disk
-                        // that never comes back on its own.
-                        tracing::error!(session = %session_id, "removing the worktree: {e:#}");
+                    // Recorded before checkouts were: the workspace *is* the
+                    // worktree, and the old shape is what has to be reclaimed.
+                    if self
+                        .store
+                        .checkouts_of(&session_id)
+                        .await
+                        .unwrap_or_default()
+                        .is_empty()
+                    {
+                        if let Some(slug) = self.store.repo_of(&session_id).await? {
+                            let mirror = self.git.mirror_path(&slug);
+                            if let Err(e) = self.git.remove_worktree_at(&mirror, workspace).await {
+                                tracing::error!(session = %session_id, "removing the worktree: {e:#}");
+                            }
+                        }
+                    }
+
+                    // And the directory that held them, which git knows
+                    // nothing about.
+                    if let Err(e) = tokio::fs::remove_dir_all(workspace).await {
+                        if e.kind() != std::io::ErrorKind::NotFound {
+                            tracing::warn!(session = %session_id, "removing the workspace: {e:#}");
+                        }
                     }
                 }
 
@@ -538,7 +571,7 @@ impl Worker {
             }
 
             ToWorker::Summarize { req, session_id } => match self.summarize(&session_id).await {
-                Ok(summary) => out.send(ToServer::Summarized { req, summary }).await?,
+                Ok(summaries) => out.send(ToServer::Summarized { req, summaries }).await?,
                 Err(e) => {
                     tracing::warn!(session = %session_id, "summarising: {e:#}");
                     out.send(ToServer::ActionDone {
@@ -814,197 +847,165 @@ impl Worker {
         }
     }
 
-    /// Build a workspace, narrating each step as it completes.
+    /// Check one repository into a workspace, narrating each step.
     ///
-    /// The narration is the point: it's what the interface shows while you wait,
-    /// and what tells you *where* it broke when it breaks.
-    async fn create_workspace(
+    /// The same work at launch and afterwards: a session that gains a
+    /// repository mid-conversation runs exactly this, which is why it is a
+    /// function rather than a branch inside bring-up.
+    ///
+    /// Failure belongs to this checkout, not to the session — the caller
+    /// decides what to say about it and carries on with the rest.
+    async fn prepare_checkout(
         &self,
-        spec: CreateWorkspace,
+        id: &SessionId,
+        workspace: &Path,
+        position: i64,
+        repo: &ft_proto::RepoSpec,
+        env: &[(String, String)],
         out: &mpsc::Sender<ToServer>,
-    ) -> Result<()> {
-        let id = spec.session_id.clone();
-        let title = ft_core::session::title_from(&spec.prompt);
-
-        self.store
-            .create_session(
-                &id,
-                spec.repo.as_ref().map(|r| r.slug.as_str()),
-                &title,
-                &spec.prompt,
-                spec.repo.as_ref().map(|r| r.branch.as_str()),
-                spec.repo.as_ref().map(|r| r.base.as_str()),
-                &format!("{:?}", spec.agent),
-                spec.size,
-            )
+    ) -> Result<PathBuf> {
+        self.emit(id, EventKind::StepStarted { step: Step::Fetch }, out)
             .await?;
+        let started = std::time::Instant::now();
 
-        self.emit(
-            &id,
-            EventKind::SessionCreated {
-                repo: spec
-                    .repo
-                    .as_ref()
-                    .map(|r| r.slug.clone())
-                    .unwrap_or_else(|| "no repository".into()),
-                prompt: spec.prompt.clone(),
-            },
-            out,
-        )
-        .await?;
+        // git's progress goes into a slot rather than down a channel: the
+        // callback is synchronous and emitting is not, so the loop below does
+        // the emitting, on this task, where `out` lives.
+        let latest = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
+        let report = {
+            let latest = latest.clone();
+            move |line: String| *latest.lock().unwrap() = line
+        };
 
-        // A bare agent gets a directory and nothing else: no mirror, no
-        // worktree, no branch. It is somewhere to work rather than a checkout.
-        let path = match &spec.repo {
-            None => {
-                self.emit(
-                    &id,
-                    EventKind::StepStarted {
-                        step: Step::Workspace,
-                    },
-                    out,
-                )
-                .await?;
-                let path = self.git.worktree_path(&spec.workspace);
-                tokio::fs::create_dir_all(&path)
-                    .await
-                    .with_context(|| format!("creating {}", path.display()))?;
-                path
-            }
-            Some(repo) => {
-                self.emit(&id, EventKind::StepStarted { step: Step::Fetch }, out)
-                    .await?;
-                let started = std::time::Instant::now();
+        let mirroring = self.git.ensure_mirror(
+            &repo.remote,
+            &repo.slug,
+            repo.credential.clone(),
+            Some(&report),
+        );
+        tokio::pin!(mirroring);
 
-                // git's progress goes into a slot rather than down a channel:
-                // the callback is synchronous and emitting is not, so the loop
-                // below does the emitting, on this task, where `out` lives.
-                let latest = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
-                let report = {
-                    let latest = latest.clone();
-                    move |line: String| *latest.lock().unwrap() = line
-                };
-
-                let mirroring = self.git.ensure_mirror(
-                    &repo.remote,
-                    &repo.slug,
-                    spec.credential.clone(),
-                    Some(&report),
-                );
-                tokio::pin!(mirroring);
-
-                // Often enough to look alive, rarely enough that a fetch isn't
-                // also a way to fill the event log.
-                let mut said = String::new();
-                let (mirror, cloned) = loop {
-                    tokio::select! {
-                        done = &mut mirroring => break done.context("preparing the repository mirror")?,
-                        _ = tokio::time::sleep(std::time::Duration::from_millis(900)) => {
-                            let line = latest.lock().unwrap().clone();
-                            if !line.is_empty() && line != said {
-                                said = line.clone();
-                                self.emit(
-                                    &id,
-                                    EventKind::StepProgress { step: Step::Fetch, detail: line },
-                                    out,
-                                )
-                                .await?;
-                            }
-                        }
+        // Often enough to look alive, rarely enough that a fetch isn't also a
+        // way to fill the event log.
+        let mut said = String::new();
+        let (mirror, cloned) = loop {
+            tokio::select! {
+                done = &mut mirroring => break done.context("preparing the repository mirror")?,
+                _ = tokio::time::sleep(std::time::Duration::from_millis(900)) => {
+                    let line = latest.lock().unwrap().clone();
+                    if !line.is_empty() && line != said {
+                        said = line.clone();
+                        self.emit(
+                            id,
+                            EventKind::StepProgress { step: Step::Fetch, detail: format!("{} · {line}", repo.slug) },
+                            out,
+                        )
+                        .await?;
                     }
-                };
-
-                self.emit(
-                    &id,
-                    EventKind::RepoFetched {
-                        detail: if cloned {
-                            format!("cloned · {:.1}s", started.elapsed().as_secs_f32())
-                        } else {
-                            format!("from the mirror · {:.1}s", started.elapsed().as_secs_f32())
-                        },
-                    },
-                    out,
-                )
-                .await?;
-
-                self.emit(
-                    &id,
-                    EventKind::StepStarted {
-                        step: Step::Worktree,
-                    },
-                    out,
-                )
-                .await?;
-                let (path, branch) = self
-                    .git
-                    .add_worktree(&mirror, &repo.branch, &repo.base, &spec.workspace)
-                    .await
-                    .context("cutting the worktree")?;
-
-                // Two sessions from one prompt want the same name, so git may have
-                // numbered it. What is on disk is the authority — pushing the name we
-                // asked for would push somebody else's branch.
-                self.store.set_branch(&id, &branch).await?;
-
-                self.emit(&id, EventKind::WorktreeAdded { branch }, out)
-                    .await?;
-                path
+                }
             }
         };
 
-        // Firetower's own files live in the workspace, which means git can see
-        // them. The supervisor's log is written on every line an agent prints,
-        // so without this it is the largest change in every diff, it is what a
-        // description gets asked about, and committing everything would put it
-        // in somebody's repository.
-        Self::exclude_from_git(&path, &format!("{}/", agentd::DIR)).await;
-
-        let tmux = Tmux::for_session(id.as_str());
-        self.store
-            .record_workspace(&id, path.to_str().unwrap_or_default(), tmux.name())
-            .await?;
-
-        let (cpus, mem) = spec.size.resources();
         self.emit(
-            &id,
-            EventKind::WorkspaceStarted {
-                detail: format!("{cpus} CPU / {} GB", mem / 1024),
+            id,
+            EventKind::RepoFetched {
+                detail: format!(
+                    "{} · {}",
+                    repo.slug,
+                    if cloned {
+                        format!("cloned · {:.1}s", started.elapsed().as_secs_f32())
+                    } else {
+                        format!("from the mirror · {:.1}s", started.elapsed().as_secs_f32())
+                    }
+                ),
             },
             out,
         )
         .await?;
 
-        // Which session this is, and where this worker keeps its state.
-        // Inherited by the agent, by the setup script, and by everything either
-        // of them runs — a script that wants to know which session it is
-        // running inside has nowhere else to look.
-        let mut env = spec.env.clone();
-        env.push((ft_core::SESSION_ENV.to_string(), id.to_string()));
-        env.push((
-            ft_core::WORKER_ROOT_ENV.to_string(),
-            self.root.display().to_string(),
-        ));
+        self.emit(
+            id,
+            EventKind::StepStarted {
+                step: Step::Worktree,
+            },
+            out,
+        )
+        .await?;
 
-        // Before setup, because a setup script is the first thing that wants to
-        // read it — `npm run db:migrate` against a URL that is only in a file.
-        if let Some(file) = &spec.env_file {
-            Self::write_env_file(&path, file)
-                .await
-                .with_context(|| format!("writing {}", file.path))?;
+        // An empty path means the checkout *is* the workspace, which is how a
+        // session made before a session could hold more than one is laid out.
+        // Those directories are not moving.
+        let name = if repo.path.is_empty() {
+            workspace.to_path_buf()
+        } else {
+            workspace.join(&repo.path)
+        };
+
+        let (path, branch) = self
+            .git
+            .add_worktree_at(&mirror, &repo.branch, &repo.base, &name)
+            .await
+            .context("cutting the worktree")?;
+
+        // Two sessions from one prompt want the same name, so git may have
+        // numbered it — and it may have numbered it differently in each
+        // repository, which is why the branch is recorded per checkout. What is
+        // on disk is the authority: pushing the name we asked for would push
+        // somebody else's branch.
+        self.store
+            .record_checkout(
+                id,
+                position,
+                &repo.slug,
+                &repo.remote,
+                &repo.base,
+                &branch,
+                &repo.path,
+            )
+            .await?;
+        if position == 0 {
+            self.store.set_branch(id, &branch).await?;
         }
 
-        if let Some(setup) = spec.setup.as_deref().filter(|s| !s.trim().is_empty()) {
-            self.emit(&id, EventKind::StepStarted { step: Step::Setup }, out)
+        self.emit(
+            id,
+            EventKind::WorktreeAdded {
+                branch: branch.clone(),
+                repo: Some(repo.slug.clone()),
+            },
+            out,
+        )
+        .await?;
+
+        // Inside the checkout, not the workspace: `.env` is read by the tooling
+        // of the repository it belongs to, and two repositories both asking for
+        // one at the workspace root would be a single file with the wrong
+        // contents in it.
+        //
+        // Before setup, because a setup script is the first thing that wants to
+        // read it — `npm run db:migrate` against a URL that is only in a file.
+        if let Some(file) = &repo.env_file {
+            Self::write_env_file(&path, file)
+                .await
+                .with_context(|| format!("writing {} in {}", file.path, repo.slug))?;
+            // It holds this repository's secrets and it is inside a checkout,
+            // so git can see it. Excluded locally rather than added to the
+            // repository's own ignore file, which belongs to whoever wrote it.
+            Self::exclude_from_git(&path, &file.path).await;
+        }
+
+        if let Some(setup) = repo.setup.as_deref().filter(|s| !s.trim().is_empty()) {
+            self.emit(id, EventKind::StepStarted { step: Step::Setup }, out)
                 .await?;
             let started = std::time::Instant::now();
             let output = tokio::process::Command::new("sh")
                 .arg("-lc")
                 .arg(setup)
+                // In its own checkout, which is where its package file is.
                 .current_dir(&path)
                 // The same environment the agent gets. A setup script that
                 // installs dependencies and migrates a database needs the
-                // repository's variables as much as the agent does, and until
-                // now it ran with none of them.
+                // repository's variables as much as the agent does.
                 .envs(env.iter().map(|(k, v)| (k.as_str(), v.as_str())))
                 .output()
                 .await
@@ -1019,14 +1020,206 @@ impl Worker {
             }
 
             self.emit(
-                &id,
+                id,
                 EventKind::SetupFinished {
-                    detail: format!("{setup} · {:.1}s", started.elapsed().as_secs_f32()),
+                    detail: format!(
+                        "{} · {setup} · {:.1}s",
+                        repo.slug,
+                        started.elapsed().as_secs_f32()
+                    ),
                 },
                 out,
             )
             .await?;
         }
+
+        Ok(path)
+    }
+
+    /// Write down what is checked out and where.
+    ///
+    /// The agent starts at the workspace rather than inside a repository, so
+    /// the first thing it needs is a map. A file rather than a sentence in the
+    /// prompt, because it has to still be true on the tenth turn — and because
+    /// it sits beside the checkouts rather than inside one, so it never appears
+    /// in anybody's diff.
+    ///
+    /// Best effort. A workspace without it is a worse first turn, not a broken
+    /// session.
+    async fn write_workspace_guide(&self, id: &SessionId, workspace: &Path) {
+        let checkouts = match self.store.checkouts_of(id).await {
+            Ok(c) if !c.is_empty() => c,
+            _ => return,
+        };
+
+        let mut text = String::from(
+            "# This workspace
+
+             Firetower checked these out for this session. Each is a git worktree on              its own branch, and each is a separate repository — a change in one is              committed and pushed on its own.
+
+",
+        );
+        for c in &checkouts {
+            text.push_str(&format!(
+                "- `{}/` — {} · on `{}`, from `{}`
+",
+                if c.path.is_empty() { "." } else { &c.path },
+                c.slug,
+                c.branch,
+                c.base
+            ));
+        }
+        text.push_str(
+            "
+You are in the directory that holds them, not inside one of them.              Paths in what you say should be relative to here.
+",
+        );
+
+        let at = workspace.join("AGENTS.md");
+        if let Err(e) = tokio::fs::write(&at, text).await {
+            tracing::warn!("could not write {}: {e:#}", at.display());
+        }
+    }
+
+    /// Build a workspace, narrating each step as it completes.
+    ///
+    /// The narration is the point: it's what the interface shows while you wait,
+    /// and what tells you *where* it broke when it breaks.
+    async fn create_workspace(
+        &self,
+        spec: CreateWorkspace,
+        out: &mpsc::Sender<ToServer>,
+    ) -> Result<()> {
+        let id = spec.session_id.clone();
+        let title = ft_core::session::title_from(&spec.prompt);
+        let first = spec.repos.first();
+
+        self.store
+            .create_session(
+                &id,
+                first.map(|r| r.slug.as_str()),
+                &title,
+                &spec.prompt,
+                first.map(|r| r.branch.as_str()),
+                first.map(|r| r.base.as_str()),
+                &format!("{:?}", spec.agent),
+                spec.size,
+            )
+            .await?;
+
+        self.emit(
+            &id,
+            EventKind::SessionCreated {
+                repo: if spec.repos.is_empty() {
+                    "no repository".to_string()
+                } else {
+                    spec.repos
+                        .iter()
+                        .map(|r| r.slug.clone())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                },
+                prompt: spec.prompt.clone(),
+            },
+            out,
+        )
+        .await?;
+
+        // The workspace is a directory that holds checkouts, and it exists
+        // whether or not there are any. A bare agent gets it and nothing else;
+        // a session with two repositories gets both inside it; a session with
+        // one gets it too, which is the only shape that changed — the checkout
+        // used to *be* the workspace.
+        //
+        // Worth what it costs: Firetower's own files stop living inside
+        // somebody's repository, so the supervisor log is not in every diff and
+        // an attachment is not a file the agent might commit.
+        self.emit(
+            &id,
+            EventKind::StepStarted {
+                step: Step::Workspace,
+            },
+            out,
+        )
+        .await?;
+        let path = self.git.worktree_path(&spec.workspace);
+        tokio::fs::create_dir_all(&path)
+            .await
+            .with_context(|| format!("creating {}", path.display()))?;
+
+        let (cpus, mem) = spec.size.resources();
+        self.emit(
+            &id,
+            EventKind::WorkspaceStarted {
+                detail: format!("{cpus} CPU / {} GB", mem / 1024),
+            },
+            out,
+        )
+        .await?;
+
+        let tmux = Tmux::for_session(id.as_str());
+        self.store
+            .record_workspace(&id, path.to_str().unwrap_or_default(), tmux.name())
+            .await?;
+
+        // Which session this is, and where this worker keeps its state.
+        // Inherited by the agent, by every setup script, and by everything
+        // either of them runs — a script that wants to know which session it is
+        // running inside has nowhere else to look.
+        let mut env = spec.env.clone();
+        env.push((ft_core::SESSION_ENV.to_string(), id.to_string()));
+        env.push((
+            ft_core::WORKER_ROOT_ENV.to_string(),
+            self.root.display().to_string(),
+        ));
+
+        // In order, and each one is allowed to fail on its own: a session that
+        // came up with two repositories out of three is still a session worth
+        // having, and saying which one is missing beats pretending it was never
+        // asked for.
+        let mut ready = 0usize;
+        for (position, repo) in spec.repos.iter().enumerate() {
+            match self
+                .prepare_checkout(&id, &path, position as i64, repo, &env, out)
+                .await
+            {
+                Ok(_) => ready += 1,
+                Err(e) => {
+                    tracing::warn!(session = %id, repo = %repo.slug, "checking out: {e:#}");
+                    self.emit(
+                        &id,
+                        EventKind::Failed {
+                            code: "checkout".into(),
+                            message: format!("{}: {e:#}", repo.slug),
+                        },
+                        out,
+                    )
+                    .await?;
+                }
+            }
+        }
+
+        // Asked for repositories and got none of them. There is nothing here to
+        // work on, so this is a failed session rather than a bare agent —
+        // which is what a session with one repository and a broken setup script
+        // has always been.
+        if ready == 0 && !spec.repos.is_empty() {
+            anyhow::bail!("none of this session's repositories could be checked out");
+        }
+
+        // What is checked out and where, written where the agent will find it.
+        //
+        // The agent starts at the workspace rather than inside a repository
+        // now, so the first thing it needs is a map. Written here rather than
+        // said in the prompt because it has to still be true on the tenth turn,
+        // and because it is one more file in a workspace Firetower already
+        // writes files into.
+        self.write_workspace_guide(&id, &path).await;
+
+        // Nothing to exclude from git here any more. The supervisor's log used
+        // to be the largest change in every diff because the workspace *was*
+        // the checkout; it sits beside the checkouts now, where git cannot see
+        // it at all.
 
         // Answer what the agent would otherwise stop and ask. Best effort: a
         // question in the pane is a worse first session, but it is one someone
@@ -1144,6 +1337,100 @@ impl Worker {
             .context("this session has no workspace")
     }
 
+    /// One checkout, by the path it sits at inside the workspace.
+    ///
+    /// An empty path is the workspace itself, which is what a session made
+    /// before a session could hold more than one is — and what a caller that
+    /// does not care which repository it means gets.
+    async fn checkout_at(&self, session_id: &SessionId, at: &str) -> Result<PathBuf> {
+        let workspace = self.workspace_of(session_id).await?;
+        Ok(if at.is_empty() {
+            workspace
+        } else {
+            workspace.join(at)
+        })
+    }
+
+    /// A checkout and the branch it is on.
+    ///
+    /// Read from the checkout rather than from the session, because git may
+    /// have had to number the branch and may have numbered it differently in
+    /// each repository. Falls back to the session's own branch for a session
+    /// recorded before checkouts were.
+    async fn checkout_refs(&self, session_id: &SessionId, at: &str) -> Result<(PathBuf, String)> {
+        let dest = self.checkout_at(session_id, at).await?;
+        let branch = self
+            .store
+            .checkouts_of(session_id)
+            .await?
+            .into_iter()
+            .find(|c| c.path == at)
+            .map(|c| c.branch);
+
+        let branch = match branch {
+            Some(branch) => branch,
+            None => self
+                .store
+                .branch_of(session_id)
+                .await?
+                .context("this session has no branch")?,
+        };
+        Ok((dest, branch))
+    }
+
+    /// A checkout and what to diff it against.
+    async fn checkout_diff_refs(
+        &self,
+        session_id: &SessionId,
+        at: &str,
+    ) -> Result<(PathBuf, String)> {
+        let dest = self.checkout_at(session_id, at).await?;
+        let base = self
+            .store
+            .checkouts_of(session_id)
+            .await?
+            .into_iter()
+            .find(|c| c.path == at)
+            .map(|c| c.base)
+            .or(self.store.refs_of(session_id).await?.map(|(_, base)| base))
+            .unwrap_or_else(|| "HEAD".to_string());
+        Ok((dest, base))
+    }
+
+    /// Every checkout with the path it lives at, or the workspace itself when
+    /// there are none recorded.
+    async fn checkouts_or_workspace(
+        &self,
+        session_id: &SessionId,
+        workspace: &Path,
+    ) -> Result<Vec<Located>> {
+        let recorded = self.store.checkouts_of(session_id).await?;
+        if !recorded.is_empty() {
+            return Ok(recorded
+                .into_iter()
+                .map(|c| Located {
+                    dest: if c.path.is_empty() {
+                        workspace.to_path_buf()
+                    } else {
+                        workspace.join(&c.path)
+                    },
+                    slug: c.slug,
+                    base: c.base,
+                })
+                .collect());
+        }
+
+        // Recorded before checkouts were. The workspace is the checkout.
+        let Some((_, base)) = self.store.refs_of(session_id).await? else {
+            return Ok(Vec::new());
+        };
+        Ok(vec![Located {
+            dest: workspace.to_path_buf(),
+            slug: self.store.repo_of(session_id).await?.unwrap_or_default(),
+            base,
+        }])
+    }
+
     /// Do something with the work a session produced.
     async fn run_action(
         &self,
@@ -1152,15 +1439,6 @@ impl Worker {
         credential: Option<ft_proto::Credential>,
         out: &mpsc::Sender<ToServer>,
     ) -> Result<String> {
-        // Looked up per action rather than up front: stopping an agent has
-        // nothing to do with a branch, and a bare agent has none at all.
-        let branch = || async {
-            self.store
-                .branch_of(session_id)
-                .await?
-                .context("this session has no branch")
-        };
-
         match action {
             ft_proto::Action::Stop => {
                 // The workspace and the branch stay; only the agent goes. What
@@ -1184,14 +1462,18 @@ impl Worker {
                 Ok("stopped".to_string())
             }
 
-            ft_proto::Action::Commit { message, paths } => {
-                let dest = self.workspace_of(session_id).await?;
+            ft_proto::Action::Commit {
+                checkout,
+                message,
+                paths,
+            } => {
+                let dest = self.checkout_at(session_id, &checkout).await?;
                 self.git.commit(&dest, &message, &paths).await
             }
 
-            ft_proto::Action::Push => {
-                let dest = self.workspace_of(session_id).await?;
-                self.git.push(&dest, &branch().await?, credential).await
+            ft_proto::Action::Push { checkout } => {
+                let (dest, branch) = self.checkout_refs(session_id, &checkout).await?;
+                self.git.push(&dest, &branch, credential).await
             }
 
             ft_proto::Action::Attach { name, data } => {
@@ -1201,44 +1483,109 @@ impl Worker {
             }
 
             ft_proto::Action::Describe => {
-                let dest = self.workspace_of(session_id).await?;
+                let workspace = self.workspace_of(session_id).await?;
                 let (agent, prompt) = self.store.session_brief(session_id).await?;
-                let base = self
-                    .store
-                    .refs_of(session_id)
-                    .await?
-                    .map(|(_, base)| base)
-                    .unwrap_or_default();
-                let diff = self.git.diff(&dest, &base).await?;
 
-                let proposal = describe::propose(agent, &dest, &prompt, &diff).await?;
+                // Every checkout, one after another. A change that spans two
+                // repositories is one piece of work and wants one sentence
+                // describing it — so the model sees all of it, with each part
+                // labelled by the repository it came from.
+                let mut diff = String::new();
+                for c in self.checkouts_or_workspace(session_id, &workspace).await? {
+                    let part = self.git.diff(&c.dest, &c.base).await.unwrap_or_default();
+                    if part.trim().is_empty() {
+                        continue;
+                    }
+                    if !diff.is_empty() {
+                        diff.push('\n');
+                    }
+                    diff.push_str(&format!("# {}\n{part}", c.slug));
+                }
+
+                let proposal = describe::propose(agent, &workspace, &prompt, &diff).await?;
                 // Two values through a channel that carries one string. The
                 // shape the control plane reads it back with is right beside
                 // this, in `sessions::describe`.
                 Ok(format!("{}\n\n{}", proposal.title, proposal.body))
             }
 
-            ft_proto::Action::Diff => {
-                let dest = self.workspace_of(session_id).await?;
-                let base = self
-                    .store
-                    .refs_of(session_id)
-                    .await?
-                    .map(|(_, base)| base)
-                    .unwrap_or_else(|| "HEAD".to_string());
+            ft_proto::Action::Diff { checkout } => {
+                let (dest, base) = self.checkout_diff_refs(session_id, &checkout).await?;
                 self.git.diff(&dest, &base).await
+            }
+
+            ft_proto::Action::AddRepo { repo, mut env } => {
+                let workspace = self.workspace_of(session_id).await?;
+                let position = self.store.checkouts_of(session_id).await?.len() as i64;
+
+                // The same two the session started with, so a setup script run
+                // now can find its way home exactly as one run at launch could.
+                env.push((ft_core::SESSION_ENV.to_string(), session_id.to_string()));
+                env.push((
+                    ft_core::WORKER_ROOT_ENV.to_string(),
+                    self.root.display().to_string(),
+                ));
+
+                self.prepare_checkout(session_id, &workspace, position, &repo, &env, out)
+                    .await?;
+                self.write_workspace_guide(session_id, &workspace).await;
+
+                Ok(format!(
+                    "{} is checked out at ./{}",
+                    repo.slug,
+                    if repo.path.is_empty() {
+                        "."
+                    } else {
+                        &repo.path
+                    }
+                ))
             }
         }
     }
 
-    async fn summarize(&self, session_id: &SessionId) -> Result<ft_core::WorkSummary> {
-        let (branch, base) = self
-            .store
-            .refs_of(session_id)
-            .await?
-            .context("this session has no branch")?;
-        let dest = self.workspace_of(session_id).await?;
-        self.git.summary(&dest, &branch, &base).await
+    /// What is unsaved, per checkout.
+    ///
+    /// One per repository, because "two commits ahead" means nothing without
+    /// saying ahead in *what*. A checkout that cannot be read reports nothing
+    /// rather than failing the lot: one broken worktree should not hide what
+    /// the others are holding.
+    async fn summarize(&self, session_id: &SessionId) -> Result<Vec<ft_core::CheckoutSummary>> {
+        let workspace = self.workspace_of(session_id).await?;
+        let recorded = self.store.checkouts_of(session_id).await?;
+
+        if recorded.is_empty() {
+            // Recorded before checkouts were, or a bare agent. The workspace is
+            // the checkout, if it is anything.
+            let Some((branch, base)) = self.store.refs_of(session_id).await? else {
+                return Ok(Vec::new());
+            };
+            let summary = self.git.summary(&workspace, &branch, &base).await?;
+            return Ok(vec![ft_core::CheckoutSummary {
+                path: String::new(),
+                slug: self.store.repo_of(session_id).await?.unwrap_or_default(),
+                summary,
+            }]);
+        }
+
+        let mut out = Vec::new();
+        for c in recorded {
+            let dest = if c.path.is_empty() {
+                workspace.clone()
+            } else {
+                workspace.join(&c.path)
+            };
+            match self.git.summary(&dest, &c.branch, &c.base).await {
+                Ok(summary) => out.push(ft_core::CheckoutSummary {
+                    path: c.path,
+                    slug: c.slug,
+                    summary,
+                }),
+                Err(e) => {
+                    tracing::warn!(session = %session_id, repo = %c.slug, "summarising: {e:#}")
+                }
+            }
+        }
+        Ok(out)
     }
 
     /// Attach to a session's terminal.
@@ -1740,22 +2087,23 @@ mod tests {
     fn spec(remote: &str, id: &SessionId, setup: Option<&str>) -> ToWorker {
         ToWorker::CreateWorkspace(Box::new(CreateWorkspace {
             session_id: id.clone(),
-            repo: Some(ft_proto::RepoSpec {
+            repos: vec![ft_proto::RepoSpec {
                 remote: remote.to_string(),
                 slug: "acme/backend".into(),
                 base: "main".into(),
                 branch: "agent/fix-retries".into(),
-            }),
+                path: "backend".into(),
+                setup: setup.map(str::to_string),
+                env_file: None,
+                credential: None,
+            }],
             prompt: "Fix retry handling for Stripe webhooks".into(),
             // A shell, not a real agent: these tests should not launch
             // anything that talks to a network or expects a subscription.
             agent: Agent::Shell,
             size: WorkspaceSize::Medium,
-            setup: setup.map(str::to_string),
             workspace: id.as_str().to_string(),
             env: vec![],
-            env_file: None,
-            credential: None,
         }))
     }
 
@@ -1814,11 +2162,14 @@ mod tests {
             labels,
             vec![
                 "Session created",
+                // The workspace comes first now: it is the directory the
+                // checkouts go into, so it has to exist before any of them do.
+                "Making the workspace",
+                "Started the workspace",
                 "Fetching the repository",
                 "Fetched the repository",
                 "Creating the worktree",
                 "Added a worktree",
-                "Started the workspace",
                 "Starting the agent",
                 "Opened tmux",
                 "Launched the agent",
@@ -1881,7 +2232,7 @@ mod tests {
 
         let mut build = spec(&remote, &id, None);
         if let ToWorker::CreateWorkspace(ref mut c) = build {
-            c.setup = Some("sleep 2".into());
+            c.repos[0].setup = Some("sleep 2".into());
         }
 
         // The Ping arrives while the build is still sleeping. Before this was
@@ -1926,15 +2277,12 @@ mod tests {
                 hello(),
                 ToWorker::CreateWorkspace(Box::new(CreateWorkspace {
                     session_id: id.clone(),
-                    repo: None,
+                    repos: vec![],
                     prompt: "poke around".into(),
                     agent: Agent::Shell,
                     size: WorkspaceSize::Medium,
-                    setup: None,
                     workspace: id.as_str().to_string(),
                     env: vec![],
-                    env_file: None,
-                    credential: None,
                 })),
             ],
         )
@@ -1965,7 +2313,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_built_workspace_is_a_real_checkout() {
+    async fn a_built_workspace_holds_its_checkouts() {
         let (_origin, remote) = origin().await;
         let home = TempDir::new().unwrap();
         let worker = std::sync::Arc::new(Worker::open(home.path()).await.unwrap());
@@ -1973,8 +2321,22 @@ mod tests {
 
         exchange(&worker, vec![hello(), spec(&remote, &id, None)]).await;
 
+        // The workspace holds the repository rather than being it, so a second
+        // one can be added later without the first having to move.
         let path = worker.store().workspace_path(&id).await.unwrap().unwrap();
-        assert!(std::path::Path::new(&path).join("README.md").exists());
+        let workspace = std::path::Path::new(&path);
+        assert!(
+            workspace.join("backend").join("README.md").exists(),
+            "the checkout should be in its own directory"
+        );
+        assert!(
+            workspace.join("AGENTS.md").exists(),
+            "the agent starts here and needs to be told what is where"
+        );
+        assert!(
+            !workspace.join("backend").join(agentd::DIR).exists(),
+            "Firetower's own files belong beside the checkout, not inside it"
+        );
         assert_eq!(
             worker.store().status_of(&id).await.unwrap(),
             Some(SessionStatus::Working)
@@ -2051,7 +2413,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_setup_script_runs_inside_the_worktree() {
+    async fn a_setup_script_runs_inside_its_own_checkout() {
         let (_origin, remote) = origin().await;
         let home = TempDir::new().unwrap();
         let worker = std::sync::Arc::new(Worker::open(home.path()).await.unwrap());
@@ -2066,8 +2428,16 @@ mod tests {
         )
         .await;
 
+        // In the repository it belongs to, not in the workspace above it: two
+        // repositories have two setup scripts, and each wants to run where its
+        // own package file is.
         let path = worker.store().workspace_path(&id).await.unwrap().unwrap();
-        assert!(std::path::Path::new(&path).join("setup-ran.txt").exists());
+        let workspace = std::path::Path::new(&path);
+        assert!(workspace.join("backend").join("setup-ran.txt").exists());
+        assert!(
+            !workspace.join("setup-ran.txt").exists(),
+            "it should not run in the directory that merely holds the checkout"
+        );
 
         cleanup(&id).await;
     }

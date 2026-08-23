@@ -16,7 +16,10 @@ use axum::{
     http::StatusCode,
     Json,
 };
-use ft_core::{session::title_from, NewSession, Session, SessionId, SessionStatus};
+use ft_core::{
+    session::{title_from, Checkout},
+    NewSession, Session, SessionId, SessionStatus,
+};
 use ft_proto::{CreateWorkspace, ToWorker};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
@@ -167,16 +170,39 @@ pub(super) async fn create_session(
         ));
     }
 
-    // No repository is a bare agent: a workspace with nothing checked out.
-    let repo = match &req.repo_id {
-        None => None,
-        Some(id) => Some(state.db.repo(id).await?.ok_or_else(|| {
+    // Every repository this session checks out, in order. `repoId` is the
+    // one-repository form and goes first; `repos` is the list. Naming the same
+    // one twice is a mistake rather than two checkouts.
+    let mut wanted: Vec<ft_core::session::NewCheckout> = Vec::new();
+    if let Some(repo_id) = req.repo_id.clone() {
+        wanted.push(ft_core::session::NewCheckout {
+            repo_id,
+            base: req.base.clone(),
+        });
+    }
+    for asked in &req.repos {
+        if wanted.iter().any(|w| w.repo_id == asked.repo_id) {
+            continue;
+        }
+        wanted.push(asked.clone());
+    }
+
+    // No repository at all is a bare agent: a workspace with nothing checked
+    // out, which is still a workspace and still a session.
+    let mut repos: Vec<(ft_core::Repo, Option<String>)> = Vec::new();
+    for asked in &wanted {
+        let found = state.db.repo(&asked.repo_id).await?.ok_or_else(|| {
             ApiError::new(
                 ErrorCode::RepoNotConnected,
                 "that repository isn't connected",
             )
-        })?),
-    };
+        })?;
+        repos.push((found, asked.base.clone()));
+    }
+
+    // The first one, for everything that wants a single name: the workspace
+    // directory, the session row, a caption.
+    let repo = repos.first().map(|(r, _)| r.clone());
 
     // Scheduling is the control plane's job — it is the only thing that sees
     // every host. Today there is one, so this is the whole scheduler.
@@ -229,17 +255,16 @@ pub(super) async fn create_session(
     // A path is a path on *this* machine. Anywhere else it is a directory that
     // doesn't exist, and the session would fail several steps later with a git
     // error that says nothing about why.
-    if repo
-        .as_ref()
-        .is_some_and(|r| is_local_path(&r.remote) && host.compute != ft_core::Compute::Local)
+    if let Some((local, _)) = repos
+        .iter()
+        .find(|(r, _)| is_local_path(&r.remote) && host.compute != ft_core::Compute::Local)
     {
         return Err(ApiError::new(
             ErrorCode::InvalidRequest,
             format!(
                 "{} is a folder on this machine, so it can only run on this machine. \
                  Connect it by URL to use it on {}.",
-                repo.as_ref().map(|r| r.remote.as_str()).unwrap_or_default(),
-                host.name
+                local.remote, host.name
             ),
         ));
     }
@@ -250,83 +275,100 @@ pub(super) async fn create_session(
     // may still be unknown. Here it is knowable: this host is connected by now,
     // and it is the machine about to do the cloning. Learned once and written
     // back, so the next session doesn't ask again.
-    let trunk = match repo.as_ref() {
-        Some(r) if r.default_branch.is_none() && req.base.is_none() => {
-            let found = state
-                .fleet
-                .probe(
-                    &host.id,
-                    &r.remote,
-                    credential_for(&state, &r.remote, &format!("reading {}", r.slug)).await,
-                )
-                .await
-                .map_err(|e| ApiError::new(ErrorCode::HostUnreachable, format!("{e:#}")))?
-                .map_err(|f| {
-                    ApiError::new(
-                        ErrorCode::RepoUnreachable,
-                        format!("{} couldn't read {}: {f:?}", host.name, r.remote),
-                    )
-                })?;
-
-            state
-                .db
-                .set_default_branch(&r.id, &found.default_branch)
-                .await?;
-            Some(found.default_branch)
-        }
-        _ => None,
-    };
-
-    // A branch the caller named has to exist, or the worktree fails later with
-    // a git error rather than here with an answer.
-    // Everything about a checkout is absent together, so "no repository" is one
-    // missing value rather than four empty strings.
-    let checkout = repo.as_ref().map(|repo| {
-        let base = req
-            .base
+    // One name for the session's branch, cut in every repository. That is what
+    // makes a change across two of them reviewable: the same branch in both,
+    // and two pull requests that can point at each other.
+    let branch = ft_core::sanitize_branch(
+        &req.branch
             .as_deref()
             .map(str::trim)
             .filter(|b| !b.is_empty())
             .map(str::to_string)
-            .or_else(|| trunk.clone())
-            .or_else(|| repo.default_branch.clone())
-            // Only reachable with a repository, a host that answered, and no
-            // trunk from either — which the arm above rules out.
-            .unwrap_or_else(|| "main".to_string());
+            .unwrap_or_else(|| format!("agent/{}", ft_core::slugify(&req.prompt))),
+    );
 
-        let branch = ft_core::sanitize_branch(
-            &req.branch
-                .as_deref()
-                .map(str::trim)
-                .filter(|b| !b.is_empty())
-                .map(str::to_string)
-                .unwrap_or_else(|| format!("agent/{}", ft_core::slugify(&req.prompt))),
-        );
+    // The base is per repository, because each has its own trunk and they are
+    // not always called the same thing.
+    let mut checkouts: Vec<Checkout> = Vec::new();
+    let mut dirs: Vec<String> = Vec::new();
+    for (repo, asked_base) in &repos {
+        let base = match asked_base
+            .as_deref()
+            .map(str::trim)
+            .filter(|b| !b.is_empty())
+        {
+            Some(named) => named.to_string(),
+            None => match repo.default_branch.clone() {
+                Some(known) => known,
+                // A repository can be connected while no worker is reachable,
+                // so its trunk may still be unknown. Here it is knowable: this
+                // host is connected and is the machine about to clone it.
+                // Learned once and written back, so the next session doesn't
+                // ask again.
+                None => {
+                    let found = state
+                        .fleet
+                        .probe(
+                            &host.id,
+                            &repo.remote,
+                            credential_for(&state, &repo.remote, &format!("reading {}", repo.slug))
+                                .await,
+                        )
+                        .await
+                        .map_err(|e| ApiError::new(ErrorCode::HostUnreachable, format!("{e:#}")))?
+                        .map_err(|f| {
+                            ApiError::new(
+                                ErrorCode::RepoUnreachable,
+                                format!("{} couldn't read {}: {f:?}", host.name, repo.remote),
+                            )
+                        })?;
 
-        (repo, base, branch)
-    });
+                    state
+                        .db
+                        .set_default_branch(&repo.id, &found.default_branch)
+                        .await?;
+                    found.default_branch
+                }
+            },
+        };
 
-    // Named by whoever starts the session when they say so — this is what ends
-    // up on a pull request, and a slug made from a sentence is a poor thing to
-    // live with. Falling back to one is better than refusing.
+        // Every checkout gets a directory inside the workspace, including when
+        // there is only one. Uniform because a session can gain a repository
+        // later, and a first checkout that *is* the workspace would have to
+        // move to make room for a second.
+        let dir = ft_core::session::checkout_dir(&repo.slug, &dirs);
+        dirs.push(dir.clone());
+
+        checkouts.push(Checkout {
+            repo_id: Some(repo.id.clone()),
+            slug: repo.slug.clone(),
+            base,
+            branch: branch.clone(),
+            path: dir,
+            trouble: None,
+            pull_request: None,
+        });
+    }
 
     let id = SessionId::new();
     let title = title_from(&req.prompt);
 
-    // Named after the branch when there is one; after the session otherwise.
-    let workspace = checkout
-        .as_ref()
-        .map(|(_, _, branch)| ft_core::workspace_name(branch))
-        .unwrap_or_else(|| id.as_str().to_string());
+    // Named after the branch when there is a checkout; after the session
+    // otherwise. One name for the whole workspace, whatever is inside it.
+    let workspace = if checkouts.is_empty() {
+        id.as_str().to_string()
+    } else {
+        ft_core::workspace_name(&branch)
+    };
     let agent_name = format!("{:?}", req.agent);
 
     // Decided here, before the worker has been asked to do any of it, so the
     // session page has the whole shape of the work the moment it loads.
     let steps = ft_core::Step::plan(
-        repo.is_some(),
-        repo.as_ref()
-            .and_then(|r| r.setup.as_deref())
-            .is_some_and(|s| !s.trim().is_empty()),
+        !checkouts.is_empty(),
+        repos
+            .iter()
+            .any(|(r, _)| r.setup.as_deref().is_some_and(|s| !s.trim().is_empty())),
     );
 
     state
@@ -337,32 +379,75 @@ pub(super) async fn create_session(
             repo.as_ref().map(|r| r.slug.as_str()),
             &title,
             &req.prompt,
-            checkout.as_ref().map(|(_, _, b)| b.as_str()),
-            checkout.as_ref().map(|(_, b, _)| b.as_str()),
+            checkouts.first().map(|c| c.branch.as_str()),
+            checkouts.first().map(|c| c.base.as_str()),
             &agent_name,
             req.size,
             &steps,
         )
         .await?;
+    state.db.record_checkouts(&id, &checkouts).await?;
 
-    // The repository's own variables, opened once. Each read is a line in the
+    // Each repository's own variables, opened once. Every read is a line in the
     // vault's log naming the session it was for.
-    let repo_env = match repo.as_ref() {
-        Some(r) => repo_env(&state, r, &id).await?,
-        None => Vec::new(),
-    };
+    let mut per_repo_env: Vec<Vec<ft_core::dotenv::Variable>> = Vec::new();
+    for (repo, _) in &repos {
+        per_repo_env.push(repo_env(&state, repo, &id).await?);
+    }
 
-    // The repository first, the agent's own token last. A repository that sets
-    // `ANTHROPIC_API_KEY` for its own reasons must not be able to stop the
+    // The repositories first, the agent's own token last. A repository that
+    // sets `ANTHROPIC_API_KEY` for its own reasons must not be able to stop the
     // agent from starting — whoever wrote that variable was thinking about
     // their application, not about us.
-    let mut env: Vec<(String, String)> = repo_env
-        .iter()
-        .map(|v| (v.name.clone(), v.value.clone()))
-        .collect();
+    //
+    // Where two repositories set the same variable, the later one wins and
+    // there is nothing better to do: one process, one environment. What each
+    // repository asked for in a *file* stays its own, inside its own checkout.
+    let mut env: Vec<(String, String)> = Vec::new();
+    for vars in &per_repo_env {
+        for v in vars {
+            env.retain(|(existing, _)| *existing != v.name);
+            env.push((v.name.clone(), v.value.clone()));
+        }
+    }
     for (name, value) in agent_env(&state, req.agent, &id).await? {
         env.retain(|(existing, _)| *existing != name);
         env.push((name, value));
+    }
+
+    let mut specs = Vec::new();
+    for ((repo, _), checkout) in repos.iter().zip(&checkouts) {
+        let vars = &per_repo_env[specs.len()];
+        specs.push(ft_proto::RepoSpec {
+            remote: repo.remote.clone(),
+            slug: repo.slug.clone(),
+            base: checkout.base.clone(),
+            branch: checkout.branch.clone(),
+            path: checkout.path.clone(),
+            setup: repo.setup.clone(),
+            // Only the repository's own variables go in a file, and the file
+            // goes inside that repository's checkout. The agent's token is
+            // ours, and belongs in neither.
+            env_file: repo
+                .env_file
+                .clone()
+                .filter(|path| !path.trim().is_empty() && !vars.is_empty())
+                .map(|path| ft_proto::EnvFile {
+                    path,
+                    variables: vars
+                        .iter()
+                        .map(|v| (v.name.clone(), v.value.clone()))
+                        .collect(),
+                }),
+            // Sent with the work rather than held by the host: the worker keeps
+            // it in memory for this session and writes it nowhere.
+            credential: credential_for(
+                &state,
+                &repo.remote,
+                &format!("starting {id} on {}", repo.slug),
+            )
+            .await,
+        });
     }
 
     state
@@ -371,44 +456,12 @@ pub(super) async fn create_session(
             &host.id,
             ToWorker::CreateWorkspace(Box::new(CreateWorkspace {
                 session_id: id.clone(),
-                repo: checkout
-                    .as_ref()
-                    .map(|(repo, base, branch)| ft_proto::RepoSpec {
-                        remote: repo.remote.clone(),
-                        slug: repo.slug.clone(),
-                        base: base.clone(),
-                        branch: branch.clone(),
-                    }),
+                repos: specs,
                 workspace,
                 prompt: req.prompt.clone(),
                 agent: req.agent,
                 size: req.size,
-                setup: repo.as_ref().and_then(|r| r.setup.clone()),
-                // Resolved here, sent with the work, and held in memory on the
-                // host. Never written to a worker's disk.
                 env,
-                // Only the repository's own variables go in a file. The agent's
-                // token is ours, and the file belongs to the checkout.
-                env_file: repo
-                    .as_ref()
-                    .and_then(|r| r.env_file.clone())
-                    .filter(|path| !path.trim().is_empty() && !repo_env.is_empty())
-                    .map(|path| ft_proto::EnvFile {
-                        path,
-                        variables: repo_env
-                            .iter()
-                            .map(|v| (v.name.clone(), v.value.clone()))
-                            .collect(),
-                    }),
-                // Sent with the work rather than held by the host: the worker
-                // keeps it in memory for this session and writes it nowhere.
-                credential: match repo.as_ref() {
-                    Some(r) => {
-                        credential_for(&state, &r.remote, &format!("starting {id} on {}", r.slug))
-                            .await
-                    }
-                    None => None,
-                },
             })),
         )
         .await?;
@@ -756,7 +809,10 @@ pub(super) async fn stop_session(
     act(&state, &SessionId::from_stored(id), ft_proto::Action::Stop).await
 }
 
-/// Push the branch, so the work outlives the workspace.
+/// Push every branch, so the work outlives the workspace.
+///
+/// Each repository is pushed to its own remote. One that has nothing new is
+/// skipped rather than refused: it is a repository this change did not touch.
 #[utoipa::path(
     post, path = "/api/v1/sessions/{id}/push", tag = "sessions",
     params(("id" = String, Path, description = "Session id")),
@@ -766,7 +822,47 @@ pub(super) async fn push_session(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> ApiResult<Json<Done>> {
-    act(&state, &SessionId::from_stored(id), ft_proto::Action::Push).await
+    let id = SessionId::from_stored(id);
+    let (session, _) = session_context(&state, &id).await?;
+
+    let mut done = Vec::new();
+    let mut refused = Vec::new();
+    for c in known_checkouts(&session) {
+        match one(
+            &state,
+            &id,
+            ft_proto::Action::Push {
+                checkout: c.path.clone(),
+            },
+        )
+        .await
+        {
+            Ok(detail) => done.push(format!("{}: {detail}", c.slug)),
+            Err(why) if nothing_to_do(&why) => {}
+            // Said rather than thrown, because one repository refusing a push
+            // must not hide that the other one worked.
+            Err(why) => refused.push(format!("{}: {why}", c.slug)),
+        }
+    }
+
+    if done.is_empty() && !refused.is_empty() {
+        return Err(ApiError::new(ErrorCode::ActionFailed, refused.join(" · ")));
+    }
+
+    Ok(Json(Done {
+        detail: if done.is_empty() {
+            "everything was already pushed".to_string()
+        } else if refused.is_empty() {
+            done.join(" · ")
+        } else {
+            format!(
+                "{} · {} refused: {}",
+                done.join(" · "),
+                refused.len(),
+                refused.join(" · ")
+            )
+        },
+    }))
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -807,15 +903,95 @@ pub(super) async fn commit_session(
         .filter(|m| !m.is_empty())
         .ok_or_else(|| ApiError::new(ErrorCode::InvalidRequest, "a commit needs a message"))?;
 
-    act(
-        &state,
-        &id,
-        ft_proto::Action::Commit {
-            message,
-            paths: req.paths,
+    // Paths arrive workspace-relative, because that is what the review sheet
+    // shows — `firetower/crates/…` beside `sandbox/README.md`. Each checkout is
+    // committed with its own share of them, made relative to itself.
+    //
+    // One message for all of them: a change that spans two repositories is one
+    // piece of work, and two commits saying the same sentence is the honest
+    // record of it.
+    let mut done = Vec::new();
+    for c in known_checkouts(&session) {
+        let paths: Vec<String> = if req.paths.is_empty() {
+            Vec::new()
+        } else {
+            let kept: Vec<String> = req
+                .paths
+                .iter()
+                .filter_map(|p| within(&c.path, p))
+                .collect();
+            // Named files, none of them here. Nothing to commit in this one.
+            if kept.is_empty() {
+                continue;
+            }
+            kept
+        };
+
+        match one(
+            &state,
+            &id,
+            ft_proto::Action::Commit {
+                checkout: c.path.clone(),
+                message: message.clone(),
+                paths,
+            },
+        )
+        .await
+        {
+            Ok(detail) => done.push(format!("{}: {detail}", c.slug)),
+            // A repository with nothing staged is not a failure — it is a
+            // repository this change did not touch.
+            Err(why) if nothing_to_do(&why) => {}
+            Err(why) => {
+                return Err(ApiError::new(
+                    ErrorCode::ActionFailed,
+                    format!("{}: {why}", c.slug),
+                ))
+            }
+        }
+    }
+
+    Ok(Json(Done {
+        detail: if done.is_empty() {
+            "nothing to commit".to_string()
+        } else {
+            done.join(" · ")
         },
-    )
-    .await
+    }))
+}
+
+/// Whether a path is inside a checkout, and what it is called from there.
+///
+/// The empty checkout is the workspace, so everything is inside it.
+fn within(checkout: &str, path: &str) -> Option<String> {
+    if checkout.is_empty() {
+        return Some(path.to_string());
+    }
+    path.strip_prefix(checkout)
+        .and_then(|rest| rest.strip_prefix('/'))
+        .map(str::to_string)
+}
+
+/// Whether a refusal means "there was nothing here", which is not a failure.
+fn nothing_to_do(why: &str) -> bool {
+    let why = why.to_ascii_lowercase();
+    why.contains("nothing to commit")
+        || why.contains("no changes")
+        || why.contains("nothing added")
+        || why.contains("up to date")
+        || why.contains("everything up-to-date")
+}
+
+/// Run one action and give back what it said.
+async fn one(state: &AppState, id: &SessionId, action: ft_proto::Action) -> Result<String, String> {
+    let (_, host) = session_context(state, id)
+        .await
+        .map_err(|e| e.message.clone())?;
+    match state.fleet.run_action(&host, id, action, None).await {
+        Ok(Ok(detail)) => Ok(detail),
+        Ok(Err(why)) => Err(why),
+        Err(e) => Err(format!("{e:#}")),
+    }
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -883,32 +1059,230 @@ pub(crate) async fn propose(state: &AppState, id: &SessionId) -> ApiResult<Propo
     Ok(proposal)
 }
 
+/// Check another repository into a session that is already running.
+///
+/// The same work as bring-up, done once more. The agent is told afterwards,
+/// because an agent that is not told has no reason to look.
+#[utoipa::path(
+    post, path = "/api/v1/sessions/{id}/repos", tag = "sessions",
+    params(("id" = String, Path, description = "Session id")),
+    request_body = ft_core::session::NewCheckout,
+    responses((status = 200, body = Done), (status = 404, body = ApiError), (status = 409, body = ApiError)),
+)]
+pub(super) async fn add_repo(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(req): Json<ft_core::session::NewCheckout>,
+) -> ApiResult<Json<Done>> {
+    let id = SessionId::from_stored(id);
+    let (session, host) = session_context(&state, &id).await?;
+
+    let repo = state.db.repo(&req.repo_id).await?.ok_or_else(|| {
+        ApiError::new(
+            ErrorCode::RepoNotConnected,
+            "that repository isn't connected",
+        )
+    })?;
+
+    if session.checkouts.iter().any(|c| c.slug == repo.slug) {
+        return Err(ApiError::new(
+            ErrorCode::InvalidRequest,
+            format!("{} is already checked out in this session", repo.slug),
+        ));
+    }
+
+    // The session's branch, so a change spanning it and what was already here
+    // is one branch name in both.
+    let branch = session
+        .branch
+        .clone()
+        .unwrap_or_else(|| format!("agent/{}", ft_core::slugify(&session.prompt)));
+
+    let base = req
+        .base
+        .as_deref()
+        .map(str::trim)
+        .filter(|b| !b.is_empty())
+        .map(str::to_string)
+        .or_else(|| repo.default_branch.clone())
+        .unwrap_or_else(|| "main".to_string());
+
+    let taken: Vec<String> = session.checkouts.iter().map(|c| c.path.clone()).collect();
+    let path = ft_core::session::checkout_dir(&repo.slug, &taken);
+
+    let vars = repo_env(&state, &repo, &id).await?;
+    let spec = ft_proto::RepoSpec {
+        remote: repo.remote.clone(),
+        slug: repo.slug.clone(),
+        base: base.clone(),
+        branch: branch.clone(),
+        path: path.clone(),
+        setup: repo.setup.clone(),
+        env_file: repo
+            .env_file
+            .clone()
+            .filter(|p| !p.trim().is_empty() && !vars.is_empty())
+            .map(|p| ft_proto::EnvFile {
+                path: p,
+                variables: vars
+                    .iter()
+                    .map(|v| (v.name.clone(), v.value.clone()))
+                    .collect(),
+            }),
+        credential: credential_for(
+            &state,
+            &repo.remote,
+            &format!("adding {} to {id}", repo.slug),
+        )
+        .await,
+    };
+
+    let detail = match state
+        .fleet
+        .run_action(
+            &host,
+            &id,
+            ft_proto::Action::AddRepo {
+                repo: Box::new(spec),
+                env: vars
+                    .iter()
+                    .map(|v| (v.name.clone(), v.value.clone()))
+                    .collect(),
+            },
+            None,
+        )
+        .await
+        .map_err(|e| ApiError::new(ErrorCode::HostUnreachable, format!("{e:#}")))?
+    {
+        Ok(detail) => detail,
+        Err(why) => return Err(ApiError::new(ErrorCode::ActionFailed, why)),
+    };
+
+    state
+        .db
+        .add_checkout(
+            &id,
+            &Checkout {
+                repo_id: Some(repo.id.clone()),
+                slug: repo.slug.clone(),
+                base,
+                branch: branch.clone(),
+                path: path.clone(),
+                trouble: None,
+                pull_request: None,
+            },
+        )
+        .await?;
+
+    // Said to the agent, not just recorded. It is mid-conversation and has no
+    // reason to go looking at the filesystem again.
+    let told = format!(
+        "I've checked out `{}` at `./{}`, on branch `{}`. It is a separate \
+         repository — a change there is committed and pushed on its own.",
+        repo.slug, path, branch
+    );
+    if let Err(e) = state
+        .fleet
+        .send_turn(&host, &id, ft_core::turn::user_message(&told))
+        .await
+    {
+        tracing::warn!(session = %id, "checked out {} but could not tell the agent: {e:#}", repo.slug);
+    }
+
+    Ok(Json(Done { detail }))
+}
+
 /// What is in this workspace that isn't safely elsewhere.
 #[utoipa::path(
     get, path = "/api/v1/sessions/{id}/work", tag = "sessions",
     params(("id" = String, Path, description = "Session id")),
-    responses((status = 200, body = ft_core::WorkSummary), (status = 404, body = ApiError)),
+    responses((status = 200, body = Vec<ft_core::CheckoutWork>), (status = 404, body = ApiError)),
 )]
 pub(super) async fn session_work(
     State(state): State<AppState>,
     Path(id): Path<String>,
-) -> ApiResult<Json<ft_core::WorkSummary>> {
+) -> ApiResult<Json<Vec<ft_core::CheckoutWork>>> {
     let id = SessionId::from_stored(id);
     let (session, host) = session_context(&state, &id).await?;
 
-    if session.repo.is_none() {
+    if session.checkouts.is_empty() && session.repo.is_none() {
         return Err(ApiError::new(
             ErrorCode::InvalidRequest,
             "this session has no repository, so there is nothing to summarise",
         ));
     }
 
-    state
+    let summaries = state
         .fleet
         .summarize(&host, &id)
         .await
-        .map(Json)
-        .map_err(|e| ApiError::new(ErrorCode::HostUnreachable, format!("{e:#}")))
+        .map_err(|e| ApiError::new(ErrorCode::HostUnreachable, format!("{e:#}")))?;
+
+    // The host says what is unsaved; the control plane says where it went. A
+    // checkout the worker could not read still gets a row, because a repository
+    // that is missing is something to say rather than something to omit.
+    let mut out = Vec::new();
+    for c in known_checkouts(&session) {
+        let found = summaries
+            .iter()
+            .find(|s| s.path == c.path && (s.slug == c.slug || s.slug.is_empty()));
+        out.push(ft_core::CheckoutWork {
+            path: c.path.clone(),
+            slug: c.slug.clone(),
+            branch: found.map(|s| s.summary.branch.clone()).unwrap_or(c.branch),
+            base: c.base,
+            uncommitted: found.map(|s| s.summary.uncommitted).unwrap_or(0),
+            ahead: found.map(|s| s.summary.ahead).unwrap_or(0),
+            pushed: found.is_some_and(|s| s.summary.pushed),
+            pull_request: c.pull_request,
+            trouble: c.trouble,
+        });
+    }
+
+    Ok(Json(out))
+}
+
+/// One row per repository this session holds.
+///
+/// From the checkouts when there are any, and from the session's own columns
+/// when there are not — which is every session made before a session could hold
+/// more than one.
+fn known_checkouts(session: &Session) -> Vec<Held> {
+    if !session.checkouts.is_empty() {
+        return session
+            .checkouts
+            .iter()
+            .map(|c| Held {
+                path: c.path.clone(),
+                slug: c.slug.clone(),
+                branch: c.branch.clone(),
+                base: c.base.clone(),
+                pull_request: c.pull_request.clone(),
+                trouble: c.trouble.clone(),
+            })
+            .collect();
+    }
+
+    match (&session.repo, &session.branch, &session.base) {
+        (Some(slug), Some(branch), Some(base)) => vec![Held {
+            path: String::new(),
+            slug: slug.clone(),
+            branch: branch.clone(),
+            base: base.clone(),
+            pull_request: session.pull_request.clone(),
+            trouble: None,
+        }],
+        _ => Vec::new(),
+    }
+}
+
+struct Held {
+    path: String,
+    slug: String,
+    branch: String,
+    base: String,
+    pull_request: Option<String>,
+    trouble: Option<String>,
 }
 
 /// What this session changed, file by file.
@@ -917,25 +1291,70 @@ pub(super) async fn session_work(
 /// subtly wrong, and doing it once here beats doing it in every client.
 #[utoipa::path(
     get, path = "/api/v1/sessions/{id}/diff", tag = "sessions",
-    params(("id" = String, Path, description = "Session id")),
+    params(
+        ("id" = String, Path, description = "Session id"),
+        ("checkout" = Option<String>, Query, description = "Which checkout, by its path in the workspace. Every one when omitted."),
+    ),
     responses((status = 200, body = Vec<ft_core::FileDiff>), (status = 404, body = ApiError)),
 )]
 pub(super) async fn session_diff(
     State(state): State<AppState>,
     Path(id): Path<String>,
+    Query(which): Query<Which>,
 ) -> ApiResult<Json<Vec<ft_core::FileDiff>>> {
     let id = SessionId::from_stored(id);
-    let (_, host) = session_context(&state, &id).await?;
+    let (session, host) = session_context(&state, &id).await?;
 
-    match state
-        .fleet
-        .run_action(&host, &id, ft_proto::Action::Diff, None)
-        .await
-        .map_err(|e| ApiError::new(ErrorCode::HostUnreachable, format!("{e:#}")))?
-    {
-        Ok(diff) => Ok(Json(ft_core::split_diff(&diff))),
-        Err(why) => Err(ApiError::new(ErrorCode::ActionFailed, why)),
+    // Every checkout unless one is named. Each file keeps the repository it
+    // came from in front of its path, because two repositories can both have a
+    // `src/index.ts` and a list that does not say which is a list you cannot
+    // act on.
+    let wanted: Vec<Held> = match &which.checkout {
+        Some(at) => known_checkouts(&session)
+            .into_iter()
+            .filter(|c| &c.path == at)
+            .collect(),
+        None => known_checkouts(&session),
+    };
+
+    let many = wanted.len() > 1;
+    let mut files = Vec::new();
+    for c in wanted {
+        let diff = match state
+            .fleet
+            .run_action(
+                &host,
+                &id,
+                ft_proto::Action::Diff {
+                    checkout: c.path.clone(),
+                },
+                None,
+            )
+            .await
+            .map_err(|e| ApiError::new(ErrorCode::HostUnreachable, format!("{e:#}")))?
+        {
+            Ok(diff) => diff,
+            // One unreadable checkout should not empty the sheet.
+            Err(_) => continue,
+        };
+
+        for mut file in ft_core::split_diff(&diff) {
+            if many && !c.path.is_empty() {
+                file.path = format!("{}/{}", c.path, file.path);
+            }
+            files.push(file);
+        }
     }
+
+    Ok(Json(files))
+}
+
+/// Which checkout an action means.
+#[derive(Debug, Default, Deserialize, utoipa::IntoParams)]
+pub(super) struct Which {
+    /// The checkout's path inside the workspace. Absent means all of them.
+    #[serde(default)]
+    pub checkout: Option<String>,
 }
 
 /// Open a pull request for this session's branch.
@@ -972,25 +1391,116 @@ pub(super) async fn open_pull_request(
         .filter(|t| !t.is_empty())
         .ok_or_else(|| ApiError::new(ErrorCode::InvalidRequest, "a pull request needs a title"))?;
 
-    let slug = session.repo.as_deref().ok_or_else(|| {
-        ApiError::new(
+    let body = req
+        .body
+        .as_deref()
+        .or(session.proposed_body.as_deref())
+        .unwrap_or(&session.prompt)
+        .to_string();
+
+    // Every repository this session changed, and one pull request in each.
+    //
+    // Not one pull request spanning two repositories, because no git host has
+    // such an object. Two that point at each other is what the platform can
+    // represent, and what a reviewer will actually see.
+    let held = known_checkouts(&session);
+    if held.is_empty() {
+        return Err(ApiError::new(
             ErrorCode::InvalidRequest,
             "this session has no repository, so there is nothing to open",
-        )
-    })?;
+        ));
+    }
 
+    let mut opened: Vec<(String, String)> = Vec::new();
+    let mut refused: Vec<String> = Vec::new();
+
+    for c in &held {
+        // Already open. Pushing again amends it, so there is nothing to do.
+        if let Some(url) = &c.pull_request {
+            opened.push((c.slug.clone(), url.clone()));
+            continue;
+        }
+
+        match open_one(
+            &state, &c.slug, &c.branch, &c.base, &title, &body, req.draft,
+        )
+        .await
+        {
+            Ok(url) => {
+                if let Err(e) = state.db.set_checkout_pull_request(&id, &c.path, &url).await {
+                    tracing::warn!(session = %id, "opened a pull request but could not record it: {e:#}");
+                }
+                opened.push((c.slug.clone(), url));
+            }
+            // A repository with nothing pushed has nothing to open, which is
+            // not a reason to refuse the ones that do.
+            Err(why) if nothing_to_do(&why) => {}
+            Err(why) => refused.push(format!("{}: {why}", c.slug)),
+        }
+    }
+
+    let Some((_, first)) = opened.first().cloned() else {
+        return Err(ApiError::new(
+            ErrorCode::ActionFailed,
+            if refused.is_empty() {
+                "nothing is pushed yet, so there is nothing to open".to_string()
+            } else {
+                refused.join(" · ")
+            },
+        ));
+    };
+
+    // Each one gets a line pointing at the others. Done afterwards because none
+    // of them has a URL until all of them have been opened.
+    if opened.len() > 1 {
+        for (slug, url) in &opened {
+            let others: Vec<String> = opened
+                .iter()
+                .filter(|(other, _)| other != slug)
+                .map(|(other, link)| format!("- {other}: {link}"))
+                .collect();
+
+            let with_links = format!(
+                "{body}\n\n---\n\nPart of one change across {} repositories:\n{}\n",
+                opened.len(),
+                others.join("\n")
+            );
+
+            if let Err(e) = link_up(&state, slug, url, &with_links).await {
+                tracing::warn!(%slug, "could not cross-link the pull request: {e:#}");
+            }
+        }
+    }
+
+    // The session's own field still names one, for a caption that wants one.
+    if let Err(e) = state.db.record_pull_request(&id, &first).await {
+        tracing::warn!(session = %id, "recording the pull request: {e:#}");
+    }
+
+    let url = first;
+    Ok(Json(PullRequest { url }))
+}
+
+/// Open one, in one repository.
+#[allow(clippy::too_many_arguments)]
+async fn open_one(
+    state: &AppState,
+    slug: &str,
+    head: &str,
+    base: &str,
+    title: &str,
+    body: &str,
+    draft: bool,
+) -> Result<String, String> {
     let repo = state
         .db
         .repo_by_slug(slug)
-        .await?
-        .ok_or_else(|| ApiError::not_found("repository"))?;
+        .await
+        .map_err(|e| format!("{e:#}"))?
+        .ok_or_else(|| format!("{slug} isn't connected any more"))?;
 
-    let provider = providers::for_remote(&repo.remote).ok_or_else(|| {
-        ApiError::new(
-            ErrorCode::InvalidRequest,
-            "that repository isn't on a host Firetower can open pull requests on",
-        )
-    })?;
+    let provider = providers::for_remote(&repo.remote)
+        .ok_or_else(|| format!("{slug} isn't on a host Firetower can open pull requests on"))?;
 
     let token = state
         .vault
@@ -999,43 +1509,42 @@ pub(super) async fn open_pull_request(
             provider.id,
             &format!("opening a pull request for {}", repo.slug),
         )
-        .await?
-        .ok_or_else(|| {
-            ApiError::new(
-                ErrorCode::ProviderNotConnected,
-                format!("authorize {} first", provider.label),
-            )
-        })?;
+        .await
+        .map_err(|e| format!("{e:#}"))?
+        .ok_or_else(|| format!("authorize {} first", provider.label))?;
 
-    let url = oauth::open_pull_request(
+    oauth::open_pull_request(
         provider,
         &token,
         oauth::Opening {
             slug: &repo.slug,
-            head: session.branch.as_deref().unwrap_or_default(),
-            base: session.base.as_deref().unwrap_or_default(),
-            title: &title,
-            // In order: what somebody typed, then what the agent proposed when
-            // it finished, then the prompt. The last is a poor description of
-            // what happened, but it is never nothing.
-            body: req
-                .body
-                .as_deref()
-                .or(session.proposed_body.as_deref())
-                .unwrap_or(&session.prompt),
-            draft: req.draft,
+            head,
+            base,
+            title,
+            body,
+            draft,
         },
     )
     .await
-    .map_err(|e| ApiError::new(ErrorCode::ActionFailed, format!("{e:#}")))?;
+    .map_err(|e| format!("{e:#}"))
+}
 
-    // Remembered, so the next screen can tell "pushed" from "already open" and
-    // offer the one control that makes sense.
-    if let Err(e) = state.db.record_pull_request(&id, &url).await {
-        tracing::warn!(session = %id, "opened a pull request but could not record it: {e:#}");
-    }
+/// Put the links to its siblings into a pull request that is already open.
+async fn link_up(state: &AppState, slug: &str, url: &str, body: &str) -> anyhow::Result<()> {
+    let repo = state
+        .db
+        .repo_by_slug(slug)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("{slug} isn't connected"))?;
+    let provider = providers::for_remote(&repo.remote)
+        .ok_or_else(|| anyhow::anyhow!("no provider for {slug}"))?;
+    let token = state
+        .vault
+        .get(vault::GIT, provider.id, "cross-linking a pull request")
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("not authorized"))?;
 
-    Ok(Json(PullRequest { url }))
+    oauth::amend_pull_request(provider, &token, url, body).await
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -1054,4 +1563,35 @@ pub struct NewPullRequest {
 #[serde(rename_all = "camelCase")]
 pub struct PullRequest {
     pub url: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{nothing_to_do, within};
+
+    #[test]
+    fn a_path_belongs_to_the_checkout_it_is_under() {
+        // The review sheet shows workspace-relative paths, so each checkout is
+        // committed with its own share of them, named from inside itself.
+        assert_eq!(
+            within("backend", "backend/src/main.rs").as_deref(),
+            Some("src/main.rs")
+        );
+        assert_eq!(within("backend", "web/app/page.tsx"), None);
+        // A checkout that *is* the workspace holds everything.
+        assert_eq!(within("", "README.md").as_deref(), Some("README.md"));
+        // Not a prefix match on the string: `backend-2` is a different
+        // repository, and committing its files into `backend` would be wrong
+        // in the quietest possible way.
+        assert_eq!(within("backend", "backend-2/src/main.rs"), None);
+    }
+
+    #[test]
+    fn a_repository_this_change_did_not_touch_is_not_a_failure() {
+        // Pushing a session that changed one of its two repositories must not
+        // report the other one as broken.
+        assert!(nothing_to_do("nothing to commit, working tree clean"));
+        assert!(nothing_to_do("Everything up-to-date"));
+        assert!(!nothing_to_do("permission denied (publickey)"));
+    }
 }

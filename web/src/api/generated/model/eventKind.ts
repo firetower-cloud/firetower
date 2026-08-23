@@ -29,6 +29,15 @@ export type EventKind = {
   type: 'RepoFetched';
 } | {
   branch: string;
+  /**
+     * Which repository, when a session has more than one.
+     *
+     * Absent from a worker that predates a session holding more than one,
+     * and from a session that holds exactly one — in both cases there is
+     * nothing to disambiguate.
+     * @nullable
+     */
+  repo?: string | null;
   type: 'WorktreeAdded';
 } | {
   detail: string;

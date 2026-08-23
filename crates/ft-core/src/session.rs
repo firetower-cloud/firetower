@@ -4,6 +4,107 @@ use crate::{Agent, HostId, RepoId, SessionId, SessionStatus, WorkspaceId};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
+/// One repository checked out into a session's workspace.
+///
+/// A session used to be one of these, spread across three nullable columns on
+/// the session itself. It is a list now, because the work is often two
+/// repositories — a client and the API it calls — and two sessions that cannot
+/// see each other is not an answer to that.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct Checkout {
+    /// Absent when the repository has since been disconnected. The slug is what
+    /// this checkout *is*, and that does not stop being true.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repo_id: Option<RepoId>,
+    /// `acme/backend`
+    pub slug: String,
+    /// The branch it was cut from.
+    pub base: String,
+    /// The branch git actually made.
+    ///
+    /// Not always the one asked for: the same prompt twice wants the same
+    /// name, and git numbers the second. Per checkout because git may number
+    /// differently in each repository.
+    pub branch: String,
+    /// Where it sits inside the workspace.
+    ///
+    /// Empty means the checkout *is* the workspace — how every session made
+    /// before a session could hold more than one is laid out on disk. Those
+    /// directories are not moving.
+    #[serde(default)]
+    pub path: String,
+    /// Why it is not there, when it is not.
+    ///
+    /// A repository the host could not reach fails its own checkout rather than
+    /// the session: two of three is still a session worth having, and saying
+    /// which one is missing beats pretending it was never asked for.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trouble: Option<String>,
+    /// Where this repository's pull request went, once it has one.
+    ///
+    /// Per repository, because that is what a git host can represent: one
+    /// change across two repositories is two pull requests that point at each
+    /// other, not one object spanning both.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pull_request: Option<String>,
+}
+
+impl Checkout {
+    /// What to call the directory it lives in, for anything showing a path.
+    pub fn dir(&self) -> &str {
+        if self.path.is_empty() {
+            "."
+        } else {
+            &self.path
+        }
+    }
+
+    /// Whether it is actually on disk.
+    pub fn ready(&self) -> bool {
+        self.trouble.is_none()
+    }
+}
+
+/// The directory name a repository gets inside a workspace.
+///
+/// The last part of the slug, so `acme/backend` becomes `backend` — that is
+/// what somebody would call it, and it is what a path in a message should say.
+/// Two repositories with the same last part get the owner as well, which the
+/// caller resolves by passing what it has already used.
+pub fn checkout_dir(slug: &str, taken: &[String]) -> String {
+    let leaf = slug.rsplit('/').next().unwrap_or(slug);
+    let safe = |name: &str| -> String {
+        name.chars()
+            .map(|c| {
+                if c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_' {
+                    c
+                } else {
+                    '-'
+                }
+            })
+            .collect()
+    };
+
+    let first = safe(leaf);
+    if !taken.contains(&first) {
+        return first;
+    }
+
+    // `acme-backend`, rather than a number nobody can read.
+    let whole = safe(&slug.replace('/', "-"));
+    if !taken.contains(&whole) {
+        return whole;
+    }
+    for n in 2..1000 {
+        let candidate = format!("{first}-{n}");
+        if !taken.contains(&candidate) {
+            return candidate;
+        }
+    }
+    first
+}
+
 /// A line of work with a conversation attached and a branch at the end.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
@@ -20,14 +121,27 @@ pub struct Session {
     /// sessions on one repository all called "Ask me…" are impossible to tell
     /// apart, and renaming one of them to "the flaky test" fixes that.
     pub name: String,
-    /// `None` for a bare agent: a workspace with nothing checked out.
+    /// The first checkout's slug, or `None` for a bare agent.
+    ///
+    /// A convenience for the places that want one name — a row in a list, a
+    /// caption. [`Session::checkouts`] is what is actually true.
     pub repo: Option<String>,
     /// Short, derived from the prompt — the prompt itself lives in the transcript.
     pub title: String,
     pub prompt: String,
-    /// Absent along with the repository — there is nothing to branch.
+    /// The first checkout's branch, or `None` for a bare agent.
+    ///
+    /// Every checkout in a session is cut with the same requested name, so this
+    /// is the right thing to show once — but git may have numbered them
+    /// differently, so anything acting on a branch reads it from the checkout.
     pub branch: Option<String>,
     pub base: Option<String>,
+    /// Every repository checked out into this session's workspace.
+    ///
+    /// Empty for a bare agent. One for most sessions. The whole point of the
+    /// list is the third case.
+    #[serde(default)]
+    pub checkouts: Vec<Checkout>,
     pub agent: Agent,
     pub size: WorkspaceSize,
     pub status: SessionStatus,
@@ -79,8 +193,18 @@ pub struct Session {
 #[serde(rename_all = "camelCase")]
 pub struct NewSession {
     /// Omit for a bare agent: a workspace with nothing checked out.
+    ///
+    /// Kept alongside `repos` so that anything holding one repository still
+    /// works; when both are given, this one goes first.
     #[serde(default)]
     pub repo_id: Option<RepoId>,
+    /// Every repository to check out, in the order they should appear.
+    ///
+    /// Each may name its own base branch; the working branch is the session's
+    /// and is the same in all of them, which is what makes a change across two
+    /// repositories reviewable.
+    #[serde(default)]
+    pub repos: Vec<NewCheckout>,
     pub prompt: String,
     #[serde(default = "default_agent")]
     pub agent: Agent,
@@ -98,6 +222,16 @@ pub struct NewSession {
     pub branch: Option<String>,
     #[serde(default)]
     pub size: WorkspaceSize,
+}
+
+/// One repository to check out, as the API accepts it.
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct NewCheckout {
+    pub repo_id: RepoId,
+    /// The branch to start from. Omit for the repository's own default.
+    #[serde(default)]
+    pub base: Option<String>,
 }
 
 fn default_agent() -> Agent {
@@ -176,6 +310,54 @@ pub fn title_from(prompt: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_checkout_is_called_what_somebody_would_call_it() {
+        // The last part of the slug: that is the name in conversation, and it
+        // is what a path in a message should say.
+        assert_eq!(checkout_dir("acme/backend", &[]), "backend");
+        assert_eq!(
+            checkout_dir("kevinpiac/sandbox-firetower", &[]),
+            "sandbox-firetower"
+        );
+    }
+
+    #[test]
+    fn two_repositories_with_the_same_name_are_told_apart() {
+        // `acme/api` and `globex/api` are both "api". The owner disambiguates,
+        // rather than a number nobody can read.
+        let taken = vec!["api".to_string()];
+        assert_eq!(checkout_dir("globex/api", &taken), "globex-api");
+
+        let taken = vec!["api".to_string(), "globex-api".to_string()];
+        assert_eq!(checkout_dir("globex/api", &taken), "api-2");
+    }
+
+    #[test]
+    fn a_slug_cannot_become_a_path() {
+        // It comes from a git host, so it is treated as text rather than as a
+        // path: this is the one place a bad one would write outside the
+        // workspace it was meant for.
+        assert!(!checkout_dir("acme/../../etc", &[]).contains("..'"));
+        assert!(!checkout_dir("acme/../../etc", &[]).contains('/'));
+    }
+
+    #[test]
+    fn a_checkout_that_is_the_workspace_still_has_a_directory_to_name() {
+        let c = Checkout {
+            repo_id: None,
+            slug: "acme/backend".into(),
+            base: "main".into(),
+            branch: "agent/fix".into(),
+            path: String::new(),
+            trouble: None,
+            pull_request: None,
+        };
+        // Every session made before a session could hold more than one is laid
+        // out this way, and something still has to draw it.
+        assert_eq!(c.dir(), ".");
+        assert!(c.ready());
+    }
 
     #[test]
     fn slug_drops_filler_and_punctuation() {

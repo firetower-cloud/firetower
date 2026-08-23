@@ -2,7 +2,7 @@
 
 import { useMemo, useRef, useState } from "react";
 import { useAttachFile, useListFiles } from "@/src/api/generated/sessions/sessions";
-import type { Attached, SlashCommand, Usage } from "@/src/api/generated/model";
+import type { Attached, Checkout, SlashCommand, Usage } from "@/src/api/generated/model";
 import { Picker, MODELS, MODES, EFFORTS } from "@/components/Settings.chat";
 import { Context } from "@/components/Context.chat";
 import type { Limits } from "@/src/api/conversation";
@@ -28,6 +28,8 @@ export function ChatComposer({
   limits,
   branch,
   repo,
+  checkouts,
+  onAddRepo,
   onSend,
   onSet,
   onStop,
@@ -45,6 +47,10 @@ export function ChatComposer({
   limits?: Limits;
   branch?: string | null;
   repo?: string | null;
+  /** Every repository this session holds, when it holds more than a name. */
+  checkouts?: Checkout[];
+  /** Offer to check another one in. Absent when the session cannot take one. */
+  onAddRepo?: () => void;
   onSend: (text: string, images: Attached[]) => void;
   /** Put a setting into force, by saying so to the agent. */
   onSet: (kind: "model" | "mode" | "effort", value: string) => void;
@@ -370,10 +376,35 @@ export function ChatComposer({
         </div>
       </div>
 
-      {(repo || branch) && (
-        <div className="mt-2.5 flex items-center gap-3 px-2 font-mono text-meta text-mute">
-          {repo && <span className="truncate">{repo}</span>}
-          {branch && <span className="min-w-0 truncate">⑂ {branch}</span>}
+      {/* What is checked out, and where. One line per repository once there is
+          more than one, because "⑂ ft/auth" says nothing about which of them. */}
+      {(repo || branch || checkouts?.length) && (
+        <div className="mt-2.5 flex flex-wrap items-center gap-x-3 gap-y-1 px-2 font-mono text-meta text-mute">
+          {checkouts && checkouts.length > 0 ? (
+            checkouts.map((c) => (
+              <span
+                key={c.slug}
+                className={`min-w-0 truncate ${c.trouble ? "text-brick" : ""}`}
+                title={c.trouble ?? `./${c.path} · ${c.branch}`}
+              >
+                {c.slug} <span className="text-mute/70">⑂ {c.branch}</span>
+                {c.trouble && " · not checked out"}
+              </span>
+            ))
+          ) : (
+            <>
+              {repo && <span className="truncate">{repo}</span>}
+              {branch && <span className="min-w-0 truncate">⑂ {branch}</span>}
+            </>
+          )}
+          {onAddRepo && (
+            <button
+              onClick={onAddRepo}
+              className="rounded-[5px] px-1.5 py-0.5 text-mute transition-colors hover:bg-raise hover:text-text"
+            >
+              + repo
+            </button>
+          )}
         </div>
       )}
 

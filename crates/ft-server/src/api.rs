@@ -195,6 +195,10 @@ async fn credential_for(state: &AppState, remote: &str, why: &str) -> Option<Cre
         AgentMode,
         AgentPresence,
         ft_core::WorkSummary,
+        ft_core::CheckoutSummary,
+        ft_core::CheckoutWork,
+        ft_core::session::Checkout,
+        ft_core::session::NewCheckout,
         ft_core::FileDiff,
         ft_core::Compute,
         ft_core::SshKey,
@@ -258,6 +262,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(sessions::session_diff))
         .routes(routes!(sessions::open_pull_request))
         .routes(routes!(sessions::session_work))
+        .routes(routes!(sessions::add_repo))
         .routes(routes!(conversation::get_conversation))
         .routes(routes!(conversation::stream_conversation))
         .routes(routes!(conversation::send_turn))

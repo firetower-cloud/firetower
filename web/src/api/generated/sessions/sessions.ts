@@ -29,6 +29,7 @@ import type {
   Answer,
   ApiError,
   Attachment,
+  CheckoutWork,
   Commit,
   Conversation,
   DestroySessionParams,
@@ -40,6 +41,7 @@ import type {
   GetConversationParams,
   ListFilesParams,
   ListSessionsParams,
+  NewCheckout,
   NewPullRequest,
   NewSession,
   Placed,
@@ -48,9 +50,9 @@ import type {
   RenameSession,
   Sent,
   Session,
+  SessionDiffParams,
   SessionPtyParams,
-  Turn,
-  WorkSummary
+  Turn
 } from '../model';
 
 import { http } from '../../http';
@@ -1147,12 +1149,20 @@ export const useDescribeSession = <TError = ApiError,
       > => {
       return useMutation(getDescribeSessionMutationOptions(options), queryClient);
     }
-    export const getSessionDiffUrl = (id: string,) => {
+    export const getSessionDiffUrl = (id: string,
+    params?: SessionDiffParams,) => {
+  const normalizedParams = new URLSearchParams();
 
+  Object.entries(params || {}).forEach(([key, value]) => {
 
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
 
+  const stringifiedParams = normalizedParams.toString();
 
-  return `/api/v1/sessions/${id}/diff`
+  return stringifiedParams.length > 0 ? `/api/v1/sessions/${id}/diff?${stringifiedParams}` : `/api/v1/sessions/${id}/diff`
 }
 
 /**
@@ -1160,9 +1170,10 @@ export const useDescribeSession = <TError = ApiError,
  * subtly wrong, and doing it once here beats doing it in every client.
  * @summary What this session changed, file by file.
  */
-export const sessionDiff = async (id: string, options?: Parameters<typeof http>[1]): Promise<FileDiff[]> => {
+export const sessionDiff = async (id: string,
+    params?: SessionDiffParams, options?: Parameters<typeof http>[1]): Promise<FileDiff[]> => {
 
-  return http<FileDiff[]>(getSessionDiffUrl(id),
+  return http<FileDiff[]>(getSessionDiffUrl(id,params),
   {
     ...options,
     method: 'GET'
@@ -1175,23 +1186,25 @@ export const sessionDiff = async (id: string, options?: Parameters<typeof http>[
 
 
 
-export const getSessionDiffQueryKey = (id: string,) => {
+export const getSessionDiffQueryKey = (id: string,
+    params?: SessionDiffParams,) => {
     return [
-    `/api/v1/sessions/${id}/diff`
+    `/api/v1/sessions/${id}/diff`, ...(params ? [params] : [])
     ] as const;
     }
 
 
-export const getSessionDiffQueryOptions = <TData = Awaited<ReturnType<typeof sessionDiff>>, TError = ApiError>(id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof sessionDiff>>, TError, TData>>, request?: SecondParameter<typeof http>}
+export const getSessionDiffQueryOptions = <TData = Awaited<ReturnType<typeof sessionDiff>>, TError = ApiError>(id: string,
+    params?: SessionDiffParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof sessionDiff>>, TError, TData>>, request?: SecondParameter<typeof http>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
 
-  const queryKey =  queryOptions?.queryKey ?? getSessionDiffQueryKey(id);
+  const queryKey =  queryOptions?.queryKey ?? getSessionDiffQueryKey(id,params);
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof sessionDiff>>> = ({ signal }) => sessionDiff(id, { signal, ...requestOptions });
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof sessionDiff>>> = ({ signal }) => sessionDiff(id,params, { signal, ...requestOptions });
 
 
 
@@ -1205,7 +1218,8 @@ export type SessionDiffQueryError = ApiError
 
 
 export function useSessionDiff<TData = Awaited<ReturnType<typeof sessionDiff>>, TError = ApiError>(
- id: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof sessionDiff>>, TError, TData>> & Pick<
+ id: string,
+    params: undefined |  SessionDiffParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof sessionDiff>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof sessionDiff>>,
           TError,
@@ -1215,7 +1229,8 @@ export function useSessionDiff<TData = Awaited<ReturnType<typeof sessionDiff>>, 
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useSessionDiff<TData = Awaited<ReturnType<typeof sessionDiff>>, TError = ApiError>(
- id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof sessionDiff>>, TError, TData>> & Pick<
+ id: string,
+    params?: SessionDiffParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof sessionDiff>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof sessionDiff>>,
           TError,
@@ -1225,7 +1240,8 @@ export function useSessionDiff<TData = Awaited<ReturnType<typeof sessionDiff>>, 
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useSessionDiff<TData = Awaited<ReturnType<typeof sessionDiff>>, TError = ApiError>(
- id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof sessionDiff>>, TError, TData>>, request?: SecondParameter<typeof http>}
+ id: string,
+    params?: SessionDiffParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof sessionDiff>>, TError, TData>>, request?: SecondParameter<typeof http>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
@@ -1233,11 +1249,12 @@ export function useSessionDiff<TData = Awaited<ReturnType<typeof sessionDiff>>, 
  */
 
 export function useSessionDiff<TData = Awaited<ReturnType<typeof sessionDiff>>, TError = ApiError>(
- id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof sessionDiff>>, TError, TData>>, request?: SecondParameter<typeof http>}
+ id: string,
+    params?: SessionDiffParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof sessionDiff>>, TError, TData>>, request?: SecondParameter<typeof http>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
-  const queryOptions = getSessionDiffQueryOptions(id,options)
+  const queryOptions = getSessionDiffQueryOptions(id,params,options)
 
   const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 
@@ -1251,8 +1268,9 @@ export function useSessionDiff<TData = Awaited<ReturnType<typeof sessionDiff>>, 
  */
 export const useSetSessionDiffQueryData = () => {
   const queryClient = useQueryClient();
-  return (id: string,updater: Awaited<ReturnType<typeof sessionDiff>> | undefined | ((old: Awaited<ReturnType<typeof sessionDiff>> | undefined) => Awaited<ReturnType<typeof sessionDiff>> | undefined)) => {
-    queryClient.setQueriesData<Awaited<ReturnType<typeof sessionDiff>>>({ queryKey: getSessionDiffQueryKey(id) }, updater);
+  return (id: string,
+    params: SessionDiffParams | undefined,updater: Awaited<ReturnType<typeof sessionDiff>> | undefined | ((old: Awaited<ReturnType<typeof sessionDiff>> | undefined) => Awaited<ReturnType<typeof sessionDiff>> | undefined)) => {
+    queryClient.setQueriesData<Awaited<ReturnType<typeof sessionDiff>>>({ queryKey: getSessionDiffQueryKey(id,params) }, updater);
   };
 }
 
@@ -1261,8 +1279,9 @@ export const useSetSessionDiffQueryData = () => {
  */
 export const useGetSessionDiffQueryData = () => {
   const queryClient = useQueryClient();
-  return (id: string,) =>
-    queryClient.getQueryData<Awaited<ReturnType<typeof sessionDiff>>>(getSessionDiffQueryKey(id));
+  return (id: string,
+    params?: SessionDiffParams,) =>
+    queryClient.getQueryData<Awaited<ReturnType<typeof sessionDiff>>>(getSessionDiffQueryKey(id,params));
 }
 
 
@@ -1831,7 +1850,9 @@ export const useOpenPullRequest = <TError = ApiError,
 }
 
 /**
- * @summary Push the branch, so the work outlives the workspace.
+ * Each repository is pushed to its own remote. One that has nothing new is
+ * skipped rather than refused: it is a repository this change did not touch.
+ * @summary Push every branch, so the work outlives the workspace.
  */
 export const pushSession = async (id: string, options?: Parameters<typeof http>[1]): Promise<Done> => {
 
@@ -1880,7 +1901,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type PushSessionMutationError = ApiError
 
     /**
- * @summary Push the branch, so the work outlives the workspace.
+ * @summary Push every branch, so the work outlives the workspace.
  */
 export const usePushSession = <TError = ApiError,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof pushSession>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof http>}
@@ -1891,6 +1912,79 @@ export const usePushSession = <TError = ApiError,
         TContext
       > => {
       return useMutation(getPushSessionMutationOptions(options), queryClient);
+    }
+    export const getAddRepoUrl = (id: string,) => {
+
+
+
+
+  return `/api/v1/sessions/${id}/repos`
+}
+
+/**
+ * The same work as bring-up, done once more. The agent is told afterwards,
+ * because an agent that is not told has no reason to look.
+ * @summary Check another repository into a session that is already running.
+ */
+export const addRepo = async (id: string,
+    newCheckout: NewCheckout, options?: Parameters<typeof http>[1]): Promise<Done> => {
+
+  return http<Done>(getAddRepoUrl(id),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(newCheckout)
+  }
+);}
+
+
+
+
+
+export const getAddRepoMutationOptions = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof addRepo>>, TError,{id: string;data: NewCheckout}, TContext>, request?: SecondParameter<typeof http>}
+): UseMutationOptions<Awaited<ReturnType<typeof addRepo>>, TError,{id: string;data: NewCheckout}, TContext> => {
+
+const mutationKey = ['addRepo'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof addRepo>>, {id: string;data: NewCheckout}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  addRepo(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type AddRepoMutationResult = NonNullable<Awaited<ReturnType<typeof addRepo>>>
+    export type AddRepoMutationBody = NewCheckout
+    export type AddRepoMutationError = ApiError
+
+    /**
+ * @summary Check another repository into a session that is already running.
+ */
+export const useAddRepo = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof addRepo>>, TError,{id: string;data: NewCheckout}, TContext>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof addRepo>>,
+        TError,
+        {id: string;data: NewCheckout},
+        TContext
+      > => {
+      return useMutation(getAddRepoMutationOptions(options), queryClient);
     }
     export const getStopSessionUrl = (id: string,) => {
 
@@ -2046,9 +2140,9 @@ export const useSendTurn = <TError = ApiError,
 /**
  * @summary What is in this workspace that isn't safely elsewhere.
  */
-export const sessionWork = async (id: string, options?: Parameters<typeof http>[1]): Promise<WorkSummary> => {
+export const sessionWork = async (id: string, options?: Parameters<typeof http>[1]): Promise<CheckoutWork[]> => {
 
-  return http<WorkSummary>(getSessionWorkUrl(id),
+  return http<CheckoutWork[]>(getSessionWorkUrl(id),
   {
     ...options,
     method: 'GET'

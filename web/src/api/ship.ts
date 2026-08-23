@@ -1,27 +1,29 @@
 /**
  * Where a session's work has got to on its way out.
  *
- * A session already has its own branch, so there is exactly one sequence and at
- * any moment it is at exactly one point in it:
+ * Each repository a session holds goes through exactly one sequence:
  *
  *     changes on disk → committed → pushed → pull request open
  *
- * Knowing which is what lets one control say the next honest thing, instead of
- * offering every verb and leaving somebody to work out which applies.
+ * A session holds any number of them, and they are rarely at the same point —
+ * you change the API and the client, commit both, and one push fails. So this
+ * reads every checkout and says the *next honest thing* for the session as a
+ * whole, which is what lets one control name a step instead of offering every
+ * verb and leaving somebody to work out which applies.
  */
 
-import type { Session, WorkSummary } from "./generated/model";
+import type { CheckoutWork, Session } from "./generated/model";
 
 export type Stage =
-  /** Nothing has changed, so there is nothing to do. */
+  /** Nothing has changed anywhere, so there is nothing to do. */
   | "clean"
   /** Files are edited but not committed. */
   | "uncommitted"
-  /** Committed, and the remote has not got it. */
+  /** Committed, and a remote hasn't got it. */
   | "unpushed"
-  /** Pushed, and no pull request yet. */
+  /** Pushed, and something has no pull request yet. */
   | "pushed"
-  /** A pull request is open. Further pushes amend it. */
+  /** Every pull request is open. Further pushes amend them. */
   | "open";
 
 export type Ship = {
@@ -30,8 +32,10 @@ export type Ship = {
   label: string;
   /** Why it cannot be pressed, when it cannot. */
   blocked?: string;
-  /** Where the pull request is, once there is one. */
+  /** Where to go when there is one place to go. */
   url?: string;
+  /** How many repositories the next step touches. */
+  count: number;
 };
 
 /**
@@ -40,43 +44,94 @@ export type Ship = {
  * `work` is absent while the summary is still being fetched, which is a
  * different thing from a clean workspace and must not be drawn as one.
  */
-export function shipping(session: Session, work?: WorkSummary): Ship {
-  const url = session.pullRequest ?? undefined;
+export function shipping(session: Session, work?: CheckoutWork[]): Ship {
+  const held = work ?? [];
 
-  if (!session.repo) {
+  if (session.checkouts?.length === 0 && !session.repo) {
     return {
       stage: "clean",
       label: "Commit & push",
       blocked: "This session has no repository.",
+      count: 0,
     };
   }
   if (!work) {
-    return { stage: "clean", label: "Commit & push", blocked: "Looking…", url };
+    return { stage: "clean", label: "Commit & push", blocked: "Looking…", count: 0 };
   }
 
-  if (work.uncommitted > 0) {
-    return { stage: "uncommitted", label: "Commit & push", url };
+  // In the order the sequence runs, because the earliest unfinished step is the
+  // one to offer: committing before pushing before opening, even when another
+  // repository is further along.
+  const uncommitted = held.filter((c) => c.uncommitted > 0);
+  if (uncommitted.length > 0) {
+    return { stage: "uncommitted", label: name("Commit & push", uncommitted.length, held.length), count: uncommitted.length };
   }
-  if (work.ahead > 0) {
-    // Committed and not sent. Amending an open request is still a push, so the
-    // word is the same and the sentence around it is not.
-    return { stage: url ? "open" : "unpushed", label: "Push", url };
-  }
-  if (!work.pushed) {
+
+  const unpushed = held.filter((c) => c.ahead > 0);
+  if (unpushed.length > 0) {
+    // Amending an open request is still a push, so the word is the same and the
+    // sentence around it is not.
+    const open = unpushed.every((c) => c.pullRequest);
     return {
-      stage: "clean",
-      label: "Commit & push",
-      blocked: "Nothing has changed yet.",
-      url,
+      stage: open ? "open" : "unpushed",
+      label: name("Push", unpushed.length, held.length),
+      url: single(unpushed),
+      count: unpushed.length,
     };
   }
-  if (url) {
-    return { stage: "open", label: "View pull request", url };
+
+  const pushed = held.filter((c) => c.pushed);
+  const toOpen = pushed.filter((c) => !c.pullRequest);
+  if (toOpen.length > 0) {
+    return {
+      stage: "pushed",
+      label: toOpen.length === 1 ? "Open pull request" : `Open ${toOpen.length} pull requests`,
+      count: toOpen.length,
+    };
   }
-  return { stage: "pushed", label: "Open pull request", url };
+
+  const open = held.filter((c) => c.pullRequest);
+  if (open.length > 0) {
+    return {
+      stage: "open",
+      label: open.length === 1 ? "View pull request" : `${open.length} pull requests open`,
+      url: single(open),
+      count: open.length,
+    };
+  }
+
+  return {
+    stage: "clean",
+    label: "Commit & push",
+    blocked: "Nothing has changed yet.",
+    count: 0,
+  };
+}
+
+/**
+ * A verb, and how much of the session it applies to.
+ *
+ * Silent when it applies to everything: "Commit & push" for one repository, and
+ * for two that both changed. The count is only worth saying when it is *not*
+ * all of them — that is the case somebody needs to notice.
+ */
+function name(verb: string, touched: number, held: number): string {
+  if (held <= 1 || touched === held) return verb;
+  return `${verb} ${touched} of ${held}`;
+}
+
+/** The one URL, when there is exactly one. */
+function single(held: CheckoutWork[]): string | undefined {
+  const urls = held.map((c) => c.pullRequest).filter(Boolean);
+  return urls.length === 1 ? (urls[0] as string) : undefined;
 }
 
 /** Whether there is anything worth pressing. */
 export function ready(ship: Ship): boolean {
   return ship.blocked === undefined;
+}
+
+/** Whether ending this would lose something. */
+export function atRisk(work?: CheckoutWork[]): boolean {
+  return !work || work.some((c) => c.uncommitted > 0 || c.ahead > 0);
 }

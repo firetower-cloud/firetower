@@ -6,7 +6,7 @@ import Link from "next/link";
 import { useGetSession, useRenameSession } from "@/src/api/generated/sessions/sessions";
 import { useListEvents } from "@/src/api/generated/events/events";
 import { useSessionWork } from "@/src/api/generated/sessions/sessions";
-import type { Session, WorkSummary } from "@/src/api/generated/model";
+import type { CheckoutWork, Session } from "@/src/api/generated/model";
 import { stepLines } from "@/components/Steps";
 import { Signal } from "@/components/Signal";
 import { Terminal } from "@/components/Terminal";
@@ -15,6 +15,7 @@ import { Review } from "@/components/Review";
 import { shipping, ready } from "@/src/api/ship";
 import { SessionMenu } from "@/components/SessionActions";
 import { Diff } from "@/components/Diff";
+import { AddRepo } from "@/components/AddRepo";
 import { Files } from "@/components/Files";
 import { elapsed, minutesSince, unfinished, STATUS_LABEL } from "@/src/api/view";
 import { ApiError } from "@/src/api/http";
@@ -51,7 +52,7 @@ function Ship({
   onReview,
 }: {
   session: Session;
-  work?: WorkSummary;
+  work?: CheckoutWork[];
   onReview: () => void;
 }) {
   const ship = shipping(session, work);
@@ -82,6 +83,8 @@ export default function SessionView() {
   const id = useSessionId();
   const [tab, setTab] = useState<Tab>("Chat");
   const [reviewing, setReviewing] = useState(false);
+  /** Open while somebody is choosing another repository to check in. */
+  const [adding, setAdding] = useState(false);
   /** The name being edited, when it is. Absent means it is not. */
   const [naming, setNaming] = useState<string | null>(null);
   /**
@@ -229,6 +232,10 @@ export default function SessionView() {
         <Review session={session} work={work} onClose={() => setReviewing(false)} />
       )}
 
+      {adding && (
+        <AddRepo session={session} onClose={() => setAdding(false)} onAdded={() => refetch()} />
+      )}
+
       <section className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden px-4 py-4 lg:px-6 lg:py-5">
         <div className="mb-4 flex gap-1">
           {(["Chat", "Shell", "Files", "Changes"] as Tab[]).map((t) => (
@@ -253,6 +260,8 @@ export default function SessionView() {
               live={busy}
               branch={session.branch}
               repo={session.repo}
+              checkouts={session.checkouts}
+              onAddRepo={busy ? () => setAdding(true) : undefined}
               steps={stepLines(session, events)}
             />
           </div>

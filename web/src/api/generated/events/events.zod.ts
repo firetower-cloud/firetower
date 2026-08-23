@@ -39,6 +39,7 @@ export const ListEventsResponseItem = zod.object({
   "type": zod.enum(['RepoFetched'])
 }),zod.object({
   "branch": zod.string(),
+  "repo": zod.string().nullish().describe('Which repository, when a session has more than one.\n\nAbsent from a worker that predates a session holding more than one,\nand from a session that holds exactly one — in both cases there is\nnothing to disambiguate.'),
   "type": zod.enum(['WorktreeAdded'])
 }),zod.object({
   "detail": zod.string(),

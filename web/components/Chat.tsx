@@ -22,6 +22,7 @@ import { useNotes, asMessage, type Note } from "@/src/api/notes";
 import { useReveal } from "@/src/api/reveal";
 import type {
   Attached,
+  Checkout,
   Decision,
   ItemKind,
   PlanStep,
@@ -45,12 +46,17 @@ export function Chat({
   live,
   branch,
   repo,
+  checkouts,
+  onAddRepo,
   steps = [],
 }: {
   sessionId: string;
   live: boolean;
   branch?: string | null;
   repo?: string | null;
+  /** Every repository this session holds. */
+  checkouts?: Checkout[];
+  onAddRepo?: () => void;
   /** How the workspace was built, drawn at the top of the transcript. */
   steps?: Line[];
 }) {
@@ -248,6 +254,8 @@ export function Chat({
           limits={conversation.limits}
           branch={branch}
           repo={repo}
+          checkouts={checkouts}
+          onAddRepo={onAddRepo}
           onSend={submit}
           onSet={set}
           onStop={() => interrupt.mutate({ id: sessionId })}

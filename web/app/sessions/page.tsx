@@ -91,7 +91,7 @@ export default function AllSessions() {
               <span className={`shrink-0 text-[13.5px] ${ended ? "text-dim" : "text-bone"}`}>
                 {s.name}
               </span>
-              <span className="font-mono text-[11.5px] text-mute">{s.repo}</span>
+              <span className="font-mono text-[11.5px] text-mute">{many(s)}</span>
               <span
                 className={`min-w-0 flex-1 truncate text-[13.5px] ${ended ? "text-dim" : "text-text"}`}
               >
@@ -127,4 +127,16 @@ export default function AllSessions() {
       )}
     </div>
   );
+}
+
+/**
+ * What a row says a session is on.
+ *
+ * The first repository, and how many others — a row has space for one name,
+ * and "+1" is the part that says this session is not what it looks like.
+ */
+function many(session: { repo?: string | null; checkouts?: { slug: string }[] }): string {
+  const held = session.checkouts ?? [];
+  if (held.length > 1) return `${held[0].slug} +${held.length - 1}`;
+  return held[0]?.slug ?? session.repo ?? "";
 }

@@ -17,6 +17,22 @@ pub struct Store {
     pool: SqlitePool,
 }
 
+/// One repository checked out into a session's workspace, as the worker
+/// records it.
+///
+/// Its own type rather than `ft_core::Checkout` because the worker is the side
+/// that fetches and so needs the remote, and has no use for a control-plane
+/// repository id.
+#[derive(Debug, Clone)]
+pub struct Checkout {
+    pub slug: String,
+    pub remote: String,
+    pub base: String,
+    pub branch: String,
+    /// Relative to the workspace. Empty means the checkout *is* the workspace.
+    pub path: String,
+}
+
 /// One thing that happened, as recorded.
 #[derive(Debug, Clone)]
 pub struct StoredEvent {
@@ -308,6 +324,62 @@ impl Store {
         }))
     }
 
+    /// Write down a repository this session has checked out.
+    ///
+    /// Upserted by position, so re-running a checkout corrects the row rather
+    /// than adding a second one for the same repository.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn record_checkout(
+        &self,
+        session_id: &SessionId,
+        position: i64,
+        slug: &str,
+        remote: &str,
+        base: &str,
+        branch: &str,
+        path: &str,
+    ) -> Result<()> {
+        sqlx::query(
+            "INSERT INTO session_repos (session_id, position, slug, remote, base, branch, path)
+             VALUES (?, ?, ?, ?, ?, ?, ?)
+             ON CONFLICT (session_id, position) DO UPDATE SET
+                slug = excluded.slug, remote = excluded.remote,
+                base = excluded.base, branch = excluded.branch, path = excluded.path",
+        )
+        .bind(session_id.as_str())
+        .bind(position)
+        .bind(slug)
+        .bind(remote)
+        .bind(base)
+        .bind(branch)
+        .bind(path)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Everything this session has checked out, in the order it was added.
+    pub async fn checkouts_of(&self, session_id: &SessionId) -> Result<Vec<Checkout>> {
+        let rows = sqlx::query(
+            "SELECT slug, remote, base, branch, path FROM session_repos
+             WHERE session_id = ? ORDER BY position",
+        )
+        .bind(session_id.as_str())
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows
+            .into_iter()
+            .map(|r| Checkout {
+                slug: r.get("slug"),
+                remote: r.get("remote"),
+                base: r.get("base"),
+                branch: r.get("branch"),
+                path: r.get("path"),
+            })
+            .collect())
+    }
+
     /// Which repository a session came from, for finding its mirror again.
     pub async fn repo_of(&self, session_id: &SessionId) -> Result<Option<String>> {
         let row = sqlx::query("SELECT repo FROM sessions WHERE id = ?")
@@ -431,6 +503,7 @@ mod tests {
                 &id,
                 &EventKind::WorktreeAdded {
                     branch: "agent/fix".into(),
+                    repo: None,
                 },
             )
             .await
@@ -448,9 +521,15 @@ mod tests {
             .append(&id, &EventKind::RepoFetched { detail: "a".into() })
             .await
             .unwrap();
-        s.append(&id, &EventKind::WorktreeAdded { branch: "b".into() })
-            .await
-            .unwrap();
+        s.append(
+            &id,
+            &EventKind::WorktreeAdded {
+                branch: "b".into(),
+                repo: None,
+            },
+        )
+        .await
+        .unwrap();
         s.append(&id, &EventKind::TmuxOpened { name: "c".into() })
             .await
             .unwrap();

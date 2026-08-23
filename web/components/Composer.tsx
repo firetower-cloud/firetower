@@ -49,7 +49,17 @@ function agentLabel(agent: AgentView, runsHere: boolean) {
 export function Composer() {
   const [open, setOpen] = useState(false);
   const [text, setText] = useState("");
-  const [repoId, setRepoId] = useState<string>("");
+  /**
+   * The repositories this session will check out, in order.
+   *
+   * A list rather than one, because work is often two of them — an API and the
+   * client that calls it — and two sessions that cannot see each other is not
+   * an answer to that. Empty is a bare agent: a workspace with nothing checked
+   * out, which is still a real choice.
+   */
+  const [checkouts, setCheckouts] = useState<{ id: string; slug: string; base?: string }[]>([]);
+  const [adding, setAdding] = useState(false);
+  const [search, setSearch] = useState("");
   const [agent, setAgent] = useState<Agent | "">("");
   const [base, setBase] = useState<string>("");
   const [branch, setBranch] = useState<string>("");
@@ -60,10 +70,14 @@ export function Composer() {
 
   const { data: repos = [] } = useListRepos();
 
-  // "No repository" is a real choice, not an empty state: an agent with a
-  // workspace and nothing checked out.
-  const NONE = "No repository";
-  const repo = repoId === NONE ? undefined : (repos.find((r) => r.id === repoId) ?? repos[0]);
+  // The first one, for everything that wants a single name: the caption when
+  // the composer is closed, the branch suggestion.
+  const repo = checkouts[0] ? repos.find((r) => r.id === checkouts[0].id) : undefined;
+  const unpicked = repos.filter(
+    (r) =>
+      !checkouts.some((p) => p.id === r.id) &&
+      r.slug.toLowerCase().includes(search.trim().toLowerCase()),
+  );
 
   const { data: agents = [] } = useListAgents();
   const { data: allHosts = [] } = useListHosts();
@@ -96,7 +110,7 @@ export function Composer() {
    *
    * A machine with nothing on it stays in the list rather than disappearing —
    * you added it, and it not being there would be its own puzzle — but it says
-   * why it cannot be picked. Used for the value and the matcher as well as the
+   * why it cannot be checkouts. Used for the value and the matcher as well as the
    * options, because a label that differs between the three selects nothing.
    */
   const label = (h: Host) => (usable(h) ? picked(h) : `${picked(h)} · no worker`);
@@ -145,12 +159,13 @@ export function Composer() {
     if (!text.trim() || !chosenAgent || create.isPending) return;
     create.mutate({
       data: {
-        repoId: repo?.id,
+        // Every repository, each with its own base. The branch is the
+        // session's and is the same in all of them, which is what makes a
+        // change across two of them reviewable.
+        repos: checkouts.map((p) => ({ repoId: p.id, base: p.base })),
         prompt: text.trim(),
         agent: chosenAgent,
-        // Everything about a checkout goes together, or none of it does.
-        base: repo ? knownBase : undefined,
-        branch: repo ? branch.trim() || undefined : undefined,
+        branch: checkouts.length ? branch.trim() || undefined : undefined,
         hostId: host?.id,
       },
     });
@@ -177,26 +192,92 @@ export function Composer() {
           className="flex-1 resize-none bg-transparent text-[14px] leading-6 text-bone placeholder:text-mute focus:outline-none"
         />
         {!open && (
-          <span className="mt-0.5 font-mono text-[11px] text-mute">{repo?.slug ?? NONE}</span>
+          <span className="mt-0.5 font-mono text-[11px] text-mute">
+            {checkouts.length === 0
+              ? "No repository"
+              : checkouts.length === 1
+                ? checkouts[0].slug
+                : `${checkouts[0].slug} +${checkouts.length - 1}`}
+          </span>
         )}
       </div>
 
       {open && (
         <div className="border-t border-line px-3 py-2.5">
           <div className="flex flex-wrap items-center gap-1.5">
-            <Chip
-              glyph="repo"
-              value={repo?.slug ?? NONE}
-              onChange={(slug) =>
-                setRepoId(slug === NONE ? NONE : (repos.find((r) => r.slug === slug)?.id ?? ""))
-              }
-              options={[...repos.map((r) => r.slug), NONE]}
-            />
+            {checkouts.map((p) => (
+              <span key={p.id} className="flex items-center gap-1.5">
+                <span className="flex items-center gap-1.5 rounded-[5px] border border-line bg-panel py-1 pr-1 pl-2 text-[12px] text-dim">
+                  <span className="text-mute">▣</span>
+                  <span className="font-mono text-[11.5px] text-bone">{p.slug}</span>
+                  <button
+                    onClick={() => setCheckouts((held) => held.filter((h) => h.id !== p.id))}
+                    aria-label={`Remove ${p.slug}`}
+                    className="rounded-[4px] px-1 text-[12px] text-mute transition-colors hover:text-brick"
+                  >
+                    ×
+                  </button>
+                </span>
+              </span>
+            ))}
+
+            {/* One more, and the list of what is left. Search because a fleet
+                has more repositories than a menu can hold. */}
+            <span className="relative">
+              <button
+                onClick={() => {
+                  setAdding(!adding);
+                  setSearch("");
+                }}
+                className="flex items-center gap-1.5 rounded-[5px] border border-line border-dashed bg-panel px-2 py-1 text-[12px] text-mute transition-colors hover:border-ember/40 hover:text-text"
+              >
+                + {checkouts.length === 0 ? "repository" : "another"}
+              </button>
+
+              {adding && (
+                <div className="absolute bottom-full left-0 z-30 mb-1.5 w-[300px] rounded-[10px] border border-line bg-panel p-1.5 shadow-[0_12px_36px_-14px_rgba(0,0,0,0.85)]">
+                  <input
+                    autoFocus
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    onKeyDown={(e) => e.key === "Escape" && setAdding(false)}
+                    placeholder="Search repositories"
+                    className="mb-1 w-full rounded-[6px] bg-ground px-2.5 py-1.5 text-[12.5px] text-bone placeholder:text-mute focus:outline-none"
+                  />
+                  <ul className="max-h-[240px] overflow-y-auto">
+                    {unpicked.length === 0 && (
+                      <li className="px-2.5 py-2 text-[12px] text-mute">
+                        {repos.length === 0 ? "Nothing connected yet." : "All of them are in."}
+                      </li>
+                    )}
+                    {unpicked.map((r) => (
+                      <li key={r.id}>
+                        <button
+                          onClick={() => {
+                            setCheckouts((held) => [...held, { id: r.id, slug: r.slug }]);
+                            setAdding(false);
+                          }}
+                          className="w-full rounded-[6px] px-2.5 py-1.5 text-left font-mono text-[12px] text-text transition-colors hover:bg-raise"
+                        >
+                          {r.slug}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </span>
+
             {repo && (
             <Chip
               glyph="branch"
               value={chosenBase}
-              onChange={setBase}
+              onChange={(b) => {
+                setBase(b);
+                setCheckouts((held) =>
+                  held.map((p, i) => (i === 0 ? { ...p, base: b } : p)),
+                );
+              }}
               options={branches.length ? branches : [chosenBase]}
             />
             )}

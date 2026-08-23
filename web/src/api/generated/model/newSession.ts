@@ -7,6 +7,7 @@
  */
 import type { Agent } from './agent';
 import type { HostId } from './hostId';
+import type { NewCheckout } from './newCheckout';
 import type { RepoId } from './repoId';
 import type { WorkspaceSize } from './workspaceSize';
 
@@ -31,5 +32,13 @@ export interface NewSession {
   hostId?: null | HostId;
   prompt: string;
   repoId?: null | RepoId;
+  /**
+     * Every repository to check out, in the order they should appear.
+     *
+     * Each may name its own base branch; the working branch is the session's
+     * and is the same in all of them, which is what makes a change across two
+     * repositories reviewable.
+     */
+  repos?: NewCheckout[];
   size?: WorkspaceSize;
 }

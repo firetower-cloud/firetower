@@ -11,8 +11,9 @@ import {
   getSessionWorkQueryKey,
 } from "@/src/api/generated/sessions/sessions";
 import { useListHosts } from "@/src/api/generated/hosts/hosts";
-import type { Session, WorkSummary } from "@/src/api/generated/model";
+import type { CheckoutWork, Session } from "@/src/api/generated/model";
 import { ApiError } from "@/src/api/http";
+import { atRisk } from "@/src/api/ship";
 
 /**
  * The two things you can do to a session itself.
@@ -22,7 +23,7 @@ import { ApiError } from "@/src/api/http";
  * the space. These two are rare and destructive-ish, so they live behind a
  * menu where neither can be hit on the way to something else.
  */
-export function SessionMenu({ session, work }: { session: Session; work?: WorkSummary }) {
+export function SessionMenu({ session, work }: { session: Session; work?: CheckoutWork[] }) {
   const [open, setOpen] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [failed, setFailed] = useState<string | null>(null);
@@ -202,11 +203,6 @@ export function SessionMenu({ session, work }: { session: Session; work?: WorkSu
       )}
     </div>
   );
-}
-
-/** Whether ending this would lose something. */
-function atRisk(work?: WorkSummary) {
-  return !work || work.uncommitted > 0 || work.ahead > 0;
 }
 
 function Item({

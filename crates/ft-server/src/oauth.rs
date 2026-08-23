@@ -309,6 +309,55 @@ pub async fn open_pull_request(
     )
 }
 
+/// Replace the body of a pull request that is already open.
+///
+/// Used to put the links to its siblings in: none of them has a URL until all
+/// of them have been created, so the cross-links can only be written afterwards.
+///
+/// Takes the web URL because that is what was recorded — the API path is
+/// derived from it rather than kept alongside.
+pub async fn amend_pull_request(
+    provider: &Provider,
+    token: &str,
+    url: &str,
+    body: &str,
+) -> Result<()> {
+    // `https://github.com/acme/api/pull/12` → `acme/api` and `12`.
+    let rest = url
+        .split("://")
+        .nth(1)
+        .and_then(|after| after.split_once('/'))
+        .map(|(_, path)| path)
+        .unwrap_or_default();
+    let mut parts = rest.split('/');
+    let (Some(owner), Some(repo), Some(_), Some(number)) =
+        (parts.next(), parts.next(), parts.next(), parts.next())
+    else {
+        bail!("{url} is not a pull request address this understands");
+    };
+
+    let response = client()?
+        .patch(format!(
+            "{}/repos/{owner}/{repo}/pulls/{number}",
+            provider.api_base
+        ))
+        .bearer_auth(token)
+        .header("accept", "application/vnd.github+json")
+        .json(&serde_json::json!({ "body": body }))
+        .send()
+        .await
+        .with_context(|| format!("asking {} to amend a pull request", provider.label))?;
+
+    if !response.status().is_success() {
+        bail!(
+            "{}: {}",
+            response.status(),
+            response.text().await.unwrap_or_default()
+        );
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -243,9 +243,35 @@ impl GitRoot {
         workspace: &str,
     ) -> Result<(PathBuf, String)> {
         let dest = self.worktree_path(workspace);
-        tokio::fs::create_dir_all(&self.worktrees).await?;
+        self.add_worktree_at(mirror, branch, base, &dest).await
+    }
 
-        if dest.exists() {
+    /// The same, at a path the caller has already decided.
+    ///
+    /// A workspace holds a checkout per repository now, so where one goes is
+    /// the caller's business — and one of them may be the workspace itself, for
+    /// a session laid out before that was true.
+    pub async fn add_worktree_at(
+        &self,
+        mirror: &Path,
+        branch: &str,
+        base: &str,
+        dest: &Path,
+    ) -> Result<(PathBuf, String)> {
+        let dest = dest.to_path_buf();
+        tokio::fs::create_dir_all(&self.worktrees).await?;
+        if let Some(parent) = dest.parent() {
+            tokio::fs::create_dir_all(parent).await?;
+        }
+
+        // An empty directory is not in the way — the workspace is made before
+        // anything is checked into it, and a checkout that *is* the workspace
+        // would otherwise refuse on the directory holding it.
+        let occupied = match tokio::fs::read_dir(&dest).await {
+            Ok(mut entries) => entries.next_entry().await.ok().flatten().is_some(),
+            Err(_) => dest.exists(),
+        };
+        if occupied {
             bail!("a worktree already exists at {}", dest.display());
         }
 
@@ -313,6 +339,12 @@ impl GitRoot {
     /// Remove a worktree and forget it. Safe to call when it's already gone.
     pub async fn remove_worktree(&self, mirror: &Path, name: &str) -> Result<()> {
         let dest = self.worktree_path(name);
+        self.remove_worktree_at(mirror, &dest).await
+    }
+
+    /// The same, for a worktree at a path the caller already knows.
+    pub async fn remove_worktree_at(&self, mirror: &Path, dest: &Path) -> Result<()> {
+        let dest = dest.to_path_buf();
         if !dest.exists() {
             return Ok(());
         }

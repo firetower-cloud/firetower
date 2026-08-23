@@ -108,7 +108,7 @@ export default function Dashboard() {
                 >
                   <Signal status={s.status} size={7} />
                   <span className="shrink-0 text-[13.5px] text-bone">{s.name}</span>
-                  <span className="font-mono text-[11.5px] text-mute">{s.repo}</span>
+                  <span className="font-mono text-[11.5px] text-mute">{many(s)}</span>
                   <span className="min-w-0 flex-1 truncate text-[13.5px] text-text">{s.title}</span>
                   <span className="hidden font-mono text-[11px] text-mute md:block">{s.host}</span>
                   <span className="w-9 text-right font-mono text-[11px] text-dim">
@@ -136,7 +136,7 @@ export default function Dashboard() {
                 >
                   <span className="text-mute/50">⎿</span>
                   <span className="shrink-0 text-[13px] text-dim">{s.name}</span>
-                  <span className="font-mono text-[11.5px] text-mute/70">{s.repo}</span>
+                  <span className="font-mono text-[11.5px] text-mute/70">{many(s)}</span>
                   <span className="min-w-0 flex-1 truncate text-[13px] text-dim">{s.title}</span>
                   <span className="font-mono text-[11px] text-mute">{outcomeOf(s)}</span>
                 </Link>
@@ -248,4 +248,16 @@ function Section({
       {children}
     </section>
   );
+}
+
+/**
+ * What a row says a session is on.
+ *
+ * The first repository, and how many others — a row has space for one name,
+ * and "+1" is the part that says this session is not what it looks like.
+ */
+function many(session: { repo?: string | null; checkouts?: { slug: string }[] }): string {
+  const held = session.checkouts ?? [];
+  if (held.length > 1) return `${held[0].slug} +${held.length - 1}`;
+  return held[0]?.slug ?? session.repo ?? "";
 }

@@ -8,7 +8,7 @@
 //! Encoding is newline-delimited JSON: debuggable with `tee`, and behind
 //! [`Codec`] so a compact binary format is a later swap rather than a rewrite.
 
-use ft_core::{Agent, AgentPresence, EventKind, SessionId, WorkSummary, WorkspaceSize};
+use ft_core::{Agent, AgentPresence, EventKind, SessionId, WorkspaceSize};
 use serde::{Deserialize, Serialize};
 
 /// Bumped when a frame changes shape incompatibly. Checked during the handshake.
@@ -27,7 +27,12 @@ use serde::{Deserialize, Serialize};
 /// 9 — the agent's own terminal is gone, along with typing at it. `Pty` now
 /// names only the shell somebody opens for themselves, and an older worker
 /// would read a shell frame as a request to attach to the agent.
-pub const PROTOCOL_VERSION: u32 = 9;
+///
+/// 10 — a session holds any number of repositories. `CreateWorkspace.repo`
+/// became `repos`, each carrying the setup, environment file and credential
+/// that used to sit beside it; and the git actions name which checkout they
+/// mean. An older worker would read a two-repository session as none at all.
+pub const PROTOCOL_VERSION: u32 = 10;
 
 mod codec;
 pub use codec::{Codec, CodecError, FrameReader, FrameWriter};
@@ -227,6 +232,10 @@ pub enum Action {
     /// Kill the agent. The workspace and its branch stay.
     Stop,
     Commit {
+        /// Which checkout, by its path inside the workspace. Empty means the
+        /// workspace itself, which is what a single-repo session is.
+        #[serde(default)]
+        checkout: String,
         message: String,
         /// Which files to include. Empty means all of them.
         ///
@@ -236,9 +245,15 @@ pub enum Action {
         #[serde(default)]
         paths: Vec<String>,
     },
-    Push,
-    /// Everything this session changed, as a unified diff.
-    Diff,
+    Push {
+        #[serde(default)]
+        checkout: String,
+    },
+    /// Everything one checkout changed, as a unified diff.
+    Diff {
+        #[serde(default)]
+        checkout: String,
+    },
     /// Put a file somebody handed over into the workspace, and say where it
     /// landed.
     ///
@@ -258,36 +273,43 @@ pub enum Action {
     /// Runs on the host, where the code is — the control plane never sees the
     /// diff and needs no model credentials of its own.
     Describe,
+    /// Check another repository into a session that is already running.
+    ///
+    /// The same work as bring-up, done once more: fetch, cut the worktree, and
+    /// say where it landed. The agent is told afterwards, because an agent that
+    /// is not told has no reason to look.
+    AddRepo {
+        repo: Box<RepoSpec>,
+        /// What its setup script should run with. Resolved by the control
+        /// plane, like the environment a session starts with, and not kept
+        /// anywhere on the worker.
+        #[serde(default)]
+        env: Vec<(String, String)>,
+    },
 }
 
 /// Everything a worker needs to build a workspace. No control-plane concepts.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateWorkspace {
     pub session_id: SessionId,
-    /// `None` for a bare agent: make a directory, start the agent, clone
-    /// nothing. Everything about a checkout lives in here so that "no
-    /// repository" is one absent value rather than four empty strings.
-    pub repo: Option<RepoSpec>,
+    /// What to check out, in order. Empty for a bare agent: make a directory,
+    /// start the agent, clone nothing.
+    ///
+    /// Everything about a checkout lives inside its own spec, so that adding a
+    /// second repository adds an element rather than a parallel set of fields.
+    #[serde(default)]
+    pub repos: Vec<RepoSpec>,
     /// Directory name for the worktree. Readable, so someone on the host can
     /// tell what they're looking at.
     pub workspace: String,
     pub prompt: String,
     pub agent: Agent,
     pub size: WorkspaceSize,
-    /// Runs before the agent starts.
-    pub setup: Option<String>,
     /// Injected into the workspace environment. Secrets are already resolved.
-    pub env: Vec<(String, String)>,
-    /// A file to write in the workspace before setup runs, for tooling that
-    /// reads one instead of the environment.
     ///
-    /// Its own list rather than a flag over `env`: what belongs in a file is
-    /// the repository's own variables, not the agent's API key or the two
-    /// variables a hook needs to find its way home.
-    #[serde(default)]
-    pub env_file: Option<EnvFile>,
-    /// For the clone, and held in memory for this session's later pushes.
-    pub credential: Option<Credential>,
+    /// Everything every checkout brings, plus the agent's own. What belongs in
+    /// a *file* is per repository and lives on its spec.
+    pub env: Vec<(String, String)>,
 }
 
 /// Which terminal in a session.
@@ -337,6 +359,30 @@ pub struct RepoSpec {
     pub slug: String,
     pub base: String,
     pub branch: String,
+    /// Where it goes inside the workspace.
+    ///
+    /// Empty means the checkout *is* the workspace, which is how a session made
+    /// before a session could hold more than one is laid out — a worker asked
+    /// to rebuild one of those must not move it.
+    #[serde(default)]
+    pub path: String,
+    /// This repository's own setup command, run inside this checkout.
+    ///
+    /// Here rather than beside the workspace because setup belongs to a
+    /// repository: two of them have two, and each wants to run where its own
+    /// package file is.
+    #[serde(default)]
+    pub setup: Option<String>,
+    /// A file to write inside this checkout before its setup runs.
+    ///
+    /// Inside the checkout, not the workspace: `.env` is read by the tooling of
+    /// the repository it belongs to, and two repositories both wanting `.env`
+    /// at the workspace root would be one file with the wrong contents.
+    #[serde(default)]
+    pub env_file: Option<EnvFile>,
+    /// For the clone, and held in memory for this checkout's later pushes.
+    #[serde(default)]
+    pub credential: Option<Credential>,
 }
 
 /// Worker to control plane.
@@ -421,7 +467,8 @@ pub enum ToServer {
     /// The answer to [`ToWorker::Summarize`].
     Summarized {
         req: ReqId,
-        summary: WorkSummary,
+        /// One per checkout. A session holds any number of them.
+        summaries: Vec<ft_core::CheckoutSummary>,
     },
     /// The answer to [`ToWorker::ProbeAgents`].
     AgentsProbed {

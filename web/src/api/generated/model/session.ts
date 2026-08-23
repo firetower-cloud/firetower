@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.6.0
  */
 import type { Agent } from './agent';
+import type { Checkout } from './checkout';
 import type { HostId } from './hostId';
 import type { SessionId } from './sessionId';
 import type { SessionStatus } from './sessionStatus';
@@ -21,10 +22,21 @@ export interface Session {
   /** @nullable */
   base?: string | null;
   /**
-     * Absent along with the repository — there is nothing to branch.
+     * The first checkout's branch, or `None` for a bare agent.
+     *
+     * Every checkout in a session is cut with the same requested name, so this
+     * is the right thing to show once — but git may have numbered them
+     * differently, so anything acting on a branch reads it from the checkout.
      * @nullable
      */
   branch?: string | null;
+  /**
+     * Every repository checked out into this session's workspace.
+     *
+     * Empty for a bare agent. One for most sessions. The whole point of the
+     * list is the third case.
+     */
+  checkouts?: Checkout[];
   createdAt: string;
   /**
      * When it was removed from here without the machine being told.
@@ -83,7 +95,10 @@ export interface Session {
      */
   pullRequest?: string | null;
   /**
-     * `None` for a bare agent: a workspace with nothing checked out.
+     * The first checkout's slug, or `None` for a bare agent.
+     *
+     * A convenience for the places that want one name — a row in a list, a
+     * caption. [`Session::checkouts`] is what is actually true.
      * @nullable
      */
   repo?: string | null;

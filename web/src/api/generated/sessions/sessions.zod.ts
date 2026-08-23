@@ -26,7 +26,16 @@ export const ListSessionsQueryParams = zod.object({
 export const ListSessionsResponseItem = zod.object({
   "agent": zod.enum(['ClaudeCode', 'Codex', 'Shell']).describe('Which agent runs inside a workspace.\n\nSerialised as the variant name — see the wire conventions in the brief: a\nfield takes the consumer\'s casing, an enum value stays the symbol it is.'),
   "base": zod.string().nullish(),
-  "branch": zod.string().nullish().describe('Absent along with the repository — there is nothing to branch.'),
+  "branch": zod.string().nullish().describe('The first checkout\'s branch, or `None` for a bare agent.\n\nEvery checkout in a session is cut with the same requested name, so this\nis the right thing to show once — but git may have numbered them\ndifferently, so anything acting on a branch reads it from the checkout.'),
+  "checkouts": zod.array(zod.object({
+  "base": zod.string().describe('The branch it was cut from.'),
+  "branch": zod.string().describe('The branch git actually made.\n\nNot always the one asked for: the same prompt twice wants the same\nname, and git numbers the second. Per checkout because git may number\ndifferently in each repository.'),
+  "path": zod.string().optional().describe('Where it sits inside the workspace.\n\nEmpty means the checkout \*is\* the workspace — how every session made\nbefore a session could hold more than one is laid out on disk. Those\ndirectories are not moving.'),
+  "pullRequest": zod.string().nullish().describe('Where this repository\'s pull request went, once it has one.\n\nPer repository, because that is what a git host can represent: one\nchange across two repositories is two pull requests that point at each\nother, not one object spanning both.'),
+  "repoId": zod.union([zod.null(),zod.string().describe('Absent when the repository has since been disconnected. The slug is what\nthis checkout \*is\*, and that does not stop being true.')]).optional(),
+  "slug": zod.string().describe('`acme\/backend`'),
+  "trouble": zod.string().nullish().describe('Why it is not there, when it is not.\n\nA repository the host could not reach fails its own checkout rather than\nthe session: two of three is still a session worth having, and saying\nwhich one is missing beats pretending it was never asked for.')
+}).describe('One repository checked out into a session\'s workspace.\n\nA session used to be one of these, spread across three nullable columns on\nthe session itself. It is a list now, because the work is often two\nrepositories — a client and the API it calls — and two sessions that cannot\nsee each other is not an answer to that.')).optional().describe('Every repository checked out into this session\'s workspace.\n\nEmpty for a bare agent. One for most sessions. The whole point of the\nlist is the third case.'),
   "createdAt": zod.iso.datetime({"offset":true}),
   "forgottenAt": zod.iso.datetime({"offset":true}).nullish().describe('When it was removed from here without the machine being told.\n\nSet only by a forced removal: the host was not answering, so nobody\ncould tear the workspace down. The session is `Ended` here from that\nmoment, and the agent may well still be running there.'),
   "hostId": zod.string().describe('Identifies a host.'),
@@ -38,7 +47,7 @@ export const ListSessionsResponseItem = zod.object({
   "proposedBody": zod.string().nullish(),
   "proposedTitle": zod.string().nullish().describe('What the agent proposed calling this work, when it finished.\n\nA draft to edit rather than a box to fill. Nothing acts on it: it is\nwhat the review sheet starts with, and whoever is shipping decides what\nit actually says.'),
   "pullRequest": zod.string().nullish().describe('Where the pull request is, once one has been opened.\n\nRemembered so a screen can tell \"pushed\" from \"already open\" without\nasking GitHub, which is what lets one control name the next step rather\nthan offering every verb at once.'),
-  "repo": zod.string().nullish().describe('`None` for a bare agent: a workspace with nothing checked out.'),
+  "repo": zod.string().nullish().describe('The first checkout\'s slug, or `None` for a bare agent.\n\nA convenience for the places that want one name — a row in a list, a\ncaption. [`Session::checkouts`] is what is actually true.'),
   "size": zod.enum(['Small', 'Medium', 'Large']),
   "status": zod.enum(['Starting', 'Working', 'NeedsYou', 'HandedBack', 'Failed', 'Ended']),
   "steps": zod.array(zod.enum(['Fetch', 'Worktree', 'Workspace', 'Setup', 'Launch']).describe('One stage of bringing a session up.\n\nThe point of naming them is that the whole list is knowable \*before\* any of\nit runs — so a session can show what it is going to do the moment it is\ncreated, rather than assembling a shape out of events as they arrive. A step\nnobody has reached yet is still worth showing.')).optional().describe('What this session is going to do, in order, decided when it was created.\n\nHere rather than inferred from events so the screen has something to\nshow before the worker has said a word — the difference between \"this\nis fetching a repository\" and a blank page.'),
@@ -54,14 +63,27 @@ export const CreateSessionBody = zod.object({
   "branch": zod.string().nullish().describe('The branch the agent works on. Omit to derive one from the prompt.\n\nNamed by whoever starts the session, because this is what ends up on a\npull request and a machine-written slug is a poor thing to live with.'),
   "hostId": zod.union([zod.null(),zod.string().describe('Omit to let the scheduler choose.')]).optional(),
   "prompt": zod.string(),
-  "repoId": zod.union([zod.null(),zod.string().describe('Omit for a bare agent: a workspace with nothing checked out.')]).optional(),
+  "repoId": zod.union([zod.null(),zod.string().describe('Omit for a bare agent: a workspace with nothing checked out.\n\nKept alongside `repos` so that anything holding one repository still\nworks; when both are given, this one goes first.')]).optional(),
+  "repos": zod.array(zod.object({
+  "base": zod.string().nullish().describe('The branch to start from. Omit for the repository\'s own default.'),
+  "repoId": zod.string().describe('Identifies a connected repository.')
+}).describe('One repository to check out, as the API accepts it.')).optional().describe('Every repository to check out, in the order they should appear.\n\nEach may name its own base branch; the working branch is the session\'s\nand is the same in all of them, which is what makes a change across two\nrepositories reviewable.'),
   "size": zod.enum(['Small', 'Medium', 'Large']).optional()
 }).describe('What the API accepts to launch one.')
 
 export const CreateSessionResponse = zod.object({
   "agent": zod.enum(['ClaudeCode', 'Codex', 'Shell']).describe('Which agent runs inside a workspace.\n\nSerialised as the variant name — see the wire conventions in the brief: a\nfield takes the consumer\'s casing, an enum value stays the symbol it is.'),
   "base": zod.string().nullish(),
-  "branch": zod.string().nullish().describe('Absent along with the repository — there is nothing to branch.'),
+  "branch": zod.string().nullish().describe('The first checkout\'s branch, or `None` for a bare agent.\n\nEvery checkout in a session is cut with the same requested name, so this\nis the right thing to show once — but git may have numbered them\ndifferently, so anything acting on a branch reads it from the checkout.'),
+  "checkouts": zod.array(zod.object({
+  "base": zod.string().describe('The branch it was cut from.'),
+  "branch": zod.string().describe('The branch git actually made.\n\nNot always the one asked for: the same prompt twice wants the same\nname, and git numbers the second. Per checkout because git may number\ndifferently in each repository.'),
+  "path": zod.string().optional().describe('Where it sits inside the workspace.\n\nEmpty means the checkout \*is\* the workspace — how every session made\nbefore a session could hold more than one is laid out on disk. Those\ndirectories are not moving.'),
+  "pullRequest": zod.string().nullish().describe('Where this repository\'s pull request went, once it has one.\n\nPer repository, because that is what a git host can represent: one\nchange across two repositories is two pull requests that point at each\nother, not one object spanning both.'),
+  "repoId": zod.union([zod.null(),zod.string().describe('Absent when the repository has since been disconnected. The slug is what\nthis checkout \*is\*, and that does not stop being true.')]).optional(),
+  "slug": zod.string().describe('`acme\/backend`'),
+  "trouble": zod.string().nullish().describe('Why it is not there, when it is not.\n\nA repository the host could not reach fails its own checkout rather than\nthe session: two of three is still a session worth having, and saying\nwhich one is missing beats pretending it was never asked for.')
+}).describe('One repository checked out into a session\'s workspace.\n\nA session used to be one of these, spread across three nullable columns on\nthe session itself. It is a list now, because the work is often two\nrepositories — a client and the API it calls — and two sessions that cannot\nsee each other is not an answer to that.')).optional().describe('Every repository checked out into this session\'s workspace.\n\nEmpty for a bare agent. One for most sessions. The whole point of the\nlist is the third case.'),
   "createdAt": zod.iso.datetime({"offset":true}),
   "forgottenAt": zod.iso.datetime({"offset":true}).nullish().describe('When it was removed from here without the machine being told.\n\nSet only by a forced removal: the host was not answering, so nobody\ncould tear the workspace down. The session is `Ended` here from that\nmoment, and the agent may well still be running there.'),
   "hostId": zod.string().describe('Identifies a host.'),
@@ -73,7 +95,7 @@ export const CreateSessionResponse = zod.object({
   "proposedBody": zod.string().nullish(),
   "proposedTitle": zod.string().nullish().describe('What the agent proposed calling this work, when it finished.\n\nA draft to edit rather than a box to fill. Nothing acts on it: it is\nwhat the review sheet starts with, and whoever is shipping decides what\nit actually says.'),
   "pullRequest": zod.string().nullish().describe('Where the pull request is, once one has been opened.\n\nRemembered so a screen can tell \"pushed\" from \"already open\" without\nasking GitHub, which is what lets one control name the next step rather\nthan offering every verb at once.'),
-  "repo": zod.string().nullish().describe('`None` for a bare agent: a workspace with nothing checked out.'),
+  "repo": zod.string().nullish().describe('The first checkout\'s slug, or `None` for a bare agent.\n\nA convenience for the places that want one name — a row in a list, a\ncaption. [`Session::checkouts`] is what is actually true.'),
   "size": zod.enum(['Small', 'Medium', 'Large']),
   "status": zod.enum(['Starting', 'Working', 'NeedsYou', 'HandedBack', 'Failed', 'Ended']),
   "steps": zod.array(zod.enum(['Fetch', 'Worktree', 'Workspace', 'Setup', 'Launch']).describe('One stage of bringing a session up.\n\nThe point of naming them is that the whole list is knowable \*before\* any of\nit runs — so a session can show what it is going to do the moment it is\ncreated, rather than assembling a shape out of events as they arrive. A step\nnobody has reached yet is still worth showing.')).optional().describe('What this session is going to do, in order, decided when it was created.\n\nHere rather than inferred from events so the screen has something to\nshow before the worker has said a word — the difference between \"this\nis fetching a repository\" and a blank page.'),
@@ -106,7 +128,16 @@ export const GetSessionParams = zod.object({
 export const GetSessionResponse = zod.object({
   "agent": zod.enum(['ClaudeCode', 'Codex', 'Shell']).describe('Which agent runs inside a workspace.\n\nSerialised as the variant name — see the wire conventions in the brief: a\nfield takes the consumer\'s casing, an enum value stays the symbol it is.'),
   "base": zod.string().nullish(),
-  "branch": zod.string().nullish().describe('Absent along with the repository — there is nothing to branch.'),
+  "branch": zod.string().nullish().describe('The first checkout\'s branch, or `None` for a bare agent.\n\nEvery checkout in a session is cut with the same requested name, so this\nis the right thing to show once — but git may have numbered them\ndifferently, so anything acting on a branch reads it from the checkout.'),
+  "checkouts": zod.array(zod.object({
+  "base": zod.string().describe('The branch it was cut from.'),
+  "branch": zod.string().describe('The branch git actually made.\n\nNot always the one asked for: the same prompt twice wants the same\nname, and git numbers the second. Per checkout because git may number\ndifferently in each repository.'),
+  "path": zod.string().optional().describe('Where it sits inside the workspace.\n\nEmpty means the checkout \*is\* the workspace — how every session made\nbefore a session could hold more than one is laid out on disk. Those\ndirectories are not moving.'),
+  "pullRequest": zod.string().nullish().describe('Where this repository\'s pull request went, once it has one.\n\nPer repository, because that is what a git host can represent: one\nchange across two repositories is two pull requests that point at each\nother, not one object spanning both.'),
+  "repoId": zod.union([zod.null(),zod.string().describe('Absent when the repository has since been disconnected. The slug is what\nthis checkout \*is\*, and that does not stop being true.')]).optional(),
+  "slug": zod.string().describe('`acme\/backend`'),
+  "trouble": zod.string().nullish().describe('Why it is not there, when it is not.\n\nA repository the host could not reach fails its own checkout rather than\nthe session: two of three is still a session worth having, and saying\nwhich one is missing beats pretending it was never asked for.')
+}).describe('One repository checked out into a session\'s workspace.\n\nA session used to be one of these, spread across three nullable columns on\nthe session itself. It is a list now, because the work is often two\nrepositories — a client and the API it calls — and two sessions that cannot\nsee each other is not an answer to that.')).optional().describe('Every repository checked out into this session\'s workspace.\n\nEmpty for a bare agent. One for most sessions. The whole point of the\nlist is the third case.'),
   "createdAt": zod.iso.datetime({"offset":true}),
   "forgottenAt": zod.iso.datetime({"offset":true}).nullish().describe('When it was removed from here without the machine being told.\n\nSet only by a forced removal: the host was not answering, so nobody\ncould tear the workspace down. The session is `Ended` here from that\nmoment, and the agent may well still be running there.'),
   "hostId": zod.string().describe('Identifies a host.'),
@@ -118,7 +149,7 @@ export const GetSessionResponse = zod.object({
   "proposedBody": zod.string().nullish(),
   "proposedTitle": zod.string().nullish().describe('What the agent proposed calling this work, when it finished.\n\nA draft to edit rather than a box to fill. Nothing acts on it: it is\nwhat the review sheet starts with, and whoever is shipping decides what\nit actually says.'),
   "pullRequest": zod.string().nullish().describe('Where the pull request is, once one has been opened.\n\nRemembered so a screen can tell \"pushed\" from \"already open\" without\nasking GitHub, which is what lets one control name the next step rather\nthan offering every verb at once.'),
-  "repo": zod.string().nullish().describe('`None` for a bare agent: a workspace with nothing checked out.'),
+  "repo": zod.string().nullish().describe('The first checkout\'s slug, or `None` for a bare agent.\n\nA convenience for the places that want one name — a row in a list, a\ncaption. [`Session::checkouts`] is what is actually true.'),
   "size": zod.enum(['Small', 'Medium', 'Large']),
   "status": zod.enum(['Starting', 'Working', 'NeedsYou', 'HandedBack', 'Failed', 'Ended']),
   "steps": zod.array(zod.enum(['Fetch', 'Worktree', 'Workspace', 'Setup', 'Launch']).describe('One stage of bringing a session up.\n\nThe point of naming them is that the whole list is knowable \*before\* any of\nit runs — so a session can show what it is going to do the moment it is\ncreated, rather than assembling a shape out of events as they arrive. A step\nnobody has reached yet is still worth showing.')).optional().describe('What this session is going to do, in order, decided when it was created.\n\nHere rather than inferred from events so the screen has something to\nshow before the worker has said a word — the difference between \"this\nis fetching a repository\" and a blank page.'),
@@ -154,7 +185,16 @@ export const RenameSessionBody = zod.object({
 export const RenameSessionResponse = zod.object({
   "agent": zod.enum(['ClaudeCode', 'Codex', 'Shell']).describe('Which agent runs inside a workspace.\n\nSerialised as the variant name — see the wire conventions in the brief: a\nfield takes the consumer\'s casing, an enum value stays the symbol it is.'),
   "base": zod.string().nullish(),
-  "branch": zod.string().nullish().describe('Absent along with the repository — there is nothing to branch.'),
+  "branch": zod.string().nullish().describe('The first checkout\'s branch, or `None` for a bare agent.\n\nEvery checkout in a session is cut with the same requested name, so this\nis the right thing to show once — but git may have numbered them\ndifferently, so anything acting on a branch reads it from the checkout.'),
+  "checkouts": zod.array(zod.object({
+  "base": zod.string().describe('The branch it was cut from.'),
+  "branch": zod.string().describe('The branch git actually made.\n\nNot always the one asked for: the same prompt twice wants the same\nname, and git numbers the second. Per checkout because git may number\ndifferently in each repository.'),
+  "path": zod.string().optional().describe('Where it sits inside the workspace.\n\nEmpty means the checkout \*is\* the workspace — how every session made\nbefore a session could hold more than one is laid out on disk. Those\ndirectories are not moving.'),
+  "pullRequest": zod.string().nullish().describe('Where this repository\'s pull request went, once it has one.\n\nPer repository, because that is what a git host can represent: one\nchange across two repositories is two pull requests that point at each\nother, not one object spanning both.'),
+  "repoId": zod.union([zod.null(),zod.string().describe('Absent when the repository has since been disconnected. The slug is what\nthis checkout \*is\*, and that does not stop being true.')]).optional(),
+  "slug": zod.string().describe('`acme\/backend`'),
+  "trouble": zod.string().nullish().describe('Why it is not there, when it is not.\n\nA repository the host could not reach fails its own checkout rather than\nthe session: two of three is still a session worth having, and saying\nwhich one is missing beats pretending it was never asked for.')
+}).describe('One repository checked out into a session\'s workspace.\n\nA session used to be one of these, spread across three nullable columns on\nthe session itself. It is a list now, because the work is often two\nrepositories — a client and the API it calls — and two sessions that cannot\nsee each other is not an answer to that.')).optional().describe('Every repository checked out into this session\'s workspace.\n\nEmpty for a bare agent. One for most sessions. The whole point of the\nlist is the third case.'),
   "createdAt": zod.iso.datetime({"offset":true}),
   "forgottenAt": zod.iso.datetime({"offset":true}).nullish().describe('When it was removed from here without the machine being told.\n\nSet only by a forced removal: the host was not answering, so nobody\ncould tear the workspace down. The session is `Ended` here from that\nmoment, and the agent may well still be running there.'),
   "hostId": zod.string().describe('Identifies a host.'),
@@ -166,7 +206,7 @@ export const RenameSessionResponse = zod.object({
   "proposedBody": zod.string().nullish(),
   "proposedTitle": zod.string().nullish().describe('What the agent proposed calling this work, when it finished.\n\nA draft to edit rather than a box to fill. Nothing acts on it: it is\nwhat the review sheet starts with, and whoever is shipping decides what\nit actually says.'),
   "pullRequest": zod.string().nullish().describe('Where the pull request is, once one has been opened.\n\nRemembered so a screen can tell \"pushed\" from \"already open\" without\nasking GitHub, which is what lets one control name the next step rather\nthan offering every verb at once.'),
-  "repo": zod.string().nullish().describe('`None` for a bare agent: a workspace with nothing checked out.'),
+  "repo": zod.string().nullish().describe('The first checkout\'s slug, or `None` for a bare agent.\n\nA convenience for the places that want one name — a row in a list, a\ncaption. [`Session::checkouts`] is what is actually true.'),
   "size": zod.enum(['Small', 'Medium', 'Large']),
   "status": zod.enum(['Starting', 'Working', 'NeedsYou', 'HandedBack', 'Failed', 'Ended']),
   "steps": zod.array(zod.enum(['Fetch', 'Worktree', 'Workspace', 'Setup', 'Launch']).describe('One stage of bringing a session up.\n\nThe point of naming them is that the whole list is knowable \*before\* any of\nit runs — so a session can show what it is going to do the moment it is\ncreated, rather than assembling a shape out of events as they arrive. A step\nnobody has reached yet is still worth showing.')).optional().describe('What this session is going to do, in order, decided when it was created.\n\nHere rather than inferred from events so the screen has something to\nshow before the worker has said a word — the difference between \"this\nis fetching a repository\" and a blank page.'),
@@ -464,6 +504,10 @@ export const SessionDiffParams = zod.object({
   "id": zod.string().describe('Session id')
 })
 
+export const SessionDiffQueryParams = zod.object({
+  "checkout": zod.string().optional().describe('Which checkout, by its path in the workspace. Every one when omitted.')
+})
+
 export const sessionDiffResponseAddedMin = 0;
 
 export const sessionDiffResponseRemovedMin = 0;
@@ -578,13 +622,33 @@ export const OpenPullRequestResponse = zod.object({
 })
 
 /**
- * @summary Push the branch, so the work outlives the workspace.
+ * Each repository is pushed to its own remote. One that has nothing new is
+ * skipped rather than refused: it is a repository this change did not touch.
+ * @summary Push every branch, so the work outlives the workspace.
  */
 export const PushSessionParams = zod.object({
   "id": zod.string().describe('Session id')
 })
 
 export const PushSessionResponse = zod.object({
+  "detail": zod.string()
+})
+
+/**
+ * The same work as bring-up, done once more. The agent is told afterwards,
+ * because an agent that is not told has no reason to look.
+ * @summary Check another repository into a session that is already running.
+ */
+export const AddRepoParams = zod.object({
+  "id": zod.string().describe('Session id')
+})
+
+export const AddRepoBody = zod.object({
+  "base": zod.string().nullish().describe('The branch to start from. Omit for the repository\'s own default.'),
+  "repoId": zod.string().describe('Identifies a connected repository.')
+}).describe('One repository to check out, as the API accepts it.')
+
+export const AddRepoResponse = zod.object({
   "detail": zod.string()
 })
 
@@ -633,10 +697,16 @@ export const sessionWorkResponseUncommittedMin = 0;
 
 
 
-export const SessionWorkResponse = zod.object({
-  "ahead": zod.int().min(sessionWorkResponseAheadMin).describe('Commits the remote hasn\'t got.'),
+export const SessionWorkResponseItem = zod.object({
+  "ahead": zod.int().min(sessionWorkResponseAheadMin),
+  "base": zod.string(),
   "branch": zod.string(),
-  "pushed": zod.boolean().describe('Whether this branch exists on the remote at all.'),
-  "uncommitted": zod.int().min(sessionWorkResponseUncommittedMin).describe('Files changed but not committed.')
-}).describe('What is in a workspace that isn\'t safely elsewhere yet.\n\nThe thing that makes ending a session a decision rather than a gamble.')
+  "path": zod.string().optional(),
+  "pullRequest": zod.string().nullish().describe('Where its pull request is, once it has one.'),
+  "pushed": zod.boolean(),
+  "slug": zod.string(),
+  "trouble": zod.string().nullish().describe('Why this repository is not checked out, when it is not.'),
+  "uncommitted": zod.int().min(sessionWorkResponseUncommittedMin)
+}).describe('A checkout, what is unsaved in it, and where its pull request went.\n\nWhat the interface reads to say the next honest thing — per repository, and\naggregated across them for the one button in the header.')
+export const SessionWorkResponse = zod.array(SessionWorkResponseItem)
 

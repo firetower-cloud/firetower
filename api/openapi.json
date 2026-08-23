@@ -2066,6 +2066,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "checkout",
+            "in": "query",
+            "description": "Which checkout, by its path in the workspace. Every one when omitted.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -2402,7 +2411,8 @@
         "tags": [
           "sessions"
         ],
-        "summary": "Push the branch, so the work outlives the workspace.",
+        "summary": "Push every branch, so the work outlives the workspace.",
+        "description": "Each repository is pushed to its own remote. One that has nothing new is\nskipped rather than refused: it is a repository this change did not touch.",
         "operationId": "push_session",
         "parameters": [
           {
@@ -2415,6 +2425,69 @@
             }
           }
         ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Done"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sessions/{id}/repos": {
+      "post": {
+        "tags": [
+          "sessions"
+        ],
+        "summary": "Check another repository into a session that is already running.",
+        "description": "The same work as bring-up, done once more. The agent is told afterwards,\nbecause an agent that is not told has no reason to look.",
+        "operationId": "add_repo",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Session id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewCheckout"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
             "description": "",
@@ -2588,7 +2661,10 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/WorkSummary"
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/CheckoutWork"
+                  }
                 }
               }
             }
@@ -3017,6 +3093,134 @@
           "ProtocolMismatch",
           "Unknown"
         ]
+      },
+      "Checkout": {
+        "type": "object",
+        "description": "One repository checked out into a session's workspace.\n\nA session used to be one of these, spread across three nullable columns on\nthe session itself. It is a list now, because the work is often two\nrepositories — a client and the API it calls — and two sessions that cannot\nsee each other is not an answer to that.",
+        "required": [
+          "slug",
+          "base",
+          "branch"
+        ],
+        "properties": {
+          "base": {
+            "type": "string",
+            "description": "The branch it was cut from."
+          },
+          "branch": {
+            "type": "string",
+            "description": "The branch git actually made.\n\nNot always the one asked for: the same prompt twice wants the same\nname, and git numbers the second. Per checkout because git may number\ndifferently in each repository."
+          },
+          "path": {
+            "type": "string",
+            "description": "Where it sits inside the workspace.\n\nEmpty means the checkout *is* the workspace — how every session made\nbefore a session could hold more than one is laid out on disk. Those\ndirectories are not moving."
+          },
+          "pullRequest": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Where this repository's pull request went, once it has one.\n\nPer repository, because that is what a git host can represent: one\nchange across two repositories is two pull requests that point at each\nother, not one object spanning both."
+          },
+          "repoId": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/RepoId",
+                "description": "Absent when the repository has since been disconnected. The slug is what\nthis checkout *is*, and that does not stop being true."
+              }
+            ]
+          },
+          "slug": {
+            "type": "string",
+            "description": "`acme/backend`"
+          },
+          "trouble": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why it is not there, when it is not.\n\nA repository the host could not reach fails its own checkout rather than\nthe session: two of three is still a session worth having, and saying\nwhich one is missing beats pretending it was never asked for."
+          }
+        }
+      },
+      "CheckoutSummary": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/WorkSummary"
+          },
+          {
+            "type": "object",
+            "required": [
+              "slug"
+            ],
+            "properties": {
+              "path": {
+                "type": "string",
+                "description": "Relative to the workspace. Empty means the checkout is the workspace."
+              },
+              "slug": {
+                "type": "string"
+              }
+            }
+          }
+        ],
+        "description": "One checkout's summary, and which checkout it is.\n\nA session holds any number of them, so a summary on its own no longer says\nwhat it is a summary *of*."
+      },
+      "CheckoutWork": {
+        "type": "object",
+        "description": "A checkout, what is unsaved in it, and where its pull request went.\n\nWhat the interface reads to say the next honest thing — per repository, and\naggregated across them for the one button in the header.",
+        "required": [
+          "slug",
+          "branch",
+          "base",
+          "uncommitted",
+          "ahead",
+          "pushed"
+        ],
+        "properties": {
+          "ahead": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "base": {
+            "type": "string"
+          },
+          "branch": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "pullRequest": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Where its pull request is, once it has one."
+          },
+          "pushed": {
+            "type": "boolean"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "trouble": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why this repository is not checked out, when it is not."
+          },
+          "uncommitted": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          }
+        }
       },
       "ClientId": {
         "type": "object",
@@ -3554,6 +3758,13 @@
               "branch": {
                 "type": "string"
               },
+              "repo": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Which repository, when a session has more than one.\n\nAbsent from a worker that predates a session holding more than one,\nand from a session that holds exactly one — in both cases there is\nnothing to disambiguate."
+              },
               "type": {
                 "type": "string",
                 "enum": [
@@ -3957,6 +4168,25 @@
           }
         }
       },
+      "NewCheckout": {
+        "type": "object",
+        "description": "One repository to check out, as the API accepts it.",
+        "required": [
+          "repoId"
+        ],
+        "properties": {
+          "base": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The branch to start from. Omit for the repository's own default."
+          },
+          "repoId": {
+            "$ref": "#/components/schemas/RepoId"
+          }
+        }
+      },
       "NewEnv": {
         "type": "object",
         "description": "Variables to hold for this repository.\n\nEither typed one at a time, or pasted as a whole `.env` — the same route,\nbecause they are the same thing arriving in two shapes, and the file is the\nshape people already have.",
@@ -4103,9 +4333,16 @@
               },
               {
                 "$ref": "#/components/schemas/RepoId",
-                "description": "Omit for a bare agent: a workspace with nothing checked out."
+                "description": "Omit for a bare agent: a workspace with nothing checked out.\n\nKept alongside `repos` so that anything holding one repository still\nworks; when both are given, this one goes first."
               }
             ]
+          },
+          "repos": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NewCheckout"
+            },
+            "description": "Every repository to check out, in the order they should appear.\n\nEach may name its own base branch; the working branch is the session's\nand is the same in all of them, which is what makes a change across two\nrepositories reviewable."
           },
           "size": {
             "$ref": "#/components/schemas/WorkspaceSize"
@@ -4610,7 +4847,14 @@
               "string",
               "null"
             ],
-            "description": "Absent along with the repository — there is nothing to branch."
+            "description": "The first checkout's branch, or `None` for a bare agent.\n\nEvery checkout in a session is cut with the same requested name, so this\nis the right thing to show once — but git may have numbered them\ndifferently, so anything acting on a branch reads it from the checkout."
+          },
+          "checkouts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Checkout"
+            },
+            "description": "Every repository checked out into this session's workspace.\n\nEmpty for a bare agent. One for most sessions. The whole point of the\nlist is the third case."
           },
           "createdAt": {
             "type": "string",
@@ -4674,7 +4918,7 @@
               "string",
               "null"
             ],
-            "description": "`None` for a bare agent: a workspace with nothing checked out."
+            "description": "The first checkout's slug, or `None` for a bare agent.\n\nA convenience for the places that want one name — a row in a list, a\ncaption. [`Session::checkouts`] is what is actually true."
           },
           "size": {
             "$ref": "#/components/schemas/WorkspaceSize"

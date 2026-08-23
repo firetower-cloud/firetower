@@ -13,7 +13,7 @@ import { ApiError } from "@/src/api/http";
 export function Diff({ sessionId }: { sessionId: string }) {
   const [selected, setSelected] = useState<string | null>(null);
 
-  const { data: files = [], isLoading, error } = useSessionDiff(sessionId, {
+  const { data: files = [], isLoading, error } = useSessionDiff(sessionId, undefined, {
     query: { refetchInterval: 8000 },
   });
 

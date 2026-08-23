@@ -974,6 +974,44 @@ pub struct WorkSummary {
     pub pushed: bool,
 }
 
+/// One checkout's summary, and which checkout it is.
+///
+/// A session holds any number of them, so a summary on its own no longer says
+/// what it is a summary *of*.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CheckoutSummary {
+    /// Relative to the workspace. Empty means the checkout is the workspace.
+    #[serde(default)]
+    pub path: String,
+    pub slug: String,
+    #[serde(flatten)]
+    pub summary: WorkSummary,
+}
+
+/// A checkout, what is unsaved in it, and where its pull request went.
+///
+/// What the interface reads to say the next honest thing — per repository, and
+/// aggregated across them for the one button in the header.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CheckoutWork {
+    #[serde(default)]
+    pub path: String,
+    pub slug: String,
+    pub branch: String,
+    pub base: String,
+    pub uncommitted: u32,
+    pub ahead: u32,
+    pub pushed: bool,
+    /// Where its pull request is, once it has one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pull_request: Option<String>,
+    /// Why this repository is not checked out, when it is not.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trouble: Option<String>,
+}
+
 /// Something that happened, recorded by the worker that it happened on.
 ///
 /// Sessions are a projection of these, never the other way round.
@@ -1015,6 +1053,13 @@ pub enum EventKind {
     },
     WorktreeAdded {
         branch: String,
+        /// Which repository, when a session has more than one.
+        ///
+        /// Absent from a worker that predates a session holding more than one,
+        /// and from a session that holds exactly one — in both cases there is
+        /// nothing to disambiguate.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        repo: Option<String>,
     },
     WorkspaceStarted {
         detail: String,
@@ -1177,6 +1222,7 @@ mod step_tests {
             },
             EventKind::WorktreeAdded {
                 branch: String::new(),
+                repo: None,
             },
             EventKind::WorkspaceStarted {
                 detail: String::new(),
