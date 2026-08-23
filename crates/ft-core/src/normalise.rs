@@ -517,6 +517,18 @@ impl ClaudeNormaliser {
                 title: None,
                 task,
             });
+            // Pictures first, because that is the order they were sent in and
+            // the order they read in. Carried rather than counted: a transcript
+            // that says "1 image" cannot answer "which one did I send?", which
+            // is the question somebody scrolling back is asking.
+            let images = attached(blocks);
+            if !images.is_empty() {
+                out.push(TurnEvent::ItemUpdated {
+                    item: item.clone(),
+                    data: serde_json::json!({ "images": images }),
+                });
+            }
+
             let text = blocks
                 .iter()
                 .filter_map(|b| str_at(b, "text"))
@@ -667,6 +679,29 @@ fn slash_commands(v: Option<&Value>) -> Vec<SlashCommand> {
                 description: str_at(item, "description").map(str::to_string),
             }),
             _ => None,
+        })
+        .collect()
+}
+
+/// The pictures in a message, in the shape the interface draws them.
+///
+/// Only base64 sources. A URL source would be somebody else's server, and
+/// nothing here sends one — but an agent could echo one back, and quietly
+/// turning that into an image tag in a page is how a transcript starts making
+/// requests nobody asked for.
+fn attached(blocks: &[Value]) -> Vec<Value> {
+    blocks
+        .iter()
+        .filter(|b| str_at(b, "type") == Some("image"))
+        .filter_map(|b| {
+            let source = b.get("source")?;
+            if str_at(source, "type") != Some("base64") {
+                return None;
+            }
+            Some(serde_json::json!({
+                "mediaType": str_at(source, "media_type")?,
+                "data": str_at(source, "data")?,
+            }))
         })
         .collect()
 }

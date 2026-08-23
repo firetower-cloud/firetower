@@ -63,7 +63,7 @@ export function Chat({
 
   const submit = (text: string, images: Attached[]) => {
     if (send.isPending) return;
-    echo(text || "(image)");
+    echo(text, images);
     send.mutate({ id: sessionId, data: { text, images } });
   };
 
@@ -199,7 +199,22 @@ function Node({ item, tasks, items }: { item: Item; tasks: Task[]; items: Item[]
     return (
       <li className="node flex justify-end">
         <div className="max-w-[80%] rounded-[12px] rounded-br-[4px] bg-raise px-3 py-2">
-          <p className="text-[13.5px] leading-[1.5] whitespace-pre-wrap text-bone">{item.text}</p>
+          {item.images && item.images.length > 0 && (
+            <div className={`flex flex-wrap gap-1.5 ${item.text ? "mb-2" : ""}`}>
+              {item.images.map((image, i) => (
+                /* eslint-disable-next-line @next/next/no-img-element */
+                <img
+                  key={i}
+                  src={`data:${image.mediaType};base64,${image.data}`}
+                  alt="Attached"
+                  className="max-h-[160px] max-w-full rounded-[6px] border border-line object-contain"
+                />
+              ))}
+            </div>
+          )}
+          {item.text && (
+            <p className="text-[13.5px] leading-[1.5] whitespace-pre-wrap text-bone">{item.text}</p>
+          )}
         </div>
       </li>
     );

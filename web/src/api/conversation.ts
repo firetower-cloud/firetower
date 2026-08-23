@@ -11,6 +11,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { apiBase, token } from "./http";
 import type {
+  Attached,
   ConversationEvent,
   ItemKind,
   ItemStatus,
@@ -77,6 +78,8 @@ export type Item = {
   output: string;
   /** A tool's arguments, once they parse. */
   input?: unknown;
+  /** Pictures sent with a message, when there were any. */
+  images?: Attached[];
 };
 
 export type Conversation = {
@@ -236,7 +239,14 @@ export function apply(state: Conversation, event: ConversationEvent): Conversati
     }
 
     case "ItemUpdated":
-      return change(event.item, (item) => ({ ...item, input: event.data }));
+      return change(event.item, (item) => {
+        // A message carries pictures; a tool call carries arguments. Both
+        // arrive the same way, because both are "what came with this item".
+        const carried = (event.data as { images?: Attached[] } | undefined)?.images;
+        return carried
+          ? { ...item, images: [...(item.images ?? []), ...carried] }
+          : { ...item, input: event.data };
+      });
 
     case "ItemCompleted":
       return change(event.item, (item) => ({ ...item, status: event.status }));
@@ -450,8 +460,8 @@ export function useConversation(sessionId: string, live: boolean) {
     setState((current) => ({ ...current, [of]: value }));
   }, []);
 
-  /** Optimistically show what somebody just typed, before it comes back. */
-  const echo = useCallback((text: string) => {
+  /** Optimistically show what somebody just sent, before it comes back. */
+  const echo = useCallback((text: string, images: Attached[] = []) => {
     setState((current) => ({
       ...current,
       working: true,
@@ -462,6 +472,10 @@ export function useConversation(sessionId: string, live: boolean) {
           kind: "UserMessage" as ItemKind,
           text,
           output: "",
+          // Shown straight away, and replaced by the agent's echo of the same
+          // message a moment later. Without this a picture vanishes between
+          // pressing send and the round trip finishing.
+          images,
         },
       ],
     }));

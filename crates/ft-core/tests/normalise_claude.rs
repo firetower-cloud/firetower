@@ -157,6 +157,49 @@ fn what_we_sent_comes_back_as_part_of_the_conversation() {
 }
 
 #[test]
+fn a_picture_somebody_sent_is_in_the_transcript() {
+    // Hand-built rather than recorded: none of the captured sessions has an
+    // attachment, and the shape is the one the agent echoes back.
+    let mut normaliser = ClaudeNormaliser::new();
+    let events = normaliser.push(
+        r#"{"type":"user","uuid":"u1","message":{"role":"user","content":[
+             {"type":"image","source":{"type":"base64","media_type":"image/png","data":"AAAA"}},
+             {"type":"text","text":"what colour?"}]}}"#,
+    );
+
+    let carried = events
+        .iter()
+        .find_map(|e| match e {
+            TurnEvent::ItemUpdated { data, .. } => data.get("images").cloned(),
+            _ => None,
+        })
+        .expect("the picture should travel with the message");
+
+    assert_eq!(carried[0]["mediaType"], "image/png");
+    assert_eq!(carried[0]["data"], "AAAA");
+    assert!(text_of(&events, StreamKind::UserText).contains("what colour?"));
+}
+
+#[test]
+fn a_picture_from_somebody_elses_server_is_not_drawn() {
+    // Nothing here sends a URL source, but an agent could echo one back, and
+    // turning that into an image tag is how a transcript starts making requests
+    // nobody asked for.
+    let mut normaliser = ClaudeNormaliser::new();
+    let events = normaliser.push(
+        r#"{"type":"user","uuid":"u2","message":{"role":"user","content":[
+             {"type":"image","source":{"type":"url","url":"https://elsewhere/x.png"}},
+             {"type":"text","text":"hello"}]}}"#,
+    );
+    assert!(
+        !events
+            .iter()
+            .any(|e| matches!(e, TurnEvent::ItemUpdated { .. })),
+        "a remote source is not carried"
+    );
+}
+
+#[test]
 fn what_we_typed_is_not_mistaken_for_what_the_agent_said() {
     // They shared a stream kind once, and the inbox note for a finished
     // session came out as the prompt with the reply stuck on the end.
