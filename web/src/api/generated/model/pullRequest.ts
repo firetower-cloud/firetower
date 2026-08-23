@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.6.0
+ * OpenAPI spec version: 0.7.0
  */
 
 export interface PullRequest {
