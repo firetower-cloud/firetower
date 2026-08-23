@@ -181,7 +181,10 @@ export const AnswerRequestBody = zod.object({
 }).describe('Allow, and stop asking about calls like this one.'),zod.object({
   "decision": zod.enum(['Deny']),
   "reason": zod.string().nullish().describe('Shown to the agent, which reads it and often tries something else.\nThat is the point of asking for one.')
-})]).describe('What the person decided, when they were asked.'),
+}),zod.object({
+  "answers": zod.unknown(),
+  "decision": zod.enum(['Answered'])
+}).describe('The answers to a question the agent asked.\n\nNot an allow with extra: a question is answered, not permitted, and\nletting it through without the answers gives the agent a tool result\nsaying nothing. Keyed by the question\'s own text, valued by the label\nof the option chosen — the agent matches on both, so neither may be\nparaphrased on the way back.')]).describe('What the person decided, when they were asked.'),
   "req": zod.string().describe('Which question. The agent\'s own id for the call it is blocked on.')
 })
 
@@ -258,7 +261,7 @@ export const GetConversationResponse = zod.object({
 }),zod.object({
   "delta": zod.string(),
   "item": zod.string().describe('One thing in the transcript — a message, a thought, a tool call.'),
-  "stream": zod.enum(['AssistantText', 'Reasoning', 'ToolOutput', 'ToolInput']).describe('Which stream a piece of text belongs to.\n\nSeparate from [`ItemKind`] because one item can carry more than one: a\ncommand has both its own text and its output.'),
+  "stream": zod.enum(['AssistantText', 'UserText', 'Reasoning', 'ToolOutput', 'ToolInput']).describe('Which stream a piece of text belongs to.\n\nSeparate from [`ItemKind`] because one item can carry more than one: a\ncommand has both its own text and its output.'),
   "type": zod.enum(['ContentDelta'])
 }),zod.object({
   "args": zod.unknown().describe('The tool\'s full input, for a card that wants to show more.'),
@@ -274,7 +277,10 @@ export const GetConversationResponse = zod.object({
 }).describe('Allow, and stop asking about calls like this one.'),zod.object({
   "decision": zod.enum(['Deny']),
   "reason": zod.string().nullish().describe('Shown to the agent, which reads it and often tries something else.\nThat is the point of asking for one.')
-})]).describe('What the person decided, when they were asked.'),
+}),zod.object({
+  "answers": zod.unknown(),
+  "decision": zod.enum(['Answered'])
+}).describe('The answers to a question the agent asked.\n\nNot an allow with extra: a question is answered, not permitted, and\nletting it through without the answers gives the agent a tool result\nsaying nothing. Keyed by the question\'s own text, valued by the label\nof the option chosen — the agent matches on both, so neither may be\nparaphrased on the way back.')]).describe('What the person decided, when they were asked.'),
   "req": zod.string().describe('One thing the agent is blocked on and needs an answer to.'),
   "type": zod.enum(['RequestResolved'])
 }),zod.object({

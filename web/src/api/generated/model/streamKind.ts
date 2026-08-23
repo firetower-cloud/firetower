@@ -17,6 +17,7 @@ export type StreamKind = typeof StreamKind[keyof typeof StreamKind];
 
 export const StreamKind = {
   AssistantText: 'AssistantText',
+  UserText: 'UserText',
   Reasoning: 'Reasoning',
   ToolOutput: 'ToolOutput',
   ToolInput: 'ToolInput',

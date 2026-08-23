@@ -108,6 +108,21 @@ fn what_we_sent_comes_back_as_part_of_the_conversation() {
     );
 }
 
+#[test]
+fn what_we_typed_is_not_mistaken_for_what_the_agent_said() {
+    // They shared a stream kind once, and the inbox note for a finished
+    // session came out as the prompt with the reply stuck on the end.
+    let events = replay("plain");
+    assert!(
+        !text_of(&events, StreamKind::UserText).is_empty(),
+        "our own message should carry its text"
+    );
+    assert!(
+        !text_of(&events, StreamKind::AssistantText).contains("What is 2+2"),
+        "the prompt should not appear in the assistant's own stream"
+    );
+}
+
 // ---- items --------------------------------------------------------------
 
 #[test]

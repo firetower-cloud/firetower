@@ -15,6 +15,7 @@ import type {
   ItemKind,
   ItemStatus,
   PlanStep,
+  Question,
   RequestKind,
 } from "./generated/model";
 
@@ -37,6 +38,17 @@ export type Task = {
   progress?: string;
   /** What it came back with. */
   summary?: string;
+};
+
+/**
+ * A question the agent wants answered before it goes on.
+ *
+ * Not the same as an approval, even though both arrive the same way. One asks
+ * whether something may happen; this asks which of several things should.
+ */
+export type Questionnaire = {
+  req: string;
+  questions: Question[];
 };
 
 /** Something the agent has stopped for and will not continue without. */
@@ -84,6 +96,8 @@ export type Conversation = {
    * you are talking to did all of it.
    */
   tasks: Task[];
+  /** Questions waiting on an answer. */
+  questions: Questionnaire[];
   /** True between a turn starting and finishing — the agent is busy. */
   working: boolean;
   /** The model this session is running, once it has said. */
@@ -107,6 +121,7 @@ export const nothing: Conversation = {
   plan: [],
   asked: [],
   tasks: [],
+  questions: [],
   working: false,
   lastLine: 0,
 };
@@ -244,6 +259,26 @@ export function apply(state: Conversation, event: ConversationEvent): Conversati
         ),
       };
 
+    case "UserInputRequested":
+      // Re-sent whenever a watcher attaches, like an approval.
+      return state.questions.some((q) => q.req === event.req)
+        ? { ...state, lastLine }
+        : {
+            ...state,
+            lastLine,
+            questions: [
+              ...state.questions,
+              { req: event.req, questions: event.questions },
+            ],
+          };
+
+    case "UserInputResolved":
+      return {
+        ...state,
+        lastLine,
+        questions: state.questions.filter((q) => q.req !== event.req),
+      };
+
     case "RequestResolved":
       return {
         ...state,
@@ -367,11 +402,12 @@ export function useConversation(sessionId: string, live: boolean) {
     }));
   }, []);
 
-  /** Take a question off the screen the moment it is answered. */
+  /** Take a request off the screen the moment it is answered. */
   const settle = useCallback((req: string) => {
     setState((current) => ({
       ...current,
       asked: current.asked.filter((a) => a.req !== req),
+      questions: current.questions.filter((q) => q.req !== req),
     }));
   }, []);
 

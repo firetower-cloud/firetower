@@ -21,4 +21,7 @@ export type Decision = {
      * @nullable
      */
   reason?: string | null;
+} | {
+  answers: unknown;
+  decision: 'Answered';
 };

@@ -181,12 +181,7 @@ pub(super) async fn stream_conversation(
         {
             backlog.push(ConversationEvent {
                 line_no: replayed,
-                event: TurnEvent::RequestOpened {
-                    req: ft_core::RequestId::new(req),
-                    kind: ft_core::normalise::classify_request(&tool_name),
-                    detail: tool_name,
-                    args: input,
-                },
+                event: wanted(req, tool_name, input),
             });
         }
     }
@@ -212,12 +207,7 @@ pub(super) async fn stream_conversation(
                     input,
                 } => vec![ConversationEvent {
                     line_no: replayed,
-                    event: TurnEvent::RequestOpened {
-                        req: ft_core::RequestId::new(req),
-                        kind: ft_core::normalise::classify_request(&tool_name),
-                        detail: tool_name,
-                        args: input,
-                    },
+                    event: wanted(req, tool_name, input),
                 }],
                 AgentSpeech::Closed => Vec::new(),
             };
@@ -361,6 +351,37 @@ fn permission_result(decision: &ft_core::turn::Decision) -> serde_json::Value {
             "behavior": "deny",
             "message": denial(reason.as_deref()),
         }),
+        // An answer is an allow that carries something. The questions it
+        // answers are filled in at the far end, which is the only place that
+        // reliably still has them.
+        Decision::Answered { answers } => serde_json::json!({
+            "behavior": "allow",
+            "updatedInput": { "answers": answers },
+        }),
+    }
+}
+
+/// What the agent has stopped for, as the interface should draw it.
+///
+/// Two different things arrive through one channel, because both are tool calls
+/// that fall through to the permission prompt. They are not the same question:
+/// one asks whether something may happen, and the other asks which of several
+/// things should. Drawn identically, the second becomes a card offering
+/// "allow" and "deny" to a question about output format.
+fn wanted(req: String, tool_name: String, input: serde_json::Value) -> TurnEvent {
+    if let Some(questions) = ft_core::normalise::questions_from_input(&input) {
+        if !questions.is_empty() {
+            return TurnEvent::UserInputRequested {
+                req: ft_core::RequestId::new(req),
+                questions,
+            };
+        }
+    }
+    TurnEvent::RequestOpened {
+        req: ft_core::RequestId::new(req),
+        kind: ft_core::normalise::classify_request(&tool_name),
+        detail: tool_name,
+        args: input,
     }
 }
 

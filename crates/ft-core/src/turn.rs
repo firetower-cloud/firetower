@@ -120,6 +120,12 @@ pub enum ItemStatus {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub enum StreamKind {
     AssistantText,
+    /// What somebody typed, echoed back by the agent.
+    ///
+    /// Its own kind rather than sharing the assistant's, which it did until
+    /// something read the stream to find the last thing the agent said and got
+    /// the prompt as well.
+    UserText,
     Reasoning,
     /// What a tool printed.
     ToolOutput,
@@ -160,6 +166,16 @@ pub enum Decision {
         /// Shown to the agent, which reads it and often tries something else.
         /// That is the point of asking for one.
         reason: Option<String>,
+    },
+    /// The answers to a question the agent asked.
+    ///
+    /// Not an allow with extra: a question is answered, not permitted, and
+    /// letting it through without the answers gives the agent a tool result
+    /// saying nothing. Keyed by the question's own text, valued by the label
+    /// of the option chosen — the agent matches on both, so neither may be
+    /// paraphrased on the way back.
+    Answered {
+        answers: serde_json::Value,
     },
 }
 

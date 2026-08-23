@@ -508,7 +508,7 @@ impl ClaudeNormaliser {
             if !text.is_empty() {
                 out.push(TurnEvent::ContentDelta {
                     item: item.clone(),
-                    stream: StreamKind::AssistantText,
+                    stream: StreamKind::UserText,
                     delta: text,
                 });
             }

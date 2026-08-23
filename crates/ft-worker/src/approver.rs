@@ -205,13 +205,26 @@ fn settle(mut decision: Value, input: &Value) -> Value {
     if decision.get("behavior").and_then(Value::as_str) != Some("allow") {
         return decision;
     }
-    let unchanged = decision
-        .get("updatedInput")
-        .is_none_or(|given| given.is_null());
-    if unchanged {
-        if let Some(object) = decision.as_object_mut() {
+    let Some(object) = decision.as_object_mut() else {
+        return decision;
+    };
+
+    match object.get_mut("updatedInput") {
+        // Nothing to say about the arguments, so they are the ones that came.
+        None | Some(Value::Null) => {
             object.insert("updatedInput".into(), input.clone());
         }
+        // Something to say, but only about part of it. An answer to a question
+        // carries the answers and not the questions, and the agent matches on
+        // both — so whatever was not spoken for is filled in from what it sent.
+        Some(Value::Object(given)) => {
+            if let Some(original) = input.as_object() {
+                for (key, value) in original {
+                    given.entry(key.clone()).or_insert_with(|| value.clone());
+                }
+            }
+        }
+        _ => {}
     }
     decision
 }
@@ -307,6 +320,28 @@ mod tests {
         let input = json!({ "file_path": "/tmp/x", "content": "banana" });
         let settled = settle(json!({ "behavior": "allow", "updatedInput": null }), &input);
         assert_eq!(settled["updatedInput"], input);
+    }
+
+    #[test]
+    fn an_answer_keeps_the_questions_it_answers() {
+        // The agent matches an answer to its question by the question's own
+        // text. Allowing without them hands it a result that says nothing.
+        let input = json!({ "questions": [{ "question": "Which?", "options": [] }] });
+        let settled = settle(
+            json!({ "behavior": "allow", "updatedInput": { "answers": { "Which?": "A" } } }),
+            &input,
+        );
+        assert_eq!(settled["updatedInput"]["answers"]["Which?"], "A");
+        assert_eq!(settled["updatedInput"]["questions"], input["questions"]);
+    }
+
+    #[test]
+    fn what_the_decision_says_beats_what_the_agent_sent() {
+        let settled = settle(
+            json!({ "behavior": "allow", "updatedInput": { "answers": "mine" } }),
+            &json!({ "answers": "theirs", "questions": [] }),
+        );
+        assert_eq!(settled["updatedInput"]["answers"], "mine");
     }
 
     #[test]

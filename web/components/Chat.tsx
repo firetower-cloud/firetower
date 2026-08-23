@@ -10,6 +10,7 @@ import {
   useConversation,
   type Asked,
   type Item,
+  type Questionnaire,
   type Task,
 } from "@/src/api/conversation";
 import { Markdown } from "@/components/Markdown";
@@ -103,6 +104,15 @@ export function Chat({ sessionId, live }: { sessionId: string; live: boolean }) 
         {/* Above the composer, because it is the thing to deal with before
             saying anything else — and because on a phone that is where a
             thumb already is. */}
+        {conversation.questions.map((asking) => (
+          <Questions
+            key={asking.req}
+            sessionId={sessionId}
+            asking={asking}
+            onAnswered={() => settle(asking.req)}
+          />
+        ))}
+
         {conversation.asked.map((asked) => (
           <Approval
             key={asked.req}
@@ -232,6 +242,117 @@ function Delegated({
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * A question the agent asked, with its options.
+ *
+ * Buttons rather than a permission card, because the agent did not ask whether
+ * it may do something — it asked which of several things to do, and "allow" is
+ * not an answer to that.
+ *
+ * The answer is keyed by the question's own text and valued by the chosen
+ * option's label. Both are matched by the agent, so neither is paraphrased on
+ * the way back.
+ */
+function Questions({
+  sessionId,
+  asking,
+  onAnswered,
+}: {
+  sessionId: string;
+  asking: Questionnaire;
+  onAnswered: () => void;
+}) {
+  const answer = useAnswerRequest();
+  const [chosen, setChosen] = useState<Record<string, string[]>>({});
+
+  const pick = (question: string, label: string, many: boolean) => {
+    setChosen((current) => {
+      const had = current[question] ?? [];
+      if (!many) return { ...current, [question]: [label] };
+      return {
+        ...current,
+        [question]: had.includes(label)
+          ? had.filter((l) => l !== label)
+          : [...had, label],
+      };
+    });
+  };
+
+  const ready = asking.questions.every((q) => (chosen[q.question] ?? []).length > 0);
+
+  const send = () => {
+    onAnswered();
+    answer.mutate({
+      id: sessionId,
+      data: {
+        req: asking.req,
+        decision: {
+          decision: "Answered",
+          // A single choice is its label; several are joined, which is the
+          // shape the agent reads either way.
+          answers: Object.fromEntries(
+            Object.entries(chosen).map(([question, labels]) => [
+              question,
+              labels.length === 1 ? labels[0] : labels.join(", "),
+            ]),
+          ),
+        },
+      },
+    });
+  };
+
+  return (
+    <div className="mb-3 rounded-[6px] border border-ember-deep bg-panel p-3">
+      {asking.questions.map((q) => {
+        const picked = chosen[q.question] ?? [];
+        return (
+          <div key={q.question} className="mb-3 last:mb-0">
+            <div className="flex items-baseline gap-2">
+              <span className="text-[11px] text-ember">{q.header}</span>
+              {q.multiSelect && (
+                <span className="text-[10.5px] text-mute">pick any</span>
+              )}
+            </div>
+            <p className="mt-0.5 mb-2 text-[13px] text-text">{q.question}</p>
+
+            <div className="flex flex-col gap-1.5">
+              {q.options.map((option) => {
+                const on = picked.includes(option.label);
+                return (
+                  <button
+                    key={option.label}
+                    onClick={() => pick(q.question, option.label, q.multiSelect ?? false)}
+                    className={`rounded-[5px] border px-2.5 py-1.5 text-left transition-colors ${
+                      on
+                        ? "border-ember bg-raise"
+                        : "border-line hover:border-mute"
+                    }`}
+                  >
+                    <span className={`block text-[12.5px] ${on ? "text-bone" : "text-text"}`}>
+                      {option.label}
+                    </span>
+                    {option.description && (
+                      <span className="block text-[11.5px] text-mute">{option.description}</span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })}
+
+      <button
+        onClick={send}
+        disabled={!ready}
+        className="mt-1 rounded-[5px] bg-ember px-3 py-1.5 text-[12px] font-medium text-ground disabled:opacity-40"
+      >
+        Answer
+      </button>
     </div>
   );
 }

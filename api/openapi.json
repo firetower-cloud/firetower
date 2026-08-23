@@ -3042,6 +3042,23 @@
                 "description": "Shown to the agent, which reads it and often tries something else.\nThat is the point of asking for one."
               }
             }
+          },
+          {
+            "type": "object",
+            "description": "The answers to a question the agent asked.\n\nNot an allow with extra: a question is answered, not permitted, and\nletting it through without the answers gives the agent a tool result\nsaying nothing. Keyed by the question's own text, valued by the label\nof the option chosen — the agent matches on both, so neither may be\nparaphrased on the way back.",
+            "required": [
+              "answers",
+              "decision"
+            ],
+            "properties": {
+              "answers": {},
+              "decision": {
+                "type": "string",
+                "enum": [
+                  "Answered"
+                ]
+              }
+            }
           }
         ],
         "description": "What the person decided, when they were asked."
@@ -4556,6 +4573,7 @@
         "description": "Which stream a piece of text belongs to.\n\nSeparate from [`ItemKind`] because one item can carry more than one: a\ncommand has both its own text and its output.",
         "enum": [
           "AssistantText",
+          "UserText",
           "Reasoning",
           "ToolOutput",
           "ToolInput"
