@@ -79,8 +79,12 @@ export function Shell({ children }: { children: React.ReactNode }) {
     .sort((a, b) => Number(needsYou(b)) - Number(needsYou(a)));
 
   return (
-    <div className="flex min-h-screen">
-      <aside className="hidden w-[224px] shrink-0 flex-col border-r border-line bg-panel md:flex">
+    <div className="flex h-dvh overflow-hidden">
+      {/* Fixed to the window, whatever is in it. The list of running sessions
+          grows without bound, and a rail that grows with it pushes the page
+          past the viewport and scrolls everything — including the session
+          somebody is reading. */}
+      <aside className="hidden h-full w-[224px] shrink-0 flex-col overflow-hidden border-r border-line bg-panel md:flex">
         <div className="flex items-center gap-2.5 px-4 pt-4 pb-5">
           <span className="text-bone">
             <Mark size={22} />
@@ -113,7 +117,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
         <div className="mt-7 px-4">
           <div className="eyebrow">In flight</div>
         </div>
-        <div className="mt-2 flex-1 overflow-y-auto px-2 pb-4">
+        <div className="mt-2 min-h-0 flex-1 overflow-y-auto px-2 pb-4">
           {pinned.length === 0 && (
             <p className="px-2 py-1 text-[12px] text-mute">Nothing running.</p>
           )}
@@ -137,7 +141,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
           })}
         </div>
 
-        <div className="border-t border-line px-4 py-3">
+        <div className="max-h-[30%] shrink-0 overflow-y-auto border-t border-line px-4 py-3">
           <div className="eyebrow mb-2">Hosts</div>
           {hosts.map((h) => (
             <div key={h.name} className="flex items-center gap-2 py-[3px]">
@@ -157,7 +161,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
         <WhoAmI />
       </aside>
 
-      <main className="min-w-0 flex-1">{children}</main>
+      <main className="min-w-0 flex-1 overflow-y-auto">{children}</main>
     </div>
   );
 }
@@ -191,7 +195,7 @@ function WhoAmI() {
   if (!data) return null;
 
   return (
-    <div className="border-t border-line px-4 py-3">
+    <div className="shrink-0 border-t border-line px-4 py-3">
       <div className="flex items-center gap-2">
         <div className="min-w-0 flex-1">
           <div className="truncate text-[12.5px] text-dim">{data.user.username}</div>

@@ -54,7 +54,7 @@ export default function Dashboard() {
   const nothingYet = !isLoading && sessions.length === 0;
 
   return (
-    <div className="min-h-screen">
+    <div className="min-h-full">
       <header className="px-8 pt-8 pb-4">
         <div className="flex items-start justify-between gap-6">
           <div className="min-w-0">

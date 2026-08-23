@@ -7,13 +7,13 @@ import { useGetSession, useRenameSession } from "@/src/api/generated/sessions/se
 import { useListEvents } from "@/src/api/generated/events/events";
 import { useSessionWork } from "@/src/api/generated/sessions/sessions";
 import type { Session, WorkSummary } from "@/src/api/generated/model";
-import { Steps, STEP_EVENTS } from "@/components/Steps";
+import { stepLines } from "@/components/Steps";
 import { Signal } from "@/components/Signal";
 import { Terminal } from "@/components/Terminal";
 import { Chat } from "@/components/Chat";
 import { Review } from "@/components/Review";
 import { shipping, ready } from "@/src/api/ship";
-import { SessionActions } from "@/components/SessionActions";
+import { SessionMenu } from "@/components/SessionActions";
 import { Diff } from "@/components/Diff";
 import { Files } from "@/components/Files";
 import { elapsed, minutesSince, unfinished, STATUS_LABEL } from "@/src/api/view";
@@ -138,7 +138,7 @@ export default function SessionView() {
   }
 
   return (
-    <div className="flex h-screen flex-col">
+    <div className="flex h-full min-h-0 flex-col">
       {/* One thin bar. What a session is, and what you can do to it — nothing
           else. The old header spent four lines restating things that are
           either obvious from the conversation or one hover away, and pushed the
@@ -191,120 +191,63 @@ export default function SessionView() {
             exactly one point on the way out, so offering every verb and letting
             somebody work out which applies is work the screen can do. */}
         {session.repo && <Ship session={session} work={work} onReview={() => setReviewing(true)} />}
+
+        <SessionMenu session={session} work={work} />
       </header>
 
       {reviewing && (
         <Review session={session} work={work} onClose={() => setReviewing(false)} />
       )}
 
-      {/* One column on a phone, two on a desktop. Mobile is not a fallback
-          here — routing an agent's blocking to somebody who is not at a desk is
-          the entire point of the product, so the narrow case is the one that
-          has to be right. */}
-      <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[1fr_320px]">
-        <section className="flex min-w-0 flex-col overflow-hidden px-4 py-4 lg:border-r lg:border-line lg:p-6">
-          <div className="mb-3 flex gap-1">
-            {(["Chat", "Shell", "Files", "Changes"] as Tab[]).map((t) => (
-              <button
-                key={t}
-                onClick={() => setTab(t)}
-                className={`rounded-[5px] px-2.5 py-1 text-[12px] transition-colors ${
-                  tab === t ? "bg-raise text-bone" : "text-mute hover:text-text"
-                }`}
-              >
-                {t}
-              </button>
-            ))}
+      <section className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden px-4 py-4 lg:px-6 lg:py-5">
+        <div className="mb-3 flex gap-1">
+          {(["Chat", "Shell", "Files", "Changes"] as Tab[]).map((t) => (
+            <button
+              key={t}
+              onClick={() => setTab(t)}
+              className={`rounded-[5px] px-2.5 py-1 text-[12px] transition-colors ${
+                tab === t ? "bg-raise text-bone" : "text-mute hover:text-text"
+              }`}
+            >
+              {t}
+            </button>
+          ))}
+        </div>
+
+        {/* Chat and Changes stay mounted: switching tabs should not drop the
+            conversation stream and repaint the whole session. */}
+        <div className="min-h-0 flex-1">
+          <div className={`h-full ${tab === "Chat" ? "" : "hidden"}`}>
+            <Chat
+              sessionId={session.id}
+              live={busy}
+              branch={session.branch}
+              repo={session.repo}
+              steps={stepLines(session, events)}
+            />
           </div>
-
-          {/* Chat and Changes stay mounted: switching tabs should not drop the
-              conversation stream and repaint the whole session. */}
-          <div className="min-h-0 flex-1">
-            <div className={`h-full ${tab === "Chat" ? "" : "hidden"}`}>
-              <Chat sessionId={session.id} live={busy} branch={session.branch} repo={session.repo} />
+          {/* Mounted only while you are looking at it: a shell lives for the
+              length of a visit, and opening this tab is what starts one. */}
+          {tab === "Shell" && (
+            <div className="h-full">
+              <Terminal sessionId={session.id} live={busy} showing />
             </div>
-            {/* Mounted only while you are looking at it: a shell lives for the
-                length of a visit, and opening this tab is what starts one. */}
-            {tab === "Shell" && (
-              <div className="h-full">
-                <Terminal sessionId={session.id} live={busy} showing />
-              </div>
-            )}
-            {tab === "Files" && (
-              <div className="h-full">
-                <Files sessionId={session.id} />
-              </div>
-            )}
-            <div className={`h-full ${tab === "Changes" ? "" : "hidden"}`}>
-              <Diff sessionId={session.id} />
+          )}
+          {tab === "Files" && (
+            <div className="h-full">
+              <Files sessionId={session.id} />
             </div>
+          )}
+          <div className={`h-full ${tab === "Changes" ? "" : "hidden"}`}>
+            <Diff sessionId={session.id} />
           </div>
-        </section>
+        </div>
+      </section>
 
-        {/* Below the work on a phone rather than beside it: what the agent is
-            saying comes first, and how the workspace was built is something you
-            scroll to when you want it. */}
-        <aside className="min-h-0 overflow-y-auto border-t border-line px-4 py-5 lg:border-t-0 lg:p-5">
-          <SessionActions session={session} />
-
-          <div className="eyebrow mt-5 mb-3">Bringing it up</div>
-          <Steps session={session} events={events} />
-
-          <div className="eyebrow mt-5 mb-3">Activity</div>
-          <ol className="flex flex-col gap-2.5">
-            {/* What the checklist above already says, without saying it twice. */}
-            {events
-              .filter((e) => !STEP_EVENTS.has((e.kind as { type?: string }).type ?? ""))
-              .map((e) => (
-              <li key={e.seq} className="flex gap-2.5">
-                <span className="mt-[6px] h-[3px] w-[3px] shrink-0 rounded-full bg-mute" />
-                <span className="min-w-0">
-                  <span className="block text-[12.5px] text-dim">{label(e.kind)}</span>
-                  <span className="block truncate font-mono text-[11px] text-mute">
-                    {detail(e.kind)}
-                  </span>
-                </span>
-              </li>
-            ))}
-            {events.length === 0 && (
-              <li className="text-[12px] text-mute">Waiting for the host to answer.</li>
-            )}
-          </ol>
-        </aside>
-      </div>
     </div>
   );
 }
 
 function Frame({ children }: { children: React.ReactNode }) {
   return <div className="max-w-[900px] px-8 pt-8">{children}</div>;
-}
-
-/* The wire tags each event with its variant name; these turn that into prose. */
-const LABELS: Record<string, string> = {
-  SessionCreated: "Session created",
-  HostSelected: "Picked a host",
-  RepoFetched: "Fetched the repository",
-  WorktreeAdded: "Added a worktree",
-  WorkspaceStarted: "Started the workspace",
-  SetupFinished: "Ran the setup script",
-  TmuxOpened: "Opened tmux",
-  AgentLaunched: "Launched the agent",
-  StatusChanged: "Status",
-  Failed: "Failed",
-};
-
-type EventKind = Record<string, unknown> & { type?: string };
-
-function label(kind: EventKind) {
-  return LABELS[kind.type ?? ""] ?? (kind.type ?? "Event");
-}
-
-/** Whichever field this variant carries — they never carry two. */
-function detail(kind: EventKind) {
-  for (const key of ["detail", "branch", "name", "status", "message", "prompt"]) {
-    const value = kind[key];
-    if (typeof value === "string") return value;
-  }
-  return "";
 }

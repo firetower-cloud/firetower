@@ -17,6 +17,7 @@ import { Markdown } from "@/components/Markdown";
 import { ChatComposer } from "@/components/Composer.chat";
 import { command } from "@/components/Settings.chat";
 import { Annotatable, Notes } from "@/components/Annotate";
+import { Bringup, type Line } from "@/components/Steps";
 import { useNotes, asMessage, type Note } from "@/src/api/notes";
 import { useReveal } from "@/src/api/reveal";
 import type {
@@ -44,11 +45,14 @@ export function Chat({
   live,
   branch,
   repo,
+  steps = [],
 }: {
   sessionId: string;
   live: boolean;
   branch?: string | null;
   repo?: string | null;
+  /** How the workspace was built, drawn at the top of the transcript. */
+  steps?: Line[];
 }) {
   const { conversation, echo, settle, remember } = useConversation(sessionId, live);
   const { notes, add, drop, clear } = useNotes(sessionId);
@@ -111,45 +115,52 @@ export function Chat({
         }}
         className="min-h-0 flex-1 overflow-y-auto"
       >
-        {conversation.items.length === 0 && !conversation.trouble && (
-          <p className="py-10 text-[13px] text-mute">
-            {live ? "Waiting for the agent." : "This session said nothing."}
-          </p>
-        )}
+        {/* A column, centred, rather than a line of text as wide as the
+            window. The scroller stays full width so the bar sits at the edge
+            of the pane and not in the middle of the reading. */}
+        <div className="mx-auto w-full max-w-[860px]">
+          <Bringup lines={steps} />
 
-        {conversation.plan.length > 0 && <Plan steps={conversation.plan} />}
+          {conversation.items.length === 0 && !conversation.trouble && steps.length === 0 && (
+            <p className="py-10 text-[13px] text-mute">
+              {live ? "Waiting for the agent." : "This session said nothing."}
+            </p>
+          )}
 
-        <ol className="spine flex flex-col gap-2.5">
-          {conversation.items
-            // A subagent's steps are drawn under the delegation, not here.
-            .filter((item) => !item.task)
-            .map((item) => (
-              <Node
-                key={item.id}
-                item={item}
-                tasks={conversation.tasks}
-                items={conversation.items}
-                notes={notes.filter((n) => n.item === item.id)}
-                onAnnotate={add}
-                onDropNote={drop}
-              />
-            ))}
-        </ol>
+          {conversation.plan.length > 0 && <Plan steps={conversation.plan} />}
 
-        {/* Where the rail stops. The one place the eye goes to answer "is it
-            still going?", and the reason there is no spinner anywhere else. */}
-        <End working={conversation.working} waiting={waiting} live={live} />
+          <ol className="spine flex flex-col gap-2.5">
+            {conversation.items
+              // A subagent's steps are drawn under the delegation, not here.
+              .filter((item) => !item.task)
+              .map((item) => (
+                <Node
+                  key={item.id}
+                  item={item}
+                  tasks={conversation.tasks}
+                  items={conversation.items}
+                  notes={notes.filter((n) => n.item === item.id)}
+                  onAnnotate={add}
+                  onDropNote={drop}
+                />
+              ))}
+          </ol>
 
-        {conversation.trouble && (
-          <p className="mt-3 font-mono text-[11.5px] text-brick">
-            Lost the stream.{live ? " Reconnecting." : ""}
-          </p>
-        )}
+          {/* Where the rail stops. The one place the eye goes to answer "is it
+              still going?", and the reason there is no spinner anywhere else. */}
+          <End working={conversation.working} waiting={waiting} live={live} />
+
+          {conversation.trouble && (
+            <p className="mt-3 font-mono text-[11.5px] text-brick">
+              Lost the stream.{live ? " Reconnecting." : ""}
+            </p>
+          )}
+        </div>
 
         <div ref={foot} />
       </div>
 
-      <div className="shrink-0 pt-3">
+      <div className="mx-auto w-full max-w-[860px] shrink-0 pt-3">
         {/* Written against the transcript, waiting to go. */}
         {notes.length > 0 && (
           <div className="mb-2 flex items-center gap-3 rounded-[8px] border border-ember-deep bg-panel px-3 py-2">
