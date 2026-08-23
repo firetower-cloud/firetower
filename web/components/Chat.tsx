@@ -16,6 +16,8 @@ import {
 import { Markdown } from "@/components/Markdown";
 import { ChatComposer } from "@/components/Composer.chat";
 import { command } from "@/components/Settings.chat";
+import { Annotatable, Notes } from "@/components/Annotate";
+import { useNotes, asMessage, type Note } from "@/src/api/notes";
 import { useReveal } from "@/src/api/reveal";
 import type {
   Attached,
@@ -49,6 +51,7 @@ export function Chat({
   repo?: string | null;
 }) {
   const { conversation, echo, settle, remember } = useConversation(sessionId, live);
+  const { notes, add, drop, clear } = useNotes(sessionId);
   const send = useSendTurn();
   const interrupt = useInterruptSession();
   const foot = useRef<HTMLDivElement>(null);
@@ -65,6 +68,21 @@ export function Chat({
     if (send.isPending) return;
     echo(text, images);
     send.mutate({ id: sessionId, data: { text, images } });
+  };
+
+  /**
+   * Send everything written against the transcript, at once.
+   *
+   * An ordinary message — no new frame, no new endpoint, and the agent needs to
+   * understand nothing it does not already. Whatever is in the composer goes
+   * with them, so "and also, please…" is one send rather than two.
+   */
+  const sendNotes = () => {
+    if (send.isPending || notes.length === 0) return;
+    const text = asMessage(notes);
+    clear();
+    echo(text, []);
+    send.mutate({ id: sessionId, data: { text, images: [] } });
   };
 
   /**
@@ -111,6 +129,9 @@ export function Chat({
                 item={item}
                 tasks={conversation.tasks}
                 items={conversation.items}
+                notes={notes.filter((n) => n.item === item.id)}
+                onAnnotate={add}
+                onDropNote={drop}
               />
             ))}
         </ol>
@@ -129,6 +150,28 @@ export function Chat({
       </div>
 
       <div className="shrink-0 pt-3">
+        {/* Written against the transcript, waiting to go. */}
+        {notes.length > 0 && (
+          <div className="mb-2 flex items-center gap-3 rounded-[8px] border border-ember-deep bg-panel px-3 py-2">
+            <span className="text-[12.5px] text-dim">
+              {notes.length} {notes.length === 1 ? "note" : "notes"} on this conversation
+            </span>
+            <button
+              onClick={clear}
+              className="text-[11.5px] text-mute transition-colors hover:text-brick"
+            >
+              Discard
+            </button>
+            <button
+              onClick={sendNotes}
+              disabled={!live || send.isPending}
+              className="ml-auto min-h-[32px] rounded-[6px] bg-ember px-3 text-[12px] font-medium text-ground disabled:opacity-40"
+            >
+              Send them
+            </button>
+          </div>
+        )}
+
         {/* Above the composer: the thing to deal with before saying anything
             else, and on a phone the part a thumb already reaches. */}
         {conversation.questions.map((asking) => (
@@ -188,10 +231,37 @@ function End({ working, waiting, live }: { working: boolean; waiting: boolean; l
 }
 
 /** One thing on the rail. */
-function Node({ item, tasks, items }: { item: Item; tasks: Task[]; items: Item[] }) {
+function Node({
+  item,
+  tasks,
+  items,
+  notes = [],
+  onAnnotate,
+  onDropNote,
+}: {
+  item: Item;
+  tasks: Task[];
+  items: Item[];
+  /** Notes written against this item, if any. */
+  notes?: Note[];
+  onAnnotate?: (item: string, quote: string, note: string) => void;
+  onDropNote?: (id: string) => void;
+}) {
   // The agent talking is the connective tissue between the things it did, so it
   // gets no marker. The most common thing on screen is the quietest.
-  if (item.kind === "AssistantMessage") return <Says item={item} />;
+  // Only what the agent said can be annotated. A note on your own message is a
+  // note to yourself, and a note on a tool's output is a note about something
+  // the agent did not write.
+  if (item.kind === "AssistantMessage") {
+    return (
+      <Says
+        item={item}
+        notes={notes}
+        onAnnotate={onAnnotate}
+        onDropNote={onDropNote}
+      />
+    );
+  }
 
   // What somebody typed is theirs, and reads as an aside rather than as another
   // step in the run — so it gets a bubble and steps off the rail.
@@ -233,13 +303,38 @@ function Node({ item, tasks, items }: { item: Item; tasks: Task[]; items: Item[]
  * `useReveal`, which explains why that is not something this end can fix and
  * what it does about it anyway.
  */
-function Says({ item }: { item: Item }) {
-  const text = useReveal(item.text, item.status !== undefined);
+function Says({
+  item,
+  notes = [],
+  onAnnotate,
+  onDropNote,
+}: {
+  item: Item;
+  notes?: Note[];
+  onAnnotate?: (item: string, quote: string, note: string) => void;
+  onDropNote?: (id: string) => void;
+}) {
+  const settled = item.status !== undefined;
+  const text = useReveal(item.text, settled);
+
+  const body = (
+    <div className="max-w-[74ch]">
+      <Markdown>{text}</Markdown>
+    </div>
+  );
+
   return (
     <li className="node">
-      <div className="max-w-[74ch]">
-        <Markdown>{text}</Markdown>
-      </div>
+      {/* Only once it has finished. Selecting text that is still arriving picks
+          up whatever happened to be there a moment ago. */}
+      {settled && onAnnotate ? (
+        <Annotatable item={item.id} onAdd={onAnnotate}>
+          {body}
+        </Annotatable>
+      ) : (
+        body
+      )}
+      {onDropNote && <Notes notes={notes} onDrop={onDropNote} />}
     </li>
   );
 }
