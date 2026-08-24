@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.10.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.9.1...firetower-v0.10.0) (2026-08-24)
+
+
+### Features
+
+* **web:** get a session's branch as a worktree on your own machine ([69df760](https://github.com/firetower-cloud/firetower/commit/69df760709d51c4bbb8d0b1dee72d02d68b395e4))
+
+
+### Bug Fixes
+
+* a commit that committed nothing said it had ([0ee41f9](https://github.com/firetower-cloud/firetower/commit/0ee41f95d54df4adc7e63b81061ee998556b24f7))
+* say what the git host actually refused ([765a7b0](https://github.com/firetower-cloud/firetower/commit/765a7b0aea2709a2ccc521a753acbadcd0f7969f))
+
 ## [0.9.1](https://github.com/firetower-cloud/firetower/compare/firetower-v0.9.0...firetower-v0.9.1) (2026-08-24)
 
 
