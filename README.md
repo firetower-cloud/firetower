@@ -20,6 +20,12 @@ And yes, it works with your own subscription (Claude Code, Codex, etc.).
 
 </div>
 
+## Current stage
+
+> [!WARNING]
+> The project is in active development and still in the early stages. Expect changes and bugs.
+
+
 ## Demo
 
 https://github.com/user-attachments/assets/aca9ef60-8d57-4443-bea7-57860e45aaba
@@ -89,11 +95,6 @@ Everything else — putting it on a domain, adding a server, connecting reposito
 | [Connect repositories](https://usefiretower.com/docs/repositories) | Git URLs, paths, and authorizing GitHub |
 | [Secrets](https://usefiretower.com/docs/secrets) | How credentials are sealed, and where the root key lives |
 
-
-## Current stage
-
-> [!WARNING]
-> The project is in active development and still in the early stages. Expect changes and bugs.
 
 ## Supported agents
 
