@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.9.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.8.0...firetower-v0.9.0) (2026-08-24)
+
+
+### Features
+
+* let the operator choose the ports Caddy publishes ([c079276](https://github.com/firetower-cloud/firetower/commit/c07927633221c28dcc8261624e9c97ceb8e4e4d8))
+* stop offering the shell as an agent ([c68e798](https://github.com/firetower-cloud/firetower/commit/c68e798bd0414058ab892aa97472a60d15921599))
+* **web:** a link to the documentation on the rail ([90a85e5](https://github.com/firetower-cloud/firetower/commit/90a85e503b63f8972e14a40d6562694ba9b813d5))
+* **web:** say which agents Firetower can actually run ([ab1fea2](https://github.com/firetower-cloud/firetower/commit/ab1fea28f809e916b74fa7c56c231afd26a0c0f8))
+
+
+### Bug Fixes
+
+* **web:** the launch shortcut goes on the launch button ([44085bc](https://github.com/firetower-cloud/firetower/commit/44085bcda04403af370055e12409f2b1b3581573))
+
 ## [0.8.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.7.0...firetower-v0.8.0) (2026-08-23)
 
 
