@@ -12,7 +12,9 @@
 #
 # **Only Caddy publishes a port.** The control plane holds every credential
 # Firetower has, and is reachable from nothing but the proxy in front of it —
-# which matters more than the certificate does.
+# which matters more than the certificate does. Which ports Caddy publishes is
+# HTTP_PORT and HTTPS_PORT, and both are pinned to 80 and 443 whenever DOMAIN
+# is set.
 #
 # Sessions run in the control plane's own container, the same way they run on a
 # laptop: as a child process, with `localhost` in the fleet. To run them
@@ -29,18 +31,28 @@
 name: firetower
 
 services:
-  # The front door. Without DOMAIN it serves plain HTTP on port 80, which is
-  # the honest arrangement for something reachable only from this machine.
-  # With one, it gets a certificate on its own and redirects 80 to 443.
+  # The front door. Without DOMAIN it serves plain HTTP, which is the honest
+  # arrangement for something only ever reached from this machine — and for
+  # something behind a reverse proxy that terminates TLS itself. With one, it
+  # gets a certificate on its own and redirects 80 to 443.
   caddy:
     image: caddy:2-alpine
     restart: unless-stopped
     depends_on: [firetower]
     ports:
-      - "80:80"
+      # The host side moves; the container side does not. Caddy is configured
+      # by `{$DOMAIN}`, which names the certificate as well as the address, so
+      # a port belongs out here where changing it means nothing else.
+      #
+      # **Setting DOMAIN pins both of these to 80 and 443.** Let's Encrypt
+      # answers the challenge on those two specifically — HTTP-01 on 80,
+      # TLS-ALPN on 443 — so a certificate cannot be issued anywhere else.
+      # Move them when there is no domain here: either this is reached from
+      # the machine itself, or something else in front already holds 80.
+      - "${HTTP_PORT:-80}:80"
       # Harmless with no domain: nothing answers there until there is a
       # certificate to answer with.
-      - "443:443"
+      - "${HTTPS_PORT:-443}:443"
     environment:
       DOMAIN: ${DOMAIN:-:80}
       ACME_EMAIL: ${ACME_EMAIL:-}
