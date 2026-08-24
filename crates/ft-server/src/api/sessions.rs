@@ -914,20 +914,37 @@ pub(super) async fn commit_session(
     // One message for all of them: a change that spans two repositories is one
     // piece of work, and two commits saying the same sentence is the honest
     // record of it.
+    let held = known_checkouts(&session);
+
+    // The review sheet only puts a checkout's directory in front of a file
+    // when the session holds more than one — so with a single checkout the
+    // paths arrive bare, `hello.sh` rather than `sandbox-firetower/hello.sh`.
+    //
+    // This is what silently committed nothing: `within` looked for a prefix
+    // that was never there, every path was dropped, the checkout was skipped,
+    // and the caller went on to push and open a pull request for a branch that
+    // had gained no commits. With one checkout there is nowhere else a path
+    // could belong, so a bare one belongs here.
+    let single = held.len() == 1;
+
+    // Whether any checkout claimed a path the caller named.
+    let mut claimed = false;
+
     let mut done = Vec::new();
-    for c in known_checkouts(&session) {
+    for c in &held {
         let paths: Vec<String> = if req.paths.is_empty() {
             Vec::new()
         } else {
             let kept: Vec<String> = req
                 .paths
                 .iter()
-                .filter_map(|p| within(&c.path, p))
+                .filter_map(|p| within(&c.path, p).or_else(|| single.then(|| p.clone())))
                 .collect();
             // Named files, none of them here. Nothing to commit in this one.
             if kept.is_empty() {
                 continue;
             }
+            claimed = true;
             kept
         };
 
@@ -953,6 +970,16 @@ pub(super) async fn commit_session(
                 ))
             }
         }
+    }
+
+    // Files were named and none of them landed anywhere. Saying "nothing to
+    // commit" here is what let a commit that committed nothing report success,
+    // and the caller pushed and opened a pull request on the strength of it.
+    if !req.paths.is_empty() && !claimed {
+        return Err(ApiError::new(
+            ErrorCode::InvalidRequest,
+            "none of those files are in this session's checkouts",
+        ));
     }
 
     Ok(Json(Done {
@@ -1591,6 +1618,38 @@ mod tests {
         // repository, and committing its files into `backend` would be wrong
         // in the quietest possible way.
         assert_eq!(within("backend", "backend-2/src/main.rs"), None);
+    }
+
+    /// The asymmetry that committed nothing and said it had.
+    ///
+    /// `session_changes` puts a checkout's directory in front of a file only
+    /// when the session holds more than one. So a single-repo session — which
+    /// still has a real subdirectory on disk — sends `hello.sh`, `within`
+    /// looked for `sandbox-firetower/hello.sh`, found nothing, and the commit
+    /// skipped the only checkout there was. The push that followed was a
+    /// no-op and the pull request came back "No commits between".
+    #[test]
+    fn a_single_checkout_claims_the_bare_paths_the_sheet_sends() {
+        let checkout = "sandbox-firetower";
+        let sent = "hello.sh";
+
+        // What the prefix rule alone does with it: nothing.
+        assert_eq!(within(checkout, sent), None);
+
+        // What the commit handler does now, when there is exactly one place a
+        // path could possibly belong.
+        let single = true;
+        let kept = within(checkout, sent).or_else(|| single.then(|| sent.to_string()));
+        assert_eq!(kept.as_deref(), Some("hello.sh"));
+
+        // And with two checkouts the sheet prefixes, so the prefix rule is the
+        // only one that may apply — a bare path must not be swept into the
+        // first checkout that happens to be looked at.
+        let single = false;
+        assert_eq!(
+            within("backend", sent).or_else(|| single.then(|| sent.to_string())),
+            None
+        );
     }
 
     #[test]
