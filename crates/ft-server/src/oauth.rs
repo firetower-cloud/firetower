@@ -271,6 +271,15 @@ pub async fn open_pull_request(
     struct Created {
         html_url: Option<String>,
         message: Option<String>,
+        /// Where GitHub actually says what was wrong.
+        ///
+        /// The top-level `message` on a 422 is the word "Validation Failed"
+        /// every single time. Reading only that turned "No commits between
+        /// main and agent/hello" — which tells you exactly what to do — into
+        /// "422 Unprocessable Entity: Validation Failed", which tells you
+        /// nothing.
+        #[serde(default)]
+        errors: Vec<Refusal>,
     }
 
     let response = client()?
@@ -298,15 +307,89 @@ pub async fn open_pull_request(
         return Ok(url);
     }
 
+    let said = refusal(&created.message, &created.errors);
+
+    // One already open is not a failure. It happens when a push was amended,
+    // when somebody opened it in a browser, or when we opened it and the row
+    // recording that did not get written — and in every case the useful answer
+    // is the request itself, not an error nobody can act on.
+    if said.to_ascii_lowercase().contains("already exists") {
+        if let Some(url) = existing_pull_request(provider, token, slug, head).await? {
+            return Ok(url);
+        }
+    }
+
     // The host's own words are more useful than ours: "no commits between",
     // "already exists", and "not found" all need different things from you.
-    bail!(
-        "{}: {}",
-        status,
-        created
-            .message
-            .unwrap_or_else(|| "the host refused without saying why".into())
-    )
+    bail!("{status}: {said}")
+}
+
+/// One entry from a host's `errors` array.
+#[derive(Debug, Deserialize)]
+struct Refusal {
+    message: Option<String>,
+    field: Option<String>,
+    code: Option<String>,
+}
+
+/// The most specific thing the host said.
+///
+/// An entry carries either prose or a field-and-code pair — `head` / `invalid`
+/// — and the pair is still worth more than "Validation Failed".
+fn refusal(message: &Option<String>, errors: &[Refusal]) -> String {
+    let specific: Vec<String> = errors
+        .iter()
+        .filter_map(|e| match (&e.message, &e.field, &e.code) {
+            (Some(m), _, _) if !m.trim().is_empty() => Some(m.trim().to_string()),
+            (_, Some(f), Some(c)) => Some(format!("{f} is {c}")),
+            (_, Some(f), None) => Some(format!("{f} was refused")),
+            _ => None,
+        })
+        .collect();
+
+    if !specific.is_empty() {
+        return specific.join("; ");
+    }
+
+    message
+        .clone()
+        .filter(|m| !m.trim().is_empty())
+        .unwrap_or_else(|| "the host refused without saying why".into())
+}
+
+/// The open request for a branch, when the host says one is already there.
+///
+/// `head` is qualified with the owner because that is what the API wants, and
+/// because a fork's branch of the same name is a different thing.
+async fn existing_pull_request(
+    provider: &Provider,
+    token: &str,
+    slug: &str,
+    head: &str,
+) -> Result<Option<String>> {
+    #[derive(Deserialize)]
+    struct Open {
+        html_url: String,
+    }
+
+    let owner = slug.split('/').next().unwrap_or(slug);
+
+    let found: Vec<Open> = client()?
+        .get(format!("{}/repos/{slug}/pulls", provider.api_base))
+        .bearer_auth(token)
+        .header("accept", "application/vnd.github+json")
+        .query(&[
+            ("head", format!("{owner}:{head}")),
+            ("state", "open".into()),
+        ])
+        .send()
+        .await
+        .with_context(|| format!("asking {} which request is already open", provider.label))?
+        .json()
+        .await
+        .unwrap_or_default();
+
+    Ok(found.into_iter().next().map(|p| p.html_url))
 }
 
 /// Replace the body of a pull request that is already open.
@@ -362,6 +445,68 @@ pub async fn amend_pull_request(
 mod tests {
     use super::*;
     use crate::providers;
+
+    /// The bug this exists to stop coming back: a 422 read as
+    /// "Validation Failed", which is what GitHub says every time and tells
+    /// nobody anything.
+    #[test]
+    fn a_refusal_says_what_the_host_actually_objected_to() {
+        let body = serde_json::json!({
+            "message": "Validation Failed",
+            "errors": [{
+                "resource": "PullRequest",
+                "code": "custom",
+                "message": "No commits between main and agent/hello"
+            }],
+        });
+        let message: Option<String> = body["message"].as_str().map(str::to_string);
+        let errors: Vec<Refusal> = serde_json::from_value(body["errors"].clone()).unwrap();
+
+        assert_eq!(
+            refusal(&message, &errors),
+            "No commits between main and agent/hello"
+        );
+    }
+
+    /// Some entries carry no prose at all — a field and a code is still more
+    /// than the generic line above it.
+    #[test]
+    fn a_refusal_without_prose_still_names_the_field() {
+        let errors: Vec<Refusal> = serde_json::from_value(serde_json::json!([
+            { "resource": "PullRequest", "field": "head", "code": "invalid" }
+        ]))
+        .unwrap();
+
+        assert_eq!(
+            refusal(&Some("Validation Failed".into()), &errors),
+            "head is invalid"
+        );
+    }
+
+    #[test]
+    fn a_refusal_with_nothing_useful_falls_back_to_the_generic_line() {
+        assert_eq!(
+            refusal(&Some("Not Found".into()), &[]),
+            "Not Found",
+            "the top-level message is all there is here, and it is worth saying"
+        );
+        assert_eq!(refusal(&None, &[]), "the host refused without saying why");
+    }
+
+    /// Every reason a host gives for refusing needs a different thing from
+    /// you, so they must not collapse into one message.
+    #[test]
+    fn several_objections_are_all_reported() {
+        let errors: Vec<Refusal> = serde_json::from_value(serde_json::json!([
+            { "message": "No commits between main and agent/x" },
+            { "field": "base", "code": "invalid" }
+        ]))
+        .unwrap();
+
+        let said = refusal(&Some("Validation Failed".into()), &errors);
+        assert!(said.contains("No commits"), "{said}");
+        assert!(said.contains("base is invalid"), "{said}");
+    }
 
     #[tokio::test]
     async fn starting_without_a_registered_application_explains_what_to_do() {
