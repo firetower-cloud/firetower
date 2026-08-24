@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.1](https://github.com/firetower-cloud/firetower/compare/firetower-v0.9.0...firetower-v0.9.1) (2026-08-24)
+
+
+### Bug Fixes
+
+* sessions that collide, and controls that say what they do ([e92a13f](https://github.com/firetower-cloud/firetower/commit/e92a13f49ed710161bf6cb49e5caa0e87858252d))
+
 ## [0.9.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.8.0...firetower-v0.9.0) (2026-08-24)
 
 
