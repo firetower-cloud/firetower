@@ -53,11 +53,13 @@ export function NeedsCard({ session }: { session: SessionView }) {
               Without this the card is a red dot you have to open a terminal to
               understand, and opening the terminal is most of the cost of being
               interrupted. */}
-          {session.note && (
-            <p className="mt-2.5 line-clamp-3 text-[13px] leading-[1.5] text-text">
-              {session.note}
-            </p>
-          )}
+          <p
+            className={`mt-2.5 line-clamp-3 text-[13px] leading-[1.5] ${
+              session.note ? "text-text" : "text-mute"
+            }`}
+          >
+            {session.note ?? "The agent needs you."}
+          </p>
 
           {session.status === "HandedBack" && (
             <p className="mt-3 flex items-center gap-3 text-[13px] text-text">
@@ -87,10 +89,14 @@ export function NeedsCard({ session }: { session: SessionView }) {
                   : "rounded-[5px] border border-line bg-raise px-3 py-1.5 text-[12.5px] font-medium text-text transition-colors hover:border-[#3a3631] hover:text-bone"
               }
             >
+              {/* Not "Review changes" for a handed-back session: this card
+                  never asked what changed, and a session whose agent only
+                  answered a question has nothing to review. Generic, because
+                  generic is the most this knows. */}
               {waiting
                 ? "Open agent"
                 : session.status === "HandedBack"
-                  ? "Review changes"
+                  ? "Open session"
                   : "Open terminal"}
             </Link>
           </div>

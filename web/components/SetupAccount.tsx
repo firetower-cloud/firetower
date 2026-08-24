@@ -173,7 +173,13 @@ export function StepOrganization({ onNext }: { onNext: () => void }) {
 
 /* ── the optional one ──────────────────────────────────────────────── */
 
-export function StepGitHub({ onNext }: { onNext: () => void }) {
+export function StepGitHub({
+  onNext,
+  onSkip,
+}: {
+  onNext: () => void;
+  onSkip: () => void;
+}) {
   return (
     <div>
       <h1 className="text-[20px] font-semibold text-bone">
@@ -190,8 +196,10 @@ export function StepGitHub({ onNext }: { onNext: () => void }) {
         <ClientIdForm onDone={onNext} />
       </div>
 
+      {/* Not `onNext`: skipping saves nothing, so the server still reports this
+          step as outstanding and returning to it is all `onNext` could do. */}
       <button
-        onClick={onNext}
+        onClick={onSkip}
         className="mt-6 text-[13px] text-mute hover:text-text"
       >
         Skip — do this later
@@ -241,9 +249,13 @@ export function ClientIdForm({ onDone }: { onDone: () => void }) {
           </a>
         </li>
         <li>
-          2. Name it <span className="text-slate">Firetower</span>. The homepage
-          URL can be anything; the callback URL is required by the form and
-          unused by this flow.
+          2. Name it <span className="text-slate">Firetower</span>. Both URLs
+          the form asks for are unused by this flow — device authorization never
+          redirects — so put{" "}
+          <span className="font-mono text-[12px] text-slate">
+            http://localhost:3000
+          </span>{" "}
+          in each and move on.
         </li>
         <li>
           3. Register it, then tick{" "}

@@ -504,6 +504,7 @@ mod tests {
                 &EventKind::WorktreeAdded {
                     branch: "agent/fix".into(),
                     repo: None,
+                    asked_for: None,
                 },
             )
             .await
@@ -526,6 +527,7 @@ mod tests {
             &EventKind::WorktreeAdded {
                 branch: "b".into(),
                 repo: None,
+                asked_for: None,
             },
         )
         .await

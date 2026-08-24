@@ -10,7 +10,7 @@
       "name": "AGPL-3.0-only",
       "identifier": "AGPL-3.0-only"
     },
-    "version": "0.8.0"
+    "version": "0.9.0"
   },
   "paths": {
     "/api/v1/agents": {
@@ -3197,6 +3197,15 @@
           "branch": {
             "type": "string"
           },
+          "commits": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Commits on this branch that its base does not have. See\n[`WorkSummary::commits`]; `None` means the worker did not say.",
+            "minimum": 0
+          },
           "path": {
             "type": "string"
           },
@@ -3760,6 +3769,13 @@
               "type"
             ],
             "properties": {
+              "askedFor": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "The name asked for, when it is not the name granted.\n\nTwo sessions started from the same prompt want the same branch, so\nthe second is numbered. That is worth saying: the branch is what a\npull request is opened from, and finding out it was renamed by\nreading the pull request is finding out too late.\n\nRenamed explicitly: this enum carries no `rename_all`, and every\nother field in it happens to be one word, so it is the first that\nwould otherwise have reached the API as snake_case."
+              },
               "branch": {
                 "type": "string"
               },
@@ -5854,6 +5870,15 @@
           },
           "branch": {
             "type": "string"
+          },
+          "commits": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Commits on this branch that its base does not have.\n\nNot the same question as `ahead`, which switches to measuring against\nthe upstream the moment a branch is pushed — so a pushed branch holding\nnothing reports `ahead: 0` and looks ready to open a pull request from.\nThis is what says there is something to open one *for*.\n\n`None` from a worker too old to answer, which is not the same as zero\nand must not be drawn as it.",
+            "minimum": 0
           },
           "pushed": {
             "type": "boolean",

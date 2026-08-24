@@ -77,8 +77,16 @@ export const STATUS_LABEL: Record<SessionStatus, string> = {
 /** Terminal-state summary, derived rather than stored. */
 export function outcomeOf(session: Session): string {
   switch (session.status) {
-    case "HandedBack":
-      return `Pushed ${session.branch} · ready for review`;
+    case "HandedBack": {
+      // Only what is actually known here. This used to read "Pushed <branch> ·
+      // ready for review" for every handed-back session — nothing pushes on
+      // hand-back, and a session whose agent only said hello had neither a push
+      // nor anything to review. A pull request, when there is one, is a fact.
+      // The branch is not in this string: the card prints it in mono right
+      // beside it, which is why the old line showed it twice.
+      const open = session.checkouts?.some((c) => c.pullRequest) ?? false;
+      return open ? "Pull request open" : "Handed it back";
+    }
     case "Failed":
       return "Something went wrong — open the terminal";
     case "Ended":

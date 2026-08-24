@@ -24,6 +24,8 @@ export default function Dashboard() {
   const blocked = sessions.filter(needsYou);
   const busy = sessions.filter(inFlight);
   const ended = sessions.filter((s) => s.status === "Ended");
+  /** Everything ending would take with it: working and waiting alike. */
+  const live = busy.length + blocked.length;
   const longest = busy.reduce((a, s) => Math.max(a, s.minutes), 0);
 
   if (isError) {
@@ -78,7 +80,7 @@ export default function Dashboard() {
         </div>
       </header>
 
-      {busy.length + blocked.length > 0 && (
+      {live > 0 && (
         <div className="max-w-[900px] px-8">
           <Horizon sessions={sessions} />
         </div>
@@ -117,12 +119,17 @@ export default function Dashboard() {
                 </Link>
               ))}
             </div>
-
-            {/* Directly under what it acts on, rather than in the header where
-                it read as a page-level action and was easy to miss. */}
-            <EndAll live={busy.length + blocked.length} />
           </Section>
         )}
+
+        {/* Under everything it acts on, rather than in the header where it read
+            as a page-level action and was easy to miss.
+
+            Outside both sections, not inside "Working". It ends the blocked
+            ones too — its own count always said so — but it was rendered within
+            the Working block, so a page where everything was waiting on you had
+            sessions to end and no way to end them. */}
+        {live > 0 && <EndAll live={live} />}
 
         {ended.length > 0 && (
           <Section label="Recent" className="mt-9">
@@ -171,14 +178,14 @@ function EndAll({ live }: { live: number }) {
   const endAll = useEndAllSessions();
 
   if (result) {
-    return <p className="mt-2.5 px-3 text-[12.5px] text-slate">{result}</p>;
+    return <p className="mt-6 px-3 text-[12.5px] text-slate">{result}</p>;
   }
 
   if (!confirming) {
     return (
       <button
         onClick={() => setConfirming(true)}
-        className="mt-2.5 w-full rounded-[6px] border border-dashed border-line py-2 text-[12.5px] text-mute transition-colors hover:border-ember/40 hover:text-ember"
+        className="mt-6 w-full rounded-[6px] border border-dashed border-line py-2 text-[12.5px] text-mute transition-colors hover:border-ember/40 hover:text-ember"
       >
         End all {live} {live === 1 ? "session" : "sessions"}
       </button>
@@ -186,7 +193,7 @@ function EndAll({ live }: { live: number }) {
   }
 
   return (
-    <div className="mt-2.5 flex items-center gap-3 rounded-[6px] border border-ember/40 bg-ember/[0.04] px-3 py-2">
+    <div className="mt-6 flex items-center gap-3 rounded-[6px] border border-ember/40 bg-ember/[0.04] px-3 py-2">
       <span className="flex-1 text-[12.5px] leading-[1.45] text-dim">
         End {live} {live === 1 ? "session" : "sessions"}? Their workspaces go, and
         anything unpushed with them.

@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.8.0
+ * OpenAPI spec version: 0.9.0
  */
 
 /**
@@ -18,6 +18,20 @@ export interface WorkSummary {
      */
   ahead: number;
   branch: string;
+  /**
+     * Commits on this branch that its base does not have.
+     *
+     * Not the same question as `ahead`, which switches to measuring against
+     * the upstream the moment a branch is pushed — so a pushed branch holding
+     * nothing reports `ahead: 0` and looks ready to open a pull request from.
+     * This is what says there is something to open one *for*.
+     *
+     * `None` from a worker too old to answer, which is not the same as zero
+     * and must not be drawn as it.
+     * @minimum 0
+     * @nullable
+     */
+  commits?: number | null;
   /** Whether this branch exists on the remote at all. */
   pushed: boolean;
   /**

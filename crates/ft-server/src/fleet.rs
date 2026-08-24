@@ -1007,15 +1007,6 @@ impl Fleet {
                                 !known
                             };
 
-                            // Read before the write, or this always says it was
-                            // already waiting and nobody is ever told anything.
-                            let already = db
-                                .session_status(&session_id)
-                                .await
-                                .ok()
-                                .flatten()
-                                .is_some_and(|s| s.needs_you());
-
                             // A permission prompt is never in the log — the
                             // agent is blocked, not talking — so this frame is
                             // the only thing that can say the session stopped.
@@ -1027,13 +1018,19 @@ impl Fleet {
                                 tracing::warn!(session = %session_id, "marking as waiting: {e:#}");
                             }
 
-                            // A watcher attaching re-announces everything the
-                            // agent is already blocked on, which is right for
-                            // drawing it and wrong for telling somebody: four
-                            // waiting sessions would notify four times on every
-                            // reconnect.
-                            tracing::debug!(session = %session_id, news, already, "deciding whether to notify");
-                            if news && !already {
+                            // `news` alone, and deliberately. A watcher
+                            // attaching re-announces everything the agent is
+                            // blocked on, which is right for drawing it and
+                            // wrong for telling somebody — but a re-announced
+                            // question carries a request id we have already
+                            // seen, so `news` is false and it stays quiet.
+                            //
+                            // This used to also require that the session was
+                            // not already resting, which swallowed a second
+                            // question asked while the first was unanswered:
+                            // the card changed and the phone did not.
+                            tracing::debug!(session = %session_id, news, "deciding whether to notify");
+                            if news {
                                 tell(&db, &notify, &session_id, Some(&note)).await;
                             }
 

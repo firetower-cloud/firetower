@@ -355,10 +355,14 @@ pub(super) async fn create_session(
 
     // Named after the branch when there is a checkout; after the session
     // otherwise. One name for the whole workspace, whatever is inside it.
+    //
+    // The session is part of that name even when the branch is, because a
+    // branch name is not unique: two sessions started from the same prompt ask
+    // for the same one, and this used to hand them the same directory.
     let workspace = if checkouts.is_empty() {
         id.as_str().to_string()
     } else {
-        ft_core::workspace_name(&branch)
+        ft_core::workspace_name(&branch, id.as_str())
     };
     let agent_name = format!("{:?}", req.agent);
 
@@ -1234,6 +1238,9 @@ pub(super) async fn session_work(
             uncommitted: found.map(|s| s.summary.uncommitted).unwrap_or(0),
             ahead: found.map(|s| s.summary.ahead).unwrap_or(0),
             pushed: found.is_some_and(|s| s.summary.pushed),
+            // Absent, not zero, when the worker is too old to say — the
+            // interface treats those differently on purpose.
+            commits: found.and_then(|s| s.summary.commits),
             pull_request: c.pull_request,
             trouble: c.trouble,
         });

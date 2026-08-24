@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.8.0
+ * OpenAPI spec version: 0.9.0
  */
 import * as zod from 'zod';
 
@@ -38,6 +38,7 @@ export const ListEventsResponseItem = zod.object({
   "detail": zod.string(),
   "type": zod.enum(['RepoFetched'])
 }),zod.object({
+  "askedFor": zod.string().nullish().describe('The name asked for, when it is not the name granted.\n\nTwo sessions started from the same prompt want the same branch, so\nthe second is numbered. That is worth saying: the branch is what a\npull request is opened from, and finding out it was renamed by\nreading the pull request is finding out too late.\n\nRenamed explicitly: this enum carries no `rename_all`, and every\nother field in it happens to be one word, so it is the first that\nwould otherwise have reached the API as snake_case.'),
   "branch": zod.string(),
   "repo": zod.string().nullish().describe('Which repository, when a session has more than one.\n\nAbsent from a worker that predates a session holding more than one,\nand from a session that holds exactly one — in both cases there is\nnothing to disambiguate.'),
   "type": zod.enum(['WorktreeAdded'])

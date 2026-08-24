@@ -809,7 +809,10 @@ impl Db {
 
     /// Add one to a session that is already running.
     pub async fn add_checkout(&self, id: &SessionId, c: &Checkout) -> Result<()> {
-        let next: i64 = sqlx::query_scalar(
+        // `position` is an INT4, so `MAX(position) + 1` is one too. Reading it
+        // as an i64 made sqlx refuse the row, which is what adding a repository
+        // to a running session did instead of working.
+        let next: i32 = sqlx::query_scalar(
             "SELECT COALESCE(MAX(position) + 1, 0) FROM session_repos WHERE session_id = $1",
         )
         .bind(id.as_str())
@@ -822,7 +825,7 @@ impl Db {
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
         )
         .bind(id.as_str())
-        .bind(next as i32)
+        .bind(next)
         .bind(c.repo_id.as_ref().map(|r| r.as_str()))
         .bind(&c.slug)
         .bind(&c.base)
@@ -885,7 +888,7 @@ impl Db {
         // The worker may have had to disambiguate the branch name, so the
         // authoritative value arrives with the event rather than being what we
         // asked for.
-        if let EventKind::WorktreeAdded { branch, repo } = kind {
+        if let EventKind::WorktreeAdded { branch, repo, .. } = kind {
             // Which checkout, when the worker says. Git may have numbered the
             // name differently in each repository, so the correction belongs to
             // one row rather than to the session.
@@ -904,7 +907,12 @@ impl Db {
             // The session's own branch is the first checkout's, and is what a
             // caption shows. Left alone for any other checkout.
             let first = match repo {
-                Some(slug) => sqlx::query_scalar::<_, i64>(
+                // `position` is an INT4. Reading it as an i64 made sqlx refuse
+                // the row at runtime, which failed this whole transaction —
+                // so every WorktreeAdded from a session that names its
+                // repository was rolled back and lost, and the branch the
+                // worker actually created never reached the database.
+                Some(slug) => sqlx::query_scalar::<_, i32>(
                     "SELECT position FROM session_repos WHERE session_id = $1 AND slug = $2",
                 )
                 .bind(session_id.as_str())
@@ -1555,6 +1563,7 @@ mod tests {
             &EventKind::WorktreeAdded {
                 branch: "agent/fix-2".into(),
                 repo: None,
+                asked_for: None,
             },
             chrono::Utc::now(),
         )
@@ -1590,6 +1599,7 @@ mod tests {
         let kind = EventKind::WorktreeAdded {
             branch: "agent/fix".into(),
             repo: None,
+            asked_for: None,
         };
         let now = chrono::Utc::now();
 
@@ -1598,6 +1608,131 @@ mod tests {
         db.record_event(&host.id, 7, &id, &kind, now).await.unwrap();
 
         assert_eq!(db.events_since(0).await.unwrap().len(), 1);
+    }
+
+    /// Adding a repository to a running session never worked: `position` is
+    /// an INT4 and the next one was read as an i64, so sqlx refused the row and
+    /// the interface showed the type error rather than a checkout.
+    #[tokio::test]
+    async fn a_repository_can_be_added_to_a_running_session() {
+        let db = db().await;
+        let host = db.ensure_host("localhost", Compute::Local).await.unwrap();
+        let id = SessionId::new();
+
+        db.insert_session(
+            &id,
+            &host.id,
+            Some("acme/backend"),
+            "Fix",
+            "fix",
+            Some("agent/hello"),
+            Some("main"),
+            "ClaudeCode",
+            WorkspaceSize::Medium,
+            &ft_core::Step::plan(true, false),
+        )
+        .await
+        .unwrap();
+
+        let checkout = |slug: &str, path: &str| Checkout {
+            repo_id: None,
+            slug: slug.into(),
+            base: "main".into(),
+            branch: "agent/hello".into(),
+            path: path.into(),
+            trouble: None,
+            pull_request: None,
+        };
+
+        db.record_checkouts(&id, &[checkout("acme/backend", "backend")])
+            .await
+            .unwrap();
+
+        db.add_checkout(&id, &checkout("acme/web", "web"))
+            .await
+            .expect("adding a second repository must work");
+
+        let held = db.session(&id).await.unwrap().unwrap().checkouts;
+        assert_eq!(held.len(), 2);
+        assert_eq!(held[1].slug, "acme/web", "and it goes after the first");
+
+        // And a third, so the position really is being counted rather than
+        // landing on a primary key that happens to be free.
+        db.add_checkout(&id, &checkout("acme/docs", "docs"))
+            .await
+            .unwrap();
+        assert_eq!(db.session(&id).await.unwrap().unwrap().checkouts.len(), 3);
+    }
+
+    /// The regression that hid for a day: every event covered by a test used
+    /// `repo: None`, which skips the query that was reading an INT4 as an i64.
+    /// A session that names its repository took the other branch, the
+    /// transaction failed, and the event was silently rolled back — so the
+    /// branch git actually created never reached the database.
+    #[tokio::test]
+    async fn a_worktree_event_that_names_its_repository_is_recorded() {
+        let db = db().await;
+        let host = db.ensure_host("localhost", Compute::Local).await.unwrap();
+        let id = SessionId::new();
+
+        db.insert_session(
+            &id,
+            &host.id,
+            Some("acme/backend"),
+            "Fix",
+            "fix",
+            Some("agent/hello"),
+            Some("main"),
+            "ClaudeCode",
+            WorkspaceSize::Medium,
+            &ft_core::Step::plan(true, false),
+        )
+        .await
+        .unwrap();
+
+        db.record_checkouts(
+            &id,
+            &[Checkout {
+                repo_id: None,
+                slug: "acme/backend".into(),
+                base: "main".into(),
+                branch: "agent/hello".into(),
+                path: "backend".into(),
+                trouble: None,
+                pull_request: None,
+            }],
+        )
+        .await
+        .unwrap();
+
+        // Git had to number it, because another session held the clean name.
+        db.record_event(
+            &host.id,
+            1,
+            &id,
+            &EventKind::WorktreeAdded {
+                branch: "agent/hello-2".into(),
+                repo: Some("acme/backend".into()),
+                asked_for: Some("agent/hello".into()),
+            },
+            chrono::Utc::now(),
+        )
+        .await
+        .expect("recording must not fail");
+
+        assert_eq!(
+            db.events_since(0).await.unwrap().len(),
+            1,
+            "the event was dropped"
+        );
+
+        // And the correction reached both places that show a branch.
+        let session = db.session(&id).await.unwrap().unwrap();
+        assert_eq!(session.branch.as_deref(), Some("agent/hello-2"));
+        assert_eq!(
+            session.checkouts.first().map(|c| c.branch.as_str()),
+            Some("agent/hello-2"),
+        );
     }
 
     #[tokio::test]

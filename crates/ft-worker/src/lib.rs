@@ -947,6 +947,15 @@ impl Worker {
             .await
             .context("cutting the worktree")?;
 
+        // Where it actually landed, which is not always where it was asked to
+        // go: a directory already in use is numbered rather than fatal, and the
+        // server prefixes every diff path with this, so recording the requested
+        // one would describe files that are not there.
+        let at = path
+            .strip_prefix(workspace)
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_else(|_| repo.path.clone());
+
         // Two sessions from one prompt want the same name, so git may have
         // numbered it — and it may have numbered it differently in each
         // repository, which is why the branch is recorded per checkout. What is
@@ -960,7 +969,7 @@ impl Worker {
                 &repo.remote,
                 &repo.base,
                 &branch,
-                &repo.path,
+                &at,
             )
             .await?;
         if position == 0 {
@@ -972,6 +981,8 @@ impl Worker {
             EventKind::WorktreeAdded {
                 branch: branch.clone(),
                 repo: Some(repo.slug.clone()),
+                // Only when it differs, so the ordinary case says nothing.
+                asked_for: (branch != repo.branch).then(|| repo.branch.clone()),
             },
             out,
         )

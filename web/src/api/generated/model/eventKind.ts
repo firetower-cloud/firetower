@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.8.0
+ * OpenAPI spec version: 0.9.0
  */
 import type { Agent } from './agent';
 import type { SessionStatus } from './sessionStatus';
@@ -28,6 +28,20 @@ export type EventKind = {
   detail: string;
   type: 'RepoFetched';
 } | {
+  /**
+     * The name asked for, when it is not the name granted.
+     *
+     * Two sessions started from the same prompt want the same branch, so
+     * the second is numbered. That is worth saying: the branch is what a
+     * pull request is opened from, and finding out it was renamed by
+     * reading the pull request is finding out too late.
+     *
+     * Renamed explicitly: this enum carries no `rename_all`, and every
+     * other field in it happens to be one word, so it is the first that
+     * would otherwise have reached the API as snake_case.
+     * @nullable
+     */
+  askedFor?: string | null;
   branch: string;
   /**
      * Which repository, when a session has more than one.

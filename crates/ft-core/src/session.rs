@@ -432,11 +432,32 @@ pub fn sanitize_branch(name: &str) -> String {
     }
 }
 
-/// A directory name for a workspace, from its branch.
+/// A directory name for a workspace, from its branch and its session.
 ///
 /// Flat, because worktrees all live side by side and a slash would nest them.
-pub fn workspace_name(branch: &str) -> String {
-    sanitize_branch(branch).replace('/', "-")
+///
+/// The session's own tail is on the end because **a branch name is not
+/// unique**. Two sessions started from the same prompt want the same branch,
+/// and naming the directory after the branch alone gave them one workspace
+/// between them: the same directory on disk, the same checkout piling up
+/// numbered copies inside it, and an agent that resumed the *other* session's
+/// conversation, because an agent keys its history by working directory.
+pub fn workspace_name(branch: &str, session: &str) -> String {
+    let base = sanitize_branch(branch).replace('/', "-");
+    match tail(session) {
+        Some(tail) => format!("{base}-{tail}"),
+        None => base,
+    }
+}
+
+/// The distinguishing end of a session id, short enough to still read the
+/// branch in front of it.
+///
+/// The front of an id is a timestamp two sessions started a minute apart
+/// mostly share, so it is the end that tells them apart.
+fn tail(session: &str) -> Option<&str> {
+    let id = session.strip_prefix("s_").unwrap_or(session);
+    (id.len() >= 8).then(|| &id[id.len() - 8..])
 }
 
 #[cfg(test)]
@@ -462,7 +483,35 @@ mod naming_tests {
 
     #[test]
     fn a_workspace_is_a_flat_directory() {
-        assert_eq!(workspace_name("feature/payments"), "feature-payments");
-        assert!(!workspace_name("a/b/c").contains('/'), "must not nest");
+        let name = workspace_name("feature/payments", "s_01m0rz00rh9e45swfrsxhtqbwb");
+        assert!(name.starts_with("feature-payments"), "{name}");
+        assert!(
+            !workspace_name("a/b/c", "s_01").contains('/'),
+            "must not nest"
+        );
+    }
+
+    /// The bug this exists to prevent: two sessions on one branch shared a
+    /// directory, so the second agent opened the first one's conversation.
+    #[test]
+    fn two_sessions_on_the_same_branch_get_different_workspaces() {
+        let a = workspace_name("agent/hello", "s_01m0ryydwt3nyy3hxcwv741an1");
+        let b = workspace_name("agent/hello", "s_01m0rz00rh9e45swfrsxhtqbwb");
+
+        assert_ne!(a, b, "a shared workspace is a shared conversation");
+        // Still readable: the branch is what somebody on the host is looking
+        // for, so it stays on the front.
+        assert!(a.starts_with("agent-hello"), "{a}");
+        assert!(b.starts_with("agent-hello"), "{b}");
+    }
+
+    /// The same session asked twice must land in the same place, or a worker
+    /// that reconnects builds a second workspace beside the first.
+    #[test]
+    fn a_workspace_name_is_stable_for_one_session() {
+        assert_eq!(
+            workspace_name("agent/hello", "s_01m0rz00rh9e45swfrsxhtqbwb"),
+            workspace_name("agent/hello", "s_01m0rz00rh9e45swfrsxhtqbwb"),
+        );
     }
 }

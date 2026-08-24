@@ -12,7 +12,7 @@ import {
   getGetSessionQueryKey,
 } from "@/src/api/generated/sessions/sessions";
 import type { CheckoutWork, FileDiff, Session } from "@/src/api/generated/model";
-import { shipping } from "@/src/api/ship";
+import { shipping, sequence, done } from "@/src/api/ship";
 import { ApiError } from "@/src/api/http";
 
 /**
@@ -82,14 +82,19 @@ export function Review({
   const failed = (e: unknown) =>
     setTrouble(e instanceof ApiError ? e.message : "That didn't work.");
 
+  /**
+   * Whether pressing will end with a pull request being created.
+   *
+   * `open-behind` pushes onto a branch whose request is already open, which
+   * amends it — so the draft choice does not apply and nothing new is opened.
+   */
+  const opening =
+    ship.stage === "uncommitted" || ship.stage === "unpushed" || ship.stage === "pushed";
+
   /** One press, however many steps it takes from here. */
   const go = async () => {
     setTrouble(null);
     try {
-      if (ship.stage === "open" && ship.url && !work?.some((c) => c.ahead > 0)) {
-        window.open(ship.url, "_blank", "noreferrer");
-        return;
-      }
       if (ship.stage === "uncommitted") {
         if (!title.trim()) {
           setTrouble("A commit needs a message. The title is used as one.");
@@ -100,10 +105,14 @@ export function Review({
           data: { message: title.trim(), paths: keeping.map((f) => f.path) },
         });
       }
-      if (ship.stage === "uncommitted" || ship.stage === "unpushed" || ship.stage === "open") {
+      if (
+        ship.stage === "uncommitted" ||
+        ship.stage === "unpushed" ||
+        ship.stage === "open-behind"
+      ) {
         await push.mutateAsync({ id: session.id });
       }
-      if (ship.stage !== "open") {
+      if (opening) {
         const made = await open.mutateAsync({
           id: session.id,
           data: { title: title.trim(), body: body.trim(), draft },
@@ -254,12 +263,20 @@ export function Review({
             </p>
           )}
 
+          {/* The button is abbreviated because the same string is the control
+              in the session header, where there is no room. Said in full here,
+              because a press that opens a pull request and a browser tab should
+              not be a surprise. */}
+          {sequence(ship.stage) && (
+            <p className="mt-3 text-[11.5px] text-mute">{sequence(ship.stage)}</p>
+          )}
+
           <div className="mt-3 flex flex-wrap items-center gap-3">
             <span className="font-mono text-[11.5px] text-mute">
               ⑂ {session.branch}
               {(work?.length ?? 0) > 1 && ` · ${work?.length} repositories`}
             </span>
-            {ship.stage !== "open" && (
+            {opening && (
               <label className="flex cursor-pointer items-center gap-1.5 text-[12px] text-dim">
                 <input
                   type="checkbox"
@@ -270,13 +287,31 @@ export function Review({
                 Draft
               </label>
             )}
-            <button
-              onClick={go}
-              disabled={busy || (keeping.length === 0 && ship.stage === "uncommitted")}
-              className="ml-auto min-h-[40px] rounded-[7px] bg-ember px-4 text-[13px] font-medium text-ground transition-opacity disabled:opacity-40"
-            >
-              {busy ? "Working…" : ship.label}
-            </button>
+
+            {/* Nothing is left to do, so nothing here is a button. */}
+            {done(ship) ? (
+              <div className="ml-auto flex flex-wrap items-center gap-3">
+                {ship.links.map((l) => (
+                  <a
+                    key={l.url}
+                    href={l.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-[13px] font-medium text-sage transition-opacity hover:opacity-80"
+                  >
+                    {ship.links.length === 1 ? "View pull request" : l.slug} ↗
+                  </a>
+                ))}
+              </div>
+            ) : (
+              <button
+                onClick={go}
+                disabled={busy || (keeping.length === 0 && ship.stage === "uncommitted")}
+                className="ml-auto min-h-[40px] rounded-[7px] bg-ember px-4 text-[13px] font-medium text-ground transition-opacity disabled:opacity-40"
+              >
+                {busy ? "Working…" : ship.label}
+              </button>
+            )}
           </div>
         </footer>
       </div>

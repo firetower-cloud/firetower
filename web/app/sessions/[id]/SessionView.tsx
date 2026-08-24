@@ -12,7 +12,8 @@ import { Signal } from "@/components/Signal";
 import { Terminal } from "@/components/Terminal";
 import { Chat } from "@/components/Chat";
 import { Review } from "@/components/Review";
-import { shipping, ready } from "@/src/api/ship";
+import { shipping, ready, done } from "@/src/api/ship";
+import type { Ship } from "@/src/api/ship";
 import { SessionMenu } from "@/components/SessionActions";
 import { Diff } from "@/components/Diff";
 import { AddRepo } from "@/components/AddRepo";
@@ -56,6 +57,13 @@ function Ship({
   onReview: () => void;
 }) {
   const ship = shipping(session, work);
+
+  // The work is out and there is nothing left to press. This used to be the
+  // primary button, reading "2 pull requests open" and opening the diff — a
+  // control that named a state and did something else, and with two requests
+  // open it could not even link to them.
+  if (done(ship)) return <Opened ship={ship} onReview={onReview} />;
+
   const can = ready(ship);
   return (
     <button
@@ -70,6 +78,63 @@ function Ship({
     >
       {ship.label}
     </button>
+  );
+}
+
+/**
+ * What a finished session offers: the request, and a way back to the diff.
+ *
+ * One repository links straight out. Several cannot — there is no single place
+ * to go — so the chip lists them, which is the case that previously had a
+ * button with nowhere to send you.
+ */
+function Opened({ ship, onReview }: { ship: Ship; onReview: () => void }) {
+  const [listing, setListing] = useState(false);
+  const one = ship.links.length === 1 ? ship.links[0] : undefined;
+
+  const chip =
+    "flex items-center gap-1.5 rounded-[9px] border border-sage/35 bg-sage/[0.07] px-2.5 py-1.5 text-ui font-medium text-sage transition-colors hover:bg-sage/[0.12]";
+
+  return (
+    <div className="relative flex shrink-0 items-center gap-2">
+      {/* Getting back to the sheet is what the old button actually did, so it
+          stays reachable — just not dressed as the main action. Not "Review
+          changes": everything is committed and pushed by now, so the one thing
+          it cannot promise is changes to look at. */}
+      <button
+        onClick={onReview}
+        className="rounded-[9px] border border-line px-2.5 py-1.5 text-ui text-dim transition-colors hover:text-bone"
+      >
+        Details
+      </button>
+
+      {one ? (
+        <a className={chip} href={one.url} target="_blank" rel="noreferrer">
+          ✓ {ship.label} ↗
+        </a>
+      ) : (
+        <button className={chip} onClick={() => setListing(!listing)}>
+          ✓ {ship.label}
+        </button>
+      )}
+
+      {listing && !one && (
+        <div className="absolute top-full right-0 z-20 mt-1.5 min-w-[220px] rounded-[9px] border border-line bg-panel py-1 shadow-lg">
+          {ship.links.map((l) => (
+            <a
+              key={l.url}
+              href={l.url}
+              target="_blank"
+              rel="noreferrer"
+              onClick={() => setListing(false)}
+              className="flex items-center justify-between gap-3 px-3 py-2 font-mono text-[12px] text-dim transition-colors hover:bg-raise hover:text-bone"
+            >
+              {l.slug} <span className="text-mute">↗</span>
+            </a>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 

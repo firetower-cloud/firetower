@@ -28,12 +28,17 @@ export function Setup() {
   const { data: state, isLoading, refetch } = useSetupState();
   const complete = useCompleteSetup();
 
+  // Skipping GitHub answers nothing, so the server still reports it as
+  // outstanding. Remembering it here is what lets the step drop off the way an
+  // answered one does; a reload offers it again, which is what needsGithub is for.
+  const [skippedGithub, setSkippedGithub] = useState(false);
+
   // What is still outstanding decides how much of the wizard exists. Rendering
   // a step somebody has already answered would ask them to do it twice.
   const outstanding = [
     state?.needsPassword ? "Password" : null,
     state?.needsOrganization ? "Organisation" : null,
-    state?.needsGithub ? "GitHub" : null,
+    state?.needsGithub && !skippedGithub ? "GitHub" : null,
   ].filter(Boolean) as string[];
 
   // The tour goes once. Whatever was skipped on the way stays skipped —
@@ -82,7 +87,15 @@ export function Setup() {
         <div className="mt-9">
           {current === "Password" && <StepPassword onNext={advance} />}
           {current === "Organisation" && <StepOrganization onNext={advance} />}
-          {current === "GitHub" && <StepGitHub onNext={advance} />}
+          {current === "GitHub" && (
+            <StepGitHub
+              onNext={advance}
+              onSkip={() => {
+                setSkippedGithub(true);
+                setStep(0);
+              }}
+            />
+          )}
           {current === "Repository" && (
             <StepRepository onNext={() => setStep(step + 1)} />
           )}

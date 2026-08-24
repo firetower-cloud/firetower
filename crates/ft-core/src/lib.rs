@@ -999,6 +999,17 @@ pub struct WorkSummary {
     pub ahead: u32,
     /// Whether this branch exists on the remote at all.
     pub pushed: bool,
+    /// Commits on this branch that its base does not have.
+    ///
+    /// Not the same question as `ahead`, which switches to measuring against
+    /// the upstream the moment a branch is pushed — so a pushed branch holding
+    /// nothing reports `ahead: 0` and looks ready to open a pull request from.
+    /// This is what says there is something to open one *for*.
+    ///
+    /// `None` from a worker too old to answer, which is not the same as zero
+    /// and must not be drawn as it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub commits: Option<u32>,
 }
 
 /// One checkout's summary, and which checkout it is.
@@ -1031,6 +1042,10 @@ pub struct CheckoutWork {
     pub uncommitted: u32,
     pub ahead: u32,
     pub pushed: bool,
+    /// Commits on this branch that its base does not have. See
+    /// [`WorkSummary::commits`]; `None` means the worker did not say.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub commits: Option<u32>,
     /// Where its pull request is, once it has one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pull_request: Option<String>,
@@ -1087,6 +1102,18 @@ pub enum EventKind {
         /// nothing to disambiguate.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         repo: Option<String>,
+        /// The name asked for, when it is not the name granted.
+        ///
+        /// Two sessions started from the same prompt want the same branch, so
+        /// the second is numbered. That is worth saying: the branch is what a
+        /// pull request is opened from, and finding out it was renamed by
+        /// reading the pull request is finding out too late.
+        ///
+        /// Renamed explicitly: this enum carries no `rename_all`, and every
+        /// other field in it happens to be one word, so it is the first that
+        /// would otherwise have reached the API as snake_case.
+        #[serde(rename = "askedFor", default, skip_serializing_if = "Option::is_none")]
+        asked_for: Option<String>,
     },
     WorkspaceStarted {
         detail: String,
@@ -1250,6 +1277,7 @@ mod step_tests {
             EventKind::WorktreeAdded {
                 branch: String::new(),
                 repo: None,
+                asked_for: None,
             },
             EventKind::WorkspaceStarted {
                 detail: String::new(),

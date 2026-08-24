@@ -24,6 +24,21 @@ const LABELS: Record<Step, string> = {
   Launch: "Starting the agent",
 };
 
+/**
+ * What a finished step is worth saying.
+ *
+ * Ordinarily the branch, or whatever detail the worker sent. A worktree whose
+ * branch had to be renamed says so instead — two sessions started from the same
+ * prompt want the same name and only one can have it, and reading that off the
+ * pull request afterwards is reading it too late.
+ */
+function finished(kind: Kind): string {
+  const branch = kind.branch ? String(kind.branch) : "";
+  const asked = kind.askedFor ? String(kind.askedFor) : "";
+  if (branch && asked) return `${branch} — ${asked} was already taken`;
+  return String(kind.detail ?? branch);
+}
+
 /** Which event finishes which step. The same mapping the control plane uses. */
 const FINISHED_BY: Record<string, Step> = {
   RepoFetched: "Fetch",
@@ -74,7 +89,7 @@ export function stepLines(session: Session, events: Event[]): Line[] {
       default:
         if (step) {
           state.set(step, "done");
-          detail.set(step, String(kind.detail ?? kind.branch ?? ""));
+          detail.set(step, finished(kind));
         }
     }
   }

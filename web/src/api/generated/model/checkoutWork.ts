@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.8.0
+ * OpenAPI spec version: 0.9.0
  */
 
 /**
@@ -17,6 +17,13 @@ export interface CheckoutWork {
   ahead: number;
   base: string;
   branch: string;
+  /**
+     * Commits on this branch that its base does not have. See
+     * [`WorkSummary::commits`]; `None` means the worker did not say.
+     * @minimum 0
+     * @nullable
+     */
+  commits?: number | null;
   path?: string;
   /**
      * Where its pull request is, once it has one.

@@ -264,16 +264,20 @@ impl GitRoot {
             tokio::fs::create_dir_all(parent).await?;
         }
 
-        // An empty directory is not in the way — the workspace is made before
-        // anything is checked into it, and a checkout that *is* the workspace
-        // would otherwise refuse on the directory holding it.
-        let occupied = match tokio::fs::read_dir(&dest).await {
-            Ok(mut entries) => entries.next_entry().await.ok().flatten().is_some(),
-            Err(_) => dest.exists(),
-        };
-        if occupied {
-            bail!("a worktree already exists at {}", dest.display());
-        }
+        // Before anything is called taken, drop what only looks taken. A
+        // workspace removed by hand — or by a host that died mid-clean-up —
+        // leaves an administrative entry behind that git still counts, and
+        // pruning it is what turns "everything breaks" into "nothing happened".
+        // Best effort: a mirror too old to have a worktree list is not a reason
+        // to refuse to make one.
+        let _ = run(
+            &self.worktrees,
+            "git",
+            &["--git-dir", mirror.to_str().unwrap(), "worktree", "prune"],
+        )
+        .await;
+
+        let dest = self.free_path(dest).await?;
 
         // `origin/main` rather than `main`: the local ref is whatever the clone
         // saw once, while the remote-tracking one is what the last fetch found.
@@ -297,6 +301,14 @@ impl GitRoot {
             base
         };
 
+        // What git says is taken, rather than what git says when it refuses.
+        // The retry below still reads the error text, because two sessions
+        // starting together can both find a name free and only one can have it
+        // — but a name that is already taken when we look should never reach
+        // that path, and never depends on git's wording or the machine's
+        // locale to be recognised.
+        let taken = self.branches_in_use(mirror).await;
+
         let mut last_error = None;
         for attempt in 1..=20u32 {
             let candidate = if attempt == 1 {
@@ -304,6 +316,10 @@ impl GitRoot {
             } else {
                 format!("{branch}-{attempt}")
             };
+
+            if taken.contains(&candidate) {
+                continue;
+            }
 
             match run(
                 &self.worktrees,
@@ -332,8 +348,103 @@ impl GitRoot {
             }
         }
 
-        Err(last_error.unwrap())
-            .with_context(|| format!("every name from {branch} onwards was taken"))
+        // `last_error` is absent when every candidate was already taken at the
+        // moment we looked, so none of them reached git. Unwrapping it here
+        // panicked the worker; saying what happened does not.
+        match last_error {
+            Some(e) => {
+                Err(e).with_context(|| format!("every name from {branch} onwards was taken"))
+            }
+            None => bail!("every name from {branch} onwards is already taken"),
+        }
+    }
+
+    /// A directory nothing is in, starting from the one asked for.
+    ///
+    /// An empty directory is not in the way — the workspace is made before
+    /// anything is checked into it, and a checkout that *is* the workspace
+    /// would otherwise refuse on the directory holding it.
+    ///
+    /// One that is genuinely occupied used to end the session. It is numbered
+    /// instead, the way a taken branch name is: the caller is told the path it
+    /// got, records that, and the session runs.
+    async fn free_path(&self, dest: PathBuf) -> Result<PathBuf> {
+        for attempt in 1..=20u32 {
+            let candidate = if attempt == 1 {
+                dest.clone()
+            } else {
+                let name = dest
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_else(|| "worktree".to_string());
+                dest.with_file_name(format!("{name}-{attempt}"))
+            };
+
+            let occupied = match tokio::fs::read_dir(&candidate).await {
+                Ok(mut entries) => entries.next_entry().await.ok().flatten().is_some(),
+                Err(_) => candidate.exists(),
+            };
+            if !occupied {
+                return Ok(candidate);
+            }
+        }
+        bail!(
+            "every directory from {} onwards is already in use",
+            dest.display()
+        )
+    }
+
+    /// Every branch name this mirror cannot hand out again.
+    ///
+    /// Local branches and the branches its worktrees are on. Empty when git
+    /// cannot be asked, which leaves the retry loop to find out the slow way
+    /// rather than refusing to start.
+    async fn branches_in_use(&self, mirror: &Path) -> std::collections::HashSet<String> {
+        let mut taken = std::collections::HashSet::new();
+
+        if let Ok(out) = run(
+            &self.worktrees,
+            "git",
+            &[
+                "--git-dir",
+                mirror.to_str().unwrap(),
+                "for-each-ref",
+                "--format=%(refname:short)",
+                "refs/heads",
+            ],
+        )
+        .await
+        {
+            taken.extend(
+                out.lines()
+                    .map(|l| l.trim().to_string())
+                    .filter(|l| !l.is_empty()),
+            );
+        }
+
+        // A branch checked out by a worktree is refused even where the ref
+        // itself would have been free, so both lists matter.
+        if let Ok(out) = run(
+            &self.worktrees,
+            "git",
+            &[
+                "--git-dir",
+                mirror.to_str().unwrap(),
+                "worktree",
+                "list",
+                "--porcelain",
+            ],
+        )
+        .await
+        {
+            taken.extend(
+                out.lines()
+                    .filter_map(|l| l.strip_prefix("branch "))
+                    .map(|r| r.trim().trim_start_matches("refs/heads/").to_string()),
+            );
+        }
+
+        taken
     }
 
     /// Remove a worktree and forget it. Safe to call when it's already gone.
@@ -393,11 +504,25 @@ impl GitRoot {
             .and_then(|c| c.trim().parse().ok())
             .unwrap_or(0);
 
+        // Always against the base, whatever the push state. `ahead` stops
+        // answering this the moment a branch is pushed, and a pushed branch
+        // holding nothing is exactly the case that looked ready to open a pull
+        // request from and had nothing to open one for.
+        let commits = run(
+            dest,
+            "git",
+            &["rev-list", "--count", &format!("{base}..HEAD")],
+        )
+        .await
+        .ok()
+        .and_then(|c| c.trim().parse().ok());
+
         Ok(WorkSummary {
             branch: branch.to_string(),
             uncommitted,
             ahead,
             pushed,
+            commits,
         })
     }
 
@@ -1251,6 +1376,110 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(branch.trim(), "agent/fix-retries");
+    }
+
+    /// The signal the interface needs to stop offering a pull request for a
+    /// branch that holds nothing: measured against the base, whatever the
+    /// push state, unlike `ahead`.
+    #[tokio::test]
+    async fn a_branch_reports_whether_it_carries_anything() {
+        let (_origin, remote) = origin().await;
+        let home = TempDir::new().unwrap();
+        let git = GitRoot::new(home.path());
+        let (mirror, _) = git
+            .ensure_mirror(&remote, "acme/backend", None, None)
+            .await
+            .unwrap();
+
+        let (tree, branch) = git
+            .add_worktree(&mirror, "agent/empty", "main", "s_empty")
+            .await
+            .unwrap();
+
+        // Cut and left alone: identical to the base.
+        let fresh = git.summary(&tree, &branch, "main").await.unwrap();
+        assert_eq!(
+            fresh.commits,
+            Some(0),
+            "an untouched branch carries nothing"
+        );
+        assert_eq!(fresh.uncommitted, 0);
+
+        // A file, and then a commit holding it.
+        tokio::fs::write(tree.join("new.txt"), "x").await.unwrap();
+        let dirty = git.summary(&tree, &branch, "main").await.unwrap();
+        assert_eq!(dirty.uncommitted, 1);
+        assert_eq!(dirty.commits, Some(0), "uncommitted is not yet a commit");
+
+        git.commit(&tree, "add a file", &[]).await.unwrap();
+        let done = git.summary(&tree, &branch, "main").await.unwrap();
+        assert_eq!(done.commits, Some(1), "now there is something to open");
+    }
+
+    /// A directory in the way used to end the session. It is numbered instead,
+    /// and the caller is told where the checkout actually went.
+    #[tokio::test]
+    async fn an_occupied_directory_is_worked_around_rather_than_fatal() {
+        let (_origin, remote) = origin().await;
+        let home = TempDir::new().unwrap();
+        let git = GitRoot::new(home.path());
+        let (mirror, _) = git
+            .ensure_mirror(&remote, "acme/backend", None, None)
+            .await
+            .unwrap();
+
+        // Something unrelated is already sitting where the checkout would go.
+        let taken = git.worktree_path("s_blocked");
+        tokio::fs::create_dir_all(&taken).await.unwrap();
+        tokio::fs::write(taken.join("in-the-way.txt"), "x")
+            .await
+            .unwrap();
+
+        let (path, branch) = git
+            .add_worktree(&mirror, "agent/blocked", "main", "s_blocked")
+            .await
+            .expect("an occupied directory must not fail the session");
+
+        assert_ne!(path, taken, "it must not check out over what was there");
+        assert!(path.join(".git").exists(), "{path:?} is not a checkout");
+        assert!(
+            taken.join("in-the-way.txt").exists(),
+            "what was already there must survive"
+        );
+        // Nothing was contending for the name, so it kept the clean one.
+        assert_eq!(branch, "agent/blocked");
+    }
+
+    /// The branch is numbered by asking git what it holds, not by reading the
+    /// wording of the error it returns when it refuses.
+    #[tokio::test]
+    async fn a_taken_branch_is_numbered_without_reading_gits_prose() {
+        let (_origin, remote) = origin().await;
+        let home = TempDir::new().unwrap();
+        let git = GitRoot::new(home.path());
+        let (mirror, _) = git
+            .ensure_mirror(&remote, "acme/backend", None, None)
+            .await
+            .unwrap();
+
+        let taken = git.branches_in_use(&mirror).await;
+        assert!(
+            taken.contains("main"),
+            "the mirror's own branches have to count as taken: {taken:?}"
+        );
+
+        let (_, first) = git
+            .add_worktree(&mirror, "agent/same", "main", "s_a")
+            .await
+            .unwrap();
+        let (_, second) = git
+            .add_worktree(&mirror, "agent/same", "main", "s_b")
+            .await
+            .unwrap();
+
+        assert_eq!(first, "agent/same");
+        assert_eq!(second, "agent/same-2");
+        assert!(git.branches_in_use(&mirror).await.contains("agent/same-2"));
     }
 
     #[tokio::test]

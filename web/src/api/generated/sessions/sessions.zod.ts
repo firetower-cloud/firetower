@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.8.0
+ * OpenAPI spec version: 0.9.0
  */
 import * as zod from 'zod';
 
@@ -693,6 +693,8 @@ export const SessionWorkParams = zod.object({
 
 export const sessionWorkResponseAheadMin = 0;
 
+export const sessionWorkResponseCommitsMin = 0;
+
 export const sessionWorkResponseUncommittedMin = 0;
 
 
@@ -701,6 +703,7 @@ export const SessionWorkResponseItem = zod.object({
   "ahead": zod.int().min(sessionWorkResponseAheadMin),
   "base": zod.string(),
   "branch": zod.string(),
+  "commits": zod.int().min(sessionWorkResponseCommitsMin).nullish().describe('Commits on this branch that its base does not have. See\n[`WorkSummary::commits`]; `None` means the worker did not say.'),
   "path": zod.string().optional(),
   "pullRequest": zod.string().nullish().describe('Where its pull request is, once it has one.'),
   "pushed": zod.boolean(),
