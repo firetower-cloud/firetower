@@ -13,6 +13,7 @@ import {
 import { useListHosts } from "@/src/api/generated/hosts/hosts";
 import type { CheckoutWork, Session } from "@/src/api/generated/model";
 import { ApiError } from "@/src/api/http";
+import { GetLocally } from "./GetLocally";
 import { atRisk } from "@/src/api/ship";
 
 /**
@@ -27,6 +28,8 @@ export function SessionMenu({ session, work }: { session: Session; work?: Checko
   const [open, setOpen] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [failed, setFailed] = useState<string | null>(null);
+  /** The get-it-locally sheet, which outlives the menu that opened it. */
+  const [fetching, setFetching] = useState(false);
   const box = useRef<HTMLDivElement>(null);
 
   const router = useRouter();
@@ -85,6 +88,20 @@ export function SessionMenu({ session, work }: { session: Session; work?: Checko
 
       {open && (
         <div className="absolute top-full right-0 z-30 mt-2 w-[292px] rounded-[14px] border border-line bg-panel p-1.5 shadow-[0_12px_36px_-14px_rgba(0,0,0,0.85)]">
+          {/* Above the split, because it applies to both halves — and an ended
+              session is exactly when somebody wants it. The workspace is gone
+              by then; the branch is on the remote, which is all this needs. */}
+          {(session.checkouts?.length ?? 0) > 0 && (
+            <Item
+              label="Get it locally"
+              hint="A worktree on the agent's branch, on this machine"
+              onClick={() => {
+                close();
+                setFetching(true);
+              }}
+            />
+          )}
+
           {ended ? (
             <p className="px-2 py-1.5 text-[13px] leading-[1.5] text-mute">
               {session.forgottenAt
@@ -200,6 +217,10 @@ export function SessionMenu({ session, work }: { session: Session; work?: Checko
             </p>
           )}
         </div>
+      )}
+
+      {fetching && (
+        <GetLocally session={session} work={work} onClose={() => setFetching(false)} />
       )}
     </div>
   );
