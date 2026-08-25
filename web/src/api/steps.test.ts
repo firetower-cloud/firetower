@@ -19,6 +19,8 @@ const broke = (id: string) => item(id, "CommandExecution", "Failed");
 const running = (id: string) => item(id, "CommandExecution", undefined);
 const read = (id: string) => item(id, "FileRead", "Completed");
 const said = (id: string) => item(id, "AssistantMessage", "Completed");
+/** A reasoning block with its text left out, which is what models send. */
+const mused = (id: string) => item(id, "Reasoning", "Completed");
 
 describe("fold", () => {
   test("leaves a run too short to be worth hiding", () => {
@@ -72,6 +74,23 @@ describe("fold", () => {
     const later = fold([said("s"), ran("a"), ran("b"), ran("c")]);
     const group = later.find((r) => r.type === "group");
     expect(group).toMatchObject({ id: "a" });
+  });
+
+  test("an invisible reasoning block does not break a run", () => {
+    // What models actually send: a reasoning block before every tool call,
+    // with no text in it, which `Thought` draws as nothing. Three commands
+    // that read as consecutive have to fold as consecutive.
+    const rows = fold([mused("m1"), ran("a"), mused("m2"), ran("b"), mused("m3"), ran("c")]);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ type: "group", id: "a" });
+    if (rows[0].type === "group") expect(rows[0].items).toHaveLength(3);
+  });
+
+  test("a reasoning block that has something to say is a row of its own", () => {
+    const thought = item("t", "Reasoning", "Completed");
+    thought.text = "weighing two options";
+    const rows = fold([ran("a"), thought, ran("b"), ran("c")]);
+    expect(rows.map((r) => r.type)).toEqual(["item", "item", "item", "item"]);
   });
 
   test("nothing in, nothing out", () => {

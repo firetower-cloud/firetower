@@ -61,6 +61,23 @@ const FOLDS: ItemKind[] = [
  */
 export const LEAST = 3;
 
+/**
+ * Whether this item draws nothing at all.
+ *
+ * Current models emit a reasoning block before almost every tool call and
+ * leave its text out, so `Thought` renders null and the rail looks like an
+ * unbroken run of commands. It was not one: an invisible item between two
+ * calls still split the run, so three commands that read as consecutive came
+ * out as three separate rows and nothing ever folded.
+ *
+ * These are dropped rather than kept, because a row nobody can see is not a
+ * row — and passing them through would put them inside groups where they are
+ * equally invisible.
+ */
+function silent(item: Item): boolean {
+  return item.kind === "Reasoning" && !item.text;
+}
+
 /** Whether this item may disappear into a group. */
 function foldable(item: Item): boolean {
   // Still going, so never. `Mark` draws `○` against a running step and that is
@@ -92,6 +109,9 @@ export function fold(items: Item[], least: number = LEAST): Row[] {
   };
 
   for (const item of items) {
+    // Neither joins a run nor breaks one: it is not on the screen.
+    if (silent(item)) continue;
+
     if (foldable(item)) {
       run.push(item);
       continue;
