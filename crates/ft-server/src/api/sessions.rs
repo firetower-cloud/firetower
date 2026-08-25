@@ -1089,14 +1089,9 @@ pub(super) async fn commit_session(
 
 /// Who to record as the author of a commit.
 ///
-/// Chosen the way the credential is — by the hostname of the remote, through
-/// `providers::for_remote` — so a session holding a GitHub checkout and a
-/// checkout somewhere else gets the right identity for each.
-///
-/// In order: what that person set for that host, then what their token says
-/// they are called there, then nothing — and nothing is fine, because the
-/// worker has an identity of its own for exactly that case. A commit that
-/// happened beats a commit refused for want of a name.
+/// Chosen by the hostname of the remote, through `providers::for_remote` — the
+/// same lookup that picks the credential — so a session holding a GitHub
+/// checkout and a checkout somewhere else gets the right identity for each.
 ///
 /// Deliberately not `users.email`. That is a login: somebody signs in with a
 /// work address whose GitHub account is under a different one entirely, and a
@@ -1104,43 +1099,7 @@ pub(super) async fn commit_session(
 /// refused by the host at push time.
 async fn author_for(state: &AppState, remote: &str, owner: &str) -> Option<ft_proto::Author> {
     let provider = providers::for_remote(remote)?;
-
-    if let Ok(Some(set)) = state.db.git_identity(owner, provider.id).await {
-        return Some(set);
-    }
-
-    // Nothing stored, so ask the host who this token belongs to and keep the
-    // answer. Asking before every commit is a request that can fail and take
-    // the commit with it.
-    let token = state
-        .vault
-        .get(
-            Key::of(vault::GIT, provider.id, owner),
-            "reading who commits belong to",
-        )
-        .await
-        .ok()
-        .flatten()?;
-
-    let author = match oauth::whoami(provider, &token).await {
-        Ok(author) => author,
-        Err(e) => {
-            tracing::warn!("could not read the git identity: {e:#}");
-            return None;
-        }
-    };
-
-    if let Err(e) = state
-        .db
-        .remember_git_identity(owner, provider.id, &author, "host")
-        .await
-    {
-        // Worth a line, not worth failing: the commit is what matters and the
-        // next one asks again.
-        tracing::warn!("could not record the git identity: {e:#}");
-    }
-
-    Some(author)
+    super::providers::identity_for(state, provider, owner).await
 }
 
 /// Whether a path is inside a checkout, and what it is called from there.

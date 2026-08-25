@@ -28,9 +28,11 @@ import type {
 import type {
   ApiError,
   ClientId,
+  GitIdentity,
   PendingAuth,
   ProviderStatus,
-  RemoteRepo
+  RemoteRepo,
+  SetIdentity
 } from '../model';
 
 import { http } from '../../http';
@@ -376,6 +378,267 @@ export const useSetClientId = <TError = ApiError,
         TContext
       > => {
       return useMutation(getSetClientIdMutationOptions(options), queryClient);
+    }
+    export const getGetIdentityUrl = (id: string,) => {
+
+
+
+
+  return `/api/v1/providers/${id}/identity`
+}
+
+/**
+ * @summary Who this person's commits are authored as on this host.
+ */
+export const getIdentity = async (id: string, options?: Parameters<typeof http>[1]): Promise<GitIdentity> => {
+
+  return http<GitIdentity>(getGetIdentityUrl(id),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetIdentityQueryKey = (id: string,) => {
+    return [
+    `/api/v1/providers/${id}/identity`
+    ] as const;
+    }
+
+
+export const getGetIdentityQueryOptions = <TData = Awaited<ReturnType<typeof getIdentity>>, TError = ApiError>(id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getIdentity>>, TError, TData>>, request?: SecondParameter<typeof http>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetIdentityQueryKey(id);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getIdentity>>> = ({ signal }) => getIdentity(id, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: id !== null && id !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getIdentity>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetIdentityQueryResult = NonNullable<Awaited<ReturnType<typeof getIdentity>>>
+export type GetIdentityQueryError = ApiError
+
+
+export function useGetIdentity<TData = Awaited<ReturnType<typeof getIdentity>>, TError = ApiError>(
+ id: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getIdentity>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getIdentity>>,
+          TError,
+          Awaited<ReturnType<typeof getIdentity>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetIdentity<TData = Awaited<ReturnType<typeof getIdentity>>, TError = ApiError>(
+ id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getIdentity>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getIdentity>>,
+          TError,
+          Awaited<ReturnType<typeof getIdentity>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetIdentity<TData = Awaited<ReturnType<typeof getIdentity>>, TError = ApiError>(
+ id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getIdentity>>, TError, TData>>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Who this person's commits are authored as on this host.
+ */
+
+export function useGetIdentity<TData = Awaited<ReturnType<typeof getIdentity>>, TError = ApiError>(
+ id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getIdentity>>, TError, TData>>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetIdentityQueryOptions(id,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+/**
+ * @summary Who this person's commits are authored as on this host.
+ */
+export const useSetGetIdentityQueryData = () => {
+  const queryClient = useQueryClient();
+  return (id: string,updater: Awaited<ReturnType<typeof getIdentity>> | undefined | ((old: Awaited<ReturnType<typeof getIdentity>> | undefined) => Awaited<ReturnType<typeof getIdentity>> | undefined)) => {
+    queryClient.setQueriesData<Awaited<ReturnType<typeof getIdentity>>>({ queryKey: getGetIdentityQueryKey(id) }, updater);
+  };
+}
+
+/**
+ * @summary Who this person's commits are authored as on this host.
+ */
+export const useGetGetIdentityQueryData = () => {
+  const queryClient = useQueryClient();
+  return (id: string,) =>
+    queryClient.getQueryData<Awaited<ReturnType<typeof getIdentity>>>(getGetIdentityQueryKey(id));
+}
+
+
+export const getSetIdentityUrl = (id: string,) => {
+
+
+
+
+  return `/api/v1/providers/${id}/identity`
+}
+
+/**
+ * Kept as `set`, which the derived answer never overwrites: the reason to
+ * type one is that what the host said was not the address you wanted on your
+ * branches.
+ * @summary Say who your commits should be authored as.
+ */
+export const setIdentity = async (id: string,
+    setIdentityBody: SetIdentity, options?: Parameters<typeof http>[1]): Promise<void> => {
+
+  return http<void>(getSetIdentityUrl(id),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(setIdentityBody)
+  }
+);}
+
+
+
+
+
+export const getSetIdentityMutationOptions = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setIdentity>>, TError,{id: string;data: SetIdentity}, TContext>, request?: SecondParameter<typeof http>}
+): UseMutationOptions<Awaited<ReturnType<typeof setIdentity>>, TError,{id: string;data: SetIdentity}, TContext> => {
+
+const mutationKey = ['setIdentity'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof setIdentity>>, {id: string;data: SetIdentity}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  setIdentity(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SetIdentityMutationResult = NonNullable<Awaited<ReturnType<typeof setIdentity>>>
+    export type SetIdentityMutationBody = SetIdentity
+    export type SetIdentityMutationError = ApiError
+
+    /**
+ * @summary Say who your commits should be authored as.
+ */
+export const useSetIdentity = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setIdentity>>, TError,{id: string;data: SetIdentity}, TContext>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof setIdentity>>,
+        TError,
+        {id: string;data: SetIdentity},
+        TContext
+      > => {
+      return useMutation(getSetIdentityMutationOptions(options), queryClient);
+    }
+    export const getClearIdentityUrl = (id: string,) => {
+
+
+
+
+  return `/api/v1/providers/${id}/identity`
+}
+
+/**
+ * @summary Go back to whatever the git host says you are called.
+ */
+export const clearIdentity = async (id: string, options?: Parameters<typeof http>[1]): Promise<void> => {
+
+  return http<void>(getClearIdentityUrl(id),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+
+export const getClearIdentityMutationOptions = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof clearIdentity>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof http>}
+): UseMutationOptions<Awaited<ReturnType<typeof clearIdentity>>, TError,{id: string}, TContext> => {
+
+const mutationKey = ['clearIdentity'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof clearIdentity>>, {id: string}> = (props) => {
+          const {id} = props ?? {};
+
+          return  clearIdentity(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ClearIdentityMutationResult = NonNullable<Awaited<ReturnType<typeof clearIdentity>>>
+
+    export type ClearIdentityMutationError = ApiError
+
+    /**
+ * @summary Go back to whatever the git host says you are called.
+ */
+export const useClearIdentity = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof clearIdentity>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof clearIdentity>>,
+        TError,
+        {id: string},
+        TContext
+      > => {
+      return useMutation(getClearIdentityMutationOptions(options), queryClient);
     }
     export const getListProviderReposUrl = (id: string,) => {
 

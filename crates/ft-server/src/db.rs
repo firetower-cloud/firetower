@@ -550,6 +550,27 @@ impl Db {
         }))
     }
 
+    /// Where the stored one came from — `host` or `set`.
+    pub async fn git_identity_source(&self, owner: &str, provider: &str) -> Result<Option<String>> {
+        let row =
+            sqlx::query("SELECT source FROM git_identities WHERE user_id = $1 AND provider = $2")
+                .bind(owner)
+                .bind(provider)
+                .fetch_optional(&self.pool)
+                .await?;
+        Ok(row.map(|r| r.get("source")))
+    }
+
+    /// Forget one, so the host's answer is used again.
+    pub async fn forget_git_identity(&self, owner: &str, provider: &str) -> Result<()> {
+        sqlx::query("DELETE FROM git_identities WHERE user_id = $1 AND provider = $2")
+            .bind(owner)
+            .bind(provider)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
     /// Keep one.
     ///
     /// `source` is `host` for what a token said and `set` for what somebody
@@ -2384,6 +2405,48 @@ mod tests {
         .unwrap();
         let _ = accounts;
         id.as_str().to_string()
+    }
+
+    /// Clearing a typed identity brings the host's answer back.
+    #[tokio::test]
+    async fn clearing_a_typed_identity_lets_the_host_answer_again() {
+        let (db, mine) = db_with_user().await;
+
+        db.remember_git_identity(
+            &mine,
+            "github",
+            &ft_proto::Author {
+                name: "Typed".into(),
+                email: "typed@example.com".into(),
+            },
+            "set",
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            db.git_identity_source(&mine, "github")
+                .await
+                .unwrap()
+                .as_deref(),
+            Some("set")
+        );
+
+        db.forget_git_identity(&mine, "github").await.unwrap();
+        assert_eq!(db.git_identity(&mine, "github").await.unwrap(), None);
+
+        // And the host's answer takes hold again, rather than being refused
+        // because a typed one once existed.
+        let derived = ft_proto::Author {
+            name: "kevinpiac".into(),
+            email: "1+kevinpiac@users.noreply.github.com".into(),
+        };
+        db.remember_git_identity(&mine, "github", &derived, "host")
+            .await
+            .unwrap();
+        assert_eq!(
+            db.git_identity(&mine, "github").await.unwrap(),
+            Some(derived)
+        );
     }
 
     /// A session belongs to whoever started it, and to nobody else.

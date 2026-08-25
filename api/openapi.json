@@ -821,6 +821,135 @@
         }
       }
     },
+    "/api/v1/providers/{id}/identity": {
+      "get": {
+        "tags": [
+          "providers"
+        ],
+        "summary": "Who this person's commits are authored as on this host.",
+        "operationId": "get_identity",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Provider id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GitIdentity"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Nothing to derive one from",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "providers"
+        ],
+        "summary": "Say who your commits should be authored as.",
+        "description": "Kept as `set`, which the derived answer never overwrites: the reason to\ntype one is that what the host said was not the address you wanted on your\nbranches.",
+        "operationId": "set_identity",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Provider id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetIdentity"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "providers"
+        ],
+        "summary": "Go back to whatever the git host says you are called.",
+        "operationId": "clear_identity",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Provider id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/providers/{id}/repos": {
       "get": {
         "tags": [
@@ -3979,6 +4108,27 @@
           }
         }
       },
+      "GitIdentity": {
+        "type": "object",
+        "description": "What a person's commits are signed with, and where that came from.",
+        "required": [
+          "name",
+          "email",
+          "source"
+        ],
+        "properties": {
+          "email": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string",
+            "description": "`host` — read from your token. `set` — you typed it, and nothing\noverwrites it."
+          }
+        }
+      },
       "HeldSecret": {
         "type": "object",
         "description": "A credential Firetower holds. Its name, and nothing else.",
@@ -4998,6 +5148,22 @@
           "Failed",
           "Ended"
         ]
+      },
+      "SetIdentity": {
+        "type": "object",
+        "description": "What to sign commits with, typed rather than derived.",
+        "required": [
+          "name",
+          "email"
+        ],
+        "properties": {
+          "email": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        }
       },
       "SetupState": {
         "type": "object",

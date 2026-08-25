@@ -14,6 +14,8 @@ use axum::{
     http::StatusCode,
     Extension, Json,
 };
+use serde::Serialize;
+use utoipa::ToSchema;
 
 /// Whose git connection a request means.
 ///
@@ -27,6 +29,191 @@ fn owner(principal: &Principal) -> Result<&str, ApiError> {
             "connecting a git host needs an account, and authentication is switched off",
         )
     })
+}
+
+/// The identity this person's commits carry on this host.
+///
+/// What they set wins; what their token says is the default, kept the first
+/// time it is asked for so a commit is never waiting on a request to GitHub;
+/// and `None` means nobody knows, which the worker answers with an identity of
+/// its own rather than refusing to commit.
+pub(super) async fn identity_for(
+    state: &AppState,
+    provider: &'static providers::Provider,
+    owner: &str,
+) -> Option<ft_proto::Author> {
+    if let Ok(Some(set)) = state.db.git_identity(owner, provider.id).await {
+        return Some(set);
+    }
+
+    let token = state
+        .vault
+        .get(
+            Key::of(vault::GIT, provider.id, owner),
+            "reading who commits belong to",
+        )
+        .await
+        .ok()
+        .flatten()?;
+
+    let author = match oauth::whoami(provider, &token).await {
+        Ok(author) => author,
+        Err(e) => {
+            tracing::warn!("could not read the {} identity: {e:#}", provider.label);
+            return None;
+        }
+    };
+
+    if let Err(e) = state
+        .db
+        .remember_git_identity(owner, provider.id, &author, "host")
+        .await
+    {
+        // Worth a line, not worth failing: the commit is the point, and the
+        // next one asks again.
+        tracing::warn!("could not record the git identity: {e:#}");
+    }
+
+    Some(author)
+}
+
+/// What a person's commits are signed with, and where that came from.
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct GitIdentity {
+    pub name: String,
+    pub email: String,
+    /// `host` — read from your token. `set` — you typed it, and nothing
+    /// overwrites it.
+    pub source: String,
+}
+
+/// Who this person's commits are authored as on this host.
+#[utoipa::path(
+    get, path = "/api/v1/providers/{id}/identity", tag = "providers",
+    params(("id" = String, Path, description = "Provider id")),
+    responses(
+        (status = 200, body = GitIdentity),
+        (status = 404, body = ApiError, description = "Nothing to derive one from"),
+    ),
+)]
+pub(super) async fn get_identity(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Path(id): Path<String>,
+) -> ApiResult<Json<GitIdentity>> {
+    let provider = providers::find(&id).ok_or_else(|| ApiError::not_found("provider"))?;
+    let owner = owner(&principal)?;
+
+    // Asked before it is answered, so the screen can say which of the two this
+    // is — a value you typed reads differently from one we guessed.
+    let stored = state.db.git_identity(owner, provider.id).await?.is_some();
+
+    let author = identity_for(&state, provider, owner).await.ok_or_else(|| {
+        ApiError::new(
+            ErrorCode::ProviderNotConnected,
+            format!(
+                "authorize {} first, or set a name and address yourself",
+                provider.label
+            ),
+        )
+    })?;
+
+    let source = if stored {
+        state
+            .db
+            .git_identity_source(owner, provider.id)
+            .await?
+            .unwrap_or_else(|| "host".into())
+    } else {
+        "host".to_string()
+    };
+
+    Ok(Json(GitIdentity {
+        name: author.name,
+        email: author.email,
+        source,
+    }))
+}
+
+/// What to sign commits with, typed rather than derived.
+#[derive(Debug, serde::Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SetIdentity {
+    pub name: String,
+    pub email: String,
+}
+
+/// Say who your commits should be authored as.
+///
+/// Kept as `set`, which the derived answer never overwrites: the reason to
+/// type one is that what the host said was not the address you wanted on your
+/// branches.
+#[utoipa::path(
+    put, path = "/api/v1/providers/{id}/identity", tag = "providers",
+    params(("id" = String, Path, description = "Provider id")),
+    request_body = SetIdentity,
+    responses((status = 204), (status = 400, body = ApiError), (status = 404, body = ApiError)),
+)]
+pub(super) async fn set_identity(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Path(id): Path<String>,
+    Json(req): Json<SetIdentity>,
+) -> ApiResult<StatusCode> {
+    let provider = providers::find(&id).ok_or_else(|| ApiError::not_found("provider"))?;
+    let owner = owner(&principal)?;
+
+    let name = req.name.trim();
+    let email = req.email.trim();
+    if name.is_empty() || email.is_empty() {
+        return Err(ApiError::new(
+            ErrorCode::InvalidRequest,
+            "a commit needs both a name and an address",
+        ));
+    }
+    // Not validated beyond this. Git accepts anything here, and a rule of our
+    // own would be one more thing to be wrong about somebody's address.
+    if !email.contains('@') {
+        return Err(ApiError::new(
+            ErrorCode::InvalidRequest,
+            "that does not look like an email address",
+        ));
+    }
+
+    state
+        .db
+        .remember_git_identity(
+            owner,
+            provider.id,
+            &ft_proto::Author {
+                name: name.to_string(),
+                email: email.to_string(),
+            },
+            "set",
+        )
+        .await?;
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Go back to whatever the git host says you are called.
+#[utoipa::path(
+    delete, path = "/api/v1/providers/{id}/identity", tag = "providers",
+    params(("id" = String, Path, description = "Provider id")),
+    responses((status = 204), (status = 404, body = ApiError)),
+)]
+pub(super) async fn clear_identity(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Path(id): Path<String>,
+) -> ApiResult<StatusCode> {
+    let provider = providers::find(&id).ok_or_else(|| ApiError::not_found("provider"))?;
+    state
+        .db
+        .forget_git_identity(owner(&principal)?, provider.id)
+        .await?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 /// An authorization in flight, and the task doing the waiting.

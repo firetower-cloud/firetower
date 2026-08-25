@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { GitIdentity } from "@/components/GitIdentity";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   useListRepos,
@@ -47,6 +48,11 @@ export default function Repos() {
           Each host keeps a mirror, so a new session gets a worktree in under a second
           instead of a fresh clone.
         </p>
+
+        {/* Here rather than on an account screen: this belongs to the git host,
+            not to your Firetower login. Signing in and being credited for a
+            commit are facts about two different accounts. */}
+        <GitIdentity provider="github" label="GitHub" />
       </header>
 
       <div className="flex flex-col gap-2.5">

@@ -254,6 +254,11 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(secrets::reveal_secret))
         .routes(routes!(providers::list_providers))
         .routes(routes!(providers::set_client_id))
+        .routes(routes!(
+            providers::get_identity,
+            providers::set_identity,
+            providers::clear_identity
+        ))
         .routes(routes!(providers::authorize_provider))
         .routes(routes!(providers::disconnect_provider))
         .routes(routes!(providers::list_provider_repos))

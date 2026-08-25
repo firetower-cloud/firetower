@@ -61,6 +61,45 @@ export const SetClientIdBody = zod.object({
 export const SetClientIdResponse = zod.void()
 
 /**
+ * @summary Who this person's commits are authored as on this host.
+ */
+export const GetIdentityParams = zod.object({
+  "id": zod.string().describe('Provider id')
+})
+
+export const GetIdentityResponse = zod.object({
+  "email": zod.string(),
+  "name": zod.string(),
+  "source": zod.string().describe('`host` — read from your token. `set` — you typed it, and nothing\noverwrites it.')
+}).describe('What a person\'s commits are signed with, and where that came from.')
+
+/**
+ * Kept as `set`, which the derived answer never overwrites: the reason to
+ * type one is that what the host said was not the address you wanted on your
+ * branches.
+ * @summary Say who your commits should be authored as.
+ */
+export const SetIdentityParams = zod.object({
+  "id": zod.string().describe('Provider id')
+})
+
+export const SetIdentityBody = zod.object({
+  "email": zod.string(),
+  "name": zod.string()
+}).describe('What to sign commits with, typed rather than derived.')
+
+export const SetIdentityResponse = zod.void()
+
+/**
+ * @summary Go back to whatever the git host says you are called.
+ */
+export const ClearIdentityParams = zod.object({
+  "id": zod.string().describe('Provider id')
+})
+
+export const ClearIdentityResponse = zod.void()
+
+/**
  * @summary What the authorized account can see. This is the picker's data.
  */
 export const ListProviderReposParams = zod.object({
