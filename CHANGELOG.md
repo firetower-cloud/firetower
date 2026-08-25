@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.12.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.11.0...firetower-v0.12.0) (2026-08-25)
+
+
+### ⚠ BREAKING CHANGES
+
+* the worker image no longer contains Claude Code. An existing worker keeps working — the binary is still in its old image until it is recreated — but a worker installed or upgraded from this version has no agent until one is added. `firetower worker install` now asks which to install, and `firetower worker agents add claude-code` does it afterwards.
+
+### Features
+
+* agents are installed onto the volume, not baked into the image ([2e26a5d](https://github.com/firetower-cloud/firetower/commit/2e26a5de98f714a8bdb923383267c41192e930b9))
+
 ## [0.11.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.10.0...firetower-v0.11.0) (2026-08-25)
 
 
