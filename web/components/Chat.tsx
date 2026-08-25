@@ -224,23 +224,30 @@ export function Chat({
         )}
 
         {/* Above the composer: the thing to deal with before saying anything
-            else, and on a phone the part a thumb already reaches. */}
-        {conversation.questions.map((asking) => (
-          <Questions
-            key={asking.req}
-            sessionId={sessionId}
-            asking={asking}
-            onAnswered={() => settle(asking.req)}
-          />
-        ))}
-        {conversation.asked.map((asked) => (
-          <Approval
-            key={asked.req}
-            sessionId={sessionId}
-            asked={asked}
-            onAnswered={() => settle(asked.req)}
-          />
-        ))}
+            else, and on a phone the part a thumb already reaches.
+
+            Capped, because this bar does not shrink and the composer lives
+            below it. One card carries its own ceiling; this one is for several
+            at once, so the composer stays on the screen however many the agent
+            has asked. */}
+        <div className="max-h-[75vh] min-h-0 overflow-y-auto">
+          {conversation.questions.map((asking) => (
+            <Questions
+              key={asking.req}
+              sessionId={sessionId}
+              asking={asking}
+              onAnswered={() => settle(asking.req)}
+            />
+          ))}
+          {conversation.asked.map((asked) => (
+            <Approval
+              key={asked.req}
+              sessionId={sessionId}
+              asked={asked}
+              onAnswered={() => settle(asked.req)}
+            />
+          ))}
+        </div>
 
         <ChatComposer
           sessionId={sessionId}
@@ -827,8 +834,15 @@ function Questions({
         e.preventDefault();
         send();
       }}
-      className="mb-4 rounded-[12px] border border-ember-deep bg-panel p-4"
+      className="mb-4 flex max-h-[60vh] flex-col rounded-[12px] border border-ember-deep bg-panel p-4"
     >
+      {/* The questions scroll; the button below them does not. Three questions
+          with described options is taller than a laptop screen, and this card
+          sits in the bar above the composer rather than in the transcript — so
+          without a ceiling it grew past the bottom of the window, taking the
+          composer and its own Answer button with it, and nothing on the page
+          could scroll to reach them. */}
+      <div className="min-h-0 overflow-y-auto">
       {asking.questions.map((q) => {
         const picked = chosen[q.question] ?? [];
         const mine = written[q.question];
@@ -892,11 +906,13 @@ function Questions({
         );
       })}
 
+      </div>
+
       <button
         onClick={send}
         disabled={!ready}
         title="Answer (⌘↵)"
-        className="flex min-h-[44px] w-full items-center justify-center gap-2 rounded-[8px] bg-ember px-4 text-[13.5px] font-medium text-ground disabled:opacity-40 sm:w-auto"
+        className="mt-3 flex min-h-[44px] w-full shrink-0 items-center justify-center gap-2 rounded-[8px] bg-ember px-4 text-[13.5px] font-medium text-ground disabled:opacity-40 sm:w-auto"
       >
         Answer
         <span aria-hidden className="font-mono text-[12px] opacity-60">
