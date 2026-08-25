@@ -36,6 +36,7 @@ pub mod entry;
 pub mod first_run;
 pub mod git;
 pub mod hooks;
+pub mod runtime;
 pub mod store;
 pub mod structured;
 pub mod tmux;
@@ -275,7 +276,7 @@ impl Worker {
             }
 
             ToWorker::ProbeAgents { req } => {
-                let agents = agents::probe().await;
+                let agents = agents::probe(&self.root).await;
                 out.send(ToServer::AgentsProbed { req, agents }).await?;
             }
 
@@ -1184,6 +1185,17 @@ You are in the directory that holds them, not inside one of them.              P
             self.root.display().to_string(),
         ));
 
+        // So the session can find an agent Firetower installed. Appended
+        // rather than prepended — see `runtime::path_with_agents` — so a
+        // machine that has its own copy keeps using it.
+        env.push((
+            "PATH".to_string(),
+            crate::runtime::path_with_agents(&self.root)
+                .await
+                .to_string_lossy()
+                .to_string(),
+        ));
+
         // In order, and each one is allowed to fail on its own: a session that
         // came up with two repositories out of three is still a session worth
         // having, and saying which one is missing beats pretending it was never
@@ -1516,7 +1528,8 @@ You are in the directory that holds them, not inside one of them.              P
                     diff.push_str(&format!("# {}\n{part}", c.slug));
                 }
 
-                let proposal = describe::propose(agent, &workspace, &prompt, &diff).await?;
+                let proposal =
+                    describe::propose(agent, &workspace, &prompt, &diff, &self.root).await?;
                 // Two values through a channel that carries one string. The
                 // shape the control plane reads it back with is right beside
                 // this, in `sessions::describe`.

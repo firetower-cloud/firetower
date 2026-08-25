@@ -54,6 +54,7 @@ pub async fn propose(
     workspace: &std::path::Path,
     asked_for: &str,
     diff: &str,
+    state: &std::path::Path,
 ) -> Result<Proposal> {
     let diff = diff.trim();
     anyhow::ensure!(
@@ -62,6 +63,9 @@ pub async fn propose(
     );
 
     let output = Command::new(agent.command())
+        // The same PATH a session gets, so describing a change uses whichever
+        // copy of the agent this machine actually runs.
+        .env("PATH", crate::runtime::path_with_agents(state).await)
         .args([
             "-p",
             // Cheap and quick. This is one paragraph about a diff, not the work

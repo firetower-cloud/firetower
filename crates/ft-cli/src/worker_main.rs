@@ -59,7 +59,39 @@ struct Cli {
 // Deliberately not a doc comment: clap would take it as the whole command's
 // `about` and print six lines of rationale above the usage.
 #[derive(Subcommand)]
+enum AgentsCommand {
+    /// Fetch one, or replace it with another version.
+    Add {
+        /// `claude-code` or `codex`.
+        kind: String,
+        /// Which version. The newest published one by default.
+        #[arg(long)]
+        version: Option<String>,
+    },
+    /// Remove every copy of one from this machine.
+    Remove {
+        /// `claude-code` or `codex`.
+        kind: String,
+    },
+}
+
+#[derive(Subcommand)]
 enum Command {
+    /// The agents this machine can run.
+    ///
+    /// They are not in the image: each is a few hundred megabytes and they are
+    /// published on their own schedules, so a new one would otherwise mean a
+    /// new Firetower before anybody could use it. They go on the volume, which
+    /// survives recreating the container to upgrade the worker.
+    ///
+    /// Nothing here signs anything in. Installing a binary and authenticating
+    /// it are separate acts, and what an agent authenticates with is held by
+    /// the control plane and handed over per session.
+    Agents {
+        #[command(subcommand)]
+        what: Option<AgentsCommand>,
+    },
+
     /// Answer git's credential prompt.
     ///
     /// Run by the one-line bridge script `Askpass::start` writes, never by
@@ -140,6 +172,10 @@ async fn main() -> Result<()> {
             println!("{value}");
             return Ok(());
         }
+        Some(Command::Agents { what }) => {
+            let root = cli.root.clone().unwrap_or_else(default_root);
+            return agents(&root, what).await;
+        }
         Some(Command::Hook { event }) => {
             // Nothing. See the same arm on the `firetower` binary: hooks are
             // gone, and this remains only so that a stale one does nothing
@@ -212,8 +248,88 @@ async fn main() -> Result<()> {
 /// The control plane always passes `--root`, so this is for the two callbacks
 /// below — git's askpass and an agent's hook — which are started by something
 /// that knows nothing about our arguments.
+/// List, add or remove the agents this machine can run.
+///
+/// Written for somebody watching a terminal: what is here, or what changed,
+/// and nothing else. The control plane reads the same directory through
+/// `runtime::installed`, so this and the Agents screen never disagree.
+async fn agents(root: &std::path::Path, what: Option<AgentsCommand>) -> anyhow::Result<()> {
+    use ft_worker::runtime;
+
+    match what {
+        // Bare `agents` lists, because that is what somebody types first.
+        None => {
+            let here = runtime::installed(root).await;
+            if here.is_empty() {
+                println!("none installed");
+                println!();
+                println!("  firetower-worker agents add claude-code");
+                return Ok(());
+            }
+            for one in here {
+                println!("{:<14} {}", directory_name(one.kind), one.version);
+            }
+            Ok(())
+        }
+
+        Some(AgentsCommand::Add { kind, version }) => {
+            let kind = agent_named(&kind)?;
+            let installed = runtime::install(root, kind, version.as_deref()).await?;
+            println!("{} {}", kind.label(), installed.version);
+            Ok(())
+        }
+
+        Some(AgentsCommand::Remove { kind }) => {
+            let kind = agent_named(&kind)?;
+            runtime::remove(root, kind).await?;
+            println!("removed {}", kind.label());
+            Ok(())
+        }
+    }
+}
+
+/// The name somebody types, which is the directory name rather than the label.
+fn agent_named(name: &str) -> anyhow::Result<ft_core::Agent> {
+    let wanted = name.trim().to_ascii_lowercase().replace('_', "-");
+    ft_core::Agent::all()
+        .into_iter()
+        .find(|k| directory_name(*k) == wanted)
+        .ok_or_else(|| {
+            let known: Vec<_> = ft_core::Agent::all()
+                .into_iter()
+                .map(directory_name)
+                .collect();
+            anyhow::anyhow!("no agent called {name}. Try: {}", known.join(", "))
+        })
+}
+
+fn directory_name(kind: ft_core::Agent) -> &'static str {
+    match kind {
+        ft_core::Agent::ClaudeCode => "claude-code",
+        ft_core::Agent::Codex => "codex",
+        ft_core::Agent::Shell => "shell",
+    }
+}
+
+/// Where this worker keeps its state, when nobody said.
+///
+/// `/var/lib/firetower/worker` first, because that is what the image creates
+/// and what the control plane passes when it runs a worker in a container.
+/// Without this check the two disagree: `HOME` inside the image is redirected
+/// to the volume, so the home-directory answer would be
+/// `/var/lib/firetower/home/.firetower/worker` — a second state directory
+/// beside the real one, and agents installed by hand would land somewhere no
+/// session looks.
+///
+/// On a machine that is not a worker container it does not exist, and the
+/// home-directory answer is the right one.
 fn default_root() -> PathBuf {
+    let in_image = PathBuf::from("/var/lib/firetower/worker");
+    if in_image.is_dir() {
+        return in_image;
+    }
+
     directories::BaseDirs::new()
         .map(|d| d.home_dir().join(".firetower").join("worker"))
-        .unwrap_or_else(|| PathBuf::from("/var/lib/firetower/worker"))
+        .unwrap_or(in_image)
 }

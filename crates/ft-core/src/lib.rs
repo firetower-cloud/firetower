@@ -71,11 +71,34 @@ impl Agent {
     }
 
     /// The binary Firetower launches inside tmux.
+    ///
+    /// A bare name, resolved through `PATH` rather than an absolute path. That
+    /// is what lets a machine's own install win over the one Firetower
+    /// fetched: the ones we install are *appended* to `PATH`, so they answer
+    /// only when nothing else does.
     pub fn command(&self) -> &'static str {
         match self {
             Agent::ClaudeCode => "claude",
             Agent::Codex => "codex",
             Agent::Shell => "bash",
+        }
+    }
+
+    /// Where to get it, when the machine does not already have it.
+    ///
+    /// npm for both of these — not because they are JavaScript (neither is any
+    /// more; both ship a native binary in a per-platform package) but because
+    /// it is the channel their publishers actually support, it resolves the
+    /// right build for the architecture, and the registry hands over a digest
+    /// with the tarball so verifying costs nothing.
+    ///
+    /// `None` for a shell: every machine has one, and fetching it would be
+    /// absurd.
+    pub fn package(&self) -> Option<&'static str> {
+        match self {
+            Agent::ClaudeCode => Some("@anthropic-ai/claude-code"),
+            Agent::Codex => Some("@openai/codex"),
+            Agent::Shell => None,
         }
     }
 

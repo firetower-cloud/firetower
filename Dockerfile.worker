@@ -84,13 +84,21 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         git tmux ca-certificates curl \
     && rm -rf /var/lib/apt/lists/*
 
-# An agent, so a container host is somewhere work can actually run. Without one
-# it can only start a shell, which makes it a demonstration rather than compute.
+# Node, for installing agents rather than for running Firetower.
 #
-# Node is here for the agent, not for Firetower.
+# **No agent is in this image.** Each is a few hundred megabytes — Claude Code
+# alone was half of what this used to weigh — and they are published on their
+# own schedules, so baking them in meant a new Firetower release before
+# anybody could use a new one, and a rebuild for every version.
+#
+# They are installed onto the volume instead, by `firetower-worker agents add`,
+# which the CLI runs for you when you install a worker. The volume survives
+# recreating this container, so upgrading the worker keeps them.
+#
+# npm is how both publishers actually ship: it resolves the right build for the
+# architecture and hands over a digest with the tarball.
 RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
-    && npm install -g @anthropic-ai/claude-code \
     && npm cache clean --force \
     && rm -rf /var/lib/apt/lists/*
 
