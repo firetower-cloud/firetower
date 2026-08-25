@@ -7,7 +7,7 @@ import { forgetToken } from "@/src/api/http";
 import { Mark, Signal } from "./Signal";
 import { useListHosts } from "@/src/api/generated/hosts/hosts";
 import { useListSessions } from "@/src/api/generated/sessions/sessions";
-import { elapsed, inFlight, minutesSince, needsYou } from "@/src/api/view";
+import { elapsed, inFlight, minutesSince, needsYou, unfinished } from "@/src/api/view";
 
 const NAV = [
   {
@@ -67,7 +67,17 @@ const NAV = [
 
 export function Shell({ children }: { children: React.ReactNode }) {
   const path = usePathname();
-  const { data: sessions = [] } = useListSessions();
+  // The rail is on screen the whole time and was the only thing on it that
+  // never asked again: a session moving from working to waiting on you, or
+  // being renamed, showed up here only after a reload. Faster while something
+  // is still going, and slow rather than never once nothing is — a session
+  // started from another tab, or from a phone, should still turn up.
+  const { data: sessions = [] } = useListSessions(undefined, {
+    query: {
+      refetchInterval: (query) =>
+        (query.state.data ?? []).some(unfinished) ? 2_000 : 15_000,
+    },
+  });
   const { data: hosts = [] } = useListHosts();
 
   /* Onboarding and signing in run full-bleed — no fleet to navigate yet. */

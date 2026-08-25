@@ -1,9 +1,14 @@
 "use client";
 
 import { usePathname } from "next/navigation";
+import { useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 import Link from "next/link";
-import { useGetSession, useRenameSession } from "@/src/api/generated/sessions/sessions";
+import {
+  useGetSession,
+  useRenameSession,
+  getListSessionsQueryKey,
+} from "@/src/api/generated/sessions/sessions";
 import { useListEvents } from "@/src/api/generated/events/events";
 import { useSessionWork } from "@/src/api/generated/sessions/sessions";
 import type { CheckoutWork, Session } from "@/src/api/generated/model";
@@ -178,6 +183,7 @@ export default function SessionView() {
     },
   });
   const rename = useRenameSession();
+  const cache = useQueryClient();
 
   const busy = !!session && unfinished(session);
   // What is in the workspace that is not safely elsewhere. Asked while the
@@ -270,7 +276,15 @@ export default function SessionView() {
               if (dropped || !next || next === session.name) return;
               rename.mutate(
                 { id: session.id, data: { name: next } },
-                { onSuccess: () => refetch() },
+                {
+                  onSuccess: () => {
+                    refetch();
+                    // The rail and the dashboard read the same list, and
+                    // neither was told. The name changed here and stayed
+                    // wrong everywhere else until a reload.
+                    cache.invalidateQueries({ queryKey: getListSessionsQueryKey() });
+                  },
+                },
               );
             }}
             style={{ width: `${Math.min(Math.max(naming.length, 10) + 2, 40)}ch` }}
