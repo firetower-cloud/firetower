@@ -5,11 +5,12 @@
 //! the last sequence it saw and carries on.
 
 use super::ApiResult;
+use crate::auth::Principal;
 use crate::AppState;
 use axum::{
     extract::{Query, State},
     response::sse::{self, Sse},
-    Json,
+    Extension, Json,
 };
 use ft_core::{Event, SessionId};
 use futures::{Stream, StreamExt};
@@ -39,11 +40,19 @@ pub struct Replay {
 )]
 pub(super) async fn list_events(
     State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
     Query(q): Query<Replay>,
 ) -> ApiResult<Json<Vec<Event>>> {
     let session = q.session_id.map(SessionId::from_stored);
     Ok(Json(
-        state.db.events_since_for(q.since, session.as_ref()).await?,
+        state
+            .db
+            .events_since_for(
+                principal.owner().unwrap_or_default(),
+                q.since,
+                session.as_ref(),
+            )
+            .await?,
     ))
 }
 

@@ -1712,7 +1712,7 @@ mod tests {
     }
 
     async fn fleet() -> (Fleet, HostId) {
-        let db = Db::open_for_test().await.unwrap();
+        let (db, _owner) = Db::open_for_test_owned().await.unwrap();
         let host = db
             .ensure_host("fire-01", ft_core::Compute::Local)
             .await
@@ -1884,7 +1884,7 @@ mod supervisor_tests {
     /// first host that worked, and left everything after it unsupervised.
     #[tokio::test]
     async fn supervising_returns_while_the_host_is_still_connected() {
-        let db = Db::open_for_test().await.unwrap();
+        let (db, _owner) = Db::open_for_test_owned().await.unwrap();
         let host = db
             .ensure_host("fire-01", ft_core::Compute::Local)
             .await

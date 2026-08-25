@@ -160,11 +160,22 @@ async fn bootstrap() -> Json<Bootstrap> {
 ///
 /// A remote we have no token for isn't an error: local paths and self-hosted
 /// git work off whatever credentials the worker already has.
-async fn credential_for(state: &AppState, remote: &str, why: &str) -> Option<Credential> {
+///
+/// `owner` is **whose** token, and the answer differs by caller: a repository
+/// picker asks with the token of the person looking at it, while pushing a
+/// session's branch asks with the token of whoever started that session. Those
+/// are two different people the moment there are two people, and conflating
+/// them is how one person's branch goes up under another's name.
+async fn credential_for(
+    state: &AppState,
+    remote: &str,
+    owner: &str,
+    why: &str,
+) -> Option<Credential> {
     let provider = crate::providers::for_remote(remote)?;
     let secret = state
         .vault
-        .get(vault::GIT, provider.id, why)
+        .get(crate::vault::Key::of(vault::GIT, provider.id, owner), why)
         .await
         // A credential that will not open is a real failure, but not this
         // caller's to report: it is logged where it happens, and here it means

@@ -3,13 +3,18 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.9.0
+ * OpenAPI spec version: 0.10.0
  */
 
 /**
  * A credential Firetower holds. Its name, and nothing else.
  */
 export interface HeldSecret {
+  /**
+     * Yours rather than the install's. What the screen says, so it never has
+     * to show an account id.
+     */
+  mine: boolean;
   name: string;
   scope: string;
 }

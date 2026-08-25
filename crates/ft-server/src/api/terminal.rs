@@ -4,11 +4,13 @@
 //! and the one place latency is felt — which is why it is not on the event
 //! stream with everything else.
 
+use crate::auth::Principal;
 use crate::{fleet, AppState};
 use axum::{
     extract::ws::{Message, WebSocket, WebSocketUpgrade},
     extract::{Path, Query, State},
     response::Response,
+    Extension,
 };
 use ft_core::SessionId;
 use serde::Deserialize;
@@ -33,12 +35,16 @@ use utoipa::ToSchema;
 )]
 pub(super) async fn session_pty(
     State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
     Path(id): Path<String>,
     Query(size): Query<TerminalSize>,
     upgrade: WebSocketUpgrade,
 ) -> Response {
     let id = SessionId::from_stored(id);
-    upgrade.on_upgrade(move |socket| drive_terminal(socket, state, id, size))
+    // Checked before the upgrade, not after: a socket that opens and then says
+    // "no such session" has already told somebody the id was worth trying.
+    let owner = principal.owner().unwrap_or_default().to_string();
+    upgrade.on_upgrade(move |socket| drive_terminal(socket, state, owner, id, size))
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -65,10 +71,11 @@ enum FromViewer {
 async fn drive_terminal(
     mut socket: WebSocket,
     state: AppState,
+    owner: String,
     session_id: SessionId,
     size: TerminalSize,
 ) {
-    let Ok(Some(session)) = state.db.session(&session_id).await else {
+    let Ok(Some(session)) = state.db.session_of(&owner, &session_id).await else {
         let _ = socket
             .send(Message::Text("no such session".to_string().into()))
             .await;

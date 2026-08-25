@@ -10,7 +10,7 @@
       "name": "AGPL-3.0-only",
       "identifier": "AGPL-3.0-only"
     },
-    "version": "0.9.0"
+    "version": "0.10.0"
   },
   "paths": {
     "/api/v1/agents": {
@@ -3984,9 +3984,14 @@
         "description": "A credential Firetower holds. Its name, and nothing else.",
         "required": [
           "scope",
-          "name"
+          "name",
+          "mine"
         ],
         "properties": {
+          "mine": {
+            "type": "boolean",
+            "description": "Yours rather than the install's. What the screen says, so it never has\nto show an account id."
+          },
           "name": {
             "type": "string"
           },
@@ -4842,6 +4847,7 @@
         "description": "A line of work with a conversation attached and a branch at the end.",
         "required": [
           "id",
+          "owner",
           "number",
           "name",
           "title",
@@ -4910,6 +4916,10 @@
             "type": "integer",
             "format": "int64",
             "description": "Assigned once, never reused, and the same for as long as the session\nexists. What `name` is derived from, and what a name that has been\nchanged can always be traced back to."
+          },
+          "owner": {
+            "$ref": "#/components/schemas/UserId",
+            "description": "Whoever started it.\n\nEverything else about who may do what follows from this: who can open\nthe session, whose token pushes its branch, whose name goes on its\ncommits. Carried on the session rather than looked up each time,\nbecause every one of those questions is asked while it is already\nloaded."
           },
           "prompt": {
             "type": "string"

@@ -166,6 +166,7 @@ mod tests {
 
     fn id() -> Identity<'static> {
         Identity {
+            owner: "",
             scope: "test",
             name: "one",
             version: 1,

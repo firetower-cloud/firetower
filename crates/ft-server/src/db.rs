@@ -69,6 +69,23 @@ impl Db {
         Ok(Self { pool })
     }
 
+    /// A test database with an organization and an administrator in it.
+    ///
+    /// Almost everything is owned now — a host belongs to an organization, a
+    /// session to a person — and the foreign keys say so, so a test that
+    /// inserts one needs the same rows a first boot creates. Returns the
+    /// owner's id, which is what those inserts want.
+    #[cfg(test)]
+    pub async fn open_for_test_owned() -> Result<(Self, String)> {
+        let db = Self::open_for_test().await?;
+        let accounts = crate::accounts::Accounts::new(db.pool().clone());
+        let user = accounts
+            .create_first_admin("admin", "first-password")
+            .await?;
+        let id = user.id.as_str().to_string();
+        Ok((db, id))
+    }
+
     /// A database of its own, for one test.
     ///
     /// A schema rather than a container: tests then run in parallel against one
@@ -117,6 +134,19 @@ impl Db {
 
     // ── hosts ──────────────────────────────────────────────────────────
 
+    /// Which organization this Firetower belongs to.
+    ///
+    /// One row, so one answer. It exists as a lookup rather than a constant
+    /// because the things that ask — a host coming up, a repository being
+    /// connected — happen where there may be nobody signed in to ask instead.
+    pub async fn org(&self) -> Result<String> {
+        let row = sqlx::query("SELECT org_id FROM installation")
+            .fetch_optional(&self.pool)
+            .await?
+            .context("this Firetower has no organization yet")?;
+        Ok(row.get("org_id"))
+    }
+
     /// Register a host, or leave the existing one alone.
     ///
     /// `localhost` goes through this like any other host, because it *is* one.
@@ -126,10 +156,13 @@ impl Db {
         }
         let id = HostId::new();
         sqlx::query(
-            "INSERT INTO hosts (id, name, compute, state, created_at)
-             VALUES ($1, $2, $3, $4, $5)",
+            "INSERT INTO hosts (id, org_id, name, compute, state, created_at)
+             VALUES ($1, $2, $3, $4, $5, $6)",
         )
         .bind(id.as_str())
+        // Compute is the team's: somebody pays for a machine and everybody
+        // runs on it.
+        .bind(self.org().await?)
         .bind(name)
         .bind(serde_json::to_value(&compute)?)
         .bind("Unreachable")
@@ -438,15 +471,21 @@ impl Db {
         remote: &str,
         default_branch: Option<&str>,
         setup: Option<&str>,
+        added_by: Option<&str>,
     ) -> Result<Repo> {
         if let Some(existing) = self.repo_by_remote(remote).await? {
             return Ok(existing);
         }
         sqlx::query(
-            "INSERT INTO repos (id, slug, remote, default_branch, setup, created_at)
-             VALUES ($1, $2, $3, $4, $5, $6)",
+            "INSERT INTO repos (id, org_id, added_by, slug, remote, default_branch, setup, created_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
         )
         .bind(RepoId::new().as_str())
+        // The organization's, so one row means one setup script and one
+        // mirror. Who connected it is recorded beside it, and what actually
+        // opens it is their token, which is theirs alone.
+        .bind(self.org().await?)
+        .bind(added_by)
         .bind(slug)
         .bind(remote)
         .bind(default_branch)
@@ -467,8 +506,9 @@ impl Db {
     ///
     /// No secret here, not even a flag for one: the vault owns those, and
     /// asking it is one query — see [`crate::vault::Vault::holds`].
-    pub async fn agent_modes(&self) -> Result<Vec<(Agent, AgentMode, bool)>> {
-        let rows = sqlx::query("SELECT kind, mode, enabled FROM agents")
+    pub async fn agent_modes(&self, owner: &str) -> Result<Vec<(Agent, AgentMode, bool)>> {
+        let rows = sqlx::query("SELECT kind, mode, enabled FROM agents WHERE user_id = $1")
+            .bind(owner)
             .fetch_all(&self.pool)
             .await?;
 
@@ -486,14 +526,78 @@ impl Db {
             .collect())
     }
 
-    /// Configure an agent. The value it authenticates with is the vault's.
-    pub async fn set_agent_mode(&self, kind: Agent, mode: AgentMode, enabled: bool) -> Result<()> {
-        sqlx::query(
-            "INSERT INTO agents (kind, mode, enabled, updated_at) VALUES ($1, $2, $3, $4)
-             ON CONFLICT(kind) DO UPDATE SET mode = excluded.mode,
-                                             enabled = excluded.enabled,
-                                             updated_at = excluded.updated_at",
+    /// What a person's commits are signed with on one git host.
+    ///
+    /// Per person and per host, because somebody with three addresses has one
+    /// of them on their GitHub and a different one at work — and the branch
+    /// has to carry the one the host expects.
+    pub async fn git_identity(
+        &self,
+        owner: &str,
+        provider: &str,
+    ) -> Result<Option<ft_proto::Author>> {
+        let row = sqlx::query(
+            "SELECT name, email FROM git_identities WHERE user_id = $1 AND provider = $2",
         )
+        .bind(owner)
+        .bind(provider)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(row.map(|r| ft_proto::Author {
+            name: r.get("name"),
+            email: r.get("email"),
+        }))
+    }
+
+    /// Keep one.
+    ///
+    /// `source` is `host` for what a token said and `set` for what somebody
+    /// typed. A typed one is never overwritten by the host's answer: the whole
+    /// reason to type one is that the derived answer was wrong.
+    pub async fn remember_git_identity(
+        &self,
+        owner: &str,
+        provider: &str,
+        author: &ft_proto::Author,
+        source: &str,
+    ) -> Result<()> {
+        sqlx::query(
+            "INSERT INTO git_identities (user_id, provider, name, email, source, updated_at)
+             VALUES ($1, $2, $3, $4, $5, now())
+             ON CONFLICT (user_id, provider) DO UPDATE
+                SET name       = excluded.name,
+                    email      = excluded.email,
+                    source     = excluded.source,
+                    updated_at = excluded.updated_at
+              WHERE git_identities.source <> 'set' OR excluded.source = 'set'",
+        )
+        .bind(owner)
+        .bind(provider)
+        .bind(&author.name)
+        .bind(&author.email)
+        .bind(source)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Configure an agent. The value it authenticates with is the vault's.
+    pub async fn set_agent_mode(
+        &self,
+        owner: &str,
+        kind: Agent,
+        mode: AgentMode,
+        enabled: bool,
+    ) -> Result<()> {
+        sqlx::query(
+            "INSERT INTO agents (user_id, kind, mode, enabled, updated_at)
+             VALUES ($1, $2, $3, $4, $5)
+             ON CONFLICT(user_id, kind) DO UPDATE SET mode = excluded.mode,
+                                                      enabled = excluded.enabled,
+                                                      updated_at = excluded.updated_at",
+        )
+        .bind(owner)
         .bind(format!("{kind:?}"))
         .bind(format!("{mode:?}"))
         .bind(enabled)
@@ -504,8 +608,9 @@ impl Db {
     }
 
     /// Back to unconfigured. The stored value is the caller's to forget.
-    pub async fn forget_agent(&self, kind: Agent) -> Result<()> {
-        sqlx::query("DELETE FROM agents WHERE kind = $1")
+    pub async fn forget_agent(&self, owner: &str, kind: Agent) -> Result<()> {
+        sqlx::query("DELETE FROM agents WHERE user_id = $1 AND kind = $2")
+            .bind(owner)
             .bind(format!("{kind:?}"))
             .execute(&self.pool)
             .await?;
@@ -639,6 +744,7 @@ impl Db {
         &self,
         id: &SessionId,
         host_id: &HostId,
+        owner: &str,
         repo: Option<&str>,
         title: &str,
         prompt: &str,
@@ -651,13 +757,16 @@ impl Db {
         let now = chrono::Utc::now();
         sqlx::query(
             "INSERT INTO sessions
-               (id, host_id, repo, title, prompt, branch, base, agent, size, status,
+               (id, user_id, host_id, repo, title, prompt, branch, base, agent, size, status,
                 steps, created_at, updated_at, number, name)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'Starting', $10, $11, $12,
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'Starting', $11, $12, $13,
                      nextval('session_number_seq'),
                      'Agent ' || currval('session_number_seq'))",
         )
         .bind(id.as_str())
+        // Whoever started it. Everything about who may see it, whose token
+        // pushes it and whose name is on its commits is read from here.
+        .bind(owner)
         .bind(host_id.as_str())
         .bind(repo)
         .bind(title)
@@ -674,8 +783,8 @@ impl Db {
         Ok(())
     }
 
-    pub async fn sessions(&self) -> Result<Vec<Session>> {
-        self.sessions_page(None, None).await
+    pub async fn sessions(&self, owner: &str) -> Result<Vec<Session>> {
+        self.sessions_page(owner, None, None).await
     }
 
     /// Newest first, optionally a page at a time.
@@ -688,34 +797,62 @@ impl Db {
     /// made in the same millisecond may swap, which nobody can tell apart.
     pub async fn sessions_page(
         &self,
+        owner: &str,
         limit: Option<u32>,
         before: Option<&str>,
     ) -> Result<Vec<Session>> {
         let rows = sqlx::query(
             "SELECT * FROM sessions
-             WHERE ($1::text IS NULL OR id < $1)
+             WHERE user_id = $3
+               AND ($1::text IS NULL OR id < $1)
              ORDER BY id DESC
              LIMIT $2",
         )
         .bind(before)
         // NULL is how Postgres spells "no limit".
         .bind(limit.map(i64::from))
+        .bind(owner)
         .fetch_all(&self.pool)
         .await?;
 
         self.with_checkouts(rows).await
     }
 
-    /// Every session that hasn't ended, for stopping them all at once.
-    pub async fn live_sessions(&self) -> Result<Vec<Session>> {
-        let rows = sqlx::query("SELECT * FROM sessions WHERE status != $1 ORDER BY id DESC")
-            .bind(format!("{:?}", SessionStatus::Ended))
-            .fetch_all(&self.pool)
-            .await?;
+    /// Every session of this person's that hasn't ended, for stopping them all
+    /// at once. Never anybody else's — "end all" ends yours.
+    pub async fn live_sessions(&self, owner: &str) -> Result<Vec<Session>> {
+        let rows = sqlx::query(
+            "SELECT * FROM sessions WHERE user_id = $2 AND status != $1 ORDER BY id DESC",
+        )
+        .bind(format!("{:?}", SessionStatus::Ended))
+        .bind(owner)
+        .fetch_all(&self.pool)
+        .await?;
 
         self.with_checkouts(rows).await
     }
 
+    /// One session, if it is this person's.
+    ///
+    /// Absent rather than refused when it is somebody else's: a 403 and a 404
+    /// differ only in confirming that the session exists, which is itself
+    /// something the asker was not meant to learn.
+    pub async fn session_of(&self, owner: &str, id: &SessionId) -> Result<Option<Session>> {
+        let row = sqlx::query("SELECT * FROM sessions WHERE id = $1 AND user_id = $2")
+            .bind(id.as_str())
+            .bind(owner)
+            .fetch_optional(&self.pool)
+            .await?;
+        let Some(row) = row else { return Ok(None) };
+        Ok(self.with_checkouts(vec![row]).await?.pop())
+    }
+
+    /// One session, whoever it belongs to.
+    ///
+    /// For the parts of the control plane that act on their own — a worker
+    /// reconnecting, a clean-up sweep — where there is no request and so
+    /// nobody to check against. Never reachable from an API handler: those use
+    /// [`Db::session_of`].
     pub async fn session(&self, id: &SessionId) -> Result<Option<Session>> {
         let row = sqlx::query("SELECT * FROM sessions WHERE id = $1")
             .bind(id.as_str())
@@ -1102,8 +1239,21 @@ impl Db {
         Ok(last.unwrap_or(0))
     }
 
+    /// Every event since a cursor, whoever they belong to.
+    ///
+    /// For the control plane's own use — a worker reconnecting, the tests —
+    /// where there is no request and so nobody to narrow to. API callers use
+    /// [`Db::events_since_for`], which asks whose.
     pub async fn events_since(&self, since: i64) -> Result<Vec<Event>> {
-        self.events_since_for(since, None).await
+        let rows = sqlx::query(
+            "SELECT id, session_id, payload, created_at FROM events
+             WHERE id > $1 ORDER BY id",
+        )
+        .bind(since)
+        .fetch_all(&self.pool)
+        .await?;
+
+        rows.into_iter().map(event_from_row).collect()
     }
 
     /// Replay, optionally narrowed to one session.
@@ -1112,32 +1262,42 @@ impl Db {
     /// of rows and the log holds every event from every host.
     pub async fn events_since_for(
         &self,
+        owner: &str,
         since: i64,
         session: Option<&SessionId>,
     ) -> Result<Vec<Event>> {
         // Numbered rather than positional: mixing `?` and `?1` makes SQLite
         // reuse the first binding for both, which silently matches nothing.
+        //
+        // Joined to `sessions` rather than filtered on the id given: an event
+        // stream is how a session narrates itself, and asking for somebody
+        // else's id must return nothing rather than their build steps.
         let rows = sqlx::query(
-            "SELECT id, session_id, payload, created_at FROM events
-             WHERE id > $1 AND ($2::text IS NULL OR session_id = $2) ORDER BY id",
+            "SELECT e.id, e.session_id, e.payload, e.created_at
+             FROM events e JOIN sessions s ON s.id = e.session_id
+             WHERE e.id > $1 AND ($2::text IS NULL OR e.session_id = $2)
+               AND s.user_id = $3
+             ORDER BY e.id",
         )
         .bind(since)
         .bind(session.map(|s| s.as_str()))
+        .bind(owner)
         .fetch_all(&self.pool)
         .await?;
 
-        rows.into_iter()
-            .map(|r| {
-                let payload: serde_json::Value = r.get("payload");
-                Ok(Event {
-                    seq: r.get("id"),
-                    session_id: SessionId::from_stored(r.get::<String, _>("session_id")),
-                    kind: serde_json::from_value(payload)?,
-                    at: r.get("created_at"),
-                })
-            })
-            .collect()
+        rows.into_iter().map(event_from_row).collect()
     }
+}
+
+/// One row of the event log.
+fn event_from_row(r: sqlx::postgres::PgRow) -> Result<Event> {
+    let payload: serde_json::Value = r.get("payload");
+    Ok(Event {
+        seq: r.get("id"),
+        session_id: SessionId::from_stored(r.get::<String, _>("session_id")),
+        kind: serde_json::from_value(payload)?,
+        at: r.get("created_at"),
+    })
 }
 
 /// Drop the schemas left behind by runs that are over.
@@ -1259,6 +1419,7 @@ fn session_from_row(r: sqlx::postgres::PgRow) -> Result<Session> {
 
     Ok(Session {
         number: r.get("number"),
+        owner: ft_core::UserId::from_stored(r.get::<String, _>("user_id")),
         // Filled in by `with_checkouts`, which asks for the lot in one query.
         checkouts: Vec::new(),
         // Written when the session is created, so this is only ever absent for
@@ -1309,9 +1470,18 @@ mod tests {
         Db::open_for_test().await.unwrap()
     }
 
+    /// A database with somebody in it.
+    ///
+    /// Every table that matters now has an owner and a foreign key to enforce
+    /// it, so a test that inserts a session needs an account for it to belong
+    /// to — the same account the first boot creates.
+    async fn db_with_user() -> (Db, String) {
+        Db::open_for_test_owned().await.unwrap()
+    }
+
     #[tokio::test]
     async fn localhost_is_stored_like_any_other_host() {
-        let db = db().await;
+        let (db, owner) = db_with_user().await;
         let local = db.ensure_host("localhost", Compute::Local).await.unwrap();
         let remote = db
             .ensure_host(
@@ -1357,7 +1527,7 @@ mod tests {
     async fn a_container_host_round_trips_its_details() {
         // The kind is stored as a tagged value, so the fields that only mean
         // something for one variant have to survive the trip intact.
-        let db = Db::open_for_test().await.unwrap();
+        let (db, owner) = db_with_user().await;
         let host = db
             .ensure_host(
                 "worker-1",
@@ -1380,13 +1550,14 @@ mod tests {
 
     #[tokio::test]
     async fn a_host_with_live_sessions_refuses_to_be_forgotten() {
-        let db = Db::open_for_test().await.unwrap();
+        let (db, owner) = db_with_user().await;
         let host = db.ensure_host("localhost", Compute::Local).await.unwrap();
         let id = SessionId::new();
 
         db.insert_session(
             &id,
             &host.id,
+            &owner,
             Some("acme/backend"),
             "Still going",
             "do a thing",
@@ -1410,7 +1581,7 @@ mod tests {
     async fn draining_is_separate_from_being_unreachable() {
         // A draining host is still online and still finishing what it has;
         // folding the two together would make its sessions look lost.
-        let db = Db::open_for_test().await.unwrap();
+        let (db, owner) = db_with_user().await;
         let host = db.ensure_host("localhost", Compute::Local).await.unwrap();
 
         assert!(!db.is_drained(&host.id).await.unwrap());
@@ -1423,7 +1594,7 @@ mod tests {
 
     #[tokio::test]
     async fn registering_a_host_twice_is_harmless() {
-        let db = db().await;
+        let (db, owner) = db_with_user().await;
         let first = db.ensure_host("localhost", Compute::Local).await.unwrap();
         let again = db.ensure_host("localhost", Compute::Local).await.unwrap();
         assert_eq!(first.id, again.id);
@@ -1432,7 +1603,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_host_starts_unreachable_until_it_says_hello() {
-        let db = db().await;
+        let (db, owner) = db_with_user().await;
         let host = db.ensure_host("localhost", Compute::Local).await.unwrap();
         assert_eq!(host.state, HostState::Unreachable);
 
@@ -1447,7 +1618,7 @@ mod tests {
     /// A failure that nobody was watching still has to be readable later.
     #[tokio::test]
     async fn why_a_host_failed_outlives_the_attempt() {
-        let db = db().await;
+        let (db, owner) = db_with_user().await;
         let host = db.ensure_host("fire-01", Compute::Local).await.unwrap();
         assert!(host.diagnosis.is_none(), "nothing has failed yet");
 
@@ -1472,7 +1643,7 @@ mod tests {
     /// And stops saying it once it stops being true.
     #[tokio::test]
     async fn a_host_that_comes_back_stops_explaining_itself() {
-        let db = db().await;
+        let (db, owner) = db_with_user().await;
         let host = db.ensure_host("fire-01", Compute::Local).await.unwrap();
 
         db.record_diagnosis(
@@ -1493,12 +1664,13 @@ mod tests {
 
     #[tokio::test]
     async fn a_status_event_updates_the_session_projection() {
-        let db = db().await;
+        let (db, owner) = db_with_user().await;
         let host = db.ensure_host("localhost", Compute::Local).await.unwrap();
         let id = SessionId::new();
         db.insert_session(
             &id,
             &host.id,
+            &owner,
             Some("acme/backend"),
             "Fix",
             "Fix",
@@ -1537,12 +1709,13 @@ mod tests {
 
     #[tokio::test]
     async fn the_branch_the_worker_actually_used_wins() {
-        let db = db().await;
+        let (db, owner) = db_with_user().await;
         let host = db.ensure_host("localhost", Compute::Local).await.unwrap();
         let id = SessionId::new();
         db.insert_session(
             &id,
             &host.id,
+            &owner,
             Some("acme/backend"),
             "Fix",
             "Fix",
@@ -1578,12 +1751,13 @@ mod tests {
 
     #[tokio::test]
     async fn a_replayed_event_is_ignored_rather_than_duplicated() {
-        let db = db().await;
+        let (db, owner) = db_with_user().await;
         let host = db.ensure_host("localhost", Compute::Local).await.unwrap();
         let id = SessionId::new();
         db.insert_session(
             &id,
             &host.id,
+            &owner,
             Some("acme/backend"),
             "Fix",
             "Fix",
@@ -1615,13 +1789,14 @@ mod tests {
     /// the interface showed the type error rather than a checkout.
     #[tokio::test]
     async fn a_repository_can_be_added_to_a_running_session() {
-        let db = db().await;
+        let (db, owner) = db_with_user().await;
         let host = db.ensure_host("localhost", Compute::Local).await.unwrap();
         let id = SessionId::new();
 
         db.insert_session(
             &id,
             &host.id,
+            &owner,
             Some("acme/backend"),
             "Fix",
             "fix",
@@ -1671,13 +1846,14 @@ mod tests {
     /// branch git actually created never reached the database.
     #[tokio::test]
     async fn a_worktree_event_that_names_its_repository_is_recorded() {
-        let db = db().await;
+        let (db, owner) = db_with_user().await;
         let host = db.ensure_host("localhost", Compute::Local).await.unwrap();
         let id = SessionId::new();
 
         db.insert_session(
             &id,
             &host.id,
+            &owner,
             Some("acme/backend"),
             "Fix",
             "fix",
@@ -1739,13 +1915,14 @@ mod tests {
     async fn a_session_can_have_no_repository_at_all() {
         // A bare agent: somewhere to work, nothing checked out. The columns
         // that describe a checkout are absent rather than empty strings.
-        let db = db().await;
+        let (db, owner) = db_with_user().await;
         let host = db.ensure_host("localhost", Compute::Local).await.unwrap();
         let id = SessionId::new();
 
         db.insert_session(
             &id,
             &host.id,
+            &owner,
             None,
             "Poke around",
             "have a look",
@@ -1766,7 +1943,7 @@ mod tests {
 
     #[tokio::test]
     async fn paging_walks_backwards_without_skipping_or_repeating() {
-        let db = Db::open_for_test().await.unwrap();
+        let (db, owner) = db_with_user().await;
         let host = db.ensure_host("localhost", Compute::Local).await.unwrap();
 
         for n in 0..5 {
@@ -1774,6 +1951,7 @@ mod tests {
             db.insert_session(
                 &id,
                 &host.id,
+                &owner,
                 Some("acme/backend"),
                 &format!("Session {n}"),
                 "do a thing",
@@ -1787,11 +1965,14 @@ mod tests {
             .unwrap();
         }
 
-        let first = db.sessions_page(Some(2), None).await.unwrap();
+        let first = db.sessions_page(&owner, Some(2), None).await.unwrap();
         assert_eq!(first.len(), 2);
 
         let cursor = first.last().unwrap().id.to_string();
-        let second = db.sessions_page(Some(2), Some(&cursor)).await.unwrap();
+        let second = db
+            .sessions_page(&owner, Some(2), Some(&cursor))
+            .await
+            .unwrap();
         assert_eq!(second.len(), 2);
 
         let paged: Vec<String> = first
@@ -1804,7 +1985,7 @@ mod tests {
         // reading the whole list gives, in the same order. Nothing skipped,
         // nothing seen twice.
         let whole: Vec<String> = db
-            .sessions_page(None, None)
+            .sessions_page(&owner, None, None)
             .await
             .unwrap()
             .iter()
@@ -1821,11 +2002,32 @@ mod tests {
 
     #[tokio::test]
     async fn replay_can_be_narrowed_to_one_session() {
-        let db = Db::open_for_test().await.unwrap();
+        let (db, owner) = db_with_user().await;
         let host = db.ensure_host("localhost", Compute::Local).await.unwrap();
 
+        // Real sessions, because the log is now read through them: an event
+        // belongs to whoever owns the session it is about, and that is how
+        // narrowing knows whose it is.
         let mine = SessionId::new();
         let theirs = SessionId::new();
+        for id in [&mine, &theirs] {
+            db.insert_session(
+                id,
+                &host.id,
+                &owner,
+                None,
+                "A session",
+                "do a thing",
+                None,
+                None,
+                "ClaudeCode",
+                WorkspaceSize::Medium,
+                &[],
+            )
+            .await
+            .unwrap();
+        }
+
         for (n, id) in [(1, &mine), (2, &theirs), (3, &mine)] {
             db.record_event(
                 &host.id,
@@ -1843,7 +2045,10 @@ mod tests {
 
         assert_eq!(db.events_since(0).await.unwrap().len(), 3);
         assert_eq!(
-            db.events_since_for(0, Some(&mine)).await.unwrap().len(),
+            db.events_since_for(&owner, 0, Some(&mine))
+                .await
+                .unwrap()
+                .len(),
             2,
             "narrowing should return only that session's events"
         );
@@ -1851,12 +2056,13 @@ mod tests {
 
     #[tokio::test]
     async fn the_resume_cursor_only_moves_forward() {
-        let db = db().await;
+        let (db, owner) = db_with_user().await;
         let host = db.ensure_host("localhost", Compute::Local).await.unwrap();
         let id = SessionId::new();
         db.insert_session(
             &id,
             &host.id,
+            &owner,
             Some("r"),
             "t",
             "p",
@@ -1884,13 +2090,25 @@ mod tests {
 
     #[tokio::test]
     async fn repositories_are_deduplicated_by_slug() {
-        let db = db().await;
+        let (db, owner) = db_with_user().await;
         let a = db
-            .ensure_repo("acme/backend", "git@x:acme/backend", Some("main"), None)
+            .ensure_repo(
+                "acme/backend",
+                "git@x:acme/backend",
+                Some("main"),
+                None,
+                None,
+            )
             .await
             .unwrap();
         let b = db
-            .ensure_repo("acme/backend", "git@x:acme/backend", Some("main"), None)
+            .ensure_repo(
+                "acme/backend",
+                "git@x:acme/backend",
+                Some("main"),
+                None,
+                None,
+            )
             .await
             .unwrap();
         assert_eq!(a.id, b.id);
@@ -1899,34 +2117,34 @@ mod tests {
 
     #[tokio::test]
     async fn configuring_an_agent_twice_updates_rather_than_duplicates() {
-        let db = Db::open_for_test().await.unwrap();
-        db.set_agent_mode(Agent::ClaudeCode, AgentMode::Subscription, true)
+        let (db, owner) = db_with_user().await;
+        db.set_agent_mode(&owner, Agent::ClaudeCode, AgentMode::Subscription, true)
             .await
             .unwrap();
-        db.set_agent_mode(Agent::ClaudeCode, AgentMode::ApiKey, true)
+        db.set_agent_mode(&owner, Agent::ClaudeCode, AgentMode::ApiKey, true)
             .await
             .unwrap();
 
-        let modes = db.agent_modes().await.unwrap();
+        let modes = db.agent_modes(&owner).await.unwrap();
         assert_eq!(modes.len(), 1);
         assert_eq!(modes[0].1, AgentMode::ApiKey);
     }
 
     #[tokio::test]
     async fn an_unconfigured_agent_is_absent_not_defaulted() {
-        let db = Db::open_for_test().await.unwrap();
-        assert!(db.agent_modes().await.unwrap().is_empty());
+        let (db, owner) = db_with_user().await;
+        assert!(db.agent_modes(&owner).await.unwrap().is_empty());
 
-        db.set_agent_mode(Agent::Codex, AgentMode::ApiKey, true)
+        db.set_agent_mode(&owner, Agent::Codex, AgentMode::ApiKey, true)
             .await
             .unwrap();
-        db.forget_agent(Agent::Codex).await.unwrap();
-        assert!(db.agent_modes().await.unwrap().is_empty());
+        db.forget_agent(&owner, Agent::Codex).await.unwrap();
+        assert!(db.agent_modes(&owner).await.unwrap().is_empty());
     }
 
     #[tokio::test]
     async fn presence_is_remembered_per_host_and_refreshed_in_place() {
-        let db = Db::open_for_test().await.unwrap();
+        let (db, owner) = db_with_user().await;
         let host = db.ensure_host("localhost", Compute::Local).await.unwrap();
 
         db.record_presence(
@@ -1964,7 +2182,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_host_can_be_renamed_and_keeps_everything_else() {
-        let db = Db::open_for_test().await.unwrap();
+        let (db, owner) = db_with_user().await;
         let host = db
             .ensure_host(
                 "34.122.172.74",
@@ -1998,13 +2216,14 @@ mod tests {
     /// back on the inbox that nobody can get rid of a second time.
     #[tokio::test]
     async fn a_forgotten_session_is_not_resurrected_by_its_host() {
-        let db = Db::open_for_test().await.unwrap();
+        let (db, owner) = db_with_user().await;
         let host = db.ensure_host("fire-01", Compute::Local).await.unwrap();
 
         let id = SessionId::new();
         db.insert_session(
             &id,
             &host.id,
+            &owner,
             Some("acme/backend"),
             "Fix the flaky test",
             "fix the flaky test",
@@ -2052,13 +2271,14 @@ mod tests {
     /// Removing it here leaves a teardown owed on the machine.
     #[tokio::test]
     async fn a_forgotten_session_is_owed_a_teardown_until_it_is_told() {
-        let db = Db::open_for_test().await.unwrap();
+        let (db, owner) = db_with_user().await;
         let host = db.ensure_host("fire-01", Compute::Local).await.unwrap();
 
         let id = SessionId::new();
         db.insert_session(
             &id,
             &host.id,
+            &owner,
             None,
             "Ask me anything",
             "ask me anything",
@@ -2095,7 +2315,7 @@ mod tests {
     /// somebody else's session, and the inbox is a place people come back to.
     #[tokio::test]
     async fn every_session_gets_its_own_number_and_a_name_from_it() {
-        let db = Db::open_for_test().await.unwrap();
+        let (db, owner) = db_with_user().await;
         let host = db.ensure_host("localhost", Compute::Local).await.unwrap();
 
         let mut made = Vec::new();
@@ -2104,6 +2324,7 @@ mod tests {
             db.insert_session(
                 &id,
                 &host.id,
+                &owner,
                 Some("acme/backend"),
                 "Ask me question about",
                 "ask me a question about this repo",
@@ -2146,17 +2367,202 @@ mod tests {
 
     /// The failure that stopped a control plane from booting: a host row
     /// written by a build that knew a kind of compute this one does not.
+    /// A second account, for the tests that have to prove one person cannot
+    /// see another's work.
+    async fn second_user(db: &Db) -> String {
+        let accounts = crate::accounts::Accounts::new(db.pool().clone());
+        let org = db.org().await.unwrap();
+        let id = ft_core::UserId::new();
+        sqlx::query(
+            "INSERT INTO users (id, org_id, username, password_hash, role)
+             VALUES ($1, $2, 'somebody-else', 'x', 'admin')",
+        )
+        .bind(id.as_str())
+        .bind(&org)
+        .execute(db.pool())
+        .await
+        .unwrap();
+        let _ = accounts;
+        id.as_str().to_string()
+    }
+
+    /// A session belongs to whoever started it, and to nobody else.
+    ///
+    /// Absent rather than refused: a 403 would confirm that the id names
+    /// something, which is the one thing the asker had no way to know.
+    #[tokio::test]
+    async fn one_persons_session_is_not_another_persons() {
+        let (db, mine) = db_with_user().await;
+        let theirs = second_user(&db).await;
+        let host = db.ensure_host("localhost", Compute::Local).await.unwrap();
+
+        let id = SessionId::new();
+        db.insert_session(
+            &id,
+            &host.id,
+            &mine,
+            None,
+            "Mine",
+            "do a thing",
+            None,
+            None,
+            "ClaudeCode",
+            WorkspaceSize::Medium,
+            &[],
+        )
+        .await
+        .unwrap();
+
+        assert!(db.session_of(&mine, &id).await.unwrap().is_some());
+        assert!(
+            db.session_of(&theirs, &id).await.unwrap().is_none(),
+            "somebody else's session must not be readable"
+        );
+    }
+
+    /// The lists, too. A leak here is quieter than a fetch: nobody asked for
+    /// the row, it simply appeared.
+    #[tokio::test]
+    async fn the_session_list_holds_only_your_own() {
+        let (db, mine) = db_with_user().await;
+        let theirs = second_user(&db).await;
+        let host = db.ensure_host("localhost", Compute::Local).await.unwrap();
+
+        for owner in [&mine, &theirs] {
+            db.insert_session(
+                &SessionId::new(),
+                &host.id,
+                owner,
+                None,
+                "A session",
+                "do a thing",
+                None,
+                None,
+                "ClaudeCode",
+                WorkspaceSize::Medium,
+                &[],
+            )
+            .await
+            .unwrap();
+        }
+
+        assert_eq!(db.sessions(&mine).await.unwrap().len(), 1);
+        assert_eq!(db.sessions(&theirs).await.unwrap().len(), 1);
+        assert_eq!(db.live_sessions(&mine).await.unwrap().len(), 1);
+    }
+
+    /// What a session narrated is as much its owner's as the session is.
+    #[tokio::test]
+    async fn the_event_log_is_narrowed_to_its_owner() {
+        let (db, mine) = db_with_user().await;
+        let theirs = second_user(&db).await;
+        let host = db.ensure_host("localhost", Compute::Local).await.unwrap();
+
+        let id = SessionId::new();
+        db.insert_session(
+            &id,
+            &host.id,
+            &mine,
+            None,
+            "Mine",
+            "do a thing",
+            None,
+            None,
+            "ClaudeCode",
+            WorkspaceSize::Medium,
+            &[],
+        )
+        .await
+        .unwrap();
+
+        db.record_event(
+            &host.id,
+            1,
+            &id,
+            &EventKind::StatusChanged {
+                status: SessionStatus::Working,
+                note: None,
+            },
+            chrono::Utc::now(),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(db.events_since_for(&mine, 0, None).await.unwrap().len(), 1);
+        assert_eq!(
+            db.events_since_for(&theirs, 0, None).await.unwrap().len(),
+            0,
+            "somebody else's build steps are not yours to replay"
+        );
+        assert_eq!(
+            db.events_since_for(&theirs, 0, Some(&id))
+                .await
+                .unwrap()
+                .len(),
+            0,
+            "naming the session directly must not get round it either"
+        );
+    }
+
+    /// A git identity is one person's answer for one host.
+    #[tokio::test]
+    async fn a_git_identity_belongs_to_one_person() {
+        let (db, mine) = db_with_user().await;
+        let theirs = second_user(&db).await;
+
+        let me = ft_proto::Author {
+            name: "Kevin".into(),
+            email: "kevin@example.com".into(),
+        };
+        db.remember_git_identity(&mine, "github", &me, "host")
+            .await
+            .unwrap();
+
+        assert_eq!(db.git_identity(&mine, "github").await.unwrap(), Some(me));
+        assert_eq!(db.git_identity(&theirs, "github").await.unwrap(), None);
+    }
+
+    /// One somebody typed is never replaced by one read from the host: the
+    /// whole reason to type one is that the derived answer was wrong.
+    #[tokio::test]
+    async fn a_typed_identity_survives_the_host_disagreeing() {
+        let (db, mine) = db_with_user().await;
+
+        let typed = ft_proto::Author {
+            name: "Kevin Piacentini".into(),
+            email: "kevin@work.example".into(),
+        };
+        db.remember_git_identity(&mine, "github", &typed, "set")
+            .await
+            .unwrap();
+
+        db.remember_git_identity(
+            &mine,
+            "github",
+            &ft_proto::Author {
+                name: "kevinpiac".into(),
+                email: "1+kevinpiac@users.noreply.github.com".into(),
+            },
+            "host",
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(db.git_identity(&mine, "github").await.unwrap(), Some(typed));
+    }
+
     #[tokio::test]
     async fn a_host_this_build_cannot_read_is_skipped_rather_than_fatal() {
-        let db = Db::open_for_test().await.unwrap();
+        let (db, owner) = db_with_user().await;
         let keep = db.ensure_host("localhost", Compute::Local).await.unwrap();
 
         // What a newer version would have left behind.
         sqlx::query(
-            "INSERT INTO hosts (id, name, compute, state, created_at)
-             VALUES ($1, $2, $3, $4, $5)",
+            "INSERT INTO hosts (id, org_id, name, compute, state, created_at)
+             VALUES ($1, $2, $3, $4, $5, $6)",
         )
         .bind("h_fromthefuture")
+        .bind(db.org().await.unwrap())
         .bind("mystery")
         .bind(serde_json::json!({ "type": "SomethingElse", "port": 9 }))
         .bind("Unreachable")

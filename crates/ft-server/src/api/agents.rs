@@ -6,11 +6,13 @@
 //! about a particular host, never a global one.
 
 use super::{ApiError, ApiResult, ErrorCode};
+use crate::auth::Principal;
+use crate::vault::Key;
 use crate::{vault, AppState};
 use axum::{
     extract::{Path, State},
     http::StatusCode,
-    Json,
+    Extension, Json,
 };
 use ft_core::{Agent, AgentMode, SessionId};
 use serde::{Deserialize, Serialize};
@@ -21,14 +23,29 @@ use utoipa::ToSchema;
 /// Resolved at the moment a workspace starts rather than stored alongside the
 /// secret: which variable carries it is a delivery detail, and freezing it into
 /// a row would make it a migration the day an agent changes its mind.
+/// Whose agent configuration a request means.
+///
+/// An agent authenticates with somebody's subscription or somebody's key, so
+/// there has to be a somebody. Refused rather than defaulted when
+/// authentication is off.
+fn owner(principal: &Principal) -> Result<&str, ApiError> {
+    principal.owner().ok_or_else(|| {
+        ApiError::new(
+            ErrorCode::Unauthorized,
+            "configuring an agent needs an account, and authentication is switched off",
+        )
+    })
+}
+
 pub(super) async fn agent_env(
     state: &AppState,
     kind: Agent,
     session: &SessionId,
+    owner: &str,
 ) -> Result<Vec<(String, String)>, ApiError> {
     let Some((_, mode, _)) = state
         .db
-        .agent_modes()
+        .agent_modes(owner)
         .await?
         .into_iter()
         .find(|(k, ..)| *k == kind)
@@ -50,8 +67,7 @@ pub(super) async fn agent_env(
     let Some(secret) = state
         .vault
         .get(
-            vault::AGENT,
-            &agent_key(kind),
+            Key::of(vault::AGENT, &agent_key(kind), owner),
             &format!("starting {session} with {}", kind.label()),
         )
         .await?
@@ -147,8 +163,12 @@ fn agent_from_path(kind: &str) -> Result<Agent, ApiError> {
     get, path = "/api/v1/agents", tag = "agents",
     responses((status = 200, body = Vec<AgentView>)),
 )]
-pub(super) async fn list_agents(State(state): State<AppState>) -> ApiResult<Json<Vec<AgentView>>> {
-    let modes = state.db.agent_modes().await?;
+pub(super) async fn list_agents(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+) -> ApiResult<Json<Vec<AgentView>>> {
+    let owner = owner(&principal)?;
+    let modes = state.db.agent_modes(owner).await?;
     let presence = state.db.presence().await?;
     let hosts = state.db.hosts().await?;
 
@@ -157,7 +177,10 @@ pub(super) async fn list_agents(State(state): State<AppState>) -> ApiResult<Json
         let configured = modes.iter().find(|(k, ..)| *k == kind);
         // The vault answers whether one is set without decrypting anything, so
         // rendering this screen never touches a credential.
-        let credential_set = state.vault.holds(vault::AGENT, &agent_key(kind)).await?;
+        let credential_set = state
+            .vault
+            .holds(Key::of(vault::AGENT, &agent_key(kind), owner))
+            .await?;
 
         views.push(AgentView {
             kind,
@@ -209,6 +232,7 @@ pub(super) async fn list_agents(State(state): State<AppState>) -> ApiResult<Json
     responses((status = 204), (status = 400, body = ApiError), (status = 404, body = ApiError)),
 )]
 pub(super) async fn configure_agent(
+    Extension(principal): Extension<Principal>,
     State(state): State<AppState>,
     Path(kind): Path<String>,
     Json(req): Json<ConfigureAgent>,
@@ -238,7 +262,11 @@ pub(super) async fn configure_agent(
         ));
     }
 
-    state.db.set_agent_mode(kind, req.mode, req.enabled).await?;
+    let owner = owner(&principal)?;
+    state
+        .db
+        .set_agent_mode(owner, kind, req.mode, req.enabled)
+        .await?;
 
     // Whatever the previous mode stored goes, so an API key never lingers
     // behind a subscription as something a workspace could still be handed.
@@ -247,8 +275,7 @@ pub(super) async fn configure_agent(
             state
                 .vault
                 .put(
-                    vault::AGENT,
-                    &agent_key(kind),
+                    Key::of(vault::AGENT, &agent_key(kind), owner),
                     value,
                     &format!("{} configured with {}", kind.label(), mode_words(req.mode)),
                 )
@@ -258,8 +285,7 @@ pub(super) async fn configure_agent(
             state
                 .vault
                 .forget(
-                    vault::AGENT,
-                    &agent_key(kind),
+                    Key::of(vault::AGENT, &agent_key(kind), owner),
                     &format!("{} no longer authenticates", kind.label()),
                 )
                 .await?
@@ -277,15 +303,16 @@ pub(super) async fn configure_agent(
 )]
 pub(super) async fn forget_agent(
     State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
     Path(kind): Path<String>,
 ) -> ApiResult<StatusCode> {
     let kind = agent_from_path(&kind)?;
-    state.db.forget_agent(kind).await?;
+    let owner = owner(&principal)?;
+    state.db.forget_agent(owner, kind).await?;
     state
         .vault
         .forget(
-            vault::AGENT,
-            &agent_key(kind),
+            Key::of(vault::AGENT, &agent_key(kind), owner),
             &format!("{} was removed", kind.label()),
         )
         .await?;
@@ -300,7 +327,10 @@ pub(super) async fn forget_agent(
     post, path = "/api/v1/agents/check", tag = "agents",
     responses((status = 200, body = Vec<AgentView>)),
 )]
-pub(super) async fn check_agents(State(state): State<AppState>) -> ApiResult<Json<Vec<AgentView>>> {
+pub(super) async fn check_agents(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+) -> ApiResult<Json<Vec<AgentView>>> {
     for host in state.db.hosts().await? {
         if !state.fleet.is_connected(&host.id).await {
             continue;
@@ -310,5 +340,5 @@ pub(super) async fn check_agents(State(state): State<AppState>) -> ApiResult<Jso
             Err(e) => tracing::warn!(host = %host.name, "asking about agents: {e:#}"),
         }
     }
-    list_agents(State(state)).await
+    list_agents(State(state), Extension(principal)).await
 }

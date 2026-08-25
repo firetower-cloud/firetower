@@ -53,6 +53,12 @@ enum Layer {
 pub struct Identity<'a> {
     pub scope: &'a str,
     pub name: &'a str,
+    /// Whose it is. Empty for the install's own.
+    ///
+    /// Sealed in with the rest so one person's row cannot be put in another's
+    /// place and still open: the ciphertext is bound to the owner, not only to
+    /// the column that claims one.
+    pub owner: &'a str,
     pub version: i32,
 }
 
@@ -61,10 +67,12 @@ impl Identity<'_> {
     /// bytes. Concatenating without lengths is the classic way to make two
     /// distinct identities collide.
     fn associated_data(&self, layer: Layer) -> Vec<u8> {
-        let mut out = Vec::with_capacity(DOMAIN.len() + self.scope.len() + self.name.len() + 16);
+        let mut out = Vec::with_capacity(
+            DOMAIN.len() + self.scope.len() + self.name.len() + self.owner.len() + 20,
+        );
         out.extend_from_slice(DOMAIN);
         out.push(layer as u8);
-        for part in [self.scope, self.name] {
+        for part in [self.scope, self.name, self.owner] {
             out.extend_from_slice(&(part.len() as u32).to_be_bytes());
             out.extend_from_slice(part.as_bytes());
         }
@@ -228,6 +236,7 @@ mod tests {
 
     fn id() -> Identity<'static> {
         Identity {
+            owner: "",
             scope: "agent",
             name: "ClaudeCode",
             version: 1,

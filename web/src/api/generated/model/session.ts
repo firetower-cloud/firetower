@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.9.0
+ * OpenAPI spec version: 0.10.0
  */
 import type { Agent } from './agent';
 import type { Checkout } from './checkout';
@@ -11,6 +11,7 @@ import type { HostId } from './hostId';
 import type { SessionId } from './sessionId';
 import type { SessionStatus } from './sessionStatus';
 import type { Step } from './step';
+import type { UserId } from './userId';
 import type { WorkspaceId } from './workspaceId';
 import type { WorkspaceSize } from './workspaceSize';
 
@@ -73,6 +74,16 @@ export interface Session {
      * changed can always be traced back to.
      */
   number: number;
+  /**
+     * Whoever started it.
+     *
+     * Everything else about who may do what follows from this: who can open
+     * the session, whose token pushes its branch, whose name goes on its
+     * commits. Carried on the session rather than looked up each time,
+     * because every one of those questions is asked while it is already
+     * loaded.
+     */
+  owner: UserId;
   prompt: string;
   /** @nullable */
   proposedBody?: string | null;

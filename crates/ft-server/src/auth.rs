@@ -70,6 +70,16 @@ impl Principal {
     /// almost entirely unable to act: the credential is in a file on disk, and
     /// treating that as a working login would make the file the real
     /// credential.
+    /// Whose secrets and sessions this request acts on.
+    ///
+    /// `None` when authentication is switched off, which is a development
+    /// mode and not an account: there is nobody to own anything, so callers
+    /// that need an owner refuse rather than quietly using the install's own
+    /// secrets. Anything shared by the whole install is asked for by name.
+    pub fn owner(&self) -> Option<&str> {
+        self.user.as_ref().map(|u| u.id.as_str())
+    }
+
     pub fn must_change_password(&self) -> bool {
         self.user
             .as_ref()

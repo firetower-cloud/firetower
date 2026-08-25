@@ -5,11 +5,13 @@
 //! would be a guess about someone else's network.
 
 use super::{credential_for, ApiError, ApiResult, ErrorCode};
+use crate::auth::Principal;
+use crate::vault::Key;
 use crate::{providers, AppState};
 use axum::{
     extract::{Path, State},
     http::StatusCode,
-    Json,
+    Extension, Json,
 };
 use ft_core::{Repo, RepoId};
 use ft_proto::ProbeFailure;
@@ -31,8 +33,8 @@ pub(super) async fn list_repos(State(state): State<AppState>) -> ApiResult<Json<
         let scope = env_scope(&repo.id);
         repo.env = held
             .iter()
-            .filter(|(s, _)| *s == scope)
-            .map(|(_, name)| name.clone())
+            .filter(|held| held.scope == scope)
+            .map(|held| held.name.clone())
             .collect();
     }
 
@@ -141,8 +143,8 @@ pub(super) async fn list_repo_env(
             .names()
             .await?
             .into_iter()
-            .filter(|(s, _)| *s == scope)
-            .map(|(_, name)| name)
+            .filter(|held| held.scope == scope)
+            .map(|held| held.name)
             .collect(),
     ))
 }
@@ -239,8 +241,10 @@ pub(super) async fn put_repo_env(
         state
             .vault
             .put(
-                &scope,
-                &variable.name,
+                // The repository's own variables, shared by everybody who
+                // works on it. A personal override would be a second scope
+                // read over this one, not a different value here.
+                Key::shared(&scope, &variable.name),
                 &variable.value,
                 &format!("set for {} on the repository screen", repo.slug),
             )
@@ -273,8 +277,7 @@ pub(super) async fn remove_repo_env(
     state
         .vault
         .forget(
-            &env_scope(&id),
-            &name,
+            Key::shared(&env_scope(&id), &name),
             &format!("removed from {} on the repository screen", repo.slug),
         )
         .await?;
@@ -466,8 +469,12 @@ async fn local_host(state: &AppState) -> Option<ft_core::Host> {
 )]
 pub(super) async fn probe_repo(
     State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
     Json(req): Json<ProbeRequest>,
 ) -> ApiResult<Json<ProbeResponse>> {
+    // Asked with this person's token: whether *they* can reach it is the
+    // question, and somebody else's access is not an answer to it.
+    let asking = principal.owner().unwrap_or("");
     let remote = req.remote.trim();
     if remote.is_empty() {
         return Err(ApiError::new(
@@ -487,7 +494,7 @@ pub(super) async fn probe_repo(
         .probe(
             &host.id,
             remote,
-            credential_for(&state, remote, &format!("checking {remote}")).await,
+            credential_for(&state, remote, asking, &format!("checking {remote}")).await,
         )
         .await
         .map_err(|e| ApiError::new(ErrorCode::HostUnreachable, format!("{e:#}")))?
@@ -514,8 +521,10 @@ pub(super) async fn probe_repo(
 )]
 pub(super) async fn create_repo(
     State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
     Json(req): Json<NewRepo>,
 ) -> ApiResult<(StatusCode, Json<Repo>)> {
+    let asking = principal.owner().unwrap_or("");
     let remote = req.remote.trim();
     if remote.is_empty() {
         return Err(ApiError::new(
@@ -539,7 +548,7 @@ pub(super) async fn create_repo(
             .probe(
                 &host.id,
                 remote,
-                credential_for(&state, remote, &format!("connecting {remote}")).await,
+                credential_for(&state, remote, asking, &format!("connecting {remote}")).await,
             )
             .await
         {
@@ -577,7 +586,15 @@ pub(super) async fn create_repo(
 
     let repo = state
         .db
-        .ensure_repo(&slug, remote, trunk.as_deref(), req.setup.as_deref())
+        .ensure_repo(
+            &slug,
+            remote,
+            trunk.as_deref(),
+            req.setup.as_deref(),
+            // Recorded so the list can say who brought it in. Absent only when
+            // authentication is off and there is nobody to name.
+            principal.owner(),
+        )
         .await?;
 
     Ok((StatusCode::CREATED, Json(repo)))
@@ -595,8 +612,10 @@ pub(super) async fn create_repo(
 )]
 pub(super) async fn repo_branches(
     State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
     Path(id): Path<String>,
 ) -> ApiResult<Json<Branches>> {
+    let asking = principal.owner().unwrap_or("");
     let repo = state
         .db
         .repo(&RepoId::from_stored(id))
@@ -617,6 +636,7 @@ pub(super) async fn repo_branches(
             credential_for(
                 &state,
                 &repo.remote,
+                asking,
                 &format!("listing branches of {}", repo.slug),
             )
             .await,

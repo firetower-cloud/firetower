@@ -5,11 +5,13 @@
 //! the only thing standing between a stored token and a quiet copy of it.
 
 use super::{ApiError, ApiResult, ErrorCode};
+use crate::auth::Principal;
+use crate::vault::Key;
 use crate::{vault, AppState};
 use axum::{
     extract::{Path, State},
     http::StatusCode,
-    Json,
+    Extension, Json,
 };
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
@@ -20,6 +22,9 @@ use utoipa::ToSchema;
 pub struct HeldSecret {
     pub scope: String,
     pub name: String,
+    /// Yours rather than the install's. What the screen says, so it never has
+    /// to show an account id.
+    pub mine: bool,
 }
 
 /// One line of the access log.
@@ -57,7 +62,13 @@ pub struct VaultView {
     get, path = "/api/v1/secrets", tag = "secrets",
     responses((status = 200, body = VaultView)),
 )]
-pub(super) async fn list_secrets(State(state): State<AppState>) -> ApiResult<Json<VaultView>> {
+pub(super) async fn list_secrets(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+) -> ApiResult<Json<VaultView>> {
+    // Yours, and the install's own. Somebody else's git token is not something
+    // this screen has any business naming, let alone revealing.
+    let mine = principal.owner().unwrap_or("");
     let (intact, broken_at) = match state.vault.verify().await? {
         vault::Verification::Intact { .. } => (true, None),
         vault::Verification::Broken { at } => (false, Some(at)),
@@ -70,13 +81,21 @@ pub(super) async fn list_secrets(State(state): State<AppState>) -> ApiResult<Jso
             .names()
             .await?
             .into_iter()
-            .map(|(scope, name)| HeldSecret { scope, name })
+            .filter(|held| held.owner.is_empty() || held.owner == mine)
+            .map(|held| HeldSecret {
+                scope: held.scope,
+                name: held.name,
+                // So the screen can say "yours" rather than showing an
+                // account id nobody reads.
+                mine: held.owner == mine && !held.owner.is_empty(),
+            })
             .collect(),
         access: state
             .vault
             .access(100)
             .await?
             .into_iter()
+            .filter(|a| a.owner.is_empty() || a.owner == mine)
             .map(|a| AccessEntry {
                 id: a.id,
                 scope: a.scope,
@@ -107,6 +126,26 @@ pub struct RevealedSecret {
     pub value: String,
 }
 
+/// Which row a screen means by a scope and a name.
+///
+/// Yours if you have one, the install's otherwise — and never anybody else's,
+/// because the path carries no owner and so there is no way to ask for one.
+/// Two people both looking at `git/github` are each looking at their own.
+async fn which<'a>(
+    state: &AppState,
+    scope: &'a str,
+    name: &'a str,
+    mine: &'a str,
+) -> Result<Key<'a>, ApiError> {
+    if !mine.is_empty() {
+        let yours = Key::of(scope, name, mine);
+        if state.vault.holds(yours).await? {
+            return Ok(yours);
+        }
+    }
+    Ok(Key::shared(scope, name))
+}
+
 /// Put a credential on screen.
 ///
 /// A `POST` because it changes something: it writes a `Reveal` into the access
@@ -127,11 +166,15 @@ pub struct RevealedSecret {
 )]
 pub(super) async fn reveal_secret(
     State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
     Path((scope, name)): Path<(String, String)>,
 ) -> ApiResult<Json<RevealedSecret>> {
+    let mine = principal.owner().unwrap_or("");
+    let key = which(&state, &scope, &name, mine).await?;
+
     let value = state
         .vault
-        .reveal(&scope, &name, "shown on the Secrets screen")
+        .reveal(key, "shown on the Secrets screen")
         .await?
         .ok_or_else(|| ApiError::not_found("secret"))?;
 
@@ -158,9 +201,12 @@ pub(super) async fn reveal_secret(
 )]
 pub(super) async fn replace_secret(
     State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
     Path((scope, name)): Path<(String, String)>,
     Json(req): Json<ReplaceSecret>,
 ) -> ApiResult<StatusCode> {
+    let mine = principal.owner().unwrap_or("");
+    let key = which(&state, &scope, &name, mine).await?;
     let value = req.value.trim();
     if value.is_empty() {
         return Err(ApiError::new(
@@ -169,13 +215,13 @@ pub(super) async fn replace_secret(
         ));
     }
 
-    if !state.vault.holds(&scope, &name).await? {
+    if !state.vault.holds(key).await? {
         return Err(ApiError::not_found("secret"));
     }
 
     state
         .vault
-        .put(&scope, &name, value, "replaced on the Secrets screen")
+        .put(key, value, "replaced on the Secrets screen")
         .await?;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -194,11 +240,14 @@ pub(super) async fn replace_secret(
 )]
 pub(super) async fn remove_secret(
     State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
     Path((scope, name)): Path<(String, String)>,
 ) -> ApiResult<StatusCode> {
+    let mine = principal.owner().unwrap_or("");
+    let key = which(&state, &scope, &name, mine).await?;
     state
         .vault
-        .forget(&scope, &name, "removed on the Secrets screen")
+        .forget(key, "removed on the Secrets screen")
         .await?;
     Ok(StatusCode::NO_CONTENT)
 }

@@ -1477,9 +1477,12 @@ You are in the directory that holds them, not inside one of them.              P
                 checkout,
                 message,
                 paths,
+                author,
             } => {
                 let dest = self.checkout_at(session_id, &checkout).await?;
-                self.git.commit(&dest, &message, &paths).await
+                self.git
+                    .commit(&dest, &message, &paths, author.as_ref())
+                    .await
             }
 
             ft_proto::Action::Push { checkout } => {

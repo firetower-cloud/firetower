@@ -4,14 +4,30 @@
 //! approved on another device, and closing the tab shouldn't abandon it.
 
 use super::{ApiError, ApiResult, ErrorCode};
+use crate::auth::Principal;
 use crate::oauth::{self, RemoteRepo};
 use crate::providers::{self, PendingAuth, ProviderStatus};
+use crate::vault::Key;
 use crate::{vault, AppState};
 use axum::{
     extract::{Path, State},
     http::StatusCode,
-    Json,
+    Extension, Json,
 };
+
+/// Whose git connection a request means.
+///
+/// Refused rather than defaulted when authentication is off: with nobody
+/// signed in there is no account to authorize a git host as, and quietly using
+/// the install's own would hand one person's token to whoever asked next.
+fn owner(principal: &Principal) -> Result<&str, ApiError> {
+    principal.owner().ok_or_else(|| {
+        ApiError::new(
+            ErrorCode::Unauthorized,
+            "connecting a git host needs an account, and authentication is switched off",
+        )
+    })
+}
 
 /// An authorization in flight, and the task doing the waiting.
 pub struct Pending {
@@ -31,7 +47,11 @@ impl Drop for Pending {
 )]
 pub(super) async fn list_providers(
     State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
 ) -> ApiResult<Json<Vec<ProviderStatus>>> {
+    // Whose connections these are. Two people on one Firetower each authorize
+    // GitHub as themselves, and each sees only their own.
+    let owner = owner(&principal)?;
     let pending = state.pending.read().await;
 
     let mut out = Vec::new();
@@ -42,9 +62,11 @@ pub(super) async fn list_providers(
             // The flag, not the token: reading the token is a blocking call the
             // operating system may put behind a prompt, and this endpoint only
             // renders a screen.
-            connected: state.vault.holds(vault::GIT, p.id).await?,
+            connected: state.vault.holds(Key::of(vault::GIT, p.id, owner)).await?,
             configured: providers::client_id(&state.accounts, p.id).await.is_some(),
-            pending: pending.get(p.id).map(|p| p.auth.clone()),
+            pending: pending
+                .get(&format!("{}:{owner}", p.id))
+                .map(|p| p.auth.clone()),
         });
     }
     Ok(Json(out))
@@ -65,9 +87,11 @@ pub(super) async fn list_providers(
 )]
 pub(super) async fn authorize_provider(
     State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
     Path(id): Path<String>,
 ) -> ApiResult<Json<PendingAuth>> {
     let provider = providers::find(&id).ok_or_else(|| ApiError::not_found("provider"))?;
+    let owner = owner(&principal)?.to_string();
 
     let client_id = providers::client_id(&state.accounts, provider.id).await;
 
@@ -99,11 +123,15 @@ pub(super) async fn authorize_provider(
         verification_uri: started.verification_uri.clone(),
     };
 
+    // Keyed by person as well as host: two people authorizing GitHub at the
+    // same moment are two authorizations, and one map key would have the
+    // second overwrite the first.
+    let waiting_on = format!("{}:{owner}", provider.id);
     let pending = state.pending.clone();
     let vault = state.vault.clone();
     let device_code = started.device_code.clone();
     let mut interval = std::time::Duration::from_secs(started.interval.max(1));
-    let provider_id = provider.id.to_string();
+    let provider_id = waiting_on.clone();
 
     let task = tokio::spawn(async move {
         // The host tells us how often it will answer; asking faster earns a
@@ -119,8 +147,7 @@ pub(super) async fn authorize_provider(
                 Ok(oauth::Poll::Approved(token)) => {
                     match vault
                         .put(
-                            vault::GIT,
-                            provider.id,
+                            Key::of(vault::GIT, provider.id, &owner),
                             &token,
                             &format!("{} authorized in a browser", provider.label),
                         )
@@ -145,7 +172,7 @@ pub(super) async fn authorize_provider(
     });
 
     state.pending.write().await.insert(
-        provider.id.to_string(),
+        waiting_on,
         Pending {
             auth: auth.clone(),
             task,
@@ -163,13 +190,22 @@ pub(super) async fn authorize_provider(
 )]
 pub(super) async fn disconnect_provider(
     State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
     Path(id): Path<String>,
 ) -> ApiResult<StatusCode> {
     let provider = providers::find(&id).ok_or_else(|| ApiError::not_found("provider"))?;
-    state.pending.write().await.remove(provider.id);
+    let owner = owner(&principal)?;
+    state
+        .pending
+        .write()
+        .await
+        .remove(&format!("{}:{owner}", provider.id));
     state
         .vault
-        .forget(vault::GIT, provider.id, "signed out of the git host")
+        .forget(
+            Key::of(vault::GIT, provider.id, owner),
+            "signed out of the git host",
+        )
         .await?;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -186,13 +222,19 @@ pub(super) async fn disconnect_provider(
 )]
 pub(super) async fn list_provider_repos(
     State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
     Path(id): Path<String>,
 ) -> ApiResult<Json<Vec<RemoteRepo>>> {
     let provider = providers::find(&id).ok_or_else(|| ApiError::not_found("provider"))?;
 
+    // Asked with this person's token: the picker must show what they can
+    // clone, not what somebody else can.
     let token = state
         .vault
-        .get(vault::GIT, provider.id, "listing repositories to pick from")
+        .get(
+            Key::of(vault::GIT, provider.id, owner(&principal)?),
+            "listing repositories to pick from",
+        )
         .await?
         .ok_or_else(|| {
             ApiError::new(

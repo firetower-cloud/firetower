@@ -1,1 +1,0 @@
-ALTER TABLE sessions ADD COLUMN size TEXT NOT NULL DEFAULT 'Medium';

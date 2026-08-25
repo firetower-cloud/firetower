@@ -90,8 +90,13 @@ impl Accounts {
 
     /// The organisation, if setting up has finished.
     pub async fn organization(&self) -> Result<Option<Organization>> {
+        // `named_at`, not merely the row: the installation is bound to its
+        // organization from the first boot, because a host coming up has to
+        // know which one it belongs to. Being *named* is the separate event,
+        // and it is what "set up" means.
         let row = sqlx::query(
-            "SELECT o.id, o.name FROM installation i JOIN organizations o ON o.id = i.org_id",
+            "SELECT o.id, o.name FROM installation i JOIN organizations o ON o.id = i.org_id
+             WHERE i.named_at IS NOT NULL",
         )
         .fetch_optional(&self.pool)
         .await
@@ -156,6 +161,14 @@ impl Accounts {
         .execute(&mut *tx)
         .await?;
 
+        // Bound to its organization now rather than at the end of the wizard.
+        // A host registering itself at boot has to know which organization it
+        // belongs to, and that happens long before anybody has named one.
+        sqlx::query("INSERT INTO installation (org_id) VALUES ($1)")
+            .bind(org_id.as_str())
+            .execute(&mut *tx)
+            .await?;
+
         tx.commit().await?;
 
         Ok(User {
@@ -183,18 +196,18 @@ impl Accounts {
             .execute(&mut *tx)
             .await?;
 
-        let claimed = sqlx::query("INSERT INTO installation (org_id) VALUES ($1)")
-            .bind(org.as_str())
-            .execute(&mut *tx)
-            .await;
+        // Exactly once, decided by the database rather than by a check we
+        // wrote: two requests arriving together, only one updates a row.
+        let claimed = sqlx::query(
+            "UPDATE installation SET named_at = now() WHERE org_id = $1 AND named_at IS NULL",
+        )
+        .bind(org.as_str())
+        .execute(&mut *tx)
+        .await
+        .context("finishing setup")?;
 
-        match claimed {
-            Ok(_) => {}
-            // 23505 is a unique violation: somebody else finished first.
-            Err(sqlx::Error::Database(e)) if e.code().as_deref() == Some("23505") => {
-                bail!("this Firetower has already been set up")
-            }
-            Err(e) => return Err(e).context("finishing setup"),
+        if claimed.rows_affected() == 0 {
+            bail!("this Firetower has already been set up")
         }
 
         tx.commit().await?;

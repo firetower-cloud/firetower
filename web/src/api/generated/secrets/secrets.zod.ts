@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.9.0
+ * OpenAPI spec version: 0.10.0
  */
 import * as zod from 'zod';
 
@@ -24,6 +24,7 @@ export const ListSecretsResponse = zod.object({
 }).describe('One line of the access log.')),
   "brokenAt": zod.int().nullish().describe('The first entry that doesn\'t follow from the one before it, if any.'),
   "held": zod.array(zod.object({
+  "mine": zod.boolean().describe('Yours rather than the install\'s. What the screen says, so it never has\nto show an account id.'),
   "name": zod.string(),
   "scope": zod.string()
 }).describe('A credential Firetower holds. Its name, and nothing else.')),

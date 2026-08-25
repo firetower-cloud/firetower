@@ -37,6 +37,8 @@ pub fn mac(key: &[u8], parts: &[&[u8]]) -> [u8; DIGEST_LEN] {
 pub struct Entry<'a> {
     pub scope: &'a str,
     pub name: &'a str,
+    /// Whose secret it was. Empty for the install's own.
+    pub owner: &'a str,
     pub action: &'a str,
     /// Why it was touched, in words — "starting session s_01…", "cloning
     /// acme/backend". Never a value; see [`super::Vault`].
@@ -54,6 +56,7 @@ impl Entry<'_> {
                 previous.unwrap_or(b"firetower/vault/genesis"),
                 self.scope.as_bytes(),
                 self.name.as_bytes(),
+                self.owner.as_bytes(),
                 self.action.as_bytes(),
                 self.reason.as_bytes(),
                 self.at.to_rfc3339().as_bytes(),
@@ -72,6 +75,7 @@ mod tests {
 
     fn entry() -> Entry<'static> {
         Entry {
+            owner: "",
             scope: "agent",
             name: "ClaudeCode",
             action: "Read",

@@ -244,6 +244,17 @@ pub enum Action {
         /// point — a lockfile, a scratch note.
         #[serde(default)]
         paths: Vec<String>,
+        /// Who to record as the author.
+        ///
+        /// Sent per commit rather than configured on the machine: a worker is
+        /// shared by every session on a host, and the person a commit belongs
+        /// to is a fact about the session, not about the container.
+        ///
+        /// Absent from a control plane too old to send one, which the worker
+        /// answers with an identity of its own rather than the failure git
+        /// gives a container with no `user.email` anywhere.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        author: Option<Author>,
     },
     Push {
         #[serde(default)]
@@ -310,6 +321,16 @@ pub struct CreateWorkspace {
     /// Everything every checkout brings, plus the agent's own. What belongs in
     /// a *file* is per repository and lives on its spec.
     pub env: Vec<(String, String)>,
+}
+
+/// Who a commit belongs to.
+///
+/// Not a credential: this is what goes in the log for everyone to read, and it
+/// is public the moment the branch is pushed.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct Author {
+    pub name: String,
+    pub email: String,
 }
 
 /// Which terminal in a session.

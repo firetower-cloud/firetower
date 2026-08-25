@@ -441,7 +441,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_fresh_control_plane_registers_localhost() {
-        let db = Db::open_for_test().await.unwrap();
+        let (db, _owner) = Db::open_for_test_owned().await.unwrap();
         let host = db
             .ensure_host("localhost", ft_core::Compute::Local)
             .await

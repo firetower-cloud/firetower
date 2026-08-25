@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.9.0
+ * OpenAPI spec version: 0.10.0
  */
 import * as zod from 'zod';
 
@@ -43,6 +43,7 @@ export const ListSessionsResponseItem = zod.object({
   "name": zod.string().describe('What to call it. `Agent 3` until somebody says otherwise.\n\nSeparate from `title`, which is cut from the prompt and describes the\nwork. This one identifies the session, which is a different job: five\nsessions on one repository all called \"Ask me…\" are impossible to tell\napart, and renaming one of them to \"the flaky test\" fixes that.'),
   "note": zod.string().nullish().describe('Why it is in that status, when whatever set it knew.\n\nOnly ever the agent\'s own words, and only for the statuses that mean\nyour move. Cleared when it goes back to working — a question that has\nbeen answered is not worth keeping on screen.'),
   "number": zod.int().describe('Assigned once, never reused, and the same for as long as the session\nexists. What `name` is derived from, and what a name that has been\nchanged can always be traced back to.'),
+  "owner": zod.string().describe('Whoever started it.\n\nEverything else about who may do what follows from this: who can open\nthe session, whose token pushes its branch, whose name goes on its\ncommits. Carried on the session rather than looked up each time,\nbecause every one of those questions is asked while it is already\nloaded.'),
   "prompt": zod.string(),
   "proposedBody": zod.string().nullish(),
   "proposedTitle": zod.string().nullish().describe('What the agent proposed calling this work, when it finished.\n\nA draft to edit rather than a box to fill. Nothing acts on it: it is\nwhat the review sheet starts with, and whoever is shipping decides what\nit actually says.'),
@@ -91,6 +92,7 @@ export const CreateSessionResponse = zod.object({
   "name": zod.string().describe('What to call it. `Agent 3` until somebody says otherwise.\n\nSeparate from `title`, which is cut from the prompt and describes the\nwork. This one identifies the session, which is a different job: five\nsessions on one repository all called \"Ask me…\" are impossible to tell\napart, and renaming one of them to \"the flaky test\" fixes that.'),
   "note": zod.string().nullish().describe('Why it is in that status, when whatever set it knew.\n\nOnly ever the agent\'s own words, and only for the statuses that mean\nyour move. Cleared when it goes back to working — a question that has\nbeen answered is not worth keeping on screen.'),
   "number": zod.int().describe('Assigned once, never reused, and the same for as long as the session\nexists. What `name` is derived from, and what a name that has been\nchanged can always be traced back to.'),
+  "owner": zod.string().describe('Whoever started it.\n\nEverything else about who may do what follows from this: who can open\nthe session, whose token pushes its branch, whose name goes on its\ncommits. Carried on the session rather than looked up each time,\nbecause every one of those questions is asked while it is already\nloaded.'),
   "prompt": zod.string(),
   "proposedBody": zod.string().nullish(),
   "proposedTitle": zod.string().nullish().describe('What the agent proposed calling this work, when it finished.\n\nA draft to edit rather than a box to fill. Nothing acts on it: it is\nwhat the review sheet starts with, and whoever is shipping decides what\nit actually says.'),
@@ -145,6 +147,7 @@ export const GetSessionResponse = zod.object({
   "name": zod.string().describe('What to call it. `Agent 3` until somebody says otherwise.\n\nSeparate from `title`, which is cut from the prompt and describes the\nwork. This one identifies the session, which is a different job: five\nsessions on one repository all called \"Ask me…\" are impossible to tell\napart, and renaming one of them to \"the flaky test\" fixes that.'),
   "note": zod.string().nullish().describe('Why it is in that status, when whatever set it knew.\n\nOnly ever the agent\'s own words, and only for the statuses that mean\nyour move. Cleared when it goes back to working — a question that has\nbeen answered is not worth keeping on screen.'),
   "number": zod.int().describe('Assigned once, never reused, and the same for as long as the session\nexists. What `name` is derived from, and what a name that has been\nchanged can always be traced back to.'),
+  "owner": zod.string().describe('Whoever started it.\n\nEverything else about who may do what follows from this: who can open\nthe session, whose token pushes its branch, whose name goes on its\ncommits. Carried on the session rather than looked up each time,\nbecause every one of those questions is asked while it is already\nloaded.'),
   "prompt": zod.string(),
   "proposedBody": zod.string().nullish(),
   "proposedTitle": zod.string().nullish().describe('What the agent proposed calling this work, when it finished.\n\nA draft to edit rather than a box to fill. Nothing acts on it: it is\nwhat the review sheet starts with, and whoever is shipping decides what\nit actually says.'),
@@ -202,6 +205,7 @@ export const RenameSessionResponse = zod.object({
   "name": zod.string().describe('What to call it. `Agent 3` until somebody says otherwise.\n\nSeparate from `title`, which is cut from the prompt and describes the\nwork. This one identifies the session, which is a different job: five\nsessions on one repository all called \"Ask me…\" are impossible to tell\napart, and renaming one of them to \"the flaky test\" fixes that.'),
   "note": zod.string().nullish().describe('Why it is in that status, when whatever set it knew.\n\nOnly ever the agent\'s own words, and only for the statuses that mean\nyour move. Cleared when it goes back to working — a question that has\nbeen answered is not worth keeping on screen.'),
   "number": zod.int().describe('Assigned once, never reused, and the same for as long as the session\nexists. What `name` is derived from, and what a name that has been\nchanged can always be traced back to.'),
+  "owner": zod.string().describe('Whoever started it.\n\nEverything else about who may do what follows from this: who can open\nthe session, whose token pushes its branch, whose name goes on its\ncommits. Carried on the session rather than looked up each time,\nbecause every one of those questions is asked while it is already\nloaded.'),
   "prompt": zod.string(),
   "proposedBody": zod.string().nullish(),
   "proposedTitle": zod.string().nullish().describe('What the agent proposed calling this work, when it finished.\n\nA draft to edit rather than a box to fill. Nothing acts on it: it is\nwhat the review sheet starts with, and whoever is shipping decides what\nit actually says.'),

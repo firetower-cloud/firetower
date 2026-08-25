@@ -537,7 +537,13 @@ impl GitRoot {
     ///
     /// Paths are passed after `--`, so a file called `-f` is a file rather than
     /// an argument.
-    pub async fn commit(&self, dest: &Path, message: &str, paths: &[String]) -> Result<String> {
+    pub async fn commit(
+        &self,
+        dest: &Path,
+        message: &str,
+        paths: &[String],
+        author: Option<&ft_proto::Author>,
+    ) -> Result<String> {
         if paths.is_empty() {
             run(dest, "git", &["add", "-A"]).await?;
         } else {
@@ -554,7 +560,20 @@ impl GitRoot {
             bail!("there is nothing to commit");
         }
 
-        run(dest, "git", &["commit", "-m", message]).await?;
+        // Given on the command rather than written to a config file. A worker
+        // is shared by every session on a host, so a global identity would be
+        // one person's name on another person's commit — and this container
+        // has no identity at all, which is the error git gives instead of a
+        // commit: "Author identity unknown".
+        let author = author.unwrap_or(&UNATTRIBUTED);
+        let name = format!("user.name={}", author.name);
+        let email = format!("user.email={}", author.email);
+        run(
+            dest,
+            "git",
+            &["-c", &name, "-c", &email, "commit", "-m", message],
+        )
+        .await?;
         let count = staged.lines().filter(|l| !l.trim().is_empty()).count();
         Ok(format!(
             "committed {count} {}",
@@ -886,6 +905,17 @@ fn name_is_taken(error: &str) -> bool {
     e.contains("already exists") || e.contains("already used by worktree")
 }
 
+/// Who a commit belongs to when nothing better is known.
+///
+/// A commit that happened is worth more than a commit refused for want of a
+/// name, and `.invalid` is reserved precisely so it can never be somebody's
+/// real address.
+static UNATTRIBUTED: std::sync::LazyLock<ft_proto::Author> =
+    std::sync::LazyLock::new(|| ft_proto::Author {
+        name: "Firetower".to_string(),
+        email: "firetower@localhost.invalid".to_string(),
+    });
+
 /// Turn git's stderr into something the interface can act on.
 ///
 /// Note that a private repository you have no access to and one that does not
@@ -1032,7 +1062,7 @@ mod tests {
             .await
             .unwrap();
 
-        git.commit(dest.path(), "only one", &["wanted.txt".to_string()])
+        git.commit(dest.path(), "only one", &["wanted.txt".to_string()], None)
             .await
             .unwrap();
 
@@ -1065,7 +1095,7 @@ mod tests {
         tokio::fs::write(dest.join("new.txt"), "from the agent\n")
             .await
             .unwrap();
-        git.commit(&dest, "Add a file", &[]).await.unwrap();
+        git.commit(&dest, "Add a file", &[], None).await.unwrap();
         git.push(&dest, &branch, None).await.unwrap();
 
         // the branch reached the origin, which is what makes ending a session
@@ -1378,6 +1408,57 @@ mod tests {
         assert_eq!(branch.trim(), "agent/fix-retries");
     }
 
+    /// A container has no `user.email` anywhere, and git refuses to commit
+    /// rather than guessing one — "Author identity unknown". So the identity
+    /// travels with the commit, and this is what proves it arrives.
+    #[tokio::test]
+    async fn a_commit_is_authored_by_whoever_was_named() {
+        let dest = tempfile::tempdir().unwrap();
+        let git = GitRoot::new(dest.path());
+        run(dest.path(), "git", &["init", "-q"]).await.unwrap();
+
+        // Deliberately different from anything this machine has configured, so
+        // a pass cannot come from the developer's own global gitconfig.
+        let author = ft_proto::Author {
+            name: "Someone Else".to_string(),
+            email: "1234+someone@users.noreply.github.com".to_string(),
+        };
+
+        std::fs::write(dest.path().join("a.txt"), "x").unwrap();
+        git.commit(dest.path(), "a change", &[], Some(&author))
+            .await
+            .unwrap();
+
+        let who = run(dest.path(), "git", &["log", "-1", "--format=%an <%ae>"])
+            .await
+            .unwrap();
+        assert_eq!(
+            who.trim(),
+            "Someone Else <1234+someone@users.noreply.github.com>"
+        );
+    }
+
+    /// Nothing named, and it still has to commit: the fallback is what stops a
+    /// worker with no identity refusing every commit anybody asks it for.
+    #[tokio::test]
+    async fn a_commit_with_nobody_named_still_happens() {
+        let dest = tempfile::tempdir().unwrap();
+        let git = GitRoot::new(dest.path());
+        run(dest.path(), "git", &["init", "-q"]).await.unwrap();
+
+        // No user.name or user.email here, and none inherited: this is the
+        // container's situation, reproduced.
+        std::fs::write(dest.path().join("a.txt"), "x").unwrap();
+        git.commit(dest.path(), "a change", &[], None)
+            .await
+            .expect("a commit must not fail for want of a name");
+
+        let who = run(dest.path(), "git", &["log", "-1", "--format=%an"])
+            .await
+            .unwrap();
+        assert!(!who.trim().is_empty(), "somebody has to be on it");
+    }
+
     /// The signal the interface needs to stop offering a pull request for a
     /// branch that holds nothing: measured against the base, whatever the
     /// push state, unlike `ahead`.
@@ -1411,7 +1492,7 @@ mod tests {
         assert_eq!(dirty.uncommitted, 1);
         assert_eq!(dirty.commits, Some(0), "uncommitted is not yet a commit");
 
-        git.commit(&tree, "add a file", &[]).await.unwrap();
+        git.commit(&tree, "add a file", &[], None).await.unwrap();
         let done = git.summary(&tree, &branch, "main").await.unwrap();
         assert_eq!(done.commits, Some(1), "now there is something to open");
     }

@@ -7,14 +7,16 @@
 use super::agents::agent_env;
 use super::repos::is_local_path;
 use super::{credential_for, ApiError, ApiResult, ErrorCode};
+use crate::auth::Principal;
 use crate::oauth;
 use crate::providers;
 use crate::vault;
+use crate::vault::Key;
 use crate::AppState;
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
-    Json,
+    Extension, Json,
 };
 use ft_core::{
     session::{title_from, Checkout},
@@ -45,12 +47,13 @@ const RECONNECT_GRACE: std::time::Duration = std::time::Duration::from_secs(30);
 )]
 pub(super) async fn list_sessions(
     State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
     Query(page): Query<Page>,
 ) -> ApiResult<Json<Vec<Session>>> {
     Ok(Json(
         state
             .db
-            .sessions_page(page.limit, page.before.as_deref())
+            .sessions_page(owner(&principal)?, page.limit, page.before.as_deref())
             .await?,
     ))
 }
@@ -72,8 +75,13 @@ pub struct Page {
     post, path = "/api/v1/sessions/end-all", tag = "sessions",
     responses((status = 200, body = EndedAll)),
 )]
-pub(super) async fn end_all_sessions(State(state): State<AppState>) -> ApiResult<Json<EndedAll>> {
-    let live = state.db.live_sessions().await?;
+pub(super) async fn end_all_sessions(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+) -> ApiResult<Json<EndedAll>> {
+    // Yours. "End all" has never meant anybody else's, and with two people on
+    // one Firetower it would be a button that ends a colleague's work.
+    let live = state.db.live_sessions(owner(&principal)?).await?;
 
     let mut ended = 0;
     let mut unreachable = 0;
@@ -123,11 +131,12 @@ pub struct EndedAll {
 )]
 pub(super) async fn get_session(
     State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
     Path(id): Path<String>,
 ) -> ApiResult<Json<Session>> {
     state
         .db
-        .session(&SessionId::from_stored(id))
+        .session_of(owner(&principal)?, &SessionId::from_stored(id))
         .await?
         .map(Json)
         .ok_or_else(|| ApiError::not_found("session"))
@@ -144,8 +153,14 @@ pub(super) async fn get_session(
 )]
 pub(super) async fn create_session(
     State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
     Json(req): Json<NewSession>,
 ) -> ApiResult<(StatusCode, Json<Session>)> {
+    // Whose session this is. Written down at the moment it is created, because
+    // everything afterwards — who may open it, whose token pushes its branch,
+    // whose name goes on its commits — is answered from here.
+    let owner = owner(&principal)?.to_string();
+
     if req.prompt.trim().is_empty() {
         return Err(ApiError::new(
             ErrorCode::InvalidRequest,
@@ -311,8 +326,13 @@ pub(super) async fn create_session(
                         .probe(
                             &host.id,
                             &repo.remote,
-                            credential_for(&state, &repo.remote, &format!("reading {}", repo.slug))
-                                .await,
+                            credential_for(
+                                &state,
+                                &repo.remote,
+                                &owner,
+                                &format!("reading {}", repo.slug),
+                            )
+                            .await,
                         )
                         .await
                         .map_err(|e| ApiError::new(ErrorCode::HostUnreachable, format!("{e:#}")))?
@@ -380,6 +400,7 @@ pub(super) async fn create_session(
         .insert_session(
             &id,
             &host.id,
+            &owner,
             repo.as_ref().map(|r| r.slug.as_str()),
             &title,
             &req.prompt,
@@ -414,9 +435,34 @@ pub(super) async fn create_session(
             env.push((v.name.clone(), v.value.clone()));
         }
     }
-    for (name, value) in agent_env(&state, req.agent, &id).await? {
+    for (name, value) in agent_env(&state, req.agent, &id, &owner).await? {
         env.retain(|(existing, _)| *existing != name);
         env.push((name, value));
+    }
+
+    // The identity the agent's *own* commits carry.
+    //
+    // `Action::Commit` covers what Firetower commits for you and reaches the
+    // worker process; this covers `git commit` typed in the session's own
+    // shell, which no frame ever reaches. Both are needed, and without this
+    // one an agent committing its own work gets "Author identity unknown" —
+    // a container has no `user.email` anywhere.
+    //
+    // One environment per process, so a session spanning two git hosts gets
+    // the first checkout's identity for anything the agent commits by hand.
+    // Firetower's own commits stay per checkout.
+    if let Some(remote) = repos.first().map(|(r, _)| r.remote.clone()) {
+        if let Some(author) = author_for(&state, &remote, &owner).await {
+            for (name, value) in [
+                ("GIT_AUTHOR_NAME", &author.name),
+                ("GIT_AUTHOR_EMAIL", &author.email),
+                ("GIT_COMMITTER_NAME", &author.name),
+                ("GIT_COMMITTER_EMAIL", &author.email),
+            ] {
+                env.retain(|(existing, _)| existing != name);
+                env.push((name.to_string(), value.clone()));
+            }
+        }
     }
 
     let mut specs = Vec::new();
@@ -448,6 +494,7 @@ pub(super) async fn create_session(
             credential: credential_for(
                 &state,
                 &repo.remote,
+                &owner,
                 &format!("starting {id} on {}", repo.slug),
             )
             .await,
@@ -472,7 +519,7 @@ pub(super) async fn create_session(
 
     let session = state
         .db
-        .session(&id)
+        .session_of(&owner, &id)
         .await?
         .ok_or_else(|| ApiError::not_found("session"))?;
 
@@ -489,13 +536,14 @@ pub(super) async fn create_session(
 )]
 pub(super) async fn destroy_session(
     State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
     Path(id): Path<String>,
     Query(req): Query<Removal>,
 ) -> ApiResult<StatusCode> {
     let id = SessionId::from_stored(id);
     let session = state
         .db
-        .session(&id)
+        .session_of(owner(&principal)?, &id)
         .await?
         .ok_or_else(|| ApiError::not_found("session"))?;
 
@@ -575,11 +623,12 @@ pub struct Done {
 )]
 pub(super) async fn list_files(
     State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
     Path(id): Path<String>,
     Query(req): Query<FilePath>,
 ) -> ApiResult<Json<Vec<ft_core::FileEntry>>> {
     let id = SessionId::from_stored(id);
-    let (_, host) = session_context(&state, &id).await?;
+    let (_, host) = session_context(&state, &principal, &id).await?;
 
     state
         .fleet
@@ -605,11 +654,12 @@ pub(super) async fn list_files(
 )]
 pub(super) async fn download_file(
     State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
     Path(id): Path<String>,
     Query(req): Query<FilePath>,
 ) -> Result<axum::response::Response, ApiError> {
     let id = SessionId::from_stored(id);
-    let (_, host) = session_context(&state, &id).await?;
+    let (_, host) = session_context(&state, &principal, &id).await?;
 
     let path = req.path.unwrap_or_default();
     if path.trim().is_empty() {
@@ -668,14 +718,15 @@ async fn repo_env(
     let reason = format!("starting {session} on {}", repo.slug);
 
     let mut out = Vec::new();
-    for (_, name) in state
+    for name in state
         .vault
         .names()
         .await?
         .into_iter()
-        .filter(|(s, _)| *s == scope)
+        .filter(|held| held.scope == scope && held.owner.is_empty())
+        .map(|held| held.name)
     {
-        if let Some(value) = state.vault.get(&scope, &name, &reason).await? {
+        if let Some(value) = state.vault.get(Key::shared(&scope, &name), &reason).await? {
             // Out of its zeroizing wrapper here, as the agent's own token
             // already is: from this point it is going into a frame, over a
             // pipe, and into a tmux environment.
@@ -692,11 +743,14 @@ async fn repo_env(
 /// The session, its host, and the credential its remote needs.
 async fn session_context(
     state: &AppState,
+    principal: &Principal,
     id: &SessionId,
 ) -> Result<(Session, ft_core::HostId), ApiError> {
+    // Somebody else's is not found rather than refused: saying "you may not"
+    // confirms it exists, which is the one thing the asker had no way to know.
     let session = state
         .db
-        .session(id)
+        .session_of(owner(principal)?, id)
         .await?
         .ok_or_else(|| ApiError::not_found("session"))?;
 
@@ -717,8 +771,13 @@ async fn session_context(
     Ok((session, host))
 }
 
-async fn act(state: &AppState, id: &SessionId, action: ft_proto::Action) -> ApiResult<Json<Done>> {
-    let (session, host) = session_context(state, id).await?;
+async fn act(
+    state: &AppState,
+    principal: &Principal,
+    id: &SessionId,
+    action: ft_proto::Action,
+) -> ApiResult<Json<Done>> {
+    let (session, host) = session_context(state, principal, id).await?;
 
     // Committing and pushing are about a checkout. Stopping isn't.
     if session.repo.is_none() && !matches!(action, ft_proto::Action::Stop) {
@@ -732,7 +791,17 @@ async fn act(state: &AppState, id: &SessionId, action: ft_proto::Action) -> ApiR
     // has no remote at all.
     let credential = match session.repo.as_deref() {
         Some(slug) => match state.db.repo_by_slug(slug).await? {
-            Some(repo) => credential_for(state, &repo.remote, &format!("{action:?} on {id}")).await,
+            // The session's owner, not whoever asked. It is their branch and
+            // their token that has to be able to push it.
+            Some(repo) => {
+                credential_for(
+                    state,
+                    &repo.remote,
+                    session.owner.as_str(),
+                    &format!("{action:?} on {id}"),
+                )
+                .await
+            }
             None => None,
         },
         None => None,
@@ -766,6 +835,7 @@ async fn act(state: &AppState, id: &SessionId, action: ft_proto::Action) -> ApiR
 )]
 pub(super) async fn rename_session(
     State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
     Path(id): Path<String>,
     Json(req): Json<RenameSession>,
 ) -> ApiResult<Json<Session>> {
@@ -779,9 +849,12 @@ pub(super) async fn rename_session(
         ));
     }
 
+    // Checked before renaming, so somebody else's session cannot be renamed by
+    // guessing its id.
+    let owner = owner(&principal)?;
     state
         .db
-        .session(&id)
+        .session_of(owner, &id)
         .await?
         .ok_or_else(|| ApiError::not_found("session"))?;
 
@@ -789,7 +862,7 @@ pub(super) async fn rename_session(
 
     state
         .db
-        .session(&id)
+        .session_of(owner, &id)
         .await?
         .map(Json)
         .ok_or_else(|| ApiError::not_found("session"))
@@ -808,9 +881,16 @@ pub struct RenameSession {
 )]
 pub(super) async fn stop_session(
     State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
     Path(id): Path<String>,
 ) -> ApiResult<Json<Done>> {
-    act(&state, &SessionId::from_stored(id), ft_proto::Action::Stop).await
+    act(
+        &state,
+        &principal,
+        &SessionId::from_stored(id),
+        ft_proto::Action::Stop,
+    )
+    .await
 }
 
 /// Push every branch, so the work outlives the workspace.
@@ -824,16 +904,18 @@ pub(super) async fn stop_session(
 )]
 pub(super) async fn push_session(
     State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
     Path(id): Path<String>,
 ) -> ApiResult<Json<Done>> {
     let id = SessionId::from_stored(id);
-    let (session, _) = session_context(&state, &id).await?;
+    let (session, _) = session_context(&state, &principal, &id).await?;
 
     let mut done = Vec::new();
     let mut refused = Vec::new();
     for c in known_checkouts(&session) {
         match one(
             &state,
+            &principal,
             &id,
             ft_proto::Action::Push {
                 checkout: c.path.clone(),
@@ -893,11 +975,12 @@ pub struct Commit {
 )]
 pub(super) async fn commit_session(
     State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
     Path(id): Path<String>,
     Json(req): Json<Commit>,
 ) -> ApiResult<Json<Done>> {
     let id = SessionId::from_stored(id);
-    let (session, _) = session_context(&state, &id).await?;
+    let (session, _) = session_context(&state, &principal, &id).await?;
 
     let message = req
         .message
@@ -915,6 +998,11 @@ pub(super) async fn commit_session(
     // piece of work, and two commits saying the same sentence is the honest
     // record of it.
     let held = known_checkouts(&session);
+
+    // The session's owner, not whoever pressed the button — the work is
+    // theirs. Resolved per checkout below, because two checkouts can be on two
+    // different hosts and the identity is the host's answer.
+    let owner = session.owner.as_str().to_string();
 
     // The review sheet only puts a checkout's directory in front of a file
     // when the session holds more than one — so with a single checkout the
@@ -950,11 +1038,19 @@ pub(super) async fn commit_session(
 
         match one(
             &state,
+            &principal,
             &id,
             ft_proto::Action::Commit {
                 checkout: c.path.clone(),
                 message: message.clone(),
                 paths,
+                // By the remote, so two checkouts on two hosts each get the
+                // identity that host expects. `Held` carries the slug, and
+                // the remote is what `for_remote` matches on.
+                author: match state.db.repo_by_slug(&c.slug).await? {
+                    Some(repo) => author_for(&state, &repo.remote, &owner).await,
+                    None => None,
+                },
             },
         )
         .await
@@ -991,6 +1087,62 @@ pub(super) async fn commit_session(
     }))
 }
 
+/// Who to record as the author of a commit.
+///
+/// Chosen the way the credential is — by the hostname of the remote, through
+/// `providers::for_remote` — so a session holding a GitHub checkout and a
+/// checkout somewhere else gets the right identity for each.
+///
+/// In order: what that person set for that host, then what their token says
+/// they are called there, then nothing — and nothing is fine, because the
+/// worker has an identity of its own for exactly that case. A commit that
+/// happened beats a commit refused for want of a name.
+///
+/// Deliberately not `users.email`. That is a login: somebody signs in with a
+/// work address whose GitHub account is under a different one entirely, and a
+/// commit authored with the wrong address is at best confusing and at worst
+/// refused by the host at push time.
+async fn author_for(state: &AppState, remote: &str, owner: &str) -> Option<ft_proto::Author> {
+    let provider = providers::for_remote(remote)?;
+
+    if let Ok(Some(set)) = state.db.git_identity(owner, provider.id).await {
+        return Some(set);
+    }
+
+    // Nothing stored, so ask the host who this token belongs to and keep the
+    // answer. Asking before every commit is a request that can fail and take
+    // the commit with it.
+    let token = state
+        .vault
+        .get(
+            Key::of(vault::GIT, provider.id, owner),
+            "reading who commits belong to",
+        )
+        .await
+        .ok()
+        .flatten()?;
+
+    let author = match oauth::whoami(provider, &token).await {
+        Ok(author) => author,
+        Err(e) => {
+            tracing::warn!("could not read the git identity: {e:#}");
+            return None;
+        }
+    };
+
+    if let Err(e) = state
+        .db
+        .remember_git_identity(owner, provider.id, &author, "host")
+        .await
+    {
+        // Worth a line, not worth failing: the commit is what matters and the
+        // next one asks again.
+        tracing::warn!("could not record the git identity: {e:#}");
+    }
+
+    Some(author)
+}
+
 /// Whether a path is inside a checkout, and what it is called from there.
 ///
 /// The empty checkout is the workspace, so everything is inside it.
@@ -1014,8 +1166,13 @@ fn nothing_to_do(why: &str) -> bool {
 }
 
 /// Run one action and give back what it said.
-async fn one(state: &AppState, id: &SessionId, action: ft_proto::Action) -> Result<String, String> {
-    let (_, host) = session_context(state, id)
+async fn one(
+    state: &AppState,
+    principal: &Principal,
+    id: &SessionId,
+    action: ft_proto::Action,
+) -> Result<String, String> {
+    let (_, host) = session_context(state, principal, id)
         .await
         .map_err(|e| e.message.clone())?;
     match state.fleet.run_action(&host, id, action, None).await {
@@ -1046,10 +1203,11 @@ pub struct Proposal {
 )]
 pub(super) async fn describe_session(
     State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
     Path(id): Path<String>,
 ) -> ApiResult<Json<Proposal>> {
     let id = SessionId::from_stored(id);
-    let proposal = propose(&state, &id).await?;
+    let proposal = propose(&state, &principal, &id).await?;
     Ok(Json(proposal))
 }
 
@@ -1057,8 +1215,12 @@ pub(super) async fn describe_session(
 ///
 /// Shared with the moment a session hands back, which is when this happens
 /// without anybody asking.
-pub(crate) async fn propose(state: &AppState, id: &SessionId) -> ApiResult<Proposal> {
-    let (session, host) = session_context(state, id).await?;
+pub(crate) async fn propose(
+    state: &AppState,
+    principal: &Principal,
+    id: &SessionId,
+) -> ApiResult<Proposal> {
+    let (session, host) = session_context(state, principal, id).await?;
     if session.repo.is_none() {
         return Err(ApiError::new(
             ErrorCode::InvalidRequest,
@@ -1102,11 +1264,12 @@ pub(crate) async fn propose(state: &AppState, id: &SessionId) -> ApiResult<Propo
 )]
 pub(super) async fn add_repo(
     State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
     Path(id): Path<String>,
     Json(req): Json<ft_core::session::NewCheckout>,
 ) -> ApiResult<Json<Done>> {
     let id = SessionId::from_stored(id);
-    let (session, host) = session_context(&state, &id).await?;
+    let (session, host) = session_context(&state, &principal, &id).await?;
 
     let repo = state.db.repo(&req.repo_id).await?.ok_or_else(|| {
         ApiError::new(
@@ -1163,6 +1326,7 @@ pub(super) async fn add_repo(
         credential: credential_for(
             &state,
             &repo.remote,
+            session.owner.as_str(),
             &format!("adding {} to {id}", repo.slug),
         )
         .await,
@@ -1231,10 +1395,11 @@ pub(super) async fn add_repo(
 )]
 pub(super) async fn session_work(
     State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
     Path(id): Path<String>,
 ) -> ApiResult<Json<Vec<ft_core::CheckoutWork>>> {
     let id = SessionId::from_stored(id);
-    let (session, host) = session_context(&state, &id).await?;
+    let (session, host) = session_context(&state, &principal, &id).await?;
 
     if session.checkouts.is_empty() && session.repo.is_none() {
         return Err(ApiError::new(
@@ -1274,6 +1439,20 @@ pub(super) async fn session_work(
     }
 
     Ok(Json(out))
+}
+
+/// Whose sessions a request means.
+///
+/// A session belongs to somebody: it is their branch, their agent, and their
+/// token that pushes it. Refused rather than defaulted when authentication is
+/// off, because a session owned by nobody is one nobody can be shown.
+fn owner(principal: &Principal) -> Result<&str, ApiError> {
+    principal.owner().ok_or_else(|| {
+        ApiError::new(
+            ErrorCode::Unauthorized,
+            "a session belongs to an account, and authentication is switched off",
+        )
+    })
 }
 
 /// One row per repository this session holds.
@@ -1333,11 +1512,12 @@ struct Held {
 )]
 pub(super) async fn session_diff(
     State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
     Path(id): Path<String>,
     Query(which): Query<Which>,
 ) -> ApiResult<Json<Vec<ft_core::FileDiff>>> {
     let id = SessionId::from_stored(id);
-    let (session, host) = session_context(&state, &id).await?;
+    let (session, host) = session_context(&state, &principal, &id).await?;
 
     // Every checkout unless one is named. Each file keeps the repository it
     // came from in front of its path, because two repositories can both have a
@@ -1408,11 +1588,12 @@ pub(super) struct Which {
 )]
 pub(super) async fn open_pull_request(
     State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
     Path(id): Path<String>,
     Json(req): Json<NewPullRequest>,
 ) -> ApiResult<Json<PullRequest>> {
     let id = SessionId::from_stored(id);
-    let (session, _) = session_context(&state, &id).await?;
+    let (session, _) = session_context(&state, &principal, &id).await?;
 
     // Written, or proposed by the agent when it finished — never derived from
     // the prompt. A title cut from the opening sentence of a request reads like
@@ -1456,7 +1637,14 @@ pub(super) async fn open_pull_request(
         }
 
         match open_one(
-            &state, &c.slug, &c.branch, &c.base, &title, &body, req.draft,
+            &state,
+            session.owner.as_str(),
+            &c.slug,
+            &c.branch,
+            &c.base,
+            &title,
+            &body,
+            req.draft,
         )
         .await
         {
@@ -1500,7 +1688,7 @@ pub(super) async fn open_pull_request(
                 others.join("\n")
             );
 
-            if let Err(e) = link_up(&state, slug, url, &with_links).await {
+            if let Err(e) = link_up(&state, session.owner.as_str(), slug, url, &with_links).await {
                 tracing::warn!(%slug, "could not cross-link the pull request: {e:#}");
             }
         }
@@ -1519,6 +1707,7 @@ pub(super) async fn open_pull_request(
 #[allow(clippy::too_many_arguments)]
 async fn open_one(
     state: &AppState,
+    owner: &str,
     slug: &str,
     head: &str,
     base: &str,
@@ -1539,8 +1728,7 @@ async fn open_one(
     let token = state
         .vault
         .get(
-            vault::GIT,
-            provider.id,
+            Key::of(vault::GIT, provider.id, owner),
             &format!("opening a pull request for {}", repo.slug),
         )
         .await
@@ -1564,7 +1752,13 @@ async fn open_one(
 }
 
 /// Put the links to its siblings into a pull request that is already open.
-async fn link_up(state: &AppState, slug: &str, url: &str, body: &str) -> anyhow::Result<()> {
+async fn link_up(
+    state: &AppState,
+    owner: &str,
+    slug: &str,
+    url: &str,
+    body: &str,
+) -> anyhow::Result<()> {
     let repo = state
         .db
         .repo_by_slug(slug)
@@ -1574,7 +1768,10 @@ async fn link_up(state: &AppState, slug: &str, url: &str, body: &str) -> anyhow:
         .ok_or_else(|| anyhow::anyhow!("no provider for {slug}"))?;
     let token = state
         .vault
-        .get(vault::GIT, provider.id, "cross-linking a pull request")
+        .get(
+            Key::of(vault::GIT, provider.id, owner),
+            "cross-linking a pull request",
+        )
         .await?
         .ok_or_else(|| anyhow::anyhow!("not authorized"))?;
 

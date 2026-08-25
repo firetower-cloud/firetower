@@ -1,6 +1,6 @@
 //! Sessions and the workspaces they run on.
 
-use crate::{Agent, HostId, RepoId, SessionId, SessionStatus, WorkspaceId};
+use crate::{Agent, HostId, RepoId, SessionId, SessionStatus, UserId, WorkspaceId};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
@@ -110,6 +110,14 @@ pub fn checkout_dir(slug: &str, taken: &[String]) -> String {
 #[serde(rename_all = "camelCase")]
 pub struct Session {
     pub id: SessionId,
+    /// Whoever started it.
+    ///
+    /// Everything else about who may do what follows from this: who can open
+    /// the session, whose token pushes its branch, whose name goes on its
+    /// commits. Carried on the session rather than looked up each time,
+    /// because every one of those questions is asked while it is already
+    /// loaded.
+    pub owner: UserId,
     /// Assigned once, never reused, and the same for as long as the session
     /// exists. What `name` is derived from, and what a name that has been
     /// changed can always be traced back to.

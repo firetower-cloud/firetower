@@ -25,7 +25,7 @@ use ssh_key::{Algorithm, LineEnding, PrivateKey};
 use std::path::{Path, PathBuf};
 use zeroize::Zeroizing;
 
-use crate::vault::Vault;
+use crate::vault::{Key, Vault};
 
 /// Where the pair lives in the vault. One row, this installation's.
 const SCOPE: &str = "firetower";
@@ -83,7 +83,11 @@ pub async fn ensure(vault: &Vault) -> Result<PublicIdentity> {
         .context("encoding the private key")?;
 
     vault
-        .put(SCOPE, NAME, &openssh, "creating Firetower's own ssh key")
+        .put(
+            Key::shared(SCOPE, NAME),
+            &openssh,
+            "creating Firetower's own ssh key",
+        )
         .await?;
 
     let described = describe(&key)?;
@@ -105,7 +109,7 @@ pub async fn public(vault: &Vault) -> Result<Option<PublicIdentity>> {
 /// `Zeroizing` all the way through: this is the one string in the process worth
 /// being careful about, and it exists only long enough to reach a file.
 pub async fn private(vault: &Vault, reason: &str) -> Result<Option<Zeroizing<String>>> {
-    vault.get(SCOPE, NAME, reason).await
+    vault.get(Key::shared(SCOPE, NAME), reason).await
 }
 
 /// Write a held key where ssh can read it, and return that path.
@@ -173,7 +177,7 @@ fn restrict(path: &Path, mode: u32) -> Result<()> {
 }
 
 async fn load(vault: &Vault, reason: &str) -> Result<Option<PrivateKey>> {
-    let Some(stored) = vault.get(SCOPE, NAME, reason).await? else {
+    let Some(stored) = vault.get(Key::shared(SCOPE, NAME), reason).await? else {
         return Ok(None);
     };
 
@@ -200,7 +204,11 @@ pub async fn rotate(vault: &Vault) -> Result<PublicIdentity> {
         .context("encoding the private key")?;
 
     vault
-        .put(SCOPE, NAME, &openssh, "rotating Firetower's own ssh key")
+        .put(
+            Key::shared(SCOPE, NAME),
+            &openssh,
+            "rotating Firetower's own ssh key",
+        )
         .await?;
 
     let described = describe(&key)?;

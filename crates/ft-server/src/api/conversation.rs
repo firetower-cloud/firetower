@@ -17,7 +17,7 @@
 use axum::{
     extract::{Path, Query, State},
     response::sse::{self, Sse},
-    Json,
+    Extension, Json,
 };
 use ft_core::normalise::ClaudeNormaliser;
 use ft_core::{SessionId, TurnEvent};
@@ -27,6 +27,7 @@ use tokio_stream::wrappers::BroadcastStream;
 use utoipa::ToSchema;
 
 use super::{ApiError, ApiResult, ErrorCode};
+use crate::auth::Principal;
 use crate::fleet::AgentSpeech;
 use crate::AppState;
 
@@ -117,13 +118,17 @@ pub(super) async fn get_conversation(
 )]
 pub(super) async fn stream_conversation(
     State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
     Path(id): Path<String>,
     headers: axum::http::HeaderMap,
 ) -> ApiResult<Sse<impl Stream<Item = Result<sse::Event, std::convert::Infallible>>>> {
     let id = SessionId::from_stored(id);
+    // Somebody else's conversation is "no such session". This stream carries
+    // everything an agent said and everything it was told, so it is the last
+    // thing that should answer to an id somebody guessed.
     let session = state
         .db
-        .session(&id)
+        .session_of(owner(&principal)?, &id)
         .await
         .map_err(|e| ApiError::new(ErrorCode::Internal, format!("{e:#}")))?
         .ok_or_else(|| ApiError::new(ErrorCode::NotFound, "no such session"))?;
@@ -262,6 +267,7 @@ pub struct Sent {
 )]
 pub(super) async fn send_turn(
     State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
     Path(id): Path<String>,
     Json(turn): Json<Turn>,
 ) -> ApiResult<Json<Sent>> {
@@ -272,7 +278,7 @@ pub(super) async fn send_turn(
             "there is nothing to send",
         ));
     }
-    let host = host_of(&state, &id).await?;
+    let host = host_of(&state, &principal, &id).await?;
 
     state
         .fleet
@@ -295,10 +301,11 @@ pub(super) async fn send_turn(
 )]
 pub(super) async fn interrupt_session(
     State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
     Path(id): Path<String>,
 ) -> ApiResult<Json<Sent>> {
     let id = SessionId::from_stored(id);
-    let host = host_of(&state, &id).await?;
+    let host = host_of(&state, &principal, &id).await?;
 
     state
         .fleet
@@ -330,11 +337,12 @@ pub struct Answer {
 )]
 pub(super) async fn answer_request(
     State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
     Path(id): Path<String>,
     Json(answer): Json<Answer>,
 ) -> ApiResult<Json<Sent>> {
     let id = SessionId::from_stored(id);
-    let host = host_of(&state, &id).await?;
+    let host = host_of(&state, &principal, &id).await?;
 
     state
         .fleet
@@ -457,11 +465,12 @@ pub struct Placed {
 )]
 pub(super) async fn attach_file(
     State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
     Path(id): Path<String>,
     Json(file): Json<Attachment>,
 ) -> ApiResult<Json<Placed>> {
     let id = SessionId::from_stored(id);
-    let host = host_of(&state, &id).await?;
+    let host = host_of(&state, &principal, &id).await?;
 
     let path = state
         .fleet
@@ -481,11 +490,25 @@ pub(super) async fn attach_file(
     Ok(Json(Placed { path }))
 }
 
+/// Whose sessions a request means.
+fn owner(principal: &Principal) -> Result<&str, ApiError> {
+    principal.owner().ok_or_else(|| {
+        ApiError::new(
+            ErrorCode::Unauthorized,
+            "a session belongs to an account, and authentication is switched off",
+        )
+    })
+}
+
 /// Which machine is holding this session's agent.
-async fn host_of(state: &AppState, id: &SessionId) -> ApiResult<ft_core::HostId> {
+async fn host_of(
+    state: &AppState,
+    principal: &Principal,
+    id: &SessionId,
+) -> ApiResult<ft_core::HostId> {
     let session = state
         .db
-        .session(id)
+        .session_of(owner(principal)?, id)
         .await
         .map_err(|e| ApiError::new(ErrorCode::Internal, format!("{e:#}")))?
         .ok_or_else(|| ApiError::new(ErrorCode::NotFound, "no such session"))?;

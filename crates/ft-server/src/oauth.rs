@@ -392,6 +392,45 @@ async fn existing_pull_request(
     Ok(found.into_iter().next().map(|p| p.html_url))
 }
 
+/// Who the token belongs to, as a name and an address for a commit.
+///
+/// Asked of the host rather than of the person: this is the account whose
+/// token will push the branch, so it is the account a reviewer will expect to
+/// see against the commits — and it is the only identity Firetower can know
+/// without asking somebody to type one.
+///
+/// The address is GitHub's own no-reply form, built from the numeric id and the
+/// login. A real address is often absent from the API — most people keep theirs
+/// private — while the no-reply one always works, is what GitHub's own web
+/// editor uses, and links the commit to the account.
+pub async fn whoami(provider: &Provider, token: &str) -> Result<ft_proto::Author> {
+    #[derive(Deserialize)]
+    struct Me {
+        id: u64,
+        login: String,
+        name: Option<String>,
+    }
+
+    let me: Me = client()?
+        .get(format!("{}/user", provider.api_base))
+        .bearer_auth(token)
+        .header("accept", "application/vnd.github+json")
+        .send()
+        .await
+        .with_context(|| format!("asking {} who the token belongs to", provider.label))?
+        .json()
+        .await
+        .with_context(|| format!("reading {}'s answer about the token", provider.label))?;
+
+    Ok(ft_proto::Author {
+        name: me
+            .name
+            .filter(|n| !n.trim().is_empty())
+            .unwrap_or_else(|| me.login.clone()),
+        email: format!("{}+{}@users.noreply.github.com", me.id, me.login),
+    })
+}
+
 /// Replace the body of a pull request that is already open.
 ///
 /// Used to put the links to its siblings in: none of them has a URL until all
