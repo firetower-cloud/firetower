@@ -16,7 +16,8 @@ import {
 import { Markdown } from "@/components/Markdown";
 import { ChatComposer } from "@/components/Composer.chat";
 import { command } from "@/components/Settings.chat";
-import { Annotatable, Notes } from "@/components/Annotate";
+import { Annotatable, Drafting, Notes } from "@/components/Annotate";
+import type { Draft } from "@/components/Annotate";
 import { Bringup, type Line } from "@/components/Steps";
 import { useNotes, asMessage, type Note } from "@/src/api/notes";
 import { fold, summarise } from "@/src/api/steps";
@@ -69,11 +70,29 @@ export function Chat({
   /** Off while somebody has scrolled up to read something. */
   const following = useRef(true);
 
+  /**
+   * The note being written, if one is.
+   *
+   * Held here rather than in the message it is about, so the box can be drawn
+   * outside the transcript. Inside it, focusing the box dragged the transcript
+   * down to wherever the box happened to be — which for a long message is a
+   * long way from what you were reading.
+   */
+  const [draft, setDraft] = useState<Draft | null>(null);
+
+  const begin = useCallback((item: string, quote: string, first: string) => {
+    setDraft({ item, quote, note: first });
+  }, []);
+
   const waiting = conversation.asked.length > 0 || conversation.questions.length > 0;
 
   useEffect(() => {
+    // Never while a note is being written. `following` usually says no anyway
+    // — you scrolled up to read the thing you are annotating — but not if you
+    // started the note near the bottom and then scrolled away from it.
+    if (draft) return;
     if (following.current) foot.current?.scrollIntoView({ block: "end" });
-  }, [conversation.items, conversation.working]);
+  }, [conversation.items, conversation.working, draft]);
 
   const submit = (text: string, images: Attached[]) => {
     if (send.isPending) return;
@@ -161,7 +180,8 @@ export function Chat({
             tasks={conversation.tasks}
             all={conversation.items}
             notes={notes}
-            onAnnotate={add}
+            onBegin={begin}
+            drafting={draft !== null}
             onDropNote={drop}
           />
 
@@ -194,6 +214,26 @@ export function Chat({
               "linear-gradient(to top, var(--color-ground), color-mix(in srgb, var(--color-ground) 0%, transparent))",
           }}
         />
+
+        {/* The note being written. Outside the scroller on purpose — see
+            `Drafting`. Above the bar that counts what is already kept, so the
+            two read in the order they happen. */}
+        {draft && (
+          <Drafting
+            draft={draft}
+            onChange={(note) => setDraft({ ...draft, note })}
+            onKeep={() => {
+              const said = draft.note.trim();
+              if (said) add(draft.item, draft.quote, said);
+              setDraft(null);
+              window.getSelection()?.removeAllRanges();
+            }}
+            onCancel={() => {
+              setDraft(null);
+              window.getSelection()?.removeAllRanges();
+            }}
+          />
+        )}
 
         {/* Written against the transcript, waiting to go. */}
         {notes.length > 0 && (
@@ -297,7 +337,8 @@ function Node({
   tasks,
   items,
   notes = [],
-  onAnnotate,
+  onBegin,
+  drafting,
   onDropNote,
 }: {
   item: Item;
@@ -305,7 +346,9 @@ function Node({
   items: Item[];
   /** Notes written against this item, if any. */
   notes?: Note[];
-  onAnnotate?: (item: string, quote: string, note: string) => void;
+  onBegin?: (item: string, quote: string, first: string) => void;
+  /** Somebody is writing a note, so the selection offer stands down. */
+  drafting?: boolean;
   onDropNote?: (id: string) => void;
 }) {
   // The agent talking is the connective tissue between the things it did, so it
@@ -322,7 +365,8 @@ function Node({
       <Says
         item={item}
         notes={notes}
-        onAnnotate={onAnnotate}
+        onBegin={onBegin}
+        drafting={drafting}
         onDropNote={onDropNote}
       />
     );
@@ -371,12 +415,15 @@ function Node({
 function Says({
   item,
   notes = [],
-  onAnnotate,
+  onBegin,
+  drafting,
   onDropNote,
 }: {
   item: Item;
   notes?: Note[];
-  onAnnotate?: (item: string, quote: string, note: string) => void;
+  onBegin?: (item: string, quote: string, first: string) => void;
+  /** Somebody is writing a note, so the selection offer stands down. */
+  drafting?: boolean;
   onDropNote?: (id: string) => void;
 }) {
   const settled = item.status !== undefined;
@@ -392,8 +439,8 @@ function Says({
     <li className="node">
       {/* Only once it has finished. Selecting text that is still arriving picks
           up whatever happened to be there a moment ago. */}
-      {settled && onAnnotate ? (
-        <Annotatable item={item.id} onAdd={onAnnotate}>
+      {settled && onBegin ? (
+        <Annotatable item={item.id} drafting={drafting ?? false} onBegin={onBegin}>
           {body}
         </Annotatable>
       ) : (
@@ -590,7 +637,8 @@ function Rail({
   all,
   nested,
   notes,
-  onAnnotate,
+  onBegin,
+  drafting,
   onDropNote,
 }: {
   items: Item[];
@@ -598,7 +646,9 @@ function Rail({
   all: Item[];
   nested?: boolean;
   notes?: Note[];
-  onAnnotate?: (item: string, quote: string, note: string) => void;
+  onBegin?: (item: string, quote: string, first: string) => void;
+  /** Somebody is writing a note, so the selection offer stands down. */
+  drafting?: boolean;
   onDropNote?: (id: string) => void;
 }) {
   return (
@@ -613,7 +663,8 @@ function Rail({
             tasks={tasks}
             items={all}
             notes={notes?.filter((n) => n.item === row.item.id)}
-            onAnnotate={onAnnotate}
+            onBegin={onBegin}
+            drafting={drafting}
             onDropNote={onDropNote}
           />
         ),

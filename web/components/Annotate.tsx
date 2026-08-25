@@ -47,26 +47,27 @@ function look() {
  */
 export function Annotatable({
   item,
-  onAdd,
+  drafting,
+  onBegin,
   children,
 }: {
   item: string;
-  onAdd: (item: string, quote: string, note: string) => void;
+  /** Somebody is writing a note — about this passage or another one. */
+  drafting: boolean;
+  onBegin: (item: string, quote: string, first: string) => void;
   children: React.ReactNode;
 }) {
   const area = useRef<HTMLDivElement>(null);
-  const box = useRef<HTMLTextAreaElement>(null);
   const [offer, setOffer] = useState<{ quote: string; x: number; y: number } | null>(null);
-  const [writing, setWriting] = useState<string | null>(null);
-  const [note, setNote] = useState("");
 
   useEffect(() => {
     const within = area.current;
     if (!within) return;
 
     return watch(within, (range, quote) => {
-      // Mid-write, the selection is irrelevant and moving the box is hostile.
-      if (writing !== null) return;
+      // Mid-write, the selection is irrelevant and moving the button is
+      // hostile.
+      if (drafting) return;
       if (!range) {
         setOffer(null);
         return;
@@ -82,7 +83,7 @@ export function Annotatable({
         y: box.top - mine.top,
       });
     });
-  }, [writing]);
+  }, [drafting]);
 
   /**
    * Start writing the moment somebody types.
@@ -93,7 +94,7 @@ export function Annotatable({
    * the note, not the price of opening the box.
    */
   useEffect(() => {
-    if (!offer || writing !== null) return;
+    if (!offer || drafting) return;
 
     const key = (e: KeyboardEvent) => {
       // Somebody typing into the composer is typing into the composer, even
@@ -114,50 +115,24 @@ export function Annotatable({
       if (first === null) return;
 
       e.preventDefault();
-      setWriting(offer.quote);
-      setNote(first);
+      onBegin(item, offer.quote, first);
       setOffer(null);
     };
 
     window.addEventListener("keydown", key);
     return () => window.removeEventListener("keydown", key);
-  }, [offer, writing]);
-
-  /**
-   * Put the cursor after what is already there.
-   *
-   * `autoFocus` alone focuses the box but leaves the caret at the start, so the
-   * character that opened it ended up at the end of everything typed after it —
-   * "doit" arriving as "oitd". Focus and caret are set together, once, when the
-   * box opens.
-   */
-  useEffect(() => {
-    if (writing === null) return;
-    const el = box.current;
-    if (!el) return;
-    el.focus();
-    el.setSelectionRange(el.value.length, el.value.length);
-  }, [writing]);
-
-  const save = () => {
-    const said = note.trim();
-    if (writing && said) onAdd(item, writing, said);
-    setWriting(null);
-    setNote("");
-    setOffer(null);
-    window.getSelection()?.removeAllRanges();
-  };
+  }, [offer, drafting, item, onBegin]);
 
   return (
     <div ref={area} className="relative">
       {children}
 
-      {offer && writing === null && (
+      {offer && !drafting && (
         <button
           onMouseDown={(e) => {
             // Before the click, or the selection is gone by the time we read it.
             e.preventDefault();
-            setWriting(offer.quote);
+            onBegin(item, offer.quote, "");
             setOffer(null);
           }}
           style={{ left: offer.x, top: offer.y }}
@@ -166,55 +141,97 @@ export function Annotatable({
           Start typing to annotate
         </button>
       )}
+    </div>
+  );
+}
 
-      {writing !== null && (
-        <div className="mt-2 rounded-[12px] border border-ember-deep bg-panel p-3">
-          <blockquote className="mb-2 border-l-2 border-ember-deep pl-2.5 text-[13.5px] text-dim">
-            {writing.length > 240 ? `${writing.slice(0, 240)}…` : writing}
-          </blockquote>
-          <textarea
-            ref={box}
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                save();
-              }
-              if (e.key === "Escape") {
-                setWriting(null);
-                setNote("");
-              }
-            }}
-            rows={2}
-            placeholder="What about it?"
-            className="w-full resize-none rounded-[8px] border border-line bg-ground px-3 py-2.5 text-[13.5px] text-text placeholder:text-mute focus:border-ember focus:outline-none"
-          />
-          <div className="mt-2 flex items-center gap-2">
-            <button
-              onClick={save}
-              disabled={!note.trim()}
-              title="Keep (↵)"
-              className="flex min-h-[34px] items-center gap-2 rounded-[8px] bg-ember px-3.5 text-[13px] font-medium text-ground disabled:opacity-40"
-            >
-              Keep
-              <span aria-hidden className="font-mono text-[12px] opacity-60">
-                ↵
-              </span>
-            </button>
-            <button
-              onClick={() => {
-                setWriting(null);
-                setNote("");
-              }}
-              className="min-h-[32px] rounded-[6px] px-2 text-[13px] text-mute transition-colors hover:text-text"
-            >
-              Cancel
-            </button>
-            <span className="ml-auto text-[12px] text-mute">Kept until you send them</span>
-          </div>
-        </div>
-      )}
+/** A note being written: which passage, and what is being said about it. */
+export type Draft = { item: string; quote: string; note: string };
+
+/**
+ * The note you are writing, docked below the transcript.
+ *
+ * Deliberately outside the scroller. It used to render under the message it
+ * was about, which put it below the *whole* message — and focusing it made the
+ * browser drag the transcript down until it appeared, 1800px from what you
+ * were reading. The passage you selected is quoted here instead, so it costs
+ * nothing to have scrolled away from it.
+ */
+export function Drafting({
+  draft,
+  onChange,
+  onKeep,
+  onCancel,
+}: {
+  draft: Draft;
+  onChange: (note: string) => void;
+  onKeep: () => void;
+  onCancel: () => void;
+}) {
+  const box = useRef<HTMLTextAreaElement>(null);
+
+  /**
+   * Put the cursor after what is already there.
+   *
+   * `autoFocus` alone focuses the box but leaves the caret at the start, so the
+   * character that opened it ended up at the end of everything typed after it —
+   * "doit" arriving as "oitd". Focus and caret are set together, once, when the
+   * box opens.
+   *
+   * `preventScroll` because this is still an element being focused: the dock
+   * keeps the transcript out of it, and this keeps the window out of it too.
+   */
+  useEffect(() => {
+    const el = box.current;
+    if (!el) return;
+    el.focus({ preventScroll: true });
+    el.setSelectionRange(el.value.length, el.value.length);
+    // Once per passage, not once per keystroke.
+  }, [draft.item, draft.quote]);
+
+  return (
+    <div className="mb-2 shrink-0 rounded-[12px] border border-ember-deep bg-panel p-3">
+      <blockquote className="mb-2 border-l-2 border-ember-deep pl-2.5 text-[13.5px] text-dim">
+        {draft.quote.length > 240 ? `${draft.quote.slice(0, 240)}…` : draft.quote}
+      </blockquote>
+      <textarea
+        ref={box}
+        value={draft.note}
+        onChange={(e) => onChange(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && !e.shiftKey) {
+            e.preventDefault();
+            onKeep();
+          }
+          if (e.key === "Escape") {
+            e.preventDefault();
+            onCancel();
+          }
+        }}
+        rows={2}
+        placeholder="What about it?"
+        className="w-full resize-none rounded-[8px] border border-line bg-ground px-3 py-2.5 text-[13.5px] text-text placeholder:text-mute focus:border-ember focus:outline-none"
+      />
+      <div className="mt-2 flex items-center gap-2">
+        <button
+          onClick={onKeep}
+          disabled={!draft.note.trim()}
+          title="Keep (↵)"
+          className="flex min-h-[34px] items-center gap-2 rounded-[8px] bg-ember px-3.5 text-[13px] font-medium text-ground disabled:opacity-40"
+        >
+          Keep
+          <span aria-hidden className="font-mono text-[12px] opacity-60">
+            ↵
+          </span>
+        </button>
+        <button
+          onClick={onCancel}
+          className="min-h-[32px] rounded-[6px] px-2 text-[13px] text-mute transition-colors hover:text-text"
+        >
+          Cancel
+        </button>
+        <span className="ml-auto text-[12px] text-mute">Kept until you send them</span>
+      </div>
     </div>
   );
 }
