@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.11.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.10.0...firetower-v0.11.0) (2026-08-25)
+
+
+### ⚠ BREAKING CHANGES
+
+* the schema is replaced rather than migrated. There is no upgrade path and none is wanted — nothing has been installed from the old migrations that anybody has to keep. Existing installs start over: `just reset`.
+
+### Features
+
+* one Firetower, several people ([5af538f](https://github.com/firetower-cloud/firetower/commit/5af538f2b7cee67b27c97975dc0dc200009b9ef1))
+* **web:** fold a run of tool calls into one row ([7f4ae1f](https://github.com/firetower-cloud/firetower/commit/7f4ae1f83654b18650dd68264de9e548dffe3fd8))
+* **web:** say who your commits are authored as, and change it ([910af25](https://github.com/firetower-cloud/firetower/commit/910af2549db2f7dae334ff3e941ed74d56f2bc2f))
+
+
+### Bug Fixes
+
+* stopping a session no longer leaves it unusable ([5aaf18e](https://github.com/firetower-cloud/firetower/commit/5aaf18e13fc54ba2a9b3e2cb1579e0b92b778d47))
+* **web:** a question card taller than the window trapped the session ([cfcad35](https://github.com/firetower-cloud/firetower/commit/cfcad357a18080e2191f19f346e103d432900301))
+* **web:** a stray 0 under the composer ([091f7a2](https://github.com/firetower-cloud/firetower/commit/091f7a2d60a8df53f9a967d53ea8eadb5695886c))
+* **web:** an invisible reasoning block stopped anything folding ([77b3421](https://github.com/firetower-cloud/firetower/commit/77b3421c45da9fa3fc2c5475b7237803516f433c))
+* **web:** the rail told you what was true when the page loaded ([ceeb680](https://github.com/firetower-cloud/firetower/commit/ceeb680288ff60040e4c2f00613cb7ae8517282e))
+* **web:** writing a note no longer drags the transcript to the bottom ([041a13f](https://github.com/firetower-cloud/firetower/commit/041a13fcb7a9adbc4930542591ae39bb3d4e3e36))
+
 ## [0.10.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.9.1...firetower-v0.10.0) (2026-08-24)
 
 
