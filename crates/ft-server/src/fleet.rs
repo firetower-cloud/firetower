@@ -79,6 +79,14 @@ pub enum AgentSpeech {
 #[derive(Default)]
 struct Progress {
     reader: ft_core::normalise::ClaudeNormaliser,
+    /// Somebody pressed stop, and the turn that ends next is theirs.
+    ///
+    /// The agent reports an interrupted turn as `error_during_execution`,
+    /// which is indistinguishable from a crash by reading it — so this is
+    /// remembered from the side that asked for it. Without it, stopping a
+    /// session marked it `Failed`, and a failed session used to be one nobody
+    /// could say anything else to.
+    stopped: bool,
     /// The last thing the agent said, kept for the moment it stops.
     ///
     /// A session that handed work back is worth a sentence in the inbox, and
@@ -109,8 +117,11 @@ impl Progress {
                 }
                 E::TurnCompleted { status, .. } => {
                     let note = summarise(&self.said);
+                    // A turn we stopped is not a turn that broke, whatever the
+                    // agent calls it on the way out.
+                    let asked_for = std::mem::take(&mut self.stopped);
                     moved = Some(match status {
-                        TurnStatus::Failed => (SessionStatus::Failed, note),
+                        TurnStatus::Failed if !asked_for => (SessionStatus::Failed, note),
                         // Handed back rather than finished: it did a turn and
                         // is waiting for the next thing, which is a resting
                         // state and not an end.
@@ -1420,6 +1431,16 @@ impl Fleet {
 
     /// End the turn in progress, leaving the session alive.
     pub async fn interrupt(&self, host_id: &HostId, session_id: &SessionId) -> Result<()> {
+        // Noted before it is sent, because the turn can end before this
+        // returns. What comes back says `error_during_execution`, and only
+        // this side knows it was asked for.
+        self.progress
+            .write()
+            .await
+            .entry(session_id.to_string())
+            .or_default()
+            .stopped = true;
+
         self.send(
             host_id,
             ToWorker::Interrupt {
@@ -1689,6 +1710,78 @@ impl Fleet {
     /// something we did on purpose.
     pub async fn disconnect(&self, host_id: &HostId) {
         self.workers.write().await.remove(&host_id.to_string());
+    }
+}
+
+#[cfg(test)]
+mod progress_tests {
+    use super::*;
+
+    /// Stopping a session is not the same as a session breaking.
+    ///
+    /// The agent reports both as `error_during_execution`, so the difference is
+    /// only knowable from the side that asked. Getting it wrong marked the
+    /// session `Failed`, which used to be a state nobody could talk it out of.
+    #[test]
+    fn a_turn_we_stopped_is_handed_back_rather_than_failed() {
+        let broke = concat!(
+            r#"{"type":"user","message":{"role":"user","content":[{"text":"go","type":"text"}]}}"#,
+            "\n",
+            r#"{"type":"result","subtype":"error_during_execution","is_error":true,"num_turns":2}"#
+        );
+
+        // Nobody asked: a failure is a failure.
+        let mut on_its_own = Progress::default();
+        let mut last = None;
+        for line in broke.lines() {
+            if let Some(moved) = on_its_own.read(line) {
+                last = Some(moved.0);
+            }
+        }
+        assert_eq!(last, Some(SessionStatus::Failed));
+
+        // Somebody pressed stop: the same bytes mean something else.
+        let mut asked = Progress {
+            stopped: true,
+            ..Default::default()
+        };
+        let mut last = None;
+        for line in broke.lines() {
+            if let Some(moved) = asked.read(line) {
+                last = Some(moved.0);
+            }
+        }
+        assert_eq!(last, Some(SessionStatus::HandedBack));
+    }
+
+    /// And it is spent once, so the turn *after* a stop reports honestly.
+    #[test]
+    fn stopping_once_does_not_excuse_the_next_failure() {
+        let broke = concat!(
+            r#"{"type":"user","message":{"role":"user","content":[{"text":"go","type":"text"}]}}"#,
+            "\n",
+            r#"{"type":"result","subtype":"error_during_execution","is_error":true,"num_turns":2}"#
+        );
+
+        let mut progress = Progress {
+            stopped: true,
+            ..Default::default()
+        };
+        for line in broke.lines() {
+            progress.read(line);
+        }
+        assert!(
+            !progress.stopped,
+            "the flag is spent by the turn it explains"
+        );
+
+        let mut last = None;
+        for line in broke.lines() {
+            if let Some(moved) = progress.read(line) {
+                last = Some(moved.0);
+            }
+        }
+        assert_eq!(last, Some(SessionStatus::Failed));
     }
 }
 

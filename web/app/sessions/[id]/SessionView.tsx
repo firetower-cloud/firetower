@@ -23,7 +23,7 @@ import { SessionMenu } from "@/components/SessionActions";
 import { Diff } from "@/components/Diff";
 import { AddRepo } from "@/components/AddRepo";
 import { Files } from "@/components/Files";
-import { elapsed, minutesSince, unfinished, STATUS_LABEL } from "@/src/api/view";
+import { answerable, elapsed, minutesSince, unfinished, STATUS_LABEL } from "@/src/api/view";
 import { ApiError } from "@/src/api/http";
 
 /**
@@ -185,7 +185,13 @@ export default function SessionView() {
   const rename = useRenameSession();
   const cache = useQueryClient();
 
+  // Two different questions. `busy` is "is anything still happening on the
+  // host", which decides what is worth polling for. `live` is "can I still say
+  // something", which is true of a failed session — you resume it by talking
+  // to it, and refusing to let you was what turned one bad turn into a dead
+  // session.
   const busy = !!session && unfinished(session);
+  const live = !!session && answerable(session);
   // What is in the workspace that is not safely elsewhere. Asked while the
   // session is running because it changes under you, and once afterwards.
   const { data: work } = useSessionWork(id, {
@@ -336,7 +342,7 @@ export default function SessionView() {
           <div className={`h-full ${tab === "Chat" ? "" : "hidden"}`}>
             <Chat
               sessionId={session.id}
-              live={busy}
+              live={live}
               branch={session.branch}
               repo={session.repo}
               checkouts={session.checkouts}

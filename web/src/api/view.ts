@@ -56,6 +56,21 @@ export const unfinished = (s: { status: SessionStatus }) =>
   s.status !== "Ended" && s.status !== "Failed";
 
 /**
+ * Whether you can still say something to it.
+ *
+ * A different question from [`unfinished`], and they disagree about exactly one
+ * state. `Failed` is a *resting* state: the control plane has always allowed
+ * `Failed -> Working` — "you replied, or asked for something else, back to
+ * work" — and the API refuses only `Ended`. The interface was the only part
+ * that treated a failure as the end, which turned one bad turn into a session
+ * nobody could rescue, and a stop you asked for into the same thing.
+ *
+ * Only `Ended` is the end. Its workspace is gone; there is nothing left to say
+ * anything to.
+ */
+export const answerable = (s: { status: SessionStatus }) => s.status !== "Ended";
+
+/**
  * Whether a session still holds something on its host — a worktree, a tmux
  * session, an agent process. The same line, drawn for a different reason:
  * `Failed` holds nothing, which is why it doesn't stand in the way of removing
