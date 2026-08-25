@@ -378,7 +378,11 @@ export function ChatComposer({
 
       {/* What is checked out, and where. One line per repository once there is
           more than one, because "⑂ ft/auth" says nothing about which of them. */}
-      {(repo || branch || checkouts?.length) && (
+      {/* `!!` on the length, not the length. A bare agent has no repository and
+          no branch and an empty list of checkouts, so this read `0 && …` — and
+          React draws a `0`, which is where the stray zero under the composer
+          came from. */}
+      {(repo || branch || !!checkouts?.length) && (
         <div className="mt-2.5 flex flex-wrap items-center gap-x-3 gap-y-1 px-2 font-mono text-meta text-mute">
           {checkouts && checkouts.length > 0 ? (
             checkouts.map((c) => (
