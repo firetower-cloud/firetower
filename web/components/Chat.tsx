@@ -19,6 +19,7 @@ import { command } from "@/components/Settings.chat";
 import { Annotatable, Notes } from "@/components/Annotate";
 import { Bringup, type Line } from "@/components/Steps";
 import { useNotes, asMessage, type Note } from "@/src/api/notes";
+import { fold, summarise } from "@/src/api/steps";
 import { useReveal } from "@/src/api/reveal";
 import type {
   Attached,
@@ -154,22 +155,15 @@ export function Chat({
 
           {conversation.plan.length > 0 && <Plan steps={conversation.plan} />}
 
-          <ol className="spine flex flex-col gap-5">
-            {conversation.items
-              // A subagent's steps are drawn under the delegation, not here.
-              .filter((item) => !item.task)
-              .map((item) => (
-                <Node
-                  key={item.id}
-                  item={item}
-                  tasks={conversation.tasks}
-                  items={conversation.items}
-                  notes={notes.filter((n) => n.item === item.id)}
-                  onAnnotate={add}
-                  onDropNote={drop}
-                />
-              ))}
-          </ol>
+          <Rail
+            // A subagent's steps are drawn under the delegation, not here.
+            items={conversation.items.filter((item) => !item.task)}
+            tasks={conversation.tasks}
+            all={conversation.items}
+            notes={notes}
+            onAnnotate={add}
+            onDropNote={drop}
+          />
 
           {/* Where the rail stops. The one place the eye goes to answer "is it
               still going?", and the reason there is no spinner anywhere else. */}
@@ -185,7 +179,11 @@ export function Chat({
         <div ref={foot} className="h-12" />
       </div>
 
-      <div className="relative mx-auto w-full max-w-[860px] shrink-0 bg-ground pt-3">
+      {/* A column with a ceiling, so the composer is laid out first and the
+          cards above it take whatever is left. Two vh caps that did not know
+          about each other left the composer half off the bottom of a short
+          window — the thing this bar exists to keep reachable. */}
+      <div className="relative mx-auto flex max-h-[85vh] w-full max-w-[860px] shrink-0 flex-col bg-ground pt-3">
         {/* The transcript scrolls under this, so without a fade the last line
             is cut in half by the composer's top edge. */}
         <div
@@ -199,7 +197,7 @@ export function Chat({
 
         {/* Written against the transcript, waiting to go. */}
         {notes.length > 0 && (
-          <div className="mb-2 flex items-center gap-3 rounded-[12px] border border-ember-deep bg-panel px-4 py-2.5">
+          <div className="mb-2 flex shrink-0 items-center gap-3 rounded-[12px] border border-ember-deep bg-panel px-4 py-2.5">
             <span className="text-[13.5px] text-dim">
               {notes.length} {notes.length === 1 ? "note" : "notes"} on this conversation
             </span>
@@ -226,11 +224,10 @@ export function Chat({
         {/* Above the composer: the thing to deal with before saying anything
             else, and on a phone the part a thumb already reaches.
 
-            Capped, because this bar does not shrink and the composer lives
-            below it. One card carries its own ceiling; this one is for several
-            at once, so the composer stays on the screen however many the agent
-            has asked. */}
-        <div className="max-h-[75vh] min-h-0 overflow-y-auto">
+            This is what shrinks when the bar runs out of room, so however
+            many cards the agent has open, the composer below them keeps its
+            full height. */}
+        <div className="min-h-0 overflow-y-auto">
           {conversation.questions.map((asking) => (
             <Questions
               key={asking.req}
@@ -249,6 +246,7 @@ export function Chat({
           ))}
         </div>
 
+        <div className="shrink-0">
         <ChatComposer
           sessionId={sessionId}
           live={live}
@@ -268,6 +266,7 @@ export function Chat({
           onStop={() => interrupt.mutate({ id: sessionId })}
           failed={send.isError}
         />
+        </div>
       </div>
     </div>
   );
@@ -526,6 +525,104 @@ const DID: Partial<Record<ItemKind, string>> = {
 };
 
 /**
+ * A run of tool calls, folded into one row.
+ *
+ * Closed by default, including when something inside it failed — the summary
+ * carries the mark and the count instead, so a broken command is named without
+ * the group opening itself under somebody who was reading.
+ *
+ * The rules for what folds and what a closed one says live in `src/api/steps`,
+ * where they can be tested without React.
+ */
+function Steps({
+  items,
+  tasks,
+  all,
+}: {
+  items: Item[];
+  tasks: Task[];
+  all: Item[];
+}) {
+  const [open, setOpen] = useState(false);
+  const { verb, text, failed } = summarise(items);
+
+  return (
+    <li className="node">
+      <Mark status={failed > 0 ? "Failed" : "Completed"} />
+      <button
+        onClick={() => setOpen(!open)}
+        className="flex w-full items-baseline gap-2 text-left"
+      >
+        <span className="eyebrow shrink-0">{verb}</span>
+        <span
+          className={`min-w-0 flex-1 truncate text-[13px] ${
+            failed > 0 ? "text-brick" : "text-dim"
+          }`}
+        >
+          {text}
+          {failed > 0 && ` · ${failed} failed`}
+        </span>
+        <span aria-hidden className="shrink-0 text-[11px] text-mute">
+          {open ? "⌃" : "⌄"}
+        </span>
+      </button>
+
+      {open && (
+        <ol className="spine spine-nested mt-2 flex flex-col gap-4">
+          {items.map((step) => (
+            <Node key={step.id} item={step} tasks={tasks} items={all} />
+          ))}
+        </ol>
+      )}
+    </li>
+  );
+}
+
+/**
+ * Rows for a list of items: each on its own, or folded into runs.
+ *
+ * Both rails use this — the main one and a subagent's — because a delegated
+ * run blots its own rail exactly the same way.
+ */
+function Rail({
+  items,
+  tasks,
+  all,
+  nested,
+  notes,
+  onAnnotate,
+  onDropNote,
+}: {
+  items: Item[];
+  tasks: Task[];
+  all: Item[];
+  nested?: boolean;
+  notes?: Note[];
+  onAnnotate?: (item: string, quote: string, note: string) => void;
+  onDropNote?: (id: string) => void;
+}) {
+  return (
+    <ol className={`spine flex flex-col ${nested ? "spine-nested gap-4" : "gap-5"}`}>
+      {fold(items).map((row) =>
+        row.type === "group" ? (
+          <Steps key={row.id} items={row.items} tasks={tasks} all={all} />
+        ) : (
+          <Node
+            key={row.item.id}
+            item={row.item}
+            tasks={tasks}
+            items={all}
+            notes={notes?.filter((n) => n.item === row.item.id)}
+            onAnnotate={onAnnotate}
+            onDropNote={onDropNote}
+          />
+        ),
+      )}
+    </ol>
+  );
+}
+
+/**
  * A tool call, as one line.
  *
  * A transcript of bordered panels is a stack of boxes you have to read in order
@@ -603,13 +700,7 @@ function Delegated({ item, tasks, items }: { item: Item; tasks: Task[]; items: I
 
       {open && (
         <div className="mt-2">
-          {mine.length > 0 && (
-            <ol className="spine spine-nested flex flex-col gap-4">
-              {mine.map((step) => (
-                <Node key={step.id} item={step} tasks={tasks} items={items} />
-              ))}
-            </ol>
-          )}
+          {mine.length > 0 && <Rail items={mine} tasks={tasks} all={items} nested />}
           {task?.summary && (
             <div className="mt-2 max-w-[74ch] border-l border-line-soft pl-3">
               <Markdown>{task.summary}</Markdown>
