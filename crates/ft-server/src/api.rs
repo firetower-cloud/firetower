@@ -249,6 +249,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(agents::list_agents))
         .routes(routes!(agents::configure_agent, agents::forget_agent))
         .routes(routes!(agents::check_agents))
+        .routes(routes!(agents::sign_agent_in))
         .routes(routes!(secrets::list_secrets))
         .routes(routes!(secrets::replace_secret, secrets::remove_secret))
         .routes(routes!(secrets::reveal_secret))

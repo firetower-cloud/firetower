@@ -82,7 +82,11 @@ pub async fn start(state: &Path, home: &Path) -> Result<(Pending, Waiting)> {
         .stdout(Stdio::piped())
         // Its own diagnostics are not ours to relay, and a full pipe nobody
         // reads would eventually block it.
-        .stderr(Stdio::null());
+        .stderr(Stdio::null())
+        // An abandoned login must not leave a process polling OpenAI for
+        // fifteen minutes. Dropping the handle is how giving up is spelled
+        // here, so dropping it has to be what stops it.
+        .kill_on_drop(true);
     crate::runtime::with_agents(&mut command, state).await;
 
     let mut child = command

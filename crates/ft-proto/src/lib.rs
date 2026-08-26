@@ -212,6 +212,19 @@ pub enum ToWorker {
     ProbeAgents {
         req: ReqId,
     },
+    /// Sign Codex in on this host, using a device code.
+    ///
+    /// Asked of the worker because the machine that will run the agent is the
+    /// machine that has to be signed in: OpenAI hands the credential to
+    /// whoever asked for the code, and nothing about it travels through a
+    /// browser or through us on the way there.
+    ///
+    /// Answered twice — [`ToServer::CodexLoginPending`] with the code to show,
+    /// then [`ToServer::CodexLoginFinished`] whenever somebody gets around to
+    /// approving it.
+    CodexLoginStart {
+        req: ReqId,
+    },
     /// Can this host reach this repository, and what is its default branch?
     ///
     /// Asked of a worker rather than answered locally because the worker is
@@ -496,6 +509,20 @@ pub enum ToServer {
         req: ReqId,
         agents: Vec<AgentPresence>,
     },
+    /// The code to show for a [`ToWorker::CodexLoginStart`], or why there is
+    /// none.
+    CodexLoginPending {
+        req: ReqId,
+        result: Result<CodexPending, String>,
+    },
+    /// How that sign-in ended: the credential Codex was given, or why not.
+    ///
+    /// Minutes after the code, because that is how long a person takes.
+    CodexLoginFinished {
+        req: ReqId,
+        /// The contents of `auth.json`, as Codex wrote it.
+        result: Result<String, String>,
+    },
     /// The answer to [`ToWorker::ProbeRemote`].
     RemoteProbed {
         req: ReqId,
@@ -508,6 +535,18 @@ pub enum ToServer {
         message: String,
     },
     Pong,
+}
+
+/// A device code somebody has to approve before Codex is signed in.
+///
+/// The two things worth showing and nothing else: this is what a person reads
+/// off a screen and types somewhere else.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CodexPending {
+    /// The short code. Shown, not clicked.
+    pub user_code: String,
+    /// Where to type it.
+    pub verification_url: String,
 }
 
 /// Why a handshake was refused.

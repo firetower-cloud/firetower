@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.10.0
+ * OpenAPI spec version: 0.11.0
  */
 import * as zod from 'zod';
 
@@ -80,4 +80,26 @@ export const ForgetAgentParams = zod.object({
 })
 
 export const ForgetAgentResponse = zod.void()
+
+/**
+ * Returns as soon as there is a code to show. Approving it happens in a
+ * browser, wherever the person is, and can take a quarter of an hour — so the
+ * waiting is a task here rather than a request left open.
+ *
+ * Only Codex works this way. Claude Code hands you a token to paste, which is
+ * `configure_agent`.
+ * @summary Sign an agent in with a device code, on a host.
+ */
+export const SignAgentInParams = zod.object({
+  "kind": zod.string().describe('Agent kind')
+})
+
+export const SignAgentInBody = zod.object({
+  "hostId": zod.string().nullish().describe('Which host should do it. Any that has the agent, by default.\n\nIt matters only in that OpenAI delivers the credential to whichever\nmachine asked for the code — and that machine hands it straight to us,\nso which one it was stops mattering the moment it lands.')
+}).describe('What a sign-in needs from the caller.')
+
+export const SignAgentInResponse = zod.object({
+  "userCode": zod.string().describe('The short code to type. Shown, not clicked.'),
+  "verificationUri": zod.string().describe('Where to type it.')
+}).describe('A device authorization waiting for someone to approve it in a browser.')
 

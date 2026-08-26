@@ -7,6 +7,7 @@
 
 use super::{ApiError, ApiResult, ErrorCode};
 use crate::auth::Principal;
+use crate::providers::PendingAuth;
 use crate::vault::Key;
 use crate::{vault, AppState};
 use axum::{
@@ -293,6 +294,160 @@ pub(super) async fn configure_agent(
     }
 
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// What a sign-in needs from the caller.
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SignIn {
+    /// Which host should do it. Any that has the agent, by default.
+    ///
+    /// It matters only in that OpenAI delivers the credential to whichever
+    /// machine asked for the code — and that machine hands it straight to us,
+    /// so which one it was stops mattering the moment it lands.
+    pub host_id: Option<String>,
+}
+
+/// Sign an agent in with a device code, on a host.
+///
+/// Returns as soon as there is a code to show. Approving it happens in a
+/// browser, wherever the person is, and can take a quarter of an hour — so the
+/// waiting is a task here rather than a request left open.
+///
+/// Only Codex works this way. Claude Code hands you a token to paste, which is
+/// `configure_agent`.
+#[utoipa::path(
+    post, path = "/api/v1/agents/{kind}/login", tag = "agents",
+    params(("kind" = String, Path, description = "Agent kind")),
+    request_body = SignIn,
+    responses(
+        (status = 200, body = PendingAuth),
+        (status = 400, body = ApiError),
+        (status = 404, body = ApiError),
+        (status = 503, body = ApiError),
+    ),
+)]
+pub(super) async fn sign_agent_in(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Path(kind): Path<String>,
+    Json(req): Json<SignIn>,
+) -> ApiResult<Json<PendingAuth>> {
+    let kind = agent_from_path(&kind)?;
+    let owner = owner(&principal)?.to_string();
+
+    if kind != Agent::Codex {
+        return Err(ApiError::new(
+            ErrorCode::InvalidRequest,
+            match kind.token_setup() {
+                Some((command, _)) => format!(
+                    "{} does not sign in with a code. Run `{command}` and paste what it prints.",
+                    kind.label()
+                ),
+                None => format!("{} does not sign in with a code", kind.label()),
+            },
+        ));
+    }
+
+    let host = choose_host(&state, kind, req.host_id.as_deref()).await?;
+
+    let (pending, finished) = state
+        .fleet
+        .codex_login(&host)
+        .await
+        .map_err(|e| ApiError::new(ErrorCode::HostUnreachable, format!("{e:#}")))?;
+
+    let answer = PendingAuth {
+        user_code: pending.user_code.clone(),
+        verification_uri: pending.verification_url.clone(),
+    };
+
+    let vault = state.vault.clone();
+    let db = state.db.clone();
+    tokio::spawn(async move {
+        match finished.await {
+            Ok(Ok(credential)) => {
+                // The credential first, the mode second. A mode saying it is
+                // signed in with nothing behind it is the worse of the two
+                // half-states to be interrupted in.
+                if let Err(e) = vault
+                    .put(
+                        Key::of(vault::AGENT, &agent_key(kind), &owner),
+                        &credential,
+                        &format!("{} signed in with a device code", kind.label()),
+                    )
+                    .await
+                {
+                    tracing::error!("storing the {} credential: {e:#}", kind.label());
+                    return;
+                }
+                if let Err(e) = db
+                    .set_agent_mode(&owner, kind, AgentMode::Subscription, true)
+                    .await
+                {
+                    tracing::error!("recording that {} is signed in: {e:#}", kind.label());
+                }
+                tracing::info!("{} signed in", kind.label());
+            }
+            Ok(Err(why)) => tracing::warn!("the {} sign-in did not finish: {why}", kind.label()),
+            Err(_) => tracing::warn!("the {} sign-in was abandoned", kind.label()),
+        }
+    });
+
+    Ok(Json(answer))
+}
+
+/// Which host should do the signing in.
+///
+/// One that has the agent, because a machine without it cannot ask for a code.
+/// Named explicitly when the caller cares; otherwise any, since the credential
+/// comes back to us either way and the choice leaves no trace.
+async fn choose_host(
+    state: &AppState,
+    kind: Agent,
+    asked_for: Option<&str>,
+) -> Result<ft_core::HostId, ApiError> {
+    let presence = state.db.presence().await?;
+    let hosts = state.db.hosts().await?;
+
+    let has_it = |host: &ft_core::HostId| {
+        presence
+            .iter()
+            .any(|p| &p.host == host && p.found.kind == kind && p.found.installed)
+    };
+
+    let chosen = match asked_for {
+        Some(wanted) => hosts
+            .into_iter()
+            .find(|h| h.id.as_str() == wanted)
+            .ok_or_else(|| ApiError::not_found("host"))
+            .and_then(|h| {
+                if has_it(&h.id) {
+                    Ok(h.id)
+                } else {
+                    Err(ApiError::new(
+                        ErrorCode::InvalidRequest,
+                        format!("{} is not installed on that host", kind.label()),
+                    ))
+                }
+            })?,
+        None => hosts
+            .into_iter()
+            .find(|h| has_it(&h.id))
+            .map(|h| h.id)
+            .ok_or_else(|| {
+                ApiError::new(
+                    ErrorCode::HostUnreachable,
+                    format!(
+                        "no host has {} installed. Add it with \
+                         `firetower worker agents add codex`.",
+                        kind.label()
+                    ),
+                )
+            })?,
+    };
+
+    Ok(chosen)
 }
 
 /// Forget an agent's configuration and any credential with it.

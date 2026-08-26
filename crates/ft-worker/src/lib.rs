@@ -281,6 +281,54 @@ impl Worker {
                 out.send(ToServer::AgentsProbed { req, agents }).await?;
             }
 
+            // Signing in happens on the machine that will run the agent,
+            // because that is the machine OpenAI hands the credential to.
+            //
+            // Two answers, minutes apart: the code to show, and then whatever
+            // came of somebody approving it. The waiting is a task rather than
+            // this function, which has a whole worker's other frames to carry.
+            ToWorker::CodexLoginStart { req } => {
+                let home = self.root.join("codex-login").join(&req);
+                let started = codex::start(&self.root, &home).await;
+
+                match started {
+                    Err(e) => {
+                        out.send(ToServer::CodexLoginPending {
+                            req,
+                            result: Err(format!("{e:#}")),
+                        })
+                        .await?;
+                    }
+                    Ok((pending, waiting)) => {
+                        out.send(ToServer::CodexLoginPending {
+                            req: req.clone(),
+                            result: Ok(ft_proto::CodexPending {
+                                user_code: pending.user_code,
+                                verification_url: pending.verification_url,
+                            }),
+                        })
+                        .await?;
+
+                        let out = out.clone();
+                        tokio::spawn(async move {
+                            let result = waiting
+                                .finish()
+                                .await
+                                .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
+                                .map_err(|e| format!("{e:#}"));
+
+                            // The credential is the control plane's to keep.
+                            // Ours was a place for it to land, and leaving a
+                            // copy on a host is the thing this whole design
+                            // exists to avoid.
+                            let _ = tokio::fs::remove_dir_all(&home).await;
+
+                            let _ = out.send(ToServer::CodexLoginFinished { req, result }).await;
+                        });
+                    }
+                }
+            }
+
             // Answering this needs the credentials and the network of the
             // machine that will do the cloning, which is why it is asked here
             // rather than worked out by the control plane.
@@ -1786,6 +1834,10 @@ fn takes_a_while(frame: &ToWorker) -> bool {
             | ToWorker::Summarize { .. }
             | ToWorker::ProbeRemote { .. }
             | ToWorker::ProbeAgents { .. }
+            // Starting a login is two round trips to a process this has to
+            // spawn first. The waiting after that is its own task; getting as
+            // far as a code is still too slow to do on the loop.
+            | ToWorker::CodexLoginStart { .. }
             // Not because replaying is slow, but because it is unbounded: a
             // worker with a long history sends more events than the outbound
             // channel holds. Handled on the loop, the send that fills the

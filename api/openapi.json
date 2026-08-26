@@ -10,7 +10,7 @@
       "name": "AGPL-3.0-only",
       "identifier": "AGPL-3.0-only"
     },
-    "version": "0.10.0"
+    "version": "0.11.0"
   },
   "paths": {
     "/api/v1/agents": {
@@ -137,6 +137,79 @@
             "description": ""
           },
           "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/agents/{kind}/login": {
+      "post": {
+        "tags": [
+          "agents"
+        ],
+        "summary": "Sign an agent in with a device code, on a host.",
+        "description": "Returns as soon as there is a code to show. Approving it happens in a\nbrowser, wherever the person is, and can take a quarter of an hour — so the\nwaiting is a task here rather than a request left open.\n\nOnly Codex works this way. Claude Code hands you a token to paste, which is\n`configure_agent`.",
+        "operationId": "sign_agent_in",
+        "parameters": [
+          {
+            "name": "kind",
+            "in": "path",
+            "description": "Agent kind",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SignIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PendingAuth"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "503": {
             "description": "",
             "content": {
               "application/json": {
@@ -5200,6 +5273,19 @@
                 "$ref": "#/components/schemas/Organization"
               }
             ]
+          }
+        }
+      },
+      "SignIn": {
+        "type": "object",
+        "description": "What a sign-in needs from the caller.",
+        "properties": {
+          "hostId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Which host should do it. Any that has the agent, by default.\n\nIt matters only in that OpenAI delivers the credential to whichever\nmachine asked for the code — and that machine hands it straight to us,\nso which one it was stops mattering the moment it lands."
           }
         }
       },

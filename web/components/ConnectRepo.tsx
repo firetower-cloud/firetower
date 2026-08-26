@@ -154,7 +154,7 @@ function Authorize({
 }
 
 /** Shown, not clicked — so it needs to be readable and copyable. */
-function CodeToType({ code }: { code: string }) {
+export function CodeToType({ code }: { code: string }) {
   const [copied, setCopied] = useState(false);
 
   return (
@@ -436,7 +436,7 @@ function Failure({ error }: { error: unknown }) {
   );
 }
 
-function Spinner() {
+export function Spinner() {
   return (
     <svg width="12" height="12" viewBox="0 0 12 12" className="animate-spin" fill="none">
       <circle cx="6" cy="6" r="4.5" stroke="currentColor" strokeWidth="1.4" opacity="0.25" />

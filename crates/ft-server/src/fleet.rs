@@ -267,6 +267,14 @@ enum Waiting {
         chunks: mpsc::Sender<Vec<u8>>,
     },
     Agents(oneshot::Sender<Vec<AgentPresence>>),
+    /// A Codex sign-in: the code to show, and then the credential.
+    ///
+    /// Two channels for one request, like a file, and for the same reason —
+    /// the first answer is due in seconds and the second waits on a person.
+    CodexLogin {
+        started: Option<oneshot::Sender<Result<ft_proto::CodexPending, String>>>,
+        finished: Option<oneshot::Sender<Result<String, String>>>,
+    },
     Action(oneshot::Sender<Result<String, String>>),
     Summary(oneshot::Sender<Vec<CheckoutSummary>>),
 }
@@ -1130,6 +1138,27 @@ impl Fleet {
                                 None => tracing::debug!("an agent probe answered after its request gave up"),
                             }
                         }
+                        Ok(ToServer::CodexLoginPending { req, result }) => {
+                            // The entry stays: the credential arrives under
+                            // the same id, minutes later.
+                            let mut held = probes.write().await;
+                            if let Some(Asked { waiting: Waiting::CodexLogin { started, .. }, .. }) = held.get_mut(&req) {
+                                if let Some(tell) = started.take() {
+                                    let _ = tell.send(result);
+                                    continue;
+                                }
+                            }
+                            tracing::debug!("a Codex sign-in answered after its request gave up");
+                        }
+                        Ok(ToServer::CodexLoginFinished { req, result }) => {
+                            match probes.write().await.remove(&req) {
+                                Some(Asked { waiting: Waiting::CodexLogin { finished, .. }, .. }) => {
+                                    if let Some(tell) = finished { let _ = tell.send(result); }
+                                }
+                                Some(other) => { probes.write().await.insert(req, other); }
+                                None => tracing::debug!("a Codex sign-in finished after its request gave up"),
+                            }
+                        }
                         Ok(ToServer::Error { code, message, .. }) => {
                             tracing::warn!(host = %host_id, "worker error {code}: {message}");
                         }
@@ -1184,6 +1213,20 @@ impl Fleet {
                     Waiting::File { opened, .. } => {
                         if let Some(tell) = opened {
                             let _ = tell.send(Err("the host stopped answering".into()));
+                        }
+                    }
+                    // A sign-in belongs to the host that asked for the code:
+                    // OpenAI is delivering the credential *there*, and no
+                    // other host can be told to collect it. Losing the
+                    // connection loses the attempt, and saying so beats a
+                    // browser waiting out the full fifteen minutes.
+                    Waiting::CodexLogin { started, finished } => {
+                        if let Some(tell) = started {
+                            let _ = tell.send(Err("the host stopped answering".into()));
+                        }
+                        if let Some(tell) = finished {
+                            let _ = tell
+                                .send(Err("the host went away before the sign-in finished".into()));
                         }
                     }
                 }
@@ -1255,6 +1298,60 @@ impl Fleet {
     }
 
     /// Ask a host which agents it has.
+    /// Start signing Codex in on a host, and hand back the code to show.
+    ///
+    /// The second half — the credential — arrives on the returned channel
+    /// whenever somebody approves the code, which may be a quarter of an hour.
+    /// Waiting on it is the caller's business; this returns as soon as there is
+    /// something to put on a screen.
+    pub async fn codex_login(
+        &self,
+        host_id: &HostId,
+    ) -> Result<(
+        ft_proto::CodexPending,
+        oneshot::Receiver<Result<String, String>>,
+    )> {
+        let req = ulid::Ulid::new().to_string();
+        let (started, wait_started) = oneshot::channel();
+        let (finished, wait_finished) = oneshot::channel();
+
+        self.probes.write().await.insert(
+            req.clone(),
+            Asked {
+                host: host_id.to_string(),
+                waiting: Waiting::CodexLogin {
+                    started: Some(started),
+                    finished: Some(finished),
+                },
+            },
+        );
+
+        if let Err(e) = self
+            .send(host_id, ToWorker::CodexLoginStart { req: req.clone() })
+            .await
+        {
+            self.probes.write().await.remove(&req);
+            return Err(e);
+        }
+
+        // Only as far as the code. Spawning the process and two round trips to
+        // OpenAI is a probe's worth of waiting; the person is not part of it.
+        let pending = match tokio::time::timeout(PROBE_TIMEOUT, wait_started).await {
+            Ok(Ok(Ok(pending))) => pending,
+            Ok(Ok(Err(why))) => {
+                self.probes.write().await.remove(&req);
+                anyhow::bail!("{why}")
+            }
+            Ok(Err(_)) => anyhow::bail!("the worker connection dropped while signing Codex in"),
+            Err(_) => {
+                self.probes.write().await.remove(&req);
+                anyhow::bail!("{host_id} did not answer within {PROBE_TIMEOUT:?}")
+            }
+        };
+
+        Ok((pending, wait_finished))
+    }
+
     pub async fn probe_agents(&self, host_id: &HostId) -> Result<Vec<AgentPresence>> {
         let req = ulid::Ulid::new().to_string();
         let (tx, rx) = oneshot::channel();

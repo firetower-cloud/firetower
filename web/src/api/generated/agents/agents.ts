@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.10.0
+ * OpenAPI spec version: 0.11.0
  */
 import {
   useMutation,
@@ -28,7 +28,9 @@ import type {
 import type {
   AgentView,
   ApiError,
-  ConfigureAgent
+  ConfigureAgent,
+  PendingAuth,
+  SignIn
 } from '../model';
 
 import { http } from '../../http';
@@ -370,4 +372,81 @@ export const useForgetAgent = <TError = ApiError,
         TContext
       > => {
       return useMutation(getForgetAgentMutationOptions(options), queryClient);
+    }
+    export const getSignAgentInUrl = (kind: string,) => {
+
+
+
+
+  return `/api/v1/agents/${kind}/login`
+}
+
+/**
+ * Returns as soon as there is a code to show. Approving it happens in a
+ * browser, wherever the person is, and can take a quarter of an hour — so the
+ * waiting is a task here rather than a request left open.
+ *
+ * Only Codex works this way. Claude Code hands you a token to paste, which is
+ * `configure_agent`.
+ * @summary Sign an agent in with a device code, on a host.
+ */
+export const signAgentIn = async (kind: string,
+    signIn: SignIn, options?: Parameters<typeof http>[1]): Promise<PendingAuth> => {
+
+  return http<PendingAuth>(getSignAgentInUrl(kind),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(signIn)
+  }
+);}
+
+
+
+
+
+export const getSignAgentInMutationOptions = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof signAgentIn>>, TError,{kind: string;data: SignIn}, TContext>, request?: SecondParameter<typeof http>}
+): UseMutationOptions<Awaited<ReturnType<typeof signAgentIn>>, TError,{kind: string;data: SignIn}, TContext> => {
+
+const mutationKey = ['signAgentIn'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof signAgentIn>>, {kind: string;data: SignIn}> = (props) => {
+          const {kind,data} = props ?? {};
+
+          return  signAgentIn(kind,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SignAgentInMutationResult = NonNullable<Awaited<ReturnType<typeof signAgentIn>>>
+    export type SignAgentInMutationBody = SignIn
+    export type SignAgentInMutationError = ApiError
+
+    /**
+ * @summary Sign an agent in with a device code, on a host.
+ */
+export const useSignAgentIn = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof signAgentIn>>, TError,{kind: string;data: SignIn}, TContext>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof signAgentIn>>,
+        TError,
+        {kind: string;data: SignIn},
+        TContext
+      > => {
+      return useMutation(getSignAgentInMutationOptions(options), queryClient);
     }

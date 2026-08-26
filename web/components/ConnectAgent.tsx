@@ -1,14 +1,17 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Modal, Choice, Command, Foot, Go, Quiet } from "./Modal";
 import {
   useConfigureAgent,
+  useSignAgentIn,
+  useListAgents,
   getListAgentsQueryKey,
 } from "@/src/api/generated/agents/agents";
-import { AgentMode, type AgentView, type AgentOnHost } from "@/src/api/generated/model";
+import { Agent, AgentMode, type AgentView, type AgentOnHost } from "@/src/api/generated/model";
 import { ApiError } from "@/src/api/http";
+import { CodeToType, Spinner } from "./ConnectRepo";
 
 /**
  * How an agent authenticates.
@@ -24,6 +27,112 @@ export function ConnectAgent({
   agent: AgentView;
   onClose: () => void;
 }) {
+  // Two different acts wearing one word. Claude Code hands you a token to
+  // carry here; Codex has no such command, and signs a machine in directly.
+  if (agent.kind === Agent.Codex) {
+    return <WithACode agent={agent} onClose={onClose} />;
+  }
+  return <WithAToken agent={agent} onClose={onClose} />;
+}
+
+/**
+ * Signing in with a device code, for an agent that has no token to paste.
+ *
+ * The code is asked for by a host, because that is the machine OpenAI delivers
+ * the credential to. It comes straight back to the vault, so which host asked
+ * stops mattering the moment it lands — every host uses it afterwards, the
+ * same as a pasted token.
+ */
+function WithACode({ agent, onClose }: { agent: AgentView; onClose: () => void }) {
+  const signIn = useSignAgentIn();
+  const pending = signIn.data;
+
+  // Only while a code is on screen. Nothing else here polls, and the moment
+  // the credential lands there is nothing left to wait for.
+  const agents = useListAgents({
+    query: { refetchInterval: pending ? 3000 : false, enabled: !!pending },
+  });
+  const signedIn = agents.data?.find((a) => a.kind === agent.kind)?.credentialSet;
+
+  const queryClient = useQueryClient();
+  useEffect(() => {
+    if (!pending || !signedIn) return;
+    queryClient.invalidateQueries({ queryKey: getListAgentsQueryKey() });
+    onClose();
+  }, [pending, signedIn, onClose, queryClient]);
+
+  const start = () =>
+    signIn.mutate(
+      { kind: agent.kind, data: {} },
+      { onSuccess: (auth) => window.open(auth.verificationUri, "_blank", "noopener") },
+    );
+
+  return (
+    <Modal title={`Connect ${agent.label}`} onClose={onClose} wide>
+      {!pending ? (
+        <>
+          <p className="max-w-[52ch] text-[13.5px] leading-[1.6] text-dim">
+            {agent.label} signs a machine in rather than handing you a token to
+            copy. One of your hosts asks for a code, you approve it in a browser,
+            and the credential comes back here.
+          </p>
+          <ul className="mt-4 flex flex-col gap-2">
+            {[
+              "No password is typed here, and none passes through your browser.",
+              "It is encrypted before it is stored, and every read of it is logged.",
+              "Signed in once — every host uses it, not one sign-in per server.",
+            ].map((line) => (
+              <li key={line} className="flex gap-2.5 text-[12.5px] text-slate">
+                <span className="mt-[7px] h-[3px] w-[3px] shrink-0 rounded-full bg-mute" />
+                {line}
+              </li>
+            ))}
+          </ul>
+
+          <Hosts agent={agent} />
+
+          {signIn.isError && <Failure error={signIn.error} />}
+
+          <Foot>
+            <Go onClick={start} disabled={signIn.isPending}>
+              {signIn.isPending ? "Asking for a code…" : `Sign in to ${agent.label}`}
+            </Go>
+            <Quiet onClick={onClose}>Cancel</Quiet>
+          </Foot>
+        </>
+      ) : (
+        <>
+          <p className="text-[13.5px] text-dim">
+            A tab opened at{" "}
+            <a
+              href={pending.verificationUri}
+              target="_blank"
+              rel="noopener"
+              className="text-ember underline underline-offset-2"
+            >
+              {pending.verificationUri.replace(/^https?:\/\//, "")}
+            </a>
+            . Enter this code:
+          </p>
+
+          <CodeToType code={pending.userCode} />
+
+          <p className="mt-4 flex items-center gap-2 text-[12.5px] text-mute">
+            <Spinner />
+            Waiting for you to approve it…
+          </p>
+
+          <p className="mt-3 text-[12px] text-mute">
+            The code lasts fifteen minutes. Closing this gives up on it.
+          </p>
+        </>
+      )}
+    </Modal>
+  );
+}
+
+/** Signing in by carrying a token here, for an agent that prints one. */
+function WithAToken({ agent, onClose }: { agent: AgentView; onClose: () => void }) {
   const [mode, setMode] = useState<AgentMode>(agent.mode ?? AgentMode.Subscription);
   const [secret, setSecret] = useState("");
 
