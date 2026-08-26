@@ -21,3 +21,7 @@ ulid.workspace = true
 chrono.workspace = true
 utoipa.workspace = true
 
+[dev-dependencies]
+# The protocol check asks the installed Codex for its schema and reads it out
+# of a directory it then throws away.
+tempfile.workspace = true
