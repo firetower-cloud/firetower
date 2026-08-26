@@ -1379,15 +1379,14 @@ You are in the directory that holds them, not inside one of them.              P
             structured::wait_until_listening(&id)
                 .await
                 .context("waiting for the agent to start")?;
-            if !spec.prompt.trim().is_empty() {
-                structured::tell(
-                    &id,
-                    &agentd::ToAgent::Send {
-                        message: ft_core::turn::user_message(&spec.prompt),
-                    },
-                )
-                .await
-                .context("sending the first turn")?;
+            // Whatever this agent needs said first — for one that is a prompt,
+            // for another it is a handshake with the prompt still to come. The
+            // shapes belong to the control plane; this only puts them on the
+            // wire, in order, before anybody watches.
+            for message in spec.agent.opening(&spec.prompt, &path.to_string_lossy()) {
+                structured::tell(&id, &agentd::ToAgent::Send { message })
+                    .await
+                    .context("opening the conversation")?;
             }
 
             // Start forwarding now rather than when somebody opens the session.

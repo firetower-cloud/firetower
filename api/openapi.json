@@ -4844,7 +4844,8 @@
         "type": "string",
         "description": "Which agent's output a raw frame came from.\n\nCarried so that a frame kept for later is still interpretable later: the\nbytes alone do not say whose they are.",
         "enum": [
-          "ClaudeStreamJson"
+          "ClaudeStreamJson",
+          "CodexAppServer"
         ]
       },
       "Reached": {

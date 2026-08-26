@@ -19,7 +19,7 @@ use axum::{
     response::sse::{self, Sse},
     Extension, Json,
 };
-use ft_core::normalise::ClaudeNormaliser;
+use ft_core::normalise::Reader;
 use ft_core::{SessionId, TurnEvent};
 use futures::stream::{Stream, StreamExt};
 use serde::{Deserialize, Serialize};
@@ -89,7 +89,7 @@ pub(super) async fn get_conversation(
     // a tool result means nothing without the call it answers, and the
     // normaliser holds that. Cheaper than it looks — this is a fold over lines
     // already in memory — and correct, which the alternative is not.
-    let mut normaliser = ClaudeNormaliser::new();
+    let mut normaliser = reader_for(&state, &id).await;
     let mut events = Vec::new();
     let mut last_line = 0;
     for (line_no, line) in lines {
@@ -164,7 +164,7 @@ pub(super) async fn stream_conversation(
 
     // One normaliser for the whole connection: the backlog leaves it holding
     // the state the live lines are about to need.
-    let mut normaliser = ClaudeNormaliser::new();
+    let mut normaliser = reader_for(&state, &id).await;
     let mut backlog = Vec::new();
     let mut replayed = 0u64;
     for (line_no, line) in stored {
@@ -282,11 +282,7 @@ pub(super) async fn send_turn(
 
     state
         .fleet
-        .send_turn(
-            &host,
-            &id,
-            ft_core::turn::user_message_with(&turn.text, &turn.images),
-        )
+        .send_turn(&host, &id, &turn.text, &turn.images)
         .await
         .map_err(|e| ApiError::new(ErrorCode::HostUnreachable, format!("{e:#}")))?;
 
@@ -398,6 +394,23 @@ fn permission_result(decision: &ft_core::turn::Decision) -> serde_json::Value {
 /// one asks whether something may happen, and the other asks which of several
 /// things should. Drawn identically, the second becomes a card offering
 /// "allow" and "deny" to a question about output format.
+/// The reader for whichever agent wrote this session's lines.
+///
+/// A session whose agent cannot be looked up is read as Claude Code: it is the
+/// older shape, and reading a Codex line with it produces nothing rather than
+/// something wrong.
+async fn reader_for(state: &AppState, id: &SessionId) -> Reader {
+    let agent = state
+        .db
+        .session_agent(id)
+        .await
+        .ok()
+        .flatten()
+        .map(|(agent, _)| agent)
+        .unwrap_or(ft_core::Agent::ClaudeCode);
+    Reader::for_agent(agent)
+}
+
 fn wanted(req: String, tool_name: String, input: serde_json::Value) -> TurnEvent {
     if let Some(questions) = ft_core::normalise::questions_from_input(&input) {
         if !questions.is_empty() {

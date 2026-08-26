@@ -61,7 +61,7 @@ async fn arrange_asking(session: &str, workspace: &std::path::Path) -> Result<ft
 }
 
 /// Print what a running agent is saying, one event per line.
-pub async fn tail_agent(session: &str, from_line: u64, raw: bool) -> Result<()> {
+pub async fn tail_agent(session: &str, from_line: u64, raw: bool, agent: &str) -> Result<()> {
     use tokio::io::AsyncBufReadExt;
 
     let mut client = crate::agentd::AgentClient::connect(session)
@@ -71,7 +71,10 @@ pub async fn tail_agent(session: &str, from_line: u64, raw: bool) -> Result<()> 
         .send(&crate::agentd::ToAgent::Watch { from_line })
         .await?;
 
-    let mut normaliser = ft_core::normalise::ClaudeNormaliser::new();
+    // Which agent wrote these lines is not knowable from the lines, and this
+    // is a person at a terminal who does know. `--raw` needs no reader at all.
+    let kind = ft_core::Agent::from_name(agent).unwrap_or(ft_core::Agent::ClaudeCode);
+    let mut normaliser = ft_core::normalise::Reader::for_agent(kind);
     let mut frames = tokio::io::BufReader::new(client.into_stream()).lines();
 
     while let Some(frame) = frames.next_line().await? {

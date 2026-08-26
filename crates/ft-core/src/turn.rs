@@ -321,6 +321,7 @@ pub struct SlashCommand {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub enum RawSource {
     ClaudeStreamJson,
+    CodexAppServer,
 }
 
 /// Something an agent said or did.

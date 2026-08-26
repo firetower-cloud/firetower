@@ -102,6 +102,52 @@ fn title_for(kind: ItemKind, tool_name: &str) -> Option<String> {
     }
 }
 
+/// Whichever protocol a session's lines are in.
+///
+/// Every consumer of a transcript — the inbox, the browser's replay, a person
+/// tailing a session on a host — has to pick the same reader for the same
+/// session, and picking it is one line rather than three copies of a match.
+///
+/// An enum rather than a trait object because both are known and neither is
+/// pluggable: a third agent is a variant here and a compiler error at each
+/// place that has to care, which is the outcome worth having.
+pub enum Reader {
+    Claude(ClaudeNormaliser),
+    Codex(crate::codex::CodexNormaliser),
+}
+
+impl Reader {
+    /// The reader for the agent a session runs.
+    pub fn for_agent(agent: crate::Agent) -> Self {
+        match agent {
+            crate::Agent::Codex => {
+                let mut reader = crate::codex::CodexNormaliser::new();
+                // The worker opened the conversation at a known id, and only
+                // the sender of a request can say what its id meant.
+                reader.sent_thread_start(crate::codex::THREAD_START_ID);
+                Reader::Codex(reader)
+            }
+            _ => Reader::Claude(ClaudeNormaliser::new()),
+        }
+    }
+
+    /// Read one line and report everything it means.
+    pub fn push(&mut self, line: &str) -> Vec<TurnEvent> {
+        match self {
+            Reader::Claude(reader) => reader.push(line),
+            Reader::Codex(reader) => reader.push(line),
+        }
+    }
+
+    /// The Codex thread this conversation is in, when there is one.
+    pub fn thread(&self) -> Option<&str> {
+        match self {
+            Reader::Claude(_) => None,
+            Reader::Codex(reader) => reader.thread(),
+        }
+    }
+}
+
 /// One open assistant block, keyed by its index within the current message.
 struct OpenBlock {
     item: ItemId,

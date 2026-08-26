@@ -461,7 +461,7 @@ export const GetConversationResponse = zod.object({
   "type": zod.enum(['TaskCompleted'])
 }),zod.object({
   "payload": zod.unknown(),
-  "source": zod.enum(['ClaudeStreamJson']).describe('Which agent\'s output a raw frame came from.\n\nCarried so that a frame kept for later is still interpretable later: the\nbytes alone do not say whose they are.'),
+  "source": zod.enum(['ClaudeStreamJson', 'CodexAppServer']).describe('Which agent\'s output a raw frame came from.\n\nCarried so that a frame kept for later is still interpretable later: the\nbytes alone do not say whose they are.'),
   "type": zod.enum(['Raw'])
 }).describe('A line we kept but could not name.\n\nOnly for what nothing else matched — the complete raw log is already\nwhat Firetower stores, so repeating every mapped line here would double\nthe volume to say nothing new. This is the marker for \"an agent said\nsomething in a shape we have never seen\", which is how a version that\ngrew a new message type shows up as a gap to fill rather than as\nsilence.')]).describe('Something an agent said or did.\n\nThe vocabulary the interface draws, and the only thing that crosses out of\nthe normaliser.').and(zod.object({
   "lineNo": zod.int().min(getConversationResponseEventsItemTwoLineNoMin)

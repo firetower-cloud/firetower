@@ -172,6 +172,9 @@ enum Command {
         /// them.
         #[arg(long)]
         raw: bool,
+        /// Whose protocol to read them as. The lines do not say.
+        #[arg(long, default_value = "ClaudeCode")]
+        agent: String,
     },
 }
 
@@ -227,8 +230,9 @@ async fn main() -> Result<()> {
             session,
             from_line,
             raw,
+            agent,
         }) => {
-            return ft_worker::entry::tail_agent(&session, from_line, raw).await;
+            return ft_worker::entry::tail_agent(&session, from_line, raw, &agent).await;
         }
         None => {}
     }

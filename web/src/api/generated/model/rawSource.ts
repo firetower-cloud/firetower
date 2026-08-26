@@ -17,4 +17,5 @@ export type RawSource = typeof RawSource[keyof typeof RawSource];
 
 export const RawSource = {
   ClaudeStreamJson: 'ClaudeStreamJson',
+  CodexAppServer: 'CodexAppServer',
 } as const;

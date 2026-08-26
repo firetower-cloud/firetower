@@ -7,6 +7,7 @@
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
+pub mod codex;
 pub mod dotenv;
 mod ids;
 pub mod normalise;
@@ -240,7 +241,32 @@ impl Agent {
                 }
                 Some(argv)
             }
-            Agent::Codex | Agent::Shell => None,
+            // No prompt on the command line, and no flags: an app-server is
+            // told what to do over its own protocol rather than argv. What
+            // Claude Code takes as switches — the model, how it may ask — is
+            // in `thread/start` here, which is why this is so short.
+            Agent::Codex => Some(vec![self.command().to_string(), "app-server".to_string()]),
+            Agent::Shell => None,
+        }
+    }
+
+    /// What to say to this agent the moment it is listening, before any work.
+    ///
+    /// Claude Code is handed the first prompt and starts; there is nothing to
+    /// arrange. Codex needs a conversation opened first, and its prompt cannot
+    /// go out until that has answered — so the prompt is not here, and the
+    /// control plane sends it when the thread exists.
+    pub fn opening(&self, prompt: &str, cwd: &str) -> Vec<serde_json::Value> {
+        match self {
+            Agent::ClaudeCode => {
+                if prompt.trim().is_empty() {
+                    Vec::new()
+                } else {
+                    vec![crate::turn::user_message(prompt)]
+                }
+            }
+            Agent::Codex => crate::codex::opening(cwd),
+            Agent::Shell => Vec::new(),
         }
     }
 

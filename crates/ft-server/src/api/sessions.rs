@@ -1340,11 +1340,7 @@ pub(super) async fn add_repo(
          repository — a change there is committed and pushed on its own.",
         repo.slug, path, branch
     );
-    if let Err(e) = state
-        .fleet
-        .send_turn(&host, &id, ft_core::turn::user_message(&told))
-        .await
-    {
+    if let Err(e) = state.fleet.send_turn(&host, &id, &told, &[]).await {
         tracing::warn!(session = %id, "checked out {} but could not tell the agent: {e:#}", repo.slug);
     }
 

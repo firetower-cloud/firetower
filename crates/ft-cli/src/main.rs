@@ -187,6 +187,9 @@ enum Command {
         from_line: u64,
         #[arg(long)]
         raw: bool,
+        /// Whose protocol to read them as. The lines do not say.
+        #[arg(long, default_value = "ClaudeCode")]
+        agent: String,
     },
 }
 
@@ -249,7 +252,8 @@ async fn main() -> Result<()> {
             session,
             from_line,
             raw,
-        }) => ft_worker::entry::tail_agent(&session, from_line, raw).await,
+            agent,
+        }) => ft_worker::entry::tail_agent(&session, from_line, raw, &agent).await,
 
         Some(Command::Passwd {
             username,

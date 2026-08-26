@@ -1196,6 +1196,26 @@ impl Db {
         Ok(stored.and_then(|s| serde_json::from_str(&format!("\"{s}\"")).ok()))
     }
 
+    /// Which agent a session runs, and what it was first asked to do.
+    ///
+    /// Read when a session's first line arrives, because reading its lines
+    /// means knowing whose protocol they are — and for the agents that need a
+    /// handshake before a prompt can be sent, the prompt has to be to hand
+    /// when the handshake finishes.
+    pub async fn session_agent(&self, session_id: &SessionId) -> Result<Option<(Agent, String)>> {
+        let row: Option<(String, String)> =
+            sqlx::query_as("SELECT agent, prompt FROM sessions WHERE id = $1")
+                .bind(session_id.as_str())
+                .fetch_optional(&self.pool)
+                .await?;
+
+        Ok(row.and_then(|(agent, prompt)| {
+            serde_json::from_str::<Agent>(&format!("\"{agent}\""))
+                .ok()
+                .map(|agent| (agent, prompt))
+        }))
+    }
+
     /// Say where a session has got to, from what its agent said.
     ///
     /// The only writer of this field for an agent that speaks a protocol —

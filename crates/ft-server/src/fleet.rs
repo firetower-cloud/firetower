@@ -75,10 +75,22 @@ pub enum AgentSpeech {
     Closed,
 }
 
-/// One session's lines, read for what they say about the session.
+/// What reading a line meant.
 #[derive(Default)]
+struct Read {
+    /// Where the session has got to, when the line moved it.
+    moved: Option<(SessionStatus, Option<String>)>,
+    /// What to say back to the agent because of it.
+    ///
+    /// Empty for Claude Code, which is told things only when somebody types.
+    /// Codex needs a conversation opened before it can be given any work, and
+    /// the step after each answer is decided here.
+    send: Vec<serde_json::Value>,
+}
+
+/// One session's lines, read for what they say about the session.
 struct Progress {
-    reader: ft_core::normalise::ClaudeNormaliser,
+    reader: ft_core::normalise::Reader,
     /// Somebody pressed stop, and the turn that ends next is theirs.
     ///
     /// The agent reports an interrupted turn as `error_during_execution`,
@@ -93,11 +105,40 @@ struct Progress {
     /// this is the accurate version of what the old `Stop` hook was scraping
     /// out of a transcript file.
     said: String,
+    /// What this session was first asked to do, until it has been asked.
+    ///
+    /// Only Codex has one: its first prompt cannot go out until a thread
+    /// exists, and the answer that creates one arrives here. Taken rather than
+    /// copied, so it is sent once.
+    opening_prompt: Option<String>,
+    /// The next request id to send under.
+    ///
+    /// Ours to choose and ours to keep distinct: an answer is matched by the
+    /// id its request went out with, so reusing one would attribute an answer
+    /// to the wrong question.
+    next_id: u64,
 }
 
 impl Progress {
+    /// A reader for whichever agent this session runs.
+    fn for_agent(agent: ft_core::Agent, prompt: String) -> Self {
+        Self {
+            reader: ft_core::normalise::Reader::for_agent(agent),
+            stopped: false,
+            said: String::new(),
+            // Codex cannot be given work until a thread exists, so its first
+            // prompt waits here for the answer that creates one. Claude Code
+            // was handed its prompt with the first message and has none.
+            opening_prompt: match agent {
+                ft_core::Agent::Codex => Some(prompt),
+                _ => None,
+            },
+            next_id: ft_core::codex::FIRST_TURN_ID,
+        }
+    }
+
     /// What this line means for the session, if anything.
-    fn read(&mut self, line: &str) -> Option<(SessionStatus, Option<String>)> {
+    fn read(&mut self, line: &str) -> Read {
         use ft_core::turn::{StreamKind, TurnEvent as E, TurnStatus};
 
         let mut moved = None;
@@ -134,7 +175,45 @@ impl Progress {
                 _ => {}
             }
         }
-        moved
+
+        // The answer that created a thread is what unblocks the first prompt.
+        // Checked after the events rather than inside them because it is not
+        // an event: it is a fact the reader learned on the way past.
+        let mut send = Vec::new();
+        if let (Some(thread), Some(prompt)) = (self.reader.thread(), self.opening_prompt.as_ref()) {
+            send.push(ft_core::codex::turn_start(self.next_id, thread, prompt));
+        }
+        if !send.is_empty() {
+            self.next_id += 1;
+            self.opening_prompt = None;
+        }
+
+        Read { moved, send }
+    }
+
+    /// One message for this agent, carrying what somebody typed.
+    ///
+    /// Here rather than at the call site because the shape is the agent's and
+    /// this is the only object that knows which agent a session runs — and,
+    /// for Codex, the thread it is talking in.
+    fn turn(
+        &mut self,
+        text: &str,
+        images: &[ft_core::turn::Attached],
+    ) -> Result<serde_json::Value> {
+        match &self.reader {
+            ft_core::normalise::Reader::Claude(_) => {
+                Ok(ft_core::turn::user_message_with(text, images))
+            }
+            ft_core::normalise::Reader::Codex(reader) => {
+                let thread = reader.thread().context(
+                    "this session is still opening its conversation — try again in a moment",
+                )?;
+                let id = self.next_id;
+                self.next_id += 1;
+                Ok(ft_core::codex::turn_start(id, thread, text))
+            }
+        }
     }
 }
 
@@ -873,6 +952,9 @@ impl Fleet {
         let progress = self.progress.clone();
         let notify = self.notify.clone();
         let describing = self.clone();
+        // For the frames a line makes us want to send back — an agent that has
+        // to be answered to carry on, rather than one that only ever reports.
+        let replying = self.clone();
 
         {
             // conn is moved in so the child process outlives this scope
@@ -963,14 +1045,36 @@ impl Fleet {
                             // means anything to a screen. This is the only
                             // thing that moves a structured session off
                             // `Working`, now that hooks do not.
-                            let moved = {
+                            // A reader has to be built for the agent that
+                            // wrote the line. Once per session — the entry
+                            // existing afterwards is the cache.
+                            replying.ensure_reader(&session_id).await;
+                            let read = {
                                 let mut readers = progress.write().await;
-                                readers
-                                    .entry(session_id.to_string())
-                                    .or_default()
-                                    .read(&line)
+                                match readers.get_mut(session_id.as_str()) {
+                                    Some(reader) => reader.read(&line),
+                                    None => continue,
+                                }
                             };
-                            if let Some((status, note)) = moved {
+
+                            // What the agent has to be told before it will go
+                            // on. Codex opens a conversation and then waits to
+                            // be given work; Claude Code never sends anything
+                            // here.
+                            for message in read.send {
+                                if let Err(e) = replying
+                                    .send(&host_id, ToWorker::SendTurn {
+                                        session_id: session_id.clone(),
+                                        message,
+                                    })
+                                    .await
+                                {
+                                    tracing::warn!(session = %session_id,
+                                        "carrying on the conversation: {e:#}");
+                                }
+                            }
+
+                            if let Some((status, note)) = read.moved {
                                 let was_waiting = db
                                     .session_status(&session_id)
                                     .await
@@ -1457,13 +1561,27 @@ impl Fleet {
         Ok(receiver)
     }
 
-    /// One message for the agent.
+    /// One message for the agent, in whatever shape that agent takes.
+    ///
+    /// Takes what somebody typed rather than a finished frame: which protocol
+    /// a session speaks is this object's business, and a caller that built the
+    /// message itself would have to know too.
     pub async fn send_turn(
         &self,
         host_id: &HostId,
         session_id: &SessionId,
-        message: serde_json::Value,
+        text: &str,
+        images: &[ft_core::turn::Attached],
     ) -> Result<()> {
+        self.ensure_reader(session_id).await;
+        let message = {
+            let mut readers = self.progress.write().await;
+            let progress = readers
+                .get_mut(session_id.as_str())
+                .context("this session has no reader")?;
+            progress.turn(text, images)?
+        };
+
         self.send(
             host_id,
             ToWorker::SendTurn {
@@ -1526,17 +1644,41 @@ impl Fleet {
         .await
     }
 
+    /// Make sure this session has a reader, built for the agent it runs.
+    ///
+    /// Not `or_default`: a reader is agent-specific, and one built for the
+    /// wrong agent would read every line as something it is not. Asked of the
+    /// database once per session rather than once per line — the entry
+    /// existing is the cache.
+    async fn ensure_reader(&self, session_id: &SessionId) {
+        if self.progress.read().await.contains_key(session_id.as_str()) {
+            return;
+        }
+
+        let (agent, prompt) = match self.db.session_agent(session_id).await {
+            Ok(Some(found)) => found,
+            // A session we cannot look up still has to be readable. Claude
+            // Code is the older shape and the safer guess: it reads a Codex
+            // line as nothing rather than as the wrong thing.
+            _ => (ft_core::Agent::ClaudeCode, String::new()),
+        };
+
+        self.progress
+            .write()
+            .await
+            .entry(session_id.to_string())
+            .or_insert_with(|| Progress::for_agent(agent, prompt));
+    }
+
     /// End the turn in progress, leaving the session alive.
     pub async fn interrupt(&self, host_id: &HostId, session_id: &SessionId) -> Result<()> {
         // Noted before it is sent, because the turn can end before this
         // returns. What comes back says `error_during_execution`, and only
         // this side knows it was asked for.
-        self.progress
-            .write()
-            .await
-            .entry(session_id.to_string())
-            .or_default()
-            .stopped = true;
+        self.ensure_reader(session_id).await;
+        if let Some(progress) = self.progress.write().await.get_mut(session_id.as_str()) {
+            progress.stopped = true;
+        }
 
         self.send(
             host_id,
@@ -1828,10 +1970,10 @@ mod progress_tests {
         );
 
         // Nobody asked: a failure is a failure.
-        let mut on_its_own = Progress::default();
+        let mut on_its_own = Progress::for_agent(ft_core::Agent::ClaudeCode, String::new());
         let mut last = None;
         for line in broke.lines() {
-            if let Some(moved) = on_its_own.read(line) {
+            if let Some(moved) = on_its_own.read(line).moved {
                 last = Some(moved.0);
             }
         }
@@ -1840,11 +1982,11 @@ mod progress_tests {
         // Somebody pressed stop: the same bytes mean something else.
         let mut asked = Progress {
             stopped: true,
-            ..Default::default()
+            ..Progress::for_agent(ft_core::Agent::ClaudeCode, String::new())
         };
         let mut last = None;
         for line in broke.lines() {
-            if let Some(moved) = asked.read(line) {
+            if let Some(moved) = asked.read(line).moved {
                 last = Some(moved.0);
             }
         }
@@ -1862,7 +2004,7 @@ mod progress_tests {
 
         let mut progress = Progress {
             stopped: true,
-            ..Default::default()
+            ..Progress::for_agent(ft_core::Agent::ClaudeCode, String::new())
         };
         for line in broke.lines() {
             progress.read(line);
@@ -1874,11 +2016,55 @@ mod progress_tests {
 
         let mut last = None;
         for line in broke.lines() {
-            if let Some(moved) = progress.read(line) {
+            if let Some(moved) = progress.read(line).moved {
                 last = Some(moved.0);
             }
         }
         assert_eq!(last, Some(SessionStatus::Failed));
+    }
+
+    /// The handshake is what makes a Codex session usable, and it finishes on
+    /// an answer rather than on a notification — so this is the one line in
+    /// the protocol that must not be read as "nothing happened".
+    #[test]
+    fn a_codex_session_sends_its_first_prompt_once_it_has_a_thread() {
+        let mut progress = Progress::for_agent(ft_core::Agent::Codex, "fix the tests".into());
+
+        // Until the thread exists there is nowhere to say it.
+        let before =
+            progress.read(r#"{"id":1,"result":{"userAgent":"firetower/0.1","codexHome":"/tmp"}}"#);
+        assert!(before.send.is_empty(), "no thread yet, so nothing to send");
+
+        let after = progress.read(r#"{"id":2,"result":{"threadId":"th_9"}}"#);
+        assert_eq!(after.send.len(), 1, "the prompt goes out on the answer");
+
+        let sent = &after.send[0];
+        assert_eq!(sent["method"], "turn/start");
+        assert_eq!(sent["params"]["threadId"], "th_9");
+        assert_eq!(sent["params"]["input"][0]["text"], "fix the tests");
+
+        // And exactly once: a second line must not re-send it.
+        let again = progress.read(r#"{"method":"turn/started","params":{"turn":{"id":"t1","items":[],"status":"inProgress"}}}"#);
+        assert!(again.send.is_empty(), "the opening prompt is spent");
+    }
+
+    /// Typing at a Codex session has to reach the thread it is talking in.
+    #[test]
+    fn a_typed_turn_carries_the_thread_and_a_fresh_id() {
+        let mut progress = Progress::for_agent(ft_core::Agent::Codex, String::new());
+        // Nothing can be said before the conversation exists, and saying so is
+        // better than sending a turn into a thread that is not there.
+        assert!(progress.turn("hello", &[]).is_err());
+
+        progress.read(r#"{"id":2,"result":{"threadId":"th_9"}}"#);
+
+        let first = progress.turn("hello", &[]).unwrap();
+        let second = progress.turn("again", &[]).unwrap();
+        assert_eq!(first["params"]["threadId"], "th_9");
+        assert_ne!(
+            first["id"], second["id"],
+            "two questions cannot share one id, or an answer names both"
+        );
     }
 }
 
