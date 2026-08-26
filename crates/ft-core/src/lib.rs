@@ -859,6 +859,32 @@ impl Agent {
         matches!(self, Agent::Codex)
     }
 
+    /// The file this agent keeps its credential in, for the ones that use a
+    /// file rather than a variable.
+    ///
+    /// Relative to the agent's own directory — see
+    /// [`home_var`](Agent::home_var), which is how it is told where that is.
+    /// A file rather than a variable is not a worse arrangement, only a
+    /// different one: it still travels from the vault per session and is still
+    /// gone when the workspace is.
+    pub fn credential_file(&self) -> Option<&'static str> {
+        match self {
+            Agent::Codex => Some("auth.json"),
+            Agent::ClaudeCode | Agent::Shell => None,
+        }
+    }
+
+    /// The variable that points this agent at a directory of its own.
+    ///
+    /// Given one per session, so that what an agent writes about one session —
+    /// its credential above all — cannot be read by the next.
+    pub fn home_var(&self) -> Option<&'static str> {
+        match self {
+            Agent::Codex => Some("CODEX_HOME"),
+            Agent::ClaudeCode | Agent::Shell => None,
+        }
+    }
+
     /// The variable that carries a metered key, for the other mode.
     pub fn api_key_var(&self) -> Option<&'static str> {
         match self {

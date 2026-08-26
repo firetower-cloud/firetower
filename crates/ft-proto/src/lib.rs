@@ -334,6 +334,17 @@ pub struct CreateWorkspace {
     /// Everything every checkout brings, plus the agent's own. What belongs in
     /// a *file* is per repository and lives on its spec.
     pub env: Vec<(String, String)>,
+    /// Files to write into the agent's own directory, by relative path.
+    ///
+    /// Some agents authenticate with a file rather than a variable, and a
+    /// credential is still a credential: written 0600 into a directory made
+    /// for this session alone, and destroyed with the workspace. The control
+    /// plane's copy stays the only durable one.
+    ///
+    /// Defaulted so a worker from before this understands a frame that has it,
+    /// and writes nothing.
+    #[serde(default)]
+    pub agent_home: Vec<(String, String)>,
 }
 
 /// Who a commit belongs to.

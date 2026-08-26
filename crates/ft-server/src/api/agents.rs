@@ -79,6 +79,49 @@ pub(super) async fn agent_env(
     Ok(vec![(variable.to_string(), secret.to_string())])
 }
 
+/// The files an agent needs in its own directory, with what goes in them.
+///
+/// The other shape of the same thing `agent_env` returns. Which one an agent
+/// uses is the agent's business: Claude Code reads a variable, Codex reads
+/// `auth.json`, and both come from the same vault row.
+///
+/// Only for a subscription. An API key is a string and belongs in a variable;
+/// writing one into a file Codex expects to hold OAuth tokens would produce a
+/// worse error than not writing it at all.
+pub(super) async fn agent_home(
+    state: &AppState,
+    kind: Agent,
+    session: &SessionId,
+    owner: &str,
+) -> Result<Vec<(String, String)>, ApiError> {
+    let Some(file) = kind.credential_file() else {
+        return Ok(Vec::new());
+    };
+
+    let Some((_, AgentMode::Subscription, _)) = state
+        .db
+        .agent_modes(owner)
+        .await?
+        .into_iter()
+        .find(|(k, ..)| *k == kind)
+    else {
+        return Ok(Vec::new());
+    };
+
+    let Some(secret) = state
+        .vault
+        .get(
+            Key::of(vault::AGENT, &agent_key(kind), owner),
+            &format!("starting {session} with {}", kind.label()),
+        )
+        .await?
+    else {
+        return Ok(Vec::new());
+    };
+
+    Ok(vec![(file.to_string(), secret.to_string())])
+}
+
 /// How an agent is named in the vault — the same spelling the database uses.
 fn agent_key(kind: Agent) -> String {
     format!("{kind:?}")

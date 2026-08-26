@@ -1245,6 +1245,29 @@ You are in the directory that holds them, not inside one of them.              P
                 .to_string(),
         ));
 
+        // A directory of this session's own, for an agent that keeps its
+        // credential in a file.
+        //
+        // Per session rather than per host: what lands here is somebody's, and
+        // a directory shared between sessions is a directory the next session
+        // can read it out of. It goes inside `.firetower`, which sits beside
+        // the checkouts where git cannot see it, and is destroyed with the
+        // workspace — so the control plane's copy stays the only durable one.
+        if !spec.agent_home.is_empty() {
+            let home = agentd::dir_for(&path).join("agent-home");
+            match write_agent_home(&home, &spec.agent_home).await {
+                Ok(()) => {
+                    if let Some(var) = spec.agent.home_var() {
+                        env.push((var.to_string(), home.display().to_string()));
+                    }
+                }
+                // Not fatal. An agent that cannot find its credential says so
+                // in words its own users know, and a session that refused to
+                // start would say less.
+                Err(e) => tracing::warn!(session = %id, "writing the agent's home: {e:#}"),
+            }
+        }
+
         // In order, and each one is allowed to fail on its own: a session that
         // came up with two repositories out of three is still a session worth
         // having, and saying which one is missing beats pretending it was never
@@ -1911,6 +1934,117 @@ fn showable(workspace: &Path, path: &Path) -> String {
         .to_string()
 }
 
+/// Write an agent's own files, readable by nobody else.
+///
+/// `0600` on the files and `0700` on the directory, because these are
+/// credentials — the mode is the whole reason this is a function rather than
+/// two lines at the call site.
+///
+/// Relative paths only, and no climbing out: the names come from the control
+/// plane rather than from a person, but a path that escaped the directory
+/// would write a credential somewhere nothing cleans up.
+async fn write_agent_home(home: &std::path::Path, files: &[(String, String)]) -> Result<()> {
+    tokio::fs::create_dir_all(home)
+        .await
+        .with_context(|| format!("making {}", home.display()))?;
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        tokio::fs::set_permissions(home, std::fs::Permissions::from_mode(0o700))
+            .await
+            .with_context(|| format!("locking {}", home.display()))?;
+    }
+
+    for (name, contents) in files {
+        let relative = std::path::Path::new(name);
+        if relative.is_absolute()
+            || relative
+                .components()
+                .any(|c| matches!(c, std::path::Component::ParentDir))
+        {
+            anyhow::bail!("{name} is not a name inside the agent's own directory");
+        }
+
+        let file = home.join(relative);
+        if let Some(parent) = file.parent() {
+            tokio::fs::create_dir_all(parent).await.ok();
+        }
+        tokio::fs::write(&file, contents)
+            .await
+            .with_context(|| format!("writing {}", file.display()))?;
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            tokio::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600))
+                .await
+                .with_context(|| format!("locking {}", file.display()))?;
+        }
+    }
+
+    Ok(())
+}
+
+#[cfg(test)]
+mod agent_home_tests {
+    use super::*;
+
+    /// The mode is the point. A credential written 0644 into a workspace is a
+    /// credential anybody with an account on that host can read.
+    #[tokio::test]
+    async fn a_credential_is_written_readable_by_nobody_else() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path().join("agent-home");
+
+        write_agent_home(&home, &[("auth.json".into(), "{\"tokens\":{}}".into())])
+            .await
+            .unwrap();
+
+        let file = home.join("auth.json");
+        assert_eq!(
+            tokio::fs::read_to_string(&file).await.unwrap(),
+            "{\"tokens\":{}}"
+        );
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = tokio::fs::metadata(&file)
+                .await
+                .unwrap()
+                .permissions()
+                .mode();
+            assert_eq!(mode & 0o777, 0o600, "the file has to be private");
+            let mode = tokio::fs::metadata(&home)
+                .await
+                .unwrap()
+                .permissions()
+                .mode();
+            assert_eq!(mode & 0o777, 0o700, "so does the directory holding it");
+        }
+    }
+
+    /// The names come from the control plane rather than a person, which is a
+    /// reason to expect them to be fine and not a reason to trust them: a path
+    /// that climbed out would write a credential somewhere nothing cleans up.
+    #[tokio::test]
+    async fn a_path_that_climbs_out_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path().join("agent-home");
+
+        for escape in ["../stolen.json", "/etc/stolen.json", "a/../../stolen.json"] {
+            assert!(
+                write_agent_home(&home, &[(escape.into(), "x".into())])
+                    .await
+                    .is_err(),
+                "{escape} should be refused"
+            );
+        }
+        assert!(!dir.path().join("stolen.json").exists());
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2184,6 +2318,7 @@ mod tests {
             size: WorkspaceSize::Medium,
             workspace: id.as_str().to_string(),
             env: vec![],
+            agent_home: vec![],
         }))
     }
 
@@ -2363,6 +2498,7 @@ mod tests {
                     size: WorkspaceSize::Medium,
                     workspace: id.as_str().to_string(),
                     env: vec![],
+                    agent_home: vec![],
                 })),
             ],
         )

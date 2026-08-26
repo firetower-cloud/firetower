@@ -4,7 +4,7 @@
 //! own: it is what sees every host, so it is what picks. Everything after that
 //! is asking the worker that holds the workspace.
 
-use super::agents::agent_env;
+use super::agents::{agent_env, agent_home};
 use super::repos::is_local_path;
 use super::{credential_for, ApiError, ApiResult, ErrorCode};
 use crate::auth::Principal;
@@ -440,6 +440,10 @@ pub(super) async fn create_session(
         env.push((name, value));
     }
 
+    // The same credential, for the agents that read one out of a file rather
+    // than out of the environment.
+    let agent_home = agent_home(&state, req.agent, &id, &owner).await?;
+
     // The identity the agent's *own* commits carry.
     //
     // `Action::Commit` covers what Firetower commits for you and reaches the
@@ -513,6 +517,7 @@ pub(super) async fn create_session(
                 agent: req.agent,
                 size: req.size,
                 env,
+                agent_home,
             })),
         )
         .await?;
