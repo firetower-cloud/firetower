@@ -92,6 +92,21 @@ enum Command {
         what: Option<AgentsCommand>,
     },
 
+    /// Sign Codex in on this machine, with a code instead of a browser.
+    ///
+    /// Codex's ordinary login expects a browser on the same machine. A server
+    /// has none, so this asks OpenAI for a short code and prints it: approve it
+    /// from wherever you are, and the credential is delivered here.
+    ///
+    /// By hand this is a way to check a host can reach OpenAI at all. The
+    /// control plane drives the same thing and keeps what comes back.
+    CodexLogin {
+        /// Where the credential should land. A scratch directory by default,
+        /// printed when it is done.
+        #[arg(long)]
+        home: Option<std::path::PathBuf>,
+    },
+
     /// Answer git's credential prompt.
     ///
     /// Run by the one-line bridge script `Askpass::start` writes, never by
@@ -175,6 +190,10 @@ async fn main() -> Result<()> {
         Some(Command::Agents { what }) => {
             let root = cli.root.clone().unwrap_or_else(default_root);
             return agents(&root, what).await;
+        }
+        Some(Command::CodexLogin { home }) => {
+            let root = cli.root.clone().unwrap_or_else(default_root);
+            return codex_login(&root, home).await;
         }
         Some(Command::Hook { event }) => {
             // Nothing. See the same arm on the `firetower` binary: hooks are
@@ -286,6 +305,33 @@ async fn agents(root: &std::path::Path, what: Option<AgentsCommand>) -> anyhow::
             Ok(())
         }
     }
+}
+
+/// Sign Codex in, printing the code for somebody to approve.
+///
+/// Prints to stdout because a person is reading it. Everything it says is
+/// public — a code that is useless without an account, and a URL — and the
+/// credential itself is only ever written to `home`.
+async fn codex_login(
+    root: &std::path::Path,
+    home: Option<std::path::PathBuf>,
+) -> anyhow::Result<()> {
+    let home = home.unwrap_or_else(|| root.join("codex-home"));
+
+    let (pending, waiting) = ft_worker::codex::start(root, &home).await?;
+
+    println!("Open {}", pending.verification_url);
+    println!("Enter {}", pending.user_code);
+    println!();
+    println!("Waiting. Ctrl-C to give up.");
+
+    let credential = waiting.finish().await?;
+    println!(
+        "Signed in. {} holds {} bytes.",
+        home.join(ft_worker::codex::AUTH).display(),
+        credential.len()
+    );
+    Ok(())
 }
 
 /// The name somebody types, which is the directory name rather than the label.

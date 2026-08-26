@@ -31,6 +31,7 @@ pub mod approver;
 pub mod askpass;
 pub mod attach;
 pub mod attachments;
+pub mod codex;
 pub mod describe;
 pub mod entry;
 pub mod first_run;
