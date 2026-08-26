@@ -321,6 +321,14 @@ impl CodexNormaliser {
             "item/started" => self.item_started(&params),
             "item/completed" => self.item_completed(&params),
             "item/agentMessage/delta" => self.delta(&params, StreamKind::AssistantText),
+            // What a command printed, as it printed it. Same stream a tool's
+            // output goes to for the other agent, so the card that draws one
+            // draws the other.
+            "item/commandExecution/outputDelta" | "item/fileChange/outputDelta" => {
+                self.delta(&params, StreamKind::ToolOutput)
+            }
+            // The plan is restated whole on `turn/plan/updated`, so the
+            // fragments it is built from would only say it twice.
             "item/plan/delta" => Vec::new(),
             "turn/plan/updated" => self.plan(&params),
             "account/rateLimits/updated" => limits(&params),
@@ -501,12 +509,27 @@ impl CodexNormaliser {
         let kind = classify(item.get("type").and_then(Value::as_str).unwrap_or(""));
         self.open.insert(id.to_string(), kind);
 
-        vec![TurnEvent::ItemStarted {
+        let mut events = vec![TurnEvent::ItemStarted {
             item: ItemId::new(id),
             kind,
             title: title_for(kind, item),
             task: None,
-        }]
+        }];
+
+        // What somebody typed, which arrives whole and never as a stream —
+        // Codex is echoing back a turn it was given rather than producing one.
+        // Without this the bubble draws with nothing in it.
+        if kind == ItemKind::UserMessage {
+            if let Some(text) = content_text(item) {
+                events.push(TurnEvent::ContentDelta {
+                    item: ItemId::new(id),
+                    stream: StreamKind::UserText,
+                    delta: text,
+                });
+            }
+        }
+
+        events
     }
 
     fn item_completed(&mut self, params: &Value) -> Vec<TurnEvent> {
@@ -664,6 +687,22 @@ fn turn_id(params: &Value) -> Option<TurnId> {
         .map(TurnId::new)
 }
 
+/// The text of a message that carries its content as a list of parts.
+///
+/// Only the text ones. An image arrives as a URL Codex can reach and we
+/// cannot, so a transcript claiming to show one would be showing nothing.
+fn content_text(item: &Value) -> Option<String> {
+    let parts = item.get("content")?.as_array()?;
+    let text = parts
+        .iter()
+        .filter(|part| part.get("type").and_then(Value::as_str) == Some("text"))
+        .filter_map(|part| part.get("text").and_then(Value::as_str))
+        .collect::<Vec<_>>()
+        .join("");
+
+    (!text.is_empty()).then_some(text)
+}
+
 /// Reasoning arrives as a summary, as content, or as both.
 fn reasoning_text(item: &Value) -> Option<String> {
     let pieces = |name: &str| -> String {
@@ -817,6 +856,52 @@ mod tests {
     #[test]
     fn a_line_that_is_not_json_is_ignored_rather_than_fatal() {
         assert!(events(&["thread 'main' panicked at src/main.rs:1"]).is_empty());
+    }
+
+    /// Codex echoes back the turn it was given, whole and never as a stream.
+    /// Without the text the bubble drew with nothing in it.
+    #[test]
+    fn a_typed_message_draws_with_what_was_typed() {
+        let seen = events(&[
+            r#"{"method":"item/started","params":{"item":{"type":"userMessage","id":"u1","clientId":null,"content":[{"type":"text","text":"Hello","text_elements":[]}]}}}"#,
+        ]);
+
+        assert!(matches!(
+            seen.first(),
+            Some(TurnEvent::ItemStarted {
+                kind: ItemKind::UserMessage,
+                ..
+            })
+        ));
+        assert!(
+            seen.iter().any(|e| matches!(
+                e,
+                TurnEvent::ContentDelta { stream: StreamKind::UserText, delta, .. }
+                    if delta == "Hello"
+            )),
+            "the bubble needs the words in it"
+        );
+    }
+
+    /// What a command printed goes to the same stream a tool's output does,
+    /// so the card that draws one draws the other.
+    #[test]
+    fn command_output_reaches_the_card_that_ran_it() {
+        let seen = events(&[
+            r#"{"method":"item/commandExecution/outputDelta","params":{"threadId":"t","turnId":"u","itemId":"exec-1","delta":"AGENTS.md\n"}}"#,
+        ]);
+        match seen.first() {
+            Some(TurnEvent::ContentDelta {
+                item,
+                stream,
+                delta,
+            }) => {
+                assert_eq!(item.as_str(), "exec-1");
+                assert_eq!(*stream, StreamKind::ToolOutput);
+                assert_eq!(delta, "AGENTS.md\n");
+            }
+            other => panic!("expected output, got {other:?}"),
+        }
     }
 
     /// A request carries an id *and* a method. Reading the id first made every
