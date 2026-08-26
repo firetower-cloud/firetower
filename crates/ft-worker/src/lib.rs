@@ -88,6 +88,14 @@ impl Worker {
         let store = Store::open(&root.join("worker.db")).await?;
         let latest = store.latest_seq().await.unwrap_or(0);
 
+        // A sign-in that nobody finished leaves the directory it was going to
+        // land in. The task that would have removed it dies with the worker,
+        // so restarting is the only moment anything can.
+        //
+        // Safe to do wholesale: one of these is only interesting while the
+        // process waiting on it is alive, and none of them is.
+        let _ = tokio::fs::remove_dir_all(root.join("codex-login")).await;
+
         Ok(Self {
             store,
             git: GitRoot::new(&root),
