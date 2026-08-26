@@ -103,73 +103,16 @@ impl Agent {
         }
     }
 
-    /// The full command line, with the prompt already handed over.
-    ///
-    /// These CLIs take the first task as an argument, which is worth using:
-    /// typing it in afterwards means guessing when the agent is ready to listen,
-    /// and keystrokes sent a moment too early are simply lost.
-    ///
-    /// A shell has no prompt to give — it is there for poking around a
-    /// workspace by hand.
-    pub fn launch(&self, prompt: &str) -> String {
-        let prompt = prompt.trim();
-
-        if matches!(self, Agent::Shell) {
-            return self.command().to_string();
-        }
-
-        let mut line = self.command().to_string();
-
-        for flag in self.launch_flags() {
-            line.push(' ');
-            line.push_str(flag);
-        }
-
-        // An empty prompt still gets the flags: somebody opening a session to
-        // drive by hand wants the same agent as everybody else, not a
-        // differently-configured one.
-        if !prompt.is_empty() {
-            line.push(' ');
-            line.push_str(&quote(prompt));
-        }
-
-        line
-    }
-
-    /// How the agent is started, beyond its name and the prompt.
-    ///
-    /// **Claude Code runs in `auto`.** A session here is unattended by
-    /// construction — it is on a worker, in tmux, and whoever started it has
-    /// closed the tab — so an agent that stops to ask *may I run this?* stops
-    /// for somebody who is not there, and the run is wasted until they come
-    /// back.
-    ///
-    /// `auto` and not `acceptEdits`, which covers only writes and leaves every
-    /// command still asking. Nor `bypassPermissions`, which Claude Code refuses
-    /// outright when it is running as root — and the worker container is root,
-    /// so that would fail to start on every host we ship.
-    ///
-    /// It does not make the session silent. A question the agent wants answered
-    /// is still a question, and routing those back is the whole claim.
-    fn launch_flags(&self) -> &'static [&'static str] {
-        match self {
-            Agent::ClaudeCode => &["--permission-mode", "auto"],
-            // Codex has its own spelling for this and is not configured here
-            // yet; a wrong flag would stop it starting at all.
-            Agent::Codex | Agent::Shell => &[],
-        }
-    }
-
     /// The command line for driving this agent through a structured protocol
     /// rather than a terminal.
     ///
-    /// `None` means this agent has no such protocol here yet, which is an
-    /// answer rather than a failure: it says the session has to run the
-    /// interactive way.
+    /// `None` means this agent has no such protocol here yet, and there is no
+    /// longer another way: a session is refused before it is created rather
+    /// than started as something nobody can watch.
     ///
-    /// Unlike [`launch`](Agent::launch) this is argv, not a shell line. There
-    /// is no shell in the way — the daemon holds the pipes itself — so there is
-    /// nothing to quote and nothing that could be made to run.
+    /// argv, not a shell line. There is no shell in the way — the daemon holds
+    /// the pipes itself — so there is nothing to quote and nothing that could
+    /// be made to run.
     ///
     /// Two flags are worth explaining because they are not obvious:
     ///
@@ -302,15 +245,6 @@ impl Agent {
     pub fn speaks_a_protocol(&self) -> bool {
         self.launch_headless("probe", &Asking::CannotAsk).is_some()
     }
-}
-
-/// Wrap a string so a shell passes it through as one argument.
-///
-/// Prompts are written by people and contain quotes, backticks, dollar signs
-/// and newlines. Single quotes stop the shell reading any of it — the dance in
-/// the middle is how a single quote itself gets through.
-fn quote(text: &str) -> String {
-    format!("'{}'", text.replace('\'', r"'\''"))
 }
 
 /// Where an agent can run.
@@ -1418,31 +1352,6 @@ mod launch_tests {
     use super::*;
 
     #[test]
-    fn the_prompt_is_handed_to_the_agent() {
-        assert_eq!(
-            Agent::ClaudeCode.launch("Fix retry handling"),
-            "claude --permission-mode auto 'Fix retry handling'"
-        );
-    }
-
-    /// The session is unattended, so an agent that stops to ask permission
-    /// stops for nobody.
-    #[test]
-    fn claude_code_starts_without_asking_permission() {
-        let line = Agent::ClaudeCode.launch("anything");
-        assert!(line.contains("--permission-mode auto"), "{line}");
-
-        // Including with no prompt, where somebody is driving it by hand: the
-        // agent should not be configured differently for that.
-        assert!(
-            Agent::ClaudeCode
-                .launch("")
-                .contains("--permission-mode auto"),
-            "an empty prompt should not change how the agent runs"
-        );
-    }
-
-    #[test]
     fn a_session_started_on_a_shell_still_decodes() {
         // Shell is no longer offered, and rows that already say so must keep
         // reading. Dropping it from the list of choices is not the same as
@@ -1452,41 +1361,14 @@ mod launch_tests {
         assert!(Agent::every().contains(&Agent::Shell));
     }
 
-    /// Only the one we have checked. A flag Codex does not know would stop it
-    /// starting, which is worse than it asking.
+    /// Both of the agents on offer can be driven. Nothing else can be started
+    /// at all now, so this is the whole of what "supported" means.
     #[test]
-    fn the_others_are_started_as_they_were() {
-        assert_eq!(Agent::Codex.launch("do a thing"), "codex 'do a thing'");
-        assert_eq!(Agent::Shell.launch("do a thing"), "bash");
-    }
-
-    #[test]
-    fn a_prompt_cannot_escape_into_the_shell() {
-        // Prompts are prose written by people, and tmux runs this line through
-        // a shell. Anything in one has to arrive as text rather than as
-        // something the shell decides to run — so ask a real shell.
-        let nasty = "don't; rm -rf /; `whoami` $HOME \"quoted\" \\ end";
-
-        let shown = std::process::Command::new("sh")
-            .arg("-c")
-            .arg(format!("printf %s {}", quote(nasty)))
-            .output()
-            .expect("running a shell");
-
-        assert_eq!(
-            String::from_utf8_lossy(&shown.stdout),
-            nasty,
-            "the prompt should reach the agent exactly as written"
-        );
-    }
-
-    #[test]
-    fn a_shell_gets_no_prompt_and_no_empty_argument() {
-        assert_eq!(Agent::Shell.launch("anything"), "bash");
-        assert_eq!(
-            Agent::ClaudeCode.launch("   "),
-            "claude --permission-mode auto"
-        );
+    fn everything_offered_speaks_a_protocol() {
+        for agent in Agent::all() {
+            assert!(agent.speaks_a_protocol(), "{agent:?} cannot be driven");
+        }
+        assert!(!Agent::Shell.speaks_a_protocol());
     }
 }
 

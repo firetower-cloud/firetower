@@ -1351,19 +1351,24 @@ You are in the directory that holds them, not inside one of them.              P
         // Whether an agent can be driven at all is the control plane's
         // question, asked before a session is created — a worker does what it
         // is told. What it decides here is only how: a supervisor holding the
-        // agent's pipes, or the agent itself in a pane.
+        // agent's pipes, or a bare shell in a pane.
+        //
+        // Everything Firetower offers takes the first path now. The second is
+        // what a shell is — a workspace to poke around in by hand, with no
+        // prompt to take and nothing to configure.
         let structured = spec.agent.speaks_a_protocol();
 
         // Either way it runs under tmux, so it outlives this worker, this
-        // connection, and the laptop that started it. For a structured session
-        // tmux supervises the supervisor, which changes nothing about that: the
-        // process tree still has tmux at the top.
+        // connection, and the laptop that started it. For a driven session
+        // tmux supervises the supervisor, which changes nothing about that:
+        // the process tree still has tmux at the top.
         let command = if structured {
             let exe = std::env::current_exe().context("finding this worker's own path")?;
             structured::tmux_command(&exe, &id, &path, spec.agent)
         } else {
-            spec.agent.launch(&spec.prompt)
+            spec.agent.command().to_string()
         };
+
         tmux.start(&path, &command, &env)
             .await
             .with_context(|| format!("starting {}", spec.agent.label()))?;
@@ -1379,10 +1384,9 @@ You are in the directory that holds them, not inside one of them.              P
         self.emit(&id, EventKind::AgentLaunched { agent: spec.agent }, out)
             .await?;
 
-        // An interactive agent was handed the prompt on its command line. This
-        // one reads messages, so the first one has to be sent — after waiting
-        // for it to be listening, because a turn written into a socket nobody
-        // has bound yet is simply lost.
+        // An agent driven this way reads messages, so the first one has to be
+        // sent — after waiting for it to be listening, because a turn written
+        // into a socket nobody has bound yet is simply lost.
         if structured {
             structured::wait_until_listening(&id)
                 .await
