@@ -1487,10 +1487,6 @@ fn redacted(url: &str) -> String {
 mod tests {
     use super::*;
 
-    async fn db() -> Db {
-        Db::open_for_test().await.unwrap()
-    }
-
     /// A database with somebody in it.
     ///
     /// Every table that matters now has an owner and a foreign key to enforce
@@ -1502,7 +1498,7 @@ mod tests {
 
     #[tokio::test]
     async fn localhost_is_stored_like_any_other_host() {
-        let (db, owner) = db_with_user().await;
+        let (db, _owner) = db_with_user().await;
         let local = db.ensure_host("localhost", Compute::Local).await.unwrap();
         let remote = db
             .ensure_host(
@@ -1548,7 +1544,7 @@ mod tests {
     async fn a_container_host_round_trips_its_details() {
         // The kind is stored as a tagged value, so the fields that only mean
         // something for one variant have to survive the trip intact.
-        let (db, owner) = db_with_user().await;
+        let (db, _owner) = db_with_user().await;
         let host = db
             .ensure_host(
                 "worker-1",
@@ -1602,7 +1598,7 @@ mod tests {
     async fn draining_is_separate_from_being_unreachable() {
         // A draining host is still online and still finishing what it has;
         // folding the two together would make its sessions look lost.
-        let (db, owner) = db_with_user().await;
+        let (db, _owner) = db_with_user().await;
         let host = db.ensure_host("localhost", Compute::Local).await.unwrap();
 
         assert!(!db.is_drained(&host.id).await.unwrap());
@@ -1615,7 +1611,7 @@ mod tests {
 
     #[tokio::test]
     async fn registering_a_host_twice_is_harmless() {
-        let (db, owner) = db_with_user().await;
+        let (db, _owner) = db_with_user().await;
         let first = db.ensure_host("localhost", Compute::Local).await.unwrap();
         let again = db.ensure_host("localhost", Compute::Local).await.unwrap();
         assert_eq!(first.id, again.id);
@@ -1624,7 +1620,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_host_starts_unreachable_until_it_says_hello() {
-        let (db, owner) = db_with_user().await;
+        let (db, _owner) = db_with_user().await;
         let host = db.ensure_host("localhost", Compute::Local).await.unwrap();
         assert_eq!(host.state, HostState::Unreachable);
 
@@ -1639,7 +1635,7 @@ mod tests {
     /// A failure that nobody was watching still has to be readable later.
     #[tokio::test]
     async fn why_a_host_failed_outlives_the_attempt() {
-        let (db, owner) = db_with_user().await;
+        let (db, _owner) = db_with_user().await;
         let host = db.ensure_host("fire-01", Compute::Local).await.unwrap();
         assert!(host.diagnosis.is_none(), "nothing has failed yet");
 
@@ -1664,7 +1660,7 @@ mod tests {
     /// And stops saying it once it stops being true.
     #[tokio::test]
     async fn a_host_that_comes_back_stops_explaining_itself() {
-        let (db, owner) = db_with_user().await;
+        let (db, _owner) = db_with_user().await;
         let host = db.ensure_host("fire-01", Compute::Local).await.unwrap();
 
         db.record_diagnosis(
@@ -2111,7 +2107,7 @@ mod tests {
 
     #[tokio::test]
     async fn repositories_are_deduplicated_by_slug() {
-        let (db, owner) = db_with_user().await;
+        let (db, _owner) = db_with_user().await;
         let a = db
             .ensure_repo(
                 "acme/backend",
@@ -2165,7 +2161,7 @@ mod tests {
 
     #[tokio::test]
     async fn presence_is_remembered_per_host_and_refreshed_in_place() {
-        let (db, owner) = db_with_user().await;
+        let (db, _owner) = db_with_user().await;
         let host = db.ensure_host("localhost", Compute::Local).await.unwrap();
 
         db.record_presence(
@@ -2203,7 +2199,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_host_can_be_renamed_and_keeps_everything_else() {
-        let (db, owner) = db_with_user().await;
+        let (db, _owner) = db_with_user().await;
         let host = db
             .ensure_host(
                 "34.122.172.74",
@@ -2616,7 +2612,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_host_this_build_cannot_read_is_skipped_rather_than_fatal() {
-        let (db, owner) = db_with_user().await;
+        let (db, _owner) = db_with_user().await;
         let keep = db.ensure_host("localhost", Compute::Local).await.unwrap();
 
         // What a newer version would have left behind.
