@@ -72,9 +72,12 @@ fn the_protocol_still_says_what_we_depend_on_it_saying() {
         assert!(sent.contains(*method), "we send {method} and it is gone");
     }
 
-    let read = methods(&dir.join("ServerNotification.json"));
+    let notified = methods(&dir.join("ServerNotification.json"));
     for method in WE_READ {
-        assert!(read.contains(*method), "we read {method} and it is gone");
+        assert!(
+            notified.contains(*method),
+            "we read {method} and it is gone"
+        );
     }
 
     let asked = methods(&dir.join("ServerRequest.json"));
@@ -89,6 +92,52 @@ fn the_protocol_still_says_what_we_depend_on_it_saying() {
     let items = item_types(&dir.join("v2").join("ItemStartedNotification.json"));
     for kind in WE_DRAW {
         assert!(items.contains(*kind), "we draw {kind} and it is gone");
+    }
+
+    // Where the thread id is, which is the field the whole conversation
+    // hangs off. Method names all existed while this was read from the wrong
+    // place, and the session sat at "starting the agent" saying nothing — so
+    // the shapes we reach into are checked too, not just the names.
+    let answer = read(&dir.join("v2").join("ThreadStartResponse.json"));
+    assert!(
+        answer
+            .get("properties")
+            .and_then(|p| p.get("thread"))
+            .is_some(),
+        "thread/start stopped answering with a thread"
+    );
+    assert!(
+        answer
+            .get("properties")
+            .and_then(|p| p.get("model"))
+            .is_some(),
+        "thread/start stopped saying which model it is using"
+    );
+
+    // What a turn is started with, and what stopping one names.
+    for (file, fields) in [
+        ("TurnStartParams.json", &["threadId", "input"][..]),
+        ("TurnInterruptParams.json", &["threadId", "turnId"][..]),
+    ] {
+        let params = read(&dir.join("v2").join(file));
+        for field in fields {
+            assert!(
+                params
+                    .get("properties")
+                    .and_then(|p| p.get(*field))
+                    .is_some(),
+                "{file} no longer takes {field}"
+            );
+        }
+    }
+
+    // Where the text of a streamed message is, and which item it belongs to.
+    let delta = read(&dir.join("v2").join("AgentMessageDeltaNotification.json"));
+    for field in ["itemId", "delta"] {
+        assert!(
+            delta.get("properties").and_then(|p| p.get(field)).is_some(),
+            "a message delta no longer carries {field}"
+        );
     }
 
     // The three words a decision can be. Getting one wrong means an approval

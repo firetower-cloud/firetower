@@ -416,14 +416,43 @@ impl CodexNormaliser {
     fn answer(&mut self, id: u64, value: &Value) -> Vec<TurnEvent> {
         match self.awaiting.remove(&id) {
             Some(Awaiting::ThreadStart) => {
-                if let Some(thread) = value
-                    .get("result")
-                    .and_then(|r| r.get("threadId").or_else(|| r.get("thread_id")))
+                let Some(result) = value.get("result") else {
+                    return Vec::new();
+                };
+
+                // The whole thread, and its id inside it. Not `threadId` —
+                // the notifications carry it that way and the answer that
+                // creates one does not, which is a difference worth having
+                // been caught by reading the schema rather than by a session
+                // that sat at "starting the agent" forever.
+                let Some(thread) = result
+                    .get("thread")
+                    .and_then(|t| t.get("id"))
                     .and_then(Value::as_str)
-                {
-                    self.thread = Some(thread.to_string());
-                }
-                Vec::new()
+                else {
+                    return Vec::new();
+                };
+                self.thread = Some(thread.to_string());
+
+                // What this session turned out to be configured as. Reported
+                // rather than remembered from what we asked for: the answer is
+                // what is in force, and it is the only place either is said.
+                vec![TurnEvent::SessionConfigured {
+                    model: result
+                        .get("model")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                        .to_string(),
+                    mode: result
+                        .get("approvalPolicy")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                        .to_string(),
+                    // Codex names neither here, and an empty list is the
+                    // honest reading of that.
+                    tools: Vec::new(),
+                    commands: Vec::new(),
+                }]
             }
             // Somebody else's request, or one whose answer says nothing.
             None => Vec::new(),
@@ -672,11 +701,23 @@ mod tests {
         reader.sent_thread_start(2);
 
         // Somebody else's answer must not be mistaken for ours.
-        reader.push(r#"{"id":1,"result":{"threadId":"not-ours"}}"#);
+        reader.push(r#"{"id":1,"result":{"thread":{"id":"not-ours"}}}"#);
         assert_eq!(reader.thread(), None);
 
-        reader.push(r#"{"id":2,"result":{"threadId":"th_123"}}"#);
+        // The id is inside the thread, not beside it. Reading the wrong one
+        // left a session sitting at "starting the agent" with nothing to say.
+        let seen = reader.push(
+            r#"{"id":2,"result":{"thread":{"id":"th_123"},"model":"gpt-5.6-sol","approvalPolicy":"on-request"}}"#,
+        );
         assert_eq!(reader.thread(), Some("th_123"));
+
+        match seen.first() {
+            Some(TurnEvent::SessionConfigured { model, mode, .. }) => {
+                assert_eq!(model, "gpt-5.6-sol");
+                assert_eq!(mode, "on-request");
+            }
+            other => panic!("expected the session to report itself, got {other:?}"),
+        }
     }
 
     #[test]

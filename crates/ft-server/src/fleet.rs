@@ -2187,7 +2187,8 @@ mod progress_tests {
             progress.read(r#"{"id":1,"result":{"userAgent":"firetower/0.1","codexHome":"/tmp"}}"#);
         assert!(before.send.is_empty(), "no thread yet, so nothing to send");
 
-        let after = progress.read(r#"{"id":2,"result":{"threadId":"th_9"}}"#);
+        let after =
+            progress.read(r#"{"id":2,"result":{"thread":{"id":"th_9"},"model":"gpt-5.6-sol"}}"#);
         assert_eq!(after.send.len(), 1, "the prompt goes out on the answer");
 
         let sent = &after.send[0];
@@ -2205,7 +2206,7 @@ mod progress_tests {
     #[test]
     fn stopping_a_codex_session_names_the_turn_it_is_stopping() {
         let mut progress = Progress::for_agent(ft_core::Agent::Codex, String::new());
-        progress.read(r#"{"id":2,"result":{"threadId":"th_9"}}"#);
+        progress.read(r#"{"id":2,"result":{"thread":{"id":"th_9"},"model":"gpt-5.6-sol"}}"#);
         assert!(
             matches!(progress.stop(), Stop::Nothing),
             "nothing is running yet"
@@ -2241,7 +2242,7 @@ mod progress_tests {
         // better than sending a turn into a thread that is not there.
         assert!(progress.turn("hello", &[]).is_err());
 
-        progress.read(r#"{"id":2,"result":{"threadId":"th_9"}}"#);
+        progress.read(r#"{"id":2,"result":{"thread":{"id":"th_9"},"model":"gpt-5.6-sol"}}"#);
 
         let first = progress.turn("hello", &[]).unwrap();
         let second = progress.turn("again", &[]).unwrap();
