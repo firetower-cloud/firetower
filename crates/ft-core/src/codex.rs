@@ -62,20 +62,31 @@ pub fn opening(cwd: &str) -> Vec<Value> {
             "method": "thread/start",
             "params": {
                 "cwd": cwd,
-                // A session here is unattended by construction, so an agent
-                // that stops to ask *may I run this* stops for somebody who is
-                // not there. Confined instead of interrogated: it may do what
-                // it likes inside the workspace and nothing outside it.
+                // It asks, and the question reaches whoever is watching.
+                // That is the point of the whole arrangement, so it is the
+                // ordinary case — and a session nobody is watching is exactly
+                // the one that most needs to be able to stop and say so.
                 //
-                // Narrower than what a person at a keyboard gets, and it is
-                // what Claude Code's own unattended mode does for the same
-                // reason. Routing these to the card that already exists is
-                // the next thing, and this line is what it replaces.
-                "approvalPolicy": "never",
+                // Still sandboxed to the workspace underneath. Being asked is
+                // not the same as being unconfined: an approval somebody grants
+                // in a hurry should not be able to reach the rest of the host.
+                "approvalPolicy": "on-request",
                 "sandbox": "workspace-write",
             },
         }),
     ]
+}
+
+/// Stop the turn that is running, leaving the conversation alive.
+///
+/// Names the turn as well as the thread: a conversation can have had many, and
+/// only the one now running can be stopped.
+pub fn turn_interrupt(id: u64, thread: &str, turn: &str) -> Value {
+    serde_json::json!({
+        "id": id,
+        "method": "turn/interrupt",
+        "params": { "threadId": thread, "turnId": turn },
+    })
 }
 
 /// One turn: what somebody typed, in the thread it belongs to.
@@ -224,6 +235,11 @@ pub struct CodexNormaliser {
     /// What kind of card each open item is. `item/completed` restates the
     /// item, but the card was drawn when it started and the two have to agree.
     open: HashMap<String, ItemKind>,
+    /// The turn now running, which is what stopping one has to name.
+    ///
+    /// `turn/interrupt` takes a turn as well as a thread, and there is nowhere
+    /// else to recover it from once the notification has gone past.
+    active_turn: Option<String>,
     /// Which request ids we sent, so an answer can be told from a notification.
     ///
     /// Only the ones whose answers say something: everything else is allowed
@@ -249,6 +265,13 @@ impl CodexNormaliser {
     /// which no turn can be sent.
     pub fn thread(&self) -> Option<&str> {
         self.thread.as_deref()
+    }
+
+    /// The turn now running, if one is.
+    ///
+    /// `None` between turns, when there is nothing to stop.
+    pub fn active_turn(&self) -> Option<&str> {
+        self.active_turn.as_deref()
     }
 
     /// Remember that a request went out, so its answer can be recognised.
@@ -401,6 +424,7 @@ impl CodexNormaliser {
         let Some(turn) = turn_id(params) else {
             return Vec::new();
         };
+        self.active_turn = Some(turn.as_str().to_string());
         vec![TurnEvent::TurnStarted { turn }]
     }
 
@@ -419,6 +443,7 @@ impl CodexNormaliser {
         // here is one whose completion we missed, and carrying it forward
         // would attribute it to the next turn.
         self.open.clear();
+        self.active_turn = None;
 
         vec![TurnEvent::TurnCompleted {
             turn,

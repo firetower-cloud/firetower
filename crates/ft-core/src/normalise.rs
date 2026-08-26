@@ -146,6 +146,14 @@ impl Reader {
             Reader::Codex(reader) => reader.thread(),
         }
     }
+
+    /// The turn now running, for the agents that need one named to stop it.
+    pub fn active_turn(&self) -> Option<&str> {
+        match self {
+            Reader::Claude(_) => None,
+            Reader::Codex(reader) => reader.active_turn(),
+        }
+    }
 }
 
 /// One open assistant block, keyed by its index within the current message.

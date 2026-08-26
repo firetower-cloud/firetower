@@ -75,6 +75,16 @@ pub enum AgentSpeech {
     Closed,
 }
 
+/// What stopping this session takes.
+enum Stop {
+    /// Its supervisor sends a signal.
+    Signal,
+    /// It is asked, in the conversation.
+    Ask(serde_json::Value),
+    /// Nothing is running.
+    Nothing,
+}
+
 /// What reading a line meant.
 #[derive(Default)]
 struct Read {
@@ -214,6 +224,25 @@ impl Progress {
         }
 
         Read { moved, send, asks }
+    }
+
+    /// How this agent is stopped.
+    fn stop(&mut self) -> Stop {
+        match &self.reader {
+            // Its supervisor signals it, which is not a thing it is told.
+            ft_core::normalise::Reader::Claude(_) => Stop::Signal,
+            ft_core::normalise::Reader::Codex(reader) => {
+                let (Some(thread), Some(turn)) = (reader.thread(), reader.active_turn()) else {
+                    // Between turns there is nothing running to stop, and a
+                    // request naming no turn would be refused.
+                    return Stop::Nothing;
+                };
+                let (thread, turn) = (thread.to_string(), turn.to_string());
+                let id = self.next_id;
+                self.next_id += 1;
+                Stop::Ask(ft_core::codex::turn_interrupt(id, &thread, &turn))
+            }
+        }
     }
 
     /// One message for this agent, carrying what somebody typed.
@@ -1743,11 +1772,37 @@ impl Fleet {
             _ => (ft_core::Agent::ClaudeCode, String::new()),
         };
 
+        let mut progress = Progress::for_agent(agent, prompt);
+
+        // Everything this session has already said, so a control plane that
+        // restarted knows where the conversation got to.
+        //
+        // Nothing here is acted on: the questions were answered or are still
+        // in `asked`, and the frames were sent by whoever was running at the
+        // time. What is being rebuilt is what only the reader knows — for
+        // Codex, the thread every later turn has to name, which was said once
+        // in a line that has long gone past.
+        let mut opened = false;
+        for (_, line) in self
+            .db
+            .agent_lines_since(session_id, 0)
+            .await
+            .unwrap_or_default()
+        {
+            let read = progress.read(&line);
+            // A turn that already started is the proof the first prompt went
+            // out. Without this, reconnecting would send it a second time.
+            opened |= matches!(read.moved, Some((SessionStatus::Working, _)));
+        }
+        if opened {
+            progress.opening_prompt = None;
+        }
+
         self.progress
             .write()
             .await
             .entry(session_id.to_string())
-            .or_insert_with(|| Progress::for_agent(agent, prompt));
+            .or_insert(progress);
     }
 
     /// End the turn in progress, leaving the session alive.
@@ -1756,17 +1811,34 @@ impl Fleet {
         // returns. What comes back says `error_during_execution`, and only
         // this side knows it was asked for.
         self.ensure_reader(session_id).await;
-        if let Some(progress) = self.progress.write().await.get_mut(session_id.as_str()) {
-            progress.stopped = true;
-        }
 
-        self.send(
-            host_id,
-            ToWorker::Interrupt {
+        // Claude Code is stopped by a signal its supervisor sends; Codex is
+        // asked, in the conversation, and the request has to name the turn.
+        let stop = {
+            let mut readers = self.progress.write().await;
+            match readers.get_mut(session_id.as_str()) {
+                Some(progress) => {
+                    progress.stopped = true;
+                    progress.stop()
+                }
+                None => Stop::Signal,
+            }
+        };
+
+        let frame = match stop {
+            Stop::Signal => ToWorker::Interrupt {
                 session_id: session_id.clone(),
             },
-        )
-        .await
+            Stop::Ask(message) => ToWorker::SendTurn {
+                session_id: session_id.clone(),
+                message,
+            },
+            // Nothing to stop is not a failure. Somebody pressed stop on a
+            // session that was already resting, and there is no turn to end.
+            Stop::Nothing => return Ok(()),
+        };
+
+        self.send(host_id, frame).await
     }
 
     pub async fn send_input(
@@ -2126,6 +2198,39 @@ mod progress_tests {
         // And exactly once: a second line must not re-send it.
         let again = progress.read(r#"{"method":"turn/started","params":{"turn":{"id":"t1","items":[],"status":"inProgress"}}}"#);
         assert!(again.send.is_empty(), "the opening prompt is spent");
+    }
+
+    /// Stopping names the turn, and a session between turns has nothing to
+    /// stop — a request naming no turn would be refused.
+    #[test]
+    fn stopping_a_codex_session_names_the_turn_it_is_stopping() {
+        let mut progress = Progress::for_agent(ft_core::Agent::Codex, String::new());
+        progress.read(r#"{"id":2,"result":{"threadId":"th_9"}}"#);
+        assert!(
+            matches!(progress.stop(), Stop::Nothing),
+            "nothing is running yet"
+        );
+
+        progress.read(r#"{"method":"turn/started","params":{"turn":{"id":"turn_7","items":[],"status":"inProgress"}}}"#);
+        match progress.stop() {
+            Stop::Ask(message) => {
+                assert_eq!(message["method"], "turn/interrupt");
+                assert_eq!(message["params"]["threadId"], "th_9");
+                assert_eq!(message["params"]["turnId"], "turn_7");
+            }
+            other => panic!("expected a request, got {}", matches!(other, Stop::Signal)),
+        }
+
+        // And once it has ended there is nothing to stop again.
+        progress.read(r#"{"method":"turn/completed","params":{"turn":{"id":"turn_7","items":[],"status":"completed"}}}"#);
+        assert!(matches!(progress.stop(), Stop::Nothing));
+    }
+
+    /// Claude Code is signalled, not asked. The two must not be swapped.
+    #[test]
+    fn stopping_claude_code_is_a_signal() {
+        let mut progress = Progress::for_agent(ft_core::Agent::ClaudeCode, String::new());
+        assert!(matches!(progress.stop(), Stop::Signal));
     }
 
     /// Typing at a Codex session has to reach the thread it is talking in.
