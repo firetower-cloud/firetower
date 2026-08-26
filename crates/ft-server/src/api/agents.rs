@@ -119,6 +119,11 @@ pub struct AgentView {
     pub supported: bool,
     /// What to run locally to get a token, when this agent works that way.
     pub token_command: Option<String>,
+    /// Whether this one signs a machine in with a code instead.
+    ///
+    /// Separate from `supported`: a credential is worth having before there is
+    /// a driver to spend it, and it is the half that needs a person.
+    pub signs_in_with_a_code: bool,
     pub hosts: Vec<AgentOnHost>,
 }
 
@@ -195,6 +200,7 @@ pub(super) async fn list_agents(
             // What to run, and where. The command happens on your own machine
             // because that is where a browser is.
             token_command: kind.token_setup().map(|(cmd, _)| cmd.to_string()),
+            signs_in_with_a_code: kind.signs_in_with_a_code(),
             hosts: hosts
                 .iter()
                 .map(|h| {
@@ -336,7 +342,7 @@ pub(super) async fn sign_agent_in(
     let kind = agent_from_path(&kind)?;
     let owner = owner(&principal)?.to_string();
 
-    if kind != Agent::Codex {
+    if !kind.signs_in_with_a_code() {
         return Err(ApiError::new(
             ErrorCode::InvalidRequest,
             match kind.token_setup() {

@@ -87,12 +87,16 @@ function AgentRow({
       <div className="flex items-center gap-3">
         <span className="text-[13.5px] text-bone">{agent.label}</span>
         <Mode agent={agent} />
-        {agent.supported && agent.needsCredential && (
+        {/* Connecting is not gated on there being a driver. Signing in is the
+            half that needs a person and a browser, and it is worth having done
+            before a session can use it — the row still says there is no driver
+            yet, so nobody is being told the agent will run. */}
+        {(agent.supported || agent.signsInWithACode) && agent.needsCredential && (
           <button onClick={onConfigure} className="ml-auto text-[11.5px] text-mute transition-colors hover:text-ember">
             {agent.mode ? "Change" : "Connect"}
           </button>
         )}
-        {agent.supported && agent.mode && agent.needsCredential && (
+        {(agent.supported || agent.signsInWithACode) && agent.mode && agent.needsCredential && (
           <button
             onClick={() =>
               forget.mutate(
@@ -115,6 +119,7 @@ function AgentRow({
           Firetower has no driver for {agent.label} yet, so it cannot start a session on
           one. It is listed because it may be installed on your hosts — that is worth
           seeing, and it is what a driver would use.
+          {agent.signsInWithACode && " Signing in already works, and is kept for when it does."}
         </p>
       )}
 
@@ -164,8 +169,19 @@ function AgentRow({
 function Mode({ agent }: { agent: AgentView }) {
   // Before anything about credentials, because none of it applies: an agent
   // Firetower cannot drive will not start whatever you authenticate it with.
+  //
+  // Unless it is already signed in, which is a real thing to have done and
+  // survives the driver arriving. Saying only "not supported yet" would throw
+  // away the one piece of state the person actually created.
   if (!agent.supported) {
-    return <Tag warn>not supported yet</Tag>;
+    return agent.credentialSet ? (
+      <>
+        <Tag>signed in</Tag>
+        <Tag warn>no driver yet</Tag>
+      </>
+    ) : (
+      <Tag warn>not supported yet</Tag>
+    );
   }
   if (!agent.needsCredential) {
     return <Tag>nothing to authenticate</Tag>;

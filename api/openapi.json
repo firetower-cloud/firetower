@@ -3133,6 +3133,7 @@
           "credentialSet",
           "needsCredential",
           "supported",
+          "signsInWithACode",
           "hosts"
         ],
         "properties": {
@@ -3169,6 +3170,10 @@
           "needsCredential": {
             "type": "boolean",
             "description": "True when nothing needs configuring, which is only the plain shell."
+          },
+          "signsInWithACode": {
+            "type": "boolean",
+            "description": "Whether this one signs a machine in with a code instead.\n\nSeparate from `supported`: a credential is worth having before there is\na driver to spend it, and it is the half that needs a person."
           },
           "supported": {
             "type": "boolean",

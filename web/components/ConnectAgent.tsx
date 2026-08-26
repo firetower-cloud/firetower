@@ -9,7 +9,7 @@ import {
   useListAgents,
   getListAgentsQueryKey,
 } from "@/src/api/generated/agents/agents";
-import { Agent, AgentMode, type AgentView, type AgentOnHost } from "@/src/api/generated/model";
+import { AgentMode, type AgentView, type AgentOnHost } from "@/src/api/generated/model";
 import { ApiError } from "@/src/api/http";
 import { CodeToType, Spinner } from "./ConnectRepo";
 
@@ -29,7 +29,7 @@ export function ConnectAgent({
 }) {
   // Two different acts wearing one word. Claude Code hands you a token to
   // carry here; Codex has no such command, and signs a machine in directly.
-  if (agent.kind === Agent.Codex) {
+  if (agent.signsInWithACode) {
     return <WithACode agent={agent} onClose={onClose} />;
   }
   return <WithAToken agent={agent} onClose={onClose} />;

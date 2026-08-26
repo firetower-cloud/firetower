@@ -844,6 +844,21 @@ impl Agent {
         }
     }
 
+    /// Whether this one signs a machine in rather than handing you a token.
+    ///
+    /// The other half of [`token_setup`](Agent::token_setup), and deliberately
+    /// not its negation: an agent could offer both, or neither. Codex has no
+    /// command that prints a credential, so the only way to get one is to let a
+    /// machine ask for it and approve that from a browser.
+    ///
+    /// Separate from [`speaks_a_protocol`](Agent::speaks_a_protocol) because
+    /// they answer different questions. Signing in is worth offering before
+    /// there is a driver to use it — it is the longer half of the setup, and
+    /// nothing about it depends on being able to start a session yet.
+    pub fn signs_in_with_a_code(&self) -> bool {
+        matches!(self, Agent::Codex)
+    }
+
     /// The variable that carries a metered key, for the other mode.
     pub fn api_key_var(&self) -> Option<&'static str> {
         match self {
