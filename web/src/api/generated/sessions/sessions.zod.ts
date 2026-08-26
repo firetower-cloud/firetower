@@ -333,6 +333,8 @@ export const getConversationResponseEventsItemOneThreeUsageTwoOutputTokensMin = 
 
 export const getConversationResponseEventsItemOneThreeUsageTwoThinkingTokensMin = 0;
 
+export const getConversationResponseEventsItemOneOnethreeUsedPercentMin = 0;
+
 export const getConversationResponseEventsItemTwoLineNoMin = 0;
 
 export const getConversationResponseLastLineMin = 0;
@@ -443,8 +445,9 @@ export const GetConversationResponse = zod.object({
   "resetsAt": zod.int().nullish().describe('Unix seconds.'),
   "status": zod.string().describe('`allowed`, and whatever else turns up.'),
   "type": zod.enum(['Limited']),
+  "usedPercent": zod.int().min(getConversationResponseEventsItemOneOnethreeUsedPercentMin).nullish().describe('How much of the window is gone, when the agent says.\n\nClaude Code does not, which is why a bar was not worth drawing.\nCodex does, and a window is a far more useful thing to see as a\nproportion than as a word.'),
   "window": zod.string().describe('`five_hour`, and whatever else turns up.')
-}).describe('What the account\'s own limits say.\n\nArrives on its own schedule rather than with a turn, and says less than\nit looks like it should: there is a window, whether we are inside it,\nand when it starts again. No proportion — the agent does not send one,\nand a bar drawn without one would be invented.'),zod.object({
+}).describe('What the account\'s own limits say.\n\nArrives on its own schedule rather than with a turn: a window, whether\nwe are inside it, and when it starts again. A proportion when the agent\nsends one, and nothing drawn from it when it does not — Claude Code\nsays none, which is why this is optional rather than a number somebody\nhas to trust.'),zod.object({
   "agent": zod.string().nullish(),
   "description": zod.string(),
   "item": zod.string().describe('The tool call that spawned it, which is how its items find their way\nhome.'),

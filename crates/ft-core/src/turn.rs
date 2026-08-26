@@ -414,10 +414,11 @@ pub enum TurnEvent {
 
     /// What the account's own limits say.
     ///
-    /// Arrives on its own schedule rather than with a turn, and says less than
-    /// it looks like it should: there is a window, whether we are inside it,
-    /// and when it starts again. No proportion — the agent does not send one,
-    /// and a bar drawn without one would be invented.
+    /// Arrives on its own schedule rather than with a turn: a window, whether
+    /// we are inside it, and when it starts again. A proportion when the agent
+    /// sends one, and nothing drawn from it when it does not — Claude Code
+    /// says none, which is why this is optional rather than a number somebody
+    /// has to trust.
     #[serde(rename_all = "camelCase")]
     Limited {
         /// `five_hour`, and whatever else turns up.
@@ -427,6 +428,13 @@ pub enum TurnEvent {
         /// Unix seconds.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         resets_at: Option<i64>,
+        /// How much of the window is gone, when the agent says.
+        ///
+        /// Claude Code does not, which is why a bar was not worth drawing.
+        /// Codex does, and a window is a far more useful thing to see as a
+        /// proportion than as a word.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        used_percent: Option<u8>,
     },
 
     TaskStarted {

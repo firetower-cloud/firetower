@@ -882,6 +882,9 @@ fn limits(v: &Value) -> Option<TurnEvent> {
         window: str_at(info, "rateLimitType")?.to_string(),
         status: str_at(info, "status").unwrap_or("unknown").to_string(),
         resets_at: info.get("resetsAt").and_then(Value::as_i64),
+        // Claude Code sends none, and a bar without a numerator would be a
+        // drawing rather than a reading.
+        used_percent: None,
     })
 }
 

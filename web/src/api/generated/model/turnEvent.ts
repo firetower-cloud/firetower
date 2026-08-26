@@ -103,6 +103,16 @@ export type TurnEvent = {
   /** `allowed`, and whatever else turns up. */
   status: string;
   type: 'Limited';
+  /**
+     * How much of the window is gone, when the agent says.
+     *
+     * Claude Code does not, which is why a bar was not worth drawing.
+     * Codex does, and a window is a far more useful thing to see as a
+     * proportion than as a word.
+     * @minimum 0
+     * @nullable
+     */
+  usedPercent?: number | null;
   /** `five_hour`, and whatever else turns up. */
   window: string;
 } | {

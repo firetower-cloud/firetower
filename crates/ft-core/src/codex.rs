@@ -27,7 +27,7 @@ use serde_json::Value;
 
 use crate::turn::{
     Decision, ItemId, ItemKind, ItemStatus, PlanStep, PlanStepStatus, Question, QuestionOption,
-    RawSource, RequestId, RequestKind, StreamKind, TurnEvent, TurnId, TurnStatus,
+    RawSource, RequestId, RequestKind, StreamKind, TurnEvent, TurnId, TurnStatus, Usage,
 };
 
 /// The id the worker sends `initialize` under.
@@ -235,6 +235,12 @@ pub struct CodexNormaliser {
     /// What kind of card each open item is. `item/completed` restates the
     /// item, but the card was drawn when it started and the two have to agree.
     open: HashMap<String, ItemKind>,
+    /// What the turn now running has cost, as last reported.
+    ///
+    /// Kept because it arrives on its own notification rather than with the
+    /// turn that ends: by the time a turn completes, this is the only place
+    /// the number is.
+    usage: Option<Usage>,
     /// The turn now running, which is what stopping one has to name.
     ///
     /// `turn/interrupt` takes a turn as well as a thread, and there is nowhere
@@ -317,7 +323,11 @@ impl CodexNormaliser {
             "item/agentMessage/delta" => self.delta(&params, StreamKind::AssistantText),
             "item/plan/delta" => Vec::new(),
             "turn/plan/updated" => self.plan(&params),
-            "account/rateLimits/updated" => self.limits(&params),
+            "account/rateLimits/updated" => limits(&params),
+            "thread/tokenUsage/updated" => {
+                self.usage = usage(&params);
+                Vec::new()
+            }
             // Everything else is kept rather than dropped, so a message type
             // that turns up in a new release shows as a gap to fill instead of
             // as silence. The full log is stored either way; this is the
@@ -448,7 +458,7 @@ impl CodexNormaliser {
         vec![TurnEvent::TurnCompleted {
             turn,
             status,
-            usage: None,
+            usage: self.usage.take(),
         }]
     }
 
@@ -555,24 +565,64 @@ impl CodexNormaliser {
 
         vec![TurnEvent::PlanUpdated { steps }]
     }
+}
 
-    fn limits(&mut self, params: &Value) -> Vec<TurnEvent> {
-        let window = params
-            .get("window")
-            .and_then(Value::as_str)
-            .unwrap_or("unknown")
-            .to_string();
-        let status = params
-            .get("status")
-            .and_then(Value::as_str)
-            .unwrap_or("unknown")
-            .to_string();
-        vec![TurnEvent::Limited {
-            window,
-            status,
-            resets_at: params.get("resetsAt").and_then(Value::as_i64),
-        }]
-    }
+/// What the account's limits say, as two windows rather than one.
+///
+/// Codex reports a short window and a long one, each as a percentage used and
+/// when it starts again. It names neither, so they are named here — `primary`
+/// and `secondary` are the field names and mean nothing to anybody; a duration
+/// does, when there is one.
+fn limits(params: &Value) -> Vec<TurnEvent> {
+    let snapshot = params.get("rateLimits").unwrap_or(&Value::Null);
+
+    ["primary", "secondary"]
+        .into_iter()
+        .filter_map(|which| {
+            let window = snapshot.get(which)?;
+            let used = window.get("usedPercent").and_then(Value::as_i64)?;
+
+            let name = match window.get("windowDurationMins").and_then(Value::as_i64) {
+                Some(mins) if mins % (60 * 24) == 0 => format!("{}_day", mins / (60 * 24)),
+                Some(mins) if mins % 60 == 0 => format!("{}_hour", mins / 60),
+                Some(mins) => format!("{mins}_minute"),
+                None => which.to_string(),
+            };
+
+            Some(TurnEvent::Limited {
+                window: name,
+                // A window is only "reached" once it is full. Anything else is
+                // room left, however little.
+                status: if used >= 100 { "reached" } else { "allowed" }.to_string(),
+                resets_at: window.get("resetsAt").and_then(Value::as_i64),
+                used_percent: Some(used as u8),
+            })
+        })
+        .collect()
+}
+
+/// What a turn cost, from the breakdown Codex keeps for the whole thread.
+///
+/// `last` rather than `total`: a turn's cost is what that turn used, and the
+/// running total belongs to the conversation.
+fn usage(params: &Value) -> Option<Usage> {
+    let usage = params.get("tokenUsage")?;
+    let last = usage.get("last")?;
+    let count = |name: &str| last.get(name).and_then(Value::as_u64);
+
+    Some(Usage {
+        input_tokens: count("inputTokens").unwrap_or_default(),
+        output_tokens: count("outputTokens").unwrap_or_default(),
+        cache_read_tokens: count("cachedInputTokens"),
+        cache_write_tokens: count("cacheWriteInputTokens"),
+        thinking_tokens: count("reasoningOutputTokens"),
+        context_used: count("totalTokens"),
+        context_window: usage.get("modelContextWindow").and_then(Value::as_u64),
+        // Codex does its own arithmetic nowhere we can see, and inventing a
+        // number here would be worse than showing none.
+        cost_usd: None,
+        ..Default::default()
+    })
 }
 
 /// The turn id, from either shape a notification carries it in.
@@ -799,6 +849,90 @@ mod tests {
             }
             other => panic!("expected questions, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn a_plan_is_read_with_the_state_of_each_step() {
+        let seen = events(&[
+            r#"{"method":"turn/plan/updated","params":{"threadId":"t","turnId":"u","plan":[{"step":"read the tests","status":"completed"},{"step":"fix the bug","status":"inProgress"},{"step":"run them","status":"pending"}]}}"#,
+        ]);
+        match seen.first() {
+            Some(TurnEvent::PlanUpdated { steps }) => {
+                assert_eq!(steps.len(), 3);
+                assert_eq!(steps[0].step, "read the tests");
+                assert_eq!(steps[0].status, PlanStepStatus::Completed);
+                assert_eq!(steps[1].status, PlanStepStatus::InProgress);
+                assert_eq!(steps[2].status, PlanStepStatus::Pending);
+            }
+            other => panic!("expected a plan, got {other:?}"),
+        }
+    }
+
+    /// Two windows, neither of which Codex names — so they are named from
+    /// their own duration, which is the part anybody reading it cares about.
+    #[test]
+    fn both_rate_limit_windows_are_reported_with_what_is_left() {
+        let seen = events(&[
+            r#"{"method":"account/rateLimits/updated","params":{"rateLimits":{"primary":{"usedPercent":42,"windowDurationMins":300,"resetsAt":1787724427},"secondary":{"usedPercent":100,"windowDurationMins":10080}}}}"#,
+        ]);
+
+        assert_eq!(seen.len(), 2, "a short window and a long one");
+        match &seen[0] {
+            TurnEvent::Limited {
+                window,
+                status,
+                used_percent,
+                resets_at,
+            } => {
+                assert_eq!(window, "5_hour");
+                assert_eq!(status, "allowed");
+                assert_eq!(*used_percent, Some(42));
+                assert_eq!(*resets_at, Some(1787724427));
+            }
+            other => panic!("expected a limit, got {other:?}"),
+        }
+        match &seen[1] {
+            TurnEvent::Limited { window, status, .. } => {
+                assert_eq!(window, "7_day");
+                assert_eq!(status, "reached", "a full window is not room left");
+            }
+            other => panic!("expected a limit, got {other:?}"),
+        }
+    }
+
+    /// Cost arrives on its own notification, and by the time a turn ends this
+    /// is the only place the number is.
+    #[test]
+    fn what_a_turn_cost_is_carried_to_the_turn_that_ends() {
+        let mut reader = CodexNormaliser::new();
+        reader.push(
+            r#"{"method":"thread/tokenUsage/updated","params":{"threadId":"t","turnId":"u","tokenUsage":{"modelContextWindow":200000,"last":{"inputTokens":120,"outputTokens":45,"cachedInputTokens":900,"reasoningOutputTokens":30,"totalTokens":1095},"total":{"inputTokens":1,"outputTokens":1,"cachedInputTokens":1,"reasoningOutputTokens":1,"totalTokens":1}}}}"#,
+        );
+
+        let ended = reader.push(
+            r#"{"method":"turn/completed","params":{"turn":{"id":"turn_1","items":[],"status":"completed"}}}"#,
+        );
+        match ended.first() {
+            Some(TurnEvent::TurnCompleted {
+                usage: Some(usage), ..
+            }) => {
+                assert_eq!(usage.input_tokens, 120);
+                assert_eq!(usage.output_tokens, 45);
+                assert_eq!(usage.thinking_tokens, Some(30));
+                assert_eq!(usage.context_window, Some(200000));
+            }
+            other => panic!("expected a cost, got {other:?}"),
+        }
+
+        // Spent by the turn it belonged to: the next one starts from nothing
+        // rather than inheriting a number that was never about it.
+        let next = reader.push(
+            r#"{"method":"turn/completed","params":{"turn":{"id":"turn_2","items":[],"status":"completed"}}}"#,
+        );
+        assert!(matches!(
+            next.first(),
+            Some(TurnEvent::TurnCompleted { usage: None, .. })
+        ));
     }
 
     /// Codex sends reasoning as a completed item rather than as a stream, so
