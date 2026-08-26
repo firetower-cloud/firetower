@@ -3241,6 +3241,7 @@
       },
       "Attachment": {
         "type": "object",
+        "description": "A denial, said in a way the agent will act on rather than distrust.\n\nThe reason is attributed rather than stated. A tool result that simply says\n\"call it pear.txt instead\" reads to an agent exactly like an instruction\nsmuggled into data, and a good one refuses it — one did, in testing, and\nreported the redirection as a prompt injection attempt instead of following\nit. Which is correct behaviour, and the reason this wrapping exists: the\nsentence really is from the person watching, so it should say so.\n\nIt does not make the agent obey. It makes an instruction from a person\ndistinguishable from one that arrived in a tool's output, which is the only\nthing we can honestly offer.",
         "required": [
           "name",
           "data"

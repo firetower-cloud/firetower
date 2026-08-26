@@ -262,7 +262,7 @@ export const AttachFileParams = zod.object({
 export const AttachFileBody = zod.object({
   "data": zod.string().describe('The bytes, base64.'),
   "name": zod.string().describe('What it was called. Only the last part is kept, and it is scrubbed.')
-})
+}).describe('A denial, said in a way the agent will act on rather than distrust.\n\nThe reason is attributed rather than stated. A tool result that simply says\n\"call it pear.txt instead\" reads to an agent exactly like an instruction\nsmuggled into data, and a good one refuses it — one did, in testing, and\nreported the redirection as a prompt injection attempt instead of following\nit. Which is correct behaviour, and the reason this wrapping exists: the\nsentence really is from the person watching, so it should say so.\n\nIt does not make the agent obey. It makes an instruction from a person\ndistinguishable from one that arrived in a tool\'s output, which is the only\nthing we can honestly offer.')
 
 export const AttachFileResponse = zod.object({
   "path": zod.string().describe('Where it landed, relative to the workspace — which is what to say to the\nagent, and what it can act on.')

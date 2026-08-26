@@ -26,8 +26,8 @@ use std::collections::HashMap;
 use serde_json::Value;
 
 use crate::turn::{
-    ItemId, ItemKind, ItemStatus, PlanStep, PlanStepStatus, RawSource, StreamKind, TurnEvent,
-    TurnId, TurnStatus,
+    Decision, ItemId, ItemKind, ItemStatus, PlanStep, PlanStepStatus, Question, QuestionOption,
+    RawSource, RequestId, RequestKind, StreamKind, TurnEvent, TurnId, TurnStatus,
 };
 
 /// The id the worker sends `initialize` under.
@@ -92,6 +92,70 @@ pub fn turn_start(id: u64, thread: &str, text: &str) -> Value {
             "input": [{ "type": "text", "text": text }],
         },
     })
+}
+
+/// One question, in our shape.
+///
+/// Theirs carries an id we drop: answers here are keyed by the question's own
+/// text, which has to survive the round trip either way.
+fn question(asked: &Value) -> Question {
+    let text = |name: &str| {
+        asked
+            .get(name)
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string()
+    };
+
+    Question {
+        question: text("question"),
+        header: text("header"),
+        options: asked
+            .get("options")
+            .and_then(Value::as_array)
+            .map(|options| {
+                options
+                    .iter()
+                    .map(|option| QuestionOption {
+                        label: option
+                            .get("label")
+                            .or_else(|| option.get("name"))
+                            .and_then(Value::as_str)
+                            .unwrap_or_default()
+                            .to_string(),
+                        description: option
+                            .get("description")
+                            .and_then(Value::as_str)
+                            .unwrap_or_default()
+                            .to_string(),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default(),
+        // Not offered: their question says nothing about picking more than one.
+        multi_select: false,
+    }
+}
+
+/// The reply to something Codex is blocked on.
+///
+/// `req` is the id the request arrived with, as a string, because that is how
+/// it travelled through the parts in between. A reply carrying anything else
+/// leaves the agent waiting.
+pub fn reply(req: &str, decision: &Decision) -> Option<Value> {
+    let id: u64 = req.parse().ok()?;
+
+    let result = match decision {
+        Decision::Allow => serde_json::json!({ "decision": "accept" }),
+        // Theirs is scoped to the session, which is as far as ours goes too.
+        Decision::AllowAlways => serde_json::json!({ "decision": "acceptForSession" }),
+        // The reason is ours to keep for the transcript: their decision is one
+        // word and carries nowhere to put it.
+        Decision::Deny { .. } => serde_json::json!({ "decision": "decline" }),
+        Decision::Answered { answers } => serde_json::json!({ "answers": answers }),
+    };
+
+    Some(serde_json::json!({ "id": id, "result": result }))
 }
 
 /// What Codex calls a thing, and what Firetower draws for it.
@@ -204,15 +268,23 @@ impl CodexNormaliser {
             return Vec::new();
         };
 
-        // An answer to something we sent.
-        if let Some(id) = value.get("id").and_then(Value::as_u64) {
-            return self.answer(id, &value);
-        }
-
+        // A method makes it a request or a notification; only a line without
+        // one is an answer to something we sent. Checking the id first would
+        // read every approval request — which carries both — as an answer, and
+        // the agent would wait for a reply nobody was going to send.
         let Some(method) = value.get("method").and_then(Value::as_str) else {
-            return Vec::new();
+            return match value.get("id").and_then(Value::as_u64) {
+                Some(id) => self.answer(id, &value),
+                None => Vec::new(),
+            };
         };
         let params = value.get("params").cloned().unwrap_or(Value::Null);
+
+        // A request expects a reply, keyed by the id it came with. A
+        // notification has none and expects nothing.
+        if let Some(id) = value.get("id").and_then(Value::as_u64) {
+            return self.request(id, method, &params);
+        }
 
         match method {
             "turn/started" => self.turn_started(&params),
@@ -230,6 +302,80 @@ impl CodexNormaliser {
             _ => vec![TurnEvent::Raw {
                 source: RawSource::CodexAppServer,
                 payload: value,
+            }],
+        }
+    }
+
+    /// Something Codex is blocked on and will not pass without an answer.
+    ///
+    /// The id is the whole of the correspondence: whatever is sent back has to
+    /// carry it, or Codex is still waiting on a reply it can recognise.
+    fn request(&mut self, id: u64, method: &str, params: &Value) -> Vec<TurnEvent> {
+        let req = RequestId::new(id.to_string());
+        let text = |name: &str| params.get(name).and_then(Value::as_str).unwrap_or_default();
+
+        match method {
+            "item/commandExecution/requestApproval" => {
+                let command = text("command");
+                let detail = if command.is_empty() {
+                    "wants to run a command".to_string()
+                } else {
+                    command.to_string()
+                };
+                vec![TurnEvent::RequestOpened {
+                    req,
+                    kind: RequestKind::CommandExecution,
+                    detail,
+                    args: params.clone(),
+                }]
+            }
+            "item/fileChange/requestApproval" => {
+                let reason = text("reason");
+                let detail = if reason.is_empty() {
+                    "wants to change files".to_string()
+                } else {
+                    reason.to_string()
+                };
+                vec![TurnEvent::RequestOpened {
+                    req,
+                    kind: RequestKind::FileChange,
+                    detail,
+                    args: params.clone(),
+                }]
+            }
+            "item/tool/requestUserInput" => {
+                let questions = params
+                    .get("questions")
+                    .and_then(Value::as_array)
+                    .map(|asked| asked.iter().map(question).collect())
+                    .unwrap_or_default();
+                vec![TurnEvent::UserInputRequested { req, questions }]
+            }
+            // A tool asking for a permission, a server asking to elicit
+            // something. Both are "the agent is blocked and a person decides",
+            // which is one card.
+            "item/permissions/requestApproval" | "mcpServer/elicitation/request" => {
+                let reason = text("reason");
+                let detail = if reason.is_empty() {
+                    "wants permission".to_string()
+                } else {
+                    reason.to_string()
+                };
+                vec![TurnEvent::RequestOpened {
+                    req,
+                    kind: RequestKind::Tool,
+                    detail,
+                    args: params.clone(),
+                }]
+            }
+            // A request we have no card for still has to be visible: an agent
+            // silently waiting on one is a session that has stopped for no
+            // reason anybody can see.
+            _ => vec![TurnEvent::RequestOpened {
+                req,
+                kind: RequestKind::Tool,
+                detail: method.to_string(),
+                args: params.clone(),
             }],
         }
     }
@@ -555,6 +701,79 @@ mod tests {
     #[test]
     fn a_line_that_is_not_json_is_ignored_rather_than_fatal() {
         assert!(events(&["thread 'main' panicked at src/main.rs:1"]).is_empty());
+    }
+
+    /// A request carries an id *and* a method. Reading the id first made every
+    /// approval look like an answer to something we sent, and the agent would
+    /// wait forever for a reply nobody was going to write.
+    #[test]
+    fn an_approval_request_is_not_mistaken_for_an_answer() {
+        let mut reader = CodexNormaliser::new();
+        reader.sent_thread_start(THREAD_START_ID);
+
+        let seen = reader.push(
+            r#"{"id":41,"method":"item/commandExecution/requestApproval","params":{"command":"rm -rf build","itemId":"i1","threadId":"t","turnId":"u","startedAtMs":0}}"#,
+        );
+
+        match seen.first() {
+            Some(TurnEvent::RequestOpened {
+                req, kind, detail, ..
+            }) => {
+                assert_eq!(req.as_str(), "41", "the reply is keyed by this");
+                assert_eq!(*kind, RequestKind::CommandExecution);
+                assert_eq!(detail, "rm -rf build");
+            }
+            other => panic!("expected a request, got {other:?}"),
+        }
+    }
+
+    /// A request nothing recognises still has to be visible: an agent silently
+    /// waiting on one is a session stopped for no reason anybody can see.
+    #[test]
+    fn a_request_we_have_no_card_for_still_opens_one() {
+        let seen = events(&[r#"{"id":9,"method":"some/newApproval","params":{}}"#]);
+        assert!(matches!(
+            seen.first(),
+            Some(TurnEvent::RequestOpened { .. })
+        ));
+    }
+
+    #[test]
+    fn a_decision_goes_back_under_the_id_it_arrived_with() {
+        let allow = reply("41", &Decision::Allow).unwrap();
+        assert_eq!(allow["id"], 41);
+        assert_eq!(allow["result"]["decision"], "accept");
+
+        let always = reply("41", &Decision::AllowAlways).unwrap();
+        assert_eq!(always["result"]["decision"], "acceptForSession");
+
+        let no = reply(
+            "41",
+            &Decision::Deny {
+                reason: Some("not that one".into()),
+            },
+        )
+        .unwrap();
+        assert_eq!(no["result"]["decision"], "decline");
+
+        // An id that is not a number is not one of ours, and inventing a reply
+        // for it would answer a question nobody asked.
+        assert!(reply("mcp-tool-call-7", &Decision::Allow).is_none());
+    }
+
+    #[test]
+    fn a_question_keeps_the_words_the_answer_is_keyed_by() {
+        let seen = events(&[
+            r#"{"id":5,"method":"item/tool/requestUserInput","params":{"itemId":"i","threadId":"t","turnId":"u","isBlocking":true,"questions":[{"id":"q1","header":"Deploy","question":"Which environment?","options":[{"label":"staging","description":"safe"},{"label":"production","description":"not"}]}]}}"#,
+        ]);
+        match seen.first() {
+            Some(TurnEvent::UserInputRequested { questions, .. }) => {
+                assert_eq!(questions[0].question, "Which environment?");
+                assert_eq!(questions[0].header, "Deploy");
+                assert_eq!(questions[0].options[1].label, "production");
+            }
+            other => panic!("expected questions, got {other:?}"),
+        }
     }
 
     /// Codex sends reasoning as a completed item rather than as a stream, so

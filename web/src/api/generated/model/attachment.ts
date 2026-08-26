@@ -6,6 +6,20 @@
  * OpenAPI spec version: 0.11.0
  */
 
+/**
+ * A denial, said in a way the agent will act on rather than distrust.
+ *
+ * The reason is attributed rather than stated. A tool result that simply says
+ * "call it pear.txt instead" reads to an agent exactly like an instruction
+ * smuggled into data, and a good one refuses it — one did, in testing, and
+ * reported the redirection as a prompt injection attempt instead of following
+ * it. Which is correct behaviour, and the reason this wrapping exists: the
+ * sentence really is from the person watching, so it should say so.
+ *
+ * It does not make the agent obey. It makes an instruction from a person
+ * distinguishable from one that arrived in a tool's output, which is the only
+ * thing we can honestly offer.
+ */
 export interface Attachment {
   /** The bytes, base64. */
   data: string;

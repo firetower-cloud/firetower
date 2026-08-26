@@ -86,6 +86,13 @@ struct Read {
     /// Codex needs a conversation opened before it can be given any work, and
     /// the step after each answer is decided here.
     send: Vec<serde_json::Value>,
+    /// What the agent has stopped for.
+    ///
+    /// Claude Code asks through a tool it starts itself, so its questions
+    /// arrive as their own frame and never through here. Codex asks down the
+    /// same pipe it says everything else on, which makes a line the only thing
+    /// that can report it.
+    asks: Vec<AgentSpeech>,
 }
 
 /// One session's lines, read for what they say about the session.
@@ -142,6 +149,7 @@ impl Progress {
         use ft_core::turn::{StreamKind, TurnEvent as E, TurnStatus};
 
         let mut moved = None;
+        let mut asks = Vec::new();
         for event in self.reader.push(line) {
             match event {
                 // Assistant text only. A tool's output is not the agent
@@ -169,8 +177,25 @@ impl Progress {
                         _ => (SessionStatus::HandedBack, note),
                     });
                 }
-                E::RequestOpened { detail, args, .. } => {
-                    moved = Some((SessionStatus::NeedsYou, Some(asking_about(&detail, &args))));
+                // Not `moved`: what a blocked session does — record it,
+                // announce it, tell somebody — is one thing done in one place,
+                // and doing half of it here would write the status twice.
+                E::RequestOpened {
+                    req, detail, args, ..
+                } => {
+                    asks.push(AgentSpeech::Asks {
+                        req: req.to_string(),
+                        tool_name: detail,
+                        input: args,
+                    });
+                }
+                E::UserInputRequested { req, questions } => {
+                    let input = serde_json::json!({ "questions": questions });
+                    asks.push(AgentSpeech::Asks {
+                        req: req.to_string(),
+                        tool_name: "AskUserQuestion".into(),
+                        input,
+                    });
                 }
                 _ => {}
             }
@@ -188,7 +213,7 @@ impl Progress {
             self.opening_prompt = None;
         }
 
-        Read { moved, send }
+        Read { moved, send, asks }
     }
 
     /// One message for this agent, carrying what somebody typed.
@@ -281,6 +306,71 @@ async fn describe(fleet: &Fleet, db: &Db, host_id: &HostId, session_id: &Session
         .await
     {
         tracing::warn!(session = %session_id, "could not keep the proposal: {e:#}");
+    }
+}
+
+/// Record that a session has stopped for somebody, and say so.
+///
+/// Two things arrive at this: an agent that asks through a tool of its own —
+/// its own frame — and one that asks down the pipe it says everything else on,
+/// which reaches us as a line. Same question either way, and a browser opening
+/// afterwards has to find it whichever way it came.
+async fn blocked(
+    db: &Db,
+    notify: &crate::notify::Notifier,
+    asked: &Arc<RwLock<HashMap<String, Vec<AgentSpeech>>>>,
+    conversations: &Arc<RwLock<HashMap<String, broadcast::Sender<AgentSpeech>>>>,
+    session_id: &SessionId,
+    question: AgentSpeech,
+) {
+    let AgentSpeech::Asks {
+        req,
+        tool_name,
+        input,
+    } = &question
+    else {
+        return;
+    };
+
+    // Kept before it is announced, so a browser that opens a moment later
+    // still finds it.
+    let news = {
+        let mut held = asked.write().await;
+        let waiting = held.entry(session_id.to_string()).or_default();
+        let known = waiting
+            .iter()
+            .any(|q| matches!(q, AgentSpeech::Asks { req: seen, .. } if seen == req));
+        if !known {
+            waiting.push(question.clone());
+        }
+        !known
+    };
+
+    // A permission prompt is never in a transcript — the agent is blocked, not
+    // talking — so this is the only thing that can say the session stopped.
+    let note = asking_about(tool_name, input);
+    if let Err(e) = db
+        .set_session_state(session_id, SessionStatus::NeedsYou, Some(&note))
+        .await
+    {
+        tracing::warn!(session = %session_id, "marking as waiting: {e:#}");
+    }
+
+    // `news` alone, and deliberately. A watcher attaching re-announces
+    // everything the agent is blocked on, which is right for drawing it and
+    // wrong for telling somebody — but a re-announced question carries a
+    // request id we have already seen, so `news` is false and it stays quiet.
+    //
+    // This used to also require that the session was not already resting,
+    // which swallowed a second question asked while the first was unanswered:
+    // the card changed and the phone did not.
+    tracing::debug!(session = %session_id, news, "deciding whether to notify");
+    if news {
+        tell(db, notify, session_id, Some(&note)).await;
+    }
+
+    if let Some(tx) = conversations.read().await.get(session_id.as_str()) {
+        let _ = tx.send(question);
     }
 }
 
@@ -1074,6 +1164,17 @@ impl Fleet {
                                 }
                             }
 
+                            // A question Codex asked reaches us as a line and
+                            // has to land where one asked through a tool of
+                            // its own does, or the browser shows a session
+                            // that stopped for no visible reason.
+                            for question in read.asks {
+                                blocked(
+                                    &db, &notify, &asked, &conversations,
+                                    &session_id, question,
+                                ).await;
+                            }
+
                             if let Some((status, note)) = read.moved {
                                 let was_waiting = db
                                     .session_status(&session_id)
@@ -1115,51 +1216,10 @@ impl Fleet {
                             }
                         }
                         Ok(ToServer::AgentAsks { session_id, req, tool_name, input }) => {
-                            let input_for_note = input.clone();
-                            let question = AgentSpeech::Asks { req: req.clone(), tool_name: tool_name.clone(), input };
-
-                            // Kept before it is announced, so a browser that
-                            // opens a moment later still finds it.
-                            let news = {
-                                let mut held = asked.write().await;
-                                let waiting = held.entry(session_id.to_string()).or_default();
-                                let known = waiting.iter().any(|q| matches!(q, AgentSpeech::Asks { req: seen, .. } if *seen == req));
-                                if !known {
-                                    waiting.push(question.clone());
-                                }
-                                !known
-                            };
-
-                            // A permission prompt is never in the log — the
-                            // agent is blocked, not talking — so this frame is
-                            // the only thing that can say the session stopped.
-                            let note = asking_about(&tool_name, &input_for_note);
-                            if let Err(e) = db
-                                .set_session_state(&session_id, SessionStatus::NeedsYou, Some(&note))
-                                .await
-                            {
-                                tracing::warn!(session = %session_id, "marking as waiting: {e:#}");
-                            }
-
-                            // `news` alone, and deliberately. A watcher
-                            // attaching re-announces everything the agent is
-                            // blocked on, which is right for drawing it and
-                            // wrong for telling somebody — but a re-announced
-                            // question carries a request id we have already
-                            // seen, so `news` is false and it stays quiet.
-                            //
-                            // This used to also require that the session was
-                            // not already resting, which swallowed a second
-                            // question asked while the first was unanswered:
-                            // the card changed and the phone did not.
-                            tracing::debug!(session = %session_id, news, "deciding whether to notify");
-                            if news {
-                                tell(&db, &notify, &session_id, Some(&note)).await;
-                            }
-
-                            if let Some(tx) = conversations.read().await.get(session_id.as_str()) {
-                                let _ = tx.send(question);
-                            }
+                            blocked(
+                                &db, &notify, &asked, &conversations, &session_id,
+                                AgentSpeech::Asks { req, tool_name, input },
+                            ).await;
                         }
                         Ok(ToServer::AgentClosed { session_id }) => {
                             asked.write().await.remove(session_id.as_str());
@@ -1608,7 +1668,7 @@ impl Fleet {
         host_id: &HostId,
         session_id: &SessionId,
         req: String,
-        result: serde_json::Value,
+        decision: &ft_core::turn::Decision,
     ) -> Result<()> {
         // Forgotten here rather than when the agent acknowledges, because it
         // does not acknowledge — it simply carries on, and the next thing it
@@ -1633,15 +1693,35 @@ impl Fleet {
             }
         }
 
-        self.send(
-            host_id,
+        // Which shape an answer takes is the agent's, and which agent this is
+        // is the reader's to know. Claude Code is answering a tool it started
+        // itself, over a socket of its own; Codex is answering a request that
+        // came down the same pipe everything else does.
+        self.ensure_reader(session_id).await;
+        let codex = {
+            let readers = self.progress.read().await;
+            matches!(
+                readers.get(session_id.as_str()).map(|p| &p.reader),
+                Some(ft_core::normalise::Reader::Codex(_))
+            )
+        };
+
+        let frame = if codex {
+            let message = ft_core::codex::reply(&req, decision)
+                .with_context(|| format!("{req} is not a request Codex is waiting on"))?;
+            ToWorker::SendTurn {
+                session_id: session_id.clone(),
+                message,
+            }
+        } else {
             ToWorker::Answer {
                 session_id: session_id.clone(),
                 req,
-                result,
-            },
-        )
-        .await
+                result: ft_core::turn::permission_result(decision),
+            }
+        };
+
+        self.send(host_id, frame).await
     }
 
     /// Make sure this session has a reader, built for the agent it runs.

@@ -342,49 +342,11 @@ pub(super) async fn answer_request(
 
     state
         .fleet
-        .answer(&host, &id, answer.req, permission_result(&answer.decision))
+        .answer(&host, &id, answer.req, &answer.decision)
         .await
         .map_err(|e| ApiError::new(ErrorCode::HostUnreachable, format!("{e:#}")))?;
 
     Ok(Json(Sent { sent: true }))
-}
-
-/// A decision, in the shape the agent reads.
-///
-/// Verified against a real run rather than inferred. `updatedInput` is required
-/// on an allow — an older agent rejected an allow without one and denied the
-/// call with a validation error — and `null` means "unchanged", which is what
-/// we always want: Firetower shows a command, it does not rewrite one.
-fn permission_result(decision: &ft_core::turn::Decision) -> serde_json::Value {
-    use ft_core::turn::Decision;
-    match decision {
-        Decision::Allow => serde_json::json!({
-            "behavior": "allow",
-            "updatedInput": serde_json::Value::Null,
-        }),
-        // The second half of "always" is not something the agent is told. The
-        // callback its own SDK offers a host arrives with ready-made rules to
-        // hand back; the tool call this arrives through does not carry them, so
-        // the far end writes the rule into the workspace instead. This flag is
-        // how it knows to, and it is taken back off before the agent sees any
-        // of it.
-        Decision::AllowAlways => serde_json::json!({
-            "behavior": "allow",
-            "updatedInput": serde_json::Value::Null,
-            "firetowerAlways": true,
-        }),
-        Decision::Deny { reason } => serde_json::json!({
-            "behavior": "deny",
-            "message": denial(reason.as_deref()),
-        }),
-        // An answer is an allow that carries something. The questions it
-        // answers are filled in at the far end, which is the only place that
-        // reliably still has them.
-        Decision::Answered { answers } => serde_json::json!({
-            "behavior": "allow",
-            "updatedInput": { "answers": answers },
-        }),
-    }
 }
 
 /// What the agent has stopped for, as the interface should draw it.
@@ -440,13 +402,6 @@ fn wanted(req: String, tool_name: String, input: serde_json::Value) -> TurnEvent
 /// It does not make the agent obey. It makes an instruction from a person
 /// distinguishable from one that arrived in a tool's output, which is the only
 /// thing we can honestly offer.
-fn denial(reason: Option<&str>) -> String {
-    match reason.map(str::trim).filter(|r| !r.is_empty()) {
-        Some(reason) => format!("The person watching this session denied this and said: {reason}"),
-        None => "The person watching this session denied this.".into(),
-    }
-}
-
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Attachment {

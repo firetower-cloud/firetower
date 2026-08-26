@@ -476,6 +476,50 @@ pub struct Attached {
 /// Here rather than in the worker because it is a value, and because the
 /// control plane builds one too — the worker forwards turns, it does not
 /// author them.
+/// A decision, in the shape the agent reads.
+///
+/// Verified against a real run rather than inferred. `updatedInput` is required
+/// on an allow — an older agent rejected an allow without one and denied the
+/// call with a validation error — and `null` means "unchanged", which is what
+/// we always want: Firetower shows a command, it does not rewrite one.
+pub fn permission_result(decision: &Decision) -> serde_json::Value {
+    match decision {
+        Decision::Allow => serde_json::json!({
+            "behavior": "allow",
+            "updatedInput": serde_json::Value::Null,
+        }),
+        // The second half of "always" is not something the agent is told. The
+        // callback its own SDK offers a host arrives with ready-made rules to
+        // hand back; the tool call this arrives through does not carry them, so
+        // the far end writes the rule into the workspace instead. This flag is
+        // how it knows to, and it is taken back off before the agent sees any
+        // of it.
+        Decision::AllowAlways => serde_json::json!({
+            "behavior": "allow",
+            "updatedInput": serde_json::Value::Null,
+            "firetowerAlways": true,
+        }),
+        Decision::Deny { reason } => serde_json::json!({
+            "behavior": "deny",
+            "message": denial(reason.as_deref()),
+        }),
+        // An answer is an allow that carries something. The questions it
+        // answers are filled in at the far end, which is the only place that
+        // reliably still has them.
+        Decision::Answered { answers } => serde_json::json!({
+            "behavior": "allow",
+            "updatedInput": { "answers": answers },
+        }),
+    }
+}
+
+fn denial(reason: Option<&str>) -> String {
+    match reason.map(str::trim).filter(|r| !r.is_empty()) {
+        Some(reason) => format!("The person watching this session denied this and said: {reason}"),
+        None => "The person watching this session denied this.".into(),
+    }
+}
+
 pub fn user_message(text: &str) -> serde_json::Value {
     user_message_with(text, &[])
 }
