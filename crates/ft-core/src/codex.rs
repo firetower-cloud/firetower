@@ -60,7 +60,20 @@ pub fn opening(cwd: &str) -> Vec<Value> {
         serde_json::json!({
             "id": THREAD_START_ID,
             "method": "thread/start",
-            "params": { "cwd": cwd },
+            "params": {
+                "cwd": cwd,
+                // A session here is unattended by construction, so an agent
+                // that stops to ask *may I run this* stops for somebody who is
+                // not there. Confined instead of interrogated: it may do what
+                // it likes inside the workspace and nothing outside it.
+                //
+                // Narrower than what a person at a keyboard gets, and it is
+                // what Claude Code's own unattended mode does for the same
+                // reason. Routing these to the card that already exists is
+                // the next thing, and this line is what it replaces.
+                "approvalPolicy": "never",
+                "sandbox": "workspace-write",
+            },
         }),
     ]
 }
