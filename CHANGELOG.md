@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.13.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.12.0...firetower-v0.13.0) (2026-08-27)
+
+
+### Features
+
+* **codex:** confine the agent rather than interrogate it ([cd115bf](https://github.com/firetower-cloud/firetower/commit/cd115bfa5e5df5631eaed22f3587a0fa1b463f5d))
+* **codex:** route what it stops for to the card that exists ([8a0e7ef](https://github.com/firetower-cloud/firetower/commit/8a0e7efe3706b4c2c0d87e2897db9b73337bff27))
+* **codex:** stop a turn, and survive a restart ([3b25884](https://github.com/firetower-cloud/firetower/commit/3b25884f8858e521e81874734cc7866d2c4437a2))
+* **codex:** what a turn cost, and how much of the plan is left ([28bc778](https://github.com/firetower-cloud/firetower/commit/28bc778f2b1d9d23f1fd73ce852069dfb8dfe203))
+* connect Codex from the browser ([d5fed03](https://github.com/firetower-cloud/firetower/commit/d5fed030bfa0fbf864eb1a23b82c1bd932de75b3))
+* drive Codex ([83633f7](https://github.com/firetower-cloud/firetower/commit/83633f71550a20d223a7773c5f05c154c9757016))
+* hand Codex its credential per session ([48ff8c4](https://github.com/firetower-cloud/firetower/commit/48ff8c41e69a32b4634f1c82b8044b7dc44ea834))
+* the session controls belong to the agent, not the browser ([5469f6a](https://github.com/firetower-cloud/firetower/commit/5469f6a97b8d9b765f1d68f59f8c9094cf38a498))
+* **worker:** sign Codex in with a device code ([dec2666](https://github.com/firetower-cloud/firetower/commit/dec2666fa8894850f51da1eaabef99fbeeea70fb))
+
+
+### Bug Fixes
+
+* **codex:** open the conversation one message at a time ([37fce05](https://github.com/firetower-cloud/firetower/commit/37fce059a3eed2d77c6d047e5fef6022930798de))
+* **codex:** put the words in the bubble ([2b93dcc](https://github.com/firetower-cloud/firetower/commit/2b93dcc444f45cab90506a6acd6420000e371850))
+* **codex:** read the thread id from where it actually is ([4a5cba7](https://github.com/firetower-cloud/firetower/commit/4a5cba7db655a9bdc8127cc2dce4285d31794887))
+* **codex:** show what the session is actually running ([ad980a4](https://github.com/firetower-cloud/firetower/commit/ad980a493620823baddf6a7256e53f091b228f73))
+* **server:** a clean lint ([be1a657](https://github.com/firetower-cloud/firetower/commit/be1a6573c1b760c6ecb1f41dcae52667ecec4bf3))
+* stop forwarding every line twice ([65b7ef2](https://github.com/firetower-cloud/firetower/commit/65b7ef2a1be10c7d90114730f0ce9bf4d1ddc66d))
+* **web:** let Codex be connected before it can be driven ([1cded9f](https://github.com/firetower-cloud/firetower/commit/1cded9fd8839c303bf1810fb39c1678349b69a20))
+* **worker:** a dead watcher was holding the slot ([d597774](https://github.com/firetower-cloud/firetower/commit/d597774b0a7bf94ba925329ab84b1dc420a97d65))
+* **worker:** sweep sign-ins nobody finished ([18ea846](https://github.com/firetower-cloud/firetower/commit/18ea8464d85077af709cb99139ba11fe7c6c483b))
+
 ## [0.12.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.11.0...firetower-v0.12.0) (2026-08-25)
 
 
