@@ -1395,10 +1395,21 @@ You are in the directory that holds them, not inside one of them.              P
             // for another it is a handshake with the prompt still to come. The
             // shapes belong to the control plane; this only puts them on the
             // wire, in order, before anybody watches.
+            // One at a time, and a request is answered before the next goes
+            // out. An app-server refuses everything with "Not initialized"
+            // until it has finished starting, and a burst loses that race on a
+            // machine that is busy — which is every machine, sometimes.
             for message in spec.agent.opening(&spec.prompt, &path.to_string_lossy()) {
+                let awaiting = message.get("id").and_then(serde_json::Value::as_u64);
                 structured::tell(&id, &agentd::ToAgent::Send { message })
                     .await
                     .context("opening the conversation")?;
+
+                if let Some(req) = awaiting {
+                    structured::wait_for_answer(&path, req)
+                        .await
+                        .context("opening the conversation")?;
+                }
             }
 
             // Start forwarding now rather than when somebody opens the session.

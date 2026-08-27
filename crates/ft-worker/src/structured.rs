@@ -79,6 +79,47 @@ pub async fn wait_until_listening(session_id: &SessionId) -> Result<()> {
     }
 }
 
+/// Wait until the agent has answered the request with this id.
+///
+/// An opening is a conversation, not a burst: an app-server refuses everything
+/// with "Not initialized" until it has finished starting, and what it refuses
+/// it does not come back to. Sending the next request only once the last has
+/// been answered is the difference between a session that starts and one that
+/// sits there.
+///
+/// Read from the log rather than from a socket because the log is where every
+/// line already lands, written and flushed before anybody is offered it — so
+/// there is no window in which an answer arrives and nothing sees it.
+pub async fn wait_for_answer(workspace: &Path, id: u64) -> Result<()> {
+    let log = crate::agentd::log_path(workspace);
+    let deadline = std::time::Instant::now() + STARTUP;
+
+    loop {
+        if let Ok(text) = tokio::fs::read_to_string(&log).await {
+            for line in text.lines() {
+                let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
+                    continue;
+                };
+                // A request carries both; only an answer carries an id alone.
+                if value.get("method").is_some() {
+                    continue;
+                }
+                if value.get("id").and_then(serde_json::Value::as_u64) == Some(id) {
+                    return Ok(());
+                }
+            }
+        }
+
+        if std::time::Instant::now() >= deadline {
+            anyhow::bail!(
+                "the agent did not answer request {id} within {}s",
+                STARTUP.as_secs()
+            );
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+}
+
 /// Send one frame to a running agent and hang up.
 ///
 /// A new connection per message on purpose. These are rare — somebody typing —
@@ -166,6 +207,43 @@ mod tests {
         assert!(command.contains("'/opt/my worker/firetower-worker'"));
         assert!(command.contains("'/tmp/some workspace'"));
         assert!(command.contains("--agent 'ClaudeCode'"));
+    }
+
+    /// A request carries an id *and* a method; only an answer carries an id
+    /// alone. Reading a request as the answer to itself would let the opening
+    /// run on before the agent was ready, which is the bug this exists for.
+    #[tokio::test]
+    async fn an_answer_is_told_from_a_request_that_shares_its_id() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let workspace = dir.path();
+        tokio::fs::create_dir_all(crate::agentd::dir_for(workspace))
+            .await
+            .unwrap();
+
+        let log = crate::agentd::log_path(workspace);
+        tokio::fs::write(
+            &log,
+            concat!(
+                // Something it asked us, which happens to carry the same id.
+                r#"{"id":1,"method":"item/commandExecution/requestApproval","params":{}}"#,
+                "\n",
+            ),
+        )
+        .await
+        .unwrap();
+
+        let waited =
+            tokio::time::timeout(Duration::from_millis(150), wait_for_answer(workspace, 1)).await;
+        assert!(waited.is_err(), "a request is not an answer to itself");
+
+        // And the real answer ends it.
+        tokio::fs::write(&log, "{\"id\":1,\"result\":{}}\n")
+            .await
+            .unwrap();
+        tokio::time::timeout(Duration::from_secs(2), wait_for_answer(workspace, 1))
+            .await
+            .expect("should not have timed out")
+            .expect("the answer is there");
     }
 
     #[tokio::test]

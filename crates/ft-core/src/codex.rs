@@ -154,6 +154,9 @@ pub fn opening(cwd: &str) -> Vec<Value> {
                 }
             },
         }),
+        // Their one client notification, and the protocol says to send it.
+        // Not sending it was tolerated; nothing is gained by continuing to.
+        serde_json::json!({ "method": "initialized" }),
         model_list(),
         serde_json::json!({
             "id": THREAD_START_ID,
