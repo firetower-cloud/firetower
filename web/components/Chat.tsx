@@ -74,6 +74,17 @@ export function Chat({
   const choose = useChooseControl();
   /** Clicked, and not yet confirmed by the server or by the agent. */
   const [chosen, setChosen] = useState<Record<string, string | undefined>>({});
+
+  // What a session can be asked to change is not known when it opens: an
+  // agent that lists its own models answers a moment later, and the pickers
+  // are drawn from that answer. Saying which model it is running is the same
+  // moment, so it is the signal to ask again — without it the model picker
+  // never appears at all on the session that just started.
+  const running = conversation.model;
+  const askAgain = controls.refetch;
+  useEffect(() => {
+    if (live) askAgain();
+  }, [running, live, askAgain]);
   const foot = useRef<HTMLDivElement>(null);
   /** Off while somebody has scrolled up to read something. */
   const following = useRef(true);

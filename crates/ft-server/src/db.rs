@@ -1126,13 +1126,19 @@ impl Db {
     /// Idempotent because a worker replays from a cursor after a reconnect, so
     /// the same line arriving twice is ordinary. Its own numbering is the key,
     /// not an identity of ours: both ends have to agree on what has been seen.
+    /// Keep a line, and say whether it was new.
+    ///
+    /// `false` means we already had it, which is the only signal anything has
+    /// that a line arrived twice — two forwarders on one session store one row
+    /// and would otherwise announce it twice, which reaches a browser as every
+    /// word written twice.
     pub async fn record_agent_line(
         &self,
         session_id: &SessionId,
         line_no: i64,
         line: &str,
-    ) -> Result<()> {
-        sqlx::query(
+    ) -> Result<bool> {
+        let stored = sqlx::query(
             "INSERT INTO agent_lines (session_id, line_no, line)
              VALUES ($1, $2, $3)
              ON CONFLICT (session_id, line_no) DO NOTHING",
@@ -1142,7 +1148,7 @@ impl Db {
         .bind(line)
         .execute(&self.pool)
         .await?;
-        Ok(())
+        Ok(stored.rows_affected() > 0)
     }
 
     /// Remember where a session's pull request is.

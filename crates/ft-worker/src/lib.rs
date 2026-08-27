@@ -530,26 +530,7 @@ impl Worker {
                 session_id,
                 since_line,
             } => {
-                let key = session_id.to_string();
-                let mut watching = self.watching.lock().await;
-                // Already forwarding. A second watcher would double every line,
-                // and the one that exists is already at or ahead of this
-                // cursor.
-                let out = out.clone();
-                let id = session_id.clone();
-                watching.entry(key).or_insert_with(move || {
-                    tokio::spawn(async move {
-                        if let Err(e) = structured::watch(id.clone(), since_line, out.clone()).await
-                        {
-                            // Ordinary rather than exceptional: a session
-                            // running in a terminal has no agent to watch, and
-                            // the control plane asks about all of them rather
-                            // than remembering which is which.
-                            tracing::debug!(session = %id, "no conversation to follow: {e:#}");
-                            let _ = out.send(ToServer::AgentClosed { session_id: id }).await;
-                        }
-                    })
-                });
+                self.watch_agent(&session_id, since_line, out).await;
             }
 
             ToWorker::UnwatchAgent { session_id } => {
@@ -1154,6 +1135,48 @@ You are in the directory that holds them, not inside one of them.              P
     ///
     /// The narration is the point: it's what the interface shows while you wait,
     /// and what tells you *where* it broke when it breaks.
+    /// Start forwarding what a session's agent says, if nothing already is.
+    ///
+    /// One place, because there are two reasons to start: a session that has
+    /// just been built, and a control plane reconnecting and asking about
+    /// everything still running. Both can happen at once — building one now
+    /// waits for the agent to answer its handshake, which is a wide enough
+    /// window for a reconnect to land in the middle of it.
+    ///
+    /// A second watcher would forward every line twice. The control plane
+    /// stores a line once whatever happens, so the duplicate is invisible
+    /// there and arrives in a browser as every word written twice.
+    async fn watch_agent(
+        &self,
+        session_id: &SessionId,
+        since_line: u64,
+        out: &mpsc::Sender<ToServer>,
+    ) {
+        let mut watching = self.watching.lock().await;
+        // Already forwarding, and the one that exists is at or ahead of this
+        // cursor. `insert` here would drop a handle without stopping the task
+        // behind it, which is how two of them end up running.
+        if watching.contains_key(session_id.as_str()) {
+            return;
+        }
+
+        let out = out.clone();
+        let id = session_id.clone();
+        watching.insert(
+            session_id.to_string(),
+            tokio::spawn(async move {
+                if let Err(e) = structured::watch(id.clone(), since_line, out.clone()).await {
+                    // Ordinary rather than exceptional: a session running in a
+                    // terminal has no agent to watch, and the control plane
+                    // asks about all of them rather than remembering which is
+                    // which.
+                    tracing::debug!(session = %id, "no conversation to follow: {e:#}");
+                    let _ = out.send(ToServer::AgentClosed { session_id: id }).await;
+                }
+            }),
+        );
+    }
+
     async fn create_workspace(
         &self,
         spec: CreateWorkspace,
@@ -1416,16 +1439,7 @@ You are in the directory that holds them, not inside one of them.              P
             // What the agent says is how the control plane learns that it
             // finished, or stopped to ask something — and a session nobody is
             // watching is exactly the one that most needs to be able to say so.
-            let watcher = out.clone();
-            let watched = id.clone();
-            self.watching.lock().await.insert(
-                id.to_string(),
-                tokio::spawn(async move {
-                    if let Err(e) = structured::watch(watched.clone(), 0, watcher).await {
-                        tracing::warn!(session = %watched, "following the agent: {e:#}");
-                    }
-                }),
-            );
+            self.watch_agent(&id, 0, out).await;
         }
 
         self.store.set_status(&id, SessionStatus::Working).await?;

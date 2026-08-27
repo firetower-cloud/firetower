@@ -1249,9 +1249,20 @@ impl Fleet {
                             // arrives a moment later replays from the table, so
                             // a line that was announced but not yet written
                             // would be one nobody ever sees again.
-                            if let Err(e) = db.record_agent_line(&session_id, line_no as i64, &line).await {
-                                tracing::error!(session = %session_id, "recording a line: {e:#}");
-                                continue;
+                            match db.record_agent_line(&session_id, line_no as i64, &line).await {
+                                Err(e) => {
+                                    tracing::error!(session = %session_id, "recording a line: {e:#}");
+                                    continue;
+                                }
+                                // We already had it. Reading it again would
+                                // move the session on a turn that already
+                                // happened, and announcing it again reaches a
+                                // browser as every word written twice.
+                                Ok(false) => {
+                                    tracing::debug!(session = %session_id, line_no, "a line arrived twice");
+                                    continue;
+                                }
+                                Ok(true) => {}
                             }
                             // What this line means for the session, before it
                             // means anything to a screen. This is the only
