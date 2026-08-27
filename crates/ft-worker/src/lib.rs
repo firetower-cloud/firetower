@@ -1153,11 +1153,20 @@ You are in the directory that holds them, not inside one of them.              P
         out: &mpsc::Sender<ToServer>,
     ) {
         let mut watching = self.watching.lock().await;
+
         // Already forwarding, and the one that exists is at or ahead of this
         // cursor. `insert` here would drop a handle without stopping the task
         // behind it, which is how two of them end up running.
-        if watching.contains_key(session_id.as_str()) {
-            return;
+        //
+        // *Running*, not merely present. A watcher started before the agent
+        // was listening fails at once and leaves its entry behind; treating
+        // that as "something is watching" means nothing ever does, and the
+        // control plane hears not one word of a session that ran perfectly.
+        if let Some(existing) = watching.get(session_id.as_str()) {
+            if !existing.is_finished() {
+                return;
+            }
+            watching.remove(session_id.as_str());
         }
 
         let out = out.clone();
@@ -2020,6 +2029,66 @@ async fn write_agent_home(home: &std::path::Path, files: &[(String, String)]) ->
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod watcher_tests {
+    use super::*;
+
+    /// Whether a watcher was actually started, judged by what it did rather
+    /// than by what is in the map: one with no agent to watch says so, and one
+    /// that was never started says nothing at all.
+    async fn started(out: &mut mpsc::Receiver<ToServer>) -> bool {
+        tokio::time::timeout(std::time::Duration::from_millis(500), out.recv())
+            .await
+            .is_ok()
+    }
+
+    /// Two forwarders on one session send every line twice, and the control
+    /// plane cannot tell — it stores one row either way, so it arrives in a
+    /// browser as every word written twice.
+    #[tokio::test]
+    async fn a_second_watcher_is_refused_while_the_first_is_running() {
+        let dir = tempfile::tempdir().unwrap();
+        let worker = Worker::open(dir.path()).await.unwrap();
+        let (out, mut heard) = mpsc::channel(8);
+        let id = SessionId::from_stored("s_01watch");
+
+        // Something that does not finish, standing in for a live watcher.
+        worker.watching.lock().await.insert(
+            id.to_string(),
+            tokio::spawn(async { std::future::pending::<()>().await }),
+        );
+
+        worker.watch_agent(&id, 0, &out).await;
+        assert!(
+            !started(&mut heard).await,
+            "a second watcher started beside a running one"
+        );
+    }
+
+    /// And the other way round, which cost a whole session: a watcher started
+    /// before the agent was listening fails at once, and its leftover entry
+    /// must not stop a real one starting. Treating it as alive meant the
+    /// control plane heard not one word of a session that ran perfectly.
+    #[tokio::test]
+    async fn a_watcher_that_already_died_does_not_hold_the_slot() {
+        let dir = tempfile::tempdir().unwrap();
+        let worker = Worker::open(dir.path()).await.unwrap();
+        let (out, mut heard) = mpsc::channel(8);
+        let id = SessionId::from_stored("s_01dead");
+
+        let over = tokio::spawn(async {});
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        assert!(over.is_finished(), "the stand-in has to be over");
+        worker.watching.lock().await.insert(id.to_string(), over);
+
+        worker.watch_agent(&id, 0, &out).await;
+        assert!(
+            started(&mut heard).await,
+            "a dead entry stopped a real watcher from starting"
+        );
+    }
 }
 
 #[cfg(test)]
