@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
 pub mod codex;
+pub mod controls;
 pub mod dotenv;
 mod ids;
 pub mod normalise;

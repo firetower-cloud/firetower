@@ -7,6 +7,10 @@ import {
   useAnswerRequest,
 } from "@/src/api/generated/sessions/sessions";
 import {
+  useSessionControls,
+  useChooseControl,
+} from "@/src/api/generated/conversation/conversation";
+import {
   useConversation,
   type Asked,
   type Item,
@@ -15,7 +19,7 @@ import {
 } from "@/src/api/conversation";
 import { Markdown } from "@/components/Markdown";
 import { ChatComposer } from "@/components/Composer.chat";
-import { command } from "@/components/Settings.chat";
+import type { Control } from "@/components/Settings.chat";
 import { Annotatable, Drafting, Notes } from "@/components/Annotate";
 import type { Draft } from "@/components/Annotate";
 import { Bringup, type Line } from "@/components/Steps";
@@ -66,6 +70,10 @@ export function Chat({
   const { notes, add, drop, clear } = useNotes(sessionId);
   const send = useSendTurn();
   const interrupt = useInterruptSession();
+  const controls = useSessionControls(sessionId, { query: { enabled: live } });
+  const choose = useChooseControl();
+  /** Clicked, and not yet confirmed by the server or by the agent. */
+  const [chosen, setChosen] = useState<Record<string, string | undefined>>({});
   const foot = useRef<HTMLDivElement>(null);
   /** Off while somebody has scrolled up to read something. */
   const following = useRef(true);
@@ -135,21 +143,46 @@ export function Chat({
   }, [notes.length, sendNotes]);
 
   /**
-   * Change a setting, by saying so to the agent.
+   * Change a setting.
    *
-   * A slash command down the ordinary path — there is no separate control
-   * channel and none is needed. The agent answers with a sentence saying what
-   * it did, which lands in the transcript rather than being swallowed: a
-   * setting that changed silently is one nobody trusts.
+   * What that means belongs to whatever is driving the agent — a slash command
+   * for the one that reads them out of its own input, a parameter on the next
+   * turn for the one that does not. This used to build the command here, which
+   * is what made every Codex session offer Opus and spend a turn saying so.
    */
-  const set = (kind: "model" | "mode" | "effort", value: string) => {
-    // Shown as chosen straight away. The agent restates the model and the mode,
-    // but only at the start of the next turn, so waiting for that reads as the
-    // click not having worked — and `init` overwrites this when it comes, so a
+  const set = (kind: Control["kind"], value: string) => {
+    // Shown as chosen straight away. Claude Code restates the model and the
+    // mode only at the start of the next turn, so waiting for that reads as
+    // the click not having worked — and what comes back overwrites this, so a
     // request that was refused corrects itself.
-    remember(kind, value);
-    send.mutate({ id: sessionId, data: { text: command(kind, value), images: [] } });
+    if (kind === "model" || kind === "mode" || kind === "effort") remember(kind, value);
+    setChosen((was) => ({ ...was, [kind]: value }));
+
+    choose.mutate(
+      { id: sessionId, data: { kind, value } },
+      { onSuccess: () => controls.refetch() },
+    );
   };
+
+  /**
+   * The pickers this session has, with what is in force filled in.
+   *
+   * Two sources, and they answer for different agents. The server knows what
+   * somebody chose for an agent that takes settings as parameters; the
+   * transcript knows what an agent that restates them said. `chosen` is the
+   * click that has not been confirmed by either yet.
+   */
+  const pickers: Control[] = (controls.data ?? []).map((control) => ({
+    ...control,
+    current:
+      chosen[control.kind] ??
+      control.current ??
+      ({
+        model: conversation.model,
+        mode: conversation.mode,
+        effort: conversation.effort,
+      } as Record<string, string | undefined>)[control.kind],
+  }));
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -292,9 +325,7 @@ export function Chat({
           live={live}
           working={conversation.working}
           commands={conversation.commands}
-          model={conversation.model}
-          mode={conversation.mode}
-          effort={conversation.effort}
+          controls={pickers}
           usage={conversation.usage}
           limits={conversation.limits}
           branch={branch}

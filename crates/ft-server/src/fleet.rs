@@ -108,6 +108,9 @@ struct Read {
 /// One session's lines, read for what they say about the session.
 struct Progress {
     reader: ft_core::normalise::Reader,
+    /// Which agent this session runs. Kept because the pickers it has and the
+    /// way a choice is put into force are both facts about it.
+    agent: ft_core::Agent,
     /// Somebody pressed stop, and the turn that ends next is theirs.
     ///
     /// The agent reports an interrupted turn as `error_during_execution`,
@@ -128,6 +131,9 @@ struct Progress {
     /// exists, and the answer that creates one arrives here. Taken rather than
     /// copied, so it is sent once.
     opening_prompt: Option<String>,
+    /// What somebody has chosen for this session, for the agent that takes
+    /// them as parameters rather than as commands.
+    settings: ft_core::codex::Settings,
     /// The next request id to send under.
     ///
     /// Ours to choose and ours to keep distinct: an answer is matched by the
@@ -140,6 +146,7 @@ impl Progress {
     /// A reader for whichever agent this session runs.
     fn for_agent(agent: ft_core::Agent, prompt: String) -> Self {
         Self {
+            agent,
             reader: ft_core::normalise::Reader::for_agent(agent),
             stopped: false,
             said: String::new(),
@@ -150,8 +157,71 @@ impl Progress {
                 ft_core::Agent::Codex => Some(prompt),
                 _ => None,
             },
+            settings: ft_core::codex::Settings::default(),
             next_id: ft_core::codex::FIRST_TURN_ID,
         }
+    }
+
+    /// The pickers this session has, and what is in each.
+    fn controls(&self) -> Vec<ft_core::controls::Control> {
+        let (models, efforts) = match &self.reader {
+            ft_core::normalise::Reader::Codex(reader) => {
+                (reader.models().to_vec(), reader.efforts().to_vec())
+            }
+            ft_core::normalise::Reader::Claude(_) => (Vec::new(), Vec::new()),
+        };
+
+        let mut controls = ft_core::controls::for_agent(self.agent, models, efforts);
+
+        // What somebody chose, so a picker shows it rather than the default it
+        // was drawn with. Claude Code restates its own at the start of every
+        // turn and this stays empty for it.
+        for control in &mut controls {
+            control.current = match control.kind {
+                ft_core::controls::ControlKind::Model => self.settings.model.clone(),
+                ft_core::controls::ControlKind::Effort => self.settings.effort.clone(),
+                ft_core::controls::ControlKind::Mode => self.settings.approval.clone(),
+                ft_core::controls::ControlKind::Sandbox => {
+                    Some(self.settings.fence.unwrap_or_default().name().to_string())
+                }
+            };
+        }
+        controls
+    }
+
+    /// Put a choice into force, and say how.
+    fn choose(
+        &mut self,
+        kind: ft_core::controls::ControlKind,
+        value: &str,
+    ) -> Result<Option<serde_json::Value>> {
+        use ft_core::controls::ControlKind as K;
+
+        // The agent that reads slash commands out of its own input. Nothing to
+        // remember: it answers with a sentence saying what it did, and that is
+        // what the picker then shows.
+        if let Some(text) = ft_core::controls::command(self.agent, kind, value) {
+            return Ok(Some(ft_core::turn::user_message(&text)));
+        }
+        if self.agent != ft_core::Agent::Codex {
+            anyhow::bail!("{} cannot be asked to change that", self.agent.label());
+        }
+
+        match kind {
+            K::Model => self.settings.model = Some(value.to_string()),
+            K::Effort => self.settings.effort = Some(value.to_string()),
+            K::Mode => self.settings.approval = Some(value.to_string()),
+            K::Sandbox => {
+                self.settings.fence = Some(
+                    ft_core::codex::Fence::named(value)
+                        .with_context(|| format!("{value} is not a sandbox"))?,
+                )
+            }
+        }
+
+        // Nothing to send. It rides on the next turn, because there is no
+        // request that changes a thread's settings on its own.
+        Ok(None)
     }
 
     /// What this line means for the session, if anything.
@@ -216,7 +286,12 @@ impl Progress {
         // an event: it is a fact the reader learned on the way past.
         let mut send = Vec::new();
         if let (Some(thread), Some(prompt)) = (self.reader.thread(), self.opening_prompt.as_ref()) {
-            send.push(ft_core::codex::turn_start(self.next_id, thread, prompt));
+            send.push(ft_core::codex::turn_start(
+                self.next_id,
+                thread,
+                prompt,
+                &self.settings,
+            ));
         }
         if !send.is_empty() {
             self.next_id += 1;
@@ -265,7 +340,7 @@ impl Progress {
                 )?;
                 let id = self.next_id;
                 self.next_id += 1;
-                Ok(ft_core::codex::turn_start(id, thread, text))
+                Ok(ft_core::codex::turn_start(id, thread, text, &self.settings))
             }
         }
     }
@@ -1648,6 +1723,59 @@ impl Fleet {
         .await?;
 
         Ok(receiver)
+    }
+
+    /// The pickers this session has, and what is in each.
+    ///
+    /// Asked of the reader rather than assembled here, because the answer
+    /// depends on what the agent has said about itself — Codex lists its own
+    /// models, and a session that has not heard back yet has no model picker.
+    pub async fn controls(&self, session_id: &SessionId) -> Vec<ft_core::controls::Control> {
+        self.ensure_reader(session_id).await;
+        self.progress
+            .read()
+            .await
+            .get(session_id.as_str())
+            .map(|progress| progress.controls())
+            .unwrap_or_default()
+    }
+
+    /// Change one of them.
+    ///
+    /// What that means is the agent's business: a slash command for the one
+    /// that reads them out of its own input, and a parameter on the next turn
+    /// for the one that does not. The browser knows neither.
+    pub async fn choose(
+        &self,
+        host_id: &HostId,
+        session_id: &SessionId,
+        kind: ft_core::controls::ControlKind,
+        value: &str,
+    ) -> Result<()> {
+        self.ensure_reader(session_id).await;
+
+        let message = {
+            let mut readers = self.progress.write().await;
+            let progress = readers
+                .get_mut(session_id.as_str())
+                .context("this session has no reader")?;
+            progress.choose(kind, value)?
+        };
+
+        // Nothing to send is an ordinary outcome, not a failure: it has been
+        // remembered and rides on the next turn.
+        let Some(message) = message else {
+            return Ok(());
+        };
+
+        self.send(
+            host_id,
+            ToWorker::SendTurn {
+                session_id: session_id.clone(),
+                message,
+            },
+        )
+        .await
     }
 
     /// One message for the agent, in whatever shape that agent takes.

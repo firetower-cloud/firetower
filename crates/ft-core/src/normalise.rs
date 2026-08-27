@@ -125,6 +125,7 @@ impl Reader {
                 // The worker opened the conversation at a known id, and only
                 // the sender of a request can say what its id meant.
                 reader.sent_thread_start(crate::codex::THREAD_START_ID);
+                reader.sent_model_list(crate::codex::MODEL_LIST_ID);
                 Reader::Codex(reader)
             }
             _ => Reader::Claude(ClaudeNormaliser::new()),

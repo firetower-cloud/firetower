@@ -202,6 +202,9 @@ async fn credential_for(
         ft_core::HostState,
         ProviderStatus,
         PendingAuth,
+        ft_core::controls::Control,
+        ft_core::controls::Choice,
+        ft_core::controls::ControlKind,
         RemoteRepo,
         AgentMode,
         AgentPresence,
@@ -283,6 +286,10 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(conversation::get_conversation))
         .routes(routes!(conversation::stream_conversation))
         .routes(routes!(conversation::send_turn))
+        .routes(routes!(
+            conversation::session_controls,
+            conversation::choose_control
+        ))
         .routes(routes!(conversation::interrupt_session))
         .routes(routes!(conversation::answer_request))
         .routes(routes!(conversation::attach_file))

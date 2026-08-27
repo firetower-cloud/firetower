@@ -38,8 +38,105 @@ use crate::turn::{
 pub const INITIALIZE_ID: u64 = 1;
 /// The id the worker sends `thread/start` under. See [`INITIALIZE_ID`].
 pub const THREAD_START_ID: u64 = 2;
+/// The id the control plane asks for the model list under.
+pub const MODEL_LIST_ID: u64 = 3;
 /// Where ids for everything after the opening begin.
-pub const FIRST_TURN_ID: u64 = 3;
+pub const FIRST_TURN_ID: u64 = 4;
+
+/// Ask what this build can actually run.
+///
+/// Nothing is written down here on purpose: a list of models in our source
+/// would be out of date the week after, and the binary knows.
+pub fn model_list() -> Value {
+    serde_json::json!({
+        "id": MODEL_LIST_ID,
+        "method": "model/list",
+        "params": {},
+    })
+}
+
+/// What a turn should be run with, when somebody has said.
+///
+/// Every field is optional and an unset one is simply left out, which is how
+/// Codex is told "whatever you were doing". They ride on the turn because
+/// there is nowhere else to put them: no request changes a thread's settings
+/// on its own.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Settings {
+    pub model: Option<String>,
+    pub effort: Option<String>,
+    /// `on-request`, `untrusted`, `never`.
+    pub approval: Option<String>,
+    pub fence: Option<Fence>,
+}
+
+/// What a session may do at all.
+///
+/// Ours rather than theirs, because theirs is spelled two different ways:
+/// `thread/start` takes a word and `turn/start` takes an object with the
+/// network switch inside it. One idea, so one type.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Fence {
+    /// Writes only in the workspace. No network.
+    Workspace,
+    /// The same, and it can reach the internet.
+    WorkspaceAndNetwork,
+    /// No fence.
+    Everything,
+}
+
+impl Fence {
+    /// What `thread/start` takes, which has no room for the network switch.
+    pub fn word(&self) -> &'static str {
+        match self {
+            Fence::Workspace | Fence::WorkspaceAndNetwork => "workspace-write",
+            Fence::Everything => "danger-full-access",
+        }
+    }
+
+    /// What `turn/start` takes, which does.
+    pub fn policy(&self) -> Value {
+        match self {
+            Fence::Workspace => serde_json::json!({
+                "type": "workspaceWrite", "networkAccess": false,
+            }),
+            Fence::WorkspaceAndNetwork => serde_json::json!({
+                "type": "workspaceWrite", "networkAccess": true,
+            }),
+            Fence::Everything => serde_json::json!({ "type": "dangerFullAccess" }),
+        }
+    }
+
+    /// Read back from what the interface calls it.
+    pub fn named(value: &str) -> Option<Fence> {
+        match value {
+            crate::controls::SANDBOX_WORKSPACE => Some(Fence::Workspace),
+            crate::controls::SANDBOX_WORKSPACE_NETWORK => Some(Fence::WorkspaceAndNetwork),
+            crate::controls::SANDBOX_EVERYTHING => Some(Fence::Everything),
+            _ => None,
+        }
+    }
+
+    /// What the interface calls it.
+    pub fn name(&self) -> &'static str {
+        match self {
+            Fence::Workspace => crate::controls::SANDBOX_WORKSPACE,
+            Fence::WorkspaceAndNetwork => crate::controls::SANDBOX_WORKSPACE_NETWORK,
+            Fence::Everything => crate::controls::SANDBOX_EVERYTHING,
+        }
+    }
+}
+
+impl Default for Fence {
+    /// Network on, and still confined.
+    ///
+    /// A session that cannot install a dependency stops for a reason nobody
+    /// expects, and letting it reach the internet costs nothing in write
+    /// confinement — they are separate switches, whatever the name suggests.
+    fn default() -> Self {
+        Fence::WorkspaceAndNetwork
+    }
+}
 
 /// The handshake, which has to finish before Codex will take any work.
 ///
@@ -57,6 +154,7 @@ pub fn opening(cwd: &str) -> Vec<Value> {
                 }
             },
         }),
+        model_list(),
         serde_json::json!({
             "id": THREAD_START_ID,
             "method": "thread/start",
@@ -71,7 +169,7 @@ pub fn opening(cwd: &str) -> Vec<Value> {
                 // not the same as being unconfined: an approval somebody grants
                 // in a hurry should not be able to reach the rest of the host.
                 "approvalPolicy": "on-request",
-                "sandbox": "workspace-write",
+                "sandbox": Fence::default().word(),
             },
         }),
     ]
@@ -94,15 +192,64 @@ pub fn turn_interrupt(id: u64, thread: &str, turn: &str) -> Value {
 /// The thread is what makes this a conversation rather than a series of
 /// unrelated requests, which is why nothing can be sent before the handshake
 /// has answered.
-pub fn turn_start(id: u64, thread: &str, text: &str) -> Value {
-    serde_json::json!({
-        "id": id,
-        "method": "turn/start",
-        "params": {
-            "threadId": thread,
-            "input": [{ "type": "text", "text": text }],
-        },
-    })
+pub fn turn_start(id: u64, thread: &str, text: &str, settings: &Settings) -> Value {
+    let mut params = serde_json::json!({
+        "threadId": thread,
+        "input": [{ "type": "text", "text": text }],
+    });
+
+    let fields = params.as_object_mut().expect("just built as an object");
+    if let Some(model) = &settings.model {
+        fields.insert("model".into(), Value::String(model.clone()));
+    }
+    if let Some(effort) = &settings.effort {
+        fields.insert("effort".into(), Value::String(effort.clone()));
+    }
+    if let Some(approval) = &settings.approval {
+        fields.insert("approvalPolicy".into(), Value::String(approval.clone()));
+    }
+    // Always, even unset: the default has the network on and `thread/start`
+    // had no way to say so, so the first turn is where it starts being true.
+    fields.insert(
+        "sandboxPolicy".into(),
+        settings.fence.unwrap_or_default().policy(),
+    );
+
+    serde_json::json!({ "id": id, "method": "turn/start", "params": params })
+}
+
+/// One effort a model supports.
+///
+/// An object with its own description rather than a bare word — worth knowing,
+/// because reading it as a string produces an empty list and a picker that
+/// never appears.
+fn effort(listed: &Value) -> Option<crate::controls::Choice> {
+    let value = listed
+        .get("reasoningEffort")
+        .and_then(Value::as_str)
+        .or_else(|| listed.as_str())?;
+
+    let note = listed
+        .get("description")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+
+    Some(crate::controls::Choice::of(&titled(value), value, note))
+}
+
+/// `medium` reads as a value; `Medium` reads as a choice.
+fn titled(word: &str) -> String {
+    // Capitalising this one gives `Xhigh`, which reads as a typo. Their own
+    // description spells it out, so borrow that.
+    if word == "xhigh" {
+        return "Extra high".to_string();
+    }
+
+    let mut letters = word.chars();
+    match letters.next() {
+        Some(first) => first.to_uppercase().collect::<String>() + letters.as_str(),
+        None => String::new(),
+    }
 }
 
 /// One question, in our shape.
@@ -235,6 +382,11 @@ pub struct CodexNormaliser {
     /// What kind of card each open item is. `item/completed` restates the
     /// item, but the card was drawn when it started and the two have to agree.
     open: HashMap<String, ItemKind>,
+    /// What this build can run, as it said.
+    models: Vec<crate::controls::Choice>,
+    /// The efforts the default model supports. Per model rather than one list
+    /// for everything, which is what it says.
+    efforts: Vec<crate::controls::Choice>,
     /// What the turn now running has cost, as last reported.
     ///
     /// Kept because it arrives on its own notification rather than with the
@@ -258,6 +410,8 @@ pub struct CodexNormaliser {
 enum Awaiting {
     /// `thread/start`, whose answer carries the thread id.
     ThreadStart,
+    /// `model/list`, whose answer is what the model picker offers.
+    ModelList,
 }
 
 impl CodexNormaliser {
@@ -285,6 +439,23 @@ impl CodexNormaliser {
     /// Ids are the sender's, so only the sender can say what one meant.
     pub fn sent_thread_start(&mut self, id: u64) {
         self.awaiting.insert(id, Awaiting::ThreadStart);
+    }
+
+    pub fn sent_model_list(&mut self, id: u64) {
+        self.awaiting.insert(id, Awaiting::ModelList);
+    }
+
+    /// What this build said it can run.
+    ///
+    /// Empty until it has answered, and empty is what stops a model picker
+    /// being drawn with nothing in it.
+    pub fn models(&self) -> &[crate::controls::Choice] {
+        &self.models
+    }
+
+    /// The efforts the model now in force supports.
+    pub fn efforts(&self) -> &[crate::controls::Choice] {
+        &self.efforts
     }
 
     /// Read one line and report everything it means.
@@ -462,8 +633,57 @@ impl CodexNormaliser {
                     commands: Vec::new(),
                 }]
             }
+            Some(Awaiting::ModelList) => {
+                self.read_models(value);
+                Vec::new()
+            }
             // Somebody else's request, or one whose answer says nothing.
             None => Vec::new(),
+        }
+    }
+
+    /// Keep what it can run, and what the default one can be asked to do.
+    ///
+    /// Hidden models are left out: they are hidden from the people using Codex
+    /// directly, and a picker here is not the place to surface them.
+    fn read_models(&mut self, value: &Value) {
+        let Some(listed) = value
+            .get("result")
+            .and_then(|r| r.get("data"))
+            .and_then(Value::as_array)
+        else {
+            return;
+        };
+
+        for model in listed {
+            if model.get("hidden").and_then(Value::as_bool) == Some(true) {
+                continue;
+            }
+            let Some(id) = model.get("id").and_then(Value::as_str) else {
+                continue;
+            };
+
+            let label = model
+                .get("displayName")
+                .and_then(Value::as_str)
+                .unwrap_or(id);
+            let note = model
+                .get("description")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+
+            self.models
+                .push(crate::controls::Choice::of(label, id, note));
+
+            // From the default one, because effort is a property of a model
+            // and the default is the one a session starts on.
+            if model.get("isDefault").and_then(Value::as_bool) == Some(true) {
+                self.efforts = model
+                    .get("supportedReasoningEfforts")
+                    .and_then(Value::as_array)
+                    .map(|efforts| efforts.iter().filter_map(effort).collect())
+                    .unwrap_or_default();
+            }
         }
     }
 
@@ -856,6 +1076,108 @@ mod tests {
     #[test]
     fn a_line_that_is_not_json_is_ignored_rather_than_fatal() {
         assert!(events(&["thread 'main' panicked at src/main.rs:1"]).is_empty());
+    }
+
+    /// A list written down here would be out of date the week after, so it is
+    /// read from what the binary said it can run.
+    #[test]
+    fn the_models_offered_are_the_ones_it_said_it_had() {
+        let mut reader = CodexNormaliser::new();
+        reader.sent_model_list(MODEL_LIST_ID);
+        reader.push(&format!(
+            r#"{{"id":{MODEL_LIST_ID},"result":{{"data":[
+              {{"id":"gpt-5.6-sol","displayName":"GPT-5.6","description":"The default","isDefault":true,"hidden":false,"supportedReasoningEfforts":[
+                {{"reasoningEffort":"low","description":"Fast responses with lighter reasoning"}},
+                {{"reasoningEffort":"medium","description":"Balances speed and reasoning depth"}},
+                {{"reasoningEffort":"high","description":"Greater reasoning depth"}}
+              ]}},
+              {{"id":"gpt-5.6-mini","displayName":"GPT-5.6 mini","description":"Quicker","isDefault":false,"hidden":false}},
+              {{"id":"internal-thing","displayName":"Internal","isDefault":false,"hidden":true}}
+            ]}}}}"#
+        ));
+
+        let models: Vec<_> = reader.models().iter().map(|m| m.value.as_str()).collect();
+        assert_eq!(
+            models,
+            ["gpt-5.6-sol", "gpt-5.6-mini"],
+            "hidden stays hidden"
+        );
+        assert_eq!(reader.models()[0].label, "GPT-5.6");
+
+        // Effort belongs to a model, not to everything.
+        let efforts: Vec<_> = reader.efforts().iter().map(|e| e.value.as_str()).collect();
+        assert_eq!(efforts, ["low", "medium", "high"]);
+        assert_eq!(reader.efforts()[0].label, "Low");
+        // Their own words, which are better notes than ones I would write —
+        // and reading these as bare strings gives an empty list.
+        assert_eq!(
+            reader.efforts()[0].note.as_deref(),
+            Some("Fast responses with lighter reasoning")
+        );
+    }
+
+    /// The network switch is not part of the fence, which is the whole reason
+    /// there are three rows rather than two.
+    #[test]
+    fn the_fence_and_the_network_are_separate_switches() {
+        assert_eq!(
+            Fence::Workspace.policy(),
+            serde_json::json!({"type":"workspaceWrite","networkAccess":false})
+        );
+        assert_eq!(
+            Fence::WorkspaceAndNetwork.policy(),
+            serde_json::json!({"type":"workspaceWrite","networkAccess":true})
+        );
+        assert_eq!(
+            Fence::Everything.policy(),
+            serde_json::json!({"type":"dangerFullAccess"})
+        );
+
+        // Both confined ones are the same word where a word is all there is
+        // room for, which is why the network only starts on the first turn.
+        assert_eq!(Fence::Workspace.word(), "workspace-write");
+        assert_eq!(Fence::WorkspaceAndNetwork.word(), "workspace-write");
+
+        // And it survives the round trip through what the interface calls it.
+        for fence in [
+            Fence::Workspace,
+            Fence::WorkspaceAndNetwork,
+            Fence::Everything,
+        ] {
+            assert_eq!(Fence::named(fence.name()), Some(fence));
+        }
+    }
+
+    /// A setting nobody chose is left out rather than sent as a guess.
+    #[test]
+    fn a_turn_carries_only_what_somebody_chose() {
+        let bare = turn_start(9, "th_1", "go", &Settings::default());
+        let params = &bare["params"];
+        assert!(params.get("model").is_none());
+        assert!(params.get("effort").is_none());
+        assert!(params.get("approvalPolicy").is_none());
+        // Except the fence, which is always said: the default has the network
+        // on and `thread/start` had no way to say so.
+        assert_eq!(params["sandboxPolicy"]["networkAccess"], true);
+
+        let chosen = turn_start(
+            10,
+            "th_1",
+            "go",
+            &Settings {
+                model: Some("gpt-5.6-mini".into()),
+                effort: Some("high".into()),
+                approval: Some("never".into()),
+                fence: Some(Fence::Everything),
+            },
+        );
+        assert_eq!(chosen["params"]["model"], "gpt-5.6-mini");
+        assert_eq!(chosen["params"]["effort"], "high");
+        assert_eq!(chosen["params"]["approvalPolicy"], "never");
+        assert_eq!(
+            chosen["params"]["sandboxPolicy"]["type"],
+            "dangerFullAccess"
+        );
     }
 
     /// Codex echoes back the turn it was given, whole and never as a stream.

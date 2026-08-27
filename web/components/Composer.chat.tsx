@@ -3,7 +3,7 @@
 import { useMemo, useRef, useState } from "react";
 import { useAttachFile, useListFiles } from "@/src/api/generated/sessions/sessions";
 import type { Attached, Checkout, SlashCommand, Usage } from "@/src/api/generated/model";
-import { Picker, MODELS, MODES, EFFORTS } from "@/components/Settings.chat";
+import { Picker, type Control } from "@/components/Settings.chat";
 import { Context } from "@/components/Context.chat";
 import type { Limits } from "@/src/api/conversation";
 
@@ -21,9 +21,7 @@ export function ChatComposer({
   live,
   working,
   commands,
-  model,
-  mode,
-  effort,
+  controls,
   usage,
   limits,
   branch,
@@ -39,9 +37,8 @@ export function ChatComposer({
   live: boolean;
   working: boolean;
   commands: SlashCommand[];
-  model?: string;
-  mode?: string;
-  effort?: string;
+  /** The pickers this session has, and what is in each. */
+  controls: Control[];
   usage?: Usage;
   /** What the account's limits allow, when the agent has said. */
   limits?: Limits;
@@ -53,7 +50,7 @@ export function ChatComposer({
   onAddRepo?: () => void;
   onSend: (text: string, images: Attached[]) => void;
   /** Put a setting into force, by saying so to the agent. */
-  onSet: (kind: "model" | "mode" | "effort", value: string) => void;
+  onSet: (kind: Control["kind"], value: string) => void;
   onStop: () => void;
   failed: boolean;
 }) {
@@ -321,27 +318,20 @@ export function ChatComposer({
             }}
           />
 
-          <Picker
-            choices={MODELS}
-            current={model}
-            fallback="Model"
-            disabled={!live}
-            onPick={(v) => onSet("model", v)}
-          />
-          <Picker
-            choices={MODES}
-            current={mode}
-            fallback="Permissions"
-            disabled={!live}
-            onPick={(v) => onSet("mode", v)}
-          />
-          <Picker
-            choices={EFFORTS}
-            current={effort}
-            fallback="Effort"
-            disabled={!live}
-            onPick={(v) => onSet("effort", v)}
-          />
+          {/* One per knob this agent has, in the order the server gave
+              them. A session whose agent has none — or whose agent has not
+              said what its models are yet — shows nothing here rather than
+              a picker that cannot be right. */}
+          {controls.map((control) => (
+            <Picker
+              key={control.kind}
+              choices={control.choices}
+              current={control.current ?? undefined}
+              fallback={control.fallback}
+              disabled={!live}
+              onPick={(v) => onSet(control.kind, v)}
+            />
+          ))}
 
           <div className="ml-auto flex items-center gap-3">
             {usage && <Context usage={usage} limits={limits} />}

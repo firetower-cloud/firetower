@@ -356,6 +356,60 @@ pub(super) async fn answer_request(
 /// one asks whether something may happen, and the other asks which of several
 /// things should. Drawn identically, the second becomes a card offering
 /// "allow" and "deny" to a question about output format.
+/// The pickers this session offers.
+///
+/// Per session rather than a constant in the browser, because which knobs a
+/// session has is a fact about the agent it runs — and it was three constants
+/// in a React file for as long as there was one agent to be right about.
+#[utoipa::path(
+    get, path = "/api/v1/sessions/{id}/controls", tag = "conversation",
+    params(("id" = String, Path, description = "Session id")),
+    responses((status = 200, body = Vec<ft_core::controls::Control>), (status = 404, body = ApiError)),
+)]
+pub(super) async fn session_controls(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Path(id): Path<String>,
+) -> ApiResult<Json<Vec<ft_core::controls::Control>>> {
+    let id = SessionId::from_stored(id);
+    // For the ownership check, which is the whole reason to look it up.
+    host_of(&state, &principal, &id).await?;
+    Ok(Json(state.fleet.controls(&id).await))
+}
+
+/// What to change, and to what.
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct Chosen {
+    pub kind: ft_core::controls::ControlKind,
+    pub value: String,
+}
+
+/// Change one of them.
+#[utoipa::path(
+    post, path = "/api/v1/sessions/{id}/controls", tag = "conversation",
+    params(("id" = String, Path, description = "Session id")),
+    request_body = Chosen,
+    responses((status = 200, body = Sent), (status = 400, body = ApiError), (status = 404, body = ApiError)),
+)]
+pub(super) async fn choose_control(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Path(id): Path<String>,
+    Json(chosen): Json<Chosen>,
+) -> ApiResult<Json<Sent>> {
+    let id = SessionId::from_stored(id);
+    let host = host_of(&state, &principal, &id).await?;
+
+    state
+        .fleet
+        .choose(&host, &id, chosen.kind, &chosen.value)
+        .await
+        .map_err(|e| ApiError::new(ErrorCode::InvalidRequest, format!("{e:#}")))?;
+
+    Ok(Json(Sent { sent: true }))
+}
+
 /// The reader for whichever agent wrote this session's lines.
 ///
 /// A session whose agent cannot be looked up is read as Claude Code: it is the

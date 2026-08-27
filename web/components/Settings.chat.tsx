@@ -3,12 +3,16 @@
 import { useEffect, useRef, useState } from "react";
 
 /**
- * The things about a running session somebody can change.
+ * The picker itself. What goes in it comes from the server.
  *
- * Each is a slash command the agent already understands, sent down the same
- * path as any other message — there is no separate control channel and none is
- * needed. Verified against a live session rather than assumed: each one takes
- * effect immediately and answers with a sentence.
+ * The lists used to be here, which was right for as long as there was one
+ * agent to be right about. A second one made every one of them wrong — and the
+ * mechanism with it, since picking a model built `/model opus[1m]` and sent it
+ * as a message. Claude Code reads that out of its own input; Codex reads it as
+ * a sentence about Opus and spends a turn on it.
+ *
+ * So which knobs a session has, what is in them, and what picking one means
+ * are all answered by whatever is driving the agent. This draws the answer.
  *
  * The row these live in used to be a caption. Printing `claude-sonnet-5` beside
  * a repository name looks exactly like the row in a tool where those are
@@ -16,82 +20,9 @@ import { useEffect, useRef, useState } from "react";
  * nothing.
  */
 
-export type Choice = {
-  /** What the picker shows when this is in force. */
-  label: string;
-  /** What gets sent. */
-  value: string;
-  /** Why somebody would pick it, when that is not obvious. */
-  note?: string;
-  /** Drawn apart, because it changes what the agent may do unsupervised. */
-  grave?: boolean;
-};
+import type { Choice, Control, ControlKind } from "@/src/api/generated/model";
 
-/**
- * The models a session can be moved to.
- *
- * The long-context variants are offered where they exist, because a session
- * here is unattended and often long — which is exactly the shape of work that
- * runs out of room.
- *
- * `bypassPermissions` has no equivalent here on purpose; see `MODES`.
- */
-export const MODELS: Choice[] = [
-  { label: "Opus", value: "opus[1m]", note: "The flagship, long context" },
-  { label: "Fable", value: "fable[1m]", note: "More capable, more expensive" },
-  { label: "Sonnet", value: "sonnet[1m]", note: "Quicker, cheaper" },
-  { label: "Haiku", value: "haiku", note: "Fastest, for small things" },
-  { label: "Opus plan", value: "opusplan", note: "Plans with Opus, works with Sonnet" },
-];
-
-/**
- * What the agent may do without asking.
- *
- * The one control here that changes what happens while nobody is watching, so
- * the ordinary setting reads as unremarkable and the rest say what they mean.
- *
- * `bypassPermissions` is deliberately absent. It is a flag for a sandbox
- * somebody built on purpose rather than an item in a menu — and Claude Code
- * refuses it as root anyway, which is what the worker container runs as.
- */
-export const MODES: Choice[] = [
-  { label: "Auto", value: "auto", note: "Approves the ordinary, asks about the rest" },
-  { label: "Ask everything", value: "default", note: "Nothing runs unasked" },
-  { label: "Plan", value: "plan", note: "Explores and proposes, changes nothing" },
-  {
-    label: "Accept edits",
-    value: "acceptEdits",
-    note: "Writes files without asking. Commands still ask",
-    grave: true,
-  },
-  {
-    label: "Never ask",
-    value: "dontAsk",
-    note: "Refuses anything not already allowed, rather than asking",
-    grave: true,
-  },
-];
-
-/** How hard it thinks. */
-export const EFFORTS: Choice[] = [
-  { label: "Low", value: "low", note: "Quick, for small things" },
-  { label: "Medium", value: "medium" },
-  { label: "High", value: "high", note: "The usual" },
-  { label: "Max", value: "max", note: "Slow, and as good as it gets" },
-];
-
-/** The slash command that puts each one into force. */
-export function command(kind: "model" | "mode" | "effort", value: string): string {
-  switch (kind) {
-    case "model":
-      return `/model ${value}`;
-    // `/permissions` is not available headless; `/config` is, and takes it.
-    case "mode":
-      return `/config permissionMode=${value}`;
-    case "effort":
-      return `/effort ${value}`;
-  }
-}
+export type { Choice, Control, ControlKind };
 
 /**
  * A small menu that reads as one word until it is opened.
