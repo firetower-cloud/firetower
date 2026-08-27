@@ -101,7 +101,7 @@ Everything else — putting it on a domain, adding a server, connecting reposito
 | | |
 | --- | --- |
 | Claude Code | Supported |
-| Codex | Planned |
+| Codex | Supported |
 | OpenCode | Planned |
 | Grok| Planned |
 | Cursor | Planned |
