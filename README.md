@@ -23,7 +23,7 @@ And yes, it works with your own subscription (Claude Code, Codex, etc.).
 ## Current stage
 
 > [!WARNING]
-> The project is in active development and still in the early stages. Expect changes and bugs.
+> The project is in active development and still in the early stages. Expect breaking changes and bugs.
 
 
 ## Demo
