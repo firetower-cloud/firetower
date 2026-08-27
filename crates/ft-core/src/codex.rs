@@ -385,6 +385,10 @@ pub struct CodexNormaliser {
     /// What kind of card each open item is. `item/completed` restates the
     /// item, but the card was drawn when it started and the two have to agree.
     open: HashMap<String, ItemKind>,
+    /// What the session reported itself as running, as opposed to what
+    /// somebody has since chosen. A picker with neither shows nothing, and
+    /// showing nothing when the agent has said is a picker that looks broken.
+    reported: Settings,
     /// What this build can run, as it said.
     models: Vec<crate::controls::Choice>,
     /// The efforts the default model supports. Per model rather than one list
@@ -459,6 +463,11 @@ impl CodexNormaliser {
     /// The efforts the model now in force supports.
     pub fn efforts(&self) -> &[crate::controls::Choice] {
         &self.efforts
+    }
+
+    /// What the session said it is running, before anybody changed anything.
+    pub fn reported(&self) -> &Settings {
+        &self.reported
     }
 
     /// Read one line and report everything it means.
@@ -615,6 +624,19 @@ impl CodexNormaliser {
                     return Vec::new();
                 };
                 self.thread = Some(thread.to_string());
+
+                self.reported.model = result
+                    .get("model")
+                    .and_then(Value::as_str)
+                    .map(str::to_string);
+                self.reported.approval = result
+                    .get("approvalPolicy")
+                    .and_then(Value::as_str)
+                    .map(str::to_string);
+                self.reported.effort = result
+                    .get("reasoningEffort")
+                    .and_then(Value::as_str)
+                    .map(str::to_string);
 
                 // What this session turned out to be configured as. Reported
                 // rather than remembered from what we asked for: the answer is

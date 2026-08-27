@@ -112,8 +112,11 @@ fn title_for(kind: ItemKind, tool_name: &str) -> Option<String> {
 /// pluggable: a third agent is a variant here and a compiler error at each
 /// place that has to care, which is the outcome worth having.
 pub enum Reader {
-    Claude(ClaudeNormaliser),
-    Codex(crate::codex::CodexNormaliser),
+    // Both boxed. An enum is as big as its largest arm, and each of these
+    // holds a session's worth of correlation state — so the one that happens
+    // to be smaller today would still pay for the other.
+    Claude(Box<ClaudeNormaliser>),
+    Codex(Box<crate::codex::CodexNormaliser>),
 }
 
 impl Reader {
@@ -126,9 +129,9 @@ impl Reader {
                 // the sender of a request can say what its id meant.
                 reader.sent_thread_start(crate::codex::THREAD_START_ID);
                 reader.sent_model_list(crate::codex::MODEL_LIST_ID);
-                Reader::Codex(reader)
+                Reader::Codex(Box::new(reader))
             }
-            _ => Reader::Claude(ClaudeNormaliser::new()),
+            _ => Reader::Claude(Box::new(ClaudeNormaliser::new())),
         }
     }
 

@@ -164,11 +164,15 @@ impl Progress {
 
     /// The pickers this session has, and what is in each.
     fn controls(&self) -> Vec<ft_core::controls::Control> {
-        let (models, efforts) = match &self.reader {
-            ft_core::normalise::Reader::Codex(reader) => {
-                (reader.models().to_vec(), reader.efforts().to_vec())
+        let (models, efforts, reported) = match &self.reader {
+            ft_core::normalise::Reader::Codex(reader) => (
+                reader.models().to_vec(),
+                reader.efforts().to_vec(),
+                reader.reported().clone(),
+            ),
+            ft_core::normalise::Reader::Claude(_) => {
+                (Vec::new(), Vec::new(), ft_core::codex::Settings::default())
             }
-            ft_core::normalise::Reader::Claude(_) => (Vec::new(), Vec::new()),
         };
 
         let mut controls = ft_core::controls::for_agent(self.agent, models, efforts);
@@ -177,10 +181,24 @@ impl Progress {
         // was drawn with. Claude Code restates its own at the start of every
         // turn and this stays empty for it.
         for control in &mut controls {
+            // What somebody chose, or failing that what the session said it
+            // was running. A picker showing neither looks broken.
             control.current = match control.kind {
-                ft_core::controls::ControlKind::Model => self.settings.model.clone(),
-                ft_core::controls::ControlKind::Effort => self.settings.effort.clone(),
-                ft_core::controls::ControlKind::Mode => self.settings.approval.clone(),
+                ft_core::controls::ControlKind::Model => self
+                    .settings
+                    .model
+                    .clone()
+                    .or_else(|| reported.model.clone()),
+                ft_core::controls::ControlKind::Effort => self
+                    .settings
+                    .effort
+                    .clone()
+                    .or_else(|| reported.effort.clone()),
+                ft_core::controls::ControlKind::Mode => self
+                    .settings
+                    .approval
+                    .clone()
+                    .or_else(|| reported.approval.clone()),
                 ft_core::controls::ControlKind::Sandbox => {
                     Some(self.settings.fence.unwrap_or_default().name().to_string())
                 }
@@ -2327,6 +2345,89 @@ mod progress_tests {
         // And exactly once: a second line must not re-send it.
         let again = progress.read(r#"{"method":"turn/started","params":{"turn":{"id":"t1","items":[],"status":"inProgress"}}}"#);
         assert!(again.send.is_empty(), "the opening prompt is spent");
+    }
+
+    /// The whole point of the controls work: a Codex session offers what Codex
+    /// said it can run, and never Claude Code's list.
+    ///
+    /// The payloads are trimmed copies of what a real app-server answered
+    /// with — the shapes have been wrong three times now, always because I
+    /// wrote the test from the same guess as the code.
+    #[test]
+    fn a_codex_session_offers_the_models_it_was_told_about() {
+        let log = [
+            r#"{"id":1,"result":{"userAgent":"firetower/0.149.1","codexHome":"/tmp"}}"#,
+            r#"{"id":3,"result":{"data":[
+                {"id":"gpt-5.6-sol","displayName":"GPT-5.6-Sol","description":"Latest frontier agentic coding model.","isDefault":true,"hidden":false,
+                 "supportedReasoningEfforts":[{"reasoningEffort":"low","description":"Fast responses with lighter reasoning"},
+                                              {"reasoningEffort":"high","description":"Greater reasoning depth for complex problems"}]},
+                {"id":"gpt-5.6-terra","displayName":"GPT-5.6-Terra","description":"Balanced agentic coding model.","isDefault":false,"hidden":false}
+            ],"nextCursor":null}}"#,
+            r#"{"id":2,"result":{"thread":{"id":"th_abc"},"model":"gpt-5.6-sol","approvalPolicy":"on-request","reasoningEffort":"high"}}"#,
+        ];
+
+        let mut progress = Progress::for_agent(ft_core::Agent::Codex, "go".into());
+        for line in log {
+            progress.read(line);
+        }
+
+        let controls = progress.controls();
+        let picker = |kind: ft_core::controls::ControlKind| {
+            controls
+                .iter()
+                .find(|c| c.kind == kind)
+                .unwrap_or_else(|| panic!("no {kind:?} picker"))
+        };
+
+        use ft_core::controls::ControlKind as K;
+        let models: Vec<_> = picker(K::Model)
+            .choices
+            .iter()
+            .map(|c| c.value.as_str())
+            .collect();
+        assert_eq!(models, ["gpt-5.6-sol", "gpt-5.6-terra"]);
+        assert!(
+            !models.iter().any(|m| m.contains("opus")),
+            "this is the bug: Claude Code's models on a Codex session"
+        );
+
+        // What is in force, which the session reported rather than anybody
+        // choosing. A picker showing nothing looks broken.
+        assert_eq!(picker(K::Model).current.as_deref(), Some("gpt-5.6-sol"));
+        assert_eq!(picker(K::Mode).current.as_deref(), Some("on-request"));
+        assert_eq!(picker(K::Effort).current.as_deref(), Some("high"));
+
+        // Effort belongs to the default model, not to everything.
+        let efforts: Vec<_> = picker(K::Effort)
+            .choices
+            .iter()
+            .map(|c| c.value.as_str())
+            .collect();
+        assert_eq!(efforts, ["low", "high"]);
+
+        // And the fence, which only this agent has.
+        assert_eq!(
+            picker(K::Sandbox).current.as_deref(),
+            Some(ft_core::controls::SANDBOX_WORKSPACE_NETWORK)
+        );
+    }
+
+    /// Claude Code keeps exactly what it had, including having no fence.
+    #[test]
+    fn a_claude_session_is_unchanged_by_any_of_this() {
+        let progress = Progress::for_agent(ft_core::Agent::ClaudeCode, "go".into());
+        let controls = progress.controls();
+
+        let kinds: Vec<_> = controls.iter().map(|c| c.kind).collect();
+        use ft_core::controls::ControlKind as K;
+        assert_eq!(kinds, [K::Model, K::Mode, K::Effort]);
+
+        let models: Vec<_> = controls[0]
+            .choices
+            .iter()
+            .map(|c| c.value.as_str())
+            .collect();
+        assert!(models.contains(&"opus[1m]"));
     }
 
     /// Stopping names the turn, and a session between turns has nothing to
