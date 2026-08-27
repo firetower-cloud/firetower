@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.11.0
+ * OpenAPI spec version: 0.12.0
  */
 
 export type PlanStepStatus = typeof PlanStepStatus[keyof typeof PlanStepStatus];
