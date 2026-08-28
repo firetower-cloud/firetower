@@ -17,7 +17,7 @@ import { paneTabs, useTabs } from "./tabs";
 import { revealPanel, VIEWS } from "./panel";
 
 export function useWorkbenchKeys() {
-  const { state, focus, close, move, unsplit, focusPane } = useTabs();
+  const { set, focus, close, move, unsplit, focusPane } = useTabs();
 
   useEffect(() => {
     const pressed = (e: KeyboardEvent) => {
@@ -25,8 +25,8 @@ export function useWorkbenchKeys() {
       if (on && (on.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(on.tagName))) return;
       if (!e.metaKey && !e.ctrlKey) return;
 
-      const here = paneTabs(state, state.focused);
-      const active = state.active[state.focused];
+      const here = paneTabs(set, set?.focused ?? 0);
+      const active = set?.active[set.focused] ?? null;
 
       // ⌘⌥1..3 — the right panel's views. Before the plain ⌘1..9 test below,
       // which would otherwise take the digit first.
@@ -64,13 +64,13 @@ export function useWorkbenchKeys() {
       // ⌘\ — put what you are reading beside what you were reading.
       if (e.key === "\\") {
         e.preventDefault();
-        if (state.split) unsplit();
+        if (set?.split) unsplit();
         else if (active) move(active, 1);
         return;
       }
 
       // ⌘⌥← / → — step between the halves of a split.
-      if (state.split && e.altKey && (e.key === "ArrowLeft" || e.key === "ArrowRight")) {
+      if (set?.split && e.altKey && (e.key === "ArrowLeft" || e.key === "ArrowRight")) {
         e.preventDefault();
         focusPane(e.key === "ArrowLeft" ? 0 : 1);
       }
@@ -78,5 +78,5 @@ export function useWorkbenchKeys() {
 
     window.addEventListener("keydown", pressed);
     return () => window.removeEventListener("keydown", pressed);
-  }, [state, focus, close, move, unsplit, focusPane]);
+  }, [set, focus, close, move, unsplit, focusPane]);
 }

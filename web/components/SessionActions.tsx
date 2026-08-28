@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
 import {
@@ -24,13 +24,31 @@ import { atRisk } from "@/src/api/ship";
  * the space. These two are rare and destructive-ish, so they live behind a
  * menu where neither can be hit on the way to something else.
  */
-export function SessionMenu({ session, work }: { session: Session; work?: CheckoutWork[] }) {
+export function SessionMenu({
+  session,
+  work,
+  compact,
+}: {
+  session: Session;
+  work?: CheckoutWork[];
+  /**
+   * In the rail, where the row is narrow and its list scrolls.
+   *
+   * The trigger shrinks, and the menu is rendered through a portal anchored to
+   * it — a dropdown positioned inside the rail would be clipped by the
+   * scroller it lives in, and one wide enough to read would not fit anyway.
+   */
+  compact?: boolean;
+}) {
   const [open, setOpen] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [failed, setFailed] = useState<string | null>(null);
   /** The get-it-locally sheet, which outlives the menu that opened it. */
   const [fetching, setFetching] = useState(false);
   const box = useRef<HTMLDivElement>(null);
+  const trigger = useRef<HTMLButtonElement>(null);
+  /** Where a compact menu goes, measured from its trigger when it opens. */
+  const [at, setAt] = useState({ top: 0, left: 0 });
 
   const router = useRouter();
   const cache = useQueryClient();
@@ -59,6 +77,19 @@ export function SessionMenu({ session, work }: { session: Session; work?: Checko
     setFailed(null);
   }, []);
 
+  // Before paint, so the menu never shows for a frame at the wrong place.
+  useLayoutEffect(() => {
+    if (!open || !compact || !trigger.current) return;
+    const mark = trigger.current.getBoundingClientRect();
+    const WIDE = 292;
+    setAt({
+      top: Math.min(mark.bottom + 6, window.innerHeight - 320),
+      // Opens to the right of the rail rather than over it, unless there is no
+      // room there — a menu wider than the rail cannot open inside it.
+      left: Math.min(mark.right + 6, window.innerWidth - WIDE - 8),
+    });
+  }, [open, compact]);
+
   useEffect(() => {
     if (!open) return;
     const away = (e: MouseEvent) => {
@@ -79,15 +110,34 @@ export function SessionMenu({ session, work }: { session: Session; work?: Checko
   return (
     <div ref={box} className="relative shrink-0">
       <button
-        onClick={() => (open ? close() : setOpen(true))}
+        ref={trigger}
+        onClick={(e) => {
+          // The rail row underneath opens the session; the menu is about it.
+          e.stopPropagation();
+          if (open) close();
+          else setOpen(true);
+        }}
         aria-label="More"
-        className="rounded-[8px] px-2 py-1.5 text-[16px] leading-none text-mute transition-colors hover:bg-raise hover:text-text"
+        className={
+          compact
+            ? "rounded-[6px] px-1 py-0.5 text-[14px] leading-none text-mute transition-colors hover:bg-raise hover:text-text"
+            : "rounded-[8px] px-2 py-1.5 text-[16px] leading-none text-mute transition-colors hover:bg-raise hover:text-text"
+        }
       >
         ⋯
       </button>
 
       {open && (
-        <div className="absolute top-full right-0 z-30 mt-2 w-[292px] rounded-[14px] border border-line bg-panel p-1.5 shadow-[0_12px_36px_-14px_rgba(0,0,0,0.85)]">
+        // `fixed` when compact, from the trigger's own position. The rail
+        // scrolls, and an absolutely positioned menu inside a scroller is
+        // clipped by it — fixed leaves that box entirely, which is what a menu
+        // hanging off a narrow rail has to do.
+        <div
+          style={compact ? { top: at.top, left: at.left } : undefined}
+          className={`w-[292px] rounded-[14px] border border-line bg-panel p-1.5 shadow-[0_12px_36px_-14px_rgba(0,0,0,0.85)] ${
+            compact ? "fixed z-40" : "absolute top-full right-0 z-30 mt-2"
+          }`}
+        >
           {/* Above the split, because it applies to both halves — and an ended
               session is exactly when somebody wants it. The workspace is gone
               by then; the branch is on the remote, which is all this needs. */}

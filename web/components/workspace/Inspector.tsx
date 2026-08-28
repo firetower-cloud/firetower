@@ -382,7 +382,7 @@ function Tree({ sessionId, changed }: { sessionId: string; changed: Set<string> 
             </span>
             <button
               onClick={() =>
-                entry.directory ? setPath(full(entry.name)) : open.file(sessionId, full(entry.name))
+                entry.directory ? setPath(full(entry.name)) : open.file(full(entry.name))
               }
               title={full(entry.name)}
               className={`min-w-0 flex-1 truncate text-left font-mono text-[11.5px] transition-colors hover:text-ember ${
@@ -471,7 +471,7 @@ function Changes({ sessionId }: { sessionId: string }) {
           <PathRow
             key={f.path}
             path={f.path}
-            onClick={() => open.diff(sessionId, f.path)}
+            onClick={() => open.diff(f.path)}
             trail={<Counts added={f.added} removed={f.removed} />}
           />
         ))}

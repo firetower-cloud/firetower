@@ -15,7 +15,7 @@ export function DiffTab({ sessionId, path }: { sessionId: string; path: string }
   const { data: files = [], isLoading, error } = useSessionDiff(sessionId, undefined, {
     query: { refetchInterval: 8_000 },
   });
-  const { state } = useTabs();
+  const { set } = useTabs();
   const open = useOpen();
 
   const file = files.find((f) => f.path === path);
@@ -33,15 +33,15 @@ export function DiffTab({ sessionId, path }: { sessionId: string; path: string }
           </>
         )}
         <button
-          onClick={() => open.file(sessionId, path)}
+          onClick={() => open.file(path)}
           title="Open the file itself"
           className="shrink-0 text-[11px] text-mute transition-colors hover:text-ember"
         >
           ▤
         </button>
-        {!state.split && (
+        {!set?.split && (
           <button
-            onClick={() => open.diff(sessionId, path, true)}
+            onClick={() => open.diff(path, true)}
             title="Open beside"
             className="shrink-0 text-[12px] text-mute transition-colors hover:text-ember"
           >

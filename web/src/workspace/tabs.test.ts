@@ -1,162 +1,188 @@
 import { describe, expect, it } from "vitest";
-import { EMPTY, reduce, addressOf, type State, type Tab } from "./tabs";
+import {
+  EMPTY,
+  addressOf,
+  freshSet,
+  nextTerminal,
+  reduce,
+  type Action,
+  type State,
+  type Tab,
+} from "./tabs";
 
-const session = (id: string): Tab => ({
-  id: addressOf.session(id),
-  kind: "session",
-  sessionId: id,
-  face: "agent",
-});
-
-const file = (id: string, path: string): Tab => ({
-  id: addressOf.file(id, path),
-  kind: "file",
-  sessionId: id,
-  path,
-});
+const file = (path: string): Tab => ({ id: addressOf.file(path), kind: "file", path });
+const terminal = (n: number): Tab => ({ id: addressOf.terminal(n), kind: "terminal", n });
 
 /** Apply a sequence, so a test reads as the clicks somebody made. */
-function run(...actions: Parameters<typeof reduce>[1][]): State {
+function run(...actions: Action[]): State {
   return actions.reduce(reduce, EMPTY);
 }
 
-describe("opening", () => {
-  it("puts a new tab in the pane you are looking at, and focuses it", () => {
-    const state = run({ do: "open", tab: session("a") });
-    expect(state.tabs).toHaveLength(1);
-    expect(state.active[0]).toBe("session:a");
-    expect(state.split).toBe(false);
+/** What is open in the session you are in. */
+function here(state: State) {
+  return state.current ? state.sets[state.current] : null;
+}
+
+describe("a session is the container", () => {
+  it("opens on its conversation and nothing else", () => {
+    const state = run({ do: "enter", sessionId: "a" });
+    expect(state.current).toBe("a");
+    expect(here(state)?.tabs.map((t) => t.kind)).toEqual(["agent"]);
+    expect(here(state)?.active[0]).toBe("agent");
   });
 
-  it("focuses an open tab rather than opening a second one", () => {
+  it("gives each session its own tabs, kept while you are elsewhere", () => {
+    // The whole point of the change: entering another session must not add to
+    // a pile, and coming back must find things where they were left.
     const state = run(
-      { do: "open", tab: session("a") },
-      { do: "open", tab: session("b") },
-      { do: "open", tab: session("a") },
+      { do: "enter", sessionId: "a" },
+      { do: "open", tab: file("PLAN.md") },
+      { do: "open", tab: terminal(1) },
+      { do: "enter", sessionId: "b" },
     );
-    expect(state.tabs).toHaveLength(2);
-    expect(state.active[0]).toBe("session:a");
+
+    expect(here(state)?.tabs.map((t) => t.kind)).toEqual(["agent"]);
+    expect(state.sets["a"].tabs.map((t) => t.id)).toEqual([
+      "agent",
+      "file:PLAN.md",
+      "terminal:1",
+    ]);
+
+    const back = reduce(state, { do: "enter", sessionId: "a" });
+    expect(back.sets["a"].active[0]).toBe("terminal:1");
   });
 
-  it("moves an already-open tab when asked for it beside", () => {
-    // The bug this exists for: `beside` on an open tab used to split and leave
-    // the tab where it was, which opened an empty half.
+  it("opens into the session you are in, never another", () => {
     const state = run(
-      { do: "open", tab: session("a") },
-      { do: "open", tab: file("a", "PLAN.md") },
-      { do: "open", tab: file("a", "PLAN.md"), beside: true },
+      { do: "enter", sessionId: "a" },
+      { do: "enter", sessionId: "b" },
+      { do: "open", tab: file("only-b.ts") },
     );
-    expect(state.split).toBe(true);
-    expect(state.pane["file:a:PLAN.md"]).toBe(1);
-    expect(state.active[1]).toBe("file:a:PLAN.md");
-    // And the half it left is showing the session, not a hole.
-    expect(state.active[0]).toBe("session:a");
+    expect(state.sets["a"].tabs).toHaveLength(1);
+    expect(state.sets["b"].tabs).toHaveLength(2);
   });
 
-  it("leaves a tab alone if it is already in the other half", () => {
+  it("re-entering the session you are in changes nothing", () => {
+    const before = run({ do: "enter", sessionId: "a" }, { do: "open", tab: file("x.ts") });
+    expect(reduce(before, { do: "enter", sessionId: "a" })).toBe(before);
+  });
+
+  it("does nothing at all before you are in a session", () => {
+    expect(reduce(EMPTY, { do: "open", tab: file("x.ts") })).toBe(EMPTY);
+  });
+
+  it("forgets a session's tabs when it is gone", () => {
     const state = run(
-      { do: "open", tab: session("a") },
-      { do: "open", tab: file("a", "PLAN.md"), beside: true },
-      { do: "focusPane", pane: 0 },
-      { do: "open", tab: file("a", "PLAN.md"), beside: true },
+      { do: "enter", sessionId: "a" },
+      { do: "open", tab: file("x.ts") },
+      { do: "forget", sessionId: "a" },
     );
-    expect(state.pane["file:a:PLAN.md"]).toBe(1);
-    expect(state.tabs).toHaveLength(2);
+    expect(state.sets["a"]).toBeUndefined();
+    expect(state.current).toBeNull();
   });
 });
 
-describe("closing", () => {
-  it("leaves you looking at a neighbour rather than at nothing", () => {
-    const state = run(
-      { do: "open", tab: session("a") },
-      { do: "open", tab: session("b") },
-      { do: "close", id: "session:b" },
-    );
-    expect(state.active[0]).toBe("session:a");
+describe("the conversation cannot be closed", () => {
+  it("refuses, because closing it would leave the session with nothing", () => {
+    const before = run({ do: "enter", sessionId: "a" });
+    expect(reduce(before, { do: "close", id: "agent" })).toBe(before);
   });
 
-  it("takes a session's files and diffs with it", () => {
+  it("closes everything else, leaving you on a neighbour", () => {
     const state = run(
-      { do: "open", tab: session("a") },
-      { do: "open", tab: file("a", "PLAN.md") },
-      { do: "open", tab: session("b") },
-      { do: "closeSession", sessionId: "a" },
+      { do: "enter", sessionId: "a" },
+      { do: "open", tab: file("x.ts") },
+      { do: "close", id: "file:x.ts" },
     );
-    expect(state.tabs.map((t) => t.id)).toEqual(["session:b"]);
+    expect(here(state)?.tabs.map((t) => t.id)).toEqual(["agent"]);
+    expect(here(state)?.active[0]).toBe("agent");
+  });
+});
+
+describe("terminals", () => {
+  it("takes the lowest free number, so closing one frees its name", () => {
+    const set = run(
+      { do: "enter", sessionId: "a" },
+      { do: "open", tab: terminal(1) },
+      { do: "open", tab: terminal(2) },
+    );
+    expect(nextTerminal(here(set)!)).toBe(3);
+
+    const gone = reduce(set, { do: "close", id: "terminal:1" });
+    expect(nextTerminal(here(gone)!)).toBe(1);
+  });
+
+  it("starts at one in a session that has none", () => {
+    expect(nextTerminal(freshSet())).toBe(1);
+  });
+});
+
+describe("splitting, inside one session", () => {
+  it("moves an already-open tab when asked for it beside", () => {
+    // `beside` on an open tab used to split and leave the tab where it was,
+    // which opened an empty half.
+    const state = run(
+      { do: "enter", sessionId: "a" },
+      { do: "open", tab: file("PLAN.md") },
+      { do: "open", tab: file("PLAN.md"), beside: true },
+    );
+    expect(here(state)?.split).toBe(true);
+    expect(here(state)?.pane["file:PLAN.md"]).toBe(1);
+    // And the half it left is showing the conversation, not a hole.
+    expect(here(state)?.active[0]).toBe("agent");
   });
 
   it("collapses a split whose second half is now empty", () => {
-    // A split held open by a hole is a half-width session for no reason.
     const state = run(
-      { do: "open", tab: session("a") },
-      { do: "open", tab: file("a", "PLAN.md"), beside: true },
-      { do: "close", id: "file:a:PLAN.md" },
+      { do: "enter", sessionId: "a" },
+      { do: "open", tab: file("PLAN.md"), beside: true },
+      { do: "close", id: "file:PLAN.md" },
     );
-    expect(state.split).toBe(false);
-    expect(state.focused).toBe(0);
-    expect(state.active[0]).toBe("session:a");
+    expect(here(state)?.split).toBe(false);
+    expect(here(state)?.active[0]).toBe("agent");
   });
 
-  it("does nothing when the tab was not open", () => {
-    const before = run({ do: "open", tab: session("a") });
-    expect(reduce(before, { do: "close", id: "session:zzz" })).toBe(before);
-  });
-});
-
-describe("splitting", () => {
-  it("brings everything back to one pane on unsplit, keeping the tabs", () => {
+  it("brings everything back on unsplit, keeping the tabs", () => {
     const state = run(
-      { do: "open", tab: session("a") },
-      { do: "open", tab: file("a", "PLAN.md"), beside: true },
+      { do: "enter", sessionId: "a" },
+      { do: "open", tab: file("PLAN.md"), beside: true },
       { do: "unsplit" },
     );
-    expect(state.split).toBe(false);
-    expect(state.tabs).toHaveLength(2);
-    expect(Object.values(state.pane)).toEqual([0, 0]);
+    expect(here(state)?.split).toBe(false);
+    expect(here(state)?.tabs).toHaveLength(2);
+    expect(Object.values(here(state)!.pane)).toEqual([0, 0]);
   });
-});
 
-describe("a session's face", () => {
-  it("changes only the session it was asked about", () => {
+  it("splits one session without touching another's layout", () => {
     const state = run(
-      { do: "open", tab: session("a") },
-      { do: "open", tab: session("b") },
-      { do: "face", id: "session:a", face: "shell" },
+      { do: "enter", sessionId: "a" },
+      { do: "open", tab: file("PLAN.md"), beside: true },
+      { do: "enter", sessionId: "b" },
     );
-    const faces = state.tabs.map((t) => (t.kind === "session" ? t.face : null));
-    expect(faces).toEqual(["shell", "agent"]);
+    expect(state.sets["a"].split).toBe(true);
+    expect(state.sets["b"].split).toBe(false);
   });
 });
 
 describe("restoring what was open last time", () => {
-  it("keeps a session opened before the store was read", () => {
-    // The order this reproduces is React's: a link opens a session in a child
+  it("keeps the session entered before the store was read", () => {
+    // The order this reproduces is React's: a link enters a session in a child
     // effect, and the provider restores in its own effect afterwards. Before
-    // the merge, the restore silently dropped the session you followed a link
-    // to and left you on whatever was open last.
-    const linked = run({ do: "open", tab: session("linked") });
+    // the merge, the restore dropped the session you followed a link to.
+    const linked = run({ do: "enter", sessionId: "linked" });
     const after = reduce(linked, {
       do: "restore",
-      state: run({ do: "open", tab: session("a") }, { do: "open", tab: session("b") }),
+      state: run({ do: "enter", sessionId: "a" }, { do: "open", tab: file("x.ts") }),
     });
 
-    expect(after.tabs.map((t) => t.sessionId).sort()).toEqual(["a", "b", "linked"]);
-    // And it is the one you are looking at: it is what you just asked for.
-    expect(after.active[0]).toBe("session:linked");
+    expect(after.current).toBe("linked");
+    // And the remembered session's tabs are still there to go back to.
+    expect(after.sets["a"].tabs).toHaveLength(2);
+    expect(after.sets["linked"]).toBeDefined();
   });
 
-  it("does not duplicate a session the store already had", () => {
-    const linked = run({ do: "open", tab: session("a") });
-    const after = reduce(linked, {
-      do: "restore",
-      state: run({ do: "open", tab: session("a") }, { do: "open", tab: session("b") }),
-    });
-
-    expect(after.tabs).toHaveLength(2);
-  });
-
-  it("takes the stored layout whole when nothing was opened first", () => {
-    const stored = run({ do: "open", tab: session("a") }, { do: "open", tab: session("b") });
+  it("takes the stored state whole when nothing was entered first", () => {
+    const stored = run({ do: "enter", sessionId: "a" }, { do: "open", tab: file("x.ts") });
     expect(reduce(EMPTY, { do: "restore", state: stored })).toBe(stored);
   });
 });

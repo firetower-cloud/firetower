@@ -24,7 +24,7 @@ import { useOpen, useTabs } from "@/src/workspace/tabs";
  */
 export function FileTab({ sessionId, path }: { sessionId: string; path: string }) {
   const { data, isLoading, error, refetch } = useFileText(sessionId, path);
-  const { state } = useTabs();
+  const { set } = useTabs();
   const open = useOpen();
 
   const { notes, add, drop } = useNotes(sessionId);
@@ -53,9 +53,9 @@ export function FileTab({ sessionId, path }: { sessionId: string; path: string }
         <span className="min-w-0 flex-1 truncate font-mono text-[11.5px] text-slate" title={path}>
           {path}
         </span>
-        {!state.split && (
+        {!set?.split && (
           <button
-            onClick={() => open.file(sessionId, path, true)}
+            onClick={() => open.file(path, true)}
             title="Open beside"
             className="shrink-0 text-[12px] text-mute transition-colors hover:text-ember"
           >

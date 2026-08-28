@@ -5,6 +5,7 @@ import { useListSessions } from "@/src/api/generated/sessions/sessions";
 import { apiBase } from "@/src/api/http";
 import { Composer } from "@/components/Composer";
 import { Modal } from "@/components/Modal";
+import { Terminal } from "@/components/Terminal";
 import { Rail } from "./Rail";
 import { TabBar } from "./TabBar";
 import { Inspector } from "./Inspector";
@@ -14,8 +15,7 @@ import { DiffTab } from "./DiffTab";
 import {
   Tabs,
   paneTabs,
-  useFocusedSession,
-  useOpen,
+  useCurrentSession,
   useTabs,
   type PaneIndex,
   type Tab,
@@ -30,6 +30,9 @@ import { useWorkbenchKeys } from "@/src/workspace/keys";
  * thinking of a session as a document you visit; what it is actually like to
  * use Firetower is watching several at once and dipping into whichever one
  * stopped — which is a workbench, not a series of pages.
+ *
+ * A session is a worktree, so it owns its tabs. Picking one in the rail changes
+ * which workspace you are in rather than adding to a pile.
  */
 export function Workspace({ initialSession }: { initialSession?: string }) {
   return (
@@ -40,9 +43,8 @@ export function Workspace({ initialSession }: { initialSession?: string }) {
 }
 
 function Bench({ initialSession }: { initialSession?: string }) {
-  const { state } = useTabs();
-  const open = useOpen();
-  const focused = useFocusedSession();
+  const { enter } = useTabs();
+  const current = useCurrentSession();
   /** The repository the composer should start on, when it was opened from one. */
   const [starting, setStarting] = useState<{ repo?: string } | null>(null);
   // The same query the rail runs, so this costs nothing — but it is the only
@@ -52,22 +54,21 @@ function Bench({ initialSession }: { initialSession?: string }) {
   useWorkbenchKeys();
 
   // A link straight to a session — a notification, a bookmark, another tab —
-  // opens it here rather than anywhere else. Once. Closing it afterwards has
-  // to stick, so this does not re-run on every render of the same address.
+  // goes there rather than anywhere else. Once. Leaving afterwards has to
+  // stick, so this does not re-run on every render of the same address.
   useEffect(() => {
-    if (initialSession) open.session(initialSession);
+    if (initialSession) enter(initialSession);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialSession]);
 
-  // Keep the address bar honest about what is on top, so a reload comes back to
-  // the same session and the link is worth copying. `replaceState` rather than
-  // the router: this is not navigation, and every tab click should not add a
-  // history entry to press Back through.
+  // Keep the address bar honest about which session you are in, so a reload
+  // comes back to it and the link is worth copying. `replaceState` rather than
+  // the router: this is not navigation, and moving between sessions should not
+  // add a history entry to press Back through.
   useEffect(() => {
-    const top = state.tabs.find((t) => t.id === state.active[state.focused]);
-    const path = top ? `/sessions/${top.sessionId}` : "/";
+    const path = current ? `/sessions/${current}` : "/";
     if (window.location.pathname !== path) window.history.replaceState(null, "", path);
-  }, [state]);
+  }, [current]);
 
   if (isError) return <Unreachable />;
 
@@ -77,15 +78,10 @@ function Bench({ initialSession }: { initialSession?: string }) {
 
       <main className="flex min-w-0 flex-1">
         <Pane index={0} />
-        {state.split && (
-          <>
-            <div className="w-px shrink-0 bg-line" />
-            <Pane index={1} />
-          </>
-        )}
+        <SecondPane />
       </main>
 
-      <Inspector sessionId={focused} />
+      <Inspector sessionId={current} />
 
       {starting && (
         <Modal onClose={() => setStarting(null)} title="New session" wide>
@@ -94,7 +90,7 @@ function Bench({ initialSession }: { initialSession?: string }) {
               startWith={starting.repo}
               onStarted={(id) => {
                 setStarting(null);
-                open.session(id);
+                enter(id);
               }}
             />
           </div>
@@ -104,10 +100,31 @@ function Bench({ initialSession }: { initialSession?: string }) {
   );
 }
 
+/** The other half of a split, when there is one. */
+function SecondPane() {
+  const { set } = useTabs();
+  if (!set?.split) return null;
+  return (
+    <>
+      <div className="w-px shrink-0 bg-line" />
+      <Pane index={1} />
+    </>
+  );
+}
+
 function Pane({ index }: { index: PaneIndex }) {
-  const { state, focusPane } = useTabs();
-  const tabs = paneTabs(state, index);
-  const active = state.active[index];
+  const { set, focusPane } = useTabs();
+  const current = useCurrentSession();
+  const tabs = paneTabs(set, index);
+  const active = set?.active[index] ?? null;
+
+  if (!current) {
+    return (
+      <section className="flex min-w-0 flex-1 flex-col overflow-hidden">
+        <Blank />
+      </section>
+    );
+  }
 
   return (
     <section
@@ -117,35 +134,48 @@ function Pane({ index }: { index: PaneIndex }) {
       <TabBar pane={index} />
 
       <div className="relative min-h-0 flex-1">
-        {tabs.length === 0 ? (
-          <Blank />
-        ) : (
-          // Every tab in the pane stays mounted, hidden behind the one on top.
-          // A conversation holds an event stream and a terminal holds a socket;
-          // unmounting to switch tabs would drop both and repaint on the way
-          // back, which is the difference between tabs and navigation.
-          tabs.map((tab) => (
-            <div
-              key={tab.id}
-              className={`absolute inset-0 ${tab.id === active ? "" : "hidden"}`}
-            >
-              <Content tab={tab} showing={tab.id === active} />
-            </div>
-          ))
-        )}
+        {/* Every tab stays mounted, hidden behind the one on top. A
+            conversation holds an event stream and a terminal holds a socket;
+            unmounting to switch tabs would drop both and repaint on the way
+            back, which is the difference between tabs and navigation.
+
+            Keyed by session as well as tab, so moving to another session tears
+            these down rather than pointing them at the wrong workspace. */}
+        {tabs.map((tab) => (
+          <div
+            key={`${current}:${tab.id}`}
+            className={`absolute inset-0 ${tab.id === active ? "" : "hidden"}`}
+          >
+            <Content sessionId={current} tab={tab} showing={tab.id === active} />
+          </div>
+        ))}
       </div>
     </section>
   );
 }
 
-function Content({ tab, showing }: { tab: Tab; showing: boolean }) {
+function Content({
+  sessionId,
+  tab,
+  showing,
+}: {
+  sessionId: string;
+  tab: Tab;
+  showing: boolean;
+}) {
   switch (tab.kind) {
-    case "session":
-      return <SessionTab sessionId={tab.sessionId} face={tab.face} showing={showing} />;
+    case "agent":
+      return <SessionTab sessionId={sessionId} />;
+    case "terminal":
+      return (
+        <div className="h-full p-2">
+          <Terminal sessionId={sessionId} live showing={showing} />
+        </div>
+      );
     case "file":
-      return <FileTab sessionId={tab.sessionId} path={tab.path} />;
+      return <FileTab sessionId={sessionId} path={tab.path} />;
     case "diff":
-      return <DiffTab sessionId={tab.sessionId} path={tab.path} />;
+      return <DiffTab sessionId={sessionId} path={tab.path} />;
   }
 }
 

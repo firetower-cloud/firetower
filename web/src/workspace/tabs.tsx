@@ -1,26 +1,32 @@
 "use client";
 
 /**
- * What is open, and where.
+ * What is open inside each session, and which session you are in.
  *
- * The interface used to be one session per page: you navigated away to look at
- * anything else, and two agents could not be on screen at once. This is the
- * state that replaces that — a set of open tabs across one or two panes, which
- * is the whole difference between reading a session and working across a fleet.
+ * A session is a worktree. It is the container, and everything you open — the
+ * conversation, a terminal, a file, a diff — happens *inside* it. So the tabs
+ * belong to a session rather than to the window: picking one in the rail
+ * changes which workspace you are in, and the strip shows that workspace's
+ * tabs, exactly as you left them.
  *
- * ## Tabs are identified by what they show, not by when they were opened
+ * This corrects a first attempt where one global strip held everything. Opening
+ * a second session put it beside the first, and the strip became a pile of
+ * unrelated things — two conversations, somebody's plan, a diff from a third
+ * session — with nothing saying which belonged to what.
  *
- * Opening the same file twice focuses the tab that is already there rather than
- * making a second one. So the id *is* the address: `file:s_abc:src/auth.rs`.
- * Nothing generates a key, which also means the layout survives a reload
- * without having to remember which random id meant what.
+ * ## Tabs are identified by what they show
+ *
+ * Within a session, `file:src/auth.rs` is the address and the id. Opening the
+ * same file twice focuses the tab that is already there. Nothing generates a
+ * key, which is also what lets the layout survive a reload without having to
+ * remember what a random id meant.
  *
  * ## It lives in the browser
  *
- * Which tabs somebody has open is a fact about this browser mid-thought, not a
- * fact about the fleet — a second machine signed in as the same person should
- * not inherit them. Storage can throw (a private window, site data blocked), so
- * every access is guarded and an unreadable store simply means starting empty.
+ * How somebody has arranged their window is not a fact about the fleet, and a
+ * second machine signed in as the same person should not inherit it. Storage
+ * can throw — a private window, site data blocked — so every access is guarded
+ * and an unreadable store means starting empty.
  */
 
 import {
@@ -36,119 +42,161 @@ import {
 /** Which half of a split a tab is in. There are at most two. */
 export type PaneIndex = 0 | 1;
 
-/** What a session tab is currently showing. A toggle inside the tab, not two tabs. */
-export type SessionFace = "agent" | "shell";
-
 export type Tab =
-  | { id: string; kind: "session"; sessionId: string; face: SessionFace }
-  | { id: string; kind: "file"; sessionId: string; path: string }
-  | { id: string; kind: "diff"; sessionId: string; path: string };
+  /** The conversation. Every session has exactly one and it cannot be closed. */
+  | { id: "agent"; kind: "agent" }
+  /** A shell in the workspace. Numbered, because two is a normal thing to want. */
+  | { id: string; kind: "terminal"; n: number }
+  | { id: string; kind: "file"; path: string }
+  | { id: string; kind: "diff"; path: string };
 
-/** The address of a thing, which is also its tab id. */
+/** The address of a thing inside a session, which is also its tab id. */
 export const addressOf = {
-  session: (sessionId: string) => `session:${sessionId}`,
-  file: (sessionId: string, path: string) => `file:${sessionId}:${path}`,
-  diff: (sessionId: string, path: string) => `diff:${sessionId}:${path}`,
+  agent: () => "agent" as const,
+  terminal: (n: number) => `terminal:${n}`,
+  file: (path: string) => `file:${path}`,
+  diff: (path: string) => `diff:${path}`,
 };
 
-export type State = {
-  /** Every open tab, in the order they were opened. */
+/** What is open in one session. */
+export type TabSet = {
   tabs: Tab[];
-  /** Which pane each tab is in. */
   pane: Record<string, PaneIndex>;
-  /** The tab on top in each pane. */
   active: [string | null, string | null];
-  /** Which pane keystrokes and the inspector belong to. */
   focused: PaneIndex;
-  /** Whether the second pane exists at all. */
   split: boolean;
 };
 
-/** Nothing open. Exported so the tests can start from the same place. */
-export const EMPTY: State = { tabs: [], pane: {}, active: [null, null], focused: 0, split: false };
+export type State = {
+  /** The session you are in. */
+  current: string | null;
+  sets: Record<string, TabSet>;
+};
+
+/** A session opens on its conversation, which is the only tab it starts with. */
+export function freshSet(): TabSet {
+  const agent: Tab = { id: "agent", kind: "agent" };
+  return {
+    tabs: [agent],
+    pane: { agent: 0 },
+    active: ["agent", null],
+    focused: 0,
+    split: false,
+  };
+}
+
+export const EMPTY: State = { current: null, sets: {} };
 
 export type Action =
+  /** Go to a session, making its set if this is the first time. */
+  | { do: "enter"; sessionId: string }
   | { do: "open"; tab: Tab; beside?: boolean }
   | { do: "close"; id: string }
-  | { do: "closeSession"; sessionId: string }
   | { do: "focus"; id: string }
   | { do: "focusPane"; pane: PaneIndex }
-  | { do: "face"; id: string; face: SessionFace }
   | { do: "move"; id: string; pane: PaneIndex }
   | { do: "unsplit" }
+  /** A session that has gone. Its tabs go with it. */
+  | { do: "forget"; sessionId: string }
   | { do: "restore"; state: State };
 
 export function reduce(state: State, action: Action): State {
   switch (action.do) {
     case "restore": {
       // Merged, not replaced. The store is read in the provider's effect, and
-      // React runs a child's effects before its parent's — so a session opened
+      // React runs a child's effects before its parent's — so a session entered
       // from a link, which happens in the bench below, lands *first* and would
       // be wiped by the restore that follows it. That was a deep link silently
-      // dropping you on whichever tab you happened to have open last.
-      //
-      // What was already here wins: it is what somebody just asked for, and
-      // the restore is only remembering what they had before.
+      // dropping you on whichever session you had open last.
       const restored = action.state;
-      const extra = state.tabs.filter((t) => !restored.tabs.some((r) => r.id === t.id));
-      if (extra.length === 0) return restored;
-
-      const pane = { ...restored.pane };
-      for (const t of extra) pane[t.id] = 0;
+      if (!state.current) return restored;
 
       return {
-        ...restored,
-        tabs: [...restored.tabs, ...extra],
-        pane,
-        // The newly opened one is what to look at, in the pane it landed in.
-        active: [extra[extra.length - 1].id, restored.active[1]],
-        focused: 0,
+        // What was already here wins: it is what somebody just asked for, and
+        // the restore is only remembering what they had before.
+        current: state.current,
+        sets: { ...restored.sets, ...state.sets },
       };
     }
 
+    case "enter": {
+      if (state.current === action.sessionId && state.sets[action.sessionId]) return state;
+      return {
+        current: action.sessionId,
+        sets: state.sets[action.sessionId]
+          ? state.sets
+          : { ...state.sets, [action.sessionId]: freshSet() },
+      };
+    }
+
+    case "forget": {
+      if (!state.sets[action.sessionId]) return state;
+      const sets = { ...state.sets };
+      delete sets[action.sessionId];
+      return {
+        sets,
+        current: state.current === action.sessionId ? null : state.current,
+      };
+    }
+
+    default:
+      return within(state, (set) => inside(set, action));
+  }
+}
+
+/** Apply a change to the session you are in, leaving the rest alone. */
+function within(state: State, change: (set: TabSet) => TabSet): State {
+  if (!state.current) return state;
+  const set = state.sets[state.current];
+  if (!set) return state;
+
+  const next = change(set);
+  if (next === set) return state;
+  return { ...state, sets: { ...state.sets, [state.current]: next } };
+}
+
+/** Everything that happens to one session's tabs. */
+function inside(set: TabSet, action: Action): TabSet {
+  switch (action.do) {
     case "open": {
-      // `beside` opens into the other pane, creating it if this is the first
-      // time. Without it a tab lands wherever the person is already looking,
-      // which is what makes clicking a file feel like navigation rather than
-      // like rearranging the room.
-      const pane: PaneIndex = action.beside ? (state.focused === 0 ? 1 : 0) : state.focused;
-      const split = state.split || action.beside === true;
+      // `beside` opens into the other half, making it if this is the first
+      // time. Without it a tab lands wherever the person is already looking.
+      const pane: PaneIndex = action.beside ? (set.focused === 0 ? 1 : 0) : set.focused;
+      const split = set.split || action.beside === true;
 
-      const known = state.tabs.find((t) => t.id === action.tab.id);
+      const known = set.tabs.find((t) => t.id === action.tab.id);
       if (known) {
-        const at = state.pane[known.id] ?? 0;
+        const at = set.pane[known.id] ?? 0;
         // Already open. Ordinarily focus it where it is — moving somebody's tab
-        // because they clicked its source a second time is the kind of
-        // helpfulness nobody asked for. `beside` is the exception, because it
-        // is a request about *position*: asking for this document next to the
-        // conversation, when the document is already open, has to move it.
-        // Splitting and leaving it behind opens an empty half instead.
-        const to: PaneIndex =
-          action.beside && at === state.focused ? (state.focused === 0 ? 1 : 0) : at;
+        // because they clicked its source twice is unasked-for helpfulness.
+        // `beside` is the exception, because it is a request about *position*:
+        // asking for this document next to the conversation, when the document
+        // is already open, has to move it. Splitting and leaving it behind
+        // opens an empty half instead.
+        const to: PaneIndex = action.beside && at === set.focused ? (set.focused === 0 ? 1 : 0) : at;
 
-        const active: [string | null, string | null] = [...state.active];
+        const active: [string | null, string | null] = [...set.active];
         if (to !== at && active[at] === known.id) {
-          // It leaves a hole behind it in the pane it came from.
           active[at] =
-            state.tabs.find((t) => t.id !== known.id && (state.pane[t.id] ?? 0) === at)?.id ?? null;
+            set.tabs.find((t) => t.id !== known.id && (set.pane[t.id] ?? 0) === at)?.id ?? null;
         }
         active[to] = known.id;
 
         return {
-          ...state,
-          pane: to === at ? state.pane : { ...state.pane, [known.id]: to },
+          ...set,
+          pane: to === at ? set.pane : { ...set.pane, [known.id]: to },
           active,
           focused: to,
           split: split || to === 1,
         };
       }
 
-      const active: [string | null, string | null] = [...state.active];
+      const active: [string | null, string | null] = [...set.active];
       active[pane] = action.tab.id;
       return {
-        ...state,
-        tabs: [...state.tabs, action.tab],
-        pane: { ...state.pane, [action.tab.id]: pane },
+        ...set,
+        tabs: [...set.tabs, action.tab],
+        pane: { ...set.pane, [action.tab.id]: pane },
         active,
         focused: pane,
         split,
@@ -156,45 +204,34 @@ export function reduce(state: State, action: Action): State {
     }
 
     case "close":
-      return without(state, (t) => t.id === action.id);
-
-    case "closeSession":
-      // Closing a session closes what belonged to it. Its files and diffs are
-      // views onto a workspace that is no longer on screen, and leaving them
-      // behind orphans a tab whose header names a session you just dismissed.
-      return without(state, (t) => t.sessionId === action.sessionId);
+      // The conversation is the session. There would be nothing left to look at
+      // if it went, so it has no close control and this refuses anyway.
+      return action.id === "agent" ? set : without(set, action.id);
 
     case "focus": {
-      const at = state.pane[action.id];
-      if (at === undefined) return state;
-      const active: [string | null, string | null] = [...state.active];
+      const at = set.pane[action.id];
+      if (at === undefined) return set;
+      const active: [string | null, string | null] = [...set.active];
       active[at] = action.id;
-      return { ...state, active, focused: at };
+      return { ...set, active, focused: at };
     }
 
     case "focusPane":
-      return state.focused === action.pane ? state : { ...state, focused: action.pane };
-
-    case "face":
-      return {
-        ...state,
-        tabs: state.tabs.map((t) =>
-          t.id === action.id && t.kind === "session" ? { ...t, face: action.face } : t,
-        ),
-      };
+      return set.focused === action.pane ? set : { ...set, focused: action.pane };
 
     case "move": {
-      if (state.pane[action.id] === action.pane) return state;
-      const active: [string | null, string | null] = [...state.active];
-      // It leaves a hole behind it in the pane it came from.
-      const from = state.pane[action.id];
+      if (set.pane[action.id] === action.pane) return set;
+      const active: [string | null, string | null] = [...set.active];
+      const from = set.pane[action.id];
       if (active[from] === action.id) {
-        active[from] = state.tabs.find((t) => t.id !== action.id && state.pane[t.id] === from)?.id ?? null;
+        // It leaves a hole behind it in the half it came from.
+        active[from] =
+          set.tabs.find((t) => t.id !== action.id && set.pane[t.id] === from)?.id ?? null;
       }
       active[action.pane] = action.id;
       return {
-        ...state,
-        pane: { ...state.pane, [action.id]: action.pane },
+        ...set,
+        pane: { ...set.pane, [action.id]: action.pane },
         active,
         focused: action.pane,
         split: true,
@@ -202,59 +239,75 @@ export function reduce(state: State, action: Action): State {
     }
 
     case "unsplit": {
-      // Everything comes back to the first pane rather than being closed.
+      // Everything comes back to the first half rather than being closed.
       const pane: Record<string, PaneIndex> = {};
-      for (const t of state.tabs) pane[t.id] = 0;
+      for (const t of set.tabs) pane[t.id] = 0;
       return {
-        ...state,
+        ...set,
         pane,
-        active: [state.active[0] ?? state.active[1], null],
+        active: [set.active[0] ?? set.active[1], null],
         focused: 0,
         split: false,
       };
     }
+
+    default:
+      return set;
   }
 }
 
-/** Drop every tab matching `gone`, and repair what was pointing at them. */
-function without(state: State, gone: (t: Tab) => boolean): State {
-  const tabs = state.tabs.filter((t) => !gone(t));
-  if (tabs.length === state.tabs.length) return state;
+/** Drop one tab, and repair what was pointing at it. */
+function without(set: TabSet, id: string): TabSet {
+  const tabs = set.tabs.filter((t) => t.id !== id);
+  if (tabs.length === set.tabs.length) return set;
 
   const pane: Record<string, PaneIndex> = {};
-  for (const t of tabs) pane[t.id] = state.pane[t.id] ?? 0;
+  for (const t of tabs) pane[t.id] = set.pane[t.id] ?? 0;
 
-  const active = state.active.map((id, at) => {
-    if (id && tabs.some((t) => t.id === id)) return id;
-    // The nearest survivor in the same pane, so closing a tab leaves you
+  const active = set.active.map((held, at) => {
+    if (held && tabs.some((t) => t.id === held)) return held;
+    // The nearest survivor in the same half, so closing a tab leaves you
     // looking at its neighbour rather than at nothing.
     return tabs.find((t) => pane[t.id] === at)?.id ?? null;
   }) as [string | null, string | null];
 
-  // A pane nobody is in stops existing. A split held open by a hole is a
-  // half-width session for no reason.
-  const split = state.split && tabs.some((t) => pane[t.id] === 1);
+  // A half nobody is in stops existing. A split held open by a hole is a
+  // half-width conversation for no reason.
+  const split = set.split && tabs.some((t) => pane[t.id] === 1);
   if (!split) {
     for (const t of tabs) pane[t.id] = 0;
     return { tabs, pane, active: [active[0] ?? active[1], null], focused: 0, split: false };
   }
 
-  return { tabs, pane, active, focused: state.focused, split };
+  return { tabs, pane, active, focused: set.focused, split };
+}
+
+/** The lowest number not already taken, so closing Terminal 1 frees the name. */
+export function nextTerminal(set: TabSet): number {
+  const taken = new Set(
+    set.tabs.flatMap((t) => (t.kind === "terminal" ? [t.n] : [])),
+  );
+  let n = 1;
+  while (taken.has(n)) n += 1;
+  return n;
 }
 
 const Ctx = createContext<{
   state: State;
+  /** What is open in the session you are in. Absent before you are in one. */
+  set: TabSet | null;
+  enter: (sessionId: string) => void;
   open: (tab: Tab, beside?: boolean) => void;
   close: (id: string) => void;
-  closeSession: (sessionId: string) => void;
   focus: (id: string) => void;
   focusPane: (pane: PaneIndex) => void;
-  face: (id: string, face: SessionFace) => void;
   move: (id: string, pane: PaneIndex) => void;
   unsplit: () => void;
+  forget: (sessionId: string) => void;
 } | null>(null);
 
-const KEY = "firetower.workspace";
+/** `v2` because the shape changed from one global strip to a set per session. */
+const KEY = "firetower.workspace.v2";
 
 export function Tabs({ children }: { children: ReactNode }) {
   const [state, send] = useReducer(reduce, EMPTY);
@@ -283,14 +336,15 @@ export function Tabs({ children }: { children: ReactNode }) {
   const value = useMemo(
     () => ({
       state,
+      set: state.current ? (state.sets[state.current] ?? null) : null,
+      enter: (sessionId: string) => send({ do: "enter", sessionId }),
       open: (tab: Tab, beside?: boolean) => send({ do: "open", tab, beside }),
       close: (id: string) => send({ do: "close", id }),
-      closeSession: (sessionId: string) => send({ do: "closeSession", sessionId }),
       focus: (id: string) => send({ do: "focus", id }),
       focusPane: (pane: PaneIndex) => send({ do: "focusPane", pane }),
-      face: (id: string, f: SessionFace) => send({ do: "face", id, face: f }),
       move: (id: string, pane: PaneIndex) => send({ do: "move", id, pane }),
       unsplit: () => send({ do: "unsplit" }),
+      forget: (sessionId: string) => send({ do: "forget", sessionId }),
     }),
     [state],
   );
@@ -304,42 +358,34 @@ export function useTabs() {
   return held;
 }
 
-/**
- * The session the inspector should be describing.
- *
- * Whatever is on top of the focused pane — and if that is a file or a diff, the
- * session it came from. Looking at a diff should not empty the panel that
- * explains where the diff is from.
- */
-export function useFocusedSession(): string | null {
-  const { state } = useTabs();
-  const id = state.active[state.focused] ?? state.active[state.focused === 0 ? 1 : 0];
-  return state.tabs.find((t) => t.id === id)?.sessionId ?? null;
+/** The session you are in. Everything on screen is about this one. */
+export function useCurrentSession(): string | null {
+  return useTabs().state.current;
 }
 
-/** The tabs in one pane, in order. */
-export function paneTabs(state: State, pane: PaneIndex): Tab[] {
-  return state.tabs.filter((t) => (state.pane[t.id] ?? 0) === pane);
+/** The tabs in one half, in order. */
+export function paneTabs(set: TabSet | null, pane: PaneIndex): Tab[] {
+  if (!set) return [];
+  return set.tabs.filter((t) => (set.pane[t.id] ?? 0) === pane);
 }
 
 /** Convenience for the many places that just want to open a thing. */
 export function useOpen() {
-  const { open } = useTabs();
+  const { open, set } = useTabs();
   return {
-    session: useCallback(
-      (sessionId: string, beside?: boolean) =>
-        open({ id: addressOf.session(sessionId), kind: "session", sessionId, face: "agent" }, beside),
-      [open],
-    ),
     file: useCallback(
-      (sessionId: string, path: string, beside?: boolean) =>
-        open({ id: addressOf.file(sessionId, path), kind: "file", sessionId, path }, beside),
+      (path: string, beside?: boolean) =>
+        open({ id: addressOf.file(path), kind: "file", path }, beside),
       [open],
     ),
     diff: useCallback(
-      (sessionId: string, path: string, beside?: boolean) =>
-        open({ id: addressOf.diff(sessionId, path), kind: "diff", sessionId, path }, beside),
+      (path: string, beside?: boolean) =>
+        open({ id: addressOf.diff(path), kind: "diff", path }, beside),
       [open],
     ),
+    terminal: useCallback(() => {
+      const n = set ? nextTerminal(set) : 1;
+      open({ id: addressOf.terminal(n), kind: "terminal", n });
+    }, [open, set]),
   };
 }

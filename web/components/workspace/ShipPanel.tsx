@@ -247,7 +247,7 @@ export function ShipPanel({ sessionId }: { sessionId: string }) {
               <PathRow
                 key={f.path}
                 path={f.path}
-                onClick={() => openTab.diff(sessionId, f.path)}
+                onClick={() => openTab.diff(f.path)}
                 title={`${f.path} — open the diff`}
                 lead={
                   <button

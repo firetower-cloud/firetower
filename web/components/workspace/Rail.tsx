@@ -10,7 +10,12 @@ import type { Session } from "@/src/api/generated/model";
 import { Mark, Signal } from "@/components/Signal";
 import { AgentMark, AGENT_SHORT } from "@/components/AgentMark";
 import { elapsed, minutesSince, needsYou, unfinished } from "@/src/api/view";
-import { useOpen, useTabs, addressOf } from "@/src/workspace/tabs";
+import { useTabs, useCurrentSession } from "@/src/workspace/tabs";
+import { useRenameSession, getListSessionsQueryKey } from "@/src/api/generated/sessions/sessions";
+import { useQueryClient } from "@tanstack/react-query";
+import { useSessionWork } from "@/src/api/generated/sessions/sessions";
+import { SessionMenu } from "@/components/SessionActions";
+import { useRef } from "react";
 
 /**
  * Sessions, not files.
@@ -186,31 +191,92 @@ function Grouped({
   );
 }
 
+/**
+ * One session, which is one worktree.
+ *
+ * Clicking it goes *into* that workspace: the tab strip becomes its tabs, the
+ * panel describes its files. It does not add a tab beside whatever else was
+ * open, because a session is a place rather than a document.
+ *
+ * The row also carries what the session header used to: the name and its
+ * rename, and the menu that stops or ends it. They act on this session, so they
+ * belong on the thing that names it.
+ */
 function Row({ session }: { session: Session }) {
-  const open = useOpen();
-  const { state } = useTabs();
-  const on = state.active.includes(addressOf.session(session.id));
+  const { enter } = useTabs();
+  const current = useCurrentSession();
+  const on = current === session.id;
   const asks = needsYou(session);
 
+  const [naming, setNaming] = useState<string | null>(null);
+  /** Set by Escape, read by the blur that follows it. */
+  const dropping = useRef(false);
+  const rename = useRenameSession();
+  const cache = useQueryClient();
+
+  // Only for the menu, which needs to know whether anything is unpushed before
+  // it offers to end the session. Asked only for the session you are in.
+  const { data: work } = useSessionWork(session.id, {
+    query: { enabled: on && !!session.repo },
+  });
+
   return (
-    <button
-      onClick={() => open.session(session.id)}
+    <div
+      onDoubleClick={() => setNaming(session.name)}
       title={session.title ?? session.name}
-      // A card when it is the one you are looking at — a border and a raised
-      // ground, not a background tint. A tint says "hovered"; a card says
-      // "this is the thing on screen", which is what the row actually means.
-      className={`mb-px flex w-full items-center gap-2 rounded-[9px] border px-2 py-[7px] text-left transition-colors ${
-        on
-          ? "border-line bg-raise"
-          : "border-transparent hover:border-line-soft hover:bg-raise/50"
+      // A card when it is the one you are in — a border and a raised ground,
+      // not a background tint. A tint says "hovered"; a card says "this is the
+      // workspace you are in", which is what the row actually means.
+      className={`group/row mb-px flex w-full items-center gap-2 rounded-[9px] border px-2 py-[7px] transition-colors ${
+        on ? "border-line bg-raise" : "border-transparent hover:border-line-soft hover:bg-raise/50"
       }`}
     >
       <Signal status={session.status} size={6} />
 
       <span className="min-w-0 flex-1">
-        <span className={`block truncate text-[13px] ${on || asks ? "text-bone" : "text-dim"}`}>
-          {session.name}
-        </span>
+        {naming === null ? (
+          <button onClick={() => enter(session.id)} className="block w-full text-left">
+            <span className={`block truncate text-[13px] ${on || asks ? "text-bone" : "text-dim"}`}>
+              {session.name}
+            </span>
+          </button>
+        ) : (
+          <input
+            autoFocus
+            value={naming}
+            onChange={(e) => setNaming(e.target.value)}
+            onFocus={(e) => e.currentTarget.select()}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                e.currentTarget.blur();
+              }
+              if (e.key === "Escape") {
+                e.preventDefault();
+                dropping.current = true;
+                e.currentTarget.blur();
+              }
+            }}
+            // Clicking away keeps it, which is what happens to a field you have
+            // finished with. Escape is the way to change your mind.
+            onBlur={() => {
+              const next = naming.trim();
+              const dropped = dropping.current;
+              dropping.current = false;
+              setNaming(null);
+              if (dropped || !next || next === session.name) return;
+              rename.mutate(
+                { id: session.id, data: { name: next } },
+                {
+                  onSuccess: () =>
+                    cache.invalidateQueries({ queryKey: getListSessionsQueryKey() }),
+                },
+              );
+            }}
+            className="w-full rounded-[5px] border border-ember-deep bg-ground px-1 text-[13px] text-bone focus:border-ember focus:outline-none"
+          />
+        )}
+
         <span className="mt-px flex items-center gap-1.5 text-mute">
           <AgentMark agent={session.agent} size={11} className="shrink-0 opacity-80" />
           <span className="truncate font-mono text-[10.5px]">
@@ -219,8 +285,20 @@ function Row({ session }: { session: Session }) {
         </span>
       </span>
 
-      {asks && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-ember" />}
-    </button>
+      {asks && naming === null && (
+        <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-ember group-hover/row:hidden" />
+      )}
+
+      {/* Hidden until the row is hovered or you are in it, so a rail of ten
+          sessions is not a rail of ten menus. */}
+      <span
+        className={`shrink-0 transition-opacity ${
+          on ? "opacity-100" : "opacity-0 group-hover/row:opacity-100"
+        }`}
+      >
+        <SessionMenu session={session} work={work} compact />
+      </span>
+    </div>
   );
 }
 
