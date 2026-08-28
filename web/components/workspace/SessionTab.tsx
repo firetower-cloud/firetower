@@ -11,7 +11,6 @@ import {
 import { useListEvents } from "@/src/api/generated/events/events";
 import { Chat } from "@/components/Chat";
 import { Terminal } from "@/components/Terminal";
-import { Review } from "@/components/Review";
 import { AddRepo } from "@/components/AddRepo";
 import { SessionMenu } from "@/components/SessionActions";
 import { stepLines } from "@/components/Steps";
@@ -24,6 +23,7 @@ import { answerable, elapsed, minutesSince, unfinished, STATUS_LABEL } from "@/s
 import { ApiError } from "@/src/api/http";
 import type { Session } from "@/src/api/generated/model";
 import { useTabs, type SessionFace } from "@/src/workspace/tabs";
+import { usePanel } from "@/src/workspace/panel";
 
 /**
  * One session, as a tab.
@@ -56,7 +56,7 @@ export function SessionTab({
   showing: boolean;
 }) {
   const { face: setFace } = useTabs();
-  const [reviewing, setReviewing] = useState(false);
+  const panel = usePanel();
   const [adding, setAdding] = useState(false);
   const [naming, setNaming] = useState<string | null>(null);
   /** Set by Escape, read by the blur that follows it. */
@@ -186,7 +186,7 @@ export function SessionTab({
 
         {ship && (
           <button
-            onClick={() => setReviewing(true)}
+            onClick={() => panel.reveal("ship")}
             disabled={!ready(ship) && !done(ship)}
             title={ship.blocked ?? ship.label}
             className={`shrink-0 rounded-[7px] px-2.5 py-1 text-[12px] font-medium transition-colors ${
@@ -204,7 +204,6 @@ export function SessionTab({
         <SessionMenu session={session} work={work} />
       </header>
 
-      {reviewing && <Review session={session} work={work} onClose={() => setReviewing(false)} />}
       {adding && (
         <AddRepo session={session} onClose={() => setAdding(false)} onAdded={() => refetch()} />
       )}

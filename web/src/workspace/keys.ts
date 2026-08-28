@@ -14,6 +14,7 @@
 
 import { useEffect } from "react";
 import { paneTabs, useTabs } from "./tabs";
+import { revealPanel, VIEWS } from "./panel";
 
 export function useWorkbenchKeys() {
   const { state, focus, close, move, unsplit, focusPane } = useTabs();
@@ -26,6 +27,17 @@ export function useWorkbenchKeys() {
 
       const here = paneTabs(state, state.focused);
       const active = state.active[state.focused];
+
+      // ⌘⌥1..3 — the right panel's views. Before the plain ⌘1..9 test below,
+      // which would otherwise take the digit first.
+      if (e.altKey && !e.shiftKey && /^[1-9]$/.test(e.key)) {
+        const view = VIEWS.find((v) => v.key === e.key);
+        if (view) {
+          e.preventDefault();
+          revealPanel(view.id);
+          return;
+        }
+      }
 
       // ⌘1..9 — the nth tab of the pane you are in. ⌘9 is the last one,
       // whatever its number, which is the convention every browser uses.
