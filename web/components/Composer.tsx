@@ -47,7 +47,7 @@ function agentLabel(agent: AgentView, runsHere: boolean) {
   return `${agent.label} · unavailable here`;
 }
 
-export function Composer() {
+export function Composer({ onStarted }: { onStarted?: (id: string) => void } = {}) {
   const [open, setOpen] = useState(false);
   const [text, setText] = useState("");
   /**
@@ -140,7 +140,11 @@ export function Composer() {
     mutation: {
       onSuccess: (session) => {
         queryClient.invalidateQueries({ queryKey: getListSessionsQueryKey() });
-        router.push(`/sessions/${session.id}`);
+        // Inside the workbench there is nowhere to navigate to: the session
+        // opens as a tab beside whatever else is already open. Navigating would
+        // tear the whole bench down and rebuild it to show one new thing.
+        if (onStarted) onStarted(session.id);
+        else router.push(`/sessions/${session.id}`);
       },
     },
   });

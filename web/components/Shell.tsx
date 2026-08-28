@@ -83,6 +83,11 @@ export function Shell({ children }: { children: React.ReactNode }) {
   /* Onboarding and signing in run full-bleed — no fleet to navigate yet. */
   if (path.startsWith("/setup") || path.startsWith("/login")) return <>{children}</>;
 
+  /* The workbench brings its own rail, its own tabs and its own panel, and it
+     wants the whole window to do it. This rail is what is left for the pages
+     that are still pages: repositories, agents, secrets, compute. */
+  if (path === "/" || path.startsWith("/sessions/")) return <>{children}</>;
+
   // Anything still alive, with what needs you first.
   const pinned = sessions
     .filter((s) => needsYou(s) || inFlight(s))
