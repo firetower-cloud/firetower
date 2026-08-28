@@ -80,8 +80,31 @@ export type Action =
 
 export function reduce(state: State, action: Action): State {
   switch (action.do) {
-    case "restore":
-      return action.state;
+    case "restore": {
+      // Merged, not replaced. The store is read in the provider's effect, and
+      // React runs a child's effects before its parent's — so a session opened
+      // from a link, which happens in the bench below, lands *first* and would
+      // be wiped by the restore that follows it. That was a deep link silently
+      // dropping you on whichever tab you happened to have open last.
+      //
+      // What was already here wins: it is what somebody just asked for, and
+      // the restore is only remembering what they had before.
+      const restored = action.state;
+      const extra = state.tabs.filter((t) => !restored.tabs.some((r) => r.id === t.id));
+      if (extra.length === 0) return restored;
+
+      const pane = { ...restored.pane };
+      for (const t of extra) pane[t.id] = 0;
+
+      return {
+        ...restored,
+        tabs: [...restored.tabs, ...extra],
+        pane,
+        // The newly opened one is what to look at, in the pane it landed in.
+        active: [extra[extra.length - 1].id, restored.active[1]],
+        focused: 0,
+      };
+    }
 
     case "open": {
       // `beside` opens into the other pane, creating it if this is the first

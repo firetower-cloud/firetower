@@ -127,3 +127,36 @@ describe("a session's face", () => {
     expect(faces).toEqual(["shell", "agent"]);
   });
 });
+
+describe("restoring what was open last time", () => {
+  it("keeps a session opened before the store was read", () => {
+    // The order this reproduces is React's: a link opens a session in a child
+    // effect, and the provider restores in its own effect afterwards. Before
+    // the merge, the restore silently dropped the session you followed a link
+    // to and left you on whatever was open last.
+    const linked = run({ do: "open", tab: session("linked") });
+    const after = reduce(linked, {
+      do: "restore",
+      state: run({ do: "open", tab: session("a") }, { do: "open", tab: session("b") }),
+    });
+
+    expect(after.tabs.map((t) => t.sessionId).sort()).toEqual(["a", "b", "linked"]);
+    // And it is the one you are looking at: it is what you just asked for.
+    expect(after.active[0]).toBe("session:linked");
+  });
+
+  it("does not duplicate a session the store already had", () => {
+    const linked = run({ do: "open", tab: session("a") });
+    const after = reduce(linked, {
+      do: "restore",
+      state: run({ do: "open", tab: session("a") }, { do: "open", tab: session("b") }),
+    });
+
+    expect(after.tabs).toHaveLength(2);
+  });
+
+  it("takes the stored layout whole when nothing was opened first", () => {
+    const stored = run({ do: "open", tab: session("a") }, { do: "open", tab: session("b") });
+    expect(reduce(EMPTY, { do: "restore", state: stored })).toBe(stored);
+  });
+});

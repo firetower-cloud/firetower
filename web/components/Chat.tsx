@@ -217,7 +217,7 @@ export function Chat({
         {/* A column, centred, rather than a line of text as wide as the
             window. The scroller stays full width so the bar sits at the edge
             of the pane and not in the middle of the reading. */}
-        <div className="mx-auto w-full max-w-[860px] pt-1">
+        <div className="mx-auto w-full max-w-[860px] px-4 pt-1">
           {head}
           <Bringup lines={steps} />
 
@@ -258,7 +258,13 @@ export function Chat({
           cards above it take whatever is left. Two vh caps that did not know
           about each other left the composer half off the bottom of a short
           window — the thing this bar exists to keep reachable. */}
-      <div className="relative mx-auto flex max-h-[85vh] w-full max-w-[860px] shrink-0 flex-col bg-ground pt-3">
+      {/* `pb-4` because this is now the bottom of the window. The session used
+          to be a page inside a padded wrapper, which is where the composer's
+          breathing room came from; in the workbench it fills its pane, and
+          without this the composer — or the line of repositories under it —
+          sits flush against the edge of the screen. `px-4` matches the reading
+          column above so the two stay on one line. */}
+      <div className="relative mx-auto flex max-h-[85vh] w-full max-w-[860px] shrink-0 flex-col bg-ground px-4 pt-3 pb-4">
         {/* The transcript scrolls under this, so without a fade the last line
             is cut in half by the composer's top edge. */}
         <div
