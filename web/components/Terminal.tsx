@@ -163,31 +163,27 @@ export function Terminal({
   }, [showing, state]);
 
   return (
-    <div className="flex h-full flex-col overflow-hidden rounded-[6px] border border-line bg-[#0f0e0d]">
-      <div className="flex items-center gap-2 border-b border-line px-3 py-1.5">
-        <span
-          className={`h-1.5 w-1.5 rounded-full ${
-            state === "live"
-              ? "bg-sage"
-              : state === "connecting"
-                ? "bg-mute"
-                : "border border-mute"
-          }`}
-        />
-        <span className="font-narrow text-[9.5px] font-semibold tracking-[0.14em] text-mute uppercase">
-          {state === "live" ? "Shell" : state === "connecting" ? "Connecting" : "Detached"}
-        </span>
-        {state === "closed" && (
+    // Edge to edge. A terminal is the whole pane: the tab above already says
+    // what it is, so a title bar repeated the label, and a border drew a box
+    // around something that has no reason not to reach the sides.
+    <div className="relative h-full overflow-hidden bg-[#0f0e0d]">
+      <div ref={host} className="h-full w-full" />
+
+      {/* The one state worth interrupting for. Nothing is drawn while it is
+          connected, which is almost always — a permanent bar saying "Shell"
+          spent a row on a fact that never changes. */}
+      {state === "closed" && (
+        <div className="absolute top-2 right-3 flex items-center gap-2 rounded-[7px] border border-line bg-panel px-2.5 py-1.5">
+          <span className="h-1.5 w-1.5 rounded-full border border-mute" />
+          <span className="text-[11.5px] text-mute">Detached</span>
           <button
             onClick={() => setAttempt((n) => n + 1)}
-            className="ml-auto text-[11px] text-mute transition-colors hover:text-ember"
+            className="text-[11.5px] text-dim transition-colors hover:text-ember"
           >
             Reconnect
           </button>
-        )}
-      </div>
-
-      <div ref={host} className="min-h-0 flex-1 px-2 py-1" />
+        </div>
+      )}
     </div>
   );
 }

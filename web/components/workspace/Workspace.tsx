@@ -167,11 +167,8 @@ function Content({
     case "agent":
       return <SessionTab sessionId={sessionId} />;
     case "terminal":
-      return (
-        <div className="h-full p-2">
-          <Terminal sessionId={sessionId} live showing={showing} />
-        </div>
-      );
+      // No wrapper and no padding: the terminal is the pane.
+      return <Terminal sessionId={sessionId} live showing={showing} />;
     case "file":
       return <FileTab sessionId={sessionId} path={tab.path} />;
     case "diff":
