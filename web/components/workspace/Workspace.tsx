@@ -43,7 +43,8 @@ function Bench({ initialSession }: { initialSession?: string }) {
   const { state } = useTabs();
   const open = useOpen();
   const focused = useFocusedSession();
-  const [starting, setStarting] = useState(false);
+  /** The repository the composer should start on, when it was opened from one. */
+  const [starting, setStarting] = useState<{ repo?: string } | null>(null);
   // The same query the rail runs, so this costs nothing — but it is the only
   // place that can say the whole thing is unreachable rather than empty.
   const { isError } = useListSessions();
@@ -72,7 +73,7 @@ function Bench({ initialSession }: { initialSession?: string }) {
 
   return (
     <div className="flex h-dvh overflow-hidden">
-      <Rail onNew={() => setStarting(true)} />
+      <Rail onNew={(repo) => setStarting({ repo })} />
 
       <main className="flex min-w-0 flex-1">
         <Pane index={0} />
@@ -87,11 +88,12 @@ function Bench({ initialSession }: { initialSession?: string }) {
       <Inspector sessionId={focused} />
 
       {starting && (
-        <Modal onClose={() => setStarting(false)} title="New session" wide>
+        <Modal onClose={() => setStarting(null)} title="New session" wide>
           <div className="p-4">
             <Composer
+              startWith={starting.repo}
               onStarted={(id) => {
-                setStarting(false);
+                setStarting(null);
                 open.session(id);
               }}
             />

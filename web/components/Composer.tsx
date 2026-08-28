@@ -47,7 +47,20 @@ function agentLabel(agent: AgentView, runsHere: boolean) {
   return `${agent.label} · unavailable here`;
 }
 
-export function Composer({ onStarted }: { onStarted?: (id: string) => void } = {}) {
+export function Composer({
+  onStarted,
+  startWith,
+}: {
+  onStarted?: (id: string) => void;
+  /**
+   * A repository slug to begin with, from the `+` beside a group in the rail.
+   *
+   * A slug rather than an id because that is what the rail groups by — it has
+   * never needed the id, and asking it to carry one so this can skip a lookup
+   * would be the wrong way round.
+   */
+  startWith?: string;
+} = {}) {
   const [open, setOpen] = useState(false);
   const [text, setText] = useState("");
   /**
@@ -69,6 +82,22 @@ export function Composer({ onStarted }: { onStarted?: (id: string) => void } = {
   const queryClient = useQueryClient();
 
   const { data: repos = [] } = useListRepos();
+
+  // Seeded once the list arrives rather than as initial state: the repositories
+  // are fetched, so at first render there is nothing to match a slug against.
+  //
+  // Adjusted during render rather than in an effect. React re-runs this
+  // component before touching the DOM, so the composer never paints once
+  // without the repository and then again with it — and an effect here would
+  // be a second render nobody sees, flagged as such.
+  //
+  // Once per slug: somebody who removes the seeded repository meant to.
+  const [seededFor, setSeededFor] = useState<string | undefined>(undefined);
+  if (startWith && startWith !== seededFor && repos.length > 0) {
+    setSeededFor(startWith);
+    const match = repos.find((r) => r.slug === startWith);
+    if (match) setCheckouts([{ id: match.id, slug: match.slug }]);
+  }
 
   // The first one, for everything that wants a single name: the caption when
   // the composer is closed, the branch suggestion.

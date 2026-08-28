@@ -2,6 +2,8 @@
 
 import { useListSessions } from "@/src/api/generated/sessions/sessions";
 import { Signal } from "@/components/Signal";
+import { AgentMark } from "@/components/AgentMark";
+import { FileGlyph } from "@/components/FileGlyph";
 import { leafOf } from "@/src/api/text";
 import { paneTabs, useTabs, type PaneIndex, type Tab } from "@/src/workspace/tabs";
 
@@ -100,15 +102,32 @@ function TabButton({
           onClose();
         }
       }}
-      className={`group flex shrink-0 cursor-default items-center gap-2 border-r border-line px-3 transition-colors ${
-        on ? "bg-ground text-bone" : "text-mute hover:bg-raise/60 hover:text-dim"
+      // Two pixels of ember along the top edge of the active tab. The
+      // background alone told you which tab was in front only by being
+      // slightly less dark than its neighbours, which is not a signal at all
+      // on a screen somebody has turned down.
+      className={`group relative flex shrink-0 cursor-default items-center gap-2 border-r border-line px-3 transition-colors ${
+        on
+          ? "bg-ground text-bone before:absolute before:inset-x-0 before:top-0 before:h-[2px] before:bg-ember before:content-['']"
+          : "text-mute hover:bg-raise/60 hover:text-dim"
       }`}
     >
       <button onClick={onPick} className="flex items-center gap-2 py-1.5">
-        {tab.kind === "session" && session ? (
-          <Signal status={session.status} size={6} />
+        {/* Which agent, or which kind of document — the same question a row in
+            the rail answers, answered the same way. */}
+        {tab.kind === "session" ? (
+          session ? (
+            <span className="flex items-center gap-1.5">
+              <Signal status={session.status} size={6} />
+              <AgentMark agent={session.agent} size={12} className="opacity-80" />
+            </span>
+          ) : (
+            <Signal status="Starting" size={6} />
+          )
+        ) : tab.kind === "diff" ? (
+          <span className="font-mono text-[11px] opacity-70">±</span>
         ) : (
-          <span className="text-[10px] opacity-70">{tab.kind === "diff" ? "±" : "▤"}</span>
+          <FileGlyph name={tab.path} size={12} className="opacity-70" />
         )}
         <span className={`max-w-[22ch] truncate text-[12.5px] ${on ? "" : "font-normal"}`}>
           {label}

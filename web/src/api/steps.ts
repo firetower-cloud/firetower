@@ -43,10 +43,16 @@ export type Row =
  * subagent's own rail are all handled before a `Node` reaches `Tool`, and none
  * of them is noise. This list is the other side of that same decision, so the
  * two are meant to be read together.
+ *
+ * **`FileChange` is deliberately absent.** Folding exists to hide scaffolding —
+ * the greps and the reads and the test runs somebody scrolls past on the way to
+ * the point. An edit is not scaffolding; it is the work, and it is what the
+ * session was started to produce. Summarising it as "changed 4 files" hid the
+ * only part of a run anybody actually wants to check, and cost a click to
+ * uncover the thing they came for.
  */
 const FOLDS: ItemKind[] = [
   "CommandExecution",
-  "FileChange",
   "FileRead",
   "McpToolCall",
   "WebSearch",

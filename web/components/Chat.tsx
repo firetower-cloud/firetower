@@ -18,6 +18,7 @@ import {
   type Task,
 } from "@/src/api/conversation";
 import { Markdown } from "@/components/Markdown";
+import { EditCard, editFrom } from "@/components/EditCard";
 import { ChatComposer } from "@/components/Composer.chat";
 import type { Control } from "@/components/Settings.chat";
 import { Annotatable, Drafting, Notes } from "@/components/Annotate";
@@ -55,9 +56,18 @@ export function Chat({
   checkouts,
   onAddRepo,
   steps = [],
+  head,
 }: {
   sessionId: string;
   live: boolean;
+  /**
+   * Drawn above the run, inside the scroller.
+   *
+   * Inside rather than above it, so it scrolls away once somebody is reading —
+   * what model is running is worth a glance when you arrive and worth nothing
+   * once you are twenty messages deep.
+   */
+  head?: React.ReactNode;
   branch?: string | null;
   repo?: string | null;
   /** Every repository this session holds. */
@@ -208,6 +218,7 @@ export function Chat({
             window. The scroller stays full width so the bar sits at the edge
             of the pane and not in the middle of the reading. */}
         <div className="mx-auto w-full max-w-[860px] pt-1">
+          {head}
           <Bringup lines={steps} />
 
           {conversation.items.length === 0 && !conversation.trouble && steps.length === 0 && (
@@ -443,6 +454,10 @@ function Node({
 
   if (item.kind === "Reasoning") return <Thought item={item} />;
   if (item.kind === "SubagentCall") return <Delegated item={item} tasks={tasks} items={items} />;
+  // An edit shows what it did rather than saying that it did something. Only
+  // when its arguments can actually be read as one — an unfamiliar tool falls
+  // through to the ordinary row, which is what it drew before.
+  if (item.kind === "FileChange" && editFrom(item.input)) return <Edited item={item} />;
 
   return <Tool item={item} />;
 }
@@ -712,6 +727,60 @@ function Rail({
         ),
       )}
     </ol>
+  );
+}
+
+/**
+ * An edit, with the edit in it.
+ *
+ * The one tool call that draws its own result. Everything else in the rail is a
+ * line you open when you want the detail; this is the detail, because a change
+ * to the workspace is the thing the session exists to make and reading it is
+ * not an "if you want to dig in" activity.
+ *
+ * Falls back to the ordinary row the moment the arguments stop making sense —
+ * `editFrom` returning nothing costs the diff and nothing else.
+ */
+function Edited({ item }: { item: Item }) {
+  const [open, setOpen] = useState(false);
+  const edit = editFrom(item.input);
+  const failed = item.status === "Failed";
+
+  if (!edit) return <Tool item={item} />;
+
+  return (
+    <li className="node">
+      <Mark status={item.status} />
+      <button onClick={() => setOpen(!open)} className="flex w-full items-baseline gap-2 text-left">
+        <span className="eyebrow shrink-0">changed</span>
+        <span
+          className={`min-w-0 flex-1 truncate font-mono text-[13px] ${
+            failed ? "text-brick" : "text-dim"
+          }`}
+        >
+          {edit.path}
+        </span>
+        <span aria-hidden className="shrink-0 text-[11px] text-mute">
+          {open ? "⌃" : "⌄"}
+        </span>
+      </button>
+
+      {/* The card is not behind the fold — the fold is for what the tool
+          printed, which is usually a confirmation nobody needs. */}
+      <div className="max-w-[74ch]">
+        <EditCard path={edit.path} removed={edit.removed} added={edit.added} />
+      </div>
+
+      {open && item.output && (
+        <pre
+          className={`max-h-[320px] overflow-auto rounded-[8px] bg-panel px-3 py-2.5 font-mono text-[12px] whitespace-pre-wrap ${
+            failed ? "text-brick" : "text-dim"
+          }`}
+        >
+          {item.output}
+        </pre>
+      )}
+    </li>
   );
 }
 

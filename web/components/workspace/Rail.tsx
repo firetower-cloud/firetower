@@ -1,13 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useCallback, useState, useSyncExternalStore } from "react";
 import { useListSessions } from "@/src/api/generated/sessions/sessions";
 import { useListHosts } from "@/src/api/generated/hosts/hosts";
 import { useMe, useLogout } from "@/src/api/generated/auth/auth";
 import { forgetToken } from "@/src/api/http";
 import type { Session } from "@/src/api/generated/model";
 import { Mark, Signal } from "@/components/Signal";
+import { AgentMark, AGENT_SHORT } from "@/components/AgentMark";
 import { elapsed, minutesSince, needsYou, unfinished } from "@/src/api/view";
 import { useOpen, useTabs, addressOf } from "@/src/workspace/tabs";
 
@@ -20,7 +21,7 @@ import { useOpen, useTabs, addressOf } from "@/src/workspace/tabs";
  * pinned at the top and sorts first inside its group, and everything else is
  * grouped by the repository it is working on.
  */
-export function Rail({ onNew }: { onNew: () => void }) {
+export function Rail({ onNew }: { onNew: (repo?: string) => void }) {
   const { data: sessions = [] } = useListSessions(undefined, {
     query: {
       // Faster while something is still going, slow rather than never once
@@ -33,8 +34,8 @@ export function Rail({ onNew }: { onNew: () => void }) {
   const waiting = live.filter(needsYou);
 
   return (
-    <aside className="flex h-full w-[264px] shrink-0 flex-col overflow-hidden border-r border-line bg-panel">
-      <div className="flex items-center gap-2.5 px-4 pt-4 pb-3">
+    <aside className="flex h-full w-[268px] shrink-0 flex-col overflow-hidden border-r border-line bg-panel">
+      <div className="flex items-center gap-2.5 px-4 pt-4 pb-2.5">
         <span className="text-bone">
           <Mark size={20} />
         </span>
@@ -44,8 +45,8 @@ export function Rail({ onNew }: { onNew: () => void }) {
       </div>
 
       {waiting.length > 0 && (
-        <div className="px-2 pb-2">
-          <div className="flex items-center gap-2 rounded-[8px] border border-ember-deep bg-ember/[0.06] px-2.5 py-1.5">
+        <div className="px-2.5 pb-2.5">
+          <div className="flex items-center gap-2 rounded-[9px] border border-ember-deep bg-ember/[0.06] px-2.5 py-1.5">
             <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-ember" />
             <span className="font-narrow text-[10px] font-semibold tracking-[0.14em] text-ember uppercase">
               Waiting on you
@@ -55,16 +56,22 @@ export function Rail({ onNew }: { onNew: () => void }) {
         </div>
       )}
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
-        <Grouped sessions={live} />
+      <div className="min-h-0 flex-1 overflow-y-auto px-2.5 pb-2.5">
+        <Grouped sessions={live} onNew={onNew} />
         {live.length === 0 && (
-          <p className="px-2.5 py-2 text-[13px] text-mute">Nothing running.</p>
+          <div className="px-1 py-3">
+            <p className="text-[13px] text-dim">Nothing running.</p>
+            <p className="mt-1 text-[12px] leading-[1.55] text-mute">
+              Describe some work and it runs on your own hardware — you can close the laptop as
+              soon as it starts.
+            </p>
+          </div>
         )}
       </div>
 
       <button
-        onClick={onNew}
-        className="mx-2 mb-2 shrink-0 rounded-[8px] border border-dashed border-line py-2 text-ui text-mute transition-colors hover:border-ember/40 hover:text-ember"
+        onClick={() => onNew()}
+        className="mx-2.5 mb-2.5 shrink-0 rounded-[9px] border border-dashed border-line py-2 text-ui text-mute transition-colors hover:border-ember/40 hover:text-ember"
       >
         + New session
       </button>
@@ -102,8 +109,19 @@ export function Rail({ onNew }: { onNew: () => void }) {
  * Grouped rather than flat because a fleet's session list is mostly noise to
  * somebody thinking about one repository, and the group header is the fastest
  * way to skip past four of them. Within a group, what is waiting on you first.
+ *
+ * Collapsible, and remembered: nine sessions on one repository used to push
+ * every other repository off the bottom of the rail.
  */
-function Grouped({ sessions }: { sessions: Session[] }) {
+function Grouped({
+  sessions,
+  onNew,
+}: {
+  sessions: Session[];
+  onNew: (repo?: string) => void;
+}) {
+  const { shut, toggle } = useShutGroups();
+
   const groups = new Map<string, Session[]>();
   for (const s of sessions) {
     const key = s.checkouts?.[0]?.slug ?? s.repo ?? "No repository";
@@ -114,22 +132,56 @@ function Grouped({ sessions }: { sessions: Session[] }) {
 
   return (
     <>
-      {[...groups].map(([repo, held]) => (
-        <section key={repo} className="mb-3">
-          <div className="flex items-baseline gap-2 px-2.5 py-1">
-            <span className="min-w-0 truncate font-mono text-[11px] text-mute" title={repo}>
-              {repo.split("/").slice(-1)[0]}
-            </span>
-            <span className="h-px flex-1 bg-line-soft" />
-          </div>
-          {held
-            .slice()
-            .sort((a, b) => Number(needsYou(b)) - Number(needsYou(a)))
-            .map((s) => (
-              <Row key={s.id} session={s} />
-            ))}
-        </section>
-      ))}
+      {[...groups].map(([repo, held]) => {
+        const closed = shut.includes(repo);
+        const asking = held.filter(needsYou).length;
+
+        return (
+          <section key={repo} className="mb-2.5">
+            <div className="group/head flex items-center gap-1.5 rounded-[6px] py-1 pr-1 pl-0.5">
+              <button
+                onClick={() => toggle(repo)}
+                className="flex min-w-0 flex-1 items-center gap-1.5 text-left"
+              >
+                <span
+                  className="shrink-0 text-[9px] text-mute transition-transform"
+                  style={{ transform: closed ? undefined : "rotate(90deg)" }}
+                >
+                  ▸
+                </span>
+                <span
+                  className="min-w-0 truncate font-mono text-[11px] text-dim"
+                  title={repo}
+                >
+                  {repo.split("/").slice(-1)[0]}
+                </span>
+              </button>
+
+              {/* The count says what collapsing would hide, and turns ember
+                  when some of it is waiting — so a shut group still shows
+                  that it needs somebody. */}
+              <span
+                className={`shrink-0 font-mono text-[10px] ${asking > 0 ? "text-ember" : "text-mute"}`}
+              >
+                {held.length}
+              </span>
+              <button
+                onClick={() => onNew(repo)}
+                title={`New session on ${repo}`}
+                className="shrink-0 px-0.5 text-[12px] leading-none text-mute opacity-0 transition-opacity group-hover/head:opacity-100 hover:text-ember"
+              >
+                +
+              </button>
+            </div>
+
+            {!closed &&
+              held
+                .slice()
+                .sort((a, b) => Number(needsYou(b)) - Number(needsYou(a)))
+                .map((s) => <Row key={s.id} session={s} />)}
+          </section>
+        );
+      })}
     </>
   );
 }
@@ -144,26 +196,92 @@ function Row({ session }: { session: Session }) {
     <button
       onClick={() => open.session(session.id)}
       title={session.title ?? session.name}
-      className={`flex w-full items-center gap-2 rounded-[8px] py-[7px] pr-2 pl-2 text-left transition-colors ${
-        on ? "bg-raise" : "hover:bg-raise/60"
+      // A card when it is the one you are looking at — a border and a raised
+      // ground, not a background tint. A tint says "hovered"; a card says
+      // "this is the thing on screen", which is what the row actually means.
+      className={`mb-px flex w-full items-center gap-2 rounded-[9px] border px-2 py-[7px] text-left transition-colors ${
+        on
+          ? "border-line bg-raise"
+          : "border-transparent hover:border-line-soft hover:bg-raise/50"
       }`}
     >
       <Signal status={session.status} size={6} />
+
       <span className="min-w-0 flex-1">
-        <span
-          className={`block truncate text-[13px] ${
-            asks ? "text-bone" : on ? "text-bone" : "text-dim"
-          }`}
-        >
+        <span className={`block truncate text-[13px] ${on || asks ? "text-bone" : "text-dim"}`}>
           {session.name}
         </span>
-        <span className="block truncate font-mono text-[10.5px] text-mute">
-          {(session.agent ?? "").toLowerCase()} · {elapsed(minutesSince(session.createdAt))}
+        <span className="mt-px flex items-center gap-1.5 text-mute">
+          <AgentMark agent={session.agent} size={11} className="shrink-0 opacity-80" />
+          <span className="truncate font-mono text-[10.5px]">
+            {AGENT_SHORT[session.agent]} · {elapsed(minutesSince(session.createdAt))}
+          </span>
         </span>
       </span>
+
       {asks && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-ember" />}
     </button>
   );
+}
+
+/**
+ * Which repository groups are shut.
+ *
+ * In the browser, like the tab layout: it is a fact about how somebody is
+ * working right now, not about the fleet. Storage can throw, and an unreadable
+ * store simply means everything is open.
+ */
+const SHUT = "firetower.rail.shut";
+const watching = new Set<() => void>();
+let held: { raw: string | null; groups: string[] } = { raw: null, groups: [] };
+const NONE: string[] = [];
+
+function useShutGroups() {
+  const shut = useSyncExternalStore(
+    (onChange) => {
+      watching.add(onChange);
+      window.addEventListener("storage", onChange);
+      return () => {
+        watching.delete(onChange);
+        window.removeEventListener("storage", onChange);
+      };
+    },
+    () => {
+      let raw: string | null = null;
+      try {
+        raw = window.localStorage.getItem(SHUT);
+      } catch {
+        return NONE;
+      }
+      // Compared by the raw string so a re-parse does not look like a change.
+      if (held.raw === raw) return held.groups;
+      let groups: string[] = NONE;
+      try {
+        if (raw) groups = JSON.parse(raw) as string[];
+      } catch {
+        groups = NONE;
+      }
+      held = { raw, groups };
+      return groups;
+    },
+    () => NONE,
+  );
+
+  const toggle = useCallback(
+    (repo: string) => {
+      const next = shut.includes(repo) ? shut.filter((r) => r !== repo) : [...shut, repo];
+      try {
+        if (next.length === 0) window.localStorage.removeItem(SHUT);
+        else window.localStorage.setItem(SHUT, JSON.stringify(next));
+      } catch {
+        // It still works for this visit, which is the part that matters.
+      }
+      for (const tell of watching) tell();
+    },
+    [shut],
+  );
+
+  return { shut, toggle };
 }
 
 function Hosts() {

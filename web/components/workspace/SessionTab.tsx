@@ -16,9 +16,13 @@ import { AddRepo } from "@/components/AddRepo";
 import { SessionMenu } from "@/components/SessionActions";
 import { stepLines } from "@/components/Steps";
 import { Signal } from "@/components/Signal";
+import { AgentMark, AGENT_LABEL } from "@/components/AgentMark";
+import { useListHosts } from "@/src/api/generated/hosts/hosts";
+import { useSessionControls } from "@/src/api/generated/conversation/conversation";
 import { shipping, ready, done } from "@/src/api/ship";
 import { answerable, elapsed, minutesSince, unfinished, STATUS_LABEL } from "@/src/api/view";
 import { ApiError } from "@/src/api/http";
+import type { Session } from "@/src/api/generated/model";
 import { useTabs, type SessionFace } from "@/src/workspace/tabs";
 
 /**
@@ -105,6 +109,7 @@ export function SessionTab({
     <div className="flex h-full min-h-0 flex-col">
       <header className="@container flex h-11 shrink-0 items-center gap-2.5 border-b border-line px-3">
         <Signal status={session.status} size={7} />
+        <AgentMark agent={session.agent} size={13} className="shrink-0 text-mute" />
 
         {naming === null ? (
           <button
@@ -209,6 +214,7 @@ export function SessionTab({
       <div className="min-h-0 flex-1">
         <div className={`h-full ${face === "agent" ? "" : "hidden"}`}>
           <Chat
+            head={<Plate session={session} />}
             sessionId={session.id}
             live={live}
             branch={session.branch}
@@ -224,6 +230,74 @@ export function SessionTab({
             <Terminal sessionId={session.id} live={busy} showing={showing} />
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * What is running, above the run.
+ *
+ * The pane used to begin at the first message, which left the top of the screen
+ * saying nothing and the four questions somebody actually arrives with — which
+ * agent, which model, which branch, which machine — spread between a menu, a
+ * tooltip and the rail. They are facts about the session, they fit on three
+ * lines, and putting them here is what makes the pane read as a workspace
+ * rather than a chat window.
+ *
+ * Inside the scroller, so it goes away once somebody is reading.
+ */
+function Plate({ session }: { session: Session }) {
+  const { data: hosts = [] } = useListHosts();
+  const { data: controls = [] } = useSessionControls(session.id, {
+    query: { staleTime: 30_000 },
+  });
+
+  const host = hosts.find((h) => h.id === session.hostId)?.name;
+  // Only what the agent has said is actually in force. A control also carries a
+  // `fallback`, but that is the picker's *label* — "Model" — for the case where
+  // nothing is known yet, and printing it here read as though the session were
+  // running a model called Model.
+  const running = controls.find((c) => c.kind === "model")?.current ?? undefined;
+
+  const checkouts = session.checkouts ?? [];
+
+  return (
+    <div className="mb-4 flex items-start gap-3 border-b border-line-soft pb-4">
+      <span className="mt-0.5 shrink-0 text-mute">
+        <AgentMark agent={session.agent} size={18} />
+      </span>
+
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+          <span className="text-[13.5px] font-medium text-bone">
+            {AGENT_LABEL[session.agent]}
+          </span>
+          {running && (
+            <span className="font-mono text-[11.5px] text-slate">· {running}</span>
+          )}
+        </div>
+
+        <div className="mt-1 flex flex-wrap items-center gap-x-2.5 gap-y-1 font-mono text-[11px] text-mute">
+          {checkouts.length === 0 && <span>no repository</span>}
+          {checkouts.map((c) => (
+            <span key={c.slug} className="flex items-center gap-1.5">
+              <span className="text-dim">{c.slug}</span>
+              {c.branch && (
+                <>
+                  <span className="text-mute/60">on</span>
+                  <span className="text-dim">{c.branch}</span>
+                </>
+              )}
+            </span>
+          ))}
+          {host && (
+            <span className="flex items-center gap-1.5">
+              <span className="text-mute/60">·</span>
+              {host}
+            </span>
+          )}
+        </div>
       </div>
     </div>
   );

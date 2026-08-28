@@ -5,6 +5,7 @@ import { useListFiles, useSessionDiff } from "@/src/api/generated/sessions/sessi
 import { ApiError, apiBase, token } from "@/src/api/http";
 import type { FileEntry } from "@/src/api/generated/model";
 import { useOpen } from "@/src/workspace/tabs";
+import { FileGlyph } from "@/components/FileGlyph";
 
 /**
  * The workspace of whatever is in front of you.
@@ -17,19 +18,28 @@ import { useOpen } from "@/src/workspace/tabs";
  * Everything here opens a tab in the middle. Nothing here is a viewer.
  */
 export function Inspector({ sessionId }: { sessionId: string | null }) {
+  // Asked once here and read twice below. React Query serves both from the same
+  // cache entry, so the tree can mark what changed without a second request.
+  const { data: files = [] } = useSessionDiff(sessionId ?? "", undefined, {
+    query: { enabled: !!sessionId, refetchInterval: 8_000 },
+  });
+
   if (!sessionId) {
     return (
       <Panel>
-        <p className="px-3 py-4 text-[12.5px] text-mute">
-          Open a session and its workspace shows up here.
-        </p>
+        <div className="px-3 py-4">
+          <p className="text-[12.5px] text-dim">No session in front of you.</p>
+          <p className="mt-1 text-[11.5px] leading-[1.55] text-mute">
+            Open one and its files and changes show up here.
+          </p>
+        </div>
       </Panel>
     );
   }
 
   return (
     <Panel>
-      <Tree sessionId={sessionId} />
+      <Tree sessionId={sessionId} changed={new Set(files.map((f) => f.path))} />
       <Changes sessionId={sessionId} />
     </Panel>
   );
@@ -50,7 +60,7 @@ function Panel({ children }: { children: React.ReactNode }) {
  * worker, and a symbolic link is shown rather than followed. The shell is the
  * escape hatch for anything outside.
  */
-function Tree({ sessionId }: { sessionId: string }) {
+function Tree({ sessionId, changed }: { sessionId: string; changed: Set<string> }) {
   const [path, setPath] = useState("");
   const { data: entries = [], isLoading, error, refetch } = useListFiles(sessionId, { path });
   const open = useOpen();
@@ -112,8 +122,8 @@ function Tree({ sessionId }: { sessionId: string }) {
             key={entry.name}
             className="group flex items-center gap-2 rounded-[4px] px-1.5 py-1 transition-colors hover:bg-raise/60"
           >
-            <span className="shrink-0 text-[10px] text-mute">
-              {entry.directory ? "▸" : entry.link ? "↗" : "▪"}
+            <span className="shrink-0 text-mute">
+              <FileGlyph name={entry.name} directory={entry.directory} link={entry.link} />
             </span>
             <button
               onClick={() =>
@@ -127,6 +137,16 @@ function Tree({ sessionId }: { sessionId: string }) {
               {entry.name}
               {entry.directory ? "/" : ""}
             </button>
+
+            {/* The tree and Changes are the same fact asked twice. Marking it
+                here means finding a modified file does not cost a trip to the
+                other list and back. */}
+            {changed.has(full(entry.name)) && (
+              <span
+                title="Changed"
+                className="h-1.5 w-1.5 shrink-0 rounded-full bg-ember group-hover:hidden"
+              />
+            )}
 
             {/* A link is shown, never followed — so there is nothing here we
                 could be sure is inside the workspace. */}
