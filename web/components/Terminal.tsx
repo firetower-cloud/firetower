@@ -167,7 +167,11 @@ export function Terminal({
     // what it is, so a title bar repeated the label, and a border drew a box
     // around something that has no reason not to reach the sides.
     <div className="relative h-full overflow-hidden bg-[#0f0e0d]">
-      <div ref={host} className="h-full w-full" />
+      {/* Three pixels, so glyphs and the cursor do not sit against the edge.
+          It goes on the host rather than the box around it because the fit
+          addon measures this element's content box to work out how many
+          columns fit — padding here is subtracted, padding outside it is not. */}
+      <div ref={host} className="h-full w-full p-[3px]" />
 
       {/* The one state worth interrupting for. Nothing is drawn while it is
           connected, which is almost always — a permanent bar saying "Shell"
