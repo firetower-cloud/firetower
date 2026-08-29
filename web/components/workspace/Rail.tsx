@@ -3,9 +3,6 @@
 import Link from "next/link";
 import { useCallback, useState, useSyncExternalStore } from "react";
 import { useListSessions } from "@/src/api/generated/sessions/sessions";
-import { useListHosts } from "@/src/api/generated/hosts/hosts";
-import { useMe, useLogout } from "@/src/api/generated/auth/auth";
-import { forgetToken } from "@/src/api/http";
 import type { Session } from "@/src/api/generated/model";
 import { Mark, Signal } from "@/components/Signal";
 import { AgentMark, AGENT_SHORT } from "@/components/AgentMark";
@@ -39,14 +36,24 @@ export function Rail({ onNew }: { onNew: (repo?: string) => void }) {
 
   return (
     <aside className="flex h-full w-[268px] shrink-0 flex-col overflow-hidden border-r border-line bg-panel">
-      <div className="flex items-center gap-2.5 px-4 pt-4 pb-2.5">
+      {/* The way back, and the only one this screen needs. Named rather than a
+          bare arrow: an arrow says "back", and back from a workspace you
+          followed a link into is not somewhere anybody can picture. */}
+      <Link
+        href="/"
+        title="Everything"
+        className="group flex shrink-0 items-center gap-2.5 px-4 pt-4 pb-2.5"
+      >
+        <span className="text-mute transition-colors group-hover:text-ember">
+          <span className="inline-block transition-transform group-hover:-translate-x-0.5">←</span>
+        </span>
         <span className="text-bone">
           <Mark size={20} />
         </span>
-        <span className="font-narrow text-[12px] font-semibold tracking-[0.22em] text-bone uppercase">
+        <span className="font-narrow text-[12px] font-semibold tracking-[0.22em] text-bone uppercase transition-colors group-hover:text-ember">
           Firetower
         </span>
-      </div>
+      </Link>
 
       {waiting.length > 0 && (
         <div className="px-2.5 pb-2.5">
@@ -80,29 +87,6 @@ export function Rail({ onNew }: { onNew: (repo?: string) => void }) {
         + New workspace
       </button>
 
-      <Hosts />
-
-      {/* One line, and it has to stay one line: these are the pages that are
-          still pages, and a rail that reflows them into two rows steals a row
-          from the sessions above it every time the window narrows. */}
-      <nav className="flex shrink-0 items-center justify-between gap-1 border-t border-line px-3 py-2">
-        {[
-          ["/repos", "Repos"],
-          ["/agents", "Agents"],
-          ["/secrets", "Secrets"],
-          ["/compute", "Compute"],
-        ].map(([href, label]) => (
-          <Link
-            key={href}
-            href={href}
-            className="rounded-[5px] px-1.5 py-1 text-[11px] whitespace-nowrap text-mute transition-colors hover:bg-raise/60 hover:text-ember"
-          >
-            {label}
-          </Link>
-        ))}
-      </nav>
-
-      <WhoAmI />
     </aside>
   );
 }
@@ -443,71 +427,3 @@ function useShutGroups() {
   return { shut, toggle };
 }
 
-function Hosts() {
-  const { data: hosts = [] } = useListHosts();
-  const [showing, setShowing] = useState(false);
-
-  if (hosts.length === 0) return null;
-  const up = hosts.filter((h) => h.state === "Online").length;
-
-  return (
-    <div className="shrink-0 border-t border-line px-4 py-2">
-      <button
-        onClick={() => setShowing(!showing)}
-        className="flex w-full items-center gap-2 text-left"
-      >
-        <span className="eyebrow">Hosts</span>
-        <span className="ml-auto font-mono text-[10px] text-mute">
-          {up}/{hosts.length}
-        </span>
-        <span className="text-[9px] text-mute">{showing ? "▾" : "▸"}</span>
-      </button>
-      {showing && (
-        <div className="mt-1.5 max-h-[22vh] overflow-y-auto">
-          {hosts.map((h) => (
-            <div key={h.name} className="flex items-center gap-2 py-[3px]">
-              <span
-                className={`h-1.5 w-1.5 rounded-full ${
-                  h.state === "Online" ? "bg-sage" : "border border-mute"
-                }`}
-              />
-              <span className="min-w-0 truncate font-mono text-meta text-dim">{h.name}</span>
-              <span className="ml-auto font-mono text-[10px] text-mute">{h.cpus ?? "—"}</span>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function WhoAmI() {
-  const { data } = useMe();
-  const out = useLogout();
-
-  if (!data) return null;
-
-  return (
-    <div className="flex shrink-0 items-center gap-2 border-t border-line px-4 py-2.5">
-      <div className="min-w-0 flex-1">
-        <div className="truncate text-[12.5px] text-dim">{data.user.username}</div>
-      </div>
-      <button
-        onClick={() =>
-          out.mutate(undefined, {
-            // Whether or not the server managed to delete the row, this browser
-            // is done with the token.
-            onSettled: () => {
-              forgetToken();
-              // eslint-disable-next-line @next/next/no-location-assign-relative-destination
-              window.location.assign("/login");
-            },
-          })
-        }
-        className="text-[11.5px] text-mute transition-colors hover:text-text"
-      >
-        Sign out
-      </button>
-    </div>
-  );
-}

@@ -1,19 +1,18 @@
 "use client";
 
-import { Workspace } from "@/components/workspace/Workspace";
+import { Overview } from "@/components/Overview";
 
 /**
- * The workbench.
+ * Home.
  *
- * This used to be a dashboard: a headline counting what was waiting on you,
- * cards for each of them, and a link into a session page. Every one of those
- * ended in navigating away, which meant the fleet and the work were never on
- * screen together — and the thing somebody actually does all day is glance at
- * one agent while another finishes.
+ * This was a dashboard, then it was the workbench with an empty middle, and
+ * neither was a place to land: the first ended in navigating away from
+ * everything, the second showed a workspace-shaped screen with no workspace in
+ * it.
  *
- * So the counting moved into the rail, the composer moved behind "new session",
- * and what is left in the middle is whatever you are reading.
+ * It is the overview again, but of *workspaces* rather than sessions — which is
+ * what a person has now that one place holds several agents.
  */
 export default function Home() {
-  return <Workspace />;
+  return <Overview />;
 }

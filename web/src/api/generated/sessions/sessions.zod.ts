@@ -112,7 +112,11 @@ export const CreateSessionResponse = zod.object({
  * Destructive in the same way as ending one, multiplied — every workspace goes
  * and anything unpushed with it. The count comes back so the interface can say
  * what it did rather than guess.
- * @summary End every session that is still running.
+ *
+ * Counted in workspaces rather than sessions. A workspace holds any number of
+ * agents now, so "48 ended" was a number nobody recognised: what somebody is
+ * about to lose is six places, not forty-eight processes.
+ * @summary End every workspace that is still running.
  */
 export const endAllSessionsResponseEndedMin = 0;
 
@@ -121,7 +125,7 @@ export const endAllSessionsResponseUnreachableMin = 0;
 
 
 export const EndAllSessionsResponse = zod.object({
-  "ended": zod.int().min(endAllSessionsResponseEndedMin),
+  "ended": zod.int().min(endAllSessionsResponseEndedMin).describe('Workspaces ended, not sessions: a workspace is what somebody loses.'),
   "unreachable": zod.int().min(endAllSessionsResponseUnreachableMin).describe('Left alone because their host wasn\'t answering.')
 })
 

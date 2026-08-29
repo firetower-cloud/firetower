@@ -280,7 +280,11 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
  * Destructive in the same way as ending one, multiplied — every workspace goes
  * and anything unpushed with it. The count comes back so the interface can say
  * what it did rather than guess.
- * @summary End every session that is still running.
+ *
+ * Counted in workspaces rather than sessions. A workspace holds any number of
+ * agents now, so "48 ended" was a number nobody recognised: what somebody is
+ * about to lose is six places, not forty-eight processes.
+ * @summary End every workspace that is still running.
  */
 export const endAllSessions = async ( options?: Parameters<typeof http>[1]): Promise<EndedAll> => {
 
@@ -329,7 +333,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type EndAllSessionsMutationError = unknown
 
     /**
- * @summary End every session that is still running.
+ * @summary End every workspace that is still running.
  */
 export const useEndAllSessions = <TError = unknown,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof endAllSessions>>, TError,void, TContext>, request?: SecondParameter<typeof http>}

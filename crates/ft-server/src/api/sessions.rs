@@ -66,11 +66,15 @@ pub struct Page {
     pub before: Option<String>,
 }
 
-/// End every session that is still running.
+/// End every workspace that is still running.
 ///
 /// Destructive in the same way as ending one, multiplied — every workspace goes
 /// and anything unpushed with it. The count comes back so the interface can say
 /// what it did rather than guess.
+///
+/// Counted in workspaces rather than sessions. A workspace holds any number of
+/// agents now, so "48 ended" was a number nobody recognised: what somebody is
+/// about to lose is six places, not forty-eight processes.
 #[utoipa::path(
     post, path = "/api/v1/sessions/end-all", tag = "sessions",
     responses((status = 200, body = EndedAll)),
@@ -83,33 +87,61 @@ pub(super) async fn end_all_sessions(
     // one Firetower it would be a button that ends a colleague's work.
     let live = state.db.live_sessions(owner(&principal)?).await?;
 
+    // By the place rather than by the process. Every agent in a workspace shares
+    // its worktree, so they go together or the directory is pulled out from
+    // under whichever is left — and one unreachable host should skip a
+    // workspace whole rather than half of it.
+    let mut places: Vec<(String, Vec<Session>)> = Vec::new();
+    for session in live {
+        let key = session
+            .workspace_id
+            .as_ref()
+            .map(|w| w.as_str().to_string())
+            .unwrap_or_else(|| session.id.as_str().to_string());
+        match places.iter_mut().find(|(id, _)| id == &key) {
+            Some((_, held)) => held.push(session),
+            None => places.push((key, vec![session])),
+        }
+    }
+
     let mut ended = 0;
     let mut unreachable = 0;
 
-    for session in live {
-        // A host we can't talk to keeps its sessions; marking them ended here
+    for (_, sessions) in places {
+        let host = &sessions[0].host_id;
+
+        // A host we can't talk to keeps its workspaces; marking them ended here
         // would be a lie the next reconnect corrects.
-        if !state.fleet.is_connected(&session.host_id).await {
+        if !state.fleet.is_connected(host).await {
             unreachable += 1;
             continue;
         }
 
-        match state
-            .fleet
-            .send(
-                &session.host_id,
-                ToWorker::Destroy {
-                    session_id: session.id.clone(),
-                    force: true,
-                },
-            )
-            .await
-        {
-            Ok(()) => ended += 1,
-            Err(e) => {
+        let mut lost = false;
+        for session in &sessions {
+            if let Err(e) = state
+                .fleet
+                .send(
+                    &session.host_id,
+                    ToWorker::Destroy {
+                        session_id: session.id.clone(),
+                        force: true,
+                    },
+                )
+                .await
+            {
                 tracing::warn!(session = %session.id, "ending: {e:#}");
-                unreachable += 1;
+                lost = true;
             }
+        }
+
+        // The worktree is reclaimed by whichever of them finishes last, which
+        // the worker decides for itself — so the order these go out in does not
+        // matter, only that they all do.
+        if lost {
+            unreachable += 1;
+        } else {
+            ended += 1;
         }
     }
 
@@ -119,6 +151,7 @@ pub(super) async fn end_all_sessions(
 #[derive(Debug, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct EndedAll {
+    /// Workspaces ended, not sessions: a workspace is what somebody loses.
     pub ended: u32,
     /// Left alone because their host wasn't answering.
     pub unreachable: u32,

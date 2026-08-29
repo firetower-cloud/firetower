@@ -1,6 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+
+import { useEffect, useRef, useState } from "react";
 import { useListSessions } from "@/src/api/generated/sessions/sessions";
 import { apiBase } from "@/src/api/http";
 import { NewWorkspace } from "@/components/NewWorkspace";
@@ -43,6 +45,7 @@ export function Workspace({ initialSession }: { initialSession?: string }) {
 }
 
 function Bench({ initialSession }: { initialSession?: string }) {
+  const router = useRouter();
   const { enter } = useTabs();
   const current = useCurrentSession();
   /** The repository the composer should start on, when it was opened from one. */
@@ -65,10 +68,26 @@ function Bench({ initialSession }: { initialSession?: string }) {
   // comes back to it and the link is worth copying. `replaceState` rather than
   // the router: this is not navigation, and moving between sessions should not
   // add a history entry to press Back through.
+  //
+  // Leaving the last one is different. `/` is a page of its own now — the
+  // overview — so being in no workspace has somewhere to be, and rewriting the
+  // address to it without navigating would leave a workspace screen with no
+  // workspace in it, which is the emptiness the overview exists to replace.
+  // Only once a workspace has actually been entered. On the first render of
+  // this screen `current` is still null — entering happens in the effect above,
+  // and this one runs in the same pass — so redirecting on "no workspace" alone
+  // sent every click from the overview straight back to it.
+  const entered = useRef(false);
+
   useEffect(() => {
-    const path = current ? `/sessions/${current}` : "/";
-    if (window.location.pathname !== path) window.history.replaceState(null, "", path);
-  }, [current]);
+    if (current) {
+      entered.current = true;
+      const path = `/sessions/${current}`;
+      if (window.location.pathname !== path) window.history.replaceState(null, "", path);
+      return;
+    }
+    if (entered.current) router.replace("/");
+  }, [current, router]);
 
   if (isError) return <Unreachable />;
 
