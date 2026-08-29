@@ -160,8 +160,18 @@ impl Progress {
             // Codex cannot be given work until a thread exists, so its first
             // prompt waits here for the answer that creates one. Claude Code
             // was handed its prompt with the first message and has none.
+            //
+            // Only when there is one to wait for. A workspace can be made
+            // without a task, and an agent started from the `+` menu never has
+            // one — sending the empty string anyway opened every Codex session
+            // with a turn, so it drew a blank message bubble from the person
+            // who had not typed anything and then answered it with "what would
+            // you like me to work on?".
+            //
+            // `Agent::opening` makes the same decision for Claude Code, one
+            // layer down, and has since it was written.
             opening_prompt: match agent {
-                ft_core::Agent::Codex => Some(prompt),
+                ft_core::Agent::Codex if !prompt.trim().is_empty() => Some(prompt),
                 _ => None,
             },
             settings: ft_core::codex::Settings::default(),
@@ -2439,6 +2449,26 @@ mod progress_tests {
         // And exactly once: a second line must not re-send it.
         let again = progress.read(r#"{"method":"turn/started","params":{"turn":{"id":"t1","items":[],"status":"inProgress"}}}"#);
         assert!(again.send.is_empty(), "the opening prompt is spent");
+    }
+
+    /// A workspace made without a task, and every agent started from the `+`
+    /// menu, has no opening prompt. Sending the empty string anyway opened the
+    /// conversation with a turn — which drew a blank message bubble from
+    /// somebody who had typed nothing, and Codex then answered it.
+    #[test]
+    fn a_codex_session_with_nothing_to_do_says_nothing() {
+        for nothing in ["", "   ", "\n"] {
+            let mut progress = Progress::for_agent(ft_core::Agent::Codex, nothing.into());
+
+            progress.read(r#"{"id":1,"result":{"userAgent":"firetower/0.1","codexHome":"/tmp"}}"#);
+            let after =
+                progress.read(r#"{"id":2,"result":{"thread":{"id":"th_9"},"model":"gpt-5.6-sol"}}"#);
+
+            assert!(
+                after.send.is_empty(),
+                "a thread is not a reason to say something: {nothing:?}"
+            );
+        }
     }
 
     /// The whole point of the controls work: a Codex session offers what Codex
