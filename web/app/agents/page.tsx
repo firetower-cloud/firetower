@@ -10,6 +10,7 @@ import {
 } from "@/src/api/generated/agents/agents";
 import { AgentMode, type AgentView } from "@/src/api/generated/model";
 import { ConnectAgent } from "@/components/ConnectAgent";
+import { Install } from "@/components/InstallAgent";
 import { KeyGlyph } from "@/components/Signal";
 
 export default function Agents() {
@@ -154,9 +155,14 @@ function AgentRow({
                 )}
               </>
             ) : (
-              <span className="text-[11.5px] text-mute">
-                {h.checkedAt ? "not installed" : "not checked yet"}
-              </span>
+              <>
+                <span className="text-[11.5px] text-mute">
+                  {h.checkedAt ? "not installed" : "not checked yet"}
+                </span>
+                <span className="ml-auto flex items-center gap-2.5">
+                  <Install agent={agent} host={h} />
+                </span>
+              </>
             )}
           </div>
         ))}

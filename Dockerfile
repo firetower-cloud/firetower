@@ -91,12 +91,21 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         git tmux openssh-client ca-certificates curl \
     && rm -rf /var/lib/apt/lists/*
 
-# An agent, so this is somewhere work can actually run rather than only a place
-# to watch it from. Node is here for the agent, not for Firetower — the
-# interface is already inside the binary.
+# Node, because that is how agents are fetched and how they run. Not for
+# Firetower — the interface is already inside the binary.
+#
+# The agents themselves are *not* here. They go on the volume, installed per
+# host, the same as on a worker: each is a few hundred megabytes, they are
+# published on their own schedules, and one baked in is a version nobody chose
+# and nobody can change without a new Firetower. This image had been the
+# exception to that — `firetower serve` runs this machine's worker itself, so
+# the rule applies to it as much as to any other host.
+#
+# A fresh install is not left with nothing: start-up fetches Claude Code onto
+# the volume the first time, so there is somewhere to run work without anybody
+# configuring anything. See `seed_agents`.
 RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
-    && npm install -g @anthropic-ai/claude-code \
     && npm cache clean --force \
     && rm -rf /var/lib/apt/lists/*
 

@@ -12,6 +12,7 @@ import {
 import { AgentMode, type AgentView, type AgentOnHost } from "@/src/api/generated/model";
 import { ApiError } from "@/src/api/http";
 import { CodeToType, Spinner } from "./ConnectRepo";
+import { Install } from "./InstallAgent";
 
 /**
  * How an agent authenticates.
@@ -54,6 +55,13 @@ function WithACode({ agent, onClose }: { agent: AgentView; onClose: () => void }
   });
   const signedIn = agents.data?.find((a) => a.kind === agent.kind)?.credentialSet;
 
+  // Whether any host could ask for a code at all. Read from the list rather
+  // than the prop so that installing one from inside this modal turns the
+  // button on without reopening it.
+  const anywhere = (agents.data?.find((a) => a.kind === agent.kind) ?? agent).hosts.some(
+    (h) => h.installed,
+  );
+
   const queryClient = useQueryClient();
   useEffect(() => {
     if (!pending || !signedIn) return;
@@ -94,8 +102,15 @@ function WithACode({ agent, onClose }: { agent: AgentView; onClose: () => void }
           {signIn.isError && <Failure error={signIn.error} />}
 
           <Foot>
-            <Go onClick={start} disabled={signIn.isPending}>
-              {signIn.isPending ? "Asking for a code…" : `Sign in to ${agent.label}`}
+            {/* A host has to have the binary: asking for a code means running
+                `codex app-server` on one. Refused by the server too — this
+                only means finding out before the click rather than after. */}
+            <Go onClick={start} disabled={signIn.isPending || !anywhere}>
+              {signIn.isPending
+                ? "Asking for a code…"
+                : anywhere
+                  ? `Sign in to ${agent.label}`
+                  : `Install ${agent.label} on a host first`}
             </Go>
             <Quiet onClick={onClose}>Cancel</Quiet>
           </Foot>
@@ -238,6 +253,7 @@ function Hosts({ agent }: { agent: AgentView }) {
             <span className="min-w-0 flex-1 truncate text-[11.5px] text-mute">
               {reads(h, agent)}
             </span>
+            {!h.installed && <Install agent={agent} host={h} />}
           </div>
         ))}
       </div>
@@ -245,7 +261,7 @@ function Hosts({ agent }: { agent: AgentView }) {
       {agent.hosts.some((h) => !h.installed) && (
         <p className="mt-3 text-[12px] text-mute">
           A host without {agent.label} installed needs it there first — Firetower runs the
-          real CLI rather than shipping its own.
+          real CLI rather than shipping its own. Installing takes about a minute.
         </p>
       )}
     </div>

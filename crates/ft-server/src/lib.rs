@@ -156,6 +156,10 @@ pub async fn run(config: Config) -> Result<()> {
         pending: Default::default(),
         accounts: accounts.clone(),
     };
+    // In the background: it fetches a few hundred megabytes, and nothing else
+    // start-up does should wait on somebody's connection to npm.
+    tokio::spawn(seed_agents(state.clone()));
+
     announce(&policy, admin.as_ref(), &ssh_identity, &config);
 
     let app = build_router(state, config.dev, policy, accounts);
@@ -177,6 +181,98 @@ pub async fn run(config: Config) -> Result<()> {
     .await
     .context("serving")?;
     Ok(())
+}
+
+/// The setting that says we have already done this once.
+const SEEDED: &str = "seeded_local_agent";
+
+/// Put one agent on this machine, the first time Firetower ever runs.
+///
+/// Claude Code used to be in the control plane's image. It is not any more —
+/// agents belong on the volume, installed per host, for the same reasons they
+/// were taken out of the worker image: a few hundred megabytes each, published
+/// on their own schedules, and a baked-in one is a version nobody chose. But a
+/// fresh install with no agent at all is an install where nothing can be run
+/// and the first screen is an error, so start-up fetches one.
+///
+/// **Once, ever.** Guarded by a setting rather than by looking at the disk:
+/// somebody who deliberately removes Claude Code is entitled to have it stay
+/// removed, and a check for "is anything installed" would put it back on the
+/// next restart.
+///
+/// Everything here is best-effort. A machine with no network yet, an npm that
+/// is having a bad day, a worker still connecting — none of them is a reason
+/// for the control plane not to serve. The Agents page can install one at any
+/// time, which is the same code path this uses.
+async fn seed_agents(state: AppState) {
+    const KIND: ft_core::Agent = ft_core::Agent::ClaudeCode;
+
+    match state.accounts.setting(SEEDED).await {
+        Ok(Some(_)) => return,
+        Ok(None) => {}
+        Err(e) => {
+            tracing::warn!("could not read {SEEDED}: {e:#}");
+            return;
+        }
+    }
+
+    let Ok(hosts) = state.db.hosts().await else {
+        return;
+    };
+    let Some(local) = hosts
+        .into_iter()
+        .find(|h| h.compute == ft_core::Compute::Local)
+    else {
+        return;
+    };
+
+    // It was supervised a moment ago and connects as a child process, so this
+    // is a short wait rather than a hopeful one.
+    if !state
+        .fleet
+        .wait_until_connected(&local.id, std::time::Duration::from_secs(30))
+        .await
+    {
+        tracing::warn!(
+            "this machine's worker never connected; not installing {}",
+            KIND.label()
+        );
+        return;
+    }
+
+    // Somebody else's copy counts. A machine that already answers `claude` —
+    // an image that still has one, an operator who installed it — needs
+    // nothing from us, and fetching a second would be a download to sit beside
+    // a working binary.
+    if let Ok(found) = state.fleet.probe_agents(&local.id).await {
+        if found.iter().any(|a| a.kind == KIND && a.installed) {
+            let _ = state.db.record_presence(&local.id, &found).await;
+            let _ = mark_seeded(&state).await;
+            return;
+        }
+    }
+
+    tracing::info!("first start: installing {} on this machine", KIND.label());
+
+    match state.fleet.install_agent(&local.id, KIND, None).await {
+        Ok(version) => {
+            tracing::info!("installed {} {version}", KIND.label());
+            if let Ok(found) = state.fleet.probe_agents(&local.id).await {
+                let _ = state.db.record_presence(&local.id, &found).await;
+            }
+            let _ = mark_seeded(&state).await;
+        }
+        // Deliberately not marked as done: a failure here is usually the
+        // network, and the next restart is the natural moment to try again.
+        Err(e) => tracing::warn!("could not install {}: {e:#}", KIND.label()),
+    }
+}
+
+async fn mark_seeded(state: &AppState) -> Result<()> {
+    state
+        .accounts
+        .set_setting(SEEDED, &chrono::Utc::now().to_rfc3339())
+        .await
 }
 
 /// Where to open a browser, as far as this process can tell.

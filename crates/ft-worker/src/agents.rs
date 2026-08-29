@@ -39,6 +39,16 @@ pub async fn probe(state: &Path) -> Vec<AgentPresence> {
     out
 }
 
+/// Whether one agent is on this machine at all.
+///
+/// The same question [`probe`] answers for every kind, asked about one — for
+/// the moment before a launch, where the alternative to knowing is starting a
+/// process that isn't there and reporting it as an agent that never woke up.
+pub async fn present(state: &Path, kind: Agent) -> bool {
+    let path = crate::runtime::path_with_agents(state).await;
+    version_of(kind.command(), &path).await.is_some()
+}
+
 /// Whether an agent is signed in, and as whom.
 ///
 /// `(None, None)` means it offers no way to ask — the honest answer then is
@@ -111,6 +121,24 @@ mod tests {
         assert!(version_of("firetower-definitely-not-installed", &path)
             .await
             .is_none());
+    }
+
+    #[tokio::test]
+    async fn present_agrees_with_what_probing_found() {
+        // The launch guard and the agents screen must never disagree — one
+        // saying a host has an agent while the other refuses to start it is
+        // the confusing failure this check exists to remove.
+        let empty = tempfile::tempdir().unwrap();
+        let found = probe(empty.path()).await;
+
+        for kind in Agent::all() {
+            let probed = found.iter().find(|a| a.kind == kind).unwrap().installed;
+            assert_eq!(
+                present(empty.path(), kind).await,
+                probed,
+                "{kind:?} answered differently to the two questions"
+            );
+        }
     }
 
     #[tokio::test]
