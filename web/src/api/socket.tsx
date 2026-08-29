@@ -137,7 +137,15 @@ export function SocketProvider({ children }: { children: ReactNode }) {
       const ws = new WebSocket(url);
       socket.current = ws;
 
+      /** Whether this socket is still the one the page is using. */
+      const current = () => socket.current === ws;
+
       ws.onopen = () => {
+        // A socket that finished connecting after being superseded closes
+        // rather than joining in. React mounts effects twice in development,
+        // so this is the common case, not a corner.
+        if (!current()) return void ws.close();
+
         attempt = 0;
         setLive(true);
         // Each subscription comes back with its own cursor — where it actually
@@ -153,6 +161,7 @@ export function SocketProvider({ children }: { children: ReactNode }) {
       };
 
       ws.onmessage = (message) => {
+        if (!current()) return;
         const parsed = StreamResponse.safeParse(readable(message.data));
         if (!parsed.success) {
           console.error("[firetower] unusable frame", parsed.error);
@@ -175,6 +184,15 @@ export function SocketProvider({ children }: { children: ReactNode }) {
 
       const gone = () => {
         if (beat) clearInterval(beat);
+        // Only if this is still the live one. An earlier socket closing must
+        // not clear the reference to its replacement — that left the page
+        // holding a socket it had already thrown away: `follow` had nowhere to
+        // send `sub`, so nothing was ever subscribed and no transcript arrived,
+        // while the socket itself was open and healthy.
+        //
+        // React's development double-mount makes this happen on every load,
+        // which is why every session came up with an empty conversation.
+        if (!current()) return;
         socket.current = null;
         setLive(false);
         if (closed) return;
@@ -183,8 +201,13 @@ export function SocketProvider({ children }: { children: ReactNode }) {
 
       ws.onclose = gone;
       // `onerror` is always followed by `onclose`, so reconnecting is left to
-      // that and this only says why.
-      ws.onerror = () => console.warn("[firetower] stream socket error");
+      // that and this only says why — and only for the socket the page is
+      // actually using. A superseded one erroring as it is closed mid-handshake
+      // is the development double-mount, not a fault, and saying so on every
+      // load trains people to ignore the line that matters.
+      ws.onerror = () => {
+        if (current()) console.warn("[firetower] stream socket error");
+      };
     };
 
     open();
@@ -193,8 +216,9 @@ export function SocketProvider({ children }: { children: ReactNode }) {
       closed = true;
       if (retry) clearTimeout(retry);
       if (beat) clearInterval(beat);
-      socket.current?.close();
+      const held = socket.current;
       socket.current = null;
+      held?.close();
     };
     // Opened once for the life of the page. Everything that varies — who is
     // listening, where they got to — is read through refs.
