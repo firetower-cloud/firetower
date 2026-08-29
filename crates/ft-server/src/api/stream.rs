@@ -42,7 +42,7 @@ use axum::{
     response::Response,
     Extension,
 };
-use ft_core::SessionId;
+use ft_core::{SessionId, SessionStatus};
 use futures::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -343,6 +343,7 @@ async fn follow_conversation(
         .ok_or_else(|| "no such session".to_string())?;
 
     let state = state.clone();
+    let owner = owner.to_string();
     Ok(tokio::spawn(async move {
         let mut events =
             conversation_events(&state, &session.host_id, &session_id, from.unwrap_or(0))
@@ -357,6 +358,37 @@ async fn follow_conversation(
             if out.send(frame).await.is_err() {
                 return;
             }
+        }
+
+        // The stream ending does not mean the conversation ended.
+        //
+        // It ends when the fleet drops this session's broadcast, which happens
+        // when the worker reports the agent closed — and the worker reports
+        // that when its *watcher* dies, not only when the agent exits. The
+        // agent carries on writing to its log and this task quietly stops
+        // reading it, so the tab freezes mid-word and never moves again while
+        // the answer completes on disk.
+        //
+        // Saying `reset` hands the problem to the one place that knows where it
+        // got to. The client resubscribes from its own cursor, which
+        // re-establishes the watch, and nothing is missed or replayed.
+        //
+        // The endpoint this replaced had this by accident: it reopened the
+        // stream every two seconds, and reopening restarted the watcher.
+        if state
+            .db
+            .session_of(&owner, &session_id)
+            .await
+            .ok()
+            .flatten()
+            .is_some_and(|s| s.status != SessionStatus::Ended)
+        {
+            let _ = out
+                .send(ServerFrame::Reset {
+                    topic: Topic::Conversation,
+                    id: Some(raw),
+                })
+                .await;
         }
     }))
 }

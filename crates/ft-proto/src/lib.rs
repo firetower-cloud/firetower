@@ -543,8 +543,19 @@ pub enum ToServer {
         tool_name: String,
         input: serde_json::Value,
     },
-    /// Nothing more is coming from this agent.
+    /// Nothing more is coming from this agent. It has exited.
     AgentClosed {
+        session_id: SessionId,
+    },
+    /// The worker stopped following this agent, but the agent is still there.
+    ///
+    /// Distinct from `AgentClosed`, which used to carry both meanings — and
+    /// the second one is a lie that costs a conversation. A watcher can die on
+    /// its own (its socket read fails, its stream ends) while the agent carries
+    /// on writing to its log; reporting that as the agent closing tore down the
+    /// broadcast, and every reader of that conversation stopped mid-word while
+    /// the answer went on being written.
+    AgentUnwatched {
         session_id: SessionId,
     },
     /// The answer to [`ToWorker::ListFiles`].

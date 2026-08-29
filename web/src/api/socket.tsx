@@ -45,9 +45,9 @@ import {
 import { StreamResponse } from "./generated/stream/stream.zod";
 import type { ServerFrame } from "./generated/model";
 import { wsBase, token } from "./http";
+import { addressed, keyOf, nextResume, type Topic } from "./frames";
 
-/** What a subscription is about. Mirrors `Topic` in the contract. */
-export type Topic = "sessions" | "conversation";
+export type { Topic };
 
 /** Told about frames for one subscription, and where it has got to. */
 type Listener = {
@@ -70,11 +70,6 @@ const Ctx = createContext<Socket | null>(null);
 /** Reconnect backoff: quick at first, then out of the way. */
 const BACKOFF = [250, 500, 1_000, 2_000, 5_000, 10_000];
 
-/** The one subscription two listeners on the same thing share. */
-function keyOf(listener: Listener): string {
-  return `${listener.topic}:${listener.id ?? ""}`;
-}
-
 function send(ws: WebSocket | null, frame: object) {
   if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify(frame));
 }
@@ -96,6 +91,9 @@ export function SocketProvider({ children }: { children: ReactNode }) {
   // callbacks read these from closures that outlive any one render.
   const listeners = useRef(new Set<Listener>());
   const socket = useRef<WebSocket | null>(null);
+  // How recently each subscription was reset, so one that cannot be
+  // re-established backs off instead of spinning.
+  const resets = useRef(new Map<string, { at: number; run: number }>());
 
   const follow = useCallback((listener: Listener) => {
     const shared = [...listeners.current].some((l) => keyOf(l) === keyOf(listener));
@@ -117,6 +115,26 @@ export function SocketProvider({ children }: { children: ReactNode }) {
       });
     };
   }, []);
+
+  /**
+   * Resubscribe after a reset, slowing down if they keep coming.
+   *
+   * A reset usually means "you fell behind, catch up", and immediately is the
+   * right answer. But it also means "the thing feeding this went away", and if
+   * it cannot be re-established the resubscribe ends the same way at once —
+   * which without this is a tight loop between the two of us.
+   */
+  const resume = (ws: WebSocket, listener: Listener) => {
+    const key = keyOf(listener);
+    const now = Date.now();
+    const { wait, run } = nextResume(resets.current.get(key), now);
+    resets.current.set(key, { at: now, run });
+
+    if (wait === 0) return subscribe(ws, listener);
+    setTimeout(() => {
+      if (socket.current === ws && listeners.current.has(listener)) subscribe(ws, listener);
+    }, wait);
+  };
 
   useEffect(() => {
     let closed = false;
@@ -173,11 +191,12 @@ export function SocketProvider({ children }: { children: ReactNode }) {
         for (const listener of listeners.current) {
           if (!addressed(frame, listener)) continue;
           listener.onFrame(frame);
-          // Behind. That one subscription resumes from its own cursor; nothing
-          // else on the socket is affected.
+          // Behind, or its stream ended under it. Either way that one
+          // subscription resumes from its own cursor; nothing else on the
+          // socket is affected.
           if (frame.t === "reset" && !resumed.has(keyOf(listener))) {
             resumed.add(keyOf(listener));
-            subscribe(ws, listener);
+            resume(ws, listener);
           }
         }
       };
@@ -236,22 +255,6 @@ export function useSocket(): Socket {
   const held = useContext(Ctx);
   if (!held) throw new Error("useSocket outside the api provider");
   return held;
-}
-
-/** Whether this frame is this listener's business. */
-function addressed(frame: ServerFrame, listener: Listener): boolean {
-  switch (frame.t) {
-    case "event":
-      return listener.topic === "sessions";
-    case "line":
-      return listener.topic === "conversation" && frame.id === listener.id;
-    case "reset":
-    case "error":
-      return frame.topic === listener.topic && (frame.id ?? undefined) === listener.id;
-    default:
-      // `ready` and `pong` are about the connection, not a subscription.
-      return false;
-  }
 }
 
 function readable(data: unknown): unknown {

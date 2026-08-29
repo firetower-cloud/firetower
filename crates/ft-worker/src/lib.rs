@@ -1254,13 +1254,23 @@ You are in the directory that holds them, not inside one of them.              P
         watching.insert(
             session_id.to_string(),
             tokio::spawn(async move {
-                if let Err(e) = structured::watch(id.clone(), since_line, out.clone()).await {
-                    // Ordinary rather than exceptional: a session running in a
-                    // terminal has no agent to watch, and the control plane
-                    // asks about all of them rather than remembering which is
-                    // which.
-                    tracing::debug!(session = %id, "no conversation to follow: {e:#}");
-                    let _ = out.send(ToServer::AgentClosed { session_id: id }).await;
+                // Which of the two ended is the whole point. Saying the agent
+                // closed when only the watching stopped tears down the
+                // conversation on the far side, and it does not come back —
+                // the agent goes on writing into a log nobody is reading.
+                match structured::watch(id.clone(), since_line, out.clone()).await {
+                    Ok(structured::Ended::AgentExited) => {}
+                    Ok(structured::Ended::WatcherStopped) => {
+                        let _ = out.send(ToServer::AgentUnwatched { session_id: id }).await;
+                    }
+                    Err(e) => {
+                        // Ordinary rather than exceptional: a session running
+                        // in a terminal has no agent to watch, and the control
+                        // plane asks about all of them rather than remembering
+                        // which is which.
+                        tracing::debug!(session = %id, "no conversation to follow: {e:#}");
+                        let _ = out.send(ToServer::AgentUnwatched { session_id: id }).await;
+                    }
                 }
             }),
         );

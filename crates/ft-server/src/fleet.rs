@@ -22,6 +22,13 @@ use tokio::sync::{broadcast, mpsc, oneshot, RwLock};
 /// itself stopped answering.
 const PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
+/// How long an agent install may take before we stop waiting.
+///
+/// Its own number rather than [`PROBE_TIMEOUT`] because it is not a probe: npm
+/// is fetching a few hundred megabytes over whatever line that host has, and
+/// thirty seconds is an ordinary amount of time for that to still be going.
+const INSTALL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
+
 /// How often to provoke an answer when nothing else is being said.
 const HEARTBEAT: std::time::Duration = std::time::Duration::from_secs(20);
 
@@ -1361,6 +1368,20 @@ impl Fleet {
                                 let _ = tx.send(AgentSpeech::Closed);
                             }
                         }
+                        Ok(ToServer::AgentUnwatched { session_id }) => {
+                            // The agent is still there. So what it is blocked
+                            // on and what it has told us about itself both
+                            // still stand — clearing those, as an exit does,
+                            // dropped the very question somebody was being
+                            // asked to answer.
+                            //
+                            // The broadcast does go, because its readers have
+                            // to find out: each one resubscribes from its own
+                            // cursor, and that is what starts the watching
+                            // again.
+                            tracing::debug!(session = %session_id, "the watcher stopped; the agent has not");
+                            conversations.write().await.remove(session_id.as_str());
+                        }
                         Ok(ToServer::PtyClosed { session_id, pty }) => {
                             if let Some(tx) = terminals.write().await.remove(&terminal_key(&session_id, pty)) {
                                 let _ = tx.send(Terminal::Closed);
@@ -1433,6 +1454,13 @@ impl Fleet {
                                 Some(Asked { waiting: Waiting::Agents(reply), .. }) => { let _ = reply.send(agents); }
                                 Some(other) => { probes.write().await.insert(req, other); }
                                 None => tracing::debug!("an agent probe answered after its request gave up"),
+                            }
+                        }
+                        Ok(ToServer::AgentInstalled { req, result }) => {
+                            match probes.write().await.remove(&req) {
+                                Some(Asked { waiting: Waiting::Action(reply), .. }) => { let _ = reply.send(result); }
+                                Some(other) => { probes.write().await.insert(req, other); }
+                                None => tracing::debug!("an install answered after its request gave up"),
                             }
                         }
                         Ok(ToServer::CodexLoginPending { req, result }) => {
@@ -1674,6 +1702,61 @@ impl Fleet {
             Err(_) => {
                 self.probes.write().await.remove(&req);
                 anyhow::bail!("{host_id} did not answer within {PROBE_TIMEOUT:?}")
+            }
+        }
+    }
+
+    /// Fetch an agent onto a host, and say which version landed.
+    ///
+    /// Waits for the install rather than returning once it has started: the
+    /// caller is a person watching a button, and "it is happening somewhere"
+    /// is not an answer they can do anything with.
+    pub async fn install_agent(
+        &self,
+        host_id: &HostId,
+        kind: ft_core::Agent,
+        version: Option<&str>,
+    ) -> Result<String> {
+        let req = ulid::Ulid::new().to_string();
+        let (tx, rx) = oneshot::channel();
+        self.probes.write().await.insert(
+            req.clone(),
+            Asked {
+                host: host_id.to_string(),
+                waiting: Waiting::Action(tx),
+            },
+        );
+
+        if let Err(e) = self
+            .send(
+                host_id,
+                ToWorker::InstallAgent {
+                    req: req.clone(),
+                    kind,
+                    version: version.map(str::to_string),
+                },
+            )
+            .await
+        {
+            self.probes.write().await.remove(&req);
+            return Err(e);
+        }
+
+        match tokio::time::timeout(INSTALL_TIMEOUT, rx).await {
+            Ok(Ok(Ok(version))) => Ok(version),
+            Ok(Ok(Err(why))) => anyhow::bail!("{why}"),
+            Ok(Err(_)) => {
+                anyhow::bail!(
+                    "the worker connection dropped while installing {}",
+                    kind.label()
+                )
+            }
+            Err(_) => {
+                self.probes.write().await.remove(&req);
+                anyhow::bail!(
+                    "{host_id} was still installing {} after {INSTALL_TIMEOUT:?}",
+                    kind.label()
+                )
             }
         }
     }
@@ -2520,6 +2603,27 @@ mod tests {
             .await
             .unwrap();
         (Fleet::new(db), host.id)
+    }
+
+    /// An install that can't even be sent must not leave the request behind.
+    ///
+    /// Every one of these holds a `oneshot` and a host id until something
+    /// removes it, and nothing else would: the answer that would have cleared
+    /// it is never coming. A button somebody presses while a host is down is
+    /// exactly the case that would leak, and it is the case they press twice.
+    #[tokio::test]
+    async fn an_install_that_cannot_be_sent_is_not_left_waiting() {
+        let (fleet, host) = fleet().await;
+
+        let failed = fleet
+            .install_agent(&host, ft_core::Agent::Codex, None)
+            .await;
+
+        assert!(failed.is_err(), "a host with no worker cannot install");
+        assert!(
+            fleet.probes.read().await.is_empty(),
+            "the request outlived the send that failed"
+        );
     }
 
     #[test]

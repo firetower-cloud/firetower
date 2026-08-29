@@ -152,11 +152,21 @@ pub async fn tell(session_id: &SessionId, frame: &ToAgent) -> Result<()> {
 ///
 /// Returns when the agent exits or the connection drops. The caller runs this
 /// off the serve loop; it is unbounded in time by nature.
+/// How a watch ended, which the caller has to tell apart.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Ended {
+    /// The agent exited. Nothing more is coming, ever.
+    AgentExited,
+    /// Only the watching stopped. The agent is still there and still writing,
+    /// so somebody asking again will pick up where this left off.
+    WatcherStopped,
+}
+
 pub async fn watch(
     session_id: SessionId,
     since_line: u64,
     out: mpsc::Sender<ToServer>,
-) -> Result<()> {
+) -> Result<Ended> {
     let mut client = AgentClient::connect(session_id.as_str())
         .await
         .with_context(|| format!("no agent is listening for {session_id}"))?;
@@ -199,13 +209,16 @@ pub async fn watch(
         if out.send(forwarded).await.is_err() {
             // The control plane went away. The log has everything, so there is
             // nothing to rescue — whoever comes back asks from their cursor.
-            return Ok(());
+            return Ok(Ended::WatcherStopped);
         }
         if closing {
-            return Ok(());
+            return Ok(Ended::AgentExited);
         }
     }
-    Ok(())
+
+    // The frames ran out without the agent saying it had exited: agentd hung
+    // up, or the read ended. The agent is still running.
+    Ok(Ended::WatcherStopped)
 }
 
 #[cfg(test)]
@@ -314,6 +327,24 @@ mod tests {
         .await
         .expect("should not have timed out")
         .expect("the answer is there");
+    }
+
+    #[tokio::test]
+    async fn a_watch_that_cannot_connect_does_not_claim_the_agent_exited() {
+        // The distinction this exists for. `watch` failing means the *watching*
+        // failed; the agent may be running perfectly and still writing. Saying
+        // it exited makes the control plane drop the conversation, and every
+        // reader of it stops mid-word while the answer goes on being written.
+        let session = SessionId::from_stored("s_definitely-not-running-02");
+        let (out, mut heard) = mpsc::channel(8);
+
+        let ended = watch(session, 0, out).await;
+
+        assert!(ended.is_err(), "there is nothing to connect to");
+        assert!(
+            heard.try_recv().is_err(),
+            "and nothing should have been said about the agent itself"
+        );
     }
 
     #[tokio::test]
