@@ -14,7 +14,7 @@ import { FileGlyph } from "@/components/FileGlyph";
 import { Signal } from "@/components/Signal";
 import { STATUS_LABEL, unfinished } from "@/src/api/view";
 import { useListEvents } from "@/src/api/generated/events/events";
-import { stepLines } from "@/components/Steps";
+import { stepLines, ready } from "@/components/Steps";
 import { PathRow, Counts } from "./PathRow";
 import { ShipPanel } from "./ShipPanel";
 
@@ -276,12 +276,12 @@ function Doing({ sessionId }: { sessionId: string }) {
 
   if (!session) return null;
 
-  // Whatever is running, or the last thing that finished — the same lines the
-  // bring-up draws, read for the one that is current rather than all of them.
+  // Whatever is running — the same lines the bring-up draws, read for the one
+  // that is current rather than all of them. Nothing once the workspace is up:
+  // the status says "Ready" and repeating the last completed step under it
+  // said "Starting the agent" about an agent that had finished starting.
   const lines = stepLines(session, events);
-  const now =
-    lines.find((l) => l.state === "running") ??
-    lines.filter((l) => l.state !== "pending").at(-1);
+  const now = ready(lines) ? undefined : lines.find((l) => l.state === "running");
   const under = now?.detail || (now ? LABEL[now.step] : undefined);
 
   return (

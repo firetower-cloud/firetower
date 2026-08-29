@@ -12,6 +12,7 @@ export type SessionStatus = typeof SessionStatus[keyof typeof SessionStatus];
 export const SessionStatus = {
   Starting: 'Starting',
   Working: 'Working',
+  Ready: 'Ready',
   NeedsYou: 'NeedsYou',
   HandedBack: 'HandedBack',
   Failed: 'Failed',

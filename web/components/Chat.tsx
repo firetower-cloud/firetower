@@ -23,7 +23,7 @@ import { ChatComposer } from "@/components/Composer.chat";
 import type { Control } from "@/components/Settings.chat";
 import { Annotatable, Drafting, Notes } from "@/components/Annotate";
 import type { Draft } from "@/components/Annotate";
-import { Bringup, type Line } from "@/components/Steps";
+import { Bringup, ready, type Line } from "@/components/Steps";
 import { useNotes, asMessage, type Note } from "@/src/api/notes";
 import { fold, summarise } from "@/src/api/steps";
 import { useReveal } from "@/src/api/reveal";
@@ -221,9 +221,19 @@ export function Chat({
           {head}
           <Bringup lines={steps} />
 
-          {conversation.items.length === 0 && !conversation.trouble && steps.length === 0 && (
+          {/* Nothing said yet. Which of the three reasons it is matters: an
+              agent that is up and waiting for its first instruction looked
+              exactly like one that had hung, because the bring-up ended on
+              "Starting the agent" and nothing ever followed it. */}
+          {conversation.items.length === 0 && !conversation.trouble && (
             <p className="py-10 text-[14px] text-mute">
-              {live ? "Waiting for the agent." : "This session said nothing."}
+              {!live
+                ? "This session said nothing."
+                : ready(steps)
+                  ? "The agent is up and waiting. Say what you want done."
+                  : steps.length === 0
+                    ? "Waiting for the agent."
+                    : null}
             </p>
           )}
 

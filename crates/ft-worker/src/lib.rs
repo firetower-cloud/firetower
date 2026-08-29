@@ -289,6 +289,18 @@ impl Worker {
                 out.send(ToServer::AgentsProbed { req, agents }).await?;
             }
 
+            // Slow — npm, a few hundred megabytes — so this arm only runs
+            // because `takes_a_while` keeps it off the message loop. On the
+            // loop it would hold up the heartbeats and the control plane would
+            // give the connection up as dead half way through.
+            ToWorker::InstallAgent { req, kind, version } => {
+                let result = runtime::install(&self.root, kind, version.as_deref())
+                    .await
+                    .map(|installed| installed.version)
+                    .map_err(|e| format!("{e:#}"));
+                out.send(ToServer::AgentInstalled { req, result }).await?;
+            }
+
             // Signing in happens on the machine that will run the agent,
             // because that is the machine OpenAI hands the credential to.
             //
@@ -1380,6 +1392,17 @@ You are in the directory that holds them, not inside one of them.              P
         self.emit(&id, EventKind::StepStarted { step: Step::Launch }, out)
             .await?;
 
+        // The control plane asks this too, from what this host last reported.
+        // Asked again here because that answer has an age: an agent removed by
+        // hand since the last probe would otherwise be launched, and a missing
+        // binary under tmux is a pane that dies quietly and an agent that
+        // never becomes ready. This says which of the two it is.
+        anyhow::ensure!(
+            agents::present(&self.root, spec.agent).await,
+            "{} is not installed on this machine",
+            spec.agent.label()
+        );
+
         // Whether an agent can be driven at all is the control plane's
         // question, asked before a session is created — a worker does what it
         // is told. What it decides here is only how: a supervisor holding the
@@ -1451,16 +1474,23 @@ You are in the directory that holds them, not inside one of them.              P
             self.watch_agent(&id, 0, out).await;
         }
 
-        self.store.set_status(&id, SessionStatus::Working).await?;
-        self.emit(
-            &id,
-            EventKind::StatusChanged {
-                status: SessionStatus::Working,
-                note: None,
-            },
-            out,
-        )
-        .await?;
+        // Whether anything was actually asked for. A workspace can be made
+        // without a task, and an agent that was sent nothing is not working: it
+        // is up and waiting, and nothing will ever arrive to correct a status
+        // that claimed otherwise.
+        //
+        // The prompt itself, not what `opening` produced: for one agent that is
+        // the prompt, and for another it is a handshake sent whether or not
+        // there is anything to ask.
+        let status = if !spec.prompt.trim().is_empty() {
+            SessionStatus::Working
+        } else {
+            SessionStatus::Ready
+        };
+
+        self.store.set_status(&id, status).await?;
+        self.emit(&id, EventKind::StatusChanged { status, note: None }, out)
+            .await?;
 
         Ok(())
     }
@@ -1902,6 +1932,9 @@ fn takes_a_while(frame: &ToWorker) -> bool {
             | ToWorker::Summarize { .. }
             | ToWorker::ProbeRemote { .. }
             | ToWorker::ProbeAgents { .. }
+            // npm, fetching a few hundred megabytes. Minutes on a slow line,
+            // and every heartbeat is due during it.
+            | ToWorker::InstallAgent { .. }
             // Starting a login is two round trips to a process this has to
             // spawn first. The waiting after that is its own task; getting as
             // far as a code is still too slow to do on the loop.

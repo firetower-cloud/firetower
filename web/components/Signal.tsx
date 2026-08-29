@@ -5,6 +5,9 @@ import type { SessionStatus } from "@/src/api/generated/model";
 export const TONE: Record<SessionStatus, string> = {
   NeedsYou: "text-ember",
   HandedBack: "text-sage",
+  // Up and idle. The same restful green as having handed back: both mean
+  // nothing is in flight and it is your move.
+  Ready: "text-sage",
   Failed: "text-brick",
   Working: "text-slate",
   Starting: "text-slate",
@@ -13,7 +16,7 @@ export const TONE: Record<SessionStatus, string> = {
 
 export function Signal({ status, size = 8 }: { status: SessionStatus; size?: number }) {
   const tone = TONE[status];
-  const hollow = status === "Ended" || status === "Starting";
+  const hollow = status === "Ended" || status === "Starting" || status === "Ready";
 
   return (
     <span

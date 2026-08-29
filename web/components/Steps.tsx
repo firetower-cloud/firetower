@@ -25,6 +25,38 @@ const LABELS: Record<Step, string> = {
 };
 
 /**
+ * The same steps, once they are over.
+ *
+ * A finished step used to keep its present tense and lose its mark, so
+ * "Starting the agent" was the last thing on screen whether the agent was
+ * still starting or had been up for an hour — which is exactly what it looks
+ * like when nothing has happened since.
+ */
+const DONE: Record<Step, string> = {
+  Fetch: "Repository fetched",
+  Worktree: "Worktree created",
+  Workspace: "Workspace made",
+  Setup: "Setup finished",
+  Launch: "Agent ready",
+};
+
+/**
+ * Whether the workspace is up and the agent is waiting on you.
+ *
+ * Every step that was going to run has, and the last of them was the launch.
+ * A session with no bring-up recorded at all — one from before steps existed —
+ * is not claimed to be ready, because nothing here knows.
+ */
+export function ready(lines: Line[]): boolean {
+  const started = lines.filter((l) => l.state !== "pending");
+  return (
+    started.length > 0 &&
+    started.every((l) => l.state === "done") &&
+    started.some((l) => l.step === "Launch")
+  );
+}
+
+/**
  * What a finished step is worth saying.
  *
  * Ordinarily the branch, or whatever detail the worker sent. A worktree whose
@@ -49,7 +81,7 @@ const FINISHED_BY: Record<string, Step> = {
 };
 
 type Kind = Record<string, unknown> & { type?: string };
-type State = "done" | "running" | "failed" | "pending";
+export type State = "done" | "running" | "failed" | "pending";
 
 export type Line = {
   step: Step;
@@ -117,15 +149,13 @@ export function Bringup({ lines }: { lines: Line[] }) {
     <ol className="spine mb-2.5 flex flex-col gap-2.5">
       {started.map((line) => (
         <li key={line.step} className="node">
-          {line.state !== "done" && (
-            <span className="mark" data-state={line.state}>
-              {line.state === "running" ? "\u25CB" : "\u2715"}
-            </span>
-          )}
+          <span className="mark" data-state={line.state}>
+            {line.state === "running" ? "\u25CB" : line.state === "failed" ? "\u2715" : "\u2713"}
+          </span>
           <span
             className={`text-[13.5px] ${line.state === "failed" ? "text-brick" : "text-dim"}`}
           >
-            {LABELS[line.step]}
+            {line.state === "done" ? DONE[line.step] : LABELS[line.step]}
           </span>
           {line.detail && (
             <div
