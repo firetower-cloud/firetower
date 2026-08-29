@@ -39,7 +39,15 @@ export interface NewSession {
      * @nullable
      */
   name?: string | null;
-  prompt: string;
+  /**
+     * What to ask for first. Optional, because a workspace is a place before
+     * it is a task: you may want the branch checked out and an agent waiting
+     * in it, and to say what you want once you are looking at the files.
+     *
+     * Absent means the agent starts and says nothing until you do.
+     * @nullable
+     */
+  prompt?: string | null;
   repoId?: null | RepoId;
   /**
      * Every repository to check out, in the order they should appear.

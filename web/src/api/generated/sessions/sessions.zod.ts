@@ -64,7 +64,7 @@ export const CreateSessionBody = zod.object({
   "branch": zod.string().nullish().describe('The branch the agent works on. Omit to derive one from the prompt.\n\nNamed by whoever starts the session, because this is what ends up on a\npull request and a machine-written slug is a poor thing to live with.'),
   "hostId": zod.union([zod.null(),zod.string().describe('Omit to let the scheduler choose.')]).optional(),
   "name": zod.string().nullish().describe('What to call the workspace. Omit to derive one from the branch.\n\nThe name a person reads in the rail, not an identifier: it is free text,\nit can be changed afterwards, and two workspaces may share one. The\nbranch is what has to be unique, and git enforces that itself.'),
-  "prompt": zod.string(),
+  "prompt": zod.string().nullish().describe('What to ask for first. Optional, because a workspace is a place before\nit is a task: you may want the branch checked out and an agent waiting\nin it, and to say what you want once you are looking at the files.\n\nAbsent means the agent starts and says nothing until you do.'),
   "repoId": zod.union([zod.null(),zod.string().describe('Omit for a bare agent: a workspace with nothing checked out.\n\nKept alongside `repos` so that anything holding one repository still\nworks; when both are given, this one goes first.')]).optional(),
   "repos": zod.array(zod.object({
   "base": zod.string().nullish().describe('The branch to start from. Omit for the repository\'s own default.'),

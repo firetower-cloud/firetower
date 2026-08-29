@@ -213,7 +213,13 @@ pub struct NewSession {
     /// repositories reviewable.
     #[serde(default)]
     pub repos: Vec<NewCheckout>,
-    pub prompt: String,
+    /// What to ask for first. Optional, because a workspace is a place before
+    /// it is a task: you may want the branch checked out and an agent waiting
+    /// in it, and to say what you want once you are looking at the files.
+    ///
+    /// Absent means the agent starts and says nothing until you do.
+    #[serde(default)]
+    pub prompt: Option<String>,
     #[serde(default = "default_agent")]
     pub agent: Agent,
     /// Omit to let the scheduler choose.

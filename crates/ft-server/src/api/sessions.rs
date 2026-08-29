@@ -161,10 +161,16 @@ pub(super) async fn create_session(
     // whose name goes on its commits — is answered from here.
     let owner = owner(&principal)?.to_string();
 
-    if req.prompt.trim().is_empty() {
+    // What was actually asked for, if anything. A workspace may be created
+    // empty — a branch, a checkout and an agent waiting in it — so the only
+    // thing genuinely required is something to call it by.
+    let prompt = req.prompt.as_deref().map(str::trim).unwrap_or_default();
+    let asked_name = req.name.as_deref().map(str::trim).unwrap_or_default();
+
+    if prompt.is_empty() && asked_name.is_empty() {
         return Err(ApiError::new(
             ErrorCode::InvalidRequest,
-            "a session needs a prompt",
+            "a workspace needs a name, or something to do",
         ));
     }
 
@@ -324,7 +330,19 @@ pub(super) async fn create_session(
             .map(str::trim)
             .filter(|b| !b.is_empty())
             .map(str::to_string)
-            .unwrap_or_else(|| format!("agent/{}", ft_core::slugify(&req.prompt))),
+            .unwrap_or_else(|| {
+                // The name first: it is what somebody chose, and the prompt is
+                // only a fallback for the case where they typed a task and let
+                // everything else be worked out.
+                format!(
+                    "agent/{}",
+                    ft_core::slugify(if asked_name.is_empty() {
+                        prompt
+                    } else {
+                        asked_name
+                    })
+                )
+            }),
     );
 
     // The base is per repository, because each has its own trunk and they are
@@ -396,7 +414,13 @@ pub(super) async fn create_session(
     }
 
     let id = SessionId::new();
-    let title = title_from(&req.prompt);
+    // What the work is called in a list. The prompt says it best when there is
+    // one; otherwise the name is all there is, and it was chosen for this.
+    let title = if prompt.is_empty() {
+        asked_name.to_string()
+    } else {
+        title_from(prompt)
+    };
 
     // Named after the branch when there is a checkout; after the session
     // otherwise. One name for the whole workspace, whatever is inside it.
@@ -428,7 +452,7 @@ pub(super) async fn create_session(
             &owner,
             repo.as_ref().map(|r| r.slug.as_str()),
             &title,
-            &req.prompt,
+            prompt,
             checkouts.first().map(|c| c.branch.as_str()),
             checkouts.first().map(|c| c.base.as_str()),
             &agent_name,
@@ -548,7 +572,7 @@ pub(super) async fn create_session(
                 session_id: id.clone(),
                 repos: specs,
                 workspace,
-                prompt: req.prompt.clone(),
+                prompt: prompt.to_string(),
                 agent: req.agent,
                 size: req.size,
                 env,

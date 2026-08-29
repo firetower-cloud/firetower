@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useListSessions } from "@/src/api/generated/sessions/sessions";
 import { apiBase } from "@/src/api/http";
-import { Composer } from "@/components/Composer";
+import { NewWorkspace } from "@/components/NewWorkspace";
 import { Modal } from "@/components/Modal";
 import { Terminal } from "@/components/Terminal";
 import { Rail } from "./Rail";
@@ -85,15 +85,13 @@ function Bench({ initialSession }: { initialSession?: string }) {
 
       {starting && (
         <Modal onClose={() => setStarting(null)} title="New workspace" wide>
-          <div className="p-4">
-            <Composer
-              startWith={starting.repo}
-              onStarted={(id) => {
-                setStarting(null);
-                enter(id);
-              }}
-            />
-          </div>
+          <NewWorkspace
+            startWith={starting.repo}
+            onCreated={(id) => {
+              setStarting(null);
+              enter(id);
+            }}
+          />
         </Modal>
       )}
     </div>
