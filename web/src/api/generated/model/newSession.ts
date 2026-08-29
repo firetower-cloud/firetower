@@ -9,6 +9,7 @@ import type { Agent } from './agent';
 import type { HostId } from './hostId';
 import type { NewCheckout } from './newCheckout';
 import type { RepoId } from './repoId';
+import type { WorkspaceId } from './workspaceId';
 import type { WorkspaceSize } from './workspaceSize';
 
 /**
@@ -58,4 +59,5 @@ export interface NewSession {
      */
   repos?: NewCheckout[];
   size?: WorkspaceSize;
+  workspaceId?: null | WorkspaceId;
 }

@@ -50,7 +50,7 @@ export const ListSessionsResponseItem = zod.object({
   "pullRequest": zod.string().nullish().describe('Where the pull request is, once one has been opened.\n\nRemembered so a screen can tell \"pushed\" from \"already open\" without\nasking GitHub, which is what lets one control name the next step rather\nthan offering every verb at once.'),
   "repo": zod.string().nullish().describe('The first checkout\'s slug, or `None` for a bare agent.\n\nA convenience for the places that want one name — a row in a list, a\ncaption. [`Session::checkouts`] is what is actually true.'),
   "size": zod.enum(['Small', 'Medium', 'Large']),
-  "status": zod.enum(['Starting', 'Working', 'NeedsYou', 'HandedBack', 'Failed', 'Ended']),
+  "status": zod.enum(['Starting', 'Working', 'Ready', 'NeedsYou', 'HandedBack', 'Failed', 'Ended']),
   "steps": zod.array(zod.enum(['Fetch', 'Worktree', 'Workspace', 'Setup', 'Launch']).describe('One stage of bringing a session up.\n\nThe point of naming them is that the whole list is knowable \*before\* any of\nit runs — so a session can show what it is going to do the moment it is\ncreated, rather than assembling a shape out of events as they arrive. A step\nnobody has reached yet is still worth showing.')).optional().describe('What this session is going to do, in order, decided when it was created.\n\nHere rather than inferred from events so the screen has something to\nshow before the worker has said a word — the difference between \"this\nis fetching a repository\" and a blank page.'),
   "title": zod.string().describe('Short, derived from the prompt — the prompt itself lives in the transcript.'),
   "updatedAt": zod.iso.datetime({"offset":true}),
@@ -70,7 +70,8 @@ export const CreateSessionBody = zod.object({
   "base": zod.string().nullish().describe('The branch to start from. Omit for the repository\'s own default.'),
   "repoId": zod.string().describe('Identifies a connected repository.')
 }).describe('One repository to check out, as the API accepts it.')).optional().describe('Every repository to check out, in the order they should appear.\n\nEach may name its own base branch; the working branch is the session\'s\nand is the same in all of them, which is what makes a change across two\nrepositories reviewable.'),
-  "size": zod.enum(['Small', 'Medium', 'Large']).optional()
+  "size": zod.enum(['Small', 'Medium', 'Large']).optional(),
+  "workspaceId": zod.union([zod.null(),zod.string().describe('A workspace to start this agent in, instead of making one.\n\nThe place already exists — its host, its repositories, its branch and\nits directory — so all of those are read from it and anything sent\nalongside is ignored. What is left is the agent and what to ask it.\n\nThis is how a workspace comes to hold two agents: they are two sessions\nnaming one `workspace_id`, each with its own conversation.')]).optional()
 }).describe('What the API accepts to launch one.')
 
 export const CreateSessionResponse = zod.object({
@@ -100,7 +101,7 @@ export const CreateSessionResponse = zod.object({
   "pullRequest": zod.string().nullish().describe('Where the pull request is, once one has been opened.\n\nRemembered so a screen can tell \"pushed\" from \"already open\" without\nasking GitHub, which is what lets one control name the next step rather\nthan offering every verb at once.'),
   "repo": zod.string().nullish().describe('The first checkout\'s slug, or `None` for a bare agent.\n\nA convenience for the places that want one name — a row in a list, a\ncaption. [`Session::checkouts`] is what is actually true.'),
   "size": zod.enum(['Small', 'Medium', 'Large']),
-  "status": zod.enum(['Starting', 'Working', 'NeedsYou', 'HandedBack', 'Failed', 'Ended']),
+  "status": zod.enum(['Starting', 'Working', 'Ready', 'NeedsYou', 'HandedBack', 'Failed', 'Ended']),
   "steps": zod.array(zod.enum(['Fetch', 'Worktree', 'Workspace', 'Setup', 'Launch']).describe('One stage of bringing a session up.\n\nThe point of naming them is that the whole list is knowable \*before\* any of\nit runs — so a session can show what it is going to do the moment it is\ncreated, rather than assembling a shape out of events as they arrive. A step\nnobody has reached yet is still worth showing.')).optional().describe('What this session is going to do, in order, decided when it was created.\n\nHere rather than inferred from events so the screen has something to\nshow before the worker has said a word — the difference between \"this\nis fetching a repository\" and a blank page.'),
   "title": zod.string().describe('Short, derived from the prompt — the prompt itself lives in the transcript.'),
   "updatedAt": zod.iso.datetime({"offset":true}),
@@ -155,7 +156,7 @@ export const GetSessionResponse = zod.object({
   "pullRequest": zod.string().nullish().describe('Where the pull request is, once one has been opened.\n\nRemembered so a screen can tell \"pushed\" from \"already open\" without\nasking GitHub, which is what lets one control name the next step rather\nthan offering every verb at once.'),
   "repo": zod.string().nullish().describe('The first checkout\'s slug, or `None` for a bare agent.\n\nA convenience for the places that want one name — a row in a list, a\ncaption. [`Session::checkouts`] is what is actually true.'),
   "size": zod.enum(['Small', 'Medium', 'Large']),
-  "status": zod.enum(['Starting', 'Working', 'NeedsYou', 'HandedBack', 'Failed', 'Ended']),
+  "status": zod.enum(['Starting', 'Working', 'Ready', 'NeedsYou', 'HandedBack', 'Failed', 'Ended']),
   "steps": zod.array(zod.enum(['Fetch', 'Worktree', 'Workspace', 'Setup', 'Launch']).describe('One stage of bringing a session up.\n\nThe point of naming them is that the whole list is knowable \*before\* any of\nit runs — so a session can show what it is going to do the moment it is\ncreated, rather than assembling a shape out of events as they arrive. A step\nnobody has reached yet is still worth showing.')).optional().describe('What this session is going to do, in order, decided when it was created.\n\nHere rather than inferred from events so the screen has something to\nshow before the worker has said a word — the difference between \"this\nis fetching a repository\" and a blank page.'),
   "title": zod.string().describe('Short, derived from the prompt — the prompt itself lives in the transcript.'),
   "updatedAt": zod.iso.datetime({"offset":true}),
@@ -213,7 +214,7 @@ export const RenameSessionResponse = zod.object({
   "pullRequest": zod.string().nullish().describe('Where the pull request is, once one has been opened.\n\nRemembered so a screen can tell \"pushed\" from \"already open\" without\nasking GitHub, which is what lets one control name the next step rather\nthan offering every verb at once.'),
   "repo": zod.string().nullish().describe('The first checkout\'s slug, or `None` for a bare agent.\n\nA convenience for the places that want one name — a row in a list, a\ncaption. [`Session::checkouts`] is what is actually true.'),
   "size": zod.enum(['Small', 'Medium', 'Large']),
-  "status": zod.enum(['Starting', 'Working', 'NeedsYou', 'HandedBack', 'Failed', 'Ended']),
+  "status": zod.enum(['Starting', 'Working', 'Ready', 'NeedsYou', 'HandedBack', 'Failed', 'Ended']),
   "steps": zod.array(zod.enum(['Fetch', 'Worktree', 'Workspace', 'Setup', 'Launch']).describe('One stage of bringing a session up.\n\nThe point of naming them is that the whole list is knowable \*before\* any of\nit runs — so a session can show what it is going to do the moment it is\ncreated, rather than assembling a shape out of events as they arrive. A step\nnobody has reached yet is still worth showing.')).optional().describe('What this session is going to do, in order, decided when it was created.\n\nHere rather than inferred from events so the screen has something to\nshow before the worker has said a word — the difference between \"this\nis fetching a repository\" and a blank page.'),
   "title": zod.string().describe('Short, derived from the prompt — the prompt itself lives in the transcript.'),
   "updatedAt": zod.iso.datetime({"offset":true}),

@@ -7,7 +7,7 @@
 use anyhow::{Context, Result};
 use ft_core::{
     session::Checkout, Agent, AgentMode, AgentPresence, Compute, Event, EventKind, Host, HostId,
-    HostState, Repo, RepoId, Session, SessionId, SessionStatus, WorkspaceSize,
+    HostState, Repo, RepoId, Session, SessionId, SessionStatus, WorkspaceId, WorkspaceSize,
 };
 use sqlx::postgres::PgPoolOptions;
 use sqlx::{PgPool, Row};
@@ -868,6 +868,77 @@ impl Db {
         Ok(())
     }
 
+    /// One workspace of this person's, for starting another agent in it.
+    ///
+    /// Absent rather than refused when it is somebody else's, for the reason
+    /// [`Db::session_of`] gives: a 403 and a 404 differ only in confirming that
+    /// the thing exists.
+    pub async fn workspace_for(
+        &self,
+        owner: &str,
+        id: &WorkspaceId,
+    ) -> Result<Option<WorkspacePlace>> {
+        let row = sqlx::query(
+            "SELECT id, host_id, repo, branch, base, size, forgotten_at
+               FROM workspaces WHERE id = $1 AND user_id = $2",
+        )
+        .bind(id.as_str())
+        .bind(owner)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        let Some(r) = row else { return Ok(None) };
+        let size: String = r.get("size");
+        Ok(Some(WorkspacePlace {
+            id: WorkspaceId::from_stored(r.get::<String, _>("id")),
+            host_id: HostId::from_stored(r.get::<String, _>("host_id")),
+            repo: r.get("repo"),
+            branch: r.get("branch"),
+            base: r.get("base"),
+            size: serde_json::from_str(&format!("\"{size}\"")).context("decoding size")?,
+            forgotten: r
+                .get::<Option<chrono::DateTime<chrono::Utc>>, _>("forgotten_at")
+                .is_some(),
+        }))
+    }
+
+    /// Another agent in a workspace that already exists.
+    ///
+    /// The place is not touched: its host, its repositories and its branch are
+    /// what they were. This adds the work, which is a second `sessions` row
+    /// naming the same `workspace_id` — the shape the schema has allowed since
+    /// the two were split, and which nothing until now asked for.
+    pub async fn insert_run(&self, run: NewRun<'_>) -> Result<()> {
+        let NewRun {
+            id,
+            workspace_id,
+            owner,
+            title,
+            prompt,
+            agent,
+            steps,
+        } = run;
+        let now = chrono::Utc::now();
+        sqlx::query(
+            "INSERT INTO sessions
+               (id, user_id, workspace_id, title, prompt, agent, status,
+                steps, created_at, updated_at, number)
+             VALUES ($1, $2, $3, $4, $5, $6, 'Starting', $7, $8, $8,
+                     nextval('session_number_seq'))",
+        )
+        .bind(id.as_str())
+        .bind(owner)
+        .bind(workspace_id.as_str())
+        .bind(title)
+        .bind(prompt)
+        .bind(agent)
+        .bind(serde_json::to_value(steps)?)
+        .bind(now)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
     pub async fn sessions(&self, owner: &str) -> Result<Vec<Session>> {
         self.sessions_page(owner, None, None).await
     }
@@ -1573,6 +1644,38 @@ fn repo_from_row(r: sqlx::postgres::PgRow) -> Repo {
 /// outside that is what it is: some work, in a place. The split is about what
 /// can be *said* — a workspace with two sessions in it is now expressible —
 /// rather than about what a screen draws today.
+/// A run to add to a workspace that already exists.
+///
+/// A struct because these travel together and describe one thing, and as
+/// arguments they were an unlabelled row of five strings — three of which are
+/// interchangeable at a call site and none of which the compiler would catch.
+pub struct NewRun<'a> {
+    pub id: &'a SessionId,
+    pub workspace_id: &'a WorkspaceId,
+    pub owner: &'a str,
+    pub title: &'a str,
+    pub prompt: &'a str,
+    pub agent: &'a str,
+    pub steps: &'a [ft_core::Step],
+}
+
+/// Where a workspace is, for starting another agent in it.
+///
+/// Not [`ft_core::session::Workspace`], which is what a worker reports about a
+/// directory it made. This is what the control plane knows before it asks for
+/// anything: whose machine, which repository, which branch.
+#[derive(Debug, Clone)]
+pub struct WorkspacePlace {
+    pub id: WorkspaceId,
+    pub host_id: HostId,
+    pub repo: Option<String>,
+    pub branch: Option<String>,
+    pub base: Option<String>,
+    pub size: ft_core::WorkspaceSize,
+    /// Removed here while its host was away. Nothing new starts in one.
+    pub forgotten: bool,
+}
+
 const SESSION_COLUMNS: &str = "\
     s.*, w.host_id, w.repo, w.branch, w.base, w.size, w.pull_request, \
     w.forgotten_at, w.cleaned_at, w.name";
@@ -2732,6 +2835,175 @@ mod tests {
         assert_eq!(
             on_workspace, "second-name",
             "the name lives on the workspace"
+        );
+    }
+
+    /// A workspace keeps the id of the session it was split from.
+    ///
+    /// Load-bearing, and not obviously so. The directory a workspace occupies
+    /// on its host was named from that session's id when it was built, and the
+    /// worker was never told the workspace id — so starting a *second* agent
+    /// there means deriving the same directory name again, from this. If ids
+    /// ever stopped matching, a second agent would be launched into a directory
+    /// that does not exist, or worse, somebody else's.
+    #[tokio::test]
+    async fn a_workspace_keeps_its_first_sessions_id() {
+        let (db, owner) = db_with_user().await;
+        let host = db.ensure_host("localhost", Compute::Local).await.unwrap();
+
+        let id = SessionId::new();
+        db.insert_session(
+            &id,
+            &host.id,
+            &owner,
+            Some("acme/backend"),
+            "Something",
+            "something",
+            Some("agent/thing"),
+            Some("main"),
+            "ClaudeCode",
+            WorkspaceSize::Medium,
+            &[],
+            None,
+        )
+        .await
+        .unwrap();
+
+        let session = db.session(&id).await.unwrap().unwrap();
+        assert_eq!(
+            session.workspace_id.as_ref().map(|w| w.as_str()),
+            Some(id.as_str()),
+        );
+    }
+
+    /// A second agent is a second session in one workspace.
+    #[tokio::test]
+    async fn a_workspace_can_hold_two_agents() {
+        let (db, owner) = db_with_user().await;
+        let host = db.ensure_host("localhost", Compute::Local).await.unwrap();
+
+        let first = SessionId::new();
+        db.insert_session(
+            &first,
+            &host.id,
+            &owner,
+            Some("acme/backend"),
+            "Split the refresh path",
+            "split the refresh path",
+            Some("agent/auth"),
+            Some("main"),
+            "ClaudeCode",
+            WorkspaceSize::Medium,
+            &[],
+            Some("auth"),
+        )
+        .await
+        .unwrap();
+
+        let workspace = db
+            .session(&first)
+            .await
+            .unwrap()
+            .unwrap()
+            .workspace_id
+            .unwrap();
+
+        let second = SessionId::new();
+        db.insert_run(NewRun {
+            id: &second,
+            workspace_id: &workspace,
+            owner: &owner,
+            title: "Codex",
+            prompt: "",
+            agent: "Codex",
+            steps: &[],
+        })
+        .await
+        .unwrap();
+
+        // Two runs, one place — and the second reads the first's worktree back
+        // out of the workspace it was told to join.
+        let run = db.session(&second).await.unwrap().unwrap();
+        assert_eq!(run.workspace_id.as_ref(), Some(&workspace));
+        assert_eq!(run.agent, Agent::Codex);
+        assert_eq!(
+            run.host_id, host.id,
+            "the same machine, because it is the same directory"
+        );
+        assert_eq!(run.branch.as_deref(), Some("agent/auth"));
+        assert_eq!(
+            run.name, "auth",
+            "both runs are in the workspace of that name"
+        );
+
+        // And its number is its own: two runs are two things in a list.
+        assert_ne!(
+            run.number,
+            db.session(&first).await.unwrap().unwrap().number
+        );
+
+        let held: i64 = sqlx::query_scalar("SELECT count(*) FROM sessions WHERE workspace_id = $1")
+            .bind(workspace.as_str())
+            .fetch_one(&db.pool)
+            .await
+            .unwrap();
+        assert_eq!(held, 2);
+    }
+
+    /// Ending one run does not take the other, or the place.
+    #[tokio::test]
+    async fn ending_one_agent_leaves_the_workspace_and_its_neighbour() {
+        let (db, owner) = db_with_user().await;
+        let host = db.ensure_host("localhost", Compute::Local).await.unwrap();
+
+        let first = SessionId::new();
+        db.insert_session(
+            &first,
+            &host.id,
+            &owner,
+            None,
+            "One",
+            "one",
+            None,
+            None,
+            "ClaudeCode",
+            WorkspaceSize::Medium,
+            &[],
+            Some("shared"),
+        )
+        .await
+        .unwrap();
+        let workspace = db
+            .session(&first)
+            .await
+            .unwrap()
+            .unwrap()
+            .workspace_id
+            .unwrap();
+
+        let second = SessionId::new();
+        db.insert_run(NewRun {
+            id: &second,
+            workspace_id: &workspace,
+            owner: &owner,
+            title: "Two",
+            prompt: "",
+            agent: "Codex",
+            steps: &[],
+        })
+        .await
+        .unwrap();
+
+        db.forget_session(&second).await.unwrap();
+
+        assert_eq!(
+            db.session(&second).await.unwrap().unwrap().status,
+            SessionStatus::Ended
+        );
+        assert_ne!(
+            db.session(&first).await.unwrap().unwrap().status,
+            SessionStatus::Ended,
+            "ending one agent must not end the one beside it"
         );
     }
 

@@ -234,6 +234,16 @@ pub struct NewSession {
     /// pull request and a machine-written slug is a poor thing to live with.
     #[serde(default)]
     pub branch: Option<String>,
+    /// A workspace to start this agent in, instead of making one.
+    ///
+    /// The place already exists — its host, its repositories, its branch and
+    /// its directory — so all of those are read from it and anything sent
+    /// alongside is ignored. What is left is the agent and what to ask it.
+    ///
+    /// This is how a workspace comes to hold two agents: they are two sessions
+    /// naming one `workspace_id`, each with its own conversation.
+    #[serde(default)]
+    pub workspace_id: Option<WorkspaceId>,
     /// What to call the workspace. Omit to derive one from the branch.
     ///
     /// The name a person reads in the rail, not an identifier: it is free text,

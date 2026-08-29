@@ -43,8 +43,21 @@ import {
 export type PaneIndex = 0 | 1;
 
 export type Tab =
-  /** The conversation. Every session has exactly one and it cannot be closed. */
+  /**
+   * The workspace's first agent. Exactly one, and it cannot be closed.
+   *
+   * Its session id is the one the workspace is keyed by — a workspace takes the
+   * id of the session it was split from — which is why this tab does not carry
+   * one and a `run` does.
+   */
   | { id: "agent"; kind: "agent" }
+  /**
+   * Another agent in the same workspace, with its own conversation.
+   *
+   * Its own session, its own socket and its own tmux on the host; what it
+   * shares with the first is the directory it is working in.
+   */
+  | { id: string; kind: "run"; sessionId: string }
   /** A shell in the workspace. Numbered, because two is a normal thing to want. */
   | { id: string; kind: "terminal"; n: number }
   | { id: string; kind: "file"; path: string }
@@ -53,6 +66,7 @@ export type Tab =
 /** The address of a thing inside a session, which is also its tab id. */
 export const addressOf = {
   agent: () => "agent" as const,
+  run: (sessionId: string) => `run:${sessionId}`,
   terminal: (n: number) => `terminal:${n}`,
   file: (path: string) => `file:${path}`,
   diff: (path: string) => `diff:${path}`,

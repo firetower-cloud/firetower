@@ -1,12 +1,21 @@
 "use client";
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { useGetSession } from "@/src/api/generated/sessions/sessions";
-import { AgentMark } from "@/components/AgentMark";
+import { useQueryClient } from "@tanstack/react-query";
+import {
+  useGetSession,
+  useCreateSession,
+  getListSessionsQueryKey,
+} from "@/src/api/generated/sessions/sessions";
+import { useListAgents } from "@/src/api/generated/agents/agents";
+import { useListHosts } from "@/src/api/generated/hosts/hosts";
+import type { AgentView } from "@/src/api/generated/model";
+import { AgentMark, AGENT_SHORT } from "@/components/AgentMark";
 import { FileGlyph } from "@/components/FileGlyph";
 import { Signal } from "@/components/Signal";
 import { leafOf } from "@/src/api/text";
 import {
+  addressOf,
   paneTabs,
   useCurrentSession,
   useOpen,
@@ -94,17 +103,24 @@ function TabButton({
   const { data: session } = useGetSession(sessionId ?? "", {
     query: { enabled: !!sessionId && tab.kind === "agent" },
   });
+  // A second agent is its own session, so its tab reads its own status and
+  // its own kind rather than the workspace's first.
+  const { data: run } = useGetSession(tab.kind === "run" ? tab.sessionId : "", {
+    query: { enabled: tab.kind === "run" },
+  });
 
   // The conversation is the session, so it is named after it — and there is no
   // closing it, because closing would leave the session with nothing on screen.
   const label =
     tab.kind === "agent"
       ? (session?.name ?? "Agent")
-      : tab.kind === "terminal"
-        ? tab.n === 1
-          ? "Terminal"
-          : `Terminal ${tab.n}`
-        : leafOf(tab.path);
+      : tab.kind === "run"
+        ? (run?.agent ? AGENT_SHORT[run.agent] : "Agent")
+        : tab.kind === "terminal"
+          ? tab.n === 1
+            ? "Terminal"
+            : `Terminal ${tab.n}`
+          : leafOf(tab.path);
 
   const closable = tab.kind !== "agent";
 
@@ -133,7 +149,11 @@ function TabButton({
       }`}
     >
       <button onClick={onPick} className="flex items-center gap-2 py-1.5">
-        <Glyph tab={tab} status={session?.status} agent={session?.agent} />
+        <Glyph
+          tab={tab}
+          status={tab.kind === "run" ? run?.status : session?.status}
+          agent={tab.kind === "run" ? run?.agent : session?.agent}
+        />
         <span className={`max-w-[22ch] truncate text-[12.5px] ${on ? "" : "font-normal"}`}>
           {label}
         </span>
@@ -161,7 +181,7 @@ function Glyph({
   status?: React.ComponentProps<typeof Signal>["status"];
   agent?: React.ComponentProps<typeof AgentMark>["agent"];
 }) {
-  if (tab.kind === "agent") {
+  if (tab.kind === "agent" || tab.kind === "run") {
     return (
       <span className="flex items-center gap-1.5">
         <Signal status={status ?? "Starting"} size={6} />
@@ -225,7 +245,7 @@ function NewTab() {
         // positioned inside it is clipped away by that scroller.
         <div
           style={{ top: at.top, left: at.left }}
-          className="fixed z-40 w-[248px] rounded-[10px] border border-line bg-panel p-1 shadow-[0_12px_36px_-14px_rgba(0,0,0,0.85)]"
+          className="fixed z-40 w-[264px] rounded-[10px] border border-line bg-panel p-1 shadow-[0_12px_36px_-14px_rgba(0,0,0,0.85)]"
         >
           <Choice
             glyph="▸"
@@ -242,29 +262,112 @@ function NewTab() {
             hint="From the Files panel on the right"
             disabled
           />
-          {/* Honest rather than hidden: a session runs one agent today, and an
-              entry that quietly did nothing would be worse than one that says
-              why it cannot. */}
-          <Choice
-            glyph="✳"
-            label="New agent here"
-            hint="One agent per session for now"
-            disabled
-          />
+
+          <Agents onDone={() => setOpen(false)} />
         </div>
       )}
     </div>
   );
 }
 
+/**
+ * Starting another agent in this workspace.
+ *
+ * Every agent the fleet knows about, gated on the machine *this workspace* is
+ * on — a workspace is one directory on one host, so an agent anywhere else
+ * could not see it, and there is no choosing.
+ *
+ * Unavailable ones stay listed and say why. Vanishing from a menu looks like
+ * the thing does not exist and leaves nowhere to learn what is missing, which
+ * is the same rule the create dialog follows.
+ */
+function Agents({ onDone }: { onDone: () => void }) {
+  const sessionId = useCurrentSession();
+  const { open } = useTabs();
+  const cache = useQueryClient();
+
+  const { data: session } = useGetSession(sessionId ?? "", {
+    query: { enabled: !!sessionId },
+  });
+  const { data: agents = [] } = useListAgents();
+  const { data: hosts = [] } = useListHosts();
+
+  const host = hosts.find((h) => h.id === session?.hostId);
+  const start = useCreateSession({
+    mutation: {
+      onSuccess: (made) => {
+        cache.invalidateQueries({ queryKey: getListSessionsQueryKey() });
+        // Its own tab, in the workspace it joined.
+        open({ id: addressOf.run(made.id), kind: "run", sessionId: made.id });
+      },
+    },
+  });
+
+  if (!session || agents.length === 0) return null;
+
+  return (
+    <>
+      <div className="my-1 border-t border-line" />
+      <p className="px-2 pt-1 pb-1.5 font-narrow text-[10px] font-semibold tracking-[0.14em] text-mute uppercase">
+        Start an agent
+      </p>
+      {agents.map((a) => {
+        const why = unavailable(a, host?.id, host?.name);
+        return (
+          <Choice
+            key={a.kind}
+            glyph=""
+            mark={a.kind}
+            label={a.label}
+            hint={why ?? "In this workspace, on its branch"}
+            disabled={!!why || start.isPending}
+            onClick={() => {
+              onDone();
+              start.mutate({
+                data: {
+                  // The place is decided; only the agent is new.
+                  workspaceId: session.workspaceId ?? undefined,
+                  agent: a.kind,
+                },
+              });
+            }}
+          />
+        );
+      })}
+    </>
+  );
+}
+
+/**
+ * Why this agent cannot be started here, or nothing.
+ *
+ * The same two questions the create dialog asks, in the same order: is it on
+ * the machine at all, and can it authenticate there. A subscription lives in
+ * the agent's own config on the host it was signed in on, so one machine being
+ * signed in says nothing about another.
+ */
+function unavailable(agent: AgentView, hostId?: string, hostName?: string): string | undefined {
+  if (!agent.supported) return "Firetower has no driver for it yet";
+  if (!hostId) return "this workspace's host is gone";
+
+  const here = agent.hosts.find((h) => h.hostId === hostId);
+  if (!here?.installed) return `not installed on ${hostName ?? "that machine"}`;
+  if (!agent.needsCredential) return undefined;
+  if (here.loggedIn === true || agent.credentialSet) return undefined;
+  return "no credentials for it there";
+}
+
 function Choice({
   glyph,
+  mark,
   label,
   hint,
   onClick,
   disabled,
 }: {
   glyph: string;
+  /** An agent's own mark, where the row is about one. */
+  mark?: React.ComponentProps<typeof AgentMark>["agent"];
   label: string;
   hint: string;
   onClick?: () => void;
@@ -276,8 +379,8 @@ function Choice({
       disabled={disabled}
       className="flex w-full items-start gap-2.5 rounded-[7px] px-2 py-1.5 text-left transition-colors enabled:hover:bg-raise disabled:opacity-40"
     >
-      <span className="mt-px w-3 shrink-0 text-center font-mono text-[11px] text-mute">
-        {glyph}
+      <span className="mt-px flex w-3 shrink-0 justify-center text-center font-mono text-[11px] text-mute">
+        {mark ? <AgentMark agent={mark} size={12} /> : glyph}
       </span>
       <span className="min-w-0">
         <span className="block text-[12.5px] text-bone">{label}</span>

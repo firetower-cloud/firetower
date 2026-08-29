@@ -164,6 +164,9 @@ function Content({
   switch (tab.kind) {
     case "agent":
       return <SessionTab sessionId={sessionId} />;
+    // Another agent in this workspace: its own conversation, its own session.
+    case "run":
+      return <SessionTab sessionId={tab.sessionId} />;
     case "terminal":
       // No wrapper and no padding: the terminal is the pane.
       return <Terminal sessionId={sessionId} live showing={showing} />;

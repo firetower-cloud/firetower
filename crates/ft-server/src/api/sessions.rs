@@ -161,6 +161,13 @@ pub(super) async fn create_session(
     // whose name goes on its commits — is answered from here.
     let owner = owner(&principal)?.to_string();
 
+    // Another agent in a place that already exists, which is a different job
+    // from making one: the host, the repositories, the branch and the directory
+    // are all decided, and everything below about choosing them does not apply.
+    if let Some(workspace_id) = req.workspace_id.clone() {
+        return start_another_agent(state, owner, workspace_id, req).await;
+    }
+
     // What was actually asked for, if anything. A workspace may be created
     // empty — a branch, a checkout and an agent waiting in it — so the only
     // thing genuinely required is something to call it by.
@@ -575,6 +582,166 @@ pub(super) async fn create_session(
                 prompt: prompt.to_string(),
                 agent: req.agent,
                 size: req.size,
+                env,
+                agent_home,
+            })),
+        )
+        .await?;
+
+    let session = state
+        .db
+        .session_of(&owner, &id)
+        .await?
+        .ok_or_else(|| ApiError::not_found("session"))?;
+
+    Ok((StatusCode::CREATED, Json(session)))
+}
+
+/// Another agent, in a workspace that is already there.
+///
+/// The place is not made again: its host, its repositories, its branch and its
+/// directory are what they were, and a second agent shares all of them. What is
+/// created is a session — a second run — with its own conversation, its own
+/// socket on the host and its own tmux.
+///
+/// Deliberately not a flag on the path above. That one decides where to put a
+/// workspace and then builds it; this one decides nothing and builds nothing,
+/// and the two share only the launch at the end.
+async fn start_another_agent(
+    state: AppState,
+    owner: String,
+    workspace_id: ft_core::WorkspaceId,
+    req: NewSession,
+) -> ApiResult<(StatusCode, Json<Session>)> {
+    if !req.agent.speaks_a_protocol() {
+        return Err(ApiError::new(
+            ErrorCode::InvalidRequest,
+            format!(
+                "Firetower has no driver for {} yet, so it cannot run one",
+                req.agent.label()
+            ),
+        ));
+    }
+
+    let place = state
+        .db
+        .workspace_for(&owner, &workspace_id)
+        .await?
+        .ok_or_else(|| ApiError::not_found("workspace"))?;
+
+    // Removed here while its host was away. The directory may or may not still
+    // be on that machine, and starting an agent in one we have already given up
+    // on is how a workspace comes back from the dead.
+    if place.forgotten {
+        return Err(ApiError::new(
+            ErrorCode::InvalidRequest,
+            "that workspace has been removed",
+        ));
+    }
+
+    // The agent has to be on the machine the workspace is on. There is no
+    // choosing here: a workspace is one directory on one host, and an agent
+    // anywhere else could not see it.
+    let host = state
+        .db
+        .host_by_id(&place.host_id)
+        .await?
+        .ok_or_else(|| ApiError::new(ErrorCode::NoCapacity, "that workspace's host is gone"))?;
+
+    let installed_here = state
+        .db
+        .presence()
+        .await?
+        .into_iter()
+        .any(|p| p.host == host.id && p.found.kind == req.agent && p.found.installed);
+
+    if !installed_here {
+        return Err(ApiError::new(
+            ErrorCode::InvalidRequest,
+            format!(
+                "{} isn't installed on {}, which is where this workspace is.",
+                req.agent.label(),
+                host.name
+            ),
+        ));
+    }
+
+    // A host that has just dropped is usually seconds from being back, so wait
+    // for one something is actively reconnecting. One nobody is reconnecting is
+    // not coming back on its own, and waiting would be a promise rather than a
+    // delay.
+    let reachable = state.fleet.is_connected(&host.id).await
+        || (state.fleet.is_supervised(&host.id).await
+            && state
+                .fleet
+                .wait_until_connected(&host.id, RECONNECT_GRACE)
+                .await);
+
+    if !reachable {
+        return Err(ApiError::new(
+            ErrorCode::HostUnreachable,
+            format!("{} isn't responding", host.name),
+        ));
+    }
+
+    let prompt = req.prompt.as_deref().map(str::trim).unwrap_or_default();
+    let id = SessionId::new();
+    let title = if prompt.is_empty() {
+        req.agent.label().to_string()
+    } else {
+        title_from(prompt)
+    };
+
+    // The directory the workspace occupies, derived the same way it was when it
+    // was built. A workspace carries the id of the session it was split from,
+    // so this is that session's name for it — see `a_workspace_keeps_its_first
+    // _sessions_id`, which is what stops this being a guess.
+    let directory = match place.branch.as_deref() {
+        Some(branch) if place.repo.is_some() => ft_core::workspace_name(branch, place.id.as_str()),
+        _ => place.id.as_str().to_string(),
+    };
+
+    // One step. A second agent does not fetch, does not cut a worktree and does
+    // not run setup, and drawing those as skipped would say something happened.
+    let steps = vec![ft_core::Step::Launch];
+    let agent_name = format!("{:?}", req.agent);
+
+    state
+        .db
+        .insert_run(crate::db::NewRun {
+            id: &id,
+            workspace_id: &place.id,
+            owner: &owner,
+            title: &title,
+            prompt,
+            agent: &agent_name,
+            steps: &steps,
+        })
+        .await?;
+
+    // Its own credential and its own environment, resolved against this session
+    // so the vault's log names the run that spent it.
+    let mut env: Vec<(String, String)> = Vec::new();
+    for (name, value) in agent_env(&state, req.agent, &id, &owner).await? {
+        env.retain(|(existing, _)| *existing != name);
+        env.push((name, value));
+    }
+    let agent_home = agent_home(&state, req.agent, &id, &owner).await?;
+
+    state
+        .fleet
+        .send(
+            &host.id,
+            ToWorker::StartAgent(Box::new(ft_proto::StartAgent {
+                session_id: id.clone(),
+                workspace: directory,
+                prompt: prompt.to_string(),
+                agent: req.agent,
+                title: title.clone(),
+                repo: place.repo.clone(),
+                branch: place.branch.clone(),
+                base: place.base.clone(),
+                size: place.size,
                 env,
                 agent_home,
             })),

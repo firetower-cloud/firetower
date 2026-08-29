@@ -212,6 +212,19 @@ pub enum ToWorker {
     ProbeAgents {
         req: ReqId,
     },
+    /// Fetch an agent onto this host, or replace it with another version.
+    ///
+    /// Asked of the worker because the install lands on that machine's own
+    /// volume — under `agents/<kind>/<version>/` — and only the machine can
+    /// say what npm resolved to. Nothing here touches a credential: what an
+    /// agent authenticates with stays with the control plane and is handed
+    /// over per session.
+    InstallAgent {
+        req: ReqId,
+        kind: Agent,
+        /// The newest published one when nobody says.
+        version: Option<String>,
+    },
     /// Sign Codex in on this host, using a device code.
     ///
     /// Asked of the worker because the machine that will run the agent is the
@@ -222,6 +235,12 @@ pub enum ToWorker {
     /// Answered twice — [`ToServer::CodexLoginPending`] with the code to show,
     /// then [`ToServer::CodexLoginFinished`] whenever somebody gets around to
     /// approving it.
+    /// Start another agent in a workspace that is already there.
+    ///
+    /// Separate from [`CreateWorkspace`] rather than a flag on it: they share a
+    /// launch and nothing else, and a worker that received one meaning the
+    /// other would clone over a checkout somebody is working in.
+    StartAgent(Box<StartAgent>),
     CodexLoginStart {
         req: ReqId,
     },
@@ -343,6 +362,52 @@ pub struct CreateWorkspace {
     ///
     /// Defaulted so a worker from before this understands a frame that has it,
     /// and writes nothing.
+    #[serde(default)]
+    pub agent_home: Vec<(String, String)>,
+}
+
+/// Another agent, in a workspace that already exists.
+///
+/// A workspace is a place and a session is the work done in it, so a second
+/// agent is a second session sharing one directory. Everything that made the
+/// place — the clone, the worktree, the setup script — has already happened and
+/// must not happen again; this is the launch on its own.
+///
+/// It carries its own `session_id`, which is what keeps the two apart on the
+/// host: the agent's socket and its tmux session are both named from it, so two
+/// runs get two of each without anything being invented for them.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StartAgent {
+    /// The new run. Not the workspace's first session.
+    pub session_id: SessionId,
+    /// The directory the workspace already occupies, by name.
+    ///
+    /// Sent rather than looked up from a sibling session: the control plane
+    /// knows which workspace this is, and a worker that had to search its own
+    /// records for "some other session in the same place" could find one that
+    /// has since been torn down.
+    pub workspace: String,
+    /// What to ask for first. Empty means the agent comes up idle.
+    #[serde(default)]
+    pub prompt: String,
+    pub agent: Agent,
+    /// The workspace's own facts, repeated for this run's record of them.
+    ///
+    /// A worker keeps a row per session and every event it stores points at
+    /// one, so a second agent needs its own — and what it says about the branch
+    /// and the repository is what the workspace says, because it is working in
+    /// the workspace.
+    #[serde(default)]
+    pub title: String,
+    #[serde(default)]
+    pub repo: Option<String>,
+    #[serde(default)]
+    pub branch: Option<String>,
+    #[serde(default)]
+    pub base: Option<String>,
+    #[serde(default)]
+    pub size: WorkspaceSize,
+    pub env: Vec<(String, String)>,
     #[serde(default)]
     pub agent_home: Vec<(String, String)>,
 }
@@ -520,6 +585,16 @@ pub enum ToServer {
         req: ReqId,
         agents: Vec<AgentPresence>,
     },
+    /// The answer to [`ToWorker::InstallAgent`]: the version that landed, or
+    /// why none did.
+    ///
+    /// The version comes back rather than being assumed, because `@latest`
+    /// does not say what it resolved to and the directory is named for the
+    /// answer.
+    AgentInstalled {
+        req: ReqId,
+        result: Result<String, String>,
+    },
     /// The code to show for a [`ToWorker::CodexLoginStart`], or why there is
     /// none.
     CodexLoginPending {
@@ -574,6 +649,42 @@ pub enum HandshakeError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A second agent survives the wire.
+    ///
+    /// `ToWorker` is internally tagged, and an internally-tagged newtype
+    /// variant only works when what it wraps serialises as a map. That is true
+    /// of a struct and quietly false of most other things, so it is worth
+    /// asserting rather than assuming.
+    #[test]
+    fn starting_another_agent_round_trips() {
+        let frame = ToWorker::StartAgent(Box::new(StartAgent {
+            session_id: SessionId::from_stored("s_second".to_string()),
+            workspace: "agent-auth-refactor-wheped1g".into(),
+            prompt: String::new(),
+            agent: Agent::Codex,
+            title: "Auth refactor".into(),
+            repo: Some("acme/backend".into()),
+            branch: Some("agent/auth-refactor".into()),
+            base: Some("main".into()),
+            size: WorkspaceSize::Medium,
+            env: vec![("KEY".into(), "value".into())],
+            agent_home: Vec::new(),
+        }));
+
+        let wire = serde_json::to_string(&frame).expect("encoding");
+        assert!(wire.contains("\"frame\":\"StartAgent\""), "{wire}");
+
+        let back: ToWorker = serde_json::from_str(&wire).expect("decoding");
+        match back {
+            ToWorker::StartAgent(spec) => {
+                assert_eq!(spec.workspace, "agent-auth-refactor-wheped1g");
+                assert_eq!(spec.agent, Agent::Codex);
+                assert!(spec.prompt.is_empty());
+            }
+            other => panic!("came back as {other:?}"),
+        }
+    }
 
     #[test]
     fn a_credential_never_prints_itself() {
