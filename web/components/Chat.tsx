@@ -76,7 +76,7 @@ export function Chat({
   /** How the workspace was built, drawn at the top of the transcript. */
   steps?: Line[];
 }) {
-  const { conversation, echo, settle, remember } = useConversation(sessionId, live);
+  const { conversation, echo, settle, remember } = useConversation(sessionId);
   const { notes, add, drop, clear } = useNotes(sessionId);
   const send = useSendTurn();
   const interrupt = useInterruptSession();

@@ -18,43 +18,8 @@ import {
 } from "./generated/sessions/sessions";
 import { getListEventsQueryKey } from "./generated/events/events";
 import type { Session } from "./generated/model";
-import { apiBase, token } from "./http";
 
 export type SessionEvent = Event;
-
-/**
- * Subscribe until the returned function is called.
- *
- * EventSource can't set headers, so the token rides in the query string. That's
- * acceptable for a loopback connection; a hosted deployment should mint a
- * short-lived stream token rather than putting the session one in a URL.
- */
-export function subscribeToEvents(onEvent: (event: SessionEvent) => void): () => void {
-  const auth = token();
-  const url = `${apiBase()}/api/v1/events/stream${auth ? `?t=${encodeURIComponent(auth)}` : ""}`;
-  const source = new EventSource(url);
-
-  source.addEventListener("session", (message) => {
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse((message as MessageEvent).data);
-    } catch {
-      console.warn("[firetower] unparseable event frame");
-      return;
-    }
-    onEvent(parsed as SessionEvent);
-  });
-
-  source.onerror = () => {
-    // Not fatal: EventSource reconnects by itself and resumes from the last id
-    // it saw. Worth a line in the console, not a thrown error.
-    if (source.readyState === EventSource.CLOSED) {
-      console.warn("[firetower] event stream closed; the browser will retry");
-    }
-  };
-
-  return () => source.close();
-}
 
 /**
  * Fold an event into the cache instead of refetching a list we already hold.
