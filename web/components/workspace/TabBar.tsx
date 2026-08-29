@@ -320,17 +320,26 @@ function Agents({
 }: {
   onStart: (workspaceId: string, agent: AgentView["kind"]) => void;
 }) {
-  const sessionId = useCurrentSession();
-  const { data: session } = useGetSession(sessionId ?? "", {
-    query: { enabled: !!sessionId },
+  // The session you are in *is* the workspace: a workspace takes the id of the
+  // session it was split from, and that is what the tab set is keyed by. So the
+  // id is known without waiting for anything — which matters, because this
+  // renders the moment the menu opens and the session may not be cached yet.
+  //
+  // Depending on that query meant the whole section returned `null` while it
+  // loaded, so the menu opened with the agents simply absent and clicking where
+  // they should have been did nothing at all.
+  const workspaceId = useCurrentSession() ?? undefined;
+  const { data: session } = useGetSession(workspaceId ?? "", {
+    query: { enabled: !!workspaceId },
   });
   const { data: agents = [] } = useListAgents();
   const { data: hosts = [] } = useListHosts();
 
+  // Only needed to say *why* one is unavailable. Absent while it loads, which
+  // reads as "we cannot tell yet" rather than hiding the row.
   const host = hosts.find((h) => h.id === session?.hostId);
-  const workspaceId = session?.workspaceId ?? undefined;
 
-  if (!session || agents.length === 0) return null;
+  if (!workspaceId) return null;
 
   return (
     <>
@@ -338,10 +347,15 @@ function Agents({
       <p className="px-2 pt-1 pb-1.5 font-narrow text-[10px] font-semibold tracking-[0.14em] text-mute uppercase">
         Start an agent
       </p>
+
+      {agents.length === 0 && (
+        <p className="px-2 pb-1.5 text-[11.5px] text-mute">
+          No agents configured. Add one on the Agents screen.
+        </p>
+      )}
+
       {agents.map((a) => {
-        const why = !workspaceId
-          ? "this session has no workspace"
-          : unavailable(a, host?.id, host?.name);
+        const why = session ? unavailable(a, host?.id, host?.name) : undefined;
         return (
           <Choice
             key={a.kind}
@@ -350,7 +364,7 @@ function Agents({
             label={a.label}
             hint={why ?? "In this workspace, on its branch"}
             disabled={!!why}
-            onClick={() => workspaceId && onStart(workspaceId, a.kind)}
+            onClick={() => onStart(workspaceId, a.kind)}
           />
         );
       })}
