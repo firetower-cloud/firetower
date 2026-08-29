@@ -23,6 +23,7 @@ import { useListTasks } from "@/src/api/generated/tasks/tasks";
 import { useListRepos } from "@/src/api/generated/repos/repos";
 import type { Task, TaskKind, TaskState } from "@/src/api/generated/model";
 import { Modal } from "@/components/Modal";
+import { TaskDialog } from "@/components/TaskDialog";
 import { NewWorkspace } from "@/components/NewWorkspace";
 import { elapsed, minutesSince } from "@/src/api/view";
 
@@ -38,6 +39,8 @@ export function Tasks() {
   const [typed, setTyped] = useState("");
   const [page, setPage] = useState(1);
   const [starting, setStarting] = useState<Task | null>(null);
+  /** Which row is open for reading, by position in the page. */
+  const [reading, setReading] = useState<number | null>(null);
 
   const params = useMemo(
     () => ({ kind, state, mine, repo, q: q || undefined, page }),
@@ -66,8 +69,8 @@ export function Tasks() {
           {isPending ? "Looking…" : `${data?.total ?? tasks.length} to pick from.`}
         </h1>
         <p className="mt-1.5 max-w-[56ch] text-[14px] text-dim">
-          Read from GitHub as you look, never copied here. Starting one cuts a worktree with the
-          issue already written into the first prompt.
+          Read from GitHub as you look, never copied here. Starting one cuts a worktree and puts
+          the issue in the composer — unsent, so you can say what you want done with it first.
         </p>
       </header>
 
@@ -181,7 +184,13 @@ export function Tasks() {
       {tasks.length > 0 && (
         <div className="overflow-hidden rounded-[10px] border border-line">
           {tasks.map((task, i) => (
-            <Row key={task.id} task={task} first={i === 0} onStart={() => setStarting(task)} />
+            <Row
+              key={task.id}
+              task={task}
+              first={i === 0}
+              onRead={() => setReading(i)}
+              onStart={() => setStarting(task)}
+            />
           ))}
         </div>
       )}
@@ -206,6 +215,27 @@ export function Tasks() {
         </div>
       )}
 
+      {reading !== null && tasks[reading] && (
+        <TaskDialog
+          task={tasks[reading]}
+          at={reading + 1}
+          of={tasks.length}
+          onMove={(by) =>
+            setReading((at) =>
+              at === null ? at : Math.min(tasks.length - 1, Math.max(0, at + by)),
+            )
+          }
+          onClose={() => setReading(null)}
+          onStart={() => {
+            // Read, then decide. Closing this one and opening the other keeps
+            // one dialog on screen at a time, and the worktree form is the same
+            // one the `+` in the rail opens rather than a second copy of it.
+            setStarting(tasks[reading]);
+            setReading(null);
+          }}
+        />
+      )}
+
       {starting && (
         <Modal onClose={() => setStarting(null)} title="New worktree" wide>
           <NewWorkspace
@@ -228,7 +258,17 @@ export function Tasks() {
 }
 
 /** One task, and the button that turns it into a worktree. */
-function Row({ task, first, onStart }: { task: Task; first: boolean; onStart: () => void }) {
+function Row({
+  task,
+  first,
+  onRead,
+  onStart,
+}: {
+  task: Task;
+  first: boolean;
+  onRead: () => void;
+  onStart: () => void;
+}) {
   return (
     <div
       className={`flex items-center gap-4 px-4 py-3 transition-colors hover:bg-raise/40 ${
@@ -246,7 +286,7 @@ function Row({ task, first, onStart }: { task: Task; first: boolean; onStart: ()
       </a>
 
       <div className="min-w-0 flex-1">
-        <button onClick={onStart} className="block w-full truncate text-left">
+        <button onClick={onRead} className="block w-full truncate text-left">
           <span className="text-[14px] text-text">{task.title}</span>
         </button>
         <div className="mt-1 flex flex-wrap items-center gap-1.5">
@@ -284,6 +324,17 @@ function Row({ task, first, onStart }: { task: Task; first: boolean; onStart: ()
       <span className="w-16 shrink-0 text-right font-mono text-[11px] text-mute">
         {elapsed(minutesSince(task.updatedAt))}
       </span>
+
+      {/* Reading is the safe one and comes first; starting is the deliberate
+          one and is the last thing on the row. Both are named, because an icon
+          alone is a guess on first sight. */}
+      <button
+        onClick={onRead}
+        title="Read it"
+        className="shrink-0 rounded-[8px] border border-line px-3 py-1.5 text-ui text-mute transition-colors hover:text-text"
+      >
+        View
+      </button>
 
       <button
         onClick={onStart}

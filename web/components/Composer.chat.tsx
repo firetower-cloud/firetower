@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useRef, useState } from "react";
+import { takeDraft } from "@/src/workspace/draft";
 import { useAttachFile, useListFiles } from "@/src/api/generated/sessions/sessions";
 import type { Attached, Checkout, SlashCommand, Usage } from "@/src/api/generated/model";
 import { Picker, type Control } from "@/components/Settings.chat";
@@ -54,7 +55,11 @@ export function ChatComposer({
   onStop: () => void;
   failed: boolean;
 }) {
-  const [draft, setDraft] = useState("");
+  // Seeded during the first render rather than in an effect: an effect would
+  // paint an empty composer and then fill it, which reads as the page changing
+  // its mind. `takeDraft` removes what it returns, so a reload does not put the
+  // issue back on top of whatever has since been typed.
+  const [draft, setDraft] = useState(() => takeDraft(sessionId) ?? "");
   const [images, setImages] = useState<Attached[]>([]);
   const [over, setOver] = useState(false);
   const [refused, setRefused] = useState<string | null>(null);

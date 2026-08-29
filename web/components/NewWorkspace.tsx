@@ -12,6 +12,7 @@ import {
 import type { Agent, AgentView, Host, Repo } from "@/src/api/generated/model";
 import { AgentMark, AGENT_LABEL } from "@/components/AgentMark";
 import { slugify } from "@/src/api/slug";
+import { leaveDraft } from "@/src/workspace/draft";
 import { ConnectRepo } from "@/components/ConnectRepo";
 import { getListReposQueryKey } from "@/src/api/generated/repos/repos";
 
@@ -94,6 +95,15 @@ export function NewWorkspace({
   const create = useCreateSession({
     mutation: {
       onSuccess: (session) => {
+        // The task, waiting in the composer of a screen that does not exist
+        // yet. Left rather than sent: an agent should not be editing files
+        // before anybody has read the issue here.
+        if (fromTask) {
+          leaveDraft(
+            session.id,
+            [fromTask.title, fromTask.body, fromTask.url].filter(Boolean).join("\n\n"),
+          );
+        }
         cache.invalidateQueries({ queryKey: getListSessionsQueryKey() });
         onCreated(session.id);
       },
@@ -107,13 +117,11 @@ export function NewWorkspace({
     create.mutate({
       data: {
         name: name.trim(),
-        // No prompt, unless it came from a task — then the task is the prompt,
-        // and it is the reason somebody clicked Start rather than typing.
-        // Otherwise the agent starts and waits, and what you want doing is
-        // said in the conversation, where it can be answered.
-        prompt: fromTask
-          ? [fromTask.title, fromTask.body, fromTask.url].filter(Boolean).join("\n\n")
-          : undefined,
+        // No prompt, ever — including when this came from a task. The agent
+        // starts and waits; what you want doing is said in the conversation,
+        // where it can be answered. A task fills the composer instead, unsent,
+        // so "here is the issue, let's plan it together" is something you can
+        // still type in front of it.
         taskKey: fromTask?.key,
         taskUrl: fromTask?.url,
         repos: checkouts.map((c) => ({ repoId: c.id, base: c.base })),
