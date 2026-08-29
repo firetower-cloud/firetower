@@ -16,6 +16,7 @@ import {
   getListSessionsQueryKey,
 } from "@/src/api/generated/sessions/sessions";
 import { useQueryClient } from "@tanstack/react-query";
+import { slugify } from "@/src/api/slug";
 
 /**
  * Whether this agent could run on this particular host.
@@ -76,6 +77,19 @@ export function Composer({
   const [search, setSearch] = useState("");
   const [agent, setAgent] = useState<Agent | "">("");
   const [branch, setBranch] = useState<string>("");
+  const [name, setName] = useState<string>("");
+  /**
+   * Which fields have stopped following the ones above them.
+   *
+   * The name derives from the prompt and the branch from the name, live, until
+   * you disagree with one — after which it is yours and nothing overwrites it.
+   * Naming things is a chore, so deriving was right; doing it invisibly, and
+   * only telling you afterwards in a caption, was the part that was wrong.
+   */
+  const [typed, setTyped] = useState<{ name: boolean; branch: boolean }>({
+    name: false,
+    branch: false,
+  });
   const [hostId, setHostId] = useState<string>("");
   const ta = useRef<HTMLTextAreaElement>(null);
   const router = useRouter();
@@ -102,6 +116,12 @@ export function Composer({
   // The first one, for everything that wants a single name: the caption when
   // the composer is closed, the branch suggestion.
   const repo = checkouts[0] ? repos.find((r) => r.id === checkouts[0].id) : undefined;
+
+  // What the two fields hold right now, whether or not anybody has typed in
+  // them. Every read below goes through these rather than the raw state, so a
+  // field that is still following shows what it would send.
+  const shownName = typed.name ? name : slugify(text);
+  const shownBranch = typed.branch ? branch : shownName ? `agent/${shownName}` : "";
 
   // What every chosen repository brings, not just the first. Two of them bring
   // two sets, and the count is the thing worth saying before you start.
@@ -193,7 +213,10 @@ export function Composer({
         repos: checkouts.map((p) => ({ repoId: p.id, base: p.base })),
         prompt: text.trim(),
         agent: chosenAgent,
-        branch: checkouts.length ? branch.trim() || undefined : undefined,
+        branch: checkouts.length ? shownBranch.trim() || undefined : undefined,
+        // Sent even with nothing checked out: a workspace still has a name,
+        // and `Agent 14` is the fallback rather than the intent.
+        name: shownName.trim() || undefined,
         hostId: host?.id,
       },
     });
@@ -293,18 +316,39 @@ export function Composer({
               </ul>
             </Picker>
 
-            {repo && (
-            <label className="flex items-center gap-1.5 rounded-[5px] border border-line bg-panel py-1 pr-2 pl-2 text-[12px] text-dim transition-colors focus-within:border-ember/40 hover:border-[#3a3631]">
-              <span className="text-mute">⎇</span>
-              <input
-                value={branch}
-                onChange={(e) => setBranch(e.target.value)}
-                placeholder={suggestion(text)}
-                spellCheck={false}
-                className="w-[190px] bg-transparent font-mono text-[11.5px] text-bone placeholder:text-mute focus:outline-none"
+          </div>
+
+          {/* What it is called, and what git will call the branch. Derived and
+              shown rather than derived and hidden: you could always change the
+              branch, but only after finding out what it had been named. */}
+          <div className="mt-2.5 flex flex-col gap-1.5 border-t border-line pt-2.5">
+            <Field
+              label="Name"
+              value={shownName}
+              following={!typed.name}
+              placeholder="named after what you asked for"
+              onChange={(v) => {
+                setName(v);
+                setTyped((t) => ({ ...t, name: true }));
+              }}
+            />
+            {checkouts.length > 0 && (
+              <Field
+                label="Branch"
+                mono
+                value={shownBranch}
+                following={!typed.branch}
+                placeholder="branch name"
+                onChange={(v) => {
+                  setBranch(v);
+                  setTyped((t) => ({ ...t, branch: true }));
+                }}
               />
-            </label>
             )}
+          </div>
+
+          <div className="mt-2.5 flex flex-wrap items-center gap-1.5 border-t border-line pt-2.5">
+            <span className="eyebrow mr-1">First agent</span>
 
             {/* Every machine that's up. Nothing here is filtered by which
                 agent you picked — that would hide the thing you just added. */}
@@ -345,14 +389,14 @@ export function Composer({
                   !runsHere(chosen) ||
                   create.isPending
                 }
-                title="Launch (⌘↵)"
+                title="Create the workspace and start the agent (⌘↵)"
                 className="flex items-center gap-2 rounded-[5px] bg-ember px-3.5 py-1.5 text-[12.5px] font-semibold text-[#1a0c04] transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:bg-line disabled:text-mute"
               >
                 {create.isPending
                   ? host?.state === "Online"
                     ? "Opening…"
                     : `Waiting for ${where(host)}…`
-                  : "Launch"}
+                  : "Create workspace"}
                 {/* On the button, as everywhere else: a shortcut floating
                     beside a control is a caption for whatever it lands next
                     to. */}
@@ -397,22 +441,46 @@ export function Composer({
 }
 
 /**
- * What the branch would be called if you leave it alone.
+ * A labelled field that may still be following something above it.
  *
- * Shown as a placeholder rather than filled in, so the field stays yours to
- * type in and the fallback is visible without being in the way.
+ * A following value is drawn in the muted colour, so you can tell at a glance
+ * whether what is in the box is a suggestion or a decision. Typing in it makes
+ * it yours and it stops moving — which is the whole contract, and the reason
+ * this is one component rather than two inputs with different rules.
  */
-function suggestion(prompt: string) {
-  const slug = prompt
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .split("-")
-    .filter(Boolean)
-    .slice(0, 5)
-    .join("-");
-  return slug ? `agent/${slug}` : "branch name";
+function Field({
+  label,
+  value,
+  following,
+  placeholder,
+  mono,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  /** Still derived from what was typed above, rather than set here. */
+  following: boolean;
+  placeholder: string;
+  mono?: boolean;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label className="flex items-center gap-2.5">
+      <span className="w-[52px] shrink-0 text-[11.5px] text-mute">{label}</span>
+      <input
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        spellCheck={false}
+        title={following ? "Following what you typed above — edit to fix it" : undefined}
+        className={`min-w-0 flex-1 rounded-[6px] border border-line bg-ground px-2 py-1 text-[12px] placeholder:text-mute focus:border-ember focus:outline-none ${
+          mono ? "font-mono" : ""
+        } ${following ? "text-dim" : "text-bone"}`}
+      />
+    </label>
+  );
 }
+
 
 /** What to show for the chosen agent, before the list has loaded. */
 

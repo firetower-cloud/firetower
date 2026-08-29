@@ -30,6 +30,15 @@ export interface NewSession {
      */
   branch?: string | null;
   hostId?: null | HostId;
+  /**
+     * What to call the workspace. Omit to derive one from the branch.
+     *
+     * The name a person reads in the rail, not an identifier: it is free text,
+     * it can be changed afterwards, and two workspaces may share one. The
+     * branch is what has to be unique, and git enforces that itself.
+     * @nullable
+     */
+  name?: string | null;
   prompt: string;
   repoId?: null | RepoId;
   /**

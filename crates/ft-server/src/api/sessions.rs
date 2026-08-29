@@ -267,6 +267,31 @@ pub(super) async fn create_session(
         }
     }
 
+    // The binary has to be on the machine that will run it.
+    //
+    // Asked here, where there is somewhere to say it, rather than found out at
+    // the launch step — which is what used to happen, and it arrived as the
+    // agent never becoming ready. That reads as a broken agent and is a
+    // missing one. The worker checks again before it launches, because this
+    // answer is only as fresh as the last probe.
+    let installed_here = state
+        .db
+        .presence()
+        .await?
+        .into_iter()
+        .any(|p| p.host == host.id && p.found.kind == req.agent && p.found.installed);
+
+    if !installed_here {
+        return Err(ApiError::new(
+            ErrorCode::InvalidRequest,
+            format!(
+                "{} isn't installed on {}. Install it from the Agents page and try again.",
+                req.agent.label(),
+                host.name
+            ),
+        ));
+    }
+
     // A path is a path on *this* machine. Anywhere else it is a directory that
     // doesn't exist, and the session would fail several steps later with a git
     // error that says nothing about why.
@@ -409,6 +434,16 @@ pub(super) async fn create_session(
             &agent_name,
             req.size,
             &steps,
+            // What it is called, and what it is: the branch without the
+            // `agent/` that every one of them carries, which would be four
+            // characters of nothing repeated down the whole rail.
+            Some(
+                req.name
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|n| !n.is_empty())
+                    .unwrap_or_else(|| branch.strip_prefix("agent/").unwrap_or(&branch)),
+            ),
         )
         .await?;
     state.db.record_checkouts(&id, &checkouts).await?;

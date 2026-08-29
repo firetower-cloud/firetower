@@ -78,7 +78,7 @@ export function Rail({ onNew }: { onNew: (repo?: string) => void }) {
         onClick={() => onNew()}
         className="mx-2.5 mb-2.5 shrink-0 rounded-[9px] border border-dashed border-line py-2 text-ui text-mute transition-colors hover:border-ember/40 hover:text-ember"
       >
-        + New session
+        + New workspace
       </button>
 
       <Hosts />
@@ -172,7 +172,7 @@ function Grouped({
               </span>
               <button
                 onClick={() => onNew(repo)}
-                title={`New session on ${repo}`}
+                title={`New workspace on ${repo}`}
                 className="shrink-0 px-0.5 text-[12px] leading-none text-mute opacity-0 transition-opacity group-hover/head:opacity-100 hover:text-ember"
               >
                 +

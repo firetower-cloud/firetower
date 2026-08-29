@@ -84,7 +84,7 @@ function Bench({ initialSession }: { initialSession?: string }) {
       <Inspector sessionId={current} />
 
       {starting && (
-        <Modal onClose={() => setStarting(null)} title="New session" wide>
+        <Modal onClose={() => setStarting(null)} title="New workspace" wide>
           <div className="p-4">
             <Composer
               startWith={starting.repo}

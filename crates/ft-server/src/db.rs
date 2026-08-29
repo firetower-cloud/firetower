@@ -214,13 +214,16 @@ impl Db {
     }
 
     pub async fn rename_session(&self, id: &SessionId, name: &str) -> Result<()> {
-        sqlx::query("UPDATE sessions SET name = $1, updated_at = $2 WHERE id = $3")
-            .bind(name.trim())
-            .bind(chrono::Utc::now())
-            .bind(id.as_str())
-            .execute(&self.pool)
-            .await
-            .context("renaming a session")?;
+        sqlx::query(
+            "UPDATE workspaces SET name = $1, updated_at = $2
+              WHERE id = (SELECT workspace_id FROM sessions WHERE id = $3)",
+        )
+        .bind(name.trim())
+        .bind(chrono::Utc::now())
+        .bind(id.as_str())
+        .execute(&self.pool)
+        .await
+        .context("renaming a session")?;
         Ok(())
     }
 
@@ -800,6 +803,9 @@ impl Db {
         agent: &str,
         size: WorkspaceSize,
         steps: &[ft_core::Step],
+        // What to call the place. `None` falls back to `Agent {number}`, which
+        // is all a bare agent with no branch to be named after has.
+        name: Option<&str>,
     ) -> Result<()> {
         let now = chrono::Utc::now();
         let mut tx = self.pool.begin().await?;
@@ -811,10 +817,17 @@ impl Db {
         // One workspace, one session, for now. Nothing here stops a second
         // session naming the same `workspace_id`; the rest of the control plane
         // is what is not ready for it yet.
+        // The number is claimed here so the workspace can fall back to it, and
+        // the session below reads it back with `currval` rather than claiming a
+        // second one.
+        let number: i64 = sqlx::query_scalar("SELECT nextval('session_number_seq')")
+            .fetch_one(&mut *tx)
+            .await?;
+
         sqlx::query(
             "INSERT INTO workspaces
-               (id, user_id, host_id, repo, branch, base, size, created_at, updated_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $8)",
+               (id, user_id, host_id, repo, branch, base, size, name, created_at, updated_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $9)",
         )
         .bind(id.as_str())
         .bind(owner)
@@ -823,6 +836,10 @@ impl Db {
         .bind(branch)
         .bind(base)
         .bind(serde_json::to_string(&size)?.trim_matches('"').to_string())
+        .bind(
+            name.map(str::to_string)
+                .unwrap_or_else(|| format!("Agent {number}")),
+        )
         .bind(now)
         .execute(&mut *tx)
         .await?;
@@ -830,10 +847,8 @@ impl Db {
         sqlx::query(
             "INSERT INTO sessions
                (id, user_id, workspace_id, title, prompt, agent, status,
-                steps, created_at, updated_at, number, name)
-             VALUES ($1, $2, $3, $4, $5, $6, 'Starting', $7, $8, $8,
-                     nextval('session_number_seq'),
-                     'Agent ' || currval('session_number_seq'))",
+                steps, created_at, updated_at, number)
+             VALUES ($1, $2, $3, $4, $5, $6, 'Starting', $7, $8, $8, $9)",
         )
         .bind(id.as_str())
         // Whoever started it. Everything about who may see it, whose token
@@ -845,6 +860,7 @@ impl Db {
         .bind(agent)
         .bind(serde_json::to_value(steps)?)
         .bind(now)
+        .bind(number)
         .execute(&mut *tx)
         .await?;
 
@@ -1559,7 +1575,7 @@ fn repo_from_row(r: sqlx::postgres::PgRow) -> Repo {
 /// rather than about what a screen draws today.
 const SESSION_COLUMNS: &str = "\
     s.*, w.host_id, w.repo, w.branch, w.base, w.size, w.pull_request, \
-    w.forgotten_at, w.cleaned_at";
+    w.forgotten_at, w.cleaned_at, w.name";
 
 fn session_from_row(r: sqlx::postgres::PgRow) -> Result<Session> {
     let status: String = r.get("status");
@@ -1571,11 +1587,9 @@ fn session_from_row(r: sqlx::postgres::PgRow) -> Result<Session> {
         owner: ft_core::UserId::from_stored(r.get::<String, _>("user_id")),
         // Filled in by `with_checkouts`, which asks for the lot in one query.
         checkouts: Vec::new(),
-        // Written when the session is created, so this is only ever absent for
-        // a row from before names existed.
-        name: r
-            .get::<Option<String>, _>("name")
-            .unwrap_or_else(|| format!("Agent {}", r.get::<i64, _>("number"))),
+        // On the workspace, and never absent: the migration that moved it here
+        // filled every row.
+        name: r.get("name"),
         note: r.get("note"),
         id: SessionId::from_stored(r.get::<String, _>("id")),
         repo: r.get("repo"),
@@ -1715,6 +1729,7 @@ mod tests {
             "Shell",
             WorkspaceSize::Medium,
             &ft_core::Step::plan(true, false),
+            None,
         )
         .await
         .unwrap();
@@ -1828,6 +1843,7 @@ mod tests {
             "ClaudeCode",
             WorkspaceSize::Medium,
             &ft_core::Step::plan(true, false),
+            None,
         )
         .await
         .unwrap();
@@ -1873,6 +1889,7 @@ mod tests {
             "ClaudeCode",
             WorkspaceSize::Medium,
             &ft_core::Step::plan(true, false),
+            None,
         )
         .await
         .unwrap();
@@ -1915,6 +1932,7 @@ mod tests {
             "ClaudeCode",
             WorkspaceSize::Medium,
             &ft_core::Step::plan(true, false),
+            None,
         )
         .await
         .unwrap();
@@ -1954,6 +1972,7 @@ mod tests {
             "ClaudeCode",
             WorkspaceSize::Medium,
             &ft_core::Step::plan(true, false),
+            None,
         )
         .await
         .unwrap();
@@ -2011,6 +2030,7 @@ mod tests {
             "ClaudeCode",
             WorkspaceSize::Medium,
             &ft_core::Step::plan(true, false),
+            None,
         )
         .await
         .unwrap();
@@ -2080,6 +2100,7 @@ mod tests {
             "Shell",
             WorkspaceSize::Medium,
             &ft_core::Step::plan(true, false),
+            None,
         )
         .await
         .unwrap();
@@ -2109,6 +2130,7 @@ mod tests {
                 "Shell",
                 WorkspaceSize::Medium,
                 &ft_core::Step::plan(true, false),
+                None,
             )
             .await
             .unwrap();
@@ -2172,6 +2194,7 @@ mod tests {
                 "ClaudeCode",
                 WorkspaceSize::Medium,
                 &[],
+                None,
             )
             .await
             .unwrap();
@@ -2220,6 +2243,7 @@ mod tests {
             "Shell",
             WorkspaceSize::Medium,
             &ft_core::Step::plan(true, false),
+            None,
         )
         .await
         .unwrap();
@@ -2381,6 +2405,7 @@ mod tests {
             "ClaudeCode",
             WorkspaceSize::Medium,
             &[],
+            None,
         )
         .await
         .unwrap();
@@ -2436,6 +2461,7 @@ mod tests {
             "ClaudeCode",
             WorkspaceSize::Medium,
             &[],
+            None,
         )
         .await
         .unwrap();
@@ -2482,6 +2508,7 @@ mod tests {
             "ClaudeCode",
             WorkspaceSize::Medium,
             &[],
+            None,
         )
         .await
         .unwrap();
@@ -2532,6 +2559,7 @@ mod tests {
             "ClaudeCode",
             WorkspaceSize::Medium,
             &[],
+            None,
         )
         .await
         .unwrap();
@@ -2594,6 +2622,7 @@ mod tests {
             "ClaudeCode",
             WorkspaceSize::Medium,
             &[],
+            None,
         )
         .await
         .unwrap();
@@ -2610,6 +2639,99 @@ mod tests {
             db.owed_cleanup_on(&host.id).await.unwrap(),
             vec![id.clone()],
             "the host is still owed a teardown, now read off the workspace"
+        );
+    }
+
+    /// A workspace is called after the work, not after a counter.
+    ///
+    /// `Agent 14` named the agent, which is the least interesting thing about a
+    /// branch somebody will come back to tomorrow. The number stays — it is
+    /// still a unique handle — it is just no longer what the place is called.
+    #[tokio::test]
+    async fn a_workspace_is_named_for_its_work() {
+        let (db, owner) = db_with_user().await;
+        let host = db.ensure_host("localhost", Compute::Local).await.unwrap();
+
+        let named = SessionId::new();
+        db.insert_session(
+            &named,
+            &host.id,
+            &owner,
+            Some("acme/backend"),
+            "Split the refresh path",
+            "split the refresh path out of auth",
+            Some("agent/auth-refactor"),
+            Some("main"),
+            "ClaudeCode",
+            WorkspaceSize::Medium,
+            &[],
+            Some("auth-refactor"),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            db.session(&named).await.unwrap().unwrap().name,
+            "auth-refactor"
+        );
+
+        // Nothing to be named after: a bare agent with no branch keeps the
+        // old form, because a blank row in the rail would be worse.
+        let bare = SessionId::new();
+        db.insert_session(
+            &bare,
+            &host.id,
+            &owner,
+            None,
+            "Ask me",
+            "ask me a question",
+            None,
+            None,
+            "ClaudeCode",
+            WorkspaceSize::Medium,
+            &[],
+            None,
+        )
+        .await
+        .unwrap();
+        let session = db.session(&bare).await.unwrap().unwrap();
+        assert_eq!(session.name, format!("Agent {}", session.number));
+    }
+
+    /// Renaming names the place, and the work inside it goes on being itself.
+    #[tokio::test]
+    async fn renaming_a_session_renames_its_workspace() {
+        let (db, owner) = db_with_user().await;
+        let host = db.ensure_host("localhost", Compute::Local).await.unwrap();
+
+        let id = SessionId::new();
+        db.insert_session(
+            &id,
+            &host.id,
+            &owner,
+            None,
+            "Something",
+            "something",
+            None,
+            None,
+            "ClaudeCode",
+            WorkspaceSize::Medium,
+            &[],
+            Some("first-name"),
+        )
+        .await
+        .unwrap();
+
+        db.rename_session(&id, "second-name").await.unwrap();
+        assert_eq!(db.session(&id).await.unwrap().unwrap().name, "second-name");
+
+        let on_workspace: String = sqlx::query_scalar("SELECT name FROM workspaces WHERE id = $1")
+            .bind(id.as_str())
+            .fetch_one(&db.pool)
+            .await
+            .unwrap();
+        assert_eq!(
+            on_workspace, "second-name",
+            "the name lives on the workspace"
         );
     }
 
@@ -2637,6 +2759,7 @@ mod tests {
                 "ClaudeCode",
                 WorkspaceSize::Medium,
                 &[],
+                None,
             )
             .await
             .unwrap();
@@ -2755,6 +2878,7 @@ mod tests {
             "ClaudeCode",
             WorkspaceSize::Medium,
             &[],
+            None,
         )
         .await
         .unwrap();
@@ -2787,6 +2911,7 @@ mod tests {
                 "ClaudeCode",
                 WorkspaceSize::Medium,
                 &[],
+                None,
             )
             .await
             .unwrap();
@@ -2817,6 +2942,7 @@ mod tests {
             "ClaudeCode",
             WorkspaceSize::Medium,
             &[],
+            None,
         )
         .await
         .unwrap();

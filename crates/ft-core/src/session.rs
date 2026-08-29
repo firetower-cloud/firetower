@@ -228,6 +228,13 @@ pub struct NewSession {
     /// pull request and a machine-written slug is a poor thing to live with.
     #[serde(default)]
     pub branch: Option<String>,
+    /// What to call the workspace. Omit to derive one from the branch.
+    ///
+    /// The name a person reads in the rail, not an identifier: it is free text,
+    /// it can be changed afterwards, and two workspaces may share one. The
+    /// branch is what has to be unique, and git enforces that itself.
+    #[serde(default)]
+    pub name: Option<String>,
     #[serde(default)]
     pub size: WorkspaceSize,
 }
