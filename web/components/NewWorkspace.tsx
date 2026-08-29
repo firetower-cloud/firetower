@@ -12,6 +12,8 @@ import {
 import type { Agent, AgentView, Host, Repo } from "@/src/api/generated/model";
 import { AgentMark, AGENT_LABEL } from "@/components/AgentMark";
 import { slugify } from "@/src/api/slug";
+import { ConnectRepo } from "@/components/ConnectRepo";
+import { getListReposQueryKey } from "@/src/api/generated/repos/repos";
 
 /**
  * Making a workspace.
@@ -49,6 +51,7 @@ export function NewWorkspace({
   const cache = useQueryClient();
 
   const { data: repos = [] } = useListRepos();
+  const [connecting, setConnecting] = useState(false);
   const { data: agents = [] } = useListAgents();
   const { data: allHosts = [] } = useListHosts();
 
@@ -149,6 +152,7 @@ export function NewWorkspace({
               setCheckouts((held) => [...held, { id: r.id, slug: r.slug }]);
               setAdding(false);
             }}
+            onConnect={() => setConnecting(true)}
           />
         </div>
       </Row>
@@ -219,6 +223,22 @@ export function NewWorkspace({
           )}
         </button>
       </div>
+
+      {/* The repository somebody wants is sometimes one Firetower has never
+          heard of — and on the first day the account it would come from is not
+          connected either, which this dialog handles too. Doing it here rather
+          than in Configuration keeps the name and the branch already typed. */}
+      {connecting && (
+        <ConnectRepo
+          onClose={() => {
+            setConnecting(false);
+            // Whatever was just connected has to be in the list the picker
+            // reads, or the dialog says "nothing connected yet" about a
+            // repository connected ten seconds ago.
+            cache.invalidateQueries({ queryKey: getListReposQueryKey() });
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -292,6 +312,7 @@ function Add({
   empty,
   label,
   onPick,
+  onConnect,
 }: {
   open: boolean;
   onOpen: () => void;
@@ -300,6 +321,8 @@ function Add({
   empty: string;
   label: string;
   onPick: (repo: Repo) => void;
+  /** Connect one that is not there — or the account it would come from. */
+  onConnect: () => void;
 }) {
   const [search, setSearch] = useState("");
   const shown = repos.filter((r) => r.slug.toLowerCase().includes(search.trim().toLowerCase()));
@@ -357,6 +380,19 @@ function Add({
           </button>
         ))}
       </div>
+
+      {/* The repository somebody wants is sometimes one Firetower has never
+          heard of, and on the first day there are none at all — the account it
+          would come from is not connected either. Sending them to Configuration
+          to do it means losing the name and the branch they have already typed,
+          so it happens here and hands back the same picker with the new one
+          in it. */}
+      <button
+        onClick={onConnect}
+        className="mt-0.5 block w-full rounded-[6px] border-t border-line px-2.5 py-1.5 text-left text-[12px] text-mute transition-colors hover:text-ember"
+      >
+        + Connect a repository…
+      </button>
     </div>
   );
 }
