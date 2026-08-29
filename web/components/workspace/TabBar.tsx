@@ -359,7 +359,12 @@ function Agents({
   const { data: session } = useGetSession(workspaceId ?? "", {
     query: { enabled: !!workspaceId },
   });
-  const { data: agents = [] } = useListAgents();
+  const {
+    data: agents = [],
+    isPending,
+    isError,
+    refetch,
+  } = useListAgents();
   const { data: hosts = [] } = useListHosts();
 
   // Only needed to say *why* one is unavailable. Absent while it loads, which
@@ -375,7 +380,26 @@ function Agents({
         Start an agent
       </p>
 
-      {agents.length === 0 && (
+      {/* Three different things, which this used to say with one sentence.
+          "No agents configured" is a claim about your setup, and printing it
+          while the request is still in flight sent people to the Agents screen
+          to add an agent they had already added. */}
+      {isPending && (
+        <p className="px-2 pb-1.5 text-[11.5px] text-mute" aria-busy>
+          Looking…
+        </p>
+      )}
+
+      {isError && (
+        <button
+          onClick={() => refetch()}
+          className="block w-full px-2 pb-1.5 text-left text-[11.5px] text-ember hover:underline"
+        >
+          Couldn&rsquo;t reach the API. Retry
+        </button>
+      )}
+
+      {!isPending && !isError && agents.length === 0 && (
         <p className="px-2 pb-1.5 text-[11.5px] text-mute">
           No agents configured. Add one on the Agents screen.
         </p>
