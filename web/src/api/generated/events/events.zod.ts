@@ -56,7 +56,7 @@ export const ListEventsResponseItem = zod.object({
   "type": zod.enum(['AgentLaunched'])
 }),zod.object({
   "note": zod.string().nullish().describe('Why, when whatever changed it knows.\n\nThe agent\'s own words: the permission it is asking for, the last\nthing it said before finishing, the error that stopped it. Without\nthis a blocked session is a red dot you have to open a terminal to\nunderstand, which is most of the cost of being interrupted.'),
-  "status": zod.enum(['Starting', 'Working', 'NeedsYou', 'HandedBack', 'Failed', 'Ended']),
+  "status": zod.enum(['Starting', 'Working', 'Ready', 'NeedsYou', 'HandedBack', 'Failed', 'Ended']),
   "type": zod.enum(['StatusChanged'])
 }),zod.object({
   "code": zod.string(),

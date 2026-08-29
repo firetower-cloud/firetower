@@ -29,6 +29,7 @@ import type {
   AgentView,
   ApiError,
   ConfigureAgent,
+  InstallAgent,
   PendingAuth,
   SignIn
 } from '../model';
@@ -372,6 +373,84 @@ export const useForgetAgent = <TError = ApiError,
         TContext
       > => {
       return useMutation(getForgetAgentMutationOptions(options), queryClient);
+    }
+    export const getInstallAgentUrl = (kind: string,) => {
+
+
+
+
+  return `/api/v1/agents/${kind}/install`
+}
+
+/**
+ * The alternative was a shell command on the machine itself, which is fine
+ * for a server somebody is already logged in to and useless for the container
+ * Firetower is running inside. The work happens on the host either way — this
+ * only means nobody has to reach it by hand.
+ *
+ * Slow on purpose: the request is held until npm is done, because the answer
+ * somebody wants is which version they now have.
+ * @summary Fetch an agent onto a host.
+ */
+export const installAgent = async (kind: string,
+    installAgentBody: InstallAgent, options?: Parameters<typeof http>[1]): Promise<AgentView[]> => {
+
+  return http<AgentView[]>(getInstallAgentUrl(kind),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(installAgentBody)
+  }
+);}
+
+
+
+
+
+export const getInstallAgentMutationOptions = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof installAgent>>, TError,{kind: string;data: InstallAgent}, TContext>, request?: SecondParameter<typeof http>}
+): UseMutationOptions<Awaited<ReturnType<typeof installAgent>>, TError,{kind: string;data: InstallAgent}, TContext> => {
+
+const mutationKey = ['installAgent'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof installAgent>>, {kind: string;data: InstallAgent}> = (props) => {
+          const {kind,data} = props ?? {};
+
+          return  installAgent(kind,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type InstallAgentMutationResult = NonNullable<Awaited<ReturnType<typeof installAgent>>>
+    export type InstallAgentMutationBody = InstallAgent
+    export type InstallAgentMutationError = ApiError
+
+    /**
+ * @summary Fetch an agent onto a host.
+ */
+export const useInstallAgent = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof installAgent>>, TError,{kind: string;data: InstallAgent}, TContext>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof installAgent>>,
+        TError,
+        {kind: string;data: InstallAgent},
+        TContext
+      > => {
+      return useMutation(getInstallAgentMutationOptions(options), queryClient);
     }
     export const getSignAgentInUrl = (kind: string,) => {
 

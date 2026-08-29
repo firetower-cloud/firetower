@@ -20,6 +20,7 @@ mod secrets;
 mod sessions;
 mod setup;
 mod terminal;
+mod stream;
 
 // `providers` on its own is the module below, which is this crate's git-host
 // screen rather than the git hosts themselves.
@@ -217,7 +218,11 @@ async fn credential_for(
         ft_core::Compute,
         ft_core::SshKey,
         crate::sshkey::PublicIdentity,
-        hosts::Reached
+        hosts::Reached,
+        stream::Topic,
+        stream::ChangedWhat,
+        stream::ClientFrame,
+        stream::ServerFrame
     ))
 )]
 pub struct ApiDoc;
@@ -253,6 +258,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(agents::configure_agent, agents::forget_agent))
         .routes(routes!(agents::check_agents))
         .routes(routes!(agents::sign_agent_in))
+        .routes(routes!(agents::install_agent))
         .routes(routes!(secrets::list_secrets))
         .routes(routes!(secrets::replace_secret, secrets::remove_secret))
         .routes(routes!(secrets::reveal_secret))
@@ -285,6 +291,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(sessions::add_repo))
         .routes(routes!(conversation::get_conversation))
         .routes(routes!(conversation::stream_conversation))
+        .routes(routes!(stream::stream))
         .routes(routes!(conversation::send_turn))
         .routes(routes!(
             conversation::session_controls,

@@ -105,49 +105,30 @@ pub(super) async fn get_conversation(
     Ok(Json(Conversation { events, last_line }))
 }
 
-/// The conversation as it happens.
+/// Everything a session has said since `resume_from`, and everything it says
+/// next.
 ///
-/// Server-sent events, like the session feed: it only ever flows down, and the
-/// browser supplies reconnection for free. Each event carries its line number
-/// as the SSE id, so a client that drops resumes from `Last-Event-ID` and the
-/// cursor is the platform's problem rather than ours.
-#[utoipa::path(
-    get, path = "/api/v1/sessions/{id}/conversation/stream", tag = "sessions",
-    params(("id" = String, Path, description = "Session id")),
-    responses((status = 200, description = "text/event-stream of ConversationEvent")),
-)]
-pub(super) async fn stream_conversation(
-    State(state): State<AppState>,
-    Extension(principal): Extension<Principal>,
-    Path(id): Path<String>,
-    headers: axum::http::HeaderMap,
-) -> ApiResult<Sse<impl Stream<Item = Result<sse::Event, std::convert::Infallible>>>> {
-    let id = SessionId::from_stored(id);
-    // Somebody else's conversation is "no such session". This stream carries
-    // everything an agent said and everything it was told, so it is the last
-    // thing that should answer to an id somebody guessed.
-    let session = state
-        .db
-        .session_of(owner(&principal)?, &id)
-        .await
-        .map_err(|e| ApiError::new(ErrorCode::Internal, format!("{e:#}")))?
-        .ok_or_else(|| ApiError::new(ErrorCode::NotFound, "no such session"))?;
-
-    let resume_from = headers
-        .get("last-event-id")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.parse::<u64>().ok())
-        .unwrap_or(0);
-
+/// Split out from the SSE handler so the multiplexed socket carries exactly the
+/// same events as the endpoint it replaces — the normaliser, the backlog and
+/// the gap-closing subscribe-before-read are all subtle enough that a second
+/// copy would drift.
+///
+/// The caller has already established that this session is theirs.
+pub(crate) async fn conversation_events(
+    state: &AppState,
+    host_id: &ft_core::HostId,
+    id: &SessionId,
+    resume_from: u64,
+) -> impl Stream<Item = ConversationEvent> + Send {
     // Subscribing before reading is what closes the gap: a line that arrives
     // while the backlog is being replayed waits in the channel rather than
     // being missed, and is skipped below if the replay already had it.
     // A session on a host that is not answering still has a history worth
     // reading; it just will not grow while nobody can reach it.
-    let already = state.db.last_agent_line(&id).await.unwrap_or(0).max(0) as u64;
+    let already = state.db.last_agent_line(id).await.unwrap_or(0).max(0) as u64;
     let live = match state
         .fleet
-        .watch_agent(&session.host_id, &id, already)
+        .watch_agent(host_id, id, already)
         .await
     {
         Ok(receiver) => receiver,
@@ -157,10 +138,10 @@ pub(super) async fn stream_conversation(
         }
     };
 
-    let stored = state.db.agent_lines_since(&id, 0).await.unwrap_or_default();
+    let stored = state.db.agent_lines_since(id, 0).await.unwrap_or_default();
     // Anything the agent is already blocked on, so opening a waiting session
     // shows the question rather than a transcript that stops for no reason.
-    let waiting = state.fleet.asked(&id).await;
+    let waiting = state.fleet.asked(id).await;
 
     // One normaliser for the whole connection: the backlog leaves it holding
     // the state the live lines are about to need.
@@ -219,9 +200,47 @@ pub(super) async fn stream_conversation(
             futures::stream::iter(events)
         });
 
-    let stream = futures::stream::iter(backlog)
-        .chain(following)
+    futures::stream::iter(backlog).chain(following)
+}
+
+/// The conversation as it happens.
+///
+/// Server-sent events, like the session feed: it only ever flows down, and the
+/// browser supplies reconnection for free. Each event carries its line number
+/// as the SSE id, so a client that drops resumes from `Last-Event-ID` and the
+/// cursor is the platform's problem rather than ours.
+#[utoipa::path(
+    get, path = "/api/v1/sessions/{id}/conversation/stream", tag = "sessions",
+    params(("id" = String, Path, description = "Session id")),
+    responses((status = 200, description = "text/event-stream of ConversationEvent")),
+)]
+pub(super) async fn stream_conversation(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Path(id): Path<String>,
+    headers: axum::http::HeaderMap,
+) -> ApiResult<Sse<impl Stream<Item = Result<sse::Event, std::convert::Infallible>>>> {
+    let id = SessionId::from_stored(id);
+    // Somebody else's conversation is "no such session". This stream carries
+    // everything an agent said and everything it was told, so it is the last
+    // thing that should answer to an id somebody guessed.
+    let session = state
+        .db
+        .session_of(owner(&principal)?, &id)
+        .await
+        .map_err(|e| ApiError::new(ErrorCode::Internal, format!("{e:#}")))?
+        .ok_or_else(|| ApiError::new(ErrorCode::NotFound, "no such session"))?;
+
+    let resume_from = headers
+        .get("last-event-id")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.parse::<u64>().ok())
+        .unwrap_or(0);
+
+    let stream = conversation_events(&state, &session.host_id, &id, resume_from)
+        .await
         .map(|event| {
+
             Ok(sse::Event::default()
                 .id(event.line_no.to_string())
                 .event("turn")

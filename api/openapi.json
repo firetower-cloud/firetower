@@ -149,6 +149,82 @@
         }
       }
     },
+    "/api/v1/agents/{kind}/install": {
+      "post": {
+        "tags": [
+          "agents"
+        ],
+        "summary": "Fetch an agent onto a host.",
+        "description": "The alternative was a shell command on the machine itself, which is fine\nfor a server somebody is already logged in to and useless for the container\nFiretower is running inside. The work happens on the host either way — this\nonly means nobody has to reach it by hand.\n\nSlow on purpose: the request is held until npm is done, because the answer\nsomebody wants is which version they now have.",
+        "operationId": "install_agent",
+        "parameters": [
+          {
+            "name": "kind",
+            "in": "path",
+            "description": "Agent kind",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InstallAgent"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/AgentView"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/agents/{kind}/login": {
       "post": {
         "tags": [
@@ -3084,6 +3160,39 @@
           }
         }
       }
+    },
+    "/api/v1/stream": {
+      "get": {
+        "tags": [
+          "stream"
+        ],
+        "summary": "The live feed: session events and conversations, multiplexed.",
+        "description": "Documented as an operation carrying both frame types so the generator emits\nTypeScript **and** zod validators for them — orval builds validators from\noperations, not from loose components. The HTTP shape below is therefore a\npolite fiction: this is a websocket upgrade, the \"request body\" is what the\nclient sends as frames and the \"response body\" is what it receives. The cost\nis one generated hook nobody imports, which is cheaper than a second\nspecification and a second generator to describe eleven messages.",
+        "operationId": "stream",
+        "requestBody": {
+          "description": "Frames the client sends",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClientFrame"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Frames the server sends",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServerFrame"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -3413,6 +3522,14 @@
           "Unknown"
         ]
       },
+      "ChangedWhat": {
+        "type": "string",
+        "description": "What changed in a workspace, when the socket says something did.",
+        "enum": [
+          "diff",
+          "files"
+        ]
+      },
       "Checkout": {
         "type": "object",
         "description": "One repository checked out into a session's workspace.\n\nA session used to be one of these, spread across three nullable columns on\nthe session itself. It is a list now, because the work is often two\nrepositories — a client and the API it calls — and two sessions that cannot\nsee each other is not an answer to that.",
@@ -3594,6 +3711,83 @@
             "type": "string"
           }
         }
+      },
+      "ClientFrame": {
+        "oneOf": [
+          {
+            "type": "object",
+            "description": "Start receiving a topic, optionally from where you got to.\n\n`id` names the session for a per-session topic and is ignored otherwise.\n`from` is a resume cursor — a sequence number for `sessions`, a line\nnumber for `conversation`. Absent means live only, with no replay.",
+            "required": [
+              "topic",
+              "t"
+            ],
+            "properties": {
+              "from": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "format": "int64",
+                "minimum": 0
+              },
+              "id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "t": {
+                "type": "string",
+                "enum": [
+                  "sub"
+                ]
+              },
+              "topic": {
+                "$ref": "#/components/schemas/Topic"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Stop receiving it. A closed tab should stop costing anything.",
+            "required": [
+              "topic",
+              "t"
+            ],
+            "properties": {
+              "id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "t": {
+                "type": "string",
+                "enum": [
+                  "unsub"
+                ]
+              },
+              "topic": {
+                "$ref": "#/components/schemas/Topic"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "t"
+            ],
+            "properties": {
+              "t": {
+                "type": "string",
+                "enum": [
+                  "ping"
+                ]
+              }
+            }
+          }
+        ],
+        "description": "What a client says."
       },
       "ClientId": {
         "type": "object",
@@ -4499,6 +4693,26 @@
           "Draining"
         ]
       },
+      "InstallAgent": {
+        "type": "object",
+        "description": "What a host is being asked to fetch.",
+        "required": [
+          "hostId"
+        ],
+        "properties": {
+          "hostId": {
+            "type": "string",
+            "description": "Which machine gets it. Agents are per host: a token travels, a binary\ndoes not."
+          },
+          "version": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Which version. The newest published one when nobody says."
+          }
+        }
+      },
       "ItemId": {
         "type": "string",
         "description": "One thing in the transcript — a message, a thought, a tool call."
@@ -4738,9 +4952,6 @@
       "NewSession": {
         "type": "object",
         "description": "What the API accepts to launch one.",
-        "required": [
-          "prompt"
-        ],
         "properties": {
           "agent": {
             "$ref": "#/components/schemas/Agent"
@@ -4770,8 +4981,19 @@
               }
             ]
           },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What to call the workspace. Omit to derive one from the branch.\n\nThe name a person reads in the rail, not an identifier: it is free text,\nit can be changed afterwards, and two workspaces may share one. The\nbranch is what has to be unique, and git enforces that itself."
+          },
           "prompt": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What to ask for first. Optional, because a workspace is a place before\nit is a task: you may want the branch checked out and an agent waiting\nin it, and to say what you want once you are looking at the files.\n\nAbsent means the agent starts and says nothing until you do."
           },
           "repoId": {
             "oneOf": [
@@ -4793,6 +5015,17 @@
           },
           "size": {
             "$ref": "#/components/schemas/WorkspaceSize"
+          },
+          "workspaceId": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/WorkspaceId",
+                "description": "A workspace to start this agent in, instead of making one.\n\nThe place already exists — its host, its repositories, its branch and\nits directory — so all of those are read from it and anything sent\nalongside is ignored. What is left is the agent and what to ask it.\n\nThis is how a workspace comes to hold two agents: they are two sessions\nnaming one `workspace_id`, each with its own conversation."
+              }
+            ]
           }
         }
       },
@@ -5264,6 +5497,178 @@
           }
         }
       },
+      "ServerFrame": {
+        "oneOf": [
+          {
+            "type": "object",
+            "description": "The socket is live. Everything after this is a subscription of yours.",
+            "required": [
+              "t"
+            ],
+            "properties": {
+              "t": {
+                "type": "string",
+                "enum": [
+                  "ready"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "A session of yours changed.",
+            "required": [
+              "event",
+              "t"
+            ],
+            "properties": {
+              "event": {
+                "type": "object",
+                "description": "Something that happened, recorded by the worker that it happened on.\n\nSessions are a projection of these, never the other way round.",
+                "required": [
+                  "seq",
+                  "sessionId",
+                  "kind",
+                  "at"
+                ],
+                "properties": {
+                  "at": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "kind": {
+                    "$ref": "#/components/schemas/EventKind"
+                  },
+                  "seq": {
+                    "type": "integer",
+                    "format": "int64",
+                    "description": "Monotonic per worker. This is the resume cursor."
+                  },
+                  "sessionId": {
+                    "$ref": "#/components/schemas/SessionId"
+                  }
+                }
+              },
+              "t": {
+                "type": "string",
+                "enum": [
+                  "event"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "One line of a session's transcript.",
+            "required": [
+              "id",
+              "line",
+              "t"
+            ],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "line": {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/TurnEvent"
+                  },
+                  {
+                    "type": "object",
+                    "required": [
+                      "lineNo"
+                    ],
+                    "properties": {
+                      "lineNo": {
+                        "type": "integer",
+                        "format": "int64",
+                        "minimum": 0
+                      }
+                    }
+                  }
+                ],
+                "description": "One thing that happened, and where in the log it was said.\n\nThe line number travels with the event because several events can come from\none line, and a client's cursor has to be a position in the agent's log\nrather than a count of what it drew."
+              },
+              "t": {
+                "type": "string",
+                "enum": [
+                  "line"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Frames were dropped because this subscription fell behind. Resubscribe\nfrom your cursor; nothing else on the socket is affected.",
+            "required": [
+              "topic",
+              "t"
+            ],
+            "properties": {
+              "id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "t": {
+                "type": "string",
+                "enum": [
+                  "reset"
+                ]
+              },
+              "topic": {
+                "$ref": "#/components/schemas/Topic"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "This subscription cannot be served, and why.",
+            "required": [
+              "topic",
+              "message",
+              "t"
+            ],
+            "properties": {
+              "id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "message": {
+                "type": "string"
+              },
+              "t": {
+                "type": "string",
+                "enum": [
+                  "error"
+                ]
+              },
+              "topic": {
+                "$ref": "#/components/schemas/Topic"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "t"
+            ],
+            "properties": {
+              "t": {
+                "type": "string",
+                "enum": [
+                  "pong"
+                ]
+              }
+            }
+          }
+        ],
+        "description": "What the server says.\n\nThe two payloads that matter are the ones the SSE endpoints already send,\nunchanged: `ft_core::Event` and `ConversationEvent`. This is not a second\nevent system — it is the same events with a topic on the front, sharing one\nconnection."
+      },
       "Session": {
         "type": "object",
         "description": "A line of work with a conversation attached and a branch at the end.",
@@ -5415,6 +5820,7 @@
         "enum": [
           "Starting",
           "Working",
+          "Ready",
           "NeedsYou",
           "HandedBack",
           "Failed",
@@ -5645,6 +6051,14 @@
       "TaskId": {
         "type": "string",
         "description": "One subagent run, from the moment it was spawned to its report."
+      },
+      "Topic": {
+        "type": "string",
+        "description": "What a client can subscribe to.",
+        "enum": [
+          "sessions",
+          "conversation"
+        ]
       },
       "Turn": {
         "type": "object",
