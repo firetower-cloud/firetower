@@ -35,19 +35,12 @@ export function SessionTab({ sessionId }: { sessionId: string }) {
     isLoading,
     error,
     refetch,
-  } = useGetSession(sessionId, {
-    query: {
-      refetchInterval: (query) => (query.state.data && unfinished(query.state.data) ? 2_000 : false),
-    },
-  });
+  } = useGetSession(sessionId);
 
   const busy = !!session && unfinished(session);
   const live = !!session && answerable(session);
 
-  const { data: events = [] } = useListEvents(
-    { since: 0, sessionId },
-    { query: { refetchInterval: busy ? 1_500 : false } },
-  );
+  const { data: events = [] } = useListEvents({ since: 0, sessionId });
 
   if (isLoading) return <Middle>Looking…</Middle>;
 

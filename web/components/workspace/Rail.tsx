@@ -31,7 +31,6 @@ export function Rail({ onNew }: { onNew: (repo?: string) => void }) {
     query: {
       // Faster while something is still going, slow rather than never once
       // nothing is: a session started from a phone should still turn up.
-      refetchInterval: (query) => ((query.state.data ?? []).some(unfinished) ? 2_000 : 15_000),
     },
   });
 

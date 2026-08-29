@@ -12,7 +12,7 @@ import { useOpen } from "@/src/workspace/tabs";
 import { usePanel, VIEWS, type View } from "@/src/workspace/panel";
 import { FileGlyph } from "@/components/FileGlyph";
 import { Signal } from "@/components/Signal";
-import { STATUS_LABEL, unfinished } from "@/src/api/view";
+import { STATUS_LABEL } from "@/src/api/view";
 import { useListEvents } from "@/src/api/generated/events/events";
 import { stepLines, ready } from "@/components/Steps";
 import { PathRow, Counts } from "./PathRow";
@@ -262,17 +262,10 @@ function Grip() {
  * line, and it belongs somewhere that does not move.
  */
 function Doing({ sessionId }: { sessionId: string }) {
-  const { data: session } = useGetSession(sessionId, {
-    query: {
-      refetchInterval: (query) => (query.state.data && unfinished(query.state.data) ? 3_000 : false),
-    },
-  });
-  const busy = !!session && unfinished(session);
-  // The same query the session tab runs, served from one cache entry.
-  const { data: events = [] } = useListEvents(
-    { since: 0, sessionId },
-    { query: { enabled: busy, refetchInterval: busy ? 3_000 : false } },
-  );
+  const { data: session } = useGetSession(sessionId);
+  // The same query the session tab runs, served from one cache entry — and kept
+  // current by the socket rather than by either of them polling.
+  const { data: events = [] } = useListEvents({ since: 0, sessionId });
 
   if (!session) return null;
 

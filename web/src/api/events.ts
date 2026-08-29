@@ -1,13 +1,13 @@
 /**
- * The live feed.
+ * Folding the live feed into the query cache.
  *
- * Hand-written, because generators produce nothing for streams — but the event
- * union is registered as a schema component, so the *generated* validator
- * checks every frame. One contract, no second definition to keep in step.
+ * The frames arrive on the page's one socket — see `socket.tsx` for why there
+ * is exactly one — and land here, where they update what is already held rather
+ * than prompting a refetch of it. The event *is* the update.
  *
- * Reconnection and replay are the browser's job: EventSource retries on its own
- * and sends `Last-Event-ID`, which the server answers with everything after
- * that sequence number. Nothing here tracks a cursor.
+ * Which is what lets the queries below have interval refetching turned off.
+ * Before the socket they polled, several of them per open tab, and that polling
+ * competed for the same six connections the streams were exhausting.
  */
 
 import type { QueryClient } from "@tanstack/react-query";
