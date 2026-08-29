@@ -45,12 +45,12 @@ export function Install({
       <button
         onClick={go}
         disabled={install.isPending}
-        className="shrink-0 text-[11.5px] text-mute transition-colors hover:text-ember disabled:hover:text-mute"
+        className="shrink-0 text-meta text-mute transition-colors hover:text-bone disabled:hover:text-mute"
       >
         {install.isPending ? "Installing…" : "Install"}
       </button>
       {install.isError && (
-        <span className="min-w-0 truncate text-[11px] text-ember">
+        <span className="min-w-0 truncate text-meta text-brick">
           {install.error instanceof ApiError
             ? install.error.message
             : "it didn't install"}

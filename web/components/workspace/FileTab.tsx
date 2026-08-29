@@ -50,14 +50,14 @@ export function FileTab({ sessionId, path }: { sessionId: string; path: string }
   return (
     <div className="flex h-full min-h-0 flex-col">
       <header className="flex h-9 shrink-0 items-center gap-2 border-b border-line bg-panel px-3">
-        <span className="min-w-0 flex-1 truncate font-mono text-[11.5px] text-slate" title={path}>
+        <span className="min-w-0 flex-1 truncate font-mono text-meta text-slate" title={path}>
           {path}
         </span>
         {!set?.split && (
           <button
             onClick={() => open.file(path, true)}
             title="Open beside"
-            className="shrink-0 text-[12px] text-mute transition-colors hover:text-ember"
+            className="shrink-0 text-meta text-mute transition-colors hover:text-bone"
           >
             ⊞
           </button>
@@ -65,7 +65,7 @@ export function FileTab({ sessionId, path }: { sessionId: string; path: string }
         <button
           onClick={() => refetch()}
           title="Read it again"
-          className="shrink-0 text-[11px] text-mute transition-colors hover:text-ember"
+          className="shrink-0 text-meta text-mute transition-colors hover:text-bone"
         >
           ↻
         </button>
@@ -131,7 +131,7 @@ export function FileTab({ sessionId, path }: { sessionId: string; path: string }
                 <button
                   onClick={sendNotes}
                   disabled={send.isPending}
-                  className="rounded-[7px] bg-ember px-2.5 py-1 text-[12px] font-medium text-ground transition-opacity hover:opacity-90 disabled:opacity-50"
+                  className="rounded-md bg-bone px-2.5 py-1 text-meta font-medium text-ground transition-colors hover:bg-white disabled:bg-line disabled:text-mute"
                 >
                   {send.isPending ? "Sending…" : "Send to the agent"}
                 </button>
@@ -155,7 +155,7 @@ export function FileTab({ sessionId, path }: { sessionId: string; path: string }
 function Code({ text }: { text: string }) {
   const lines = text.split("\n");
   return (
-    <pre className="px-3 py-2 font-mono text-[11.5px] leading-[1.6] text-dim">
+    <pre className="px-3 py-2 font-mono text-meta leading-[1.6] text-dim">
       {lines.map((line, i) => (
         <div key={i} className="flex gap-3">
           <span className="w-10 shrink-0 select-none text-right text-mute/60">{i + 1}</span>
@@ -169,7 +169,7 @@ function Code({ text }: { text: string }) {
 function Note({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex h-full items-center justify-center px-8">
-      <p className="max-w-[44ch] text-center text-[13px] text-mute">{children}</p>
+      <p className="max-w-[44ch] text-center text-ui text-mute">{children}</p>
     </div>
   );
 }

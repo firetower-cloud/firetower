@@ -116,9 +116,9 @@ export function SetUpHost({ host, onClose }: { host: Host; onClose: () => void }
 
   return (
     <Modal title={`Set up ${host.name}`} onClose={onClose}>
-      <p className="text-[12.5px] leading-[1.55] text-bone">{said}</p>
+      <p className="text-meta leading-[1.55] text-bone">{said}</p>
 
-      <p className="mt-2 text-[12px] leading-[1.55] text-mute">
+      <p className="mt-2 text-meta leading-[1.55] text-mute">
         ssh works — the address, the account and the key are all right. What is left is
         on that machine.
       </p>
@@ -129,7 +129,7 @@ export function SetUpHost({ host, onClose }: { host: Host; onClose: () => void }
         ))}
       </div>
 
-      <p className="mt-3 text-[12px] leading-[1.55] text-mute">
+      <p className="mt-3 text-meta leading-[1.55] text-mute">
         Whichever account you ssh as has to be able to reach Docker.
       </p>
 
@@ -137,13 +137,13 @@ export function SetUpHost({ host, onClose }: { host: Host; onClose: () => void }
         href="https://usefiretower.com/docs"
         target="_blank"
         rel="noreferrer"
-        className="mt-3 inline-block text-[12px] text-slate transition-colors hover:text-bone"
+        className="mt-3 inline-block text-meta text-slate transition-colors hover:text-bone"
       >
         See documentation ↗
       </a>
 
       {gaveUp && (
-        <p className="mt-3 text-[12px] leading-[1.55] text-ember">
+        <p className="mt-3 text-meta leading-[1.55] text-brick">
           Still nothing there. {now.diagnosis?.summary ?? ""} The commands above run on
           that machine, not this one.
         </p>

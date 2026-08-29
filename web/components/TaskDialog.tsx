@@ -11,6 +11,8 @@
  * data already in hand.
  */
 
+import { ArrowRight, ChevronLeft, ChevronRight } from "lucide-react";
+import { Button, IconButton } from "@/components/ui";
 import { useEffect } from "react";
 import type { Task } from "@/src/api/generated/model";
 import { Modal } from "@/components/Modal";
@@ -50,55 +52,53 @@ export function TaskDialog({
   return (
     <Modal onClose={onClose} title={`${task.key} · ${task.repo ?? "task"}`} wide>
       <div className="flex items-center gap-2 pb-3">
-        <button
+        <IconButton
+          of={ChevronLeft}
+          size="sm"
+          label="Previous (↑)"
           onClick={() => onMove(-1)}
           disabled={at <= 1}
-          title="Previous (↑)"
-          className="rounded-[6px] px-2 py-1 text-[13px] text-mute transition-colors hover:text-text disabled:opacity-30"
-        >
-          ‹
-        </button>
-        <span className="font-mono text-[11px] text-mute">
+        />
+        <span className="font-mono text-meta text-mute">
           {at} of {of}
         </span>
-        <button
+        <IconButton
+          of={ChevronRight}
+          size="sm"
+          label="Next (↓)"
           onClick={() => onMove(1)}
           disabled={at >= of}
-          title="Next (↓)"
-          className="rounded-[6px] px-2 py-1 text-[13px] text-mute transition-colors hover:text-text disabled:opacity-30"
-        >
-          ›
-        </button>
+        />
 
         <a
           href={task.url}
           target="_blank"
           rel="noreferrer"
-          className="ml-auto text-[12px] text-mute transition-colors hover:text-ember"
+          className="ml-auto text-meta text-mute transition-colors hover:text-bone"
         >
           Open on GitHub ↗
         </a>
       </div>
 
-      <h2 className="text-[19px] leading-[1.35] text-bone">{task.title}</h2>
+      <h2 className="text-display leading-[1.35] text-bone">{task.title}</h2>
 
       <div className="mt-2 flex flex-wrap items-center gap-2 border-b border-line pb-3">
         <span
-          className={`rounded-[6px] border px-2 py-0.5 text-[11px] ${
+          className={`rounded-sm border px-2 py-0.5 text-meta ${
             task.state === "open" ? "border-sage/40 text-sage" : "border-line text-mute"
           }`}
         >
           {task.state === "open" ? "Open" : "Closed"}
         </span>
         {task.assignees.map((who) => (
-          <span key={who.login} className="font-mono text-[11.5px] text-dim">
+          <span key={who.login} className="font-mono text-meta text-dim">
             {who.login}
           </span>
         ))}
         {task.labels.map((label) => (
           <span
             key={label.name}
-            className="rounded-[5px] border px-1.5 py-px text-[10.5px]"
+            className="rounded-sm border px-1.5 py-px text-micro"
             style={
               label.colour
                 ? { borderColor: `#${label.colour}66`, color: `#${label.colour}` }
@@ -108,7 +108,7 @@ export function TaskDialog({
             {label.name}
           </span>
         ))}
-        <span className="ml-auto font-mono text-[11px] text-mute">
+        <span className="ml-auto font-mono text-meta text-mute">
           {elapsed(minutesSince(task.updatedAt))} ago
         </span>
       </div>
@@ -119,20 +119,17 @@ export function TaskDialog({
         {task.body?.trim() ? (
           <Markdown>{task.body}</Markdown>
         ) : (
-          <p className="text-[13px] text-mute">No description.</p>
+          <p className="text-ui text-mute">No description.</p>
         )}
       </div>
 
       <div className="flex items-center justify-between gap-4 border-t border-line pt-3">
-        <p className="text-[12px] text-mute">
+        <p className="text-meta text-mute">
           Cuts a worktree and puts this in the composer, unsent.
         </p>
-        <button
-          onClick={onStart}
-          className="shrink-0 rounded-[8px] border border-ember-deep bg-ember/[0.08] px-3.5 py-2 text-ui text-ember transition-colors hover:bg-ember/[0.16]"
-        >
-          Start a worktree →
-        </button>
+        <Button variant="primary" trailing={ArrowRight} onClick={onStart}>
+          Start a worktree
+        </Button>
       </div>
     </Modal>
   );

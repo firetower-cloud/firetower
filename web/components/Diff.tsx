@@ -36,7 +36,7 @@ export function Diff({ sessionId }: { sessionId: string }) {
   const file = files.find((f) => f.path === selected) ?? files[0];
 
   return (
-    <div className="grid h-full min-h-0 grid-cols-[220px_1fr] overflow-hidden rounded-[6px] border border-line">
+    <div className="grid h-full min-h-0 grid-cols-[220px_1fr] overflow-hidden rounded-sm border border-line">
       <ul className="min-h-0 overflow-y-auto border-r border-line bg-panel py-1">
         {files.map((f) => (
           <li key={f.path}>
@@ -47,24 +47,24 @@ export function Diff({ sessionId }: { sessionId: string }) {
               }`}
             >
               <span
-                className="min-w-0 flex-1 truncate font-mono text-[11.5px] text-dim"
+                className="min-w-0 flex-1 truncate font-mono text-meta text-dim"
                 title={f.path}
               >
                 {/* The end of a path identifies it; the start rarely does. */}
                 {f.path.split("/").slice(-2).join("/")}
               </span>
-              <span className="shrink-0 font-mono text-[10px] text-sage">+{f.added}</span>
-              <span className="shrink-0 font-mono text-[10px] text-brick">−{f.removed}</span>
+              <span className="shrink-0 font-mono text-micro text-sage">+{f.added}</span>
+              <span className="shrink-0 font-mono text-micro text-brick">−{f.removed}</span>
             </button>
           </li>
         ))}
       </ul>
 
-      <div className="min-h-0 overflow-auto bg-[#0f0e0d]">
-        <div className="sticky top-0 border-b border-line bg-[#0f0e0d] px-3 py-1.5">
-          <span className="font-mono text-[11px] text-slate">{file.path}</span>
+      <div className="min-h-0 overflow-auto bg-ground">
+        <div className="sticky top-0 border-b border-line bg-ground px-3 py-1.5">
+          <span className="font-mono text-meta text-slate">{file.path}</span>
         </div>
-        <pre className="px-3 py-2 font-mono text-[11.5px] leading-[1.6]">
+        <pre className="px-3 py-2 font-mono text-meta leading-[1.6]">
           {file.patch.split("\n").map((line, i) => (
             <div key={i} className={colour(line)}>
               {line || " "}
@@ -81,15 +81,15 @@ function colour(line: string) {
   if (line.startsWith("+++") || line.startsWith("---")) return "text-mute";
   if (line.startsWith("+")) return "bg-sage/[0.07] text-sage";
   if (line.startsWith("-")) return "bg-brick/[0.07] text-brick";
-  if (line.startsWith("@@")) return "text-ember/70";
+  if (line.startsWith("@@")) return "text-slate";
   if (line.startsWith("diff --git") || line.startsWith("index ")) return "text-mute";
   return "text-dim";
 }
 
 function Empty({ children }: { children: React.ReactNode }) {
   return (
-    <div className="flex h-full items-center justify-center rounded-[6px] border border-dashed border-line">
-      <p className="text-[12.5px] text-mute">{children}</p>
+    <div className="flex h-full items-center justify-center rounded-sm border border-dashed border-line">
+      <p className="text-meta text-mute">{children}</p>
     </div>
   );
 }

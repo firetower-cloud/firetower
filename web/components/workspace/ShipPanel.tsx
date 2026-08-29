@@ -144,7 +144,7 @@ export function ShipPanel({ sessionId }: { sessionId: string }) {
           value={shownTitle}
           onChange={(e) => setTitle(e.target.value)}
           placeholder="Title — the commit message and the pull request"
-          className="w-full rounded-[7px] border border-line bg-ground px-2.5 py-2 text-[12.5px] text-text placeholder:text-mute focus:border-ember focus:outline-none"
+          className="w-full rounded-md border border-line bg-ground px-2.5 py-2 text-meta text-text placeholder:text-mute focus:border-dim focus:outline-none"
         />
 
         <div className="relative">
@@ -153,7 +153,7 @@ export function ShipPanel({ sessionId }: { sessionId: string }) {
             onChange={(e) => setBody(e.target.value)}
             rows={4}
             placeholder="What changed and why, for whoever reviews it"
-            className="w-full resize-none rounded-[7px] border border-line bg-ground py-2 pr-8 pl-2.5 text-[12px] leading-[1.5] text-text placeholder:text-mute focus:border-ember focus:outline-none"
+            className="w-full resize-none rounded-md border border-line bg-ground py-2 pr-8 pl-2.5 text-meta leading-[1.5] text-text placeholder:text-mute focus:border-dim focus:outline-none"
           />
           <button
             onClick={() =>
@@ -170,20 +170,20 @@ export function ShipPanel({ sessionId }: { sessionId: string }) {
             }
             disabled={describe.isPending}
             title="Ask the agent to describe the change"
-            className="absolute top-1.5 right-1.5 rounded-[5px] px-1 py-0.5 text-[12px] text-mute transition-colors hover:text-ember disabled:opacity-40"
+            className="absolute top-1.5 right-1.5 rounded-sm px-1 py-0.5 text-meta text-mute transition-colors hover:text-bone disabled:opacity-40"
           >
             {describe.isPending ? "…" : "✦"}
           </button>
         </div>
 
         {sequence(ship.stage) && (
-          <p className="text-[11px] leading-[1.5] text-mute">{sequence(ship.stage)}</p>
+          <p className="text-meta leading-[1.5] text-mute">{sequence(ship.stage)}</p>
         )}
 
         {/* Read and acted on, not a toast: a refused push is something to fix,
             and a message that disappears is neither. */}
         {trouble && (
-          <p className="rounded-[6px] border border-brick/40 bg-ground px-2.5 py-2 text-[11.5px] leading-[1.5] text-brick">
+          <p className="rounded-sm border border-brick/40 bg-ground px-2.5 py-2 text-meta leading-[1.5] text-brick">
             {trouble}
           </p>
         )}
@@ -196,7 +196,7 @@ export function ShipPanel({ sessionId }: { sessionId: string }) {
                 href={l.url}
                 target="_blank"
                 rel="noreferrer"
-                className="flex items-center justify-center gap-1.5 rounded-[7px] border border-sage/35 bg-sage/[0.07] py-2 text-[12.5px] font-medium text-sage transition-opacity hover:opacity-80"
+                className="flex items-center justify-center gap-1.5 rounded-md border border-sage-deep bg-sage-tint py-2 text-meta font-medium text-sage transition-opacity hover:opacity-80"
               >
                 {ship.links.length === 1 ? "View pull request" : l.slug} ↗
               </a>
@@ -207,23 +207,23 @@ export function ShipPanel({ sessionId }: { sessionId: string }) {
             onClick={go}
             disabled={busy || (keeping.length === 0 && ship.stage === "uncommitted")}
             title={ship.blocked ?? ship.label}
-            className="w-full rounded-[7px] bg-ember py-2 text-[12.5px] font-medium text-ground transition-opacity disabled:opacity-40"
+            className="w-full rounded-md bg-bone py-2 text-meta font-medium text-ground transition-colors hover:bg-white disabled:bg-line disabled:text-mute"
           >
             {busy ? "Working…" : ship.label}
           </button>
         )}
 
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-          <span className="min-w-0 truncate font-mono text-[10.5px] text-mute">
+          <span className="min-w-0 truncate font-mono text-micro text-mute">
             ⑂ {session.branch}
           </span>
           {opening && (
-            <label className="flex cursor-pointer items-center gap-1.5 text-[11.5px] text-dim">
+            <label className="flex cursor-pointer items-center gap-1.5 text-meta text-dim">
               <input
                 type="checkbox"
                 checked={draft}
                 onChange={(e) => setDraft(e.target.checked)}
-                className="accent-ember"
+                className="accent-bone"
               />
               Draft
             </label>
@@ -261,7 +261,7 @@ export function ShipPanel({ sessionId }: { sessionId: string }) {
                     }
                     title={going ? "Leave this one out" : "Put this one back"}
                     aria-label={going ? `Leave out ${f.path}` : `Include ${f.path}`}
-                    className={`shrink-0 text-[11px] transition-colors ${
+                    className={`shrink-0 text-meta transition-colors ${
                       going ? "text-sage" : "text-mute hover:text-dim"
                     }`}
                   >
@@ -274,7 +274,7 @@ export function ShipPanel({ sessionId }: { sessionId: string }) {
           })}
 
           {files.length > 0 && (
-            <p className="px-1.5 pt-1.5 font-mono text-[10.5px] text-mute">
+            <p className="px-1.5 pt-1.5 font-mono text-micro text-mute">
               <span className="text-sage">+{totals.added}</span>{" "}
               <span className="text-brick">−{totals.removed}</span>
               {dropped.size > 0 && ` · ${dropped.size} left out`}
@@ -289,11 +289,11 @@ export function ShipPanel({ sessionId }: { sessionId: string }) {
 function Note({ children }: { children: React.ReactNode }) {
   return (
     <div className="p-3">
-      <p className="text-[12px] leading-[1.55] text-mute">{children}</p>
+      <p className="text-meta leading-[1.55] text-mute">{children}</p>
     </div>
   );
 }
 
 function Line({ children }: { children: React.ReactNode }) {
-  return <p className="px-1.5 py-1 text-[11.5px] text-mute">{children}</p>;
+  return <p className="px-1.5 py-1 text-meta text-mute">{children}</p>;
 }

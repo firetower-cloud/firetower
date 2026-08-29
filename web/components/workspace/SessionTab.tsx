@@ -108,11 +108,11 @@ function Plate({ session }: { session: Session }) {
 
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-          <span className="text-[13.5px] font-medium text-bone">{AGENT_LABEL[session.agent]}</span>
-          {running && <span className="font-mono text-[11.5px] text-slate">· {running}</span>}
+          <span className="text-ui font-medium text-bone">{AGENT_LABEL[session.agent]}</span>
+          {running && <span className="font-mono text-meta text-slate">· {running}</span>}
         </div>
 
-        <div className="mt-1 flex flex-wrap items-center gap-x-2.5 gap-y-1 font-mono text-[11px] text-mute">
+        <div className="mt-1 flex flex-wrap items-center gap-x-2.5 gap-y-1 font-mono text-meta text-mute">
           {checkouts.length === 0 && <span>no repository</span>}
           {checkouts.map((c) => (
             <span key={c.slug} className="flex items-center gap-1.5">
@@ -140,7 +140,7 @@ function Plate({ session }: { session: Session }) {
 function Middle({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex h-full items-center justify-center px-8">
-      <p className="max-w-[46ch] text-center text-[13.5px] text-mute">{children}</p>
+      <p className="max-w-[46ch] text-center text-ui text-mute">{children}</p>
     </div>
   );
 }

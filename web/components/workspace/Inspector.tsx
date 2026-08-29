@@ -1,5 +1,8 @@
 "use client";
 
+import { FileDiff, FolderOpen, GitBranch, PanelRight } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
+import { Icon } from "@/components/ui";
 import { useState } from "react";
 import {
   useGetSession,
@@ -61,8 +64,8 @@ export function Inspector({ sessionId }: { sessionId: string | null }) {
 
         {!sessionId ? (
           <div className="px-3 py-4">
-            <p className="text-[12.5px] text-dim">No session in front of you.</p>
-            <p className="mt-1 text-[11.5px] leading-[1.55] text-mute">
+            <p className="text-meta text-dim">No session in front of you.</p>
+            <p className="mt-1 text-meta leading-[1.55] text-mute">
               Open one and its files, its changes and the way out show up here.
             </p>
           </div>
@@ -105,11 +108,11 @@ function Strip({ changed, vertical = false }: { changed: number; vertical?: bool
             // An underline rather than a filled pill: the strip sits on the
             // same ground as the panel it labels, and a pill would read as a
             // button floating above it rather than a tab belonging to it.
-            className={`relative rounded-[6px] px-2 py-1.5 transition-colors ${
+            className={`relative rounded-sm px-2 py-1.5 transition-colors ${
               on ? "text-bone" : "text-mute hover:bg-raise/60 hover:text-dim"
             } ${
               on && !vertical
-                ? "after:absolute after:inset-x-1.5 after:-bottom-1 after:h-[2px] after:bg-ember after:content-['']"
+                ? "after:absolute after:inset-x-1.5 after:-bottom-1 after:h-[2px] after:bg-bone after:content-['']"
                 : ""
             }`}
           >
@@ -117,7 +120,7 @@ function Strip({ changed, vertical = false }: { changed: number; vertical?: bool
             {/* Changes carries a count: the point of a strip is telling you a
                 view has something in it without having to open it. */}
             {v.id === "changes" && changed > 0 && (
-              <span className="absolute -top-0.5 -right-0.5 rounded-full bg-ember px-1 font-mono text-[8.5px] leading-[13px] text-ground">
+              <span className="absolute -top-0.5 -right-0.5 rounded-full bg-bone px-1 font-mono text-micro leading-[13px] text-ground">
                 {changed > 9 ? "9+" : changed}
               </span>
             )}
@@ -130,63 +133,24 @@ function Strip({ changed, vertical = false }: { changed: number; vertical?: bool
           onClick={panel.toggle}
           title="Collapse the panel"
           aria-label="Collapse the panel"
-          className="ml-auto rounded-[6px] px-2 py-1.5 text-mute transition-colors hover:bg-raise/60 hover:text-dim"
+          className="ml-auto rounded-sm px-2 py-1.5 text-mute transition-colors hover:bg-raise/60 hover:text-dim"
         >
-          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" aria-hidden>
-            <rect x="1.8" y="2.4" width="10.4" height="9.2" rx="1.4" strokeWidth="1.2" />
-            <path d="M9 2.4v9.2" strokeWidth="1.2" />
-          </svg>
+          <Icon of={PanelRight} size={14} />
         </button>
       )}
     </div>
   );
 }
 
+/** One glyph per view, from the one icon set, at the one stroke weight. */
+const VIEW_ICON: Record<View, LucideIcon> = {
+  files: FolderOpen,
+  changes: FileDiff,
+  ship: GitBranch,
+};
+
 function ViewIcon({ view }: { view: View }) {
-  const common = {
-    width: 14,
-    height: 14,
-    viewBox: "0 0 14 14",
-    fill: "none",
-    stroke: "currentColor",
-    "aria-hidden": true,
-  } as const;
-
-  if (view === "files") {
-    return (
-      <svg {...common}>
-        <path
-          d="M2.4 3.2a1 1 0 011-1h2.3l1 1.4h3.9a1 1 0 011 1v6.2a1 1 0 01-1 1H3.4a1 1 0 01-1-1z"
-          strokeWidth="1.2"
-          strokeLinejoin="round"
-        />
-      </svg>
-    );
-  }
-
-  if (view === "changes") {
-    // A plus over a minus. A bare `+` reads as "add something", which is the
-    // one thing this view does not do.
-    return (
-      <svg {...common}>
-        <path
-          d="M4.6 4.4h4.8M7 2v4.8M4.6 9.9h4.8"
-          strokeWidth="1.3"
-          strokeLinecap="round"
-        />
-      </svg>
-    );
-  }
-
-  // A branch: two commits and the line that joins them.
-  return (
-    <svg {...common}>
-      <circle cx="4.2" cy="3.6" r="1.5" strokeWidth="1.2" />
-      <circle cx="4.2" cy="10.4" r="1.5" strokeWidth="1.2" />
-      <circle cx="10" cy="5.4" r="1.5" strokeWidth="1.2" />
-      <path d="M4.2 5.1v3.8M10 6.9c0 1.6-1.3 2.2-2.9 2.4" strokeWidth="1.2" strokeLinecap="round" />
-    </svg>
-  );
+  return <Icon of={VIEW_ICON[view]} size={14} />;
 }
 
 /**
@@ -248,7 +212,7 @@ function Grip() {
       aria-label="Resize the panel"
       title="Drag to resize · double-click to reset"
       className={`w-[5px] shrink-0 cursor-col-resize transition-colors ${
-        dragging ? "bg-ember" : "hover:bg-ember/40"
+        dragging ? "bg-dim" : "hover:bg-line"
       }`}
     />
   );
@@ -281,12 +245,12 @@ function Doing({ sessionId }: { sessionId: string }) {
     <div className="shrink-0 border-t border-line px-3 py-2">
       <div className="flex items-center gap-2">
         <Signal status={session.status} size={6} />
-        <span className="truncate text-[11.5px] text-dim">
+        <span className="truncate text-meta text-dim">
           {STATUS_LABEL[session.status] ?? session.status}
         </span>
       </div>
       {under && (
-        <p className="mt-0.5 truncate pl-[14px] font-mono text-[10.5px] text-mute" title={under}>
+        <p className="mt-0.5 truncate pl-[14px] font-mono text-micro text-mute" title={under}>
           {under}
         </p>
       )}
@@ -325,7 +289,7 @@ function Tree({ sessionId, changed }: { sessionId: string; changed: Set<string> 
         <span className="ml-auto flex min-w-0 items-center gap-1 overflow-hidden">
           <button
             onClick={() => setPath("")}
-            className="shrink-0 font-mono text-[10.5px] text-mute transition-colors hover:text-ember"
+            className="shrink-0 font-mono text-micro text-mute transition-colors hover:text-bone"
           >
             /
           </button>
@@ -335,7 +299,7 @@ function Tree({ sessionId, changed }: { sessionId: string; changed: Set<string> 
                 onClick={() =>
                   setPath(parts.slice(0, parts.length - shown.length + i + 1).join("/"))
                 }
-                className="min-w-0 truncate font-mono text-[10.5px] text-dim transition-colors hover:text-ember"
+                className="min-w-0 truncate font-mono text-micro text-dim transition-colors hover:text-bone"
               >
                 {part}
               </button>
@@ -345,7 +309,7 @@ function Tree({ sessionId, changed }: { sessionId: string; changed: Set<string> 
         </span>
         <button
           onClick={() => refetch()}
-          className="shrink-0 text-[10px] text-mute transition-colors hover:text-ember"
+          className="shrink-0 text-micro text-mute transition-colors hover:text-bone"
         >
           ↻
         </button>
@@ -358,17 +322,17 @@ function Tree({ sessionId, changed }: { sessionId: string; changed: Set<string> 
         {path && (
           <button
             onClick={() => setPath(parts.slice(0, -1).join("/"))}
-            className="flex w-full items-center gap-2 rounded-[5px] px-1.5 py-1 text-left transition-colors hover:bg-raise/60"
+            className="flex w-full items-center gap-2 rounded-sm px-1.5 py-1 text-left transition-colors hover:bg-raise/60"
           >
             <span className="text-mute">⟵</span>
-            <span className="font-mono text-[11.5px] text-dim">..</span>
+            <span className="font-mono text-meta text-dim">..</span>
           </button>
         )}
 
         {entries.map((entry: FileEntry) => (
           <div
             key={entry.name}
-            className="group flex items-center gap-2 rounded-[5px] px-1.5 py-1 transition-colors hover:bg-raise/60"
+            className="group flex items-center gap-2 rounded-sm px-1.5 py-1 transition-colors hover:bg-raise/60"
           >
             <span className="shrink-0 text-mute">
               <FileGlyph name={entry.name} directory={entry.directory} link={entry.link} />
@@ -378,7 +342,7 @@ function Tree({ sessionId, changed }: { sessionId: string; changed: Set<string> 
                 entry.directory ? setPath(full(entry.name)) : open.file(full(entry.name))
               }
               title={full(entry.name)}
-              className={`min-w-0 flex-1 truncate text-left font-mono text-[11.5px] transition-colors hover:text-ember ${
+              className={`min-w-0 flex-1 truncate text-left font-mono text-meta transition-colors hover:text-bone ${
                 entry.directory ? "text-bone" : "text-dim"
               }`}
             >
@@ -392,7 +356,7 @@ function Tree({ sessionId, changed }: { sessionId: string; changed: Set<string> 
             {changed.has(full(entry.name)) && (
               <span
                 title="Changed"
-                className="h-1.5 w-1.5 shrink-0 rounded-full bg-ember group-hover:hidden"
+                className="h-1.5 w-1.5 shrink-0 rounded-full bg-slate group-hover:hidden"
               />
             )}
 
@@ -402,7 +366,7 @@ function Tree({ sessionId, changed }: { sessionId: string; changed: Set<string> 
               <button
                 onClick={() => download(sessionId, full(entry.name), entry.name)}
                 title={`Download ${entry.name}`}
-                className="shrink-0 px-0.5 text-[11px] text-mute opacity-0 transition-opacity group-hover:opacity-100 hover:text-ember"
+                className="shrink-0 px-0.5 text-meta text-mute opacity-0 transition-opacity group-hover:opacity-100 hover:text-bone"
               >
                 ↓
               </button>
@@ -454,7 +418,7 @@ function Changes({ sessionId }: { sessionId: string }) {
     <section className="flex min-h-0 flex-1 flex-col overflow-hidden">
       <div className="flex shrink-0 items-center gap-2 border-b border-line px-3 py-1.5">
         <span className="eyebrow">Changes</span>
-        <span className="ml-auto font-mono text-[10.5px] text-mute">
+        <span className="ml-auto font-mono text-micro text-mute">
           {isLoading ? "…" : files.length === 0 ? "none" : `${files.length} files`}
         </span>
       </div>
@@ -474,13 +438,13 @@ function Changes({ sessionId }: { sessionId: string }) {
 
       {files.length > 0 && (
         <div className="shrink-0 border-t border-line px-3 py-2">
-          <p className="mb-2 font-mono text-[10.5px] text-mute">
+          <p className="mb-2 font-mono text-micro text-mute">
             <span className="text-sage">+{added}</span>{" "}
             <span className="text-brick">−{removed}</span>
           </p>
           <button
             onClick={() => panel.reveal("ship")}
-            className="w-full rounded-[7px] border border-line py-1.5 text-[12px] text-dim transition-colors hover:border-ember/40 hover:text-ember"
+            className="w-full rounded-md border border-line py-1.5 text-meta text-dim transition-colors hover:border-line hover:text-bone"
           >
             Review &amp; ship →
           </button>
@@ -491,5 +455,5 @@ function Changes({ sessionId }: { sessionId: string }) {
 }
 
 function Line({ children }: { children: React.ReactNode }) {
-  return <p className="px-1.5 py-1 text-[11.5px] text-mute">{children}</p>;
+  return <p className="px-1.5 py-1 text-meta text-mute">{children}</p>;
 }

@@ -5,10 +5,13 @@ import { usePathname, useRouter } from "next/navigation";
 import { useMe, useLogout } from "@/src/api/generated/auth/auth";
 import { forgetToken } from "@/src/api/http";
 import { useState } from "react";
+import { BookOpen, CircleDashed, LayoutList, ListTodo, Plus, Settings2 } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import { Mark, Signal } from "./Signal";
 import { Modal } from "./Modal";
 import { NewWorkspace } from "./NewWorkspace";
 import { AgentMark } from "./AgentMark";
+import { Button, GithubMark, Icon } from "./ui";
 import { useListSessions } from "@/src/api/generated/sessions/sessions";
 import { doing, group, shortRepo, type Workspace } from "@/src/api/workspaces";
 import { elapsed, minutesSince, needsYou, unfinished } from "@/src/api/view";
@@ -22,28 +25,10 @@ import { elapsed, minutesSince, needsYou, unfinished } from "@/src/api/view";
  * repository to start work, and you touch the other three once and then never
  * again until something breaks. The three live behind Configuration now.
  */
-const NAV = [
-  {
-    href: "/",
-    label: "Dashboard",
-    icon: (
-      <>
-        <path d="M2 3.5h10M2 7h10M2 10.5h6" strokeWidth="1.3" strokeLinecap="round" />
-      </>
-    ),
-  },
-  {
-    href: "/tasks",
-    label: "Tasks",
-    icon: (
-      <>
-        <path d="M2 3.6h1.8M2 7h1.8M2 10.4h1.8" strokeWidth="1.3" strokeLinecap="round" />
-        <path d="M5.8 3.6H12M5.8 7H12M5.8 10.4h4" strokeWidth="1.3" strokeLinecap="round" />
-      </>
-    ),
-  },
+const NAV: { href: string; label: string; icon: LucideIcon }[] = [
+  { href: "/", label: "Dashboard", icon: LayoutList },
+  { href: "/tasks", label: "Tasks", icon: ListTodo },
 ];
-
 
 export function Shell({ children }: { children: React.ReactNode }) {
   const path = usePathname();
@@ -64,33 +49,20 @@ export function Shell({ children }: { children: React.ReactNode }) {
           grows without bound, and a rail that grows with it pushes the page
           past the viewport and scrolls everything — including the session
           somebody is reading. */}
-      <aside className="hidden h-full w-[224px] shrink-0 flex-col overflow-hidden border-r border-line bg-panel md:flex">
+      <aside className="hidden h-full w-[236px] shrink-0 flex-col overflow-hidden border-r border-line bg-panel md:flex">
         <div className="flex items-center gap-2.5 px-4 pt-4 pb-5">
           <span className="text-bone">
-            <Mark size={22} />
+            <Mark size={20} />
           </span>
-          <span className="font-narrow text-[13px] font-semibold tracking-[0.22em] text-bone uppercase">
+          <span className="font-narrow text-ui font-semibold tracking-[0.22em] text-bone uppercase">
             Firetower
           </span>
         </div>
 
-        <nav className="flex flex-col gap-px px-2">
+        <nav className="flex flex-col gap-0.5 px-2">
           {NAV.map((n) => {
             const on = n.href === "/" ? path === "/" || path.startsWith("/sessions") : path === n.href;
-            return (
-              <Link
-                key={n.href}
-                href={n.href}
-                className={`group flex items-center gap-2.5 rounded-[8px] px-2.5 py-2 text-ui transition-colors ${
-                  on ? "bg-raise text-bone" : "text-dim hover:bg-raise/60 hover:text-text"
-                }`}
-              >
-                <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" className="opacity-70">
-                  {n.icon}
-                </svg>
-                {n.label}
-              </Link>
-            );
+            return <NavLink key={n.href} {...n} on={on} />;
           })}
         </nav>
 
@@ -100,63 +72,26 @@ export function Shell({ children }: { children: React.ReactNode }) {
             you reach for after the work rather than during it, in the order you
             reach for them. Hosts used to be here; they are what Compute is
             about, and a list of them was fleet trivia on every screen. */}
-        <Link
-          href="/configuration"
-          className={`flex shrink-0 items-center gap-2.5 border-t border-line px-4 py-2.5 text-ui transition-colors ${
-            path.startsWith("/configuration")
-              ? "bg-raise text-bone"
-              : "text-mute hover:bg-raise/60 hover:text-text"
-          }`}
-        >
-          <svg
-            width="14"
-            height="14"
-            viewBox="0 0 14 14"
-            fill="none"
-            stroke="currentColor"
-            aria-hidden
-            className="opacity-70"
-          >
-            <circle cx="7" cy="7" r="2.1" strokeWidth="1.3" />
-            <path
-              d="M7 1.6v1.5M7 10.9v1.5M12.4 7h-1.5M3.1 7H1.6M10.8 3.2l-1 1M4.2 9.8l-1 1M10.8 10.8l-1-1M4.2 4.2l-1-1"
-              strokeWidth="1.2"
-              strokeLinecap="round"
-            />
-          </svg>
-          Configuration
-        </Link>
+        <div className="shrink-0 border-t border-line px-2 py-2">
+          <NavLink
+            href="/configuration"
+            label="Configuration"
+            icon={Settings2}
+            on={path.startsWith("/configuration")}
+          />
 
-        {/* Between the fleet and the account, where somebody looks after they
-            have run out of things to try on the screen itself. Off to the
-            website rather than into the app: it is versioned with the release,
-            not with what is running here. */}
-        <a
-          href="https://www.usefiretower.com/docs"
-          target="_blank"
-          rel="noreferrer"
-          className="flex shrink-0 items-center gap-2.5 border-t border-line px-4 py-2.5 text-ui text-mute transition-colors hover:bg-raise/60 hover:text-text"
-        >
-          <svg
-            width="14"
-            height="14"
-            viewBox="0 0 14 14"
-            fill="none"
-            stroke="currentColor"
-            aria-hidden
-            className="opacity-70"
+          {/* Off to the website rather than into the app: it is versioned with
+              the release, not with what is running here. */}
+          <a
+            href="https://www.usefiretower.com/docs"
+            target="_blank"
+            rel="noreferrer"
+            className="flex h-8 items-center gap-2.5 rounded-md px-2.5 text-ui text-mute transition-colors duration-150 hover:bg-raise hover:text-text"
           >
-            <path
-              d="M2.4 2.6h3.2c.8 0 1.4.6 1.4 1.4v7c0-.6-.5-1.1-1.1-1.1H2.4zM11.6 2.6H8.4c-.8 0-1.4.6-1.4 1.4v7c0-.6.5-1.1 1.1-1.1h3.5z"
-              strokeWidth="1.1"
-              strokeLinejoin="round"
-            />
-          </svg>
-          Documentation
-          <span aria-hidden className="ml-auto text-[10px] opacity-60">
-            ↗
-          </span>
-        </a>
+            <Icon of={BookOpen} size={14} />
+            Documentation
+          </a>
+        </div>
 
         <WhoAmI />
       </aside>
@@ -169,6 +104,40 @@ export function Shell({ children }: { children: React.ReactNode }) {
         {children}
       </main>
     </div>
+  );
+}
+
+/**
+ * One destination.
+ *
+ * Where it is on is a lift and a brighter label, plus a short ember stub in the
+ * left margin — the only place in the rail that colour appears, so the eye
+ * finds "you are here" before it reads anything.
+ */
+function NavLink({
+  href,
+  label,
+  icon,
+  on,
+}: {
+  href: string;
+  label: string;
+  icon: LucideIcon;
+  on: boolean;
+}) {
+  return (
+    <Link
+      href={href}
+      className={`relative flex h-8 items-center gap-2.5 rounded-md px-2.5 text-ui transition-colors duration-150 ${
+        on ? "bg-raise text-bone" : "text-dim hover:bg-raise/60 hover:text-text"
+      }`}
+    >
+      {on && (
+        <span className="absolute top-1.5 bottom-1.5 -left-2 w-[2px] rounded-full bg-bone" />
+      )}
+      <Icon of={icon} size={14} />
+      {label}
+    </Link>
   );
 }
 
@@ -204,17 +173,14 @@ function WhoAmI() {
     <div className="shrink-0 border-t border-line px-4 py-3">
       <div className="flex items-center gap-2">
         <div className="min-w-0 flex-1">
-          <div className="truncate text-[13px] text-dim">{data.user.username}</div>
+          <div className="truncate text-ui text-text">{data.user.username}</div>
           {data.organization && (
-            <div className="truncate text-[11px] text-mute">{data.organization.name}</div>
+            <div className="truncate text-meta text-mute">{data.organization.name}</div>
           )}
         </div>
-        <button
-          onClick={signOut}
-          className="text-[11.5px] text-mute transition-colors hover:text-text"
-        >
+        <Button variant="quiet" size="sm" onClick={signOut}>
           Sign out
-        </button>
+        </Button>
       </div>
     </div>
   );
@@ -246,33 +212,41 @@ function Worktrees() {
 
   return (
     <div className="mt-6 flex min-h-0 flex-1 flex-col">
-      <div className="flex items-center gap-2 px-4 pb-1">
+      <div className="flex items-center gap-2 px-4 pb-1.5">
         <span className="eyebrow">Worktrees</span>
         {/* Making one, not connecting a repository. Connecting is a once-a-year
             thing and lives in Configuration; cutting a worktree is the reason
             somebody opened Firetower, so it is the `+` nearest the list of
             them. */}
-        <button
-          onClick={() => setStarting({})}
+        <Button
+          variant="quiet"
+          size="sm"
+          icon={Plus}
           title="New worktree"
-          className="ml-auto text-[15px] leading-none text-mute transition-colors hover:text-ember"
-        >
-          +
-        </button>
+          onClick={() => setStarting({})}
+          className="-mr-1.5 ml-auto px-1"
+        />
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
         {repos.groups.length === 0 && (
-          <p className="px-2 py-1 text-[13px] text-mute">Nothing running.</p>
+          <p className="px-2.5 py-1 text-ui text-mute">Nothing running.</p>
         )}
 
         {repos.groups.map(([repo, places]) => (
-          <div key={repo} className="mb-2">
-            <div className="flex items-center gap-1.5 px-2 py-1">
-              <span className="min-w-0 truncate font-mono text-[11px] text-dim">
+          <div key={repo} className="mb-3">
+            <div className="flex items-center gap-1.5 px-2.5 py-1.5">
+              {/* The bucket for workspaces with nothing checked out is not a
+                  repository, so it does not get a repository's mark. */}
+              {repo === "no repository" ? (
+                <Icon of={CircleDashed} size={12} className="text-mute" />
+              ) : (
+                <GithubMark size={13} className="text-dim" />
+              )}
+              <span className="min-w-0 truncate text-ui font-medium text-bone">
                 {shortRepo(repo)}
               </span>
-              <span className="font-mono text-[10px] text-mute">{places.length}</span>
+              <span className="font-mono text-micro text-mute">{places.length}</span>
             </div>
             {places.map((place) => (
               <Worktree key={place.id} place={place} on={path === `/sessions/${place.id}`} />
@@ -303,25 +277,25 @@ function Worktree({ place, on }: { place: Workspace; on: boolean }) {
   return (
     <Link
       href={`/sessions/${place.id}`}
-      className={`block rounded-[8px] py-1.5 pr-2 pl-2 transition-colors ${
+      className={`block rounded-md px-2 py-1.5 transition-colors duration-150 ${
         on ? "bg-raise" : "hover:bg-raise/60"
       }`}
     >
       <div className="flex items-center gap-2">
         <Signal status={place.runs[0].status} size={6} />
-        <span className={`min-w-0 flex-1 truncate text-[13px] ${on ? "text-bone" : "text-dim"}`}>
+        <span className={`min-w-0 flex-1 truncate text-ui ${on ? "text-bone" : "text-dim"}`}>
           {place.name}
         </span>
         {place.runs.some(needsYou) && (
           <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-ember" />
         )}
-        <span className="shrink-0 font-mono text-[10px] text-mute">
+        <span className="shrink-0 font-mono text-micro text-mute">
           {elapsed(minutesSince(place.runs[0].createdAt))}
         </span>
       </div>
 
       <div className="mt-0.5 flex items-center gap-1.5 pl-[14px]">
-        <span className="min-w-0 flex-1 truncate font-mono text-[10.5px] text-mute">
+        <span className="min-w-0 flex-1 truncate font-mono text-micro text-mute">
           {place.branch ?? "—"}
         </span>
         {/* Which agents are in it, rather than how many: two of one and one of

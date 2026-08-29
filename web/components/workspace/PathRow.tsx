@@ -37,7 +37,7 @@ export function PathRow({
 
   return (
     <div
-      className={`group flex items-center gap-2 rounded-[5px] px-1.5 py-1 transition-colors ${
+      className={`group flex items-center gap-2 rounded-sm px-1.5 py-1 transition-colors ${
         on ? "bg-raise" : "hover:bg-raise/60"
       }`}
     >
@@ -50,7 +50,7 @@ export function PathRow({
         className="flex min-w-0 flex-1 items-baseline gap-1.5 text-left disabled:cursor-default"
       >
         <span
-          className={`shrink-0 truncate font-mono text-[11.5px] transition-colors ${
+          className={`shrink-0 truncate font-mono text-meta transition-colors ${
             on ? "text-bone" : "text-dim group-hover:text-bone"
           }`}
         >
@@ -59,7 +59,7 @@ export function PathRow({
         {/* Shrinks first and disappears last: it is the half that stops
             mattering once the name has been read. */}
         {dir && (
-          <span className="min-w-0 flex-1 truncate font-mono text-[10.5px] text-mute">{dir}</span>
+          <span className="min-w-0 flex-1 truncate font-mono text-micro text-mute">{dir}</span>
         )}
       </button>
 
@@ -71,7 +71,7 @@ export function PathRow({
 /** `+12 −3`, drawn the same way everywhere it appears. */
 export function Counts({ added, removed }: { added: number; removed: number }) {
   return (
-    <span className="flex shrink-0 items-baseline gap-1 font-mono text-[10px]">
+    <span className="flex shrink-0 items-baseline gap-1 font-mono text-micro">
       <span className="text-sage">+{added}</span>
       <span className="text-brick">−{removed}</span>
     </span>
@@ -105,14 +105,14 @@ export function Fold({
         className="flex w-full items-center gap-1.5 px-1.5 py-1.5 text-left"
       >
         <span
-          className="shrink-0 text-[9px] text-mute transition-transform"
+          className="shrink-0 text-micro text-mute transition-transform"
           style={{ transform: open ? "rotate(90deg)" : undefined }}
         >
           ▸
         </span>
         <span className="eyebrow">{label}</span>
         {count !== undefined && (
-          <span className="ml-auto font-mono text-[10px] text-mute">{count}</span>
+          <span className="ml-auto font-mono text-micro text-mute">{count}</span>
         )}
       </button>
       {open && children}

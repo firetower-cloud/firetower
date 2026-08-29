@@ -190,21 +190,21 @@ function Unreachable() {
   return (
     <div className="flex h-dvh items-center justify-center px-8">
       <div className="max-w-[52ch]">
-        <h1 className="text-[22px] font-semibold tracking-[-0.02em] text-bone">
+        <h1 className="text-display font-semibold text-bone">
           Can&apos;t reach the control plane.
         </h1>
-        <p className="mt-2 text-[14px] text-dim">
+        <p className="mt-2 text-body text-dim">
           Nothing useful came back from{" "}
-          <code className="font-mono text-[12.5px] text-slate">{apiBase()}</code>.
+          <code className="font-mono text-meta text-slate">{apiBase()}</code>.
         </p>
-        <ul className="mt-3 list-disc pl-5 text-[13.5px] leading-[1.7] text-mute">
+        <ul className="mt-3 list-disc pl-5 text-ui leading-[1.7] text-mute">
           <li>
             If that address is this page&apos;s own, the interface is asking itself. Start both
-            halves with <code className="font-mono text-[12px] text-slate">just dev</code>.
+            halves with <code className="font-mono text-meta text-slate">just dev</code>.
           </li>
           <li>
             If it&apos;s the control plane&apos;s address, check it is running:{" "}
-            <code className="font-mono text-[12px] text-slate">cargo run</code>.
+            <code className="font-mono text-meta text-slate">cargo run</code>.
           </li>
         </ul>
       </div>
@@ -215,7 +215,7 @@ function Unreachable() {
 function Blank() {
   return (
     <div className="flex h-full items-center justify-center px-8">
-      <p className="max-w-[40ch] text-center text-[13px] text-mute">
+      <p className="max-w-[40ch] text-center text-ui text-mute">
         Pick a session on the left, or start one.
       </p>
     </div>

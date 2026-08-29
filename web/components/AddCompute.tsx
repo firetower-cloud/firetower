@@ -262,7 +262,7 @@ export function AddCompute({ onClose }: { onClose: () => void }) {
             runs it directly.
           </Field>
 
-          <p className="mt-4 text-[12px] leading-[1.5] text-mute">
+          <p className="mt-4 text-meta leading-[1.5] text-mute">
             The worker has to be running there already. If it isn&apos;t, the host is still
             added and says what to do about it.
           </p>
@@ -284,8 +284,8 @@ export function AddCompute({ onClose }: { onClose: () => void }) {
       )}
 
       {create.isError && (
-        <div className="mt-4 rounded-[6px] border border-ember/30 bg-ember/[0.05] px-3.5 py-2.5">
-          <p className="text-[12.5px] leading-[1.55] text-bone">
+        <div className="mt-4 rounded-md border border-brick-deep bg-brick-tint px-3.5 py-2.5">
+          <p className="text-meta leading-[1.55] text-brick">
             {create.error instanceof ApiError
               ? create.error.message
               : "Couldn't add that."}
@@ -332,28 +332,28 @@ function NotAnswering({ told }: { told: Diagnosis }) {
   const refused = told.cause === "AuthRefused";
 
   return (
-    <div className="mt-4 rounded-[6px] border border-slate/30 bg-slate/[0.05] px-3.5 py-3">
-      <p className="text-[12.5px] leading-[1.55] text-bone">{told.summary}</p>
+    <div className="mt-4 rounded-sm border border-slate/30 bg-slate/[0.05] px-3.5 py-3">
+      <p className="text-meta leading-[1.55] text-brick">{told.summary}</p>
 
       {/* By far the likeliest first failure now: the machine has never been
           told about Firetower's key. The fix is a copy-paste, so it goes here
           rather than behind a link to somewhere else. */}
       {refused && identity && (
         <>
-          <p className="mt-2 text-[12px] leading-[1.55] text-dim">
+          <p className="mt-2 text-meta leading-[1.55] text-dim">
             Firetower authenticates with its own key, and that machine has not accepted it.
             Check the username above is the account you gave it to — and if that machine
             manages keys elsewhere, Google Cloud metadata or an SSH CA, it belongs there
             rather than in <code className="font-mono">authorized_keys</code>.
           </p>
-          <code className="mt-2 block overflow-x-auto rounded-[4px] bg-black/25 px-3 py-2 font-mono text-[11px] break-all text-bone">
+          <code className="mt-2 block overflow-x-auto rounded-sm bg-black/25 px-3 py-2 font-mono text-meta break-all text-bone">
             {identity.publicKey}
           </code>
         </>
       )}
 
       {told.remedy && (
-        <pre className="mt-2.5 overflow-x-auto rounded-[4px] bg-black/25 px-3 py-2 font-mono text-[11.5px] leading-[1.6] text-bone">
+        <pre className="mt-2.5 overflow-x-auto rounded-sm bg-black/25 px-3 py-2 font-mono text-meta leading-[1.6] text-bone">
           {told.remedy}
         </pre>
       )}
@@ -361,17 +361,17 @@ function NotAnswering({ told }: { told: Diagnosis }) {
       {/* What the machine said, folded away: always available, never in the way. */}
       {told.detail && (
         <details className="mt-2.5">
-          <summary className="cursor-pointer text-[11.5px] text-mute">
+          <summary className="cursor-pointer text-meta text-mute">
             What it said
           </summary>
-          <pre className="mt-1.5 overflow-x-auto whitespace-pre-wrap font-mono text-[11px] leading-[1.6] text-mute">
+          <pre className="mt-1.5 overflow-x-auto whitespace-pre-wrap font-mono text-meta leading-[1.6] text-mute">
             {told.detail}
           </pre>
         </details>
       )}
 
       {/* Hosts connect at start-up and when added; nothing retries in between. */}
-      <p className="mt-2.5 text-[11.5px] leading-[1.5] text-mute">
+      <p className="mt-2.5 text-meta leading-[1.5] text-mute">
         It&apos;s on the Compute screen either way. Firetower tries it again next
         time it starts.
       </p>
@@ -445,7 +445,7 @@ function HowWeGetIn({
   };
 
   return (
-    <div className="mt-5 rounded-[6px] border border-line bg-ground/40 p-3">
+    <div className="mt-5 rounded-sm border border-line bg-ground/40 p-3">
       <p className="eyebrow">How Firetower gets in</p>
 
       {ownKey ? (
@@ -464,14 +464,14 @@ function HowWeGetIn({
           <button
             type="button"
             onClick={() => onOwnKey(false)}
-            className="mt-3 text-[12px] text-slate hover:text-bone"
+            className="mt-3 text-meta text-slate hover:text-bone"
           >
             ← Use Firetower&apos;s key
           </button>
         </>
       ) : (
         <>
-          <p className="mt-2 text-[12px] leading-[1.5] text-mute">
+          <p className="mt-2 text-meta leading-[1.5] text-mute">
             Give this public key to the machine you are about to name. It is public —
             safe to paste into a provider&apos;s web form, a cloud-init file, or
             <code className="mx-1 font-mono text-slate">authorized_keys</code> on a
@@ -479,20 +479,20 @@ function HowWeGetIn({
           </p>
 
           <div className="mt-2 flex items-start gap-2">
-            <code className="min-w-0 flex-1 break-all rounded-[6px] border border-line bg-ground px-3 py-2 font-mono text-[11.5px] leading-[1.5] text-bone">
+            <code className="min-w-0 flex-1 break-all rounded-sm border border-line bg-ground px-3 py-2 font-mono text-meta leading-[1.5] text-bone">
               {isLoading ? "…" : (identity?.publicKey ?? "no key yet")}
             </code>
             <button
               type="button"
               onClick={copy}
               disabled={!identity}
-              className="shrink-0 rounded-[6px] border border-line px-3 py-2 text-[12px] text-slate hover:text-bone disabled:opacity-40"
+              className="shrink-0 rounded-sm border border-line px-3 py-2 text-meta text-slate hover:text-bone disabled:opacity-40"
             >
               {copied ? "Copied" : "Copy"}
             </button>
           </div>
 
-          <p className="mt-2 text-[12px] leading-[1.5] text-mute">
+          <p className="mt-2 text-meta leading-[1.5] text-mute">
             Most providers take it when you create the machine, or in its settings
             afterwards. Some manage keys their own way — Google Cloud through instance
             metadata or OS Login, and an SSH CA through the CA.
@@ -501,25 +501,25 @@ function HowWeGetIn({
           <button
             type="button"
             onClick={() => setShowing(!showing)}
-            className="mt-3 text-[12px] text-slate hover:text-bone"
+            className="mt-3 text-meta text-slate hover:text-bone"
           >
             {showing ? "▾" : "▸"} Adding it on the machine yourself
           </button>
 
           {showing && (
-            <pre className="mt-2 overflow-x-auto rounded-[4px] bg-black/25 px-3 py-2 font-mono text-[11px] leading-[1.7] text-bone">
+            <pre className="mt-2 overflow-x-auto rounded-sm bg-black/25 px-3 py-2 font-mono text-meta leading-[1.7] text-bone">
               {authorizedKeys(user, identity?.publicKey ?? "…")}
             </pre>
           )}
 
           <div className="mt-3 flex items-center justify-between gap-3">
-            <span className="font-mono text-[11px] text-mute">
+            <span className="font-mono text-meta text-mute">
               {identity?.fingerprint ?? ""}
             </span>
             <button
               type="button"
               onClick={() => onOwnKey(true)}
-              className="shrink-0 text-[12px] text-slate hover:text-bone"
+              className="shrink-0 text-meta text-slate hover:text-bone"
             >
               Use my own key instead →
             </button>
@@ -568,9 +568,9 @@ function Field({
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
         spellCheck={false}
-        className="mt-2 w-full rounded-[6px] border border-line bg-ground px-3 py-2 font-mono text-[12.5px] text-bone outline-none placeholder:text-mute focus:border-ember/40"
+        className="mt-2 w-full rounded-sm border border-line bg-ground px-3 py-2 font-mono text-meta text-bone outline-none placeholder:text-mute focus:border-dim/40"
       />
-      <p className="mt-2 text-[12px] leading-[1.5] text-mute">{children}</p>
+      <p className="mt-2 text-meta leading-[1.5] text-mute">{children}</p>
     </div>
   );
 }

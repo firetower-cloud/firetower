@@ -95,19 +95,19 @@ export function RepoSettings({ repo, onClose }: { repo: Repo; onClose: () => voi
   return (
     <Modal title={repo.slug} onClose={onClose} wide>
       <label className="eyebrow">Setup</label>
-      <p className="mt-1 text-[11.5px] text-mute">
+      <p className="mt-1 text-meta text-mute">
         Runs in the workspace before the agent starts, with the variables below.
       </p>
       <input
         value={setup}
         onChange={(e) => setSetup(e.target.value)}
         placeholder="npm ci && npm run db:migrate"
-        className="mt-2 w-full rounded-[5px] border border-line bg-[#0f0e0d] px-2.5 py-1.5 font-mono text-[12px] text-text outline-none focus:border-ember/50"
+        className="mt-2 w-full rounded-sm border border-line bg-ground px-2.5 py-1.5 font-mono text-meta text-text outline-none focus:border-dim/50"
       />
 
       <div className="mt-5 border-t border-line pt-4">
         <label className="eyebrow">Environment</label>
-        <p className="mt-1 text-[11.5px] leading-[1.5] text-mute">
+        <p className="mt-1 text-meta leading-[1.5] text-mute">
           Given to the agent and to everything it runs. Stored encrypted, and read
           once per session — but the agent can print them, so these are credentials
           it is allowed to use rather than secrets kept from it.
@@ -116,8 +116,8 @@ export function RepoSettings({ repo, onClose }: { repo: Repo; onClose: () => voi
         <div className="mt-3 flex flex-col">
           {held.map((n) => (
             <div key={n} className="flex items-center gap-3 border-b border-line-soft py-1.5">
-              <span className="font-mono text-[12px] text-bone">{n}</span>
-              <span className="min-w-0 flex-1 truncate font-mono text-[11.5px] text-mute">
+              <span className="font-mono text-meta text-bone">{n}</span>
+              <span className="min-w-0 flex-1 truncate font-mono text-meta text-mute">
                 {shown[n] ?? "••••••••••••"}
               </span>
               <button
@@ -130,7 +130,7 @@ export function RepoSettings({ repo, onClose }: { repo: Repo; onClose: () => voi
                     },
                   )
                 }
-                className="text-[11px] text-mute transition-colors hover:text-ember"
+                className="text-meta text-mute transition-colors hover:text-bone"
               >
                 {shown[n] ? "shown" : "Reveal"}
               </button>
@@ -141,7 +141,7 @@ export function RepoSettings({ repo, onClose }: { repo: Repo; onClose: () => voi
                     { onSuccess: refresh, onError: problem },
                   )
                 }
-                className="text-[11px] text-mute transition-colors hover:text-ember"
+                className="text-meta text-mute transition-colors hover:text-bone"
               >
                 Remove
               </button>
@@ -149,7 +149,7 @@ export function RepoSettings({ repo, onClose }: { repo: Repo; onClose: () => voi
           ))}
 
           {held.length === 0 && (
-            <p className="py-1.5 text-[12px] text-mute">Nothing yet.</p>
+            <p className="py-1.5 text-meta text-mute">Nothing yet.</p>
           )}
         </div>
 
@@ -160,7 +160,7 @@ export function RepoSettings({ repo, onClose }: { repo: Repo; onClose: () => voi
               onChange={(e) => setPasted(e.target.value)}
               rows={7}
               placeholder={"DATABASE_URL=postgres://…\nexport STRIPE_KEY=\"sk_test_…\"\n# comments and blank lines are fine"}
-              className="w-full rounded-[5px] border border-line bg-[#0f0e0d] px-2.5 py-2 font-mono text-[11.5px] text-text outline-none focus:border-ember/50"
+              className="w-full rounded-sm border border-line bg-ground px-2.5 py-2 font-mono text-meta text-text outline-none focus:border-dim/50"
             />
             <div className="mt-2 flex items-center gap-3">
               <Go
@@ -170,7 +170,7 @@ export function RepoSettings({ repo, onClose }: { repo: Repo; onClose: () => voi
                 {put.isPending ? "Storing…" : `Store ${namesIn(pasted).length}`}
               </Go>
               <Quiet onClick={() => { setPasting(false); setPasted(""); }}>Cancel</Quiet>
-              <span className="truncate font-mono text-[11px] text-mute">
+              <span className="truncate font-mono text-meta text-mute">
                 {namesIn(pasted).join(" · ")}
               </span>
             </div>
@@ -181,13 +181,13 @@ export function RepoSettings({ repo, onClose }: { repo: Repo; onClose: () => voi
               value={name}
               onChange={(e) => setName(e.target.value.toUpperCase())}
               placeholder="DATABASE_URL"
-              className="w-[40%] rounded-[5px] border border-line bg-[#0f0e0d] px-2.5 py-1.5 font-mono text-[12px] text-text outline-none focus:border-ember/50"
+              className="w-[40%] rounded-sm border border-line bg-ground px-2.5 py-1.5 font-mono text-meta text-text outline-none focus:border-dim/50"
             />
             <input
               value={value}
               onChange={(e) => setValue(e.target.value)}
               placeholder="value"
-              className="min-w-0 flex-1 rounded-[5px] border border-line bg-[#0f0e0d] px-2.5 py-1.5 font-mono text-[12px] text-text outline-none focus:border-ember/50"
+              className="min-w-0 flex-1 rounded-sm border border-line bg-ground px-2.5 py-1.5 font-mono text-meta text-text outline-none focus:border-dim/50"
             />
             <Go
               onClick={() => store({ variables: [{ name: name.trim(), value }] })}
@@ -200,21 +200,21 @@ export function RepoSettings({ repo, onClose }: { repo: Repo; onClose: () => voi
         )}
 
         {skipped.length > 0 && (
-          <ul className="mt-3 rounded-[5px] border border-ember/25 bg-ember/[0.04] px-2.5 py-1.5">
+          <ul className="mt-3 rounded-md border border-line bg-raise px-2.5 py-1.5">
             {skipped.map((s) => (
-              <li key={s} className="text-[11.5px] text-bone">
+              <li key={s} className="text-meta text-bone">
                 {s}
               </li>
             ))}
           </ul>
         )}
 
-        <label className="mt-4 flex items-center gap-2 text-[12px] text-dim">
+        <label className="mt-4 flex items-center gap-2 text-meta text-dim">
           <input
             type="checkbox"
             checked={writesFile}
             onChange={(e) => setWritesFile(e.target.checked)}
-            className="accent-ember"
+            className="accent-bone"
           />
           Also write them to a file in the workspace
         </label>
@@ -224,9 +224,9 @@ export function RepoSettings({ repo, onClose }: { repo: Repo; onClose: () => voi
               value={file}
               onChange={(e) => setFile(e.target.value)}
               placeholder=".env"
-              className="w-[220px] rounded-[5px] border border-line bg-[#0f0e0d] px-2.5 py-1.5 font-mono text-[12px] text-text outline-none focus:border-ember/50"
+              className="w-[220px] rounded-sm border border-line bg-ground px-2.5 py-1.5 font-mono text-meta text-text outline-none focus:border-dim/50"
             />
-            <span className="text-[11px] text-mute">
+            <span className="text-meta text-mute">
               written before setup runs, and kept out of git
             </span>
           </div>
@@ -234,7 +234,7 @@ export function RepoSettings({ repo, onClose }: { repo: Repo; onClose: () => voi
       </div>
 
       {failed && (
-        <p className="mt-3 rounded-[5px] border border-ember/30 bg-ember/[0.05] px-2.5 py-1.5 text-[11.5px] text-bone">
+        <p className="mt-3 rounded-md border border-line bg-raise px-2.5 py-1.5 text-meta text-bone">
           {failed}
         </p>
       )}

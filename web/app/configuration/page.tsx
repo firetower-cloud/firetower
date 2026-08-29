@@ -62,7 +62,7 @@ export default function Configuration() {
             }}
             className={`-mb-px border-b-2 px-3 py-2 text-ui transition-colors ${
               s.id === showing
-                ? "border-ember text-bone"
+                ? "border-bone text-bone"
                 : "border-transparent text-mute hover:text-text"
             }`}
           >

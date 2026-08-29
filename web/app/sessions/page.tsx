@@ -63,13 +63,13 @@ export default function AllSessions() {
   return (
     <div className="max-w-[900px] px-8 pt-8 pb-24">
       <header className="mb-7">
-        <Link href="/" className="text-[12px] text-mute transition-colors hover:text-text">
+        <Link href="/" className="text-meta text-mute transition-colors hover:text-text">
           ← Dashboard
         </Link>
-        <h1 className="mt-2 text-[26px] font-semibold tracking-[-0.02em] text-bone">
+        <h1 className="mt-2 text-display font-semibold text-bone">
           All sessions
         </h1>
-        <p className="mt-1.5 text-[14px] text-dim">
+        <p className="mt-1.5 text-body text-dim">
           {sessions.length > 0
             ? `${sessions.length}${done ? "" : "+"} so far, newest first.`
             : "Everything Firetower has run."}
@@ -85,22 +85,22 @@ export default function AllSessions() {
             <Link
               key={s.id}
               href={`/sessions/${s.id}`}
-              className="flex items-center gap-3 rounded-[5px] px-3 py-2 transition-colors hover:bg-panel"
+              className="flex items-center gap-3 rounded-sm px-3 py-2 transition-colors hover:bg-panel"
             >
               <Signal status={s.status} size={6} />
-              <span className={`shrink-0 text-[13.5px] ${ended ? "text-dim" : "text-bone"}`}>
+              <span className={`shrink-0 text-ui ${ended ? "text-dim" : "text-bone"}`}>
                 {s.name}
               </span>
-              <span className="font-mono text-[11.5px] text-mute">{many(s)}</span>
+              <span className="font-mono text-meta text-mute">{many(s)}</span>
               <span
-                className={`min-w-0 flex-1 truncate text-[13.5px] ${ended ? "text-dim" : "text-text"}`}
+                className={`min-w-0 flex-1 truncate text-ui ${ended ? "text-dim" : "text-text"}`}
               >
                 {s.title}
               </span>
-              <span className="hidden font-mono text-[11px] text-mute md:block">
+              <span className="hidden font-mono text-meta text-mute md:block">
                 {ended ? outcomeOf(s) : (STATUS_LABEL[s.status] ?? s.status)}
               </span>
-              <span className="w-10 text-right font-mono text-[11px] text-mute">
+              <span className="w-10 text-right font-mono text-meta text-mute">
                 {elapsed(minutesSince(s.createdAt))}
               </span>
             </Link>
@@ -109,19 +109,19 @@ export default function AllSessions() {
       </div>
 
       {error && (
-        <p className="mt-4 rounded-[6px] border border-ember/30 bg-ember/[0.05] px-3.5 py-2.5 text-[12.5px] text-bone">
+        <p className="mt-4 rounded-md border border-brick-deep bg-brick-tint px-3.5 py-2.5 text-meta text-brick">
           {error}
         </p>
       )}
 
       {!done && (
-        <div ref={sentinel} className="py-6 text-center text-[12px] text-mute">
+        <div ref={sentinel} className="py-6 text-center text-meta text-mute">
           {loading ? "Loading…" : " "}
         </div>
       )}
 
       {done && sessions.length === 0 && !error && (
-        <p className="panel px-4 py-6 text-center text-[13px] text-mute">
+        <p className="panel px-4 py-6 text-center text-ui text-mute">
           No sessions yet.
         </p>
       )}

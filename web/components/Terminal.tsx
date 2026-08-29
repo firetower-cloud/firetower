@@ -84,10 +84,10 @@ export function Terminal({
         // Matches the panel it sits in, so the terminal reads as part of the
         // page rather than a black rectangle dropped onto it.
         theme: {
-          background: "#0f0e0d",
-          foreground: "#d8d2c8",
-          cursor: "#f26430",
-          selectionBackground: "#2a2724",
+          background: paint("--color-ground"),
+          foreground: paint("--color-text"),
+          cursor: paint("--color-ember"),
+          selectionBackground: paint("--color-overlay"),
         },
         scrollback: 10000,
       });
@@ -166,7 +166,7 @@ export function Terminal({
     // Edge to edge. A terminal is the whole pane: the tab above already says
     // what it is, so a title bar repeated the label, and a border drew a box
     // around something that has no reason not to reach the sides.
-    <div className="relative h-full overflow-hidden bg-[#0f0e0d]">
+    <div className="relative h-full overflow-hidden bg-ground">
       {/* Four pixels, so glyphs and the cursor do not sit against the edge.
           It goes on the host rather than the box around it because the fit
           addon measures this element's content box to work out how many
@@ -177,12 +177,12 @@ export function Terminal({
           connected, which is almost always — a permanent bar saying "Shell"
           spent a row on a fact that never changes. */}
       {state === "closed" && (
-        <div className="absolute top-2 right-3 flex items-center gap-2 rounded-[7px] border border-line bg-panel px-2.5 py-1.5">
+        <div className="absolute top-2 right-3 flex items-center gap-2 rounded-md border border-line bg-panel px-2.5 py-1.5">
           <span className="h-1.5 w-1.5 rounded-full border border-mute" />
-          <span className="text-[11.5px] text-mute">Detached</span>
+          <span className="text-meta text-mute">Detached</span>
           <button
             onClick={() => setAttempt((n) => n + 1)}
-            className="text-[11.5px] text-dim transition-colors hover:text-ember"
+            className="text-meta text-dim transition-colors hover:text-bone"
           >
             Reconnect
           </button>
@@ -190,4 +190,15 @@ export function Terminal({
       )}
     </div>
   );
+}
+
+/**
+ * A colour from the design system, for the one consumer that cannot use a class.
+ *
+ * xterm paints into a canvas and takes literal colours, so the terminal is the
+ * single place a palette change could silently fail to reach. Reading the
+ * custom property means it cannot.
+ */
+function paint(name: string): string {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 }

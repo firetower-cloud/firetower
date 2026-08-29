@@ -19,13 +19,37 @@
 
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
+import { ArrowRight, RotateCw, UserRound } from "lucide-react";
 import { useListTasks } from "@/src/api/generated/tasks/tasks";
 import { useListRepos } from "@/src/api/generated/repos/repos";
 import type { Task, TaskKind, TaskState } from "@/src/api/generated/model";
 import { Modal } from "@/components/Modal";
 import { TaskDialog } from "@/components/TaskDialog";
 import { NewWorkspace } from "@/components/NewWorkspace";
+import {
+  Avatar,
+  Badge,
+  Button,
+  Card,
+  CardHead,
+  Columns,
+  Input,
+  List,
+  PageHead,
+  Row,
+  Segmented,
+  Select,
+} from "@/components/ui";
 import { elapsed, minutesSince } from "@/src/api/view";
+
+/** One set of widths, shared by the legend and every row under it. */
+const COL = {
+  id: "w-[72px] shrink-0",
+  who: "w-[88px] shrink-0",
+  state: "w-[76px] shrink-0",
+  when: "w-[76px] shrink-0",
+  act: "w-[152px] shrink-0",
+};
 
 export function Tasks() {
   const router = useRouter();
@@ -63,155 +87,140 @@ export function Tasks() {
 
   return (
     <div className="px-8 pt-6 pb-24">
-      <header className="mb-5 max-w-[900px]">
-        <div className="eyebrow">Tasks</div>
-        <h1 className="mt-2 text-[26px] font-semibold tracking-[-0.02em] text-bone">
-          {isPending ? "Looking…" : `${data?.total ?? tasks.length} to pick from.`}
-        </h1>
-        <p className="mt-1.5 max-w-[56ch] text-[14px] text-dim">
-          Read from GitHub as you look, never copied here. Starting one cuts a worktree and puts
-          the issue in the composer — unsent, so you can say what you want done with it first.
-        </p>
-      </header>
+      <PageHead eyebrow="Tasks" title={isPending ? "Looking…" : `${data?.total ?? tasks.length} to pick from.`}>
+        Read from GitHub as you look. Starting one cuts a worktree.
+      </PageHead>
 
-      <div className="mb-3 flex flex-wrap items-center gap-2">
-        <Toggle
-          options={[
-            ["issue", "Issues"],
-            ["pullRequest", "PRs"],
-          ]}
-          value={kind}
-          onChange={change<TaskKind>(setKind)}
-        />
-
-        <Toggle
-          options={[
-            ["open", "Open"],
-            ["closed", "Closed"],
-          ]}
-          value={state}
-          onChange={change<TaskState>(setState)}
-        />
-
-        <button
-          onClick={() => change<boolean>(setMine)(!mine)}
-          className={`rounded-[8px] border px-3 py-1.5 text-ui transition-colors ${
-            mine
-              ? "border-ember-deep bg-ember/[0.08] text-ember"
-              : "border-line text-mute hover:text-text"
-          }`}
+      {/* One card: what you are asking for, and what came back. The filters
+          were a loose row floating above a bordered list, which read as two
+          unrelated things — and the query line between them belongs to the
+          controls, not to the results. */}
+      <Card>
+        <CardHead
+          note={
+            /* What the chips actually sent. Shown because the box only holds
+               what somebody typed, and the request is both — seeing it is how
+               you learn the syntax well enough to type past the chips. */
+            <p className="font-mono text-meta text-mute">
+              {[
+                repo ? `repo:${repo}` : "your repositories",
+                kind === "pullRequest" ? "is:pr" : "is:issue",
+                state === "closed" ? "is:closed" : "is:open",
+                mine && "assignee:@me",
+                q,
+              ]
+                .filter(Boolean)
+                .join(" ")}
+            </p>
+          }
         >
-          Assigned to me
-        </button>
-
-        <select
-          // Chrome restores form controls across a reload and fires change as
-          // it does, which quietly narrowed the page to whichever repository
-          // had been chosen in a previous life — with the heading and the query
-          // line honestly reporting a scope nobody had picked this time.
-          autoComplete="off"
-          value={repo ?? ""}
-          onChange={(e) => change<string | undefined>(setRepo)(e.target.value || undefined)}
-          className="rounded-[8px] border border-line bg-ground px-2.5 py-1.5 text-ui text-dim focus:border-ember focus:outline-none"
-        >
-          <option value="">All your repositories</option>
-          {repos.map((r) => (
-            <option key={r.id} value={r.slug}>
-              {r.slug}
-            </option>
-          ))}
-        </select>
-
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            change<string>(setQ)(typed);
-          }}
-          className="flex min-w-[240px] flex-1 items-center gap-2"
-        >
-          <input
-            value={typed}
-            autoComplete="off"
-            onChange={(e) => setTyped(e.target.value)}
-            placeholder="label:bug sort:updated-desc"
-            spellCheck={false}
-            className="min-w-0 flex-1 rounded-[8px] border border-line bg-ground px-3 py-1.5 font-mono text-[12.5px] text-bone placeholder:text-mute focus:border-ember focus:outline-none"
+          <Segmented
+            options={[
+              ["issue", "Issues"],
+              ["pullRequest", "PRs"],
+            ]}
+            value={kind}
+            onChange={change<TaskKind>(setKind)}
           />
-        </form>
 
-        <button
-          onClick={() => refetch()}
-          title="Ask again"
-          className="rounded-[8px] border border-line px-2.5 py-1.5 text-ui text-mute transition-colors hover:text-ember"
-        >
-          {isFetching ? "…" : "↻"}
-        </button>
-      </div>
+          <Segmented
+            options={[
+              ["open", "Open"],
+              ["closed", "Closed"],
+            ]}
+            value={state}
+            onChange={change<TaskState>(setState)}
+          />
 
-      {/* What the chips actually sent. Shown because the box only holds what
-          somebody typed, and the request is both — seeing it is how you learn
-          the syntax well enough to type past the chips. */}
-      <p className="mb-4 font-mono text-[11px] text-mute">
-        {[
-          repo ? `repo:${repo}` : "your repositories",
-          kind === "pullRequest" ? "is:pr" : "is:issue",
-          state === "closed" ? "is:closed" : "is:open",
-          mine && "assignee:@me",
-          q,
-        ]
-          .filter(Boolean)
-          .join(" ")}
-      </p>
+          <Button
+            icon={UserRound}
+            variant={mine ? "primary" : "default"}
+            onClick={() => change<boolean>(setMine)(!mine)}
+          >
+            Assigned to me
+          </Button>
 
-      {isError && (
-        <div className="rounded-[10px] border border-ember-deep bg-ember/[0.05] px-4 py-3">
-          <p className="text-[13.5px] text-ember">{message(error)}</p>
-        </div>
-      )}
+          <Select
+            value={repo ?? ""}
+            onChange={(v) => change<string | undefined>(setRepo)(v || undefined)}
+            options={[
+              ["", "All your repositories"],
+              ...repos.map((r) => [r.slug, r.slug] as [string, string]),
+            ]}
+          />
 
-      {!isError && isPending && <p className="py-10 text-center text-[13px] text-mute">Looking…</p>}
-
-      {!isError && !isPending && tasks.length === 0 && (
-        <div className="rounded-[10px] border border-dashed border-line px-5 py-10 text-center">
-          <p className="text-[14px] text-dim">Nothing matches.</p>
-          <p className="mx-auto mt-1.5 max-w-[46ch] text-[12.5px] leading-[1.6] text-mute">
-            The filters above are sent to GitHub as a query, so anything its own search accepts
-            works in the box.
-          </p>
-        </div>
-      )}
-
-      {tasks.length > 0 && (
-        <div className="overflow-hidden rounded-[10px] border border-line">
-          {tasks.map((task, i) => (
-            <Row
-              key={task.id}
-              task={task}
-              first={i === 0}
-              onRead={() => setReading(i)}
-              onStart={() => setStarting(task)}
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              change<string>(setQ)(typed);
+            }}
+            className="flex min-w-[220px] flex-1 items-center gap-2"
+          >
+            <Input
+              value={typed}
+              onChange={setTyped}
+              mono
+              placeholder="label:bug sort:updated-desc"
+              className="flex-1"
             />
-          ))}
-        </div>
-      )}
+          </form>
+
+          <Button
+            icon={RotateCw}
+            title="Ask again"
+            onClick={() => refetch()}
+            disabled={isFetching}
+          />
+        </CardHead>
+
+        {isError && <p className="px-4 py-6 text-center text-ui text-brick">{message(error)}</p>}
+
+        {!isError && isPending && (
+          <p className="px-4 py-10 text-center text-ui text-mute">Looking…</p>
+        )}
+
+        {!isError && !isPending && tasks.length === 0 && (
+          <div className="px-4 py-12 text-center">
+            <p className="text-ui text-dim">Nothing matches.</p>
+            <p className="mt-1 text-meta text-mute">
+              The box takes anything GitHub search accepts.
+            </p>
+          </div>
+        )}
+
+        {tasks.length > 0 && (
+          <>
+            <Columns>
+              <span className={COL.id}>ID</span>
+              <span className="min-w-0 flex-1">Title / context</span>
+              <span className={`${COL.who} truncate`}>Assignees</span>
+              <span className={`${COL.state} truncate`}>Status</span>
+              <span className={`${COL.when} text-right`}>Updated</span>
+              <span className={COL.act} />
+            </Columns>
+            <List flush>
+              {tasks.map((task, i) => (
+                <TaskRow
+                  key={task.id}
+                  task={task}
+                  onRead={() => setReading(i)}
+                  onStart={() => setStarting(task)}
+                />
+              ))}
+            </List>
+          </>
+        )}
+      </Card>
 
       {(page > 1 || data?.more) && (
-        <div className="mt-4 flex items-center justify-center gap-4">
-          <button
-            disabled={page <= 1}
-            onClick={() => setPage((n) => n - 1)}
-            className="text-ui text-mute transition-colors hover:text-text disabled:opacity-40"
-          >
+        <div className="mt-4 flex items-center justify-center gap-3">
+          <Button variant="quiet" size="sm" disabled={page <= 1} onClick={() => setPage((n) => n - 1)}>
             ‹ Previous
-          </button>
-          <span className="font-mono text-[12px] text-dim">{page}</span>
-          <button
-            disabled={!data?.more}
-            onClick={() => setPage((n) => n + 1)}
-            className="text-ui text-mute transition-colors hover:text-text disabled:opacity-40"
-          >
+          </Button>
+          <span className="font-mono text-meta text-dim">{page}</span>
+          <Button variant="quiet" size="sm" disabled={!data?.more} onClick={() => setPage((n) => n + 1)}>
             Next ›
-          </button>
+          </Button>
         </div>
       )}
 
@@ -258,117 +267,94 @@ export function Tasks() {
 }
 
 /** One task, and the button that turns it into a worktree. */
-function Row({
+function TaskRow({
   task,
-  first,
   onRead,
   onStart,
 }: {
   task: Task;
-  first: boolean;
   onRead: () => void;
   onStart: () => void;
 }) {
   return (
-    <div
-      className={`flex items-center gap-4 px-4 py-3 transition-colors hover:bg-raise/40 ${
-        first ? "" : "border-t border-line"
-      }`}
-    >
+    <Row>
       <a
         href={task.url}
         target="_blank"
         rel="noreferrer"
         title="Read it on GitHub"
-        className="w-16 shrink-0 rounded-[6px] border border-line px-2 py-1 text-center font-mono text-[11px] text-mute transition-colors hover:text-ember"
+        onClick={(e) => e.stopPropagation()}
+        className={`${COL.id} rounded-sm border border-line bg-ground px-2 py-1 text-center font-mono text-meta text-mute transition-colors hover:border-line hover:text-bone`}
       >
         {task.key}
       </a>
 
-      <div className="min-w-0 flex-1">
+      <div className="min-w-0 flex-1 py-2.5">
         <button onClick={onRead} className="block w-full truncate text-left">
-          <span className="text-[14px] text-text">{task.title}</span>
+          <span className="text-title text-bone">{task.title}</span>
         </button>
         <div className="mt-1 flex flex-wrap items-center gap-1.5">
-          {task.assignees.slice(0, 3).map((who) => (
-            <span key={who.login} className="font-mono text-[11px] text-mute">
+          {task.assignees.slice(0, 1).map((who) => (
+            <span key={who.login} className="font-mono text-meta text-mute">
               {who.login}
             </span>
           ))}
           {task.labels.slice(0, 4).map((label) => (
-            <span
+            <Badge
               key={label.name}
-              className="rounded-[5px] border px-1.5 py-px text-[10.5px]"
               style={
                 label.colour
-                  ? { borderColor: `#${label.colour}66`, color: `#${label.colour}` }
+                  ? {
+                      // The tracker owns these colours. Its own hex at a tenth
+                      // opacity behind, full strength on top: a label reads as
+                      // itself without any one of them shouting over the row.
+                      backgroundColor: `#${label.colour}1a`,
+                      borderColor: `#${label.colour}44`,
+                      color: `#${label.colour}`,
+                    }
                   : undefined
               }
             >
               {label.name}
-            </span>
+            </Badge>
           ))}
         </div>
       </div>
 
-      <span
-        className={`shrink-0 rounded-[6px] border px-2 py-0.5 text-[11px] ${
-          task.state === "open"
-            ? "border-sage/40 text-sage"
-            : "border-line text-mute"
-        }`}
-      >
-        {task.state === "open" ? "Open" : "Closed"}
-      </span>
+      <div className={`${COL.who} flex -space-x-1.5`}>
+        {task.assignees.slice(0, 3).map((who) => (
+          <Avatar key={who.login} name={who.login} />
+        ))}
+      </div>
 
-      <span className="w-16 shrink-0 text-right font-mono text-[11px] text-mute">
+      <div className={COL.state}>
+        <Badge tone={task.state === "open" ? "sage" : "neutral"}>
+          {task.state === "open" ? "Open" : "Closed"}
+        </Badge>
+      </div>
+
+      <span className={`${COL.when} text-right font-mono text-meta text-mute`}>
         {elapsed(minutesSince(task.updatedAt))}
       </span>
 
       {/* Reading is the safe one and comes first; starting is the deliberate
           one and is the last thing on the row. Both are named, because an icon
           alone is a guess on first sight. */}
-      <button
-        onClick={onRead}
-        title="Read it"
-        className="shrink-0 rounded-[8px] border border-line px-3 py-1.5 text-ui text-mute transition-colors hover:text-text"
-      >
-        View
-      </button>
-
-      <button
-        onClick={onStart}
-        className="shrink-0 rounded-[8px] border border-line px-3 py-1.5 text-ui text-dim transition-colors hover:border-ember/40 hover:text-ember"
-      >
-        Start →
-      </button>
-    </div>
-  );
-}
-
-function Toggle<T extends string>({
-  options,
-  value,
-  onChange,
-}: {
-  options: [T, string][];
-  value: T;
-  onChange: (value: T) => void;
-}) {
-  return (
-    <div className="flex items-center gap-px rounded-[8px] border border-line p-px">
-      {options.map(([id, label]) => (
-        <button
-          key={id}
-          onClick={() => onChange(id)}
-          className={`rounded-[7px] px-3 py-1.5 text-ui transition-colors ${
-            id === value ? "bg-raise text-bone" : "text-mute hover:text-text"
-          }`}
+      <div className={`${COL.act} flex items-center justify-end gap-2`}>
+        <Button
+          variant="quiet"
+          size="sm"
+          onClick={onRead}
+          title="Read it"
+          className="opacity-0 transition-opacity group-hover:opacity-100"
         >
-          {label}
-        </button>
-      ))}
-    </div>
+          View
+        </Button>
+        <Button size="sm" trailing={ArrowRight} onClick={onStart}>
+          Start
+        </Button>
+      </div>
+    </Row>
   );
 }
 

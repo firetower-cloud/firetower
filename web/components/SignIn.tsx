@@ -72,13 +72,13 @@ export function SignIn() {
           <span className="text-bone">
             <Mark size={22} />
           </span>
-          <span className="font-narrow text-[13px] font-semibold tracking-[0.22em] text-bone uppercase">
+          <span className="font-narrow text-ui font-semibold tracking-[0.22em] text-bone uppercase">
             Firetower
           </span>
         </div>
 
         <form onSubmit={submit} className="mt-8">
-          <label className="block text-[12px] text-mute" htmlFor="username">
+          <label className="block text-meta text-mute" htmlFor="username">
             Username
           </label>
           <input
@@ -88,10 +88,10 @@ export function SignIn() {
             autoFocus
             value={username}
             onChange={(e) => setUsername(e.target.value)}
-            className="mt-1.5 w-full rounded border border-line bg-transparent px-3 py-2 text-[13.5px] text-bone outline-none focus:border-ember"
+            className="mt-1.5 w-full rounded border border-line bg-transparent px-3 py-2 text-ui text-bone outline-none focus:border-dim"
           />
 
-          <label className="mt-4 block text-[12px] text-mute" htmlFor="password">
+          <label className="mt-4 block text-meta text-mute" htmlFor="password">
             Password
           </label>
           <input
@@ -101,11 +101,11 @@ export function SignIn() {
             autoComplete="current-password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            className="mt-1.5 w-full rounded border border-line bg-transparent px-3 py-2 text-[13.5px] text-bone outline-none focus:border-ember"
+            className="mt-1.5 w-full rounded border border-line bg-transparent px-3 py-2 text-ui text-bone outline-none focus:border-dim"
           />
 
           {failed && (
-            <p className="mt-3 text-[12.5px] text-ember" role="alert">
+            <p className="mt-3 text-meta text-brick" role="alert">
               {failed}
             </p>
           )}
@@ -113,16 +113,16 @@ export function SignIn() {
           <button
             type="submit"
             disabled={login.isPending || !username || !password}
-            className="mt-5 w-full rounded bg-ember px-3 py-2 text-[13px] font-medium text-ink disabled:opacity-40"
+            className="mt-5 w-full rounded-md bg-bone px-3 py-2 text-ui font-medium text-ground transition-colors hover:bg-white disabled:bg-line disabled:text-mute"
           >
             {login.isPending ? "Signing in…" : "Sign in"}
           </button>
         </form>
 
-        <p className="mt-6 text-[12px] leading-[1.6] text-mute">
+        <p className="mt-6 text-meta leading-[1.6] text-mute">
           The first start prints a username and password in the log. If you have
           lost it, run{" "}
-          <code className="font-mono text-[11.5px] text-slate">
+          <code className="font-mono text-meta text-slate">
             firetower passwd &lt;username&gt;
           </code>{" "}
           on the machine Firetower runs on.

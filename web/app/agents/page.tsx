@@ -36,17 +36,16 @@ export default function Agents() {
     <div className="max-w-[900px] px-8 pt-8 pb-24">
       <header className="mb-7">
         <div className="eyebrow">Agents</div>
-        <h1 className="mt-2 text-[26px] font-semibold tracking-[-0.02em] text-bone">
+        <h1 className="mt-2 text-display font-semibold text-bone">
           {isLoading
             ? "Looking…"
             : waiting === 0
               ? `${configured} configured.`
               : `${waiting} still ${waiting === 1 ? "needs" : "need"} a credential.`}
         </h1>
-        <p className="mt-1.5 max-w-[56ch] text-[14px] text-dim">
-          Firetower runs the real CLI on your hosts. You authenticate once here, and the
-          credential is handed to a workspace when one starts — never written to a
-          worker&apos;s disk.
+        <p className="mt-1.5 text-ui text-dim">
+          Authenticate once here. The credential is handed to a workspace as it starts,
+          never written to a worker&apos;s disk.
         </p>
       </header>
 
@@ -59,7 +58,7 @@ export default function Agents() {
       <button
         onClick={refresh}
         disabled={check.isPending}
-        className="mt-4 w-full rounded-[6px] border border-dashed border-line py-3 text-[13px] text-mute transition-colors hover:border-ember/40 hover:text-ember disabled:hover:border-line disabled:hover:text-mute"
+        className="mt-4 w-full rounded-sm border border-dashed border-line py-3 text-ui text-mute transition-colors hover:border-line hover:text-bone disabled:hover:border-line disabled:hover:text-mute"
       >
         {check.isPending ? "Checking your hosts…" : "Check hosts again"}
       </button>
@@ -86,14 +85,14 @@ function AgentRow({
   return (
     <div className="panel px-4 py-3.5">
       <div className="flex items-center gap-3">
-        <span className="text-[13.5px] text-bone">{agent.label}</span>
+        <span className="text-ui text-bone">{agent.label}</span>
         <Mode agent={agent} />
         {/* Connecting is not gated on there being a driver. Signing in is the
             half that needs a person and a browser, and it is worth having done
             before a session can use it — the row still says there is no driver
             yet, so nobody is being told the agent will run. */}
         {(agent.supported || agent.signsInWithACode) && agent.needsCredential && (
-          <button onClick={onConfigure} className="ml-auto text-[11.5px] text-mute transition-colors hover:text-ember">
+          <button onClick={onConfigure} className="ml-auto text-meta text-mute transition-colors hover:text-bone">
             {agent.mode ? "Change" : "Connect"}
           </button>
         )}
@@ -108,7 +107,7 @@ function AgentRow({
                 },
               )
             }
-            className="text-[11.5px] text-mute transition-colors hover:text-ember"
+            className="text-meta text-mute transition-colors hover:text-bone"
           >
             Forget
           </button>
@@ -116,7 +115,7 @@ function AgentRow({
       </div>
 
       {!agent.supported && (
-        <p className="mt-2 max-w-[62ch] text-[12.5px] leading-[1.5] text-mute">
+        <p className="mt-2 max-w-[62ch] text-meta leading-[1.5] text-mute">
           Firetower has no driver for {agent.label} yet, so it cannot start a session on
           one. It is listed because it may be installed on your hosts — that is worth
           seeing, and it is what a driver would use.
@@ -135,7 +134,7 @@ function AgentRow({
         </div>
 
         {agent.hosts.length === 0 && (
-          <p className="text-[12px] text-mute">No hosts yet.</p>
+          <p className="text-meta text-mute">No hosts yet.</p>
         )}
 
         {agent.hosts.map((h) => (
@@ -143,20 +142,20 @@ function AgentRow({
             <span
               className={`h-1.5 w-1.5 rounded-full ${h.installed ? "bg-sage" : "border border-mute"}`}
             />
-            <span className="font-mono text-[11.5px] text-dim">{h.hostName}</span>
+            <span className="font-mono text-meta text-dim">{h.hostName}</span>
             {h.installed ? (
               <>
-                <span className="shrink-0 font-mono text-[11px] text-mute">{h.version}</span>
+                <span className="shrink-0 font-mono text-meta text-mute">{h.version}</span>
                 {h.loggedIn === false && (
-                  <span className="shrink-0 text-[11px] text-ember">signed out</span>
+                  <span className="shrink-0 text-meta text-brick">signed out</span>
                 )}
                 {h.account && (
-                  <span className="min-w-0 truncate text-[11px] text-slate">{h.account}</span>
+                  <span className="min-w-0 truncate text-meta text-slate">{h.account}</span>
                 )}
               </>
             ) : (
               <>
-                <span className="text-[11.5px] text-mute">
+                <span className="text-meta text-mute">
                   {h.checkedAt ? "not installed" : "not checked yet"}
                 </span>
                 <span className="ml-auto flex items-center gap-2.5">
@@ -211,8 +210,8 @@ function Mode({ agent }: { agent: AgentView }) {
 function Tag({ children, warn }: { children: React.ReactNode; warn?: boolean }) {
   return (
     <span
-      className={`rounded-[4px] border px-1.5 py-0.5 font-mono text-[10.5px] ${
-        warn ? "border-ember/30 text-ember" : "border-line text-slate"
+      className={`rounded-sm border px-1.5 py-0.5 font-mono text-micro ${
+        warn ? "border-brick-deep text-brick" : "border-line text-slate"
       }`}
     >
       {children}

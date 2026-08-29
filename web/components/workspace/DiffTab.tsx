@@ -23,19 +23,19 @@ export function DiffTab({ sessionId, path }: { sessionId: string; path: string }
   return (
     <div className="flex h-full min-h-0 flex-col">
       <header className="flex h-9 shrink-0 items-center gap-2 border-b border-line bg-panel px-3">
-        <span className="min-w-0 flex-1 truncate font-mono text-[11.5px] text-slate" title={path}>
+        <span className="min-w-0 flex-1 truncate font-mono text-meta text-slate" title={path}>
           {path}
         </span>
         {file && (
           <>
-            <span className="shrink-0 font-mono text-[10.5px] text-sage">+{file.added}</span>
-            <span className="shrink-0 font-mono text-[10.5px] text-brick">−{file.removed}</span>
+            <span className="shrink-0 font-mono text-micro text-sage">+{file.added}</span>
+            <span className="shrink-0 font-mono text-micro text-brick">−{file.removed}</span>
           </>
         )}
         <button
           onClick={() => open.file(path)}
           title="Open the file itself"
-          className="shrink-0 text-[11px] text-mute transition-colors hover:text-ember"
+          className="shrink-0 text-meta text-mute transition-colors hover:text-bone"
         >
           ▤
         </button>
@@ -43,7 +43,7 @@ export function DiffTab({ sessionId, path }: { sessionId: string; path: string }
           <button
             onClick={() => open.diff(path, true)}
             title="Open beside"
-            className="shrink-0 text-[12px] text-mute transition-colors hover:text-ember"
+            className="shrink-0 text-meta text-mute transition-colors hover:text-bone"
           >
             ⊞
           </button>
@@ -62,7 +62,7 @@ export function DiffTab({ sessionId, path }: { sessionId: string; path: string }
           </Note>
         )}
         {file && (
-          <pre className="px-3 py-2 font-mono text-[11.5px] leading-[1.6]">
+          <pre className="px-3 py-2 font-mono text-meta leading-[1.6]">
             {file.patch.split("\n").map((line, i) => (
               <div key={i} className={colour(line)}>
                 {line || " "}
@@ -80,7 +80,7 @@ function colour(line: string) {
   if (line.startsWith("+++") || line.startsWith("---")) return "text-mute";
   if (line.startsWith("+")) return "bg-sage/[0.07] text-sage";
   if (line.startsWith("-")) return "bg-brick/[0.07] text-brick";
-  if (line.startsWith("@@")) return "text-ember/70";
+  if (line.startsWith("@@")) return "text-slate";
   if (line.startsWith("diff --git") || line.startsWith("index ")) return "text-mute";
   return "text-dim";
 }
@@ -88,7 +88,7 @@ function colour(line: string) {
 function Note({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex h-full items-center justify-center px-8">
-      <p className="max-w-[44ch] text-center text-[13px] text-mute">{children}</p>
+      <p className="max-w-[44ch] text-center text-ui text-mute">{children}</p>
     </div>
   );
 }

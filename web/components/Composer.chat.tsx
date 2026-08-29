@@ -1,6 +1,8 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { ArrowUp, Plus } from "lucide-react";
+import { IconButton } from "@/components/ui";
+import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { takeDraft } from "@/src/workspace/draft";
 import { useAttachFile, useListFiles } from "@/src/api/generated/sessions/sessions";
 import type { Attached, Checkout, SlashCommand, Usage } from "@/src/api/generated/model";
@@ -67,6 +69,22 @@ export function ChatComposer({
   const [files, setFiles] = useState<{ name: string; path: string }[]>([]);
   const attach = useAttachFile();
   const box = useRef<HTMLTextAreaElement>(null);
+
+  /**
+   * The box grows with the message.
+   *
+   * Two fixed rows meant anything longer scrolled inside them — a scrollbar
+   * down the middle of the composer, and no way to see the paragraph you had
+   * just written without dragging it. It stops growing at a third of the
+   * window, which is the point past which the transcript above stops being
+   * readable; only then does it scroll, and on a bar you can barely see.
+   */
+  useLayoutEffect(() => {
+    const el = box.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, Math.round(window.innerHeight / 3))}px`;
+  }, [draft, images.length, files.length]);
   const picker = useRef<HTMLInputElement>(null);
 
   /**
@@ -156,10 +174,10 @@ export function ChatComposer({
         setOver(false);
         await take(Array.from(e.dataTransfer.files));
       }}
-      className={`rounded-[20px] transition-colors ${over ? "bg-raise" : ""}`}
+      className={`rounded-lg transition-colors ${over ? "bg-raise" : ""}`}
     >
       {suggestions.length > 0 && (
-        <ul className="mb-2 max-h-[280px] overflow-y-auto rounded-[14px] border border-line bg-panel py-1.5 shadow-[0_8px_28px_-12px_rgba(0,0,0,0.7)]">
+        <ul className="mb-2 max-h-[280px] overflow-y-auto rounded-lg border border-line bg-panel py-1.5 shadow-[0_8px_28px_-12px_rgba(0,0,0,0.7)]">
           {suggestions.map((s, i) => (
             <li key={s.value}>
               <button
@@ -169,9 +187,9 @@ export function ChatComposer({
                   i === highlighted ? "bg-raise" : ""
                 }`}
               >
-                <span className="font-mono text-[13px] text-bone">{s.value}</span>
+                <span className="font-mono text-ui text-bone">{s.value}</span>
                 {s.hint && (
-                  <span className="min-w-0 truncate text-[12.5px] text-mute">{s.hint}</span>
+                  <span className="min-w-0 truncate text-meta text-mute">{s.hint}</span>
                 )}
               </button>
             </li>
@@ -180,7 +198,7 @@ export function ChatComposer({
       )}
 
       {refused && (
-        <p className="mb-2 text-[12.5px] text-brick">{refused}</p>
+        <p className="mb-2 text-meta text-brick">{refused}</p>
       )}
 
       {files.length > 0 && (
@@ -188,16 +206,16 @@ export function ChatComposer({
           {files.map((file, i) => (
             <span
               key={file.path}
-              className="flex items-center gap-1.5 rounded-[6px] border border-line bg-panel px-2 py-1"
+              className="flex items-center gap-1.5 rounded-sm border border-line bg-panel px-2 py-1"
               title={file.path}
             >
-              <span className="max-w-[180px] truncate font-mono text-[12.5px] text-dim">
+              <span className="max-w-[180px] truncate font-mono text-meta text-dim">
                 {file.name}
               </span>
               <button
                 onClick={() => setFiles((held) => held.filter((_, at) => at !== i))}
                 aria-label={`Remove ${file.name}`}
-                className="text-[12px] text-mute hover:text-bone"
+                className="text-meta text-mute hover:text-bone"
               >
                 ×
               </button>
@@ -207,7 +225,7 @@ export function ChatComposer({
       )}
 
       {attach.isPending && (
-        <p className="mb-2 text-[12.5px] text-mute">Putting it in the workspace…</p>
+        <p className="mb-2 text-meta text-mute">Putting it in the workspace…</p>
       )}
 
       {images.length > 0 && (
@@ -218,12 +236,12 @@ export function ChatComposer({
               <img
                 src={`data:${image.mediaType};base64,${image.data}`}
                 alt=""
-                className="h-14 w-14 rounded-[4px] border border-line object-cover"
+                className="h-14 w-14 rounded-sm border border-line object-cover"
               />
               <button
                 onClick={() => setImages((held) => held.filter((_, at) => at !== i))}
                 aria-label="Remove image"
-                className="absolute -top-1.5 -right-1.5 h-5 w-5 rounded-full border border-line bg-ground text-[12px] text-dim hover:text-bone"
+                className="absolute -top-1.5 -right-1.5 h-5 w-5 rounded-full border border-line bg-ground text-meta text-dim hover:text-bone"
               >
                 ×
               </button>
@@ -237,10 +255,10 @@ export function ChatComposer({
           floating beside it, which is what stops a message box reading as a
           form. */}
       <div
-        className={`rounded-[20px] border bg-panel shadow-[0_1px_0_rgba(255,255,255,0.03)_inset,0_10px_30px_-18px_rgba(0,0,0,0.9)] transition-colors ${
+        className={`rounded-lg border bg-panel shadow-[0_1px_0_rgba(255,255,255,0.03)_inset,0_10px_30px_-18px_rgba(0,0,0,0.9)] transition-colors ${
           over
-            ? "border-ember"
-            : "border-line focus-within:border-ember-deep focus-within:bg-raise/40"
+            ? "border-bone"
+            : "border-line focus-within:border-mute/60 focus-within:bg-raise/40"
         }`}
       >
         <textarea
@@ -292,7 +310,7 @@ export function ChatComposer({
             live ? "Ask for follow-up changes, or attach a file" : "This session has finished."
           }
           disabled={!live}
-          className="min-h-[52px] w-full resize-none bg-transparent px-4.5 pt-3.5 text-body text-text placeholder:text-mute focus:outline-none disabled:opacity-50"
+          className="scroll-slim min-h-[52px] w-full resize-none bg-transparent px-4.5 pt-3.5 text-body text-text placeholder:text-mute focus:outline-none disabled:opacity-50"
         />
 
         {/* Controls, not captions. Everything here changes something; what is
@@ -300,17 +318,13 @@ export function ChatComposer({
         <div className="flex items-center gap-0.5 px-3 pb-2.5">
           {/* Discoverable. Pasting and dropping both work and neither announces
               itself, so somebody who has not been told cannot know they can. */}
-          <button
+          <IconButton
+            of={Plus}
+            size="sm"
+            label="Attach a file or an image"
             onClick={() => picker.current?.click()}
             disabled={!live}
-            aria-label="Attach a file"
-            title="Attach a file or an image"
-            className="grid h-8 w-8 shrink-0 place-items-center rounded-full text-mute transition-colors hover:bg-raise hover:text-bone disabled:opacity-40"
-          >
-            <svg viewBox="0 0 16 16" className="h-4 w-4" fill="none" stroke="currentColor">
-              <path d="M8 3.5v9M3.5 8h9" strokeWidth="1.5" strokeLinecap="round" />
-            </svg>
-          </button>
+          />
           <input
             ref={picker}
             type="file"
@@ -341,31 +355,21 @@ export function ChatComposer({
           <div className="ml-auto flex items-center gap-3">
             {usage && <Context usage={usage} limits={limits} />}
             {working ? (
-              <button
+              <IconButton
+                variant="outline"
+                label="Stop the agent"
                 onClick={onStop}
-                aria-label="Stop the agent"
-                title="Stop"
-                className="grid h-10 w-10 place-items-center rounded-full border border-line text-dim transition-colors hover:border-brick hover:text-brick"
-              >
-                <span className="block h-3 w-3 rounded-[3px] bg-current" />
-              </button>
+                glyph={<span className="block h-3 w-3 rounded-sm bg-current" />}
+                className="hover:border-brick-deep hover:text-brick"
+              />
             ) : (
-              <button
+              <IconButton
+                of={ArrowUp}
+                variant="primary"
+                label="Send"
                 onClick={submit}
                 disabled={!live || (!draft.trim() && images.length === 0 && files.length === 0)}
-                aria-label="Send"
-                title="Send"
-                className="grid h-10 w-10 place-items-center rounded-full bg-ember text-ground transition-opacity hover:opacity-90 disabled:bg-raise disabled:text-mute"
-              >
-                <svg viewBox="0 0 16 16" className="h-4 w-4" fill="none" stroke="currentColor">
-                  <path
-                    d="M8 13V3.5M3.75 7.75L8 3.5l4.25 4.25"
-                    strokeWidth="1.75"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                </svg>
-              </button>
+              />
             )}
           </div>
         </div>
@@ -399,7 +403,7 @@ export function ChatComposer({
           {onAddRepo && (
             <button
               onClick={onAddRepo}
-              className="rounded-[5px] px-1.5 py-0.5 text-mute transition-colors hover:bg-raise hover:text-text"
+              className="rounded-sm px-1.5 py-0.5 text-mute transition-colors hover:bg-raise hover:text-text"
             >
               + repo
             </button>
@@ -408,7 +412,7 @@ export function ChatComposer({
       )}
 
       {failed && (
-        <p className="mt-1.5 text-[12.5px] text-brick">
+        <p className="mt-1.5 text-meta text-brick">
           That didn&apos;t reach the agent. It may have stopped.
         </p>
       )}

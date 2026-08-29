@@ -1,5 +1,7 @@
 "use client";
 
+import { ChevronDown } from "lucide-react";
+import { Icon } from "@/components/ui";
 import { useEffect, useRef, useState } from "react";
 
 /**
@@ -74,13 +76,11 @@ export function Picker({
         className="flex h-8 items-center gap-1.5 rounded-full px-3 text-ui text-dim transition-colors hover:bg-raise hover:text-bone disabled:opacity-50"
       >
         {showing?.label ?? fallback}
-        <svg viewBox="0 0 10 10" aria-hidden className="h-2.5 w-2.5 opacity-50" fill="none" stroke="currentColor">
-          <path d="M2.5 4l2.5 2.5L7.5 4" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
+        <Icon of={ChevronDown} size={12} className="opacity-60" />
       </button>
 
       {open && (
-        <ul className="absolute bottom-full left-0 z-20 mb-2 max-h-[340px] w-[264px] overflow-y-auto rounded-[14px] border border-line bg-panel py-1.5 shadow-[0_12px_36px_-14px_rgba(0,0,0,0.85)]">
+        <ul className="absolute bottom-full left-0 z-20 mb-2 max-h-[340px] w-[264px] overflow-y-auto rounded-lg border border-line bg-panel py-1.5 shadow-[0_12px_36px_-14px_rgba(0,0,0,0.85)]">
           {choices.map((choice, i) => {
             const on = matches(choice.value, current);
             const first = choice.grave && !choices[i - 1]?.grave;
@@ -95,7 +95,7 @@ export function Picker({
                 >
                   <span
                     className={`block text-ui ${
-                      on ? "text-ember" : choice.grave ? "text-dim" : "text-text"
+                      on ? "text-bone" : choice.grave ? "text-dim" : "text-text"
                     }`}
                   >
                     {choice.label}

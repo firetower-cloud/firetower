@@ -1,5 +1,7 @@
 "use client";
 
+import { Check, LoaderCircle } from "lucide-react";
+import { Icon } from "@/components/ui";
 import { useEffect, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Modal, Foot, Go, Quiet } from "./Modal";
@@ -43,7 +45,7 @@ export function ConnectRepo({ onClose }: { onClose: () => void }) {
       {manual ? (
         <PasteRemote onBack={() => setManual(false)} onClose={onClose} />
       ) : !provider ? (
-        <p className="py-6 text-center text-[13px] text-mute">Looking…</p>
+        <p className="py-6 text-center text-ui text-mute">Looking…</p>
       ) : !provider.configured ? (
         <NotConfigured provider={provider} onManual={() => setManual(true)} />
       ) : !connected ? (
@@ -95,7 +97,7 @@ function Authorize({
   if (!pending) {
     return (
       <>
-        <p className="max-w-[52ch] text-[13.5px] leading-[1.6] text-dim">
+        <p className="max-w-[52ch] text-ui leading-[1.6] text-dim">
           Firetower needs access to clone your repositories and push the branch a
           session works on. You choose which ones on {provider.label}.
         </p>
@@ -105,7 +107,7 @@ function Authorize({
             "The token is encrypted before it is stored, and every read of it is logged.",
             "Servers running your sessions never store it.",
           ].map((line) => (
-            <li key={line} className="flex gap-2.5 text-[12.5px] text-slate">
+            <li key={line} className="flex gap-2.5 text-meta text-slate">
               <span className="mt-[7px] h-[3px] w-[3px] shrink-0 rounded-full bg-mute" />
               {line}
             </li>
@@ -126,13 +128,13 @@ function Authorize({
 
   return (
     <>
-      <p className="text-[13.5px] text-dim">
+      <p className="text-ui text-dim">
         A tab opened at{" "}
         <a
           href={pending.verificationUri}
           target="_blank"
           rel="noopener"
-          className="text-ember underline underline-offset-2"
+          className="text-dim underline underline-offset-2 transition-colors hover:text-bone"
         >
           {pending.verificationUri.replace(/^https?:\/\//, "")}
         </a>
@@ -141,7 +143,7 @@ function Authorize({
 
       <CodeToType code={pending.userCode} />
 
-      <p className="mt-4 flex items-center gap-2 text-[12.5px] text-mute">
+      <p className="mt-4 flex items-center gap-2 text-meta text-mute">
         <Spinner />
         Waiting for you to approve it…
       </p>
@@ -159,7 +161,7 @@ export function CodeToType({ code }: { code: string }) {
 
   return (
     <div className="mt-3 flex items-center gap-3">
-      <code className="rounded-[6px] border border-ember/30 bg-ember/[0.05] px-4 py-2.5 font-mono text-[20px] tracking-[0.18em] text-bone">
+      <code className="rounded-md border border-line bg-raise px-4 py-2.5 font-mono text-display tracking-[0.18em] text-bone">
         {code}
       </code>
       <button
@@ -168,7 +170,7 @@ export function CodeToType({ code }: { code: string }) {
           setCopied(true);
           setTimeout(() => setCopied(false), 1600);
         }}
-        className="text-[12px] text-mute transition-colors hover:text-text"
+        className="text-meta text-mute transition-colors hover:text-text"
       >
         {copied ? "Copied" : "Copy"}
       </button>
@@ -223,7 +225,7 @@ function Pick({
     onClose();
   };
 
-  if (isLoading) return <p className="py-8 text-center text-[13px] text-mute">Loading your repositories…</p>;
+  if (isLoading) return <p className="py-8 text-center text-ui text-mute">Loading your repositories…</p>;
   if (isError) return <Failure error={error} />;
 
   return (
@@ -233,7 +235,7 @@ function Pick({
         value={q}
         onChange={(e) => setQ(e.target.value)}
         placeholder={`Search ${repos.length} repositories`}
-        className="w-full rounded-[6px] border border-line bg-ground px-3 py-2 text-[13px] text-bone outline-none placeholder:text-mute focus:border-ember/40"
+        className="w-full rounded-sm border border-line bg-ground px-3 py-2 text-ui text-bone outline-none placeholder:text-mute focus:border-dim/40"
       />
 
       <div className="mt-3 flex max-h-[280px] flex-col gap-px overflow-y-auto">
@@ -250,7 +252,7 @@ function Pick({
           />
         ))}
         {shown.length === 0 && (
-          <p className="py-6 text-center text-[12.5px] text-mute">
+          <p className="py-6 text-center text-meta text-mute">
             Nothing matches “{q}”.
           </p>
         )}
@@ -281,30 +283,28 @@ function RepoRow({
   return (
     <button
       onClick={onToggle}
-      className={`flex items-center gap-3 rounded-[5px] px-2.5 py-2 text-left transition-colors ${
-        on ? "bg-ember/[0.06]" : "hover:bg-raise/60"
+      className={`flex items-center gap-3 rounded-sm px-2.5 py-2 text-left transition-colors ${
+        on ? "bg-raise" : "hover:bg-raise/60"
       }`}
     >
       <span
-        className={`flex h-[13px] w-[13px] shrink-0 items-center justify-center rounded-[3px] border ${
-          on ? "border-ember bg-ember" : "border-line"
+        className={`flex h-[13px] w-[13px] shrink-0 items-center justify-center rounded-sm border ${
+          on ? "border-bone bg-bone" : "border-line"
         }`}
       >
         {on && (
-          <svg width="9" height="9" viewBox="0 0 9 9" fill="none">
-            <path d="M1.5 4.5l2 2 4-4" stroke="#1a0c04" strokeWidth="1.6" strokeLinecap="round" />
-          </svg>
+          <Icon of={Check} size={12} className="text-ground" />
         )}
       </span>
-      <span className="min-w-0 flex-1 truncate font-mono text-[12.5px] text-bone">
+      <span className="min-w-0 flex-1 truncate font-mono text-meta text-bone">
         {repo.slug}
       </span>
       {repo.private && (
-        <span className="font-narrow text-[9.5px] font-semibold tracking-[0.12em] text-mute uppercase">
+        <span className="font-narrow text-micro font-semibold tracking-[0.12em] text-mute uppercase">
           Private
         </span>
       )}
-      <span className="font-mono text-[10.5px] text-mute">{repo.defaultBranch}</span>
+      <span className="font-mono text-micro text-mute">{repo.defaultBranch}</span>
     </button>
   );
 }
@@ -344,15 +344,15 @@ function PasteRemote({ onBack, onClose }: { onBack: () => void; onClose: () => v
         onChange={(e) => setRemote(e.target.value)}
         placeholder="https://host/acme/backend.git"
         spellCheck={false}
-        className="mt-2 w-full rounded-[6px] border border-line bg-ground px-3 py-2 font-mono text-[12.5px] text-bone outline-none placeholder:text-mute focus:border-ember/40"
+        className="mt-2 w-full rounded-sm border border-line bg-ground px-3 py-2 font-mono text-meta text-bone outline-none placeholder:text-mute focus:border-dim/40"
       />
-      <p className="mt-2 text-[12px] text-mute">
+      <p className="mt-2 text-meta text-mute">
         An https or ssh URL, or a path to a checkout already on the host.
       </p>
 
       <div className="mt-4 min-h-[52px]">
         {probe.isPending && (
-          <p className="flex items-center gap-2 text-[12.5px] text-mute">
+          <p className="flex items-center gap-2 text-meta text-mute">
             <Spinner />
             Checking…
           </p>
@@ -361,13 +361,11 @@ function PasteRemote({ onBack, onClose }: { onBack: () => void; onClose: () => v
         {probe.isError && <Failure error={probe.error} />}
 
         {found && !probe.isPending && (
-          <div className="rounded-[6px] border border-sage/25 bg-sage/[0.04] px-3.5 py-2.5">
+          <div className="rounded-sm border border-sage/25 bg-sage/[0.04] px-3.5 py-2.5">
             <div className="flex items-center gap-2">
-              <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-                <path d="M2 6.2l2.6 2.6L10 3.4" stroke="#8fa88a" strokeWidth="1.6" strokeLinecap="round" />
-              </svg>
-              <span className="font-mono text-[12.5px] text-bone">{found.slug}</span>
-              <span className="ml-auto font-mono text-[11px] text-slate">
+              <Icon of={Check} size={12} className="text-sage" />
+              <span className="font-mono text-meta text-bone">{found.slug}</span>
+              <span className="ml-auto font-mono text-meta text-slate">
                 branches from {found.defaultBranch}
               </span>
             </div>
@@ -398,7 +396,7 @@ function NotConfigured({
 
   return (
     <>
-      <p className="max-w-[54ch] text-[13.5px] leading-[1.6] text-dim">
+      <p className="max-w-[54ch] text-ui leading-[1.6] text-dim">
         No application is registered for {provider.label} yet, so there is nothing to
         authorize against. It takes about five minutes, once, and this is the whole of
         it — a device-flow application needs no secret and no callback URL.
@@ -430,17 +428,14 @@ function Failure({ error }: { error: unknown }) {
     error instanceof ApiError ? error.message : "Something went wrong. Try again.";
 
   return (
-    <div className="mt-4 rounded-[6px] border border-ember/30 bg-ember/[0.05] px-3.5 py-2.5">
-      <p className="text-[12.5px] leading-[1.55] text-bone">{message}</p>
+    <div className="mt-4 rounded-md border border-line bg-raise px-3.5 py-2.5">
+      <p className="text-meta leading-[1.55] text-bone">{message}</p>
     </div>
   );
 }
 
 export function Spinner() {
   return (
-    <svg width="12" height="12" viewBox="0 0 12 12" className="animate-spin" fill="none">
-      <circle cx="6" cy="6" r="4.5" stroke="currentColor" strokeWidth="1.4" opacity="0.25" />
-      <path d="M10.5 6A4.5 4.5 0 006 1.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-    </svg>
+    <Icon of={LoaderCircle} size={12} className="animate-spin" />
   );
 }

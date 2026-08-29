@@ -33,8 +33,8 @@ export function Horizon({ sessions }: { sessions: SessionView[] }) {
           preserveAspectRatio="none"
           aria-hidden
         >
-          <path d="M0 34 L120 20 L215 30 L340 12 L455 27 L580 16 L700 31 L830 18 L940 29 L1000 22 V46 H0 Z" fill="#1b1611" />
-          <path d="M0 40 L95 32 L190 39 L300 28 L420 38 L540 30 L660 40 L790 31 L900 39 L1000 34 V46 H0 Z" fill="#131110" />
+          <path d="M0 34 L120 20 L215 30 L340 12 L455 27 L580 16 L700 31 L830 18 L940 29 L1000 22 V46 H0 Z" className="fill-raise" />
+          <path d="M0 40 L95 32 L190 39 L300 28 L420 38 L540 30 L660 40 L790 31 L900 39 L1000 34 V46 H0 Z" className="fill-panel" />
         </svg>
 
         <div className="absolute inset-x-0 bottom-0 flex h-full items-end">
@@ -127,12 +127,12 @@ function Stem({
           }`}
         >
           <div
-            className={`max-w-full truncate font-narrow text-[10px] font-semibold tracking-[0.1em] uppercase ${tone}`}
+            className={`max-w-full truncate font-narrow text-micro font-semibold tracking-[0.1em] uppercase ${tone}`}
           >
             {session.name}
           </div>
           {/* The last part identifies it; a bare agent has none. */}
-          <div className="max-w-full truncate font-mono text-[9.5px] text-mute">
+          <div className="max-w-full truncate font-mono text-micro text-mute">
             {session.repo?.split("/").pop() ?? "no repo"}
           </div>
         </div>
@@ -158,7 +158,7 @@ function Stem({
       </div>
 
       <div
-        className={`absolute bottom-[2px] font-mono text-[10px] transition-colors ${
+        className={`absolute bottom-[2px] font-mono text-micro transition-colors ${
           hover || waiting ? "text-dim" : "text-mute/60"
         }`}
       >

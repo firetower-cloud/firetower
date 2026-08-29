@@ -77,11 +77,13 @@ pub struct Page {
 /// about to lose is six places, not forty-eight processes.
 #[utoipa::path(
     post, path = "/api/v1/sessions/end-all", tag = "sessions",
+    request_body = EndAll,
     responses((status = 200, body = EndedAll)),
 )]
 pub(super) async fn end_all_sessions(
     State(state): State<AppState>,
     Extension(principal): Extension<Principal>,
+    Json(req): Json<EndAll>,
 ) -> ApiResult<Json<EndedAll>> {
     // Yours. "End all" has never meant anybody else's, and with two people on
     // one Firetower it would be a button that ends a colleague's work.
@@ -103,6 +105,11 @@ pub(super) async fn end_all_sessions(
             None => places.push((key, vec![session])),
         }
     }
+
+    // What was asked for, if anything was. Filtered after grouping because a
+    // workspace is what goes: naming one is naming every agent in it, which is
+    // the same promise the button makes.
+    places.retain(|(id, _)| asked_for(id, req.workspaces.as_deref()));
 
     let mut ended = 0;
     let mut unreachable = 0;
@@ -146,6 +153,29 @@ pub(super) async fn end_all_sessions(
     }
 
     Ok(Json(EndedAll { ended, unreachable }))
+}
+
+/// Whether this workspace is one of the ones asked for.
+///
+/// No list means every one of them, which is what `end-all` meant before it
+/// could be narrowed. An *empty* list is not the same thing and must never be
+/// read as one: it names nothing, so nothing goes.
+fn asked_for(id: &str, wanted: Option<&[String]>) -> bool {
+    match wanted {
+        None => true,
+        Some(ids) => ids.iter().any(|w| w == id),
+    }
+}
+
+/// Which workspaces to end.
+#[derive(Debug, Default, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct EndAll {
+    /// The workspaces to end, by id. Every one of yours when omitted — which
+    /// is what this endpoint did before it could be narrowed, and what an
+    /// empty body still means.
+    #[serde(default)]
+    pub workspaces: Option<Vec<String>>,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -862,7 +892,10 @@ pub(super) async fn destroy_session(
     // Ending one of the others is just that one agent — the place and its
     // neighbours carry on.
     let workspace = session.workspace_id.clone();
-    if workspace.as_ref().is_some_and(|w| w.as_str() == session.id.as_str()) {
+    if workspace
+        .as_ref()
+        .is_some_and(|w| w.as_str() == session.id.as_str())
+    {
         for run in state
             .db
             .live_runs_beside(
@@ -2058,7 +2091,25 @@ pub struct PullRequest {
 
 #[cfg(test)]
 mod tests {
-    use super::{nothing_to_do, within};
+    use super::{asked_for, nothing_to_do, within};
+
+    /// Ending a filtered list must end that list and nothing beside it.
+    #[test]
+    fn only_the_workspaces_named_are_ended() {
+        let wanted = ["s_two".to_string(), "s_three".to_string()];
+
+        assert!(!asked_for("s_one", Some(&wanted)));
+        assert!(asked_for("s_two", Some(&wanted)));
+        assert!(asked_for("s_three", Some(&wanted)));
+
+        // No list at all is the whole fleet — what the button did before it
+        // could be narrowed, and what an empty body still means.
+        assert!(asked_for("s_one", None));
+
+        // An empty list names nothing. Reading it as "everything" would turn a
+        // press meant for a filtered-to-nothing list into ending the fleet.
+        assert!(!asked_for("s_one", Some(&[])));
+    }
 
     #[test]
     fn a_path_belongs_to_the_checkout_it_is_under() {

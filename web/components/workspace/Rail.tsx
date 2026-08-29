@@ -48,25 +48,25 @@ export function Rail({ onNew }: { onNew: (repo?: string) => void }) {
         title="Everything"
         className="group flex shrink-0 items-center gap-2.5 px-4 pt-4 pb-2.5"
       >
-        <span className="text-mute transition-colors group-hover:text-ember">
+        <span className="text-mute transition-colors group-hover:text-bone">
           <span className="inline-block transition-transform group-hover:-translate-x-0.5">←</span>
         </span>
         <span className="text-bone">
           <Mark size={20} />
         </span>
-        <span className="font-narrow text-[12px] font-semibold tracking-[0.22em] text-bone uppercase transition-colors group-hover:text-ember">
+        <span className="font-narrow text-meta font-semibold tracking-[0.22em] text-bone uppercase transition-colors group-hover:text-bone">
           Firetower
         </span>
       </Link>
 
       {waiting.length > 0 && (
         <div className="px-2.5 pb-2.5">
-          <div className="flex items-center gap-2 rounded-[9px] border border-ember-deep bg-ember/[0.06] px-2.5 py-1.5">
+          <div className="flex items-center gap-2 rounded-md border border-ember-deep bg-ember/[0.06] px-2.5 py-1.5">
             <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-ember" />
-            <span className="font-narrow text-[10px] font-semibold tracking-[0.14em] text-ember uppercase">
+            <span className="font-narrow text-micro font-semibold tracking-[0.14em] text-ember uppercase">
               Waiting on you
             </span>
-            <span className="ml-auto font-mono text-[11px] text-ember">{waiting.length}</span>
+            <span className="ml-auto font-mono text-meta text-ember">{waiting.length}</span>
           </div>
         </div>
       )}
@@ -75,8 +75,8 @@ export function Rail({ onNew }: { onNew: (repo?: string) => void }) {
         <Grouped sessions={live} onNew={onNew} />
         {live.length === 0 && (
           <div className="px-1 py-3">
-            <p className="text-[13px] text-dim">Nothing running.</p>
-            <p className="mt-1 text-[12px] leading-[1.55] text-mute">
+            <p className="text-ui text-dim">Nothing running.</p>
+            <p className="mt-1 text-meta leading-[1.55] text-mute">
               Describe some work and it runs on your own hardware — you can close the laptop as
               soon as it starts.
             </p>
@@ -86,7 +86,7 @@ export function Rail({ onNew }: { onNew: (repo?: string) => void }) {
 
       <button
         onClick={() => onNew()}
-        className="mx-2.5 mb-2.5 shrink-0 rounded-[9px] border border-dashed border-line py-2 text-ui text-mute transition-colors hover:border-ember/40 hover:text-ember"
+        className="mx-2.5 mb-2.5 shrink-0 rounded-md border border-dashed border-line py-2 text-ui text-mute transition-colors hover:border-line hover:text-bone"
       >
         + New workspace
       </button>
@@ -137,19 +137,19 @@ function Grouped({
 
         return (
           <section key={repo} className="mb-2.5">
-            <div className="group/head flex items-center gap-1.5 rounded-[6px] py-1 pr-1 pl-0.5">
+            <div className="group/head flex items-center gap-1.5 rounded-sm py-1 pr-1 pl-0.5">
               <button
                 onClick={() => toggle(repo)}
                 className="flex min-w-0 flex-1 items-center gap-1.5 text-left"
               >
                 <span
-                  className="shrink-0 text-[9px] text-mute transition-transform"
+                  className="shrink-0 text-micro text-mute transition-transform"
                   style={{ transform: closed ? undefined : "rotate(90deg)" }}
                 >
                   ▸
                 </span>
                 <span
-                  className="min-w-0 truncate font-mono text-[11px] text-dim"
+                  className="min-w-0 truncate font-mono text-meta text-dim"
                   title={repo}
                 >
                   {repo.split("/").slice(-1)[0]}
@@ -160,14 +160,14 @@ function Grouped({
                   when some of it is waiting — so a shut group still shows
                   that it needs somebody. */}
               <span
-                className={`shrink-0 font-mono text-[10px] ${asking > 0 ? "text-ember" : "text-mute"}`}
+                className={`shrink-0 font-mono text-micro ${asking > 0 ? "text-ember" : "text-mute"}`}
               >
                 {held.length}
               </span>
               <button
                 onClick={() => onNew(repo)}
                 title={`New workspace on ${repo}`}
-                className="shrink-0 px-0.5 text-[12px] leading-none text-mute opacity-0 transition-opacity group-hover/head:opacity-100 hover:text-ember"
+                className="shrink-0 px-0.5 text-meta leading-none text-mute opacity-0 transition-opacity group-hover/head:opacity-100 hover:text-bone"
               >
                 +
               </button>
@@ -245,14 +245,14 @@ function Run({ run }: { run: Session }) {
         open({ id: addressOf.run(run.id), kind: "run", sessionId: run.id });
       }}
       title={run.title ?? run.name}
-      className="flex w-full items-center gap-2 rounded-[7px] px-1.5 py-1 text-left transition-colors hover:bg-raise/50"
+      className="flex w-full items-center gap-2 rounded-md px-1.5 py-1 text-left transition-colors hover:bg-raise/50"
     >
       <Signal status={run.status} size={5} />
       <AgentMark agent={run.agent} size={11} className="shrink-0 text-mute" />
-      <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-mute">
+      <span className="min-w-0 flex-1 truncate font-mono text-meta text-mute">
         {AGENT_SHORT[run.agent]}
       </span>
-      <span className="shrink-0 font-mono text-[10px] text-mute">
+      <span className="shrink-0 font-mono text-micro text-mute">
         {elapsed(minutesSince(run.createdAt))}
       </span>
       {needsYou(run) && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-ember" />}
@@ -296,7 +296,7 @@ function Row({ session }: { session: Session }) {
       // A card when it is the one you are in — a border and a raised ground,
       // not a background tint. A tint says "hovered"; a card says "this is the
       // workspace you are in", which is what the row actually means.
-      className={`group/row mb-px flex w-full items-center gap-2 rounded-[9px] border px-2 py-[7px] transition-colors ${
+      className={`group/row mb-px flex w-full items-center gap-2 rounded-md border px-2 py-[7px] transition-colors ${
         on ? "border-line bg-raise" : "border-transparent hover:border-line-soft hover:bg-raise/50"
       }`}
     >
@@ -305,7 +305,7 @@ function Row({ session }: { session: Session }) {
       <span className="min-w-0 flex-1">
         {naming === null ? (
           <button onClick={() => enter(session.id)} className="block w-full text-left">
-            <span className={`block truncate text-[13px] ${on || asks ? "text-bone" : "text-dim"}`}>
+            <span className={`block truncate text-ui ${on || asks ? "text-bone" : "text-dim"}`}>
               {session.name}
             </span>
           </button>
@@ -342,13 +342,13 @@ function Row({ session }: { session: Session }) {
                 },
               );
             }}
-            className="w-full rounded-[5px] border border-ember-deep bg-ground px-1 text-[13px] text-bone focus:border-ember focus:outline-none"
+            className="w-full rounded-sm border border-line bg-ground px-1 text-ui text-bone focus:border-dim focus:outline-none"
           />
         )}
 
         <span className="mt-px flex items-center gap-1.5 text-mute">
           <AgentMark agent={session.agent} size={11} className="shrink-0 opacity-80" />
-          <span className="truncate font-mono text-[10.5px]">
+          <span className="truncate font-mono text-micro">
             {AGENT_SHORT[session.agent]} · {elapsed(minutesSince(session.createdAt))}
           </span>
         </span>

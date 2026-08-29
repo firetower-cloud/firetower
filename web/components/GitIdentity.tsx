@@ -60,14 +60,14 @@ export function GitIdentity({ provider, label }: { provider: string; label: stri
       <div className="flex items-baseline gap-3">
         <span className="eyebrow">Commits are authored as</span>
         {identity && (
-          <span className="font-mono text-[11px] text-mute">
+          <span className="font-mono text-meta text-mute">
             {identity.source === "set" ? "yours" : `from ${label}`}
           </span>
         )}
         {!editing && (
           <button
             onClick={open}
-            className="ml-auto text-[11.5px] text-mute transition-colors hover:text-ember"
+            className="ml-auto text-meta text-mute transition-colors hover:text-bone"
           >
             {identity ? "Change" : "Set one"}
           </button>
@@ -75,7 +75,7 @@ export function GitIdentity({ provider, label }: { provider: string; label: stri
       </div>
 
       {!editing && (
-        <p className="mt-1.5 font-mono text-[12.5px] text-dim">
+        <p className="mt-1.5 font-mono text-meta text-dim">
           {identity ? (
             <>
               {identity.name} &lt;{identity.email}&gt;
@@ -99,25 +99,25 @@ export function GitIdentity({ provider, label }: { provider: string; label: stri
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="Name"
-              className="min-h-[36px] flex-1 rounded-[7px] border border-line bg-ground px-2.5 text-[13px] text-bone placeholder:text-mute focus:border-ember focus:outline-none"
+              className="min-h-[36px] flex-1 rounded-md border border-line bg-ground px-2.5 text-ui text-bone placeholder:text-mute focus:border-dim focus:outline-none"
             />
             <input
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="you@example.com"
-              className="min-h-[36px] flex-1 rounded-[7px] border border-line bg-ground px-2.5 font-mono text-[12.5px] text-bone placeholder:text-mute focus:border-ember focus:outline-none"
+              className="min-h-[36px] flex-1 rounded-md border border-line bg-ground px-2.5 font-mono text-meta text-bone placeholder:text-mute focus:border-dim focus:outline-none"
             />
           </div>
 
           {/* The thing that bites people, said before it does. */}
-          <p className="text-[11.5px] leading-[1.5] text-mute">
+          <p className="text-meta leading-[1.5] text-mute">
             Use an address {label} knows about. With <em>Keep my email address
             private</em> switched on, a push authored with your real one is
             refused — the <code className="font-mono">users.noreply</code>{" "}
             address always works.
           </p>
 
-          {failed && <p className="text-[12px] text-brick">{failed}</p>}
+          {failed && <p className="text-meta text-brick">{failed}</p>}
 
           <div className="flex items-center gap-3">
             <button
@@ -135,13 +135,13 @@ export function GitIdentity({ provider, label }: { provider: string; label: stri
                 );
               }}
               disabled={!name.trim() || !email.trim() || save.isPending}
-              className="rounded-[6px] bg-ember px-3 py-1.5 text-[12.5px] font-medium text-ground disabled:opacity-40"
+              className="rounded-md bg-bone px-3 py-1.5 text-meta font-medium text-ground transition-colors hover:bg-white disabled:bg-line disabled:text-mute"
             >
               {save.isPending ? "Saving…" : "Save"}
             </button>
             <button
               onClick={() => setEditing(false)}
-              className="text-[12px] text-mute transition-colors hover:text-text"
+              className="text-meta text-mute transition-colors hover:text-text"
             >
               Cancel
             </button>
@@ -162,7 +162,7 @@ export function GitIdentity({ provider, label }: { provider: string; label: stri
                   );
                 }}
                 disabled={clear.isPending}
-                className="ml-auto text-[12px] text-mute transition-colors hover:text-brick"
+                className="ml-auto text-meta text-mute transition-colors hover:text-brick"
               >
                 Use {label}&apos;s answer instead
               </button>

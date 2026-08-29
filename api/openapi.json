@@ -1838,6 +1838,16 @@
         "summary": "End every workspace that is still running.",
         "description": "Destructive in the same way as ending one, multiplied — every workspace goes\nand anything unpushed with it. The count comes back so the interface can say\nwhat it did rather than guess.\n\nCounted in workspaces rather than sessions. A workspace holds any number of\nagents now, so \"48 ended\" was a number nobody recognised: what somebody is\nabout to lose is six places, not forty-eight processes.",
         "operationId": "end_all_sessions",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EndAll"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
             "description": "",
@@ -4272,6 +4282,22 @@
         "properties": {
           "drained": {
             "type": "boolean"
+          }
+        }
+      },
+      "EndAll": {
+        "type": "object",
+        "description": "Which workspaces to end.",
+        "properties": {
+          "workspaces": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "description": "The workspaces to end, by id. Every one of yours when omitted — which\nis what this endpoint did before it could be narrowed, and what an\nempty body still means."
           }
         }
       },

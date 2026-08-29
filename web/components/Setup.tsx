@@ -50,7 +50,7 @@ export function Setup() {
   if (isLoading) {
     return (
       <div className="min-h-screen px-8 pt-7">
-        <p className="text-[13px] text-mute">Looking…</p>
+        <p className="text-ui text-mute">Looking…</p>
       </div>
     );
   }
@@ -76,7 +76,7 @@ export function Setup() {
         <span className="text-bone">
           <Mark size={22} />
         </span>
-        <span className="font-narrow text-[13px] font-semibold tracking-[0.22em] text-bone uppercase">
+        <span className="font-narrow text-ui font-semibold tracking-[0.22em] text-bone uppercase">
           Firetower
         </span>
       </header>
@@ -131,18 +131,18 @@ function Rail({
             className="flex items-center gap-2.5 disabled:cursor-default"
           >
             <span
-              className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full font-mono text-[11px] transition-colors ${
+              className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full font-mono text-meta transition-colors ${
                 i < step
                   ? "bg-sage/20 text-sage"
                   : i === step
-                    ? "bg-ember text-[#1a0c04]"
+                    ? "bg-bone text-ground"
                     : "border border-line text-mute"
               }`}
             >
               {i < step ? "✓" : i + 1}
             </span>
             <span
-              className={`font-narrow text-[11px] font-semibold tracking-[0.14em] uppercase ${
+              className={`font-narrow text-meta font-semibold tracking-[0.14em] uppercase ${
                 i === step ? "text-bone" : i < step ? "text-dim" : "text-mute"
               }`}
             >
@@ -186,10 +186,10 @@ function StepRepository({ onNext }: { onNext: () => void }) {
           {repos.map((r) => (
             <div key={r.id} className="flex items-center gap-3 px-4 py-2.5">
               <span className="text-sage">✓</span>
-              <span className="font-mono text-[12.5px] text-dim">{r.slug}</span>
+              <span className="font-mono text-meta text-dim">{r.slug}</span>
               {/* Absent until a host has been asked, which is the usual state
                   seconds after connecting one. */}
-              <span className="ml-auto font-mono text-[11px] text-mute">
+              <span className="ml-auto font-mono text-meta text-mute">
                 {r.defaultBranch ?? "—"}
               </span>
             </div>
@@ -199,7 +199,7 @@ function StepRepository({ onNext }: { onNext: () => void }) {
 
       <button
         onClick={() => setConnecting(true)}
-        className={`w-full rounded-[6px] border border-dashed border-line py-3 text-[13px] text-mute transition-colors hover:border-ember/40 hover:text-ember ${
+        className={`w-full rounded-sm border border-dashed border-line py-3 text-ui text-mute transition-colors hover:border-line hover:text-bone ${
           repos.length > 0 ? "mt-2.5" : ""
         }`}
       >
@@ -216,7 +216,7 @@ function StepRepository({ onNext }: { onNext: () => void }) {
           {repos.length > 0 ? "Next — connect an agent" : "Skip for now"}
         </Primary>
         {repos.length > 0 && (
-          <span className="text-[12px] text-mute">
+          <span className="text-meta text-mute">
             {repos.length} connected
           </span>
         )}
@@ -242,7 +242,7 @@ function StepAgent({ onNext }: { onNext: () => void }) {
     >
       <div className="panel divide-y divide-line-soft">
         {askable.length === 0 && (
-          <p className="px-4 py-3 text-[12.5px] text-mute">
+          <p className="px-4 py-3 text-meta text-mute">
             Nothing to configure yet.
           </p>
         )}
@@ -254,11 +254,11 @@ function StepAgent({ onNext }: { onNext: () => void }) {
               <span className={a.mode ? "text-sage" : "text-mute"}>
                 {a.mode ? "✓" : "·"}
               </span>
-              <span className="text-[13.5px] text-bone">{a.label}</span>
+              <span className="text-ui text-bone">{a.label}</span>
 
               {/* What a host actually reported, rather than a version typed
                   into a mockup. */}
-              <span className="font-mono text-[11px] text-mute">
+              <span className="font-mono text-meta text-mute">
                 {present.length > 0
                   ? `on ${present.length} of ${a.hosts.length} host${a.hosts.length === 1 ? "" : "s"}`
                   : a.hosts.some((h) => h.checkedAt)
@@ -268,7 +268,7 @@ function StepAgent({ onNext }: { onNext: () => void }) {
 
               <button
                 onClick={() => setConfiguring(a)}
-                className="ml-auto text-[11.5px] text-mute transition-colors hover:text-ember"
+                className="ml-auto text-meta text-mute transition-colors hover:text-bone"
               >
                 {a.mode ? "Change" : "Connect"}
               </button>
@@ -330,10 +330,10 @@ function Card({
 }) {
   return (
     <div>
-      <h1 className="text-[24px] leading-[1.2] font-semibold tracking-[-0.02em] text-bone">
+      <h1 className="text-display leading-[1.2] font-semibold tracking-[-0.02em] text-bone">
         {title}
       </h1>
-      <p className="mt-2 mb-6 max-w-[56ch] text-[14px] leading-[1.55] text-dim">{sub}</p>
+      <p className="mt-2 mb-6 max-w-[56ch] text-body leading-[1.55] text-dim">{sub}</p>
       {children}
     </div>
   );
@@ -341,7 +341,7 @@ function Card({
 
 function Note({ children }: { children: React.ReactNode }) {
   return (
-    <p className="mt-4 border-l border-line pl-3 text-[12.5px] leading-[1.55] text-mute">
+    <p className="mt-4 border-l border-line pl-3 text-meta leading-[1.55] text-mute">
       {children}
     </p>
   );
@@ -364,7 +364,7 @@ function Primary({
     <button
       onClick={onClick}
       disabled={disabled}
-      className="rounded-[5px] bg-ember px-4 py-2 text-[13px] font-semibold text-[#1a0c04] transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:bg-line disabled:text-mute"
+      className="rounded-sm bg-bone px-4 py-2 text-ui font-semibold text-ground transition-colors hover:bg-white disabled:cursor-not-allowed disabled:bg-line disabled:text-mute"
     >
       {children}
     </button>

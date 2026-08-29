@@ -51,7 +51,7 @@ export function Context({ usage, limits }: { usage: Usage; limits?: Limits }) {
         className="relative grid h-10 w-10 place-items-center rounded-full transition-colors hover:bg-raise"
       >
         <Ring full={full} tight={tight} />
-        <span className={`absolute font-mono text-[9.5px] ${tight ? "text-ember" : "text-mute"}`}>
+        <span className={`absolute font-mono text-micro ${tight ? "text-brick" : "text-mute"}`}>
           {percent}
         </span>
       </button>
@@ -77,7 +77,7 @@ export function Panel({ usage, limits }: { usage: Usage; limits?: Limits }) {
   const tight = full > 0.85;
 
   return (
-    <div className="rounded-[14px] border border-line bg-panel p-3.5 shadow-[0_12px_36px_-14px_rgba(0,0,0,0.85)]">
+    <div className="rounded-lg border border-line bg-panel p-3.5 shadow-[0_12px_36px_-14px_rgba(0,0,0,0.85)]">
       <Window usage={usage} full={full} tight={tight} />
       <Composition usage={usage} />
       <Cost usage={usage} />
@@ -99,7 +99,7 @@ function Window({ usage, full, tight }: { usage: Usage; full: number; tight: boo
     <>
       <div className="flex items-baseline justify-between">
         <span className="eyebrow">Context window</span>
-        <span className={`font-mono text-[12px] ${tight ? "text-ember" : "text-dim"}`}>
+        <span className={`font-mono text-meta ${tight ? "text-brick" : "text-dim"}`}>
           {Math.round(full * 100)}%
         </span>
       </div>
@@ -203,7 +203,7 @@ function Allowance({ limits }: { limits?: Limits }) {
     <Section label="Plan limit">
       <Row left={window_(limits.window)} right={resets ?? limits.status} />
       {blocked && (
-        <p className="mt-1 text-meta text-ember">
+        <p className="mt-1 text-meta text-brick">
           This window is {limits.status}. The agent will wait rather than run.
         </p>
       )}
@@ -227,7 +227,7 @@ function Row({ left, right, strong }: { left: string; right: string; strong?: bo
     <div className="flex items-baseline justify-between gap-3 py-[1.5px]">
       <span className={`shrink-0 text-meta ${strong ? "text-dim" : "text-mute"}`}>{left}</span>
       <span
-        className={`min-w-0 truncate text-right font-mono text-[12px] ${
+        className={`min-w-0 truncate text-right font-mono text-meta ${
           strong ? "text-bone" : "text-dim"
         }`}
       >
@@ -241,7 +241,7 @@ function Bar({ of, tight }: { of: number; tight: boolean }) {
   return (
     <div className="mt-2 h-[3px] w-full overflow-hidden rounded-full bg-raise">
       <div
-        className={`h-full rounded-full ${tight ? "bg-ember" : "bg-slate"}`}
+        className={`h-full rounded-full ${tight ? "bg-brick" : "bg-slate"}`}
         style={{ width: `${Math.max(of * 100, 1.5)}%` }}
       />
     </div>
@@ -263,7 +263,7 @@ function Ring({ full, tight }: { full: number; tight: boolean }) {
         strokeLinecap="round"
         strokeDasharray={circumference}
         strokeDashoffset={circumference * (1 - full)}
-        className={tight ? "stroke-ember" : "stroke-mute"}
+        className={tight ? "stroke-brick" : "stroke-mute"}
       />
     </svg>
   );

@@ -12,7 +12,33 @@
  * is looking for, not labelling every format.
  */
 
+import {
+  Braces,
+  ChevronRight,
+  Code2,
+  FileText,
+  Image,
+  Link2,
+  Lock,
+  type LucideIcon,
+} from "lucide-react";
+import { Icon } from "./ui";
+
 type Kind = "dir" | "doc" | "code" | "config" | "image" | "lock" | "link";
+
+/** One glyph and one tint per kind. Everything else in the tree stays grey. */
+const GLYPH: Record<Kind, { icon: LucideIcon; tone: string }> = {
+  // A chevron rather than a folder: it is also the control that opens it, so it
+  // should look like a thing with two states.
+  dir: { icon: ChevronRight, tone: "text-dim" },
+  link: { icon: Link2, tone: "text-dim" },
+  doc: { icon: FileText, tone: "text-dim" },
+  code: { icon: Code2, tone: "text-slate" },
+  config: { icon: Braces, tone: "text-dim" },
+  image: { icon: Image, tone: "text-sage" },
+  // Generated, and not for reading. It says "leave this alone".
+  lock: { icon: Lock, tone: "text-mute" },
+};
 
 export function FileGlyph({
   name,
@@ -31,81 +57,16 @@ export function FileGlyph({
   className?: string;
 }) {
   const kind: Kind = link ? "link" : directory ? "dir" : kindOf(name);
+  const { icon, tone } = GLYPH[kind];
 
-  const common = {
-    width: size,
-    height: size,
-    viewBox: "0 0 12 12",
-    fill: "none",
-    stroke: "currentColor",
-    "aria-hidden": true,
-    className,
-  } as const;
-
-  switch (kind) {
-    case "dir":
-      // A chevron rather than a folder: it is also the control that opens it,
-      // so it should look like a thing with two states.
-      return (
-        <svg {...common} style={{ transform: open ? "rotate(90deg)" : undefined }}>
-          <path d="M4.5 2.5L8 6l-3.5 3.5" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-      );
-
-    case "link":
-      return (
-        <svg {...common}>
-          <path d="M3.5 8.5L8.5 3.5M5.5 3.5h3v3" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-      );
-
-    // Prose. A paragraph mark, because that is what is inside.
-    case "doc":
-      return (
-        <svg {...common}>
-          <path d="M2.5 3h7M2.5 6h7M2.5 9h4" strokeWidth="1.3" strokeLinecap="round" />
-        </svg>
-      );
-
-    // Source. Angle brackets.
-    case "code":
-      return (
-        <svg {...common}>
-          <path d="M4.2 3.6L1.8 6l2.4 2.4M7.8 3.6L10.2 6L7.8 8.4" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-      );
-
-    // Settings. Braces.
-    case "config":
-      return (
-        <svg {...common}>
-          <path
-            d="M4.6 2.5c-1 0-1.3.5-1.3 1.4v1c0 .7-.3 1.1-1.1 1.1.8 0 1.1.4 1.1 1.1v1c0 .9.3 1.4 1.3 1.4M7.4 2.5c1 0 1.3.5 1.3 1.4v1c0 .7.3 1.1 1.1 1.1-.8 0-1.1.4-1.1 1.1v1c0 .9-.3 1.4-1.3 1.4"
-            strokeWidth="1.2"
-            strokeLinecap="round"
-          />
-        </svg>
-      );
-
-    case "image":
-      return (
-        <svg {...common}>
-          <rect x="1.8" y="2.5" width="8.4" height="7" rx="1.2" strokeWidth="1.2" />
-          <circle cx="4.4" cy="5" r=".8" strokeWidth="1.1" />
-          <path d="M2.4 8.4L4.8 6.4l2 1.6 1.6-1.2 1.4 1.1" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-      );
-
-    // Generated, and not for reading. A closed padlock body — it says "leave
-    // this alone" without needing to be legible as anything specific.
-    case "lock":
-      return (
-        <svg {...common}>
-          <rect x="2.6" y="5.2" width="6.8" height="4.4" rx="1" strokeWidth="1.2" />
-          <path d="M4.2 5.2V4a1.8 1.8 0 013.6 0v1.2" strokeWidth="1.2" strokeLinecap="round" />
-        </svg>
-      );
-  }
+  return (
+    <span
+      style={kind === "dir" && open ? { transform: "rotate(90deg)" } : undefined}
+      className={`inline-flex shrink-0 transition-transform ${tone} ${className}`}
+    >
+      <Icon of={icon} size={size === 12 ? 12 : 14} />
+    </span>
+  );
 }
 
 const DOC = /\.(md|markdown|mdx|txt|rst|adoc)$/i;

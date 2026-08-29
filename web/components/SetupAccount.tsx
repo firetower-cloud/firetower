@@ -53,12 +53,12 @@ export function StepPassword({ onNext }: { onNext: () => void }) {
 
   return (
     <div>
-      <h1 className="text-[20px] font-semibold text-bone">Choose a password</h1>
-      <p className="mt-2 max-w-[54ch] text-[13.5px] leading-[1.6] text-dim">
+      <h1 className="text-display font-semibold text-bone">Choose a password</h1>
+      <p className="mt-2 max-w-[54ch] text-ui leading-[1.6] text-dim">
         The one you signed in with came from a file on the server, where anyone
         who can read that file can read it. Replace it and it stops mattering
         who has seen it — then delete{" "}
-        <code className="font-mono text-[12.5px] text-slate">
+        <code className="font-mono text-meta text-slate">
           ADMIN_INITIAL_PASSWORD
         </code>{" "}
         from that file.
@@ -92,7 +92,7 @@ export function StepPassword({ onNext }: { onNext: () => void }) {
         />
 
         {failed && (
-          <p className="mt-3 text-[12.5px] text-ember" role="alert">
+          <p className="mt-3 text-meta text-brick" role="alert">
             {failed}
           </p>
         )}
@@ -100,13 +100,13 @@ export function StepPassword({ onNext }: { onNext: () => void }) {
         <button
           type="submit"
           disabled={change.isPending || !current || next.length < 5}
-          className="mt-5 rounded bg-ember px-3.5 py-2 text-[13px] font-medium text-ink disabled:opacity-40"
+          className="mt-5 rounded-md bg-bone px-3.5 py-2 text-ui font-medium text-ground transition-colors hover:bg-white disabled:bg-line disabled:text-mute"
         >
           {change.isPending ? "Saving…" : "Save and continue"}
         </button>
       </form>
 
-      <p className="mt-4 text-[12px] text-mute">
+      <p className="mt-4 text-meta text-mute">
         Every other browser signed in as you is signed out. This one carries on.
       </p>
     </div>
@@ -137,10 +137,10 @@ export function StepOrganization({ onNext }: { onNext: () => void }) {
 
   return (
     <div>
-      <h1 className="text-[20px] font-semibold text-bone">
+      <h1 className="text-display font-semibold text-bone">
         What should this be called?
       </h1>
-      <p className="mt-2 max-w-[54ch] text-[13.5px] leading-[1.6] text-dim">
+      <p className="mt-2 max-w-[54ch] text-ui leading-[1.6] text-dim">
         The name of whoever this Firetower belongs to — you, or your company. It
         is shown in the interface and nothing depends on it, so an approximate
         answer is fine.
@@ -155,14 +155,14 @@ export function StepOrganization({ onNext }: { onNext: () => void }) {
           autoFocus
         />
         {failed && (
-          <p className="mt-3 text-[12.5px] text-ember" role="alert">
+          <p className="mt-3 text-meta text-brick" role="alert">
             {failed}
           </p>
         )}
         <button
           type="submit"
           disabled={name_it.isPending || !name.trim()}
-          className="mt-5 rounded bg-ember px-3.5 py-2 text-[13px] font-medium text-ink disabled:opacity-40"
+          className="mt-5 rounded-md bg-bone px-3.5 py-2 text-ui font-medium text-ground transition-colors hover:bg-white disabled:bg-line disabled:text-mute"
         >
           {name_it.isPending ? "Saving…" : "Continue"}
         </button>
@@ -182,10 +182,10 @@ export function StepGitHub({
 }) {
   return (
     <div>
-      <h1 className="text-[20px] font-semibold text-bone">
+      <h1 className="text-display font-semibold text-bone">
         Connect GitHub — optional
       </h1>
-      <p className="mt-2 max-w-[56ch] text-[13.5px] leading-[1.6] text-dim">
+      <p className="mt-2 max-w-[56ch] text-ui leading-[1.6] text-dim">
         With an application registered, you can authorize GitHub once and pick
         from a list of your repositories. Without one, you paste a repository&apos;s
         URL and the machine&apos;s own git credentials are used — which works, and
@@ -200,7 +200,7 @@ export function StepGitHub({
           step as outstanding and returning to it is all `onNext` could do. */}
       <button
         onClick={onSkip}
-        className="mt-6 text-[13px] text-mute hover:text-text"
+        className="mt-6 text-ui text-mute hover:text-text"
       >
         Skip — do this later
       </button>
@@ -236,14 +236,14 @@ export function ClientIdForm({ onDone }: { onDone: () => void }) {
 
   return (
     <div>
-      <ol className="space-y-1.5 text-[12.5px] leading-[1.6] text-dim">
+      <ol className="space-y-1.5 text-meta leading-[1.6] text-dim">
         <li>
           1. Open{" "}
           <a
             href="https://github.com/settings/applications/new"
             target="_blank"
             rel="noreferrer"
-            className="text-ember hover:underline"
+            className="text-dim underline underline-offset-2 transition-colors hover:text-bone"
           >
             github.com/settings/applications/new
           </a>
@@ -252,7 +252,7 @@ export function ClientIdForm({ onDone }: { onDone: () => void }) {
           2. Name it <span className="text-slate">Firetower</span>. Both URLs
           the form asks for are unused by this flow — device authorization never
           redirects — so put{" "}
-          <span className="font-mono text-[12px] text-slate">
+          <span className="font-mono text-meta text-slate">
             http://localhost:3000
           </span>{" "}
           in each and move on.
@@ -279,14 +279,14 @@ export function ClientIdForm({ onDone }: { onDone: () => void }) {
           onChange={setValue}
         />
         {failed && (
-          <p className="mt-3 text-[12.5px] text-ember" role="alert">
+          <p className="mt-3 text-meta text-brick" role="alert">
             {failed}
           </p>
         )}
         <button
           type="submit"
           disabled={save.isPending || !value.trim()}
-          className="mt-4 rounded bg-ember px-3.5 py-2 text-[13px] font-medium text-ink disabled:opacity-40"
+          className="mt-4 rounded-md bg-bone px-3.5 py-2 text-ui font-medium text-ground transition-colors hover:bg-white disabled:bg-line disabled:text-mute"
         >
           {save.isPending ? "Saving…" : "Save"}
         </button>
@@ -318,7 +318,7 @@ function Field({
 }) {
   return (
     <div className="mt-4 first:mt-0">
-      <label className="block text-[12px] text-mute" htmlFor={id}>
+      <label className="block text-meta text-mute" htmlFor={id}>
         {label}
       </label>
       <input
@@ -329,9 +329,9 @@ function Field({
         autoFocus={autoFocus}
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="mt-1.5 w-full rounded border border-line bg-transparent px-3 py-2 text-[13.5px] text-bone outline-none focus:border-ember"
+        className="mt-1.5 w-full rounded border border-line bg-transparent px-3 py-2 text-ui text-bone outline-none focus:border-dim"
       />
-      {hint && <p className="mt-1.5 text-[11.5px] text-mute">{hint}</p>}
+      {hint && <p className="mt-1.5 text-meta text-mute">{hint}</p>}
     </div>
   );
 }

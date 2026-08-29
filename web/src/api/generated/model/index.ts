@@ -42,6 +42,7 @@ export * from './diagnosis';
 export * from './done';
 export * from './downloadFileParams';
 export * from './drain';
+export * from './endAll';
 export * from './endedAll';
 export * from './envVariable';
 export * from './errorCode';

@@ -39,23 +39,23 @@ export default function Compute() {
     <div className="max-w-[900px] px-8 pt-8 pb-24">
       <header className="mb-7">
         <div className="eyebrow">Compute</div>
-        <h1 className="mt-2 text-[26px] font-semibold tracking-[-0.02em] text-bone">
+        <h1 className="mt-2 text-display font-semibold text-bone">
           {isLoading ? "Looking…" : `${online} of ${hosts.length} online.`}
         </h1>
-        <p className="mt-1.5 max-w-[54ch] text-[14px] text-dim">
-          Every host runs the same worker over a stream it never listens on — this
-          machine, a container, or a server you own. Nothing here needs an inbound port.
+        <p className="mt-1.5 text-ui text-dim">
+          Every host runs the same worker over an outbound stream. Nothing needs an
+          inbound port.
         </p>
       </header>
 
       {isError && (
-        <p className="panel mb-4 px-4 py-3 text-[13px] text-brick">
+        <p className="panel mb-4 px-4 py-3 text-ui text-brick">
           Couldn&apos;t reach the control plane. Is Firetower running?
         </p>
       )}
 
       {problem && (
-        <p className="mb-4 rounded-[6px] border border-ember/30 bg-ember/[0.05] px-3.5 py-2.5 text-[12.5px] text-bone">
+        <p className="mb-4 rounded-md border border-brick-deep bg-brick-tint px-3.5 py-2.5 text-meta text-brick">
           {problem}
         </p>
       )}
@@ -73,7 +73,7 @@ export default function Compute() {
           />
         ))}
         {!isLoading && hosts.length === 0 && !isError && (
-          <p className="panel px-4 py-6 text-center text-[13px] text-mute">
+          <p className="panel px-4 py-6 text-center text-ui text-mute">
             Nowhere to run anything yet.
           </p>
         )}
@@ -81,7 +81,7 @@ export default function Compute() {
 
       <button
         onClick={() => setAdding(true)}
-        className="mt-4 w-full rounded-[6px] border border-dashed border-line py-3 text-[13px] text-mute transition-colors hover:border-ember/40 hover:text-ember"
+        className="mt-4 w-full rounded-sm border border-dashed border-line py-3 text-ui text-mute transition-colors hover:border-line hover:text-bone"
       >
         + Add compute
       </button>
@@ -124,26 +124,26 @@ function HostRow({
             host.state === "Online" ? "bg-sage" : "border border-mute"
           }`}
         />
-        <span className="font-mono text-[13.5px] text-bone">{host.name}</span>
+        <span className="font-mono text-ui text-bone">{host.name}</span>
         {/* The address beside the name, for a machine that has one. The name is
             what you call it; this is how you tell two of them apart at a
             glance without reading the line below. */}
         {host.compute.type === "Server" && (
-          <span className="truncate font-mono text-[11px] text-mute">
+          <span className="truncate font-mono text-meta text-mute">
             {host.compute.host}
           </span>
         )}
-        <span className="rounded-[4px] border border-line px-1.5 py-0.5 font-mono text-[10.5px] text-slate">
+        <span className="rounded-sm border border-line px-1.5 py-0.5 font-mono text-micro text-slate">
           {kind === "Local" ? "this machine" : kind.toLowerCase()}
         </span>
 
         {host.drained && (
-          <span className="rounded-[4px] border border-ember/30 px-1.5 py-0.5 font-mono text-[10.5px] text-ember">
+          <span className="rounded-sm border border-slate-deep bg-slate-tint px-1.5 py-0.5 font-mono text-micro text-slate">
             draining
           </span>
         )}
 
-        <span className="ml-auto font-mono text-[11px] text-mute">
+        <span className="ml-auto font-mono text-meta text-mute">
           {running > 0 ? `${running} running` : "idle"}
         </span>
 
@@ -157,7 +157,7 @@ function HostRow({
               { onSuccess: refresh, onError: failed },
             )
           }
-          className="text-[11.5px] text-mute transition-colors hover:text-ember"
+          className="text-meta text-mute transition-colors hover:text-bone"
         >
           {host.drained ? "Resume" : "Drain"}
         </button>
@@ -175,7 +175,7 @@ function HostRow({
                 { onSuccess: refresh, onError: failed },
               );
             }}
-            className="text-[11.5px] text-mute transition-colors hover:text-ember"
+            className="text-meta text-mute transition-colors hover:text-bone"
           >
             Rename
           </button>
@@ -193,7 +193,7 @@ function HostRow({
                 { onSuccess: refresh, onError: failed },
               );
             }}
-            className="text-[11.5px] text-mute transition-colors hover:text-ember"
+            className="text-meta text-mute transition-colors hover:text-bone"
           >
             Remove
           </button>
@@ -202,10 +202,10 @@ function HostRow({
 
       <div className="mt-3 grid grid-cols-[110px_1fr] items-center gap-x-3 gap-y-1.5 border-t border-line pt-3">
         <span className="eyebrow">Reached by</span>
-        <code className="truncate font-mono text-[11.5px] text-dim">{reach(host)}</code>
+        <code className="truncate font-mono text-meta text-dim">{reach(host)}</code>
 
         <span className="eyebrow">Worker</span>
-        <span className="flex items-center gap-2.5 font-mono text-[11.5px] text-dim">
+        <span className="flex items-center gap-2.5 font-mono text-meta text-dim">
           {host.workerVersion ? (
             <>
               {host.workerVersion}
@@ -222,7 +222,7 @@ function HostRow({
           {canBeSetUp(host) && (
             <button
               onClick={() => setSettingUp(true)}
-              className="rounded-[4px] border border-line px-1.5 py-0.5 text-[11px] text-slate transition-colors hover:border-[#3a3631] hover:text-bone"
+              className="rounded-sm border border-line px-1.5 py-0.5 text-meta text-slate transition-colors hover:border-mute/60 hover:text-bone"
             >
               See instructions
             </button>
@@ -230,7 +230,7 @@ function HostRow({
         </span>
 
         <span className="eyebrow">Agents</span>
-        <span className="font-mono text-[11.5px] text-dim">
+        <span className="font-mono text-meta text-dim">
           {agents.length > 0 ? agents.join(", ") : <span className="text-mute">none installed</span>}
         </span>
       </div>
@@ -260,14 +260,14 @@ function Wrong({ host, onRetry }: { host: Host; onRetry: () => void }) {
   return (
     <div className="mt-3 border-t border-line pt-3">
       <div className="flex items-start gap-3">
-        <p className="flex-1 text-[11.5px] leading-[1.5] text-mute">
+        <p className="flex-1 text-meta leading-[1.5] text-mute">
           {host.diagnosis?.summary}
           {host.reconnecting && " Still trying."}
         </p>
         <button
           onClick={() => connect.mutate({ id: host.id }, { onSuccess: onRetry })}
           disabled={connect.isPending}
-          className="shrink-0 rounded-[5px] border border-line px-2 py-1 text-[11.5px] text-dim transition-colors hover:border-[#3a3631] hover:text-text disabled:text-mute"
+          className="shrink-0 rounded-sm border border-line px-2 py-1 text-meta text-dim transition-colors hover:border-mute/60 hover:text-text disabled:text-mute"
         >
           {connect.isPending ? "Trying…" : "Try now"}
         </button>
@@ -276,7 +276,7 @@ function Wrong({ host, onRetry }: { host: Host; onRetry: () => void }) {
       {/* The remedy for anything that has one and no panel of its own — a
           stopped Docker, a container that isn't running. */}
       {host.diagnosis?.remedy && !canBeSetUp(host) && (
-        <pre className="mt-2 overflow-x-auto rounded-[4px] bg-black/25 px-3 py-2 font-mono text-[11px] leading-[1.6] text-bone">
+        <pre className="mt-2 overflow-x-auto rounded-sm bg-black/25 px-3 py-2 font-mono text-meta leading-[1.6] text-bone">
           {host.diagnosis.remedy}
         </pre>
       )}

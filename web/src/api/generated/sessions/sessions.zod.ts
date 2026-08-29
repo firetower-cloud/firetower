@@ -124,6 +124,10 @@ export const CreateSessionResponse = zod.object({
  * about to lose is six places, not forty-eight processes.
  * @summary End every workspace that is still running.
  */
+export const EndAllSessionsBody = zod.object({
+  "workspaces": zod.array(zod.string()).nullish().describe('The workspaces to end, by id. Every one of yours when omitted — which\nis what this endpoint did before it could be narrowed, and what an\nempty body still means.')
+}).describe('Which workspaces to end.')
+
 export const endAllSessionsResponseEndedMin = 0;
 
 export const endAllSessionsResponseUnreachableMin = 0;

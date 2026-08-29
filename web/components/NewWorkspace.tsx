@@ -147,7 +147,7 @@ export function NewWorkspace({
           value={name}
           onChange={(e) => setName(e.target.value)}
           placeholder="auth refactor"
-          className="w-full rounded-[8px] border border-line bg-ground px-3 py-2 text-[14px] text-bone placeholder:text-mute focus:border-ember focus:outline-none"
+          className="w-full rounded-md border border-line bg-ground px-3 py-2 text-body text-bone placeholder:text-mute focus:border-dim focus:outline-none"
         />
       </Row>
 
@@ -193,7 +193,7 @@ export function NewWorkspace({
             placeholder="agent/…"
             spellCheck={false}
             title={branchTyped ? undefined : "Following the name — edit to fix it"}
-            className={`w-full rounded-[8px] border border-line bg-ground px-3 py-2 font-mono text-[12.5px] placeholder:text-mute focus:border-ember focus:outline-none ${
+            className={`w-full rounded-md border border-line bg-ground px-3 py-2 font-mono text-meta placeholder:text-mute focus:border-dim focus:outline-none ${
               branchTyped ? "text-bone" : "text-dim"
             }`}
           />
@@ -219,7 +219,7 @@ export function NewWorkspace({
       </div>
 
       {create.isError && (
-        <p className="rounded-[7px] border border-brick/40 bg-ground px-3 py-2 font-mono text-[11.5px] text-brick">
+        <p className="rounded-md border border-brick/40 bg-ground px-3 py-2 font-mono text-meta text-brick">
           {(create.error as { code?: string }).code === "NoCapacity"
             ? "No host is available to take this."
             : ((create.error as { message?: string }).message ?? "Couldn't create it.")}
@@ -234,18 +234,18 @@ export function NewWorkspace({
           href={fromTask.url}
           target="_blank"
           rel="noreferrer"
-          className="mb-3 flex items-center gap-2 rounded-[8px] border border-line px-3 py-2 transition-colors hover:border-ember/40"
+          className="mb-3 flex items-center gap-2 rounded-md border border-line px-3 py-2 transition-colors hover:border-line"
         >
-          <span className="shrink-0 font-mono text-[11px] text-ember">{fromTask.key}</span>
-          <span className="min-w-0 flex-1 truncate text-[12.5px] text-mute">{fromTask.title}</span>
-          <span aria-hidden className="shrink-0 text-[10px] text-mute">
+          <span className="shrink-0 font-mono text-meta text-dim">{fromTask.key}</span>
+          <span className="min-w-0 flex-1 truncate text-meta text-mute">{fromTask.title}</span>
+          <span aria-hidden className="shrink-0 text-micro text-mute">
             ↗
           </span>
         </a>
       )}
 
       <div className="flex items-center gap-3 border-t border-line pt-3">
-        <p className="min-w-0 flex-1 text-[11.5px] leading-[1.5] text-mute">
+        <p className="min-w-0 flex-1 text-meta leading-[1.5] text-mute">
           {why({
             hosts: hosts.length,
             chosen,
@@ -256,11 +256,11 @@ export function NewWorkspace({
         <button
           onClick={go}
           disabled={!ready}
-          className="flex shrink-0 items-center gap-2 rounded-[8px] bg-ember px-4 py-2 text-[13px] font-semibold text-[#1a0c04] transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:bg-line disabled:text-mute"
+          className="flex shrink-0 items-center gap-2 rounded-md bg-bone px-4 py-2 text-ui font-semibold text-ground transition-colors hover:bg-white disabled:cursor-not-allowed disabled:bg-line disabled:text-mute"
         >
           {create.isPending ? "Creating…" : "Create workspace"}
           {!create.isPending && (
-            <span aria-hidden className="font-mono text-[12px] opacity-60">
+            <span aria-hidden className="font-mono text-meta opacity-60">
               ⌘↵
             </span>
           )}
@@ -299,8 +299,8 @@ function Row({
   return (
     <label className="flex flex-col gap-1.5">
       <span className="flex items-baseline gap-2">
-        <span className="text-[11.5px] font-medium text-dim">{label}</span>
-        {hint && <span className="text-[11px] text-mute">{hint}</span>}
+        <span className="text-meta font-medium text-dim">{label}</span>
+        {hint && <span className="text-meta text-mute">{hint}</span>}
       </span>
       {children}
     </label>
@@ -320,10 +320,10 @@ function Select({
   glyph?: React.ReactNode;
 }) {
   return (
-    <span className="relative flex items-center gap-2 rounded-[8px] border border-line bg-ground px-3 py-2 transition-colors hover:border-[#3a3631]">
+    <span className="relative flex items-center gap-2 rounded-md border border-line bg-ground px-3 py-2 transition-colors hover:border-mute/60">
       {glyph && <span className="shrink-0 text-mute">{glyph}</span>}
-      <span className="min-w-0 flex-1 truncate text-[12.5px] text-bone">{value}</span>
-      <span aria-hidden className="shrink-0 text-[9px] text-mute">
+      <span className="min-w-0 flex-1 truncate text-meta text-bone">{value}</span>
+      <span aria-hidden className="shrink-0 text-micro text-mute">
         ▾
       </span>
       <select
@@ -377,7 +377,7 @@ function Add({
           onOpen();
           setSearch("");
         }}
-        className="rounded-[7px] border border-dashed border-line px-2.5 py-1.5 text-[12px] text-mute transition-colors hover:border-ember/40 hover:text-ember"
+        className="rounded-md border border-dashed border-line px-2.5 py-1.5 text-meta text-mute transition-colors hover:border-line hover:text-bone"
       >
         {label}
       </button>
@@ -385,7 +385,7 @@ function Add({
   }
 
   return (
-    <div className="w-full rounded-[8px] border border-line bg-ground p-1">
+    <div className="w-full rounded-md border border-line bg-ground p-1">
       <div className="flex items-center gap-1">
         <input
           autoFocus
@@ -398,12 +398,12 @@ function Add({
             if (e.key === "Enter" && shown.length === 1) onPick(shown[0]);
           }}
           placeholder="Search repositories"
-          className="min-w-0 flex-1 rounded-[6px] bg-transparent px-2.5 py-1.5 text-[12.5px] text-bone placeholder:text-mute focus:outline-none"
+          className="min-w-0 flex-1 rounded-sm bg-transparent px-2.5 py-1.5 text-meta text-bone placeholder:text-mute focus:outline-none"
         />
         <button
           onClick={onClose}
           aria-label="Stop adding"
-          className="shrink-0 px-2 text-[13px] text-mute transition-colors hover:text-text"
+          className="shrink-0 px-2 text-ui text-mute transition-colors hover:text-text"
         >
           ×
         </button>
@@ -411,13 +411,13 @@ function Add({
 
       <div className="max-h-[168px] overflow-y-auto">
         {shown.length === 0 && (
-          <p className="px-2.5 py-2 text-[12px] text-mute">{empty}</p>
+          <p className="px-2.5 py-2 text-meta text-mute">{empty}</p>
         )}
         {shown.map((r) => (
           <button
             key={r.id}
             onClick={() => onPick(r)}
-            className="block w-full rounded-[6px] px-2.5 py-1.5 text-left font-mono text-[12px] text-text transition-colors hover:bg-raise"
+            className="block w-full rounded-sm px-2.5 py-1.5 text-left font-mono text-meta text-text transition-colors hover:bg-raise"
           >
             {r.slug}
           </button>
@@ -432,7 +432,7 @@ function Add({
           in it. */}
       <button
         onClick={onConnect}
-        className="mt-0.5 block w-full rounded-[6px] border-t border-line px-2.5 py-1.5 text-left text-[12px] text-mute transition-colors hover:text-ember"
+        className="mt-0.5 block w-full rounded-sm border-t border-line px-2.5 py-1.5 text-left text-meta text-mute transition-colors hover:text-bone"
       >
         + Connect a repository…
       </button>
@@ -463,14 +463,14 @@ function RepoChip({
   const showing = base ?? info?.defaultBranch ?? "its default branch";
 
   return (
-    <span className="flex items-center rounded-[7px] border border-line bg-panel text-[12px] text-dim">
-      <span className="max-w-[200px] truncate py-1.5 pr-2 pl-2.5 font-mono text-[11.5px] text-bone">
+    <span className="flex items-center rounded-md border border-line bg-panel text-meta text-dim">
+      <span className="max-w-[200px] truncate py-1.5 pr-2 pl-2.5 font-mono text-meta text-bone">
         {slug}
       </span>
       <label className="group relative flex items-center gap-1 border-l border-line py-1.5 pr-5 pl-2">
         <span className="text-mute">⑂</span>
-        <span className="max-w-[110px] truncate font-mono text-[11.5px]">{showing}</span>
-        <span aria-hidden className="pointer-events-none absolute right-1.5 text-[9px] text-mute">
+        <span className="max-w-[110px] truncate font-mono text-meta">{showing}</span>
+        <span aria-hidden className="pointer-events-none absolute right-1.5 text-micro text-mute">
           ▾
         </span>
         <select

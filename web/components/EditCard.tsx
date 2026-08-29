@@ -47,31 +47,31 @@ export function EditCard({
   const shownIn = cut ? inn.slice(0, MOST - shownOut.length) : inn;
 
   return (
-    <div className="my-2 overflow-hidden rounded-[9px] border border-line">
+    <div className="my-2 overflow-hidden rounded-md border border-line">
       <div className="flex items-center gap-2 border-b border-line bg-panel px-2.5 py-1.5">
-        <span className="shrink-0 text-[11px] text-mute">✎</span>
-        <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-slate" title={path}>
+        <span className="shrink-0 text-meta text-mute">✎</span>
+        <span className="min-w-0 flex-1 truncate font-mono text-meta text-slate" title={path}>
           {path}
         </span>
         {inn.length > 0 && (
-          <span className="shrink-0 font-mono text-[10px] text-sage">+{inn.length}</span>
+          <span className="shrink-0 font-mono text-micro text-sage">+{inn.length}</span>
         )}
         {out.length > 0 && (
-          <span className="shrink-0 font-mono text-[10px] text-brick">−{out.length}</span>
+          <span className="shrink-0 font-mono text-micro text-brick">−{out.length}</span>
         )}
         {onOpen && (
           <button
             onClick={onOpen}
             title="Open the full diff"
-            className="shrink-0 text-[11px] text-mute transition-colors hover:text-ember"
+            className="shrink-0 text-meta text-mute transition-colors hover:text-bone"
           >
             ↗
           </button>
         )}
       </div>
 
-      <div className="overflow-x-auto bg-[#0f0e0d]">
-        <pre className="min-w-full px-2.5 py-1.5 font-mono text-[11px] leading-[1.6]">
+      <div className="overflow-x-auto bg-ground">
+        <pre className="min-w-full px-2.5 py-1.5 font-mono text-meta leading-[1.6]">
           {shownOut.map((line, i) => (
             <div key={`-${i}`} className="bg-brick/[0.07] text-brick">
               <span className="mr-2 select-none opacity-60">−</span>
@@ -90,7 +90,7 @@ export function EditCard({
       {total > MOST && (
         <button
           onClick={() => setWhole(!whole)}
-          className="w-full border-t border-line bg-panel py-1 text-[11px] text-mute transition-colors hover:text-ember"
+          className="w-full border-t border-line bg-panel py-1 text-meta text-mute transition-colors hover:text-bone"
         >
           {whole ? "Show less" : `Show all ${total} lines`}
         </button>

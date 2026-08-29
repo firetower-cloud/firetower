@@ -103,7 +103,7 @@ export function TabBar({ pane }: { pane: PaneIndex }) {
         <button
           onClick={unsplit}
           title="Close this split"
-          className="ml-auto shrink-0 px-2.5 text-[12px] text-mute transition-colors hover:text-ember"
+          className="ml-auto shrink-0 px-2.5 text-meta text-mute transition-colors hover:text-bone"
         >
           ⊟
         </button>
@@ -171,7 +171,7 @@ function TabButton({
       // somebody has turned down.
       className={`group relative flex shrink-0 cursor-default items-center gap-2 border-r border-line px-3 transition-colors ${
         on
-          ? "bg-ground text-bone before:absolute before:inset-x-0 before:top-0 before:h-[2px] before:bg-ember before:content-['']"
+          ? "bg-ground text-bone before:absolute before:inset-x-0 before:top-0 before:h-[2px] before:bg-bone before:content-['']"
           : "text-mute hover:bg-raise/60 hover:text-dim"
       }`}
     >
@@ -181,7 +181,7 @@ function TabButton({
           status={tab.kind === "run" ? run?.status : session?.status}
           agent={tab.kind === "run" ? run?.agent : session?.agent}
         />
-        <span className={`max-w-[22ch] truncate text-[12.5px] ${on ? "" : "font-normal"}`}>
+        <span className={`max-w-[22ch] truncate text-meta ${on ? "" : "font-normal"}`}>
           {label}
         </span>
       </button>
@@ -190,7 +190,7 @@ function TabButton({
         <button
           onClick={onClose}
           aria-label={`Close ${label}`}
-          className="-mr-1 shrink-0 rounded-[4px] px-1 text-[13px] leading-none text-mute opacity-0 transition-opacity group-hover:opacity-100 hover:text-brick"
+          className="-mr-1 shrink-0 rounded-sm px-1 text-ui leading-none text-mute opacity-0 transition-opacity group-hover:opacity-100 hover:text-brick"
         >
           ×
         </button>
@@ -217,10 +217,10 @@ function Glyph({
     );
   }
   if (tab.kind === "terminal") {
-    return <span className="font-mono text-[11px] opacity-70">▸</span>;
+    return <span className="font-mono text-meta opacity-70">▸</span>;
   }
   if (tab.kind === "diff") {
-    return <span className="font-mono text-[11px] opacity-70">±</span>;
+    return <span className="font-mono text-meta opacity-70">±</span>;
   }
   return <FileGlyph name={tab.path} size={12} className="opacity-70" />;
 }
@@ -289,7 +289,7 @@ function NewTab() {
         onClick={() => setOpen(!open)}
         aria-label="Open something in this session"
         title="Open something in this session"
-        className="px-3 text-[14px] leading-none text-mute transition-colors hover:bg-raise/60 hover:text-dim"
+        className="px-3 text-body leading-none text-mute transition-colors hover:bg-raise/60 hover:text-dim"
       >
         +
       </button>
@@ -299,7 +299,7 @@ function NewTab() {
         // positioned inside it is clipped away by that scroller.
         <div
           style={{ top: at.top, left: at.left }}
-          className="fixed z-40 w-[264px] rounded-[10px] border border-line bg-panel p-1 shadow-[0_12px_36px_-14px_rgba(0,0,0,0.85)]"
+          className="fixed z-40 w-[264px] rounded-md border border-line bg-panel p-1 shadow-[0_12px_36px_-14px_rgba(0,0,0,0.85)]"
         >
           <Choice
             glyph="▸"
@@ -376,7 +376,7 @@ function Agents({
   return (
     <>
       <div className="my-1 border-t border-line" />
-      <p className="px-2 pt-1 pb-1.5 font-narrow text-[10px] font-semibold tracking-[0.14em] text-mute uppercase">
+      <p className="px-2 pt-1 pb-1.5 font-narrow text-micro font-semibold tracking-[0.14em] text-mute uppercase">
         Start an agent
       </p>
 
@@ -385,7 +385,7 @@ function Agents({
           while the request is still in flight sent people to the Agents screen
           to add an agent they had already added. */}
       {isPending && (
-        <p className="px-2 pb-1.5 text-[11.5px] text-mute" aria-busy>
+        <p className="px-2 pb-1.5 text-meta text-mute" aria-busy>
           Looking…
         </p>
       )}
@@ -393,14 +393,14 @@ function Agents({
       {isError && (
         <button
           onClick={() => refetch()}
-          className="block w-full px-2 pb-1.5 text-left text-[11.5px] text-ember hover:underline"
+          className="block w-full px-2 pb-1.5 text-left text-meta text-dim transition-colors hover:text-bone"
         >
           Couldn&rsquo;t reach the API. Retry
         </button>
       )}
 
       {!isPending && !isError && agents.length === 0 && (
-        <p className="px-2 pb-1.5 text-[11.5px] text-mute">
+        <p className="px-2 pb-1.5 text-meta text-mute">
           No agents configured. Add one on the Agents screen.
         </p>
       )}
@@ -462,14 +462,14 @@ function Choice({
     <button
       onClick={onClick}
       disabled={disabled}
-      className="flex w-full items-start gap-2.5 rounded-[7px] px-2 py-1.5 text-left transition-colors enabled:hover:bg-raise disabled:opacity-40"
+      className="flex w-full items-start gap-2.5 rounded-md px-2 py-1.5 text-left transition-colors enabled:hover:bg-raise disabled:opacity-40"
     >
-      <span className="mt-px flex w-3 shrink-0 justify-center text-center font-mono text-[11px] text-mute">
+      <span className="mt-px flex w-3 shrink-0 justify-center text-center font-mono text-meta text-mute">
         {mark ? <AgentMark agent={mark} size={12} /> : glyph}
       </span>
       <span className="min-w-0">
-        <span className="block text-[12.5px] text-bone">{label}</span>
-        <span className="block text-[11px] text-mute">{hint}</span>
+        <span className="block text-meta text-bone">{label}</span>
+        <span className="block text-meta text-mute">{hint}</span>
       </span>
     </button>
   );

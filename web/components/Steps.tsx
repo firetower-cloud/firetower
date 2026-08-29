@@ -153,13 +153,13 @@ export function Bringup({ lines }: { lines: Line[] }) {
             {line.state === "running" ? "\u25CB" : line.state === "failed" ? "\u2715" : "\u2713"}
           </span>
           <span
-            className={`text-[13.5px] ${line.state === "failed" ? "text-brick" : "text-dim"}`}
+            className={`text-ui ${line.state === "failed" ? "text-brick" : "text-dim"}`}
           >
             {line.state === "done" ? DONE[line.step] : LABELS[line.step]}
           </span>
           {line.detail && (
             <div
-              className={`mt-0.5 font-mono text-[12px] leading-[1.5] ${
+              className={`mt-0.5 font-mono text-meta leading-[1.5] ${
                 line.state === "failed" ? "whitespace-pre-wrap text-brick/80" : "truncate text-mute"
               }`}
             >
