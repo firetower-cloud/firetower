@@ -811,6 +811,38 @@ pub(super) async fn destroy_session(
         return Ok(StatusCode::ACCEPTED);
     }
 
+    // Ending the workspace's own session ends the workspace, so the other
+    // agents in it go too. They share its directory, and it is about to be
+    // reclaimed; left running they would be working in a place that no longer
+    // exists, and nothing would list them, because a session is only reachable
+    // through the workspace it belongs to.
+    //
+    // Ending one of the others is just that one agent — the place and its
+    // neighbours carry on.
+    let workspace = session.workspace_id.clone();
+    if workspace.as_ref().is_some_and(|w| w.as_str() == session.id.as_str()) {
+        for run in state
+            .db
+            .live_runs_beside(
+                owner(&principal)?,
+                workspace.as_ref().expect("checked just above"),
+                &id,
+            )
+            .await?
+        {
+            state
+                .fleet
+                .send(
+                    &session.host_id,
+                    ToWorker::Destroy {
+                        session_id: run,
+                        force: false,
+                    },
+                )
+                .await?;
+        }
+    }
+
     state
         .fleet
         .send(

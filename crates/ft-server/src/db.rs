@@ -978,6 +978,36 @@ impl Db {
         self.with_checkouts(rows).await
     }
 
+    /// The agents still running in a workspace, other than this one.
+    ///
+    /// Ending a workspace has to take them with it. A workspace holds any
+    /// number of agents and only the first has the workspace's own id, so
+    /// ending that one alone would leave the rest running against a directory
+    /// that is about to be reclaimed — invisible, because nothing lists a
+    /// session whose workspace has gone.
+    pub async fn live_runs_beside(
+        &self,
+        owner: &str,
+        workspace_id: &WorkspaceId,
+        excluding: &SessionId,
+    ) -> Result<Vec<SessionId>> {
+        let rows = sqlx::query(
+            "SELECT id FROM sessions
+              WHERE user_id = $1 AND workspace_id = $2 AND id <> $3 AND status <> $4",
+        )
+        .bind(owner)
+        .bind(workspace_id.as_str())
+        .bind(excluding.as_str())
+        .bind(format!("{:?}", SessionStatus::Ended))
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows
+            .into_iter()
+            .map(|r| SessionId::from_stored(r.get::<String, _>("id")))
+            .collect())
+    }
+
     /// Every session of this person's that hasn't ended, for stopping them all
     /// at once. Never anybody else's — "end all" ends yours.
     pub async fn live_sessions(&self, owner: &str) -> Result<Vec<Session>> {
@@ -2948,6 +2978,73 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(held, 2);
+    }
+
+    /// Ending a workspace has to find the agents that are not named after it.
+    #[tokio::test]
+    async fn a_workspace_knows_the_other_agents_it_has_to_take_with_it() {
+        let (db, owner) = db_with_user().await;
+        let host = db.ensure_host("localhost", Compute::Local).await.unwrap();
+
+        let first = SessionId::new();
+        db.insert_session(
+            &first,
+            &host.id,
+            &owner,
+            Some("acme/backend"),
+            "Split the refresh path",
+            "split the refresh path",
+            Some("agent/auth"),
+            Some("main"),
+            "ClaudeCode",
+            WorkspaceSize::Medium,
+            &[],
+            Some("auth"),
+        )
+        .await
+        .unwrap();
+
+        let workspace = db
+            .session(&first)
+            .await
+            .unwrap()
+            .unwrap()
+            .workspace_id
+            .unwrap();
+
+        let mut runs = vec![];
+        for agent in ["Codex", "ClaudeCode"] {
+            let id = SessionId::new();
+            db.insert_run(NewRun {
+                id: &id,
+                workspace_id: &workspace,
+                owner: &owner,
+                title: agent,
+                prompt: "",
+                agent,
+                steps: &[],
+            })
+            .await
+            .unwrap();
+            runs.push(id);
+        }
+
+        let beside = db
+            .live_runs_beside(&owner, &workspace, &first)
+            .await
+            .unwrap();
+        assert_eq!(beside.len(), 2, "both of the workspace's other agents");
+        for id in &runs {
+            assert!(beside.iter().any(|f| f == id), "{id} should be in {beside:?}");
+        }
+
+        // One that has already ended is not ended twice.
+        db.forget_session(&runs[0]).await.unwrap();
+        let beside = db
+            .live_runs_beside(&owner, &workspace, &first)
+            .await
+            .unwrap();
+        assert_eq!(beside, vec![runs[1].clone()]);
     }
 
     /// Ending one run does not take the other, or the place.

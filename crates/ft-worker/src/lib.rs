@@ -440,10 +440,37 @@ impl Worker {
                     .kill()
                     .await?;
 
+                // Ended before the count is taken, so that the last agent out
+                // is decided the same way however many are ending at once. Two
+                // concurrent teardowns each see the other already finished and
+                // both reclaim; the directory is removed once and the second
+                // gets NotFound, which is handled below. The alternative —
+                // counting first — has both see a live sibling and neither
+                // reclaim, which leaks the worktree.
+                self.store
+                    .set_status(&session_id, SessionStatus::Ended)
+                    .await?;
+
+                // The worktree belongs to the workspace, not to this agent.
+                // With a sibling still running in it, removing it would delete
+                // the directory out from under a live process; the last agent
+                // out reclaims it instead.
+                let alone = self.store.others_in_workspace(&session_id).await?.is_empty();
+                if !alone {
+                    tracing::info!(
+                        session = %session_id,
+                        "ending this agent; its workspace stays for the others in it"
+                    );
+                }
+
                 // Each worktree is registered against its own mirror, so
                 // removing one means finding the mirror it was cut from. A
                 // session holds any number of them.
-                let workspace = self.store.workspace_path(&session_id).await?;
+                let workspace = if alone {
+                    self.store.workspace_path(&session_id).await?
+                } else {
+                    None
+                };
                 if let Some(workspace) = workspace.as_deref().map(std::path::Path::new) {
                     for c in self
                         .store
@@ -2924,6 +2951,115 @@ mod tests {
                 .unwrap(),
             path,
             "both agents work in one place"
+        );
+
+        cleanup(&first).await;
+        cleanup(&second).await;
+    }
+
+    #[tokio::test]
+    async fn ending_one_agent_leaves_the_workspace_for_the_others() {
+        // Closing an agent's tab ends that agent. If that also reclaimed the
+        // worktree, the sibling still working in it would have the directory
+        // deleted underneath it — its files, its git metadata, its socket.
+        let home = TempDir::new().unwrap();
+        let worker = std::sync::Arc::new(Worker::open(home.path()).await.unwrap());
+        let first = SessionId::new();
+
+        exchange(
+            &worker,
+            vec![
+                hello(),
+                ToWorker::CreateWorkspace(Box::new(CreateWorkspace {
+                    session_id: first.clone(),
+                    repos: vec![],
+                    prompt: String::new(),
+                    agent: Agent::Shell,
+                    size: WorkspaceSize::Medium,
+                    workspace: first.as_str().to_string(),
+                    env: vec![],
+                    agent_home: vec![],
+                })),
+            ],
+        )
+        .await;
+
+        let path = worker
+            .store()
+            .workspace_path(&first)
+            .await
+            .unwrap()
+            .unwrap();
+
+        let second = SessionId::new();
+        exchange(
+            &worker,
+            vec![
+                hello(),
+                ToWorker::StartAgent(Box::new(ft_proto::StartAgent {
+                    session_id: second.clone(),
+                    workspace: first.as_str().to_string(),
+                    prompt: String::new(),
+                    agent: Agent::Shell,
+                    title: "Shell".into(),
+                    repo: None,
+                    branch: None,
+                    base: None,
+                    size: WorkspaceSize::Medium,
+                    env: vec![],
+                    agent_home: vec![],
+                })),
+            ],
+        )
+        .await;
+
+        // End the second one, the way closing its tab does.
+        exchange(
+            &worker,
+            vec![
+                hello(),
+                ToWorker::Destroy {
+                    session_id: second.clone(),
+                    force: false,
+                },
+            ],
+        )
+        .await;
+
+        assert_eq!(
+            worker.store().status_of(&second).await.unwrap(),
+            Some(SessionStatus::Ended),
+            "the agent that was asked to end should be gone"
+        );
+        assert!(
+            !tmux::Tmux::for_session(second.as_str()).exists().await,
+            "its process should be gone with it"
+        );
+        assert!(
+            std::path::Path::new(&path).exists(),
+            "the workspace belongs to the place, and another agent is still in it"
+        );
+        assert!(
+            tmux::Tmux::for_session(first.as_str()).exists().await,
+            "the agent nobody ended should still be running"
+        );
+
+        // And when the last one goes, the worktree is reclaimed.
+        exchange(
+            &worker,
+            vec![
+                hello(),
+                ToWorker::Destroy {
+                    session_id: first.clone(),
+                    force: false,
+                },
+            ],
+        )
+        .await;
+
+        assert!(
+            !std::path::Path::new(&path).exists(),
+            "the last agent out should reclaim the worktree, not leak it"
         );
 
         cleanup(&first).await;

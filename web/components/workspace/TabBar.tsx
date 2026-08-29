@@ -5,6 +5,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import {
   useGetSession,
   useCreateSession,
+  useDestroySession,
   getListSessionsQueryKey,
 } from "@/src/api/generated/sessions/sessions";
 import { useListAgents } from "@/src/api/generated/agents/agents";
@@ -39,6 +40,32 @@ export function TabBar({ pane }: { pane: PaneIndex }) {
   const tabs = paneTabs(set, pane);
   const active = set?.active[pane] ?? null;
 
+  const cache = useQueryClient();
+  const end = useDestroySession();
+
+  // Closing an agent's tab ends the agent.
+  //
+  // The first shape kept the two apart — the `×` left the tab, and ending was
+  // a separate menu item — on the theory that leaving a conversation should
+  // not kill the process behind it. In use that is wrong: nothing else says a
+  // closed tab is still running, so every close leaked an agent, a tmux
+  // session and a checkout, and a morning's work left ninety processes on the
+  // machine with no interface that admitted they were there.
+  //
+  // A terminal, a file and a diff are still just views, and closing those
+  // closes nothing else.
+  const shut = (tab: Tab) => {
+    close(tab.id);
+    if (tab.kind !== "run") return;
+    end.mutate(
+      { id: tab.sessionId },
+      {
+        onSettled: () =>
+          cache.invalidateQueries({ queryKey: getListSessionsQueryKey() }),
+      },
+    );
+  };
+
   return (
     <div
       onDragOver={(e) => {
@@ -64,7 +91,7 @@ export function TabBar({ pane }: { pane: PaneIndex }) {
           tab={tab}
           on={tab.id === active}
           onPick={() => focus(tab.id)}
-          onClose={() => close(tab.id)}
+          onClose={() => shut(tab)}
         />
       ))}
 
