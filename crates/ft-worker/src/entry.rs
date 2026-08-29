@@ -49,7 +49,10 @@ async fn arrange_asking(session: &str, workspace: &std::path::Path) -> Result<ft
     let dir = crate::agentd::dir_for(workspace);
     tokio::fs::create_dir_all(&dir).await?;
 
-    let config = dir.join("mcp.json");
+    // Per session, because what is written into it names one: the approval
+    // tool it configures carries the session id back, so two agents sharing a
+    // file would both answer as whichever wrote it last.
+    let config = dir.join(format!("mcp-{session}.json"));
     let contents =
         serde_json::to_vec_pretty(&crate::approver::mcp_config(&exe, session, workspace))?;
     tokio::fs::write(&config, contents).await?;

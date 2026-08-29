@@ -1336,7 +1336,7 @@ You are in the directory that holds them, not inside one of them.              P
                     .context("opening the conversation")?;
 
                 if let Some(req) = awaiting {
-                    structured::wait_for_answer(path, req)
+                    structured::wait_for_answer(path, id.as_str(), req)
                         .await
                         .context("opening the conversation")?;
                 }

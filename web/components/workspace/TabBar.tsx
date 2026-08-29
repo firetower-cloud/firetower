@@ -206,6 +206,33 @@ function NewTab() {
   /** Where the menu goes, measured from the button when it opens. */
   const [at, setAt] = useState({ top: 0, left: 0 });
   const opener = useOpen();
+  const { open: openTab } = useTabs();
+  const cache = useQueryClient();
+
+  // Owned here rather than in the menu below it. React Query drops a
+  // component's mutation callbacks when it unmounts, and closing the menu
+  // unmounts it — so the run was created and its tab never opened, which
+  // looked like a cap on how many agents a workspace would take. A late one
+  // that *did* fire re-opened a tab somebody had since closed.
+  //
+  // This button is part of the strip and never goes away, so its callback
+  // always runs.
+  // Not gated on `isPending`, and not opened from the mutation's own callback.
+  //
+  // Each agent is an independent run and several may be starting at once, so
+  // disabling the list while one was in flight left later clicks landing on a
+  // dead button. And one observer's `onSuccess` fires for the newest call —
+  // start three quickly and the first two never opened a tab, though all three
+  // runs were created. Both looked like a cap on how many a workspace takes.
+  //
+  // Awaiting the call answers per click, whatever else is in flight.
+  const start = useCreateSession();
+
+  const begin = async (workspaceId: string, agent: AgentView["kind"]) => {
+    const made = await start.mutateAsync({ data: { workspaceId, agent } });
+    cache.invalidateQueries({ queryKey: getListSessionsQueryKey() });
+    openTab({ id: addressOf.run(made.id), kind: "run", sessionId: made.id });
+  };
 
   // Before paint, so it never shows for a frame in the wrong place.
   useLayoutEffect(() => {
@@ -263,7 +290,14 @@ function NewTab() {
             disabled
           />
 
-          <Agents onDone={() => setOpen(false)} />
+          <Agents
+            onStart={(workspaceId, agent) => {
+              setOpen(false);
+              // Fire and forget: a failure surfaces as the run never appearing,
+              // and the control plane has already said why in its own error.
+              void begin(workspaceId, agent);
+            }}
+          />
         </div>
       )}
     </div>
@@ -281,11 +315,12 @@ function NewTab() {
  * the thing does not exist and leaves nowhere to learn what is missing, which
  * is the same rule the create dialog follows.
  */
-function Agents({ onDone }: { onDone: () => void }) {
+function Agents({
+  onStart,
+}: {
+  onStart: (workspaceId: string, agent: AgentView["kind"]) => void;
+}) {
   const sessionId = useCurrentSession();
-  const { open } = useTabs();
-  const cache = useQueryClient();
-
   const { data: session } = useGetSession(sessionId ?? "", {
     query: { enabled: !!sessionId },
   });
@@ -293,15 +328,7 @@ function Agents({ onDone }: { onDone: () => void }) {
   const { data: hosts = [] } = useListHosts();
 
   const host = hosts.find((h) => h.id === session?.hostId);
-  const start = useCreateSession({
-    mutation: {
-      onSuccess: (made) => {
-        cache.invalidateQueries({ queryKey: getListSessionsQueryKey() });
-        // Its own tab, in the workspace it joined.
-        open({ id: addressOf.run(made.id), kind: "run", sessionId: made.id });
-      },
-    },
-  });
+  const workspaceId = session?.workspaceId ?? undefined;
 
   if (!session || agents.length === 0) return null;
 
@@ -312,7 +339,9 @@ function Agents({ onDone }: { onDone: () => void }) {
         Start an agent
       </p>
       {agents.map((a) => {
-        const why = unavailable(a, host?.id, host?.name);
+        const why = !workspaceId
+          ? "this session has no workspace"
+          : unavailable(a, host?.id, host?.name);
         return (
           <Choice
             key={a.kind}
@@ -320,17 +349,8 @@ function Agents({ onDone }: { onDone: () => void }) {
             mark={a.kind}
             label={a.label}
             hint={why ?? "In this workspace, on its branch"}
-            disabled={!!why || start.isPending}
-            onClick={() => {
-              onDone();
-              start.mutate({
-                data: {
-                  // The place is decided; only the agent is new.
-                  workspaceId: session.workspaceId ?? undefined,
-                  agent: a.kind,
-                },
-              });
-            }}
+            disabled={!!why}
+            onClick={() => workspaceId && onStart(workspaceId, a.kind)}
           />
         );
       })}

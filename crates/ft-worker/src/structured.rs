@@ -90,8 +90,10 @@ pub async fn wait_until_listening(session_id: &SessionId) -> Result<()> {
 /// Read from the log rather than from a socket because the log is where every
 /// line already lands, written and flushed before anybody is offered it — so
 /// there is no window in which an answer arrives and nothing sees it.
-pub async fn wait_for_answer(workspace: &Path, id: u64) -> Result<()> {
-    let log = crate::agentd::log_path(workspace);
+pub async fn wait_for_answer(workspace: &Path, session_id: &str, id: u64) -> Result<()> {
+    // This agent's own log. A workspace may hold several, and answering out of
+    // a neighbour's would take the wrong reply for this request.
+    let log = crate::agentd::readable_log(workspace, session_id);
     let deadline = std::time::Instant::now() + STARTUP;
 
     loop {
@@ -220,7 +222,7 @@ mod tests {
             .await
             .unwrap();
 
-        let log = crate::agentd::log_path(workspace);
+        let log = crate::agentd::log_path(workspace, "test");
         tokio::fs::write(
             &log,
             concat!(
@@ -232,18 +234,24 @@ mod tests {
         .await
         .unwrap();
 
-        let waited =
-            tokio::time::timeout(Duration::from_millis(150), wait_for_answer(workspace, 1)).await;
+        let waited = tokio::time::timeout(
+            Duration::from_millis(150),
+            wait_for_answer(workspace, "test", 1),
+        )
+        .await;
         assert!(waited.is_err(), "a request is not an answer to itself");
 
         // And the real answer ends it.
         tokio::fs::write(&log, "{\"id\":1,\"result\":{}}\n")
             .await
             .unwrap();
-        tokio::time::timeout(Duration::from_secs(2), wait_for_answer(workspace, 1))
-            .await
-            .expect("should not have timed out")
-            .expect("the answer is there");
+        tokio::time::timeout(
+            Duration::from_secs(2),
+            wait_for_answer(workspace, "test", 1),
+        )
+        .await
+        .expect("should not have timed out")
+        .expect("the answer is there");
     }
 
     #[tokio::test]

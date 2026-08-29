@@ -126,10 +126,20 @@ export function reduce(state: State, action: Action): State {
       if (!state.current) return restored;
 
       return {
-        // What was already here wins: it is what somebody just asked for, and
-        // the restore is only remembering what they had before.
+        // Which session you are in is whatever was just asked for — a link, or
+        // the address bar — because that is a choice somebody made a moment ago
+        // and the store is only remembering where they were before.
         current: state.current,
-        sets: { ...restored.sets, ...state.sets },
+        // What is *open* in each, though, is the store's. Entering a session
+        // makes it a fresh set holding one tab, and that runs first: it is a
+        // child's effect and this is its parent's. Letting the fresh set win
+        // meant every remembered tab was thrown away on the way in, so a
+        // reload came back to a workspace with only its conversation and
+        // everything else silently gone.
+        //
+        // A session the store has never heard of still gets the fresh set,
+        // because there is nothing to prefer over it.
+        sets: { ...state.sets, ...restored.sets },
       };
     }
 

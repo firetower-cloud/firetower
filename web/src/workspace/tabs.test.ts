@@ -181,6 +181,40 @@ describe("restoring what was open last time", () => {
     expect(after.sets["linked"]).toBeDefined();
   });
 
+  it("keeps the tabs it remembers for the session being entered", () => {
+    // The regression this exists for. Entering a session runs first — it is a
+    // child's effect, the restore is its parent's — so the session already has
+    // a fresh set holding one tab by the time the store is read. Letting that
+    // win threw away every remembered tab, and a reload came back to a
+    // workspace with only its conversation.
+    const entered = run({ do: "enter", sessionId: "a" });
+    const stored = run(
+      { do: "enter", sessionId: "a" },
+      { do: "open", tab: file("PLAN.md") },
+      { do: "open", tab: terminal(1) },
+    );
+
+    const after = reduce(entered, { do: "restore", state: stored });
+
+    expect(after.current).toBe("a");
+    expect(after.sets["a"].tabs.map((t) => t.id)).toEqual([
+      "agent",
+      "file:PLAN.md",
+      "terminal:1",
+    ]);
+  });
+
+  it("still gives a session the store has never seen its fresh set", () => {
+    const linked = run({ do: "enter", sessionId: "linked" });
+    const stored = run({ do: "enter", sessionId: "a" }, { do: "open", tab: file("x.ts") });
+
+    const after = reduce(linked, { do: "restore", state: stored });
+
+    expect(after.current).toBe("linked");
+    expect(after.sets["linked"].tabs.map((t) => t.id)).toEqual(["agent"]);
+    expect(after.sets["a"].tabs).toHaveLength(2);
+  });
+
   it("takes the stored state whole when nothing was entered first", () => {
     const stored = run({ do: "enter", sessionId: "a" }, { do: "open", tab: file("x.ts") });
     expect(reduce(EMPTY, { do: "restore", state: stored })).toBe(stored);
