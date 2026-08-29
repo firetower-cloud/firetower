@@ -91,9 +91,23 @@ pub async fn wait_until_listening(session_id: &SessionId) -> Result<()> {
 /// line already lands, written and flushed before anybody is offered it — so
 /// there is no window in which an answer arrives and nothing sees it.
 pub async fn wait_for_answer(workspace: &Path, session_id: &str, id: u64) -> Result<()> {
-    // This agent's own log. A workspace may hold several, and answering out of
-    // a neighbour's would take the wrong reply for this request.
-    let log = crate::agentd::readable_log(workspace, session_id);
+    // This agent's own log, and only ever that one.
+    //
+    // Not `readable_log`: its fallback to the pre-split `agent.ndjson` is for
+    // *reading back* a transcript written before a workspace could hold more
+    // than one agent. Here the file is always about to be written, so at the
+    // moment this is called the agent has produced nothing and its own log
+    // does not exist yet — the fallback would resolve to the neighbour's,
+    // once, and then poll that for the whole timeout.
+    //
+    // Which is how starting a second agent in an older workspace failed. The
+    // first agent there was Claude, so `agent.ndjson` holds stream-json with
+    // no JSON-RPC reply in it: a Codex run watched it for thirty seconds,
+    // never saw an answer to request 1, and came up `Failed` while its process
+    // sat there perfectly healthy. A second Claude run was worse — it matched
+    // the *previous* agent's answer and reported itself ready on somebody
+    // else's reply.
+    let log = crate::agentd::log_path(workspace, session_id);
     let deadline = std::time::Instant::now() + STARTUP;
 
     loop {
@@ -209,6 +223,54 @@ mod tests {
         assert!(command.contains("'/opt/my worker/firetower-worker'"));
         assert!(command.contains("'/tmp/some workspace'"));
         assert!(command.contains("--agent 'ClaudeCode'"));
+    }
+
+    /// Starting an agent in a workspace that predates the per-session log must
+    /// not answer out of the log left behind there.
+    ///
+    /// This is what capped a workspace at the agents it already had. The
+    /// leftover `agent.ndjson` is a Claude transcript, so a new Codex run
+    /// waited the full thirty seconds for a JSON-RPC reply that file could
+    /// never contain and came up `Failed` — with its process running fine and
+    /// nothing on screen saying why.
+    #[tokio::test]
+    async fn a_new_agent_never_answers_out_of_the_log_left_in_the_workspace() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let workspace = dir.path();
+        tokio::fs::create_dir_all(crate::agentd::dir_for(workspace))
+            .await
+            .unwrap();
+
+        // What the workspace's first agent left, holding an answer to id 1.
+        tokio::fs::write(
+            crate::agentd::dir_for(workspace).join(crate::agentd::LEGACY_LOG),
+            "{\"id\":1,\"result\":{\"whose\":\"the agent that was here first\"}}\n",
+        )
+        .await
+        .unwrap();
+
+        // The newcomer has written nothing yet, which is the moment this runs.
+        let waiting = wait_for_answer(workspace, "s_newcomer", 1);
+        tokio::pin!(waiting);
+        assert!(
+            tokio::time::timeout(Duration::from_millis(200), &mut waiting)
+                .await
+                .is_err(),
+            "the neighbour's answer is not this agent's answer"
+        );
+
+        // Its own reply is, the moment it lands.
+        tokio::fs::write(
+            crate::agentd::log_path(workspace, "s_newcomer"),
+            "{\"id\":1,\"result\":{\"whose\":\"mine\"}}\n",
+        )
+        .await
+        .unwrap();
+
+        tokio::time::timeout(Duration::from_secs(5), waiting)
+            .await
+            .expect("it should notice its own log appearing")
+            .expect("and take the answer in it");
     }
 
     /// A request carries an id *and* a method; only an answer carries an id
