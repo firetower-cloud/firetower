@@ -10,7 +10,7 @@ import type { Session } from "@/src/api/generated/model";
 import { Mark, Signal } from "@/components/Signal";
 import { AgentMark, AGENT_SHORT } from "@/components/AgentMark";
 import { elapsed, minutesSince, needsYou, unfinished } from "@/src/api/view";
-import { useTabs, useCurrentSession } from "@/src/workspace/tabs";
+import { useTabs, useCurrentSession, addressOf } from "@/src/workspace/tabs";
 import { useRenameSession, getListSessionsQueryKey } from "@/src/api/generated/sessions/sessions";
 import { useQueryClient } from "@tanstack/react-query";
 import { useSessionWork } from "@/src/api/generated/sessions/sessions";
@@ -127,18 +127,25 @@ function Grouped({
 }) {
   const { shut, toggle } = useShutGroups();
 
-  const groups = new Map<string, Session[]>();
+  // Repository → workspace → the runs inside it. Three levels, because a
+  // workspace can now hold several agents and listing sessions flat drew one
+  // identical row per agent with nothing to tell them apart.
+  const groups = new Map<string, Map<string, Session[]>>();
   for (const s of sessions) {
-    const key = s.checkouts?.[0]?.slug ?? s.repo ?? "No repository";
-    const held = groups.get(key);
-    if (held) held.push(s);
-    else groups.set(key, [s]);
+    const repo = s.checkouts?.[0]?.slug ?? s.repo ?? "No repository";
+    // Its own id when there is no workspace — a row from before they existed.
+    const workspace = s.workspaceId ?? s.id;
+
+    const held = groups.get(repo) ?? new Map<string, Session[]>();
+    held.set(workspace, [...(held.get(workspace) ?? []), s]);
+    groups.set(repo, held);
   }
 
   return (
     <>
-      {[...groups].map(([repo, held]) => {
+      {[...groups].map(([repo, workspaces]) => {
         const closed = shut.includes(repo);
+        const held = [...workspaces.values()].flat();
         const asking = held.filter(needsYou).length;
 
         return (
@@ -180,14 +187,89 @@ function Grouped({
             </div>
 
             {!closed &&
-              held
-                .slice()
-                .sort((a, b) => Number(needsYou(b)) - Number(needsYou(a)))
-                .map((s) => <Row key={s.id} session={s} />)}
+              [...workspaces.values()]
+                // Newest workspace first, by the run that made it.
+                .sort((a, b) => (first(a).id < first(b).id ? 1 : -1))
+                .map((runs) => <Workspace key={first(runs).id} runs={runs} />)}
           </section>
         );
       })}
     </>
+  );
+}
+
+/**
+ * The run that made the workspace, and so names it.
+ *
+ * A workspace takes the id of the session it was split from, so the run whose
+ * id matches is the first one — and it is the one the rail enters, because its
+ * id is what the tab set is keyed by.
+ */
+function first(runs: Session[]): Session {
+  return runs.find((r) => r.workspaceId === r.id) ?? runs[0];
+}
+
+/**
+ * One workspace, and the agents working in it.
+ *
+ * Drawn as a single row while there is one agent, which is every workspace
+ * until somebody asks for a second — nothing gets more chrome for the common
+ * case. A second agent turns the row into a heading with its runs beneath it.
+ */
+function Workspace({ runs }: { runs: Session[] }) {
+  const lead = first(runs);
+  const others = runs.filter((r) => r.id !== lead.id);
+
+  if (others.length === 0) return <Row session={lead} />;
+
+  return (
+    <div className="mb-1">
+      <Row session={lead} />
+      <div className="ml-3 border-l border-line-soft pl-1.5">
+        {others
+          .slice()
+          .sort((a, b) => Number(needsYou(b)) - Number(needsYou(a)))
+          .map((r) => (
+            <Run key={r.id} run={r} />
+          ))}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * A second agent in a workspace, as a line under the one that named it.
+ *
+ * Its own conversation and its own status, but not its own name: the name
+ * belongs to the place, and repeating it once per agent is what the flat list
+ * was doing wrong.
+ */
+function Run({ run }: { run: Session }) {
+  const { enter } = useTabs();
+  const current = useCurrentSession();
+  const { open } = useTabs();
+
+  return (
+    <button
+      onClick={() => {
+        // Into the workspace it belongs to, then to its own tab. Entering the
+        // run directly would make a second tab set for a place that has one.
+        if (run.workspaceId && current !== run.workspaceId) enter(run.workspaceId);
+        open({ id: addressOf.run(run.id), kind: "run", sessionId: run.id });
+      }}
+      title={run.title ?? run.name}
+      className="flex w-full items-center gap-2 rounded-[7px] px-1.5 py-1 text-left transition-colors hover:bg-raise/50"
+    >
+      <Signal status={run.status} size={5} />
+      <AgentMark agent={run.agent} size={11} className="shrink-0 text-mute" />
+      <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-mute">
+        {AGENT_SHORT[run.agent]}
+      </span>
+      <span className="shrink-0 font-mono text-[10px] text-mute">
+        {elapsed(minutesSince(run.createdAt))}
+      </span>
+      {needsYou(run) && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-ember" />}
+    </button>
   );
 }
 
