@@ -2,13 +2,10 @@
 
 import { useRouter } from "next/navigation";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import { useListSessions } from "@/src/api/generated/sessions/sessions";
 import { apiBase } from "@/src/api/http";
-import { NewWorkspace } from "@/components/NewWorkspace";
-import { Modal } from "@/components/Modal";
 import { Terminal } from "@/components/Terminal";
-import { Rail } from "./Rail";
 import { TabBar } from "./TabBar";
 import { Inspector } from "./Inspector";
 import { SessionTab } from "./SessionTab";
@@ -49,7 +46,6 @@ function Bench({ initialSession }: { initialSession?: string }) {
   const { enter } = useTabs();
   const current = useCurrentSession();
   /** The repository the composer should start on, when it was opened from one. */
-  const [starting, setStarting] = useState<{ repo?: string } | null>(null);
   // The same query the rail runs, so this costs nothing — but it is the only
   // place that can say the whole thing is unreachable rather than empty.
   const { isError } = useListSessions();
@@ -92,9 +88,7 @@ function Bench({ initialSession }: { initialSession?: string }) {
   if (isError) return <Unreachable />;
 
   return (
-    <div className="flex h-dvh overflow-hidden">
-      <Rail onNew={(repo) => setStarting({ repo })} />
-
+    <div className="flex min-w-0 flex-1 overflow-hidden">
       <main className="flex min-w-0 flex-1">
         <Pane index={0} />
         <SecondPane />
@@ -102,17 +96,6 @@ function Bench({ initialSession }: { initialSession?: string }) {
 
       <Inspector sessionId={current} />
 
-      {starting && (
-        <Modal onClose={() => setStarting(null)} title="New workspace" wide>
-          <NewWorkspace
-            startWith={starting.repo}
-            onCreated={(id) => {
-              setStarting(null);
-              enter(id);
-            }}
-          />
-        </Modal>
-      )}
     </div>
   );
 }

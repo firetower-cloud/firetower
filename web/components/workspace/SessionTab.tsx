@@ -101,7 +101,7 @@ function Plate({ session }: { session: Session }) {
   const checkouts = session.checkouts ?? [];
 
   return (
-    <div className="mb-4 flex items-start gap-3 border-b border-line-soft pb-4">
+    <div className="mt-3 mb-4 flex items-start gap-3 border-b border-line-soft pb-4">
       <span className="mt-0.5 shrink-0 text-mute">
         <AgentMark agent={session.agent} size={18} />
       </span>

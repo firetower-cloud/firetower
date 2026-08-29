@@ -25,12 +25,12 @@ import {
   useEndAllSessions,
   useListSessions,
 } from "@/src/api/generated/sessions/sessions";
-import type { Session } from "@/src/api/generated/model";
 import { AgentMark, AGENT_SHORT } from "@/components/AgentMark";
 import { Modal } from "@/components/Modal";
 import { NewWorkspace } from "@/components/NewWorkspace";
 import { Signal } from "@/components/Signal";
-import { elapsed, inFlight, minutesSince, needsYou } from "@/src/api/view";
+import { elapsed, minutesSince, needsYou } from "@/src/api/view";
+import { doing, group, type Workspace } from "@/src/api/workspaces";
 
 export function Overview() {
   const router = useRouter();
@@ -121,13 +121,8 @@ export function Overview() {
 
 /** One workspace and the agents in it, as a row you can open. */
 function Place({ place, first }: { place: Workspace; first: boolean }) {
-  // What the place as a whole is doing, which is not any one agent's status.
-  // `unfinished` was the wrong question here — it means "still holds a host",
-  // so an idle workspace and a busy one both answered yes and every row said
-  // "working".
   const anyWaiting = place.runs.some(needsYou);
-  const working = place.runs.some(inFlight);
-  const doing = working ? "working" : anyWaiting ? "waiting" : "idle";
+  const state = doing(place);
 
   return (
     <Link
@@ -165,10 +160,10 @@ function Place({ place, first }: { place: Workspace; first: boolean }) {
 
       <span
         className={`w-14 shrink-0 text-right text-[11px] ${
-          doing === "waiting" ? "text-ember" : doing === "working" ? "text-dim" : "text-mute"
+          state === "waiting" ? "text-ember" : state === "working" ? "text-dim" : "text-mute"
         }`}
       >
-        {doing}
+        {state}
       </span>
     </Link>
   );
@@ -235,61 +230,4 @@ function EndEverything({ workspaces }: { workspaces: number }) {
       )}
     </>
   );
-}
-
-/** A workspace, assembled from the sessions that name it. */
-type Workspace = {
-  id: string;
-  name: string;
-  branch?: string;
-  runs: Session[];
-};
-
-/**
- * Repository → workspace → runs.
- *
- * A session's `workspaceId` is the place it works in, and the first session of
- * a workspace carries the workspace's own id — so grouping by it and taking the
- * name from the first run gives the same three levels the rail draws.
- */
-function group(sessions: Session[]): {
-  groups: [string, Workspace[]][];
-  total: number;
-} {
-  const byRepo = new Map<string, Map<string, Workspace>>();
-
-  // What needs you first, then most recent — so the row worth opening is the
-  // one nearest the top of its group.
-  const ordered = [...sessions].sort((a, b) => {
-    if (needsYou(a) !== needsYou(b)) return needsYou(a) ? -1 : 1;
-    return b.createdAt.localeCompare(a.createdAt);
-  });
-
-  for (const session of ordered) {
-    const repo = session.repo ?? "no repository";
-    const id = session.workspaceId ?? session.id;
-
-    const places = byRepo.get(repo) ?? new Map<string, Workspace>();
-    byRepo.set(repo, places);
-
-    const held = places.get(id);
-    if (held) {
-      held.runs.push(session);
-      continue;
-    }
-    places.set(id, {
-      id,
-      name: session.name,
-      branch: session.branch ?? undefined,
-      runs: [session],
-    });
-  }
-
-  const groups: [string, Workspace[]][] = [...byRepo].map(([repo, places]) => [
-    repo,
-    [...places.values()],
-  ]);
-  const total = groups.reduce((n, [, places]) => n + places.length, 0);
-
-  return { groups, total };
 }

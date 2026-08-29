@@ -5,94 +5,45 @@ import { usePathname } from "next/navigation";
 import { useMe, useLogout } from "@/src/api/generated/auth/auth";
 import { forgetToken } from "@/src/api/http";
 import { Mark, Signal } from "./Signal";
-import { useListHosts } from "@/src/api/generated/hosts/hosts";
+import { AgentMark } from "./AgentMark";
 import { useListSessions } from "@/src/api/generated/sessions/sessions";
-import { elapsed, inFlight, minutesSince, needsYou, unfinished } from "@/src/api/view";
+import { doing, group, shortRepo, type Workspace } from "@/src/api/workspaces";
+import { elapsed, minutesSince, needsYou, unfinished } from "@/src/api/view";
 
+/**
+ * The top of the rail: what you came here to do.
+ *
+ * Repositories, agents, secrets and hosts used to sit here as four more rows of
+ * the same weight, which made the rail read as a settings menu with some
+ * sessions underneath. They are not the same kind of thing — you touch a
+ * repository to start work, and you touch the other three once and then never
+ * again until something breaks. The three live behind Configuration now.
+ */
 const NAV = [
   {
     href: "/",
-    label: "Sessions",
+    label: "Dashboard",
     icon: (
       <>
         <path d="M2 3.5h10M2 7h10M2 10.5h6" strokeWidth="1.3" strokeLinecap="round" />
       </>
     ),
   },
-  {
-    href: "/repos",
-    label: "Repositories",
-    icon: (
-      <>
-        <circle cx="4" cy="3.5" r="1.6" strokeWidth="1.3" />
-        <circle cx="4" cy="10.5" r="1.6" strokeWidth="1.3" />
-        <circle cx="10.5" cy="3.5" r="1.6" strokeWidth="1.3" />
-        <path d="M4 5.1v3.8M10.5 5.1v1.2c0 1.4-1.1 2.2-2.4 2.2H5.6" strokeWidth="1.3" strokeLinecap="round" />
-      </>
-    ),
-  },
-  {
-    href: "/agents",
-    label: "Agents",
-    icon: (
-      <>
-        <path d="M7 1.8l4.6 2.4v3.2c0 2.4-1.9 4.2-4.6 5-2.7-.8-4.6-2.6-4.6-5V4.2z" strokeWidth="1.3" strokeLinejoin="round" />
-        <circle cx="7" cy="6.4" r="1.2" strokeWidth="1.2" />
-        <path d="M7 7.6v1.6" strokeWidth="1.2" strokeLinecap="round" />
-      </>
-    ),
-  },
-  {
-    href: "/secrets",
-    label: "Secrets",
-    icon: (
-      <>
-        <rect x="2.8" y="6.2" width="8.4" height="6" rx="1.2" strokeWidth="1.3" />
-        <path d="M4.8 6.2V4.4a2.2 2.2 0 014.4 0v1.8" strokeWidth="1.3" strokeLinecap="round" />
-      </>
-    ),
-  },
-  {
-    href: "/compute",
-    label: "Compute",
-    icon: (
-      <>
-        <rect x="1.8" y="2.2" width="10.4" height="4" rx="1" strokeWidth="1.3" />
-        <rect x="1.8" y="7.8" width="10.4" height="4" rx="1" strokeWidth="1.3" />
-        <path d="M4 4.2h.01M4 9.8h.01" strokeWidth="1.6" strokeLinecap="round" />
-      </>
-    ),
-  },
 ];
+
 
 export function Shell({ children }: { children: React.ReactNode }) {
   const path = usePathname();
-  // The rail is on screen the whole time and was the only thing on it that
-  // never asked again: a session moving from working to waiting on you, or
-  // being renamed, showed up here only after a reload. Faster while something
-  // is still going, and slow rather than never once nothing is — a session
-  // started from another tab, or from a phone, should still turn up.
-  const { data: sessions = [] } = useListSessions(undefined, {
-    query: {
-      refetchInterval: (query) =>
-        (query.state.data ?? []).some(unfinished) ? 2_000 : 15_000,
-    },
-  });
-  const { data: hosts = [] } = useListHosts();
 
   /* Onboarding and signing in run full-bleed — no fleet to navigate yet. */
   if (path.startsWith("/setup") || path.startsWith("/login")) return <>{children}</>;
 
-  /* The workbench brings its own rail, its own tabs and its own panel, and it
-     wants the whole window to do it. Every other page gets this rail —
-     including home, which is a page about the fleet like the rest of them and
-     was only excluded when `/` was the workbench with an empty middle. */
-  if (path.startsWith("/sessions/")) return <>{children}</>;
-
-  // Anything still alive, with what needs you first.
-  const pinned = sessions
-    .filter((s) => needsYou(s) || inFlight(s))
-    .sort((a, b) => Number(needsYou(b)) - Number(needsYou(a)));
+  /* One rail, everywhere. The workbench used to bring its own — a second list
+     of the same workspaces, with a back button to get out of it — which meant
+     the fleet was drawn twice and looked different depending on which screen
+     you were on. Now it is a page like the others, and leaving a workspace is
+     clicking another one. */
+  const workbench = path.startsWith("/sessions/");
 
   return (
     <div className="flex h-dvh overflow-hidden">
@@ -130,49 +81,38 @@ export function Shell({ children }: { children: React.ReactNode }) {
           })}
         </nav>
 
-        <div className="mt-7 px-4">
-          <div className="eyebrow">In flight</div>
-        </div>
-        <div className="mt-2 min-h-0 flex-1 overflow-y-auto px-2 pb-4">
-          {pinned.length === 0 && (
-            <p className="px-2 py-1 text-[13px] text-mute">Nothing running.</p>
-          )}
-          {pinned.map((t) => {
-            const on = path === `/sessions/${t.id}`;
-            return (
-              <Link
-                key={t.id}
-                href={`/sessions/${t.id}`}
-                className={`flex items-center gap-2 rounded-[8px] py-2 pr-2 pl-1.5 transition-colors ${
-                  on ? "bg-raise" : "hover:bg-raise/60"
-                }`}
-              >
-                <Signal status={t.status} size={6} />
-                <span className={`flex-1 truncate text-[13px] ${on ? "text-bone" : "text-dim"}`}>
-                  {t.name}
-                </span>
-                <span className="font-mono text-[10px] text-mute">{elapsed(minutesSince(t.createdAt))}</span>
-              </Link>
-            );
-          })}
-        </div>
+        <Repositories />
 
-        <div className="max-h-[30%] shrink-0 overflow-y-auto border-t border-line px-4 py-3">
-          <div className="eyebrow mb-2">Hosts</div>
-          {hosts.map((h) => (
-            <div key={h.name} className="flex items-center gap-2 py-[3px]">
-              <span
-                className={`h-1.5 w-1.5 rounded-full ${
-                  h.state === "Online" ? "bg-sage" : "border border-mute"
-                }`}
-              />
-              <span className="font-mono text-meta text-dim">{h.name}</span>
-              <span className="ml-auto font-mono text-[10px] text-mute">
-                {h.cpus ?? "—"}
-              </span>
-            </div>
-          ))}
-        </div>
+        {/* Configuration, Documentation, then who you are. The three things
+            you reach for after the work rather than during it, in the order you
+            reach for them. Hosts used to be here; they are what Compute is
+            about, and a list of them was fleet trivia on every screen. */}
+        <Link
+          href="/configuration"
+          className={`flex shrink-0 items-center gap-2.5 border-t border-line px-4 py-2.5 text-ui transition-colors ${
+            path.startsWith("/configuration")
+              ? "bg-raise text-bone"
+              : "text-mute hover:bg-raise/60 hover:text-text"
+          }`}
+        >
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 14 14"
+            fill="none"
+            stroke="currentColor"
+            aria-hidden
+            className="opacity-70"
+          >
+            <circle cx="7" cy="7" r="2.1" strokeWidth="1.3" />
+            <path
+              d="M7 1.6v1.5M7 10.9v1.5M12.4 7h-1.5M3.1 7H1.6M10.8 3.2l-1 1M4.2 9.8l-1 1M10.8 10.8l-1-1M4.2 4.2l-1-1"
+              strokeWidth="1.2"
+              strokeLinecap="round"
+            />
+          </svg>
+          Configuration
+        </Link>
 
         {/* Between the fleet and the account, where somebody looks after they
             have run out of things to try on the screen itself. Off to the
@@ -208,7 +148,13 @@ export function Shell({ children }: { children: React.ReactNode }) {
         <WhoAmI />
       </aside>
 
-      <main className="min-w-0 flex-1 overflow-y-auto">{children}</main>
+      {/* The workbench owns its own scrolling — tabs, a transcript that follows
+          itself, a terminal. Every other page is a document and scrolls here. */}
+      <main
+        className={`min-w-0 flex-1 ${workbench ? "flex overflow-hidden" : "overflow-y-auto"}`}
+      >
+        {children}
+      </main>
     </div>
   );
 }
@@ -258,5 +204,103 @@ function WhoAmI() {
         </button>
       </div>
     </div>
+  );
+}
+
+/**
+ * Every repository, and the worktrees cut from each.
+ *
+ * The tree is the entry point rather than a settings page: picking where work
+ * happens is the first thing somebody does, and it is the same list whether
+ * they are on the dashboard or reading a conversation — which is why the rail
+ * is shared now and the workbench no longer brings one of its own.
+ */
+function Repositories() {
+  const path = usePathname();
+  // The rail is on screen the whole time. Faster while something is still
+  // going, and slow rather than never once nothing is — a workspace started
+  // from another tab, or from a phone, should still turn up.
+  const { data: sessions = [] } = useListSessions(undefined, {
+    query: {
+      refetchInterval: (query) => ((query.state.data ?? []).some(unfinished) ? 2_000 : 15_000),
+    },
+  });
+
+  const live = sessions.filter((s) => s.status !== "Ended");
+  const repos = group(live);
+
+  return (
+    <div className="mt-6 flex min-h-0 flex-1 flex-col">
+      <div className="flex items-center gap-2 px-4 pb-1">
+        <span className="eyebrow">Repositories</span>
+        <Link
+          href="/configuration#repositories"
+          title="Connect a repository"
+          className="ml-auto text-[13px] leading-none text-mute transition-colors hover:text-ember"
+        >
+          +
+        </Link>
+      </div>
+
+      <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
+        {repos.groups.length === 0 && (
+          <p className="px-2 py-1 text-[13px] text-mute">Nothing running.</p>
+        )}
+
+        {repos.groups.map(([repo, places]) => (
+          <div key={repo} className="mb-2">
+            <div className="flex items-center gap-1.5 px-2 py-1">
+              <span className="min-w-0 truncate font-mono text-[11px] text-dim">
+                {shortRepo(repo)}
+              </span>
+              <span className="font-mono text-[10px] text-mute">{places.length}</span>
+            </div>
+            {places.map((place) => (
+              <Worktree key={place.id} place={place} on={path === `/sessions/${place.id}`} />
+            ))}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** One worktree: its branch, and what is happening in it. */
+function Worktree({ place, on }: { place: Workspace; on: boolean }) {
+  const state = doing(place);
+
+  return (
+    <Link
+      href={`/sessions/${place.id}`}
+      className={`block rounded-[8px] py-1.5 pr-2 pl-2 transition-colors ${
+        on ? "bg-raise" : "hover:bg-raise/60"
+      }`}
+    >
+      <div className="flex items-center gap-2">
+        <Signal status={place.runs[0].status} size={6} />
+        <span className={`min-w-0 flex-1 truncate text-[13px] ${on ? "text-bone" : "text-dim"}`}>
+          {place.name}
+        </span>
+        {place.runs.some(needsYou) && (
+          <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-ember" />
+        )}
+        <span className="shrink-0 font-mono text-[10px] text-mute">
+          {elapsed(minutesSince(place.runs[0].createdAt))}
+        </span>
+      </div>
+
+      <div className="mt-0.5 flex items-center gap-1.5 pl-[14px]">
+        <span className="min-w-0 flex-1 truncate font-mono text-[10.5px] text-mute">
+          {place.branch ?? "—"}
+        </span>
+        {/* Which agents are in it, rather than how many: two of one and one of
+            another is a different place from three of one, and a count says
+            neither. */}
+        {state === "working" &&
+          place.runs.slice(0, 3).map((run) => (
+            <AgentMark key={run.id} agent={run.agent} size={10} className="shrink-0 text-mute" />
+          ))}
+      </div>
+    </Link>
   );
 }
