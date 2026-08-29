@@ -112,6 +112,8 @@ export type Action =
   | { do: "unsplit" }
   /** A session that has gone. Its tabs go with it. */
   | { do: "forget"; sessionId: string }
+  /** Step out of the workspace you are in, keeping everything it had open. */
+  | { do: "leave" }
   | { do: "restore"; state: State };
 
 export function reduce(state: State, action: Action): State {
@@ -152,6 +154,11 @@ export function reduce(state: State, action: Action): State {
           : { ...state.sets, [action.sessionId]: freshSet() },
       };
     }
+
+    case "leave":
+      // Not `forget`: coming back should find the tabs where they were left.
+      // This only says "you are not in a workspace", which is what home is.
+      return state.current === null ? state : { ...state, current: null };
 
     case "forget": {
       if (!state.sets[action.sessionId]) return state;
@@ -328,6 +335,7 @@ const Ctx = createContext<{
   move: (id: string, pane: PaneIndex) => void;
   unsplit: () => void;
   forget: (sessionId: string) => void;
+  leave: () => void;
 } | null>(null);
 
 /** `v2` because the shape changed from one global strip to a set per session. */
@@ -369,6 +377,7 @@ export function Tabs({ children }: { children: ReactNode }) {
       move: (id: string, pane: PaneIndex) => send({ do: "move", id, pane }),
       unsplit: () => send({ do: "unsplit" }),
       forget: (sessionId: string) => send({ do: "forget", sessionId }),
+      leave: () => send({ do: "leave" }),
     }),
     [state],
   );

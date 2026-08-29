@@ -36,9 +36,13 @@ export function Rail({ onNew }: { onNew: (repo?: string) => void }) {
 
   return (
     <aside className="flex h-full w-[268px] shrink-0 flex-col overflow-hidden border-r border-line bg-panel">
-      {/* The way back, and the only one this screen needs. Named rather than a
+      {/* The way out, and the only one this screen needs. Named rather than a
           bare arrow: an arrow says "back", and back from a workspace you
-          followed a link into is not somewhere anybody can picture. */}
+          followed a link into is not somewhere anybody can picture.
+
+          Everything about the fleet — hosts, the pages that are still pages,
+          who you are — lives on the other side of this, because none of it is
+          about the worktree in front of you. */}
       <Link
         href="/"
         title="Everything"

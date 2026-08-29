@@ -10,9 +10,10 @@
  * a workspace you are already in, and scrolling. That is a switcher, not an
  * overview, which is why forty-eight runs felt unmanageable.
  *
- * So: **home is about the fleet, a workspace is about the work.** Anything that
- * is not about one worktree lives here, and the workspace screen is only tabs
- * and the rail that switches between them.
+ * So: **home is about the fleet, a workspace is about the work.** It is a page
+ * like Repos or Agents, inside the same rail they have — Sessions, and the four
+ * others, and what is in flight, and the hosts. The workbench is the only thing
+ * that takes the whole window, because it is the only thing that needs it.
  */
 
 import Link from "next/link";
@@ -24,90 +25,58 @@ import {
   useEndAllSessions,
   useListSessions,
 } from "@/src/api/generated/sessions/sessions";
-import { useListHosts } from "@/src/api/generated/hosts/hosts";
-import { useLogout, useMe } from "@/src/api/generated/auth/auth";
-import { forgetToken } from "@/src/api/http";
 import type { Session } from "@/src/api/generated/model";
-import { Mark, Signal } from "@/components/Signal";
 import { AgentMark, AGENT_SHORT } from "@/components/AgentMark";
 import { Modal } from "@/components/Modal";
 import { NewWorkspace } from "@/components/NewWorkspace";
+import { Signal } from "@/components/Signal";
 import { elapsed, inFlight, minutesSince, needsYou } from "@/src/api/view";
-
-/** The pages that are still pages. */
-const ELSEWHERE = [
-  ["/repos", "Repos"],
-  ["/agents", "Agents"],
-  ["/secrets", "Secrets"],
-  ["/compute", "Compute"],
-] as const;
 
 export function Overview() {
   const router = useRouter();
-  const { data: sessions = [], isPending } = useListSessions();
   const [starting, setStarting] = useState<{ repo?: string } | null>(null);
+  const { data: sessions = [], isPending } = useListSessions();
 
   const live = useMemo(() => sessions.filter((s) => s.status !== "Ended"), [sessions]);
+  // Only for the headline: a banner under it saying the same number again is
+  // the same fact twice.
   const waiting = live.filter(needsYou);
 
   // Repository → workspace → the runs in it, the same three levels the rail
-  // draws. One shape for both, because moving between them should not mean
-  // learning a second way to read the same fleet.
+  // draws beside it. One shape for both, because reading the fleet twice over
+  // should not mean reading it two different ways.
   const repos = useMemo(() => group(live), [live]);
 
   return (
-    <div className="flex h-dvh flex-col overflow-hidden bg-ground">
-      <header className="flex shrink-0 items-center gap-3 border-b border-line px-5 py-3">
-        <span className="text-bone">
-          <Mark size={20} />
-        </span>
-        <span className="font-narrow text-[12px] font-semibold tracking-[0.22em] text-bone uppercase">
-          Firetower
-        </span>
-
-        <nav className="ml-auto flex items-center gap-1">
-          {ELSEWHERE.map(([href, label]) => (
-            <Link
-              key={href}
-              href={href}
-              className="rounded-[6px] px-2 py-1 text-[12px] text-mute transition-colors hover:bg-raise/60 hover:text-ember"
-            >
-              {label}
-            </Link>
-          ))}
-        </nav>
-
-        <WhoAmI />
-      </header>
-
-      <main className="min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto w-full max-w-[900px] px-5 py-6">
-          {waiting.length > 0 && (
-            <Link
-              href={`/sessions/${waiting[0].workspaceId ?? waiting[0].id}`}
-              className="mb-5 flex items-center gap-2.5 rounded-[10px] border border-ember-deep bg-ember/[0.06] px-3.5 py-2.5 transition-colors hover:bg-ember/[0.1]"
-            >
-              <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-ember" />
-              <span className="font-narrow text-[11px] font-semibold tracking-[0.14em] text-ember uppercase">
-                Waiting on you
-              </span>
-              <span className="font-mono text-[12px] text-ember">{waiting.length}</span>
-              <span className="ml-auto text-[12px] text-ember/70">Go to the first →</span>
-            </Link>
-          )}
-
-          <div className="mb-4 flex items-center gap-3">
-            <h1 className="font-narrow text-[13px] font-semibold tracking-[0.14em] text-dim uppercase">
-              Workspaces
-            </h1>
-            <span className="font-mono text-[11px] text-mute">{repos.total}</span>
+    <div className="max-w-[900px] px-8 pt-8 pb-24">
+      <header className="mb-7">
+        <div className="eyebrow">Sessions</div>
+        <div className="mt-2 flex items-baseline gap-3">
+          <h1 className="text-[26px] font-semibold tracking-[-0.02em] text-bone">
+            {isPending
+              ? "Looking…"
+              : waiting.length > 0
+                ? `${waiting.length} waiting on you.`
+                : repos.total === 0
+                  ? "Nothing running."
+                  : `${repos.total} ${repos.total === 1 ? "workspace" : "workspaces"}.`}
+          </h1>
+          <div className="ml-auto flex items-center gap-3">
+            <EndEverything workspaces={repos.total} />
             <button
               onClick={() => setStarting({})}
-              className="ml-auto rounded-[8px] border border-dashed border-line px-3 py-1.5 text-ui text-mute transition-colors hover:border-ember/40 hover:text-ember"
+              className="rounded-[8px] border border-dashed border-line px-3 py-1.5 text-ui text-mute transition-colors hover:border-ember/40 hover:text-ember"
             >
               + New workspace
             </button>
           </div>
+        </div>
+        <p className="mt-1.5 max-w-[56ch] text-[14px] text-dim">
+          A workspace is a worktree on one of your hosts, with any number of agents working in
+          it. Open one to read what they are doing.
+        </p>
+      </header>
+
 
           {isPending && <p className="py-8 text-center text-[13px] text-mute">Looking…</p>}
 
@@ -134,13 +103,6 @@ export function Overview() {
               </div>
             </section>
           ))}
-        </div>
-      </main>
-
-      <footer className="flex shrink-0 items-center gap-4 border-t border-line px-5 py-2.5">
-        <Hosts />
-        <EndEverything workspaces={repos.total} />
-      </footer>
 
       {starting && (
         <Modal onClose={() => setStarting(null)} title="New workspace" wide>
@@ -272,61 +234,6 @@ function EndEverything({ workspaces }: { workspaces: number }) {
         </Modal>
       )}
     </>
-  );
-}
-
-function Hosts() {
-  const { data: hosts = [] } = useListHosts();
-  if (hosts.length === 0) return null;
-  const up = hosts.filter((h) => h.state === "Online").length;
-
-  return (
-    <Link href="/compute" className="group flex items-center gap-2" title="Compute">
-      <span className="eyebrow transition-colors group-hover:text-ember">Hosts</span>
-      <span className="font-mono text-[11px] text-mute">
-        {up}/{hosts.length}
-      </span>
-      <span className="flex items-center gap-1">
-        {hosts.slice(0, 6).map((h) => (
-          <span
-            key={h.name}
-            title={h.name}
-            className={`h-1.5 w-1.5 rounded-full ${
-              h.state === "Online" ? "bg-sage" : "border border-mute"
-            }`}
-          />
-        ))}
-      </span>
-    </Link>
-  );
-}
-
-function WhoAmI() {
-  const { data } = useMe();
-  const out = useLogout();
-
-  if (!data) return null;
-
-  return (
-    <div className="flex items-center gap-3 border-l border-line pl-3">
-      <span className="truncate text-[12.5px] text-dim">{data.user.username}</span>
-      <button
-        onClick={() =>
-          out.mutate(undefined, {
-            // Whether or not the server managed to delete the row, this browser
-            // is done with the token.
-            onSettled: () => {
-              forgetToken();
-              // eslint-disable-next-line @next/next/no-location-assign-relative-destination
-              window.location.assign("/login");
-            },
-          })
-        }
-        className="text-[11.5px] text-mute transition-colors hover:text-text"
-      >
-        Sign out
-      </button>
-    </div>
   );
 }
 
