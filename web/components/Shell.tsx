@@ -1,10 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useMe, useLogout } from "@/src/api/generated/auth/auth";
 import { forgetToken } from "@/src/api/http";
+import { useState } from "react";
 import { Mark, Signal } from "./Signal";
+import { Modal } from "./Modal";
+import { NewWorkspace } from "./NewWorkspace";
 import { AgentMark } from "./AgentMark";
 import { useListSessions } from "@/src/api/generated/sessions/sessions";
 import { doing, group, shortRepo, type Workspace } from "@/src/api/workspaces";
@@ -81,7 +84,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
           })}
         </nav>
 
-        <Repositories />
+        <Worktrees />
 
         {/* Configuration, Documentation, then who you are. The three things
             you reach for after the work rather than during it, in the order you
@@ -215,8 +218,10 @@ function WhoAmI() {
  * they are on the dashboard or reading a conversation — which is why the rail
  * is shared now and the workbench no longer brings one of its own.
  */
-function Repositories() {
+function Worktrees() {
   const path = usePathname();
+  const router = useRouter();
+  const [starting, setStarting] = useState<{ repo?: string } | null>(null);
   // The rail is on screen the whole time. Faster while something is still
   // going, and slow rather than never once nothing is — a workspace started
   // from another tab, or from a phone, should still turn up.
@@ -232,14 +237,18 @@ function Repositories() {
   return (
     <div className="mt-6 flex min-h-0 flex-1 flex-col">
       <div className="flex items-center gap-2 px-4 pb-1">
-        <span className="eyebrow">Repositories</span>
-        <Link
-          href="/configuration#repositories"
-          title="Connect a repository"
-          className="ml-auto text-[13px] leading-none text-mute transition-colors hover:text-ember"
+        <span className="eyebrow">Worktrees</span>
+        {/* Making one, not connecting a repository. Connecting is a once-a-year
+            thing and lives in Configuration; cutting a worktree is the reason
+            somebody opened Firetower, so it is the `+` nearest the list of
+            them. */}
+        <button
+          onClick={() => setStarting({})}
+          title="New worktree"
+          className="ml-auto text-[15px] leading-none text-mute transition-colors hover:text-ember"
         >
           +
-        </Link>
+        </button>
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
@@ -261,6 +270,18 @@ function Repositories() {
           </div>
         ))}
       </div>
+
+      {starting && (
+        <Modal onClose={() => setStarting(null)} title="New worktree" wide>
+          <NewWorkspace
+            startWith={starting.repo}
+            onCreated={(id) => {
+              setStarting(null);
+              router.push(`/sessions/${id}`);
+            }}
+          />
+        </Modal>
+      )}
     </div>
   );
 }
