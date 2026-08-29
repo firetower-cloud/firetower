@@ -59,5 +59,12 @@ export interface NewSession {
      */
   repos?: NewCheckout[];
   size?: WorkspaceSize;
+  /**
+     * The task this is for, when it was started from one.
+     * @nullable
+     */
+  taskKey?: string | null;
+  /** @nullable */
+  taskUrl?: string | null;
   workspaceId?: null | WorkspaceId;
 }

@@ -868,6 +868,23 @@ impl Db {
         Ok(())
     }
 
+    /// Say which task this worktree was cut for.
+    ///
+    /// Its own statement rather than two more arguments on `insert_session`,
+    /// which already takes a dozen. If it fails the worktree is still correct —
+    /// the rail just does not show `#5138` — so it is not worth the churn of
+    /// threading it through every caller and test to get it inside the
+    /// transaction.
+    pub async fn bind_task(&self, workspace: &SessionId, key: &str, url: &str) -> Result<()> {
+        sqlx::query("UPDATE workspaces SET task_key = $1, task_url = $2 WHERE id = $3")
+            .bind(key)
+            .bind(url)
+            .bind(workspace.as_str())
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
     /// One workspace of this person's, for starting another agent in it.
     ///
     /// Absent rather than refused when it is somebody else's, for the reason
@@ -1708,7 +1725,7 @@ pub struct WorkspacePlace {
 
 const SESSION_COLUMNS: &str = "\
     s.*, w.host_id, w.repo, w.branch, w.base, w.size, w.pull_request, \
-    w.forgotten_at, w.cleaned_at, w.name";
+    w.forgotten_at, w.cleaned_at, w.name, w.task_key, w.task_url";
 
 fn session_from_row(r: sqlx::postgres::PgRow) -> Result<Session> {
     let status: String = r.get("status");
@@ -1723,6 +1740,8 @@ fn session_from_row(r: sqlx::postgres::PgRow) -> Result<Session> {
         // On the workspace, and never absent: the migration that moved it here
         // filled every row.
         name: r.get("name"),
+        task_key: r.get("task_key"),
+        task_url: r.get("task_url"),
         note: r.get("note"),
         id: SessionId::from_stored(r.get::<String, _>("id")),
         repo: r.get("repo"),

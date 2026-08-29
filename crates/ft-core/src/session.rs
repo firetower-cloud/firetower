@@ -135,6 +135,16 @@ pub struct Session {
     /// caption. [`Session::checkouts`] is what is actually true.
     pub repo: Option<String>,
     /// Short, derived from the prompt — the prompt itself lives in the transcript.
+    /// The task this worktree was cut for, if it came from one.
+    ///
+    /// Source-scoped — `github:acme/web#5138` — so a second tracker cannot
+    /// collide with the first. Everything else about the task is read from the
+    /// tracker when somebody looks; these two are ours, and they are what lets
+    /// the rail show `#5138` and shipping offer to close it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task_key: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task_url: Option<String>,
     pub title: String,
     pub prompt: String,
     /// The first checkout's branch, or `None` for a bare agent.
@@ -220,6 +230,11 @@ pub struct NewSession {
     /// Absent means the agent starts and says nothing until you do.
     #[serde(default)]
     pub prompt: Option<String>,
+    /// The task this is for, when it was started from one.
+    #[serde(default)]
+    pub task_key: Option<String>,
+    #[serde(default)]
+    pub task_url: Option<String>,
     #[serde(default = "default_agent")]
     pub agent: Agent,
     /// Omit to let the scheduler choose.

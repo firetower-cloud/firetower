@@ -510,6 +510,15 @@ pub(super) async fn create_session(
             ),
         )
         .await?;
+
+    // What this worktree is for, when it was started from a task. Recorded
+    // after the place exists rather than inside its insert: a failure here
+    // costs the `#5138` on its row and nothing else, which is not worth
+    // threading two more arguments through every caller of `insert_session`.
+    if let (Some(key), Some(url)) = (&req.task_key, &req.task_url) {
+        state.db.bind_task(&id, key, url).await?;
+    }
+
     state.db.record_checkouts(&id, &checkouts).await?;
 
     // Each repository's own variables, opened once. Every read is a line in the

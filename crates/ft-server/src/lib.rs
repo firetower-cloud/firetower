@@ -19,6 +19,7 @@ pub mod notify;
 pub mod oauth;
 pub mod providers;
 pub mod sshkey;
+pub mod tasks;
 pub mod transport;
 pub mod vault;
 mod web;

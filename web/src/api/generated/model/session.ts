@@ -123,7 +123,19 @@ export interface Session {
      * is fetching a repository" and a blank page.
      */
   steps?: Step[];
-  /** Short, derived from the prompt — the prompt itself lives in the transcript. */
+  /**
+     * Short, derived from the prompt — the prompt itself lives in the transcript.
+     * The task this worktree was cut for, if it came from one.
+     *
+     * Source-scoped — `github:acme/web#5138` — so a second tracker cannot
+     * collide with the first. Everything else about the task is read from the
+     * tracker when somebody looks; these two are ours, and they are what lets
+     * the rail show `#5138` and shipping offer to close it.
+     * @nullable
+     */
+  taskKey?: string | null;
+  /** @nullable */
+  taskUrl?: string | null;
   title: string;
   updatedAt: string;
   workspaceId?: null | WorkspaceId;

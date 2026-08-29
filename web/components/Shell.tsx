@@ -32,6 +32,16 @@ const NAV = [
       </>
     ),
   },
+  {
+    href: "/tasks",
+    label: "Tasks",
+    icon: (
+      <>
+        <path d="M2 3.6h1.8M2 7h1.8M2 10.4h1.8" strokeWidth="1.3" strokeLinecap="round" />
+        <path d="M5.8 3.6H12M5.8 7H12M5.8 10.4h4" strokeWidth="1.3" strokeLinecap="round" />
+      </>
+    ),
+  },
 ];
 
 

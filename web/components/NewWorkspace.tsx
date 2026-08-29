@@ -32,13 +32,23 @@ import { getListReposQueryKey } from "@/src/api/generated/repos/repos";
  */
 export function NewWorkspace({
   startWith,
+  fromTask,
   onCreated,
 }: {
   /** A repository slug to begin with, from the `+` beside a group in the rail. */
   startWith?: string;
+  /**
+   * The task this worktree is for, when it came from one.
+   *
+   * Fills in the name and the branch, and is written to the workspace so the
+   * rail can say `#5138` and shipping can offer to close it. The prompt is the
+   * title, the body and the link — the whole "streamlined" claim is that
+   * nobody types the problem out a second time.
+   */
+  fromTask?: { key: string; title: string; url: string; body?: string };
   onCreated: (id: string) => void;
 }) {
-  const [name, setName] = useState("");
+  const [name, setName] = useState(fromTask?.title ?? "");
   const [branch, setBranch] = useState("");
   /** Once the branch has been typed in it is yours, and stops following. */
   const [branchTyped, setBranchTyped] = useState(false);
@@ -97,8 +107,15 @@ export function NewWorkspace({
     create.mutate({
       data: {
         name: name.trim(),
-        // No prompt. The agent starts and waits; what you want doing is said in
-        // the conversation, where it can be answered.
+        // No prompt, unless it came from a task — then the task is the prompt,
+        // and it is the reason somebody clicked Start rather than typing.
+        // Otherwise the agent starts and waits, and what you want doing is
+        // said in the conversation, where it can be answered.
+        prompt: fromTask
+          ? [fromTask.title, fromTask.body, fromTask.url].filter(Boolean).join("\n\n")
+          : undefined,
+        taskKey: fromTask?.key,
+        taskUrl: fromTask?.url,
         repos: checkouts.map((c) => ({ repoId: c.id, base: c.base })),
         agent: chosenKind,
         branch: checkouts.length ? shownBranch.trim() || undefined : undefined,
@@ -199,6 +216,24 @@ export function NewWorkspace({
             ? "No host is available to take this."
             : ((create.error as { message?: string }).message ?? "Couldn't create it.")}
         </p>
+      )}
+
+      {/* Which task this is for, when it came from one. Said out loud because
+          the fields above are filled in and it should be obvious what filled
+          them — and because the first prompt is about to be derived from it. */}
+      {fromTask && (
+        <a
+          href={fromTask.url}
+          target="_blank"
+          rel="noreferrer"
+          className="mb-3 flex items-center gap-2 rounded-[8px] border border-line px-3 py-2 transition-colors hover:border-ember/40"
+        >
+          <span className="shrink-0 font-mono text-[11px] text-ember">{fromTask.key}</span>
+          <span className="min-w-0 flex-1 truncate text-[12.5px] text-mute">{fromTask.title}</span>
+          <span aria-hidden className="shrink-0 text-[10px] text-mute">
+            ↗
+          </span>
+        </a>
       )}
 
       <div className="flex items-center gap-3 border-t border-line pt-3">

@@ -3193,6 +3193,115 @@
           }
         }
       }
+    },
+    "/api/v1/tasks": {
+      "get": {
+        "tags": [
+          "tasks"
+        ],
+        "summary": "What could be worked on.",
+        "description": "Read from the tracker every time rather than from a copy here. Issues are\nsomebody else's source of truth and change under us; a conditional request\nthat has not changed costs nothing, and one that has is exactly the moment\nthe new data is wanted.",
+        "operationId": "list_tasks",
+        "parameters": [
+          {
+            "name": "source",
+            "in": "query",
+            "description": "Which tracker; github by default",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "repo",
+            "in": "query",
+            "description": "acme/web, when the source has repositories",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "kind",
+            "in": "query",
+            "description": "issue or pullRequest",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/TaskKind"
+            }
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "description": "open or closed",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/TaskState"
+            }
+          },
+          {
+            "name": "mine",
+            "in": "query",
+            "description": "Only what you are assigned",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "description": "The query box, passed to the source verbatim",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "description": "One-based",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -4744,6 +4853,24 @@
           "Declined"
         ]
       },
+      "Label": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "colour": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Six hex digits, no `#`. Whatever the source calls it."
+          },
+          "name": {
+            "type": "string"
+          }
+        }
+      },
       "Me": {
         "type": "object",
         "description": "Who the caller is, and what they belong to.",
@@ -5017,6 +5144,19 @@
           "size": {
             "$ref": "#/components/schemas/WorkspaceSize"
           },
+          "taskKey": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The task this is for, when it was started from one."
+          },
+          "taskUrl": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "workspaceId": {
             "oneOf": [
               {
@@ -5049,6 +5189,34 @@
           }
         }
       },
+      "Page": {
+        "type": "object",
+        "required": [
+          "tasks",
+          "more"
+        ],
+        "properties": {
+          "more": {
+            "type": "boolean",
+            "description": "Whether asking for the next page is worth it."
+          },
+          "tasks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Task"
+            }
+          },
+          "total": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "How many there are in total, when the source will say.",
+            "minimum": 0
+          }
+        }
+      },
       "PendingAuth": {
         "type": "object",
         "description": "A device authorization waiting for someone to approve it in a browser.",
@@ -5064,6 +5232,23 @@
           "verificationUri": {
             "type": "string",
             "description": "Where to type it."
+          }
+        }
+      },
+      "Person": {
+        "type": "object",
+        "required": [
+          "login"
+        ],
+        "properties": {
+          "avatar": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "login": {
+            "type": "string"
           }
         }
       },
@@ -5792,9 +5977,21 @@
             },
             "description": "What this session is going to do, in order, decided when it was created.\n\nHere rather than inferred from events so the screen has something to\nshow before the worker has said a word — the difference between \"this\nis fetching a repository\" and a blank page."
           },
+          "taskKey": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Short, derived from the prompt — the prompt itself lives in the transcript.\nThe task this worktree was cut for, if it came from one.\n\nSource-scoped — `github:acme/web#5138` — so a second tracker cannot\ncollide with the first. Everything else about the task is read from the\ntracker when somebody looks; these two are ours, and they are what lets\nthe rail show `#5138` and shipping offer to close it."
+          },
+          "taskUrl": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "title": {
-            "type": "string",
-            "description": "Short, derived from the prompt — the prompt itself lives in the transcript."
+            "type": "string"
           },
           "updatedAt": {
             "type": "string",
@@ -6049,9 +6246,97 @@
           "ToolInput"
         ]
       },
+      "Task": {
+        "type": "object",
+        "description": "One thing to work on, whatever tracks it.\n\nThe fields are the intersection every tracker has, plus the two that make a\nrow worth showing: what it is called, and when it last moved.",
+        "required": [
+          "id",
+          "source",
+          "key",
+          "title",
+          "url",
+          "state",
+          "kind",
+          "assignees",
+          "labels",
+          "updatedAt"
+        ],
+        "properties": {
+          "assignees": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Person"
+            }
+          },
+          "body": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Seeds the first prompt, so nobody types the problem out twice."
+          },
+          "id": {
+            "type": "string",
+            "description": "Stable within its source: `github:acme/web#5138`."
+          },
+          "key": {
+            "type": "string",
+            "description": "What a person calls it. `#5138`."
+          },
+          "kind": {
+            "$ref": "#/components/schemas/TaskKind"
+          },
+          "labels": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Label"
+            }
+          },
+          "repo": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Where the work would happen. Known for an issue; a binding for a ticket."
+          },
+          "source": {
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/TaskState"
+          },
+          "title": {
+            "type": "string"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "url": {
+            "type": "string",
+            "description": "Always somewhere to go and read it."
+          }
+        }
+      },
       "TaskId": {
         "type": "string",
         "description": "One subagent run, from the moment it was spawned to its report."
+      },
+      "TaskKind": {
+        "type": "string",
+        "description": "What sort of thing it is.\n\nThe one field the Issues/PRs toggle reads, and the reason \"filter by kind\"\nis a query parameter rather than a migration when a second source lands.",
+        "enum": [
+          "issue",
+          "pullRequest",
+          "ticket"
+        ]
+      },
+      "TaskState": {
+        "type": "string",
+        "enum": [
+          "open",
+          "closed"
+        ]
       },
       "Topic": {
         "type": "string",

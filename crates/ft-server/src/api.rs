@@ -21,6 +21,7 @@ mod sessions;
 mod setup;
 mod terminal;
 mod stream;
+mod tasks;
 
 // `providers` on its own is the module below, which is this crate's git-host
 // screen rather than the git hosts themselves.
@@ -222,7 +223,13 @@ async fn credential_for(
         stream::Topic,
         stream::ChangedWhat,
         stream::ClientFrame,
-        stream::ServerFrame
+        stream::ServerFrame,
+        crate::tasks::Task,
+        crate::tasks::Page,
+        crate::tasks::TaskKind,
+        crate::tasks::TaskState,
+        crate::tasks::Person,
+        crate::tasks::Label
     ))
 )]
 pub struct ApiDoc;
@@ -292,6 +299,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(conversation::get_conversation))
         .routes(routes!(conversation::stream_conversation))
         .routes(routes!(stream::stream))
+        .routes(routes!(tasks::list_tasks))
         .routes(routes!(conversation::send_turn))
         .routes(routes!(
             conversation::session_controls,

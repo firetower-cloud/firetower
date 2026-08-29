@@ -52,7 +52,9 @@ export const ListSessionsResponseItem = zod.object({
   "size": zod.enum(['Small', 'Medium', 'Large']),
   "status": zod.enum(['Starting', 'Working', 'Ready', 'NeedsYou', 'HandedBack', 'Failed', 'Ended']),
   "steps": zod.array(zod.enum(['Fetch', 'Worktree', 'Workspace', 'Setup', 'Launch']).describe('One stage of bringing a session up.\n\nThe point of naming them is that the whole list is knowable \*before\* any of\nit runs — so a session can show what it is going to do the moment it is\ncreated, rather than assembling a shape out of events as they arrive. A step\nnobody has reached yet is still worth showing.')).optional().describe('What this session is going to do, in order, decided when it was created.\n\nHere rather than inferred from events so the screen has something to\nshow before the worker has said a word — the difference between \"this\nis fetching a repository\" and a blank page.'),
-  "title": zod.string().describe('Short, derived from the prompt — the prompt itself lives in the transcript.'),
+  "taskKey": zod.string().nullish().describe('Short, derived from the prompt — the prompt itself lives in the transcript.\nThe task this worktree was cut for, if it came from one.\n\nSource-scoped — `github:acme\/web#5138` — so a second tracker cannot\ncollide with the first. Everything else about the task is read from the\ntracker when somebody looks; these two are ours, and they are what lets\nthe rail show `#5138` and shipping offer to close it.'),
+  "taskUrl": zod.string().nullish(),
+  "title": zod.string(),
   "updatedAt": zod.iso.datetime({"offset":true}),
   "workspaceId": zod.union([zod.null(),zod.string().describe('Identifies a workspace — the compute a session runs on.')]).optional()
 }).describe('A line of work with a conversation attached and a branch at the end.')
@@ -71,6 +73,8 @@ export const CreateSessionBody = zod.object({
   "repoId": zod.string().describe('Identifies a connected repository.')
 }).describe('One repository to check out, as the API accepts it.')).optional().describe('Every repository to check out, in the order they should appear.\n\nEach may name its own base branch; the working branch is the session\'s\nand is the same in all of them, which is what makes a change across two\nrepositories reviewable.'),
   "size": zod.enum(['Small', 'Medium', 'Large']).optional(),
+  "taskKey": zod.string().nullish().describe('The task this is for, when it was started from one.'),
+  "taskUrl": zod.string().nullish(),
   "workspaceId": zod.union([zod.null(),zod.string().describe('A workspace to start this agent in, instead of making one.\n\nThe place already exists — its host, its repositories, its branch and\nits directory — so all of those are read from it and anything sent\nalongside is ignored. What is left is the agent and what to ask it.\n\nThis is how a workspace comes to hold two agents: they are two sessions\nnaming one `workspace_id`, each with its own conversation.')]).optional()
 }).describe('What the API accepts to launch one.')
 
@@ -103,7 +107,9 @@ export const CreateSessionResponse = zod.object({
   "size": zod.enum(['Small', 'Medium', 'Large']),
   "status": zod.enum(['Starting', 'Working', 'Ready', 'NeedsYou', 'HandedBack', 'Failed', 'Ended']),
   "steps": zod.array(zod.enum(['Fetch', 'Worktree', 'Workspace', 'Setup', 'Launch']).describe('One stage of bringing a session up.\n\nThe point of naming them is that the whole list is knowable \*before\* any of\nit runs — so a session can show what it is going to do the moment it is\ncreated, rather than assembling a shape out of events as they arrive. A step\nnobody has reached yet is still worth showing.')).optional().describe('What this session is going to do, in order, decided when it was created.\n\nHere rather than inferred from events so the screen has something to\nshow before the worker has said a word — the difference between \"this\nis fetching a repository\" and a blank page.'),
-  "title": zod.string().describe('Short, derived from the prompt — the prompt itself lives in the transcript.'),
+  "taskKey": zod.string().nullish().describe('Short, derived from the prompt — the prompt itself lives in the transcript.\nThe task this worktree was cut for, if it came from one.\n\nSource-scoped — `github:acme\/web#5138` — so a second tracker cannot\ncollide with the first. Everything else about the task is read from the\ntracker when somebody looks; these two are ours, and they are what lets\nthe rail show `#5138` and shipping offer to close it.'),
+  "taskUrl": zod.string().nullish(),
+  "title": zod.string(),
   "updatedAt": zod.iso.datetime({"offset":true}),
   "workspaceId": zod.union([zod.null(),zod.string().describe('Identifies a workspace — the compute a session runs on.')]).optional()
 }).describe('A line of work with a conversation attached and a branch at the end.')
@@ -162,7 +168,9 @@ export const GetSessionResponse = zod.object({
   "size": zod.enum(['Small', 'Medium', 'Large']),
   "status": zod.enum(['Starting', 'Working', 'Ready', 'NeedsYou', 'HandedBack', 'Failed', 'Ended']),
   "steps": zod.array(zod.enum(['Fetch', 'Worktree', 'Workspace', 'Setup', 'Launch']).describe('One stage of bringing a session up.\n\nThe point of naming them is that the whole list is knowable \*before\* any of\nit runs — so a session can show what it is going to do the moment it is\ncreated, rather than assembling a shape out of events as they arrive. A step\nnobody has reached yet is still worth showing.')).optional().describe('What this session is going to do, in order, decided when it was created.\n\nHere rather than inferred from events so the screen has something to\nshow before the worker has said a word — the difference between \"this\nis fetching a repository\" and a blank page.'),
-  "title": zod.string().describe('Short, derived from the prompt — the prompt itself lives in the transcript.'),
+  "taskKey": zod.string().nullish().describe('Short, derived from the prompt — the prompt itself lives in the transcript.\nThe task this worktree was cut for, if it came from one.\n\nSource-scoped — `github:acme\/web#5138` — so a second tracker cannot\ncollide with the first. Everything else about the task is read from the\ntracker when somebody looks; these two are ours, and they are what lets\nthe rail show `#5138` and shipping offer to close it.'),
+  "taskUrl": zod.string().nullish(),
+  "title": zod.string(),
   "updatedAt": zod.iso.datetime({"offset":true}),
   "workspaceId": zod.union([zod.null(),zod.string().describe('Identifies a workspace — the compute a session runs on.')]).optional()
 }).describe('A line of work with a conversation attached and a branch at the end.')
@@ -220,7 +228,9 @@ export const RenameSessionResponse = zod.object({
   "size": zod.enum(['Small', 'Medium', 'Large']),
   "status": zod.enum(['Starting', 'Working', 'Ready', 'NeedsYou', 'HandedBack', 'Failed', 'Ended']),
   "steps": zod.array(zod.enum(['Fetch', 'Worktree', 'Workspace', 'Setup', 'Launch']).describe('One stage of bringing a session up.\n\nThe point of naming them is that the whole list is knowable \*before\* any of\nit runs — so a session can show what it is going to do the moment it is\ncreated, rather than assembling a shape out of events as they arrive. A step\nnobody has reached yet is still worth showing.')).optional().describe('What this session is going to do, in order, decided when it was created.\n\nHere rather than inferred from events so the screen has something to\nshow before the worker has said a word — the difference between \"this\nis fetching a repository\" and a blank page.'),
-  "title": zod.string().describe('Short, derived from the prompt — the prompt itself lives in the transcript.'),
+  "taskKey": zod.string().nullish().describe('Short, derived from the prompt — the prompt itself lives in the transcript.\nThe task this worktree was cut for, if it came from one.\n\nSource-scoped — `github:acme\/web#5138` — so a second tracker cannot\ncollide with the first. Everything else about the task is read from the\ntracker when somebody looks; these two are ours, and they are what lets\nthe rail show `#5138` and shipping offer to close it.'),
+  "taskUrl": zod.string().nullish(),
+  "title": zod.string(),
   "updatedAt": zod.iso.datetime({"offset":true}),
   "workspaceId": zod.union([zod.null(),zod.string().describe('Identifies a workspace — the compute a session runs on.')]).optional()
 }).describe('A line of work with a conversation attached and a branch at the end.')
