@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.18.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.17.0...firetower-v0.18.0) (2026-08-30)
+
+
+### Features
+
+* finish a workspace when its pull request does ([5a9cef4](https://github.com/firetower-cloud/firetower/commit/5a9cef4d3d8d3d2bfa312e482aa2a8ad9f066efa))
+
+
+### Bug Fixes
+
+* notice a merged pull request in seconds rather than a minute ([747a6d8](https://github.com/firetower-cloud/firetower/commit/747a6d87282fd176bc6fb3658a23f29f42c868c0))
+
 ## [0.17.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.16.0...firetower-v0.17.0) (2026-08-30)
 
 
