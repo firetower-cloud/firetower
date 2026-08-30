@@ -61,7 +61,7 @@ export const Markdown = memo(function Markdown({ children }: { children: string 
               // Model output, so the link is untrusted: this stops the opened
               // page reaching back through `window.opener`.
               rel="noreferrer noopener"
-              className="text-ember underline decoration-ember-deep underline-offset-2 hover:decoration-ember"
+              className="text-bone underline decoration-line underline-offset-2 transition-colors hover:decoration-mute"
             >
               {children}
             </a>
@@ -88,7 +88,7 @@ export const Markdown = memo(function Markdown({ children }: { children: string 
               // inline constantly, and at this density a background alone does
               // not separate them from the sentence around them.
               return (
-                <code className="rounded-[5px] border border-line bg-raise px-[5px] py-[1.5px] font-mono text-[12.5px] whitespace-nowrap text-bone">
+                <code className="rounded-sm border border-line bg-raise px-[5px] py-[1.5px] font-mono text-meta whitespace-nowrap text-bone">
                   {children}
                 </code>
               );
@@ -100,7 +100,7 @@ export const Markdown = memo(function Markdown({ children }: { children: string 
             );
           },
           pre: ({ children }) => (
-            <pre className="mb-4 overflow-x-auto rounded-[10px] border border-line-soft bg-panel px-4 py-3.5 last:mb-0">
+            <pre className="mb-4 overflow-x-auto rounded-md border border-line-soft bg-panel px-4 py-3.5 last:mb-0">
               {children}
             </pre>
           ),
@@ -136,7 +136,7 @@ export const Markdown = memo(function Markdown({ children }: { children: string 
  * structure without a chat message shouting.
  */
 function Heading({ level, children }: { level: 1 | 2 | 3; children: React.ReactNode }) {
-  const size = level === 1 ? "text-[17px]" : level === 2 ? "text-[15.5px]" : "text-body";
+  const size = level === 1 ? "text-title" : level === 2 ? "text-body" : "text-body";
   return (
     <p className={`mt-5 mb-2 font-semibold text-bone first:mt-0 ${size}`}>{children}</p>
   );

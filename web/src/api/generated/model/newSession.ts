@@ -9,6 +9,7 @@ import type { Agent } from './agent';
 import type { HostId } from './hostId';
 import type { NewCheckout } from './newCheckout';
 import type { RepoId } from './repoId';
+import type { WorkspaceId } from './workspaceId';
 import type { WorkspaceSize } from './workspaceSize';
 
 /**
@@ -30,7 +31,24 @@ export interface NewSession {
      */
   branch?: string | null;
   hostId?: null | HostId;
-  prompt: string;
+  /**
+     * What to call the workspace. Omit to derive one from the branch.
+     *
+     * The name a person reads in the rail, not an identifier: it is free text,
+     * it can be changed afterwards, and two workspaces may share one. The
+     * branch is what has to be unique, and git enforces that itself.
+     * @nullable
+     */
+  name?: string | null;
+  /**
+     * What to ask for first. Optional, because a workspace is a place before
+     * it is a task: you may want the branch checked out and an agent waiting
+     * in it, and to say what you want once you are looking at the files.
+     *
+     * Absent means the agent starts and says nothing until you do.
+     * @nullable
+     */
+  prompt?: string | null;
   repoId?: null | RepoId;
   /**
      * Every repository to check out, in the order they should appear.
@@ -41,4 +59,12 @@ export interface NewSession {
      */
   repos?: NewCheckout[];
   size?: WorkspaceSize;
+  /**
+     * The task this is for, when it was started from one.
+     * @nullable
+     */
+  taskKey?: string | null;
+  /** @nullable */
+  taskUrl?: string | null;
+  workspaceId?: null | WorkspaceId;
 }

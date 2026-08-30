@@ -41,12 +41,11 @@ export default function Repos() {
     <div className="max-w-[900px] px-8 pt-8 pb-24">
       <header className="mb-7">
         <div className="eyebrow">Repositories</div>
-        <h1 className="mt-2 text-[26px] font-semibold tracking-[-0.02em] text-bone">
+        <h1 className="mt-2 text-display font-semibold text-bone">
           {isLoading ? "Looking…" : `${repos.length} connected.`}
         </h1>
-        <p className="mt-1.5 max-w-[54ch] text-[14px] text-dim">
-          Each host keeps a mirror, so a new session gets a worktree in under a second
-          instead of a fresh clone.
+        <p className="mt-1.5 text-ui text-dim">
+          Each host keeps a mirror, so a worktree is ready in under a second.
         </p>
 
         {/* Here rather than on an account screen: this belongs to the git host,
@@ -61,35 +60,35 @@ export default function Repos() {
           return (
             <div key={r.id} className="panel px-4 py-3.5">
               <div className="flex items-center gap-3">
-                <span className="font-mono text-[13.5px] text-bone">{r.slug}</span>
-                <span className="rounded-[4px] border border-line px-1.5 py-0.5 font-mono text-[10.5px] text-slate">
+                <span className="font-mono text-ui text-bone">{r.slug}</span>
+                <span className="rounded-sm border border-line px-1.5 py-0.5 font-mono text-micro text-slate">
                   {r.defaultBranch ? `⑂ ${r.defaultBranch}` : "not read yet"}
                 </span>
-                <span className="ml-auto font-mono text-[11px] text-mute">
+                <span className="ml-auto font-mono text-meta text-mute">
                   {count} {count === 1 ? "session" : "sessions"}
                 </span>
                 <button
                   onClick={() => setSettling(r.id)}
-                  className="text-[11.5px] text-mute transition-colors hover:text-ember"
+                  className="text-meta text-mute transition-colors hover:text-bone"
                 >
                   Settings
                 </button>
                 <button
                   onClick={() => forget(r.id)}
-                  className="text-[11.5px] text-mute transition-colors hover:text-ember"
+                  className="text-meta text-mute transition-colors hover:text-bone"
                 >
                   Disconnect
                 </button>
               </div>
               <div className="mt-3 grid grid-cols-[110px_1fr] items-center gap-3 border-t border-line pt-3">
                 <span className="eyebrow">Remote</span>
-                <code className="truncate font-mono text-[11.5px] text-dim">{r.remote}</code>
+                <code className="truncate font-mono text-meta text-dim">{r.remote}</code>
                 <span className="eyebrow">Setup</span>
-                <code className="font-mono text-[11.5px] text-dim">
+                <code className="font-mono text-meta text-dim">
                   {r.setup ?? <span className="text-mute">nothing to run</span>}
                 </code>
                 <span className="eyebrow">Environment</span>
-                <span className="font-mono text-[11.5px] text-dim">
+                <span className="font-mono text-meta text-dim">
                   {r.env && r.env.length > 0 ? (
                     <>
                       {r.env.length} {r.env.length === 1 ? "variable" : "variables"}
@@ -105,13 +104,13 @@ export default function Repos() {
         })}
 
         {refused && (
-          <p className="rounded-[6px] border border-ember/30 bg-ember/[0.05] px-3.5 py-2.5 text-[12.5px] text-bone">
+          <p className="rounded-md border border-brick-deep bg-brick-tint px-3.5 py-2.5 text-meta text-brick">
             {refused}
           </p>
         )}
 
         {!isLoading && repos.length === 0 && (
-          <p className="panel px-4 py-6 text-center text-[13px] text-mute">
+          <p className="panel px-4 py-6 text-center text-ui text-mute">
             No repositories yet. Connect one and Firetower mirrors it on first use.
           </p>
         )}
@@ -119,7 +118,7 @@ export default function Repos() {
 
       <button
         onClick={() => setConnecting(true)}
-        className="mt-4 w-full rounded-[6px] border border-dashed border-line py-3 text-[13px] text-mute transition-colors hover:border-ember/40 hover:text-ember"
+        className="mt-4 w-full rounded-sm border border-dashed border-line py-3 text-ui text-mute transition-colors hover:border-line hover:text-bone"
       >
         + Connect a repository
       </button>

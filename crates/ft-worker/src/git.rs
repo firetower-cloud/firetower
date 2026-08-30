@@ -607,10 +607,30 @@ impl GitRoot {
     /// Computed here rather than on the control plane: less traffic, and it
     /// works when the laptop has no clone of the repository at all.
     pub async fn diff(&self, dest: &Path, base: &str) -> Result<String> {
-        let out = run(dest, "git", &["diff", &format!("{base}...HEAD")]).await?;
-        let unstaged = run(dest, "git", &["diff"]).await?;
+        // One comparison, from where the branch left the base to what is on
+        // disk right now.
+        //
+        // This was three diffs concatenated — `base...HEAD`, then `git diff`,
+        // then the untracked files. A file the agent committed and then edited
+        // again appeared in the first two, so the sheet listed it twice, added
+        // its line counts together, and offered two rows that were the same
+        // file and could be left out separately.
+        //
+        // `base...HEAD` means merge-base(base, HEAD)..HEAD, so resolving that
+        // merge base ourselves gives the same starting point to compare the
+        // working tree against — committed and uncommitted work in one diff,
+        // each file mentioned once.
+        let from = run(dest, "git", &["merge-base", base, "HEAD"])
+            .await
+            .map(|sha| sha.trim().to_string())
+            // No shared history to find — an unborn branch, or a base that is
+            // not a ref here. Comparing against what we were given is closer
+            // than comparing against nothing.
+            .unwrap_or_else(|_| base.to_string());
+
+        let out = run(dest, "git", &["diff", &from]).await?;
         let untracked = self.untracked_diff(dest).await.unwrap_or_default();
-        Ok(format!("{out}{unstaged}{untracked}"))
+        Ok(format!("{out}{untracked}"))
     }
 
     /// New files, which `git diff` says nothing about until they are tracked.
@@ -1701,5 +1721,51 @@ mod tests {
             "a new file must not be invisible"
         );
         assert!(diff.contains("+written by the agent"), "{diff}");
+    }
+
+    /// The shape that had the sheet listing fifty files twice each: work that
+    /// was committed on the branch and then edited again.
+    #[tokio::test]
+    async fn a_file_committed_then_edited_again_is_mentioned_once() {
+        let (_origin, remote) = origin().await;
+        let home = TempDir::new().unwrap();
+        let git = GitRoot::new(home.path());
+        let (mirror, _) = git
+            .ensure_mirror(&remote, "acme/backend", None, None)
+            .await
+            .unwrap();
+        let (tree, _) = git
+            .add_worktree(&mirror, "agent/twice", "main", "s_twice")
+            .await
+            .unwrap();
+
+        tokio::fs::write(tree.join("README.md"), "# fixture\ncommitted\n")
+            .await
+            .unwrap();
+        run(&tree, "git", &["add", "README.md"]).await.unwrap();
+        run(&tree, "git", &["commit", "-m", "first"]).await.unwrap();
+
+        // Then edited again, without committing.
+        tokio::fs::write(
+            tree.join("README.md"),
+            "# fixture\ncommitted\nand then more\n",
+        )
+        .await
+        .unwrap();
+
+        let diff = git.diff(&tree, "main").await.unwrap();
+        let files = ft_core::split_diff(&diff);
+        let readme: Vec<_> = files.iter().filter(|f| f.path == "README.md").collect();
+
+        assert_eq!(files.len(), 1, "one file changed, one entry: {diff}");
+        assert_eq!(readme.len(), 1, "README.md listed more than once: {diff}");
+        assert!(
+            diff.contains("+committed"),
+            "the committed work is in it: {diff}"
+        );
+        assert!(
+            diff.contains("+and then more"),
+            "the uncommitted work is in it: {diff}"
+        );
     }
 }

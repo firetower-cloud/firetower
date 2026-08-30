@@ -32,13 +32,13 @@ export function NeedsCard({ session }: { session: SessionView }) {
               four words of the prompt, which for "ask me a question about…"
               meant five cards reading almost the same thing. */}
           <Link href={`/sessions/${session.id}`} className="group flex items-baseline gap-2">
-            <span className="text-[14px] font-semibold text-bone group-hover:underline">
+            <span className="text-body font-semibold text-bone group-hover:underline">
               {session.name}
             </span>
-            <span className="min-w-0 truncate text-[13px] text-dim">{session.title}</span>
+            <span className="min-w-0 truncate text-ui text-dim">{session.title}</span>
           </Link>
 
-          <div className="mt-0.5 flex items-center gap-2 font-mono text-[11px] text-mute">
+          <div className="mt-0.5 flex items-center gap-2 font-mono text-meta text-mute">
             <span>{session.repo}</span>
             <span>·</span>
             <span>{session.agent}</span>
@@ -54,7 +54,7 @@ export function NeedsCard({ session }: { session: SessionView }) {
               understand, and opening the terminal is most of the cost of being
               interrupted. */}
           <p
-            className={`mt-2.5 line-clamp-3 text-[13px] leading-[1.5] ${
+            className={`mt-2.5 line-clamp-3 text-ui leading-[1.5] ${
               session.note ? "text-text" : "text-mute"
             }`}
           >
@@ -62,14 +62,14 @@ export function NeedsCard({ session }: { session: SessionView }) {
           </p>
 
           {session.status === "HandedBack" && (
-            <p className="mt-3 flex items-center gap-3 text-[13px] text-text">
+            <p className="mt-3 flex items-center gap-3 text-ui text-text">
               <span>{outcomeOf(session)}</span>
-              <span className="font-mono text-[11.5px] text-mute">{session.branch}</span>
+              <span className="font-mono text-meta text-mute">{session.branch}</span>
             </p>
           )}
 
           {session.status === "Failed" && (
-            <p className="mt-3 font-mono text-[12px] text-brick/90">{outcomeOf(session)}</p>
+            <p className="mt-3 font-mono text-meta text-brick/90">{outcomeOf(session)}</p>
           )}
 
           {/* One way out of every state: the terminal.
@@ -85,8 +85,8 @@ export function NeedsCard({ session }: { session: SessionView }) {
               href={`/sessions/${session.id}`}
               className={
                 waiting
-                  ? "rounded-[5px] bg-ember px-3 py-1.5 text-[12.5px] font-semibold text-[#1a0c04] transition-opacity hover:opacity-90"
-                  : "rounded-[5px] border border-line bg-raise px-3 py-1.5 text-[12.5px] font-medium text-text transition-colors hover:border-[#3a3631] hover:text-bone"
+                  ? "rounded-sm bg-bone px-3 py-1.5 text-meta font-semibold text-ground transition-colors hover:bg-white"
+                  : "rounded-sm border border-line bg-raise px-3 py-1.5 text-meta font-medium text-text transition-colors hover:border-mute/60 hover:text-bone"
               }
             >
               {/* Not "Review changes" for a handed-back session: this card

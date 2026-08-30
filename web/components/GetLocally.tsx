@@ -45,13 +45,13 @@ export function GetLocally({
 
   return (
     <Modal title="Get it locally" onClose={onClose} wide>
-      <p className="max-w-[56ch] text-[13.5px] leading-[1.6] text-dim">
+      <p className="max-w-[56ch] text-ui leading-[1.6] text-dim">
         A worktree on the agent&apos;s branch, beside your own clone. Your
         current branch and anything uncommitted in it are untouched.
       </p>
 
       {held.length === 0 && (
-        <p className="mt-4 text-[13px] text-mute">
+        <p className="mt-4 text-ui text-mute">
           This session has no repository, so there is nothing to fetch.
         </p>
       )}
@@ -102,12 +102,12 @@ function Recipe({
   return (
     <div>
       <div className="flex items-baseline gap-2">
-        <span className="font-mono text-[12.5px] text-bone">{slug}</span>
-        <span className="font-mono text-[11.5px] text-mute">⑂ {branch}</span>
+        <span className="font-mono text-meta text-bone">{slug}</span>
+        <span className="font-mono text-meta text-mute">⑂ {branch}</span>
       </div>
 
       {blocked ? (
-        <p className="mt-1.5 rounded-[6px] border border-ember/30 bg-ember/[0.05] px-3 py-2 text-[12.5px] leading-[1.5] text-bone">
+        <p className="mt-1.5 rounded-md border border-line bg-raise px-3 py-2 text-meta leading-[1.5] text-bone">
           {blocked}
         </p>
       ) : (
@@ -164,19 +164,19 @@ function Block({ label, lines }: { label: string; lines: string[] }) {
   return (
     <div className="mt-2.5">
       <div className="flex items-baseline gap-2">
-        <span className="text-[11.5px] text-mute">{label}</span>
+        <span className="text-meta text-mute">{label}</span>
         <button
           onClick={() => {
             navigator.clipboard.writeText(text);
             setCopied(true);
             window.setTimeout(() => setCopied(false), 1500);
           }}
-          className="ml-auto text-[11.5px] text-mute transition-colors hover:text-ember"
+          className="ml-auto text-meta text-mute transition-colors hover:text-bone"
         >
           {copied ? "Copied" : "Copy"}
         </button>
       </div>
-      <pre className="mt-1 overflow-x-auto rounded-[6px] border border-line bg-ground px-3 py-2 font-mono text-[12px] leading-[1.6] text-text">
+      <pre className="mt-1 overflow-x-auto rounded-sm border border-line bg-ground px-3 py-2 font-mono text-meta leading-[1.6] text-text">
         {text}
       </pre>
     </div>

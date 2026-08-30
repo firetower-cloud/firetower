@@ -7,7 +7,7 @@
 use anyhow::{Context, Result};
 use ft_core::{
     session::Checkout, Agent, AgentMode, AgentPresence, Compute, Event, EventKind, Host, HostId,
-    HostState, Repo, RepoId, Session, SessionId, SessionStatus, WorkspaceSize,
+    HostState, Repo, RepoId, Session, SessionId, SessionStatus, WorkspaceId, WorkspaceSize,
 };
 use sqlx::postgres::PgPoolOptions;
 use sqlx::{PgPool, Row};
@@ -214,13 +214,16 @@ impl Db {
     }
 
     pub async fn rename_session(&self, id: &SessionId, name: &str) -> Result<()> {
-        sqlx::query("UPDATE sessions SET name = $1, updated_at = $2 WHERE id = $3")
-            .bind(name.trim())
-            .bind(chrono::Utc::now())
-            .bind(id.as_str())
-            .execute(&self.pool)
-            .await
-            .context("renaming a session")?;
+        sqlx::query(
+            "UPDATE workspaces SET name = $1, updated_at = $2
+              WHERE id = (SELECT workspace_id FROM sessions WHERE id = $3)",
+        )
+        .bind(name.trim())
+        .bind(chrono::Utc::now())
+        .bind(id.as_str())
+        .execute(&self.pool)
+        .await
+        .context("renaming a session")?;
         Ok(())
     }
 
@@ -279,15 +282,28 @@ impl Db {
     /// what keeps a later replay from undoing this.
     pub async fn forget_session(&self, id: &SessionId) -> Result<()> {
         let now = chrono::Utc::now();
+        let mut tx = self.pool.begin().await?;
+        sqlx::query("UPDATE sessions SET status = 'Ended', updated_at = $1 WHERE id = $2")
+            .bind(now)
+            .bind(id.as_str())
+            .execute(&mut *tx)
+            .await
+            .context("forgetting a session")?;
+
+        // `forgotten_at` is a fact about the directory on the host, not about
+        // the conversation — it is what keeps a later replay from putting the
+        // workspace back.
         sqlx::query(
-            "UPDATE sessions SET status = 'Ended', forgotten_at = $1, updated_at = $1
-              WHERE id = $2",
+            "UPDATE workspaces SET forgotten_at = $1, updated_at = $1
+              WHERE id = (SELECT workspace_id FROM sessions WHERE id = $2)",
         )
         .bind(now)
         .bind(id.as_str())
-        .execute(&self.pool)
+        .execute(&mut *tx)
         .await
-        .context("forgetting a session")?;
+        .context("forgetting a workspace")?;
+
+        tx.commit().await?;
         Ok(())
     }
 
@@ -299,9 +315,10 @@ impl Db {
     /// torn down.
     pub async fn owed_cleanup_on(&self, host: &HostId) -> Result<Vec<SessionId>> {
         let rows = sqlx::query(
-            "SELECT id FROM sessions
-              WHERE host_id = $1 AND forgotten_at IS NOT NULL AND cleaned_at IS NULL
-              ORDER BY forgotten_at",
+            "SELECT s.id FROM sessions s
+                JOIN workspaces w ON w.id = s.workspace_id
+               WHERE w.host_id = $1 AND w.forgotten_at IS NOT NULL AND w.cleaned_at IS NULL
+               ORDER BY w.forgotten_at",
         )
         .bind(host.as_str())
         .fetch_all(&self.pool)
@@ -316,38 +333,47 @@ impl Db {
 
     /// The machine has been told to tear this one down, so stop asking.
     pub async fn mark_cleaned(&self, id: &SessionId) -> Result<()> {
-        sqlx::query("UPDATE sessions SET cleaned_at = $1 WHERE id = $2")
-            .bind(chrono::Utc::now())
-            .bind(id.as_str())
-            .execute(&self.pool)
-            .await
-            .context("recording a teardown")?;
+        sqlx::query(
+            "UPDATE workspaces SET cleaned_at = $1
+              WHERE id = (SELECT workspace_id FROM sessions WHERE id = $2)",
+        )
+        .bind(chrono::Utc::now())
+        .bind(id.as_str())
+        .execute(&self.pool)
+        .await
+        .context("recording a teardown")?;
         Ok(())
     }
 
     pub async fn live_sessions_on(&self, id: &HostId) -> Result<Vec<String>> {
         // A failed session holds nothing — no workspace, no agent, no claim on
         // the host. Counting it would block removing a host forever.
-        let rows =
-            sqlx::query("SELECT title FROM sessions WHERE host_id = $1 AND status NOT IN ($2, $3)")
-                .bind(id.as_str())
-                .bind(format!("{:?}", SessionStatus::Ended))
-                .bind(format!("{:?}", SessionStatus::Failed))
-                .fetch_all(&self.pool)
-                .await?;
+        let rows = sqlx::query(
+            "SELECT s.title FROM sessions s
+                   JOIN workspaces w ON w.id = s.workspace_id
+                  WHERE w.host_id = $1 AND s.status NOT IN ($2, $3)",
+        )
+        .bind(id.as_str())
+        .bind(format!("{:?}", SessionStatus::Ended))
+        .bind(format!("{:?}", SessionStatus::Failed))
+        .fetch_all(&self.pool)
+        .await?;
         Ok(rows.iter().map(|r| r.get::<String, _>("title")).collect())
     }
 
     /// The same sessions, by id — for telling a worker to end them rather than
     /// for telling a person which they are.
     pub async fn live_session_ids_on(&self, id: &HostId) -> Result<Vec<SessionId>> {
-        let rows =
-            sqlx::query("SELECT id FROM sessions WHERE host_id = $1 AND status NOT IN ($2, $3)")
-                .bind(id.as_str())
-                .bind(format!("{:?}", SessionStatus::Ended))
-                .bind(format!("{:?}", SessionStatus::Failed))
-                .fetch_all(&self.pool)
-                .await?;
+        let rows = sqlx::query(
+            "SELECT s.id FROM sessions s
+                   JOIN workspaces w ON w.id = s.workspace_id
+                  WHERE w.host_id = $1 AND s.status NOT IN ($2, $3)",
+        )
+        .bind(id.as_str())
+        .bind(format!("{:?}", SessionStatus::Ended))
+        .bind(format!("{:?}", SessionStatus::Failed))
+        .fetch_all(&self.pool)
+        .await?;
         Ok(rows
             .iter()
             .map(|r| SessionId::from_stored(r.get::<String, _>("id")))
@@ -702,13 +728,16 @@ impl Db {
     /// Ended ones don't count — their work is done and their history stays
     /// readable either way.
     pub async fn live_sessions_for_repo(&self, slug: &str) -> Result<Vec<String>> {
-        let rows =
-            sqlx::query("SELECT title FROM sessions WHERE repo = $1 AND status NOT IN ($2, $3)")
-                .bind(slug)
-                .bind(format!("{:?}", SessionStatus::Ended))
-                .bind(format!("{:?}", SessionStatus::Failed))
-                .fetch_all(&self.pool)
-                .await?;
+        let rows = sqlx::query(
+            "SELECT s.title FROM sessions s
+                   JOIN workspaces w ON w.id = s.workspace_id
+                  WHERE w.repo = $1 AND s.status NOT IN ($2, $3)",
+        )
+        .bind(slug)
+        .bind(format!("{:?}", SessionStatus::Ended))
+        .bind(format!("{:?}", SessionStatus::Failed))
+        .fetch_all(&self.pool)
+        .await?;
         Ok(rows.iter().map(|r| r.get::<String, _>("title")).collect())
     }
 
@@ -774,30 +803,153 @@ impl Db {
         agent: &str,
         size: WorkspaceSize,
         steps: &[ft_core::Step],
+        // What to call the place. `None` falls back to `Agent {number}`, which
+        // is all a bare agent with no branch to be named after has.
+        name: Option<&str>,
     ) -> Result<()> {
         let now = chrono::Utc::now();
+        let mut tx = self.pool.begin().await?;
+
+        // The place first. It takes the session's id, so the worker's directory
+        // and tmux names — built from the session id, and already on somebody's
+        // machine — go on meaning the same thing.
+        //
+        // One workspace, one session, for now. Nothing here stops a second
+        // session naming the same `workspace_id`; the rest of the control plane
+        // is what is not ready for it yet.
+        // The number is claimed here so the workspace can fall back to it, and
+        // the session below reads it back with `currval` rather than claiming a
+        // second one.
+        let number: i64 = sqlx::query_scalar("SELECT nextval('session_number_seq')")
+            .fetch_one(&mut *tx)
+            .await?;
+
+        sqlx::query(
+            "INSERT INTO workspaces
+               (id, user_id, host_id, repo, branch, base, size, name, created_at, updated_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $9)",
+        )
+        .bind(id.as_str())
+        .bind(owner)
+        .bind(host_id.as_str())
+        .bind(repo)
+        .bind(branch)
+        .bind(base)
+        .bind(serde_json::to_string(&size)?.trim_matches('"').to_string())
+        .bind(
+            name.map(str::to_string)
+                .unwrap_or_else(|| format!("Agent {number}")),
+        )
+        .bind(now)
+        .execute(&mut *tx)
+        .await?;
+
         sqlx::query(
             "INSERT INTO sessions
-               (id, user_id, host_id, repo, title, prompt, branch, base, agent, size, status,
-                steps, created_at, updated_at, number, name)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'Starting', $11, $12, $13,
-                     nextval('session_number_seq'),
-                     'Agent ' || currval('session_number_seq'))",
+               (id, user_id, workspace_id, title, prompt, agent, status,
+                steps, created_at, updated_at, number)
+             VALUES ($1, $2, $3, $4, $5, $6, 'Starting', $7, $8, $8, $9)",
         )
         .bind(id.as_str())
         // Whoever started it. Everything about who may see it, whose token
         // pushes it and whose name is on its commits is read from here.
         .bind(owner)
-        .bind(host_id.as_str())
-        .bind(repo)
+        .bind(id.as_str())
         .bind(title)
         .bind(prompt)
-        .bind(branch)
-        .bind(base)
         .bind(agent)
-        .bind(serde_json::to_string(&size)?.trim_matches('"').to_string())
         .bind(serde_json::to_value(steps)?)
         .bind(now)
+        .bind(number)
+        .execute(&mut *tx)
+        .await?;
+
+        tx.commit().await?;
+        Ok(())
+    }
+
+    /// Say which task this worktree was cut for.
+    ///
+    /// Its own statement rather than two more arguments on `insert_session`,
+    /// which already takes a dozen. If it fails the worktree is still correct —
+    /// the rail just does not show `#5138` — so it is not worth the churn of
+    /// threading it through every caller and test to get it inside the
+    /// transaction.
+    pub async fn bind_task(&self, workspace: &SessionId, key: &str, url: &str) -> Result<()> {
+        sqlx::query("UPDATE workspaces SET task_key = $1, task_url = $2 WHERE id = $3")
+            .bind(key)
+            .bind(url)
+            .bind(workspace.as_str())
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    /// One workspace of this person's, for starting another agent in it.
+    ///
+    /// Absent rather than refused when it is somebody else's, for the reason
+    /// [`Db::session_of`] gives: a 403 and a 404 differ only in confirming that
+    /// the thing exists.
+    pub async fn workspace_for(
+        &self,
+        owner: &str,
+        id: &WorkspaceId,
+    ) -> Result<Option<WorkspacePlace>> {
+        let row = sqlx::query(
+            "SELECT id, host_id, repo, branch, base, size, forgotten_at
+               FROM workspaces WHERE id = $1 AND user_id = $2",
+        )
+        .bind(id.as_str())
+        .bind(owner)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        let Some(r) = row else { return Ok(None) };
+        let size: String = r.get("size");
+        Ok(Some(WorkspacePlace {
+            id: WorkspaceId::from_stored(r.get::<String, _>("id")),
+            host_id: HostId::from_stored(r.get::<String, _>("host_id")),
+            repo: r.get("repo"),
+            branch: r.get("branch"),
+            base: r.get("base"),
+            size: serde_json::from_str(&format!("\"{size}\"")).context("decoding size")?,
+            forgotten: r
+                .get::<Option<chrono::DateTime<chrono::Utc>>, _>("forgotten_at")
+                .is_some(),
+        }))
+    }
+
+    /// Another agent in a workspace that already exists.
+    ///
+    /// The place is not touched: its host, its repositories and its branch are
+    /// what they were. This adds the work, which is a second `sessions` row
+    /// naming the same `workspace_id` — the shape the schema has allowed since
+    /// the two were split, and which nothing until now asked for.
+    pub async fn insert_run(&self, run: NewRun<'_>) -> Result<()> {
+        let NewRun {
+            id,
+            workspace_id,
+            owner,
+            title,
+            prompt,
+            agent,
+            steps,
+        } = run;
+        let now = chrono::Utc::now();
+        sqlx::query(
+            "INSERT INTO sessions
+               (id, user_id, workspace_id, title, prompt, agent, status,
+                steps, created_at, updated_at, number)
+             VALUES ($1, $2, $3, $4, $5, $6, 'Starting', $7, $8, $8,
+                     nextval('session_number_seq'))",
+        )
+        .bind(id.as_str())
+        .bind(owner)
+        .bind(workspace_id.as_str())
+        .bind(title)
+        .bind(prompt)
+        .bind(agent)
+        .bind(serde_json::to_value(steps)?)
         .bind(now)
         .execute(&self.pool)
         .await?;
@@ -823,11 +975,15 @@ impl Db {
         before: Option<&str>,
     ) -> Result<Vec<Session>> {
         let rows = sqlx::query(
-            "SELECT * FROM sessions
-             WHERE user_id = $3
-               AND ($1::text IS NULL OR id < $1)
-             ORDER BY id DESC
-             LIMIT $2",
+            format!(
+                "SELECT {SESSION_COLUMNS} FROM sessions s
+                   JOIN workspaces w ON w.id = s.workspace_id
+                  WHERE s.user_id = $3
+                    AND ($1::text IS NULL OR s.id < $1)
+                  ORDER BY s.id DESC
+                  LIMIT $2"
+            )
+            .as_str(),
         )
         .bind(before)
         // NULL is how Postgres spells "no limit".
@@ -839,11 +995,47 @@ impl Db {
         self.with_checkouts(rows).await
     }
 
+    /// The agents still running in a workspace, other than this one.
+    ///
+    /// Ending a workspace has to take them with it. A workspace holds any
+    /// number of agents and only the first has the workspace's own id, so
+    /// ending that one alone would leave the rest running against a directory
+    /// that is about to be reclaimed — invisible, because nothing lists a
+    /// session whose workspace has gone.
+    pub async fn live_runs_beside(
+        &self,
+        owner: &str,
+        workspace_id: &WorkspaceId,
+        excluding: &SessionId,
+    ) -> Result<Vec<SessionId>> {
+        let rows = sqlx::query(
+            "SELECT id FROM sessions
+              WHERE user_id = $1 AND workspace_id = $2 AND id <> $3 AND status <> $4",
+        )
+        .bind(owner)
+        .bind(workspace_id.as_str())
+        .bind(excluding.as_str())
+        .bind(format!("{:?}", SessionStatus::Ended))
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows
+            .into_iter()
+            .map(|r| SessionId::from_stored(r.get::<String, _>("id")))
+            .collect())
+    }
+
     /// Every session of this person's that hasn't ended, for stopping them all
     /// at once. Never anybody else's — "end all" ends yours.
     pub async fn live_sessions(&self, owner: &str) -> Result<Vec<Session>> {
         let rows = sqlx::query(
-            "SELECT * FROM sessions WHERE user_id = $2 AND status != $1 ORDER BY id DESC",
+            format!(
+                "SELECT {SESSION_COLUMNS} FROM sessions s
+                   JOIN workspaces w ON w.id = s.workspace_id
+                  WHERE s.user_id = $2 AND s.status != $1
+                  ORDER BY s.id DESC"
+            )
+            .as_str(),
         )
         .bind(format!("{:?}", SessionStatus::Ended))
         .bind(owner)
@@ -859,11 +1051,18 @@ impl Db {
     /// differ only in confirming that the session exists, which is itself
     /// something the asker was not meant to learn.
     pub async fn session_of(&self, owner: &str, id: &SessionId) -> Result<Option<Session>> {
-        let row = sqlx::query("SELECT * FROM sessions WHERE id = $1 AND user_id = $2")
-            .bind(id.as_str())
-            .bind(owner)
-            .fetch_optional(&self.pool)
-            .await?;
+        let row = sqlx::query(
+            format!(
+                "SELECT {SESSION_COLUMNS} FROM sessions s
+                   JOIN workspaces w ON w.id = s.workspace_id
+                  WHERE s.id = $1 AND s.user_id = $2"
+            )
+            .as_str(),
+        )
+        .bind(id.as_str())
+        .bind(owner)
+        .fetch_optional(&self.pool)
+        .await?;
         let Some(row) = row else { return Ok(None) };
         Ok(self.with_checkouts(vec![row]).await?.pop())
     }
@@ -875,10 +1074,17 @@ impl Db {
     /// nobody to check against. Never reachable from an API handler: those use
     /// [`Db::session_of`].
     pub async fn session(&self, id: &SessionId) -> Result<Option<Session>> {
-        let row = sqlx::query("SELECT * FROM sessions WHERE id = $1")
-            .bind(id.as_str())
-            .fetch_optional(&self.pool)
-            .await?;
+        let row = sqlx::query(
+            format!(
+                "SELECT {SESSION_COLUMNS} FROM sessions s
+                   JOIN workspaces w ON w.id = s.workspace_id
+                  WHERE s.id = $1"
+            )
+            .as_str(),
+        )
+        .bind(id.as_str())
+        .fetch_optional(&self.pool)
+        .await?;
         let Some(row) = row else { return Ok(None) };
         Ok(self.with_checkouts(vec![row]).await?.pop())
     }
@@ -900,10 +1106,12 @@ impl Db {
         }
 
         let rows = sqlx::query(
-            "SELECT session_id, repo_id, slug, base, branch, path, trouble, pull_request
-               FROM session_repos
-              WHERE session_id = ANY($1)
-              ORDER BY session_id, position",
+            "SELECT s.id AS session_id, r.repo_id, r.slug, r.base, r.branch,
+                    r.path, r.trouble, r.pull_request
+               FROM workspace_repos r
+               JOIN sessions s ON s.workspace_id = r.workspace_id
+              WHERE s.id = ANY($1)
+              ORDER BY s.id, r.position",
         )
         .bind(&ids)
         .fetch_all(&self.pool)
@@ -937,16 +1145,20 @@ impl Db {
     /// Write down what a session is checking out, replacing whatever was there.
     pub async fn record_checkouts(&self, id: &SessionId, checkouts: &[Checkout]) -> Result<()> {
         let mut tx = self.pool.begin().await?;
-        sqlx::query("DELETE FROM session_repos WHERE session_id = $1")
-            .bind(id.as_str())
-            .execute(&mut *tx)
-            .await?;
+        sqlx::query(
+            "DELETE FROM workspace_repos
+             WHERE workspace_id = (SELECT workspace_id FROM sessions WHERE id = $1)",
+        )
+        .bind(id.as_str())
+        .execute(&mut *tx)
+        .await?;
 
         for (position, c) in checkouts.iter().enumerate() {
             sqlx::query(
-                "INSERT INTO session_repos
-                   (session_id, position, repo_id, slug, base, branch, path, trouble, pull_request)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+                "INSERT INTO workspace_repos
+                   (workspace_id, position, repo_id, slug, base, branch, path, trouble, pull_request)
+                 VALUES ((SELECT workspace_id FROM sessions WHERE id = $1),
+                         $2, $3, $4, $5, $6, $7, $8, $9)",
             )
             .bind(id.as_str())
             .bind(position as i32)
@@ -971,16 +1183,18 @@ impl Db {
         // as an i64 made sqlx refuse the row, which is what adding a repository
         // to a running session did instead of working.
         let next: i32 = sqlx::query_scalar(
-            "SELECT COALESCE(MAX(position) + 1, 0) FROM session_repos WHERE session_id = $1",
+            "SELECT COALESCE(MAX(position) + 1, 0) FROM workspace_repos
+              WHERE workspace_id = (SELECT workspace_id FROM sessions WHERE id = $1)",
         )
         .bind(id.as_str())
         .fetch_one(&self.pool)
         .await?;
 
         sqlx::query(
-            "INSERT INTO session_repos
-               (session_id, position, repo_id, slug, base, branch, path, trouble, pull_request)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+            "INSERT INTO workspace_repos
+               (workspace_id, position, repo_id, slug, base, branch, path, trouble, pull_request)
+             VALUES ((SELECT workspace_id FROM sessions WHERE id = $1),
+                     $2, $3, $4, $5, $6, $7, $8, $9)",
         )
         .bind(id.as_str())
         .bind(next)
@@ -1004,7 +1218,9 @@ impl Db {
         url: &str,
     ) -> Result<()> {
         sqlx::query(
-            "UPDATE session_repos SET pull_request = $1 WHERE session_id = $2 AND path = $3",
+            "UPDATE workspace_repos SET pull_request = $1
+              WHERE workspace_id = (SELECT workspace_id FROM sessions WHERE id = $2)
+                AND path = $3",
         )
         .bind(url)
         .bind(id.as_str())
@@ -1052,8 +1268,9 @@ impl Db {
             // one row rather than to the session.
             if let Some(slug) = repo {
                 sqlx::query(
-                    "UPDATE session_repos SET branch = $1
-                      WHERE session_id = $2 AND slug = $3",
+                    "UPDATE workspace_repos SET branch = $1
+                      WHERE workspace_id = (SELECT workspace_id FROM sessions WHERE id = $2)
+                        AND slug = $3",
                 )
                 .bind(branch)
                 .bind(session_id.as_str())
@@ -1071,7 +1288,9 @@ impl Db {
                 // repository was rolled back and lost, and the branch the
                 // worker actually created never reached the database.
                 Some(slug) => sqlx::query_scalar::<_, i32>(
-                    "SELECT position FROM session_repos WHERE session_id = $1 AND slug = $2",
+                    "SELECT position FROM workspace_repos
+                      WHERE workspace_id = (SELECT workspace_id FROM sessions WHERE id = $1)
+                        AND slug = $2",
                 )
                 .bind(session_id.as_str())
                 .bind(slug)
@@ -1082,12 +1301,15 @@ impl Db {
             };
 
             if first {
-                sqlx::query("UPDATE sessions SET branch = $1, updated_at = $2 WHERE id = $3")
-                    .bind(branch)
-                    .bind(at)
-                    .bind(session_id.as_str())
-                    .execute(&mut *tx)
-                    .await?;
+                sqlx::query(
+                    "UPDATE workspaces SET branch = $1, updated_at = $2
+                      WHERE id = (SELECT workspace_id FROM sessions WHERE id = $3)",
+                )
+                .bind(branch)
+                .bind(at)
+                .bind(session_id.as_str())
+                .execute(&mut *tx)
+                .await?;
             }
         }
 
@@ -1100,7 +1322,8 @@ impl Db {
             // working; applying that here would put a ghost back on the inbox.
             sqlx::query(
                 "UPDATE sessions SET status = $1, note = $2, updated_at = $3
-                  WHERE id = $4 AND forgotten_at IS NULL",
+                  WHERE id = $4
+                    AND workspace_id IN (SELECT id FROM workspaces WHERE forgotten_at IS NULL)",
             )
             .bind(serde_json::to_string(status)?.trim_matches('"'))
             .bind(note.as_deref())
@@ -1156,11 +1379,14 @@ impl Db {
     /// Written once it exists, so a screen can tell "pushed" from "already
     /// open" without asking GitHub every time somebody looks.
     pub async fn record_pull_request(&self, session_id: &SessionId, url: &str) -> Result<()> {
-        sqlx::query("UPDATE sessions SET pull_request = $1, updated_at = now() WHERE id = $2")
-            .bind(url)
-            .bind(session_id.as_str())
-            .execute(&self.pool)
-            .await?;
+        sqlx::query(
+            "UPDATE workspaces SET pull_request = $1, updated_at = now()
+              WHERE id = (SELECT workspace_id FROM sessions WHERE id = $2)",
+        )
+        .bind(url)
+        .bind(session_id.as_str())
+        .execute(&self.pool)
+        .await?;
         Ok(())
     }
 
@@ -1459,6 +1685,48 @@ fn repo_from_row(r: sqlx::postgres::PgRow) -> Repo {
     }
 }
 
+/// A session and the workspace it runs in, as one row.
+///
+/// Everything above this file still sees one `Session`, because from the
+/// outside that is what it is: some work, in a place. The split is about what
+/// can be *said* — a workspace with two sessions in it is now expressible —
+/// rather than about what a screen draws today.
+/// A run to add to a workspace that already exists.
+///
+/// A struct because these travel together and describe one thing, and as
+/// arguments they were an unlabelled row of five strings — three of which are
+/// interchangeable at a call site and none of which the compiler would catch.
+pub struct NewRun<'a> {
+    pub id: &'a SessionId,
+    pub workspace_id: &'a WorkspaceId,
+    pub owner: &'a str,
+    pub title: &'a str,
+    pub prompt: &'a str,
+    pub agent: &'a str,
+    pub steps: &'a [ft_core::Step],
+}
+
+/// Where a workspace is, for starting another agent in it.
+///
+/// Not [`ft_core::session::Workspace`], which is what a worker reports about a
+/// directory it made. This is what the control plane knows before it asks for
+/// anything: whose machine, which repository, which branch.
+#[derive(Debug, Clone)]
+pub struct WorkspacePlace {
+    pub id: WorkspaceId,
+    pub host_id: HostId,
+    pub repo: Option<String>,
+    pub branch: Option<String>,
+    pub base: Option<String>,
+    pub size: ft_core::WorkspaceSize,
+    /// Removed here while its host was away. Nothing new starts in one.
+    pub forgotten: bool,
+}
+
+const SESSION_COLUMNS: &str = "\
+    s.*, w.host_id, w.repo, w.branch, w.base, w.size, w.pull_request, \
+    w.forgotten_at, w.cleaned_at, w.name, w.task_key, w.task_url";
+
 fn session_from_row(r: sqlx::postgres::PgRow) -> Result<Session> {
     let status: String = r.get("status");
     let agent: String = r.get("agent");
@@ -1469,11 +1737,11 @@ fn session_from_row(r: sqlx::postgres::PgRow) -> Result<Session> {
         owner: ft_core::UserId::from_stored(r.get::<String, _>("user_id")),
         // Filled in by `with_checkouts`, which asks for the lot in one query.
         checkouts: Vec::new(),
-        // Written when the session is created, so this is only ever absent for
-        // a row from before names existed.
-        name: r
-            .get::<Option<String>, _>("name")
-            .unwrap_or_else(|| format!("Agent {}", r.get::<i64, _>("number"))),
+        // On the workspace, and never absent: the migration that moved it here
+        // filled every row.
+        name: r.get("name"),
+        task_key: r.get("task_key"),
+        task_url: r.get("task_url"),
         note: r.get("note"),
         id: SessionId::from_stored(r.get::<String, _>("id")),
         repo: r.get("repo"),
@@ -1490,7 +1758,11 @@ fn session_from_row(r: sqlx::postgres::PgRow) -> Result<Session> {
         proposed_title: r.get("proposed_title"),
         proposed_body: r.get("proposed_body"),
         host_id: HostId::from_stored(r.get::<String, _>("host_id")),
-        workspace_id: None,
+        // A real id now, rather than the `None` it was while a session and the
+        // place it runs in were the same row.
+        workspace_id: Some(ft_core::WorkspaceId::from_stored(
+            r.get::<String, _>("workspace_id"),
+        )),
         // Sessions created before steps were recorded have none, which renders
         // as the activity list it always did rather than as an empty checklist.
         steps: serde_json::from_value(r.get("steps")).unwrap_or_default(),
@@ -1609,6 +1881,7 @@ mod tests {
             "Shell",
             WorkspaceSize::Medium,
             &ft_core::Step::plan(true, false),
+            None,
         )
         .await
         .unwrap();
@@ -1722,6 +1995,7 @@ mod tests {
             "ClaudeCode",
             WorkspaceSize::Medium,
             &ft_core::Step::plan(true, false),
+            None,
         )
         .await
         .unwrap();
@@ -1767,6 +2041,7 @@ mod tests {
             "ClaudeCode",
             WorkspaceSize::Medium,
             &ft_core::Step::plan(true, false),
+            None,
         )
         .await
         .unwrap();
@@ -1809,6 +2084,7 @@ mod tests {
             "ClaudeCode",
             WorkspaceSize::Medium,
             &ft_core::Step::plan(true, false),
+            None,
         )
         .await
         .unwrap();
@@ -1848,6 +2124,7 @@ mod tests {
             "ClaudeCode",
             WorkspaceSize::Medium,
             &ft_core::Step::plan(true, false),
+            None,
         )
         .await
         .unwrap();
@@ -1905,6 +2182,7 @@ mod tests {
             "ClaudeCode",
             WorkspaceSize::Medium,
             &ft_core::Step::plan(true, false),
+            None,
         )
         .await
         .unwrap();
@@ -1974,6 +2252,7 @@ mod tests {
             "Shell",
             WorkspaceSize::Medium,
             &ft_core::Step::plan(true, false),
+            None,
         )
         .await
         .unwrap();
@@ -2003,6 +2282,7 @@ mod tests {
                 "Shell",
                 WorkspaceSize::Medium,
                 &ft_core::Step::plan(true, false),
+                None,
             )
             .await
             .unwrap();
@@ -2066,6 +2346,7 @@ mod tests {
                 "ClaudeCode",
                 WorkspaceSize::Medium,
                 &[],
+                None,
             )
             .await
             .unwrap();
@@ -2114,6 +2395,7 @@ mod tests {
             "Shell",
             WorkspaceSize::Medium,
             &ft_core::Step::plan(true, false),
+            None,
         )
         .await
         .unwrap();
@@ -2275,6 +2557,7 @@ mod tests {
             "ClaudeCode",
             WorkspaceSize::Medium,
             &[],
+            None,
         )
         .await
         .unwrap();
@@ -2330,6 +2613,7 @@ mod tests {
             "ClaudeCode",
             WorkspaceSize::Medium,
             &[],
+            None,
         )
         .await
         .unwrap();
@@ -2349,6 +2633,493 @@ mod tests {
         assert!(
             db.owed_cleanup_on(&host.id).await.unwrap().is_empty(),
             "asking twice would kill a session started since"
+        );
+    }
+
+    /// The place and the work are separate rows now.
+    ///
+    /// Nothing above the database can tell — a `Session` still arrives whole —
+    /// so these assert against the tables directly. They are the reason the
+    /// split is worth anything: what they describe is a workspace that could
+    /// hold a second session, which the schema previously made impossible.
+    #[tokio::test]
+    async fn a_session_runs_inside_a_workspace() {
+        let (db, owner) = db_with_user().await;
+        let host = db.ensure_host("localhost", Compute::Local).await.unwrap();
+
+        let id = SessionId::new();
+        db.insert_session(
+            &id,
+            &host.id,
+            &owner,
+            Some("acme/backend"),
+            "Split the refresh path",
+            "split the refresh path out of auth",
+            None,
+            Some("main"),
+            "ClaudeCode",
+            WorkspaceSize::Medium,
+            &[],
+            None,
+        )
+        .await
+        .unwrap();
+
+        let session = db.session(&id).await.unwrap().unwrap();
+
+        // The worktree's facts still reach the caller, from the other table.
+        assert_eq!(session.host_id, host.id);
+        assert_eq!(session.repo.as_deref(), Some("acme/backend"));
+        assert_eq!(session.base.as_deref(), Some("main"));
+
+        // And it names the place it runs in.
+        assert_eq!(
+            session.workspace_id.as_ref().map(|w| w.as_str()),
+            Some(id.as_str()),
+            "a workspace keeps the id of the session it was split from, so \
+             directories and tmux sessions already on a host still match"
+        );
+
+        let workspaces: i64 = sqlx::query_scalar("SELECT count(*) FROM workspaces WHERE id = $1")
+            .bind(id.as_str())
+            .fetch_one(&db.pool)
+            .await
+            .unwrap();
+        assert_eq!(workspaces, 1, "one workspace, holding one session");
+    }
+
+    /// What is checked out belongs to the place.
+    ///
+    /// Two agents in one workspace read the same files out of the same
+    /// directories, so the rows hang off the workspace and not off whichever
+    /// session happened to ask for them.
+    #[tokio::test]
+    async fn checkouts_belong_to_the_workspace() {
+        let (db, owner) = db_with_user().await;
+        let host = db.ensure_host("localhost", Compute::Local).await.unwrap();
+
+        let id = SessionId::new();
+        db.insert_session(
+            &id,
+            &host.id,
+            &owner,
+            Some("acme/backend"),
+            "Two repositories",
+            "change the api and the client",
+            None,
+            Some("main"),
+            "ClaudeCode",
+            WorkspaceSize::Medium,
+            &[],
+            None,
+        )
+        .await
+        .unwrap();
+
+        db.record_checkouts(
+            &id,
+            &[Checkout {
+                repo_id: None,
+                slug: "acme/backend".into(),
+                base: "main".into(),
+                branch: "agent/two".into(),
+                path: String::new(),
+                trouble: None,
+                pull_request: None,
+            }],
+        )
+        .await
+        .unwrap();
+
+        let workspace_id: String =
+            sqlx::query_scalar("SELECT workspace_id FROM sessions WHERE id = $1")
+                .bind(id.as_str())
+                .fetch_one(&db.pool)
+                .await
+                .unwrap();
+        let rows: i64 =
+            sqlx::query_scalar("SELECT count(*) FROM workspace_repos WHERE workspace_id = $1")
+                .bind(&workspace_id)
+                .fetch_one(&db.pool)
+                .await
+                .unwrap();
+        assert_eq!(rows, 1, "the checkout is filed under the workspace");
+
+        // And it still comes back on the session, which is what every screen
+        // reads.
+        let session = db.session(&id).await.unwrap().unwrap();
+        assert_eq!(session.checkouts.len(), 1);
+        assert_eq!(session.checkouts[0].branch, "agent/two");
+    }
+
+    /// Ending the work marks the place as gone, in both rows.
+    ///
+    /// They are separate facts now — a session that has ended, and a directory
+    /// nobody has torn down — and the teardown debt is read from the second.
+    #[tokio::test]
+    async fn forgetting_ends_the_session_and_marks_the_workspace() {
+        let (db, owner) = db_with_user().await;
+        let host = db.ensure_host("localhost", Compute::Local).await.unwrap();
+
+        let id = SessionId::new();
+        db.insert_session(
+            &id,
+            &host.id,
+            &owner,
+            None,
+            "Nothing much",
+            "nothing much",
+            None,
+            None,
+            "ClaudeCode",
+            WorkspaceSize::Medium,
+            &[],
+            None,
+        )
+        .await
+        .unwrap();
+
+        db.forget_session(&id).await.unwrap();
+
+        let session = db.session(&id).await.unwrap().unwrap();
+        assert_eq!(session.status, SessionStatus::Ended);
+        assert!(
+            session.forgotten_at.is_some(),
+            "the caller still sees when it was removed, from the workspace"
+        );
+        assert_eq!(
+            db.owed_cleanup_on(&host.id).await.unwrap(),
+            vec![id.clone()],
+            "the host is still owed a teardown, now read off the workspace"
+        );
+    }
+
+    /// A workspace is called after the work, not after a counter.
+    ///
+    /// `Agent 14` named the agent, which is the least interesting thing about a
+    /// branch somebody will come back to tomorrow. The number stays — it is
+    /// still a unique handle — it is just no longer what the place is called.
+    #[tokio::test]
+    async fn a_workspace_is_named_for_its_work() {
+        let (db, owner) = db_with_user().await;
+        let host = db.ensure_host("localhost", Compute::Local).await.unwrap();
+
+        let named = SessionId::new();
+        db.insert_session(
+            &named,
+            &host.id,
+            &owner,
+            Some("acme/backend"),
+            "Split the refresh path",
+            "split the refresh path out of auth",
+            Some("agent/auth-refactor"),
+            Some("main"),
+            "ClaudeCode",
+            WorkspaceSize::Medium,
+            &[],
+            Some("auth-refactor"),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            db.session(&named).await.unwrap().unwrap().name,
+            "auth-refactor"
+        );
+
+        // Nothing to be named after: a bare agent with no branch keeps the
+        // old form, because a blank row in the rail would be worse.
+        let bare = SessionId::new();
+        db.insert_session(
+            &bare,
+            &host.id,
+            &owner,
+            None,
+            "Ask me",
+            "ask me a question",
+            None,
+            None,
+            "ClaudeCode",
+            WorkspaceSize::Medium,
+            &[],
+            None,
+        )
+        .await
+        .unwrap();
+        let session = db.session(&bare).await.unwrap().unwrap();
+        assert_eq!(session.name, format!("Agent {}", session.number));
+    }
+
+    /// Renaming names the place, and the work inside it goes on being itself.
+    #[tokio::test]
+    async fn renaming_a_session_renames_its_workspace() {
+        let (db, owner) = db_with_user().await;
+        let host = db.ensure_host("localhost", Compute::Local).await.unwrap();
+
+        let id = SessionId::new();
+        db.insert_session(
+            &id,
+            &host.id,
+            &owner,
+            None,
+            "Something",
+            "something",
+            None,
+            None,
+            "ClaudeCode",
+            WorkspaceSize::Medium,
+            &[],
+            Some("first-name"),
+        )
+        .await
+        .unwrap();
+
+        db.rename_session(&id, "second-name").await.unwrap();
+        assert_eq!(db.session(&id).await.unwrap().unwrap().name, "second-name");
+
+        let on_workspace: String = sqlx::query_scalar("SELECT name FROM workspaces WHERE id = $1")
+            .bind(id.as_str())
+            .fetch_one(&db.pool)
+            .await
+            .unwrap();
+        assert_eq!(
+            on_workspace, "second-name",
+            "the name lives on the workspace"
+        );
+    }
+
+    /// A workspace keeps the id of the session it was split from.
+    ///
+    /// Load-bearing, and not obviously so. The directory a workspace occupies
+    /// on its host was named from that session's id when it was built, and the
+    /// worker was never told the workspace id — so starting a *second* agent
+    /// there means deriving the same directory name again, from this. If ids
+    /// ever stopped matching, a second agent would be launched into a directory
+    /// that does not exist, or worse, somebody else's.
+    #[tokio::test]
+    async fn a_workspace_keeps_its_first_sessions_id() {
+        let (db, owner) = db_with_user().await;
+        let host = db.ensure_host("localhost", Compute::Local).await.unwrap();
+
+        let id = SessionId::new();
+        db.insert_session(
+            &id,
+            &host.id,
+            &owner,
+            Some("acme/backend"),
+            "Something",
+            "something",
+            Some("agent/thing"),
+            Some("main"),
+            "ClaudeCode",
+            WorkspaceSize::Medium,
+            &[],
+            None,
+        )
+        .await
+        .unwrap();
+
+        let session = db.session(&id).await.unwrap().unwrap();
+        assert_eq!(
+            session.workspace_id.as_ref().map(|w| w.as_str()),
+            Some(id.as_str()),
+        );
+    }
+
+    /// A second agent is a second session in one workspace.
+    #[tokio::test]
+    async fn a_workspace_can_hold_two_agents() {
+        let (db, owner) = db_with_user().await;
+        let host = db.ensure_host("localhost", Compute::Local).await.unwrap();
+
+        let first = SessionId::new();
+        db.insert_session(
+            &first,
+            &host.id,
+            &owner,
+            Some("acme/backend"),
+            "Split the refresh path",
+            "split the refresh path",
+            Some("agent/auth"),
+            Some("main"),
+            "ClaudeCode",
+            WorkspaceSize::Medium,
+            &[],
+            Some("auth"),
+        )
+        .await
+        .unwrap();
+
+        let workspace = db
+            .session(&first)
+            .await
+            .unwrap()
+            .unwrap()
+            .workspace_id
+            .unwrap();
+
+        let second = SessionId::new();
+        db.insert_run(NewRun {
+            id: &second,
+            workspace_id: &workspace,
+            owner: &owner,
+            title: "Codex",
+            prompt: "",
+            agent: "Codex",
+            steps: &[],
+        })
+        .await
+        .unwrap();
+
+        // Two runs, one place — and the second reads the first's worktree back
+        // out of the workspace it was told to join.
+        let run = db.session(&second).await.unwrap().unwrap();
+        assert_eq!(run.workspace_id.as_ref(), Some(&workspace));
+        assert_eq!(run.agent, Agent::Codex);
+        assert_eq!(
+            run.host_id, host.id,
+            "the same machine, because it is the same directory"
+        );
+        assert_eq!(run.branch.as_deref(), Some("agent/auth"));
+        assert_eq!(
+            run.name, "auth",
+            "both runs are in the workspace of that name"
+        );
+
+        // And its number is its own: two runs are two things in a list.
+        assert_ne!(
+            run.number,
+            db.session(&first).await.unwrap().unwrap().number
+        );
+
+        let held: i64 = sqlx::query_scalar("SELECT count(*) FROM sessions WHERE workspace_id = $1")
+            .bind(workspace.as_str())
+            .fetch_one(&db.pool)
+            .await
+            .unwrap();
+        assert_eq!(held, 2);
+    }
+
+    /// Ending a workspace has to find the agents that are not named after it.
+    #[tokio::test]
+    async fn a_workspace_knows_the_other_agents_it_has_to_take_with_it() {
+        let (db, owner) = db_with_user().await;
+        let host = db.ensure_host("localhost", Compute::Local).await.unwrap();
+
+        let first = SessionId::new();
+        db.insert_session(
+            &first,
+            &host.id,
+            &owner,
+            Some("acme/backend"),
+            "Split the refresh path",
+            "split the refresh path",
+            Some("agent/auth"),
+            Some("main"),
+            "ClaudeCode",
+            WorkspaceSize::Medium,
+            &[],
+            Some("auth"),
+        )
+        .await
+        .unwrap();
+
+        let workspace = db
+            .session(&first)
+            .await
+            .unwrap()
+            .unwrap()
+            .workspace_id
+            .unwrap();
+
+        let mut runs = vec![];
+        for agent in ["Codex", "ClaudeCode"] {
+            let id = SessionId::new();
+            db.insert_run(NewRun {
+                id: &id,
+                workspace_id: &workspace,
+                owner: &owner,
+                title: agent,
+                prompt: "",
+                agent,
+                steps: &[],
+            })
+            .await
+            .unwrap();
+            runs.push(id);
+        }
+
+        let beside = db
+            .live_runs_beside(&owner, &workspace, &first)
+            .await
+            .unwrap();
+        assert_eq!(beside.len(), 2, "both of the workspace's other agents");
+        for id in &runs {
+            assert!(beside.iter().any(|f| f == id), "{id} should be in {beside:?}");
+        }
+
+        // One that has already ended is not ended twice.
+        db.forget_session(&runs[0]).await.unwrap();
+        let beside = db
+            .live_runs_beside(&owner, &workspace, &first)
+            .await
+            .unwrap();
+        assert_eq!(beside, vec![runs[1].clone()]);
+    }
+
+    /// Ending one run does not take the other, or the place.
+    #[tokio::test]
+    async fn ending_one_agent_leaves_the_workspace_and_its_neighbour() {
+        let (db, owner) = db_with_user().await;
+        let host = db.ensure_host("localhost", Compute::Local).await.unwrap();
+
+        let first = SessionId::new();
+        db.insert_session(
+            &first,
+            &host.id,
+            &owner,
+            None,
+            "One",
+            "one",
+            None,
+            None,
+            "ClaudeCode",
+            WorkspaceSize::Medium,
+            &[],
+            Some("shared"),
+        )
+        .await
+        .unwrap();
+        let workspace = db
+            .session(&first)
+            .await
+            .unwrap()
+            .unwrap()
+            .workspace_id
+            .unwrap();
+
+        let second = SessionId::new();
+        db.insert_run(NewRun {
+            id: &second,
+            workspace_id: &workspace,
+            owner: &owner,
+            title: "Two",
+            prompt: "",
+            agent: "Codex",
+            steps: &[],
+        })
+        .await
+        .unwrap();
+
+        db.forget_session(&second).await.unwrap();
+
+        assert_eq!(
+            db.session(&second).await.unwrap().unwrap().status,
+            SessionStatus::Ended
+        );
+        assert_ne!(
+            db.session(&first).await.unwrap().unwrap().status,
+            SessionStatus::Ended,
+            "ending one agent must not end the one beside it"
         );
     }
 
@@ -2376,6 +3147,7 @@ mod tests {
                 "ClaudeCode",
                 WorkspaceSize::Medium,
                 &[],
+                None,
             )
             .await
             .unwrap();
@@ -2494,6 +3266,7 @@ mod tests {
             "ClaudeCode",
             WorkspaceSize::Medium,
             &[],
+            None,
         )
         .await
         .unwrap();
@@ -2526,6 +3299,7 @@ mod tests {
                 "ClaudeCode",
                 WorkspaceSize::Medium,
                 &[],
+                None,
             )
             .await
             .unwrap();
@@ -2556,6 +3330,7 @@ mod tests {
             "ClaudeCode",
             WorkspaceSize::Medium,
             &[],
+            None,
         )
         .await
         .unwrap();

@@ -81,6 +81,21 @@ pub struct Worker {
 /// loop — see [`takes_a_while`].
 const OUTBOUND: usize = 1024;
 
+/// One agent, and where to put it.
+///
+/// A struct because these six travel together and mean one thing: this agent,
+/// in this directory, under this tmux session, with this environment. As
+/// arguments they were an unlabelled row that two callers had to get in the
+/// same order — and clippy was right that eight of them is too many.
+struct Launch<'a> {
+    id: &'a SessionId,
+    path: &'a std::path::Path,
+    tmux: &'a Tmux,
+    env: &'a [(String, String)],
+    agent: ft_core::Agent,
+    prompt: &'a str,
+}
+
 impl Worker {
     /// Open (or create) the worker's state under `root`.
     pub async fn open(root: impl Into<PathBuf>) -> Result<Self> {
@@ -289,6 +304,18 @@ impl Worker {
                 out.send(ToServer::AgentsProbed { req, agents }).await?;
             }
 
+            // Slow — npm, a few hundred megabytes — so this arm only runs
+            // because `takes_a_while` keeps it off the message loop. On the
+            // loop it would hold up the heartbeats and the control plane would
+            // give the connection up as dead half way through.
+            ToWorker::InstallAgent { req, kind, version } => {
+                let result = runtime::install(&self.root, kind, version.as_deref())
+                    .await
+                    .map(|installed| installed.version)
+                    .map_err(|e| format!("{e:#}"));
+                out.send(ToServer::AgentInstalled { req, result }).await?;
+            }
+
             // Signing in happens on the machine that will run the agent,
             // because that is the machine OpenAI hands the credential to.
             //
@@ -349,6 +376,32 @@ impl Worker {
                 out.send(ToServer::RemoteProbed { req, result }).await?;
             }
 
+            ToWorker::StartAgent(spec) => {
+                let session_id = spec.session_id.clone();
+                if let Err(e) = self.start_agent(*spec, out).await {
+                    // The same shape as a failed build, because it is the same
+                    // thing to whoever is watching: an agent that was asked for
+                    // and is not there. The workspace itself is untouched —
+                    // this never made it, so it cannot have broken it.
+                    let kind = EventKind::Failed {
+                        code: "SetupFailed".into(),
+                        message: format!("{e:#}"),
+                    };
+                    self.emit(&session_id, kind, out).await?;
+                    self.store
+                        .set_status(&session_id, SessionStatus::Failed)
+                        .await?;
+                    self.emit(
+                        &session_id,
+                        EventKind::StatusChanged {
+                            status: SessionStatus::Failed,
+                            note: None,
+                        },
+                        out,
+                    )
+                    .await?;
+                }
+            }
             ToWorker::CreateWorkspace(spec) => {
                 let session_id = spec.session_id.clone();
                 if let Err(e) = self.create_workspace(*spec, out).await {
@@ -387,10 +440,37 @@ impl Worker {
                     .kill()
                     .await?;
 
+                // Ended before the count is taken, so that the last agent out
+                // is decided the same way however many are ending at once. Two
+                // concurrent teardowns each see the other already finished and
+                // both reclaim; the directory is removed once and the second
+                // gets NotFound, which is handled below. The alternative —
+                // counting first — has both see a live sibling and neither
+                // reclaim, which leaks the worktree.
+                self.store
+                    .set_status(&session_id, SessionStatus::Ended)
+                    .await?;
+
+                // The worktree belongs to the workspace, not to this agent.
+                // With a sibling still running in it, removing it would delete
+                // the directory out from under a live process; the last agent
+                // out reclaims it instead.
+                let alone = self.store.others_in_workspace(&session_id).await?.is_empty();
+                if !alone {
+                    tracing::info!(
+                        session = %session_id,
+                        "ending this agent; its workspace stays for the others in it"
+                    );
+                }
+
                 // Each worktree is registered against its own mirror, so
                 // removing one means finding the mirror it was cut from. A
                 // session holds any number of them.
-                let workspace = self.store.workspace_path(&session_id).await?;
+                let workspace = if alone {
+                    self.store.workspace_path(&session_id).await?
+                } else {
+                    None
+                };
                 if let Some(workspace) = workspace.as_deref().map(std::path::Path::new) {
                     for c in self
                         .store
@@ -1174,16 +1254,254 @@ You are in the directory that holds them, not inside one of them.              P
         watching.insert(
             session_id.to_string(),
             tokio::spawn(async move {
-                if let Err(e) = structured::watch(id.clone(), since_line, out.clone()).await {
-                    // Ordinary rather than exceptional: a session running in a
-                    // terminal has no agent to watch, and the control plane
-                    // asks about all of them rather than remembering which is
-                    // which.
-                    tracing::debug!(session = %id, "no conversation to follow: {e:#}");
-                    let _ = out.send(ToServer::AgentClosed { session_id: id }).await;
+                // Which of the two ended is the whole point. Saying the agent
+                // closed when only the watching stopped tears down the
+                // conversation on the far side, and it does not come back —
+                // the agent goes on writing into a log nobody is reading.
+                match structured::watch(id.clone(), since_line, out.clone()).await {
+                    Ok(structured::Ended::AgentExited) => {}
+                    Ok(structured::Ended::WatcherStopped) => {
+                        let _ = out.send(ToServer::AgentUnwatched { session_id: id }).await;
+                    }
+                    Err(e) => {
+                        // Ordinary rather than exceptional: a session running
+                        // in a terminal has no agent to watch, and the control
+                        // plane asks about all of them rather than remembering
+                        // which is which.
+                        tracing::debug!(session = %id, "no conversation to follow: {e:#}");
+                        let _ = out.send(ToServer::AgentUnwatched { session_id: id }).await;
+                    }
                 }
             }),
         );
+    }
+
+    /// Start one agent in a workspace that is already on disk.
+    ///
+    /// The tail of building a workspace, and the whole of adding a second agent
+    /// to one. Shared rather than copied: the two paths differ in everything
+    /// before this point and in nothing after it, and a second copy is how the
+    /// two come to disagree about which status a session ends up in.
+    async fn launch_agent(&self, into: Launch<'_>, out: &mpsc::Sender<ToServer>) -> Result<()> {
+        let Launch {
+            id,
+            path,
+            tmux,
+            env,
+            agent,
+            prompt,
+        } = into;
+        // Take out anything a previous version installed. The agent reports its
+        // own lifecycle now, so a hook doing the same job is a second writer of
+        // one field, and one left behind keeps firing for sessions that have
+        // long moved on.
+        if let Some(home) = std::env::var_os("HOME").map(std::path::PathBuf::from) {
+            if let Err(e) = hooks::remove(&home, agent).await {
+                tracing::warn!("could not remove {} hooks: {e:#}", agent.label());
+            }
+        }
+
+        self.emit(id, EventKind::StepStarted { step: Step::Launch }, out)
+            .await?;
+
+        // The control plane asks this too, from what this host last reported.
+        // Asked again here because that answer has an age: an agent removed by
+        // hand since the last probe would otherwise be launched, and a missing
+        // binary under tmux is a pane that dies quietly and an agent that
+        // never becomes ready. This says which of the two it is.
+        anyhow::ensure!(
+            agents::present(&self.root, agent).await,
+            "{} is not installed on this machine",
+            agent.label()
+        );
+
+        // Whether an agent can be driven at all is the control plane's
+        // question, asked before a session is created — a worker does what it
+        // is told. What it decides here is only how: a supervisor holding the
+        // agent's pipes, or a bare shell in a pane.
+        //
+        // Everything Firetower offers takes the first path now. The second is
+        // what a shell is — a workspace to poke around in by hand, with no
+        // prompt to take and nothing to configure.
+        let structured = agent.speaks_a_protocol();
+
+        // Either way it runs under tmux, so it outlives this worker, this
+        // connection, and the laptop that started it. For a driven session
+        // tmux supervises the supervisor, which changes nothing about that:
+        // the process tree still has tmux at the top.
+        let command = if structured {
+            let exe = std::env::current_exe().context("finding this worker's own path")?;
+            structured::tmux_command(&exe, id, path, agent)
+        } else {
+            agent.command().to_string()
+        };
+
+        tmux.start(path, &command, env)
+            .await
+            .with_context(|| format!("starting {}", agent.label()))?;
+
+        self.emit(
+            id,
+            EventKind::TmuxOpened {
+                name: tmux.name().to_string(),
+            },
+            out,
+        )
+        .await?;
+        self.emit(id, EventKind::AgentLaunched { agent }, out)
+            .await?;
+
+        // An agent driven this way reads messages, so the first one has to be
+        // sent — after waiting for it to be listening, because a turn written
+        // into a socket nobody has bound yet is simply lost.
+        if structured {
+            structured::wait_until_listening(id)
+                .await
+                .context("waiting for the agent to start")?;
+            // Whatever this agent needs said first — for one that is a prompt,
+            // for another it is a handshake with the prompt still to come. The
+            // shapes belong to the control plane; this only puts them on the
+            // wire, in order, before anybody watches.
+            // One at a time, and a request is answered before the next goes
+            // out. An app-server refuses everything with "Not initialized"
+            // until it has finished starting, and a burst loses that race on a
+            // machine that is busy — which is every machine, sometimes.
+            for message in agent.opening(prompt, &path.to_string_lossy()) {
+                let awaiting = message.get("id").and_then(serde_json::Value::as_u64);
+                structured::tell(id, &agentd::ToAgent::Send { message })
+                    .await
+                    .context("opening the conversation")?;
+
+                if let Some(req) = awaiting {
+                    structured::wait_for_answer(path, id.as_str(), req)
+                        .await
+                        .context("opening the conversation")?;
+                }
+            }
+
+            // Start forwarding now rather than when somebody opens the session.
+            // What the agent says is how the control plane learns that it
+            // finished, or stopped to ask something — and a session nobody is
+            // watching is exactly the one that most needs to be able to say so.
+            self.watch_agent(id, 0, out).await;
+        }
+
+        // Whether anything was actually asked for. A workspace can be made
+        // without a task, and an agent that was sent nothing is not working: it
+        // is up and waiting, and nothing will ever arrive to correct a status
+        // that claimed otherwise.
+        //
+        // The prompt itself, not what `opening` produced: for one agent that is
+        // the prompt, and for another it is a handshake sent whether or not
+        // there is anything to ask.
+        let status = if !prompt.trim().is_empty() {
+            SessionStatus::Working
+        } else {
+            SessionStatus::Ready
+        };
+
+        self.store.set_status(id, status).await?;
+        self.emit(id, EventKind::StatusChanged { status, note: None }, out)
+            .await?;
+
+        Ok(())
+    }
+
+    /// Another agent, in a workspace that is already on disk.
+    ///
+    /// Everything that made the place has already happened. This records where
+    /// the new run lives — the same directory, under its own session id, so the
+    /// agent's socket and tmux session are its own — and launches into it.
+    ///
+    /// The one step it reports is the launch. A second agent does not fetch,
+    /// does not cut a worktree and does not run setup, and drawing those as
+    /// skipped would say something happened that did not.
+    async fn start_agent(
+        &self,
+        spec: ft_proto::StartAgent,
+        out: &mpsc::Sender<ToServer>,
+    ) -> Result<()> {
+        let id = spec.session_id.clone();
+        let path = self.git.worktree_path(&spec.workspace);
+
+        anyhow::ensure!(
+            tokio::fs::metadata(&path).await.is_ok(),
+            "the workspace at {} is not there any more",
+            path.display()
+        );
+
+        // Its own row first. Every event this worker records points at a
+        // session, and the store enforces that — so without this the very first
+        // thing the launch tried to say came back as a foreign key violation
+        // and the run sat in `Starting` with nothing to explain it.
+        //
+        // The workspace's facts, because they are the workspace's: this agent
+        // works on the same branch, cut from the same base, in the same place.
+        self.store
+            .create_session(
+                &id,
+                spec.repo.as_deref(),
+                &spec.title,
+                &spec.prompt,
+                spec.branch.as_deref(),
+                spec.base.as_deref(),
+                &format!("{:?}", spec.agent),
+                spec.size,
+            )
+            .await?;
+
+        // Its own tmux session, named from its own id — which is what keeps two
+        // agents in one directory from being one agent.
+        let tmux = Tmux::for_session(id.as_str());
+        self.store
+            .record_workspace(&id, path.to_str().unwrap_or_default(), tmux.name())
+            .await?;
+
+        let mut env = spec.env.clone();
+        env.push((ft_core::SESSION_ENV.to_string(), id.to_string()));
+        env.push((
+            ft_core::WORKER_ROOT_ENV.to_string(),
+            self.root.display().to_string(),
+        ));
+        env.push((
+            "PATH".to_string(),
+            crate::runtime::path_with_agents(&self.root)
+                .await
+                .to_string_lossy()
+                .to_string(),
+        ));
+
+        // The same directory the workspace's first agent uses, deliberately.
+        // What lands there is one person's credential for one agent, so two
+        // runs of theirs write the same bytes; giving the second its own copy
+        // would be a second thing to destroy for no difference.
+        if !spec.agent_home.is_empty() {
+            let home = agentd::dir_for(&path).join("agent-home");
+            match write_agent_home(&home, &spec.agent_home).await {
+                Ok(()) => {
+                    if let Some(var) = spec.agent.home_var() {
+                        env.push((var.to_string(), home.display().to_string()));
+                    }
+                }
+                // Not fatal, for the reason the first agent's is not: one that
+                // cannot find its credential says so in words its own users
+                // know, and a run that refused to start would say less.
+                Err(e) => tracing::warn!(session = %id, "writing the agent's home: {e:#}"),
+            }
+        }
+
+        self.launch_agent(
+            Launch {
+                id: &id,
+                path: &path,
+                tmux: &tmux,
+                env: &env,
+                agent: spec.agent,
+                prompt: &spec.prompt,
+            },
+            out,
+        )
+        .await
     }
 
     async fn create_workspace(
@@ -1367,96 +1685,14 @@ You are in the directory that holds them, not inside one of them.              P
             }
         }
 
-        // Take out anything a previous version installed. The agent reports its
-        // own lifecycle now, so a hook doing the same job is a second writer of
-        // one field, and one left behind keeps firing for sessions that have
-        // long moved on.
-        if let Some(home) = std::env::var_os("HOME").map(std::path::PathBuf::from) {
-            if let Err(e) = hooks::remove(&home, spec.agent).await {
-                tracing::warn!("could not remove {} hooks: {e:#}", spec.agent.label());
-            }
-        }
-
-        self.emit(&id, EventKind::StepStarted { step: Step::Launch }, out)
-            .await?;
-
-        // Whether an agent can be driven at all is the control plane's
-        // question, asked before a session is created — a worker does what it
-        // is told. What it decides here is only how: a supervisor holding the
-        // agent's pipes, or a bare shell in a pane.
-        //
-        // Everything Firetower offers takes the first path now. The second is
-        // what a shell is — a workspace to poke around in by hand, with no
-        // prompt to take and nothing to configure.
-        let structured = spec.agent.speaks_a_protocol();
-
-        // Either way it runs under tmux, so it outlives this worker, this
-        // connection, and the laptop that started it. For a driven session
-        // tmux supervises the supervisor, which changes nothing about that:
-        // the process tree still has tmux at the top.
-        let command = if structured {
-            let exe = std::env::current_exe().context("finding this worker's own path")?;
-            structured::tmux_command(&exe, &id, &path, spec.agent)
-        } else {
-            spec.agent.command().to_string()
-        };
-
-        tmux.start(&path, &command, &env)
-            .await
-            .with_context(|| format!("starting {}", spec.agent.label()))?;
-
-        self.emit(
-            &id,
-            EventKind::TmuxOpened {
-                name: tmux.name().to_string(),
-            },
-            out,
-        )
-        .await?;
-        self.emit(&id, EventKind::AgentLaunched { agent: spec.agent }, out)
-            .await?;
-
-        // An agent driven this way reads messages, so the first one has to be
-        // sent — after waiting for it to be listening, because a turn written
-        // into a socket nobody has bound yet is simply lost.
-        if structured {
-            structured::wait_until_listening(&id)
-                .await
-                .context("waiting for the agent to start")?;
-            // Whatever this agent needs said first — for one that is a prompt,
-            // for another it is a handshake with the prompt still to come. The
-            // shapes belong to the control plane; this only puts them on the
-            // wire, in order, before anybody watches.
-            // One at a time, and a request is answered before the next goes
-            // out. An app-server refuses everything with "Not initialized"
-            // until it has finished starting, and a burst loses that race on a
-            // machine that is busy — which is every machine, sometimes.
-            for message in spec.agent.opening(&spec.prompt, &path.to_string_lossy()) {
-                let awaiting = message.get("id").and_then(serde_json::Value::as_u64);
-                structured::tell(&id, &agentd::ToAgent::Send { message })
-                    .await
-                    .context("opening the conversation")?;
-
-                if let Some(req) = awaiting {
-                    structured::wait_for_answer(&path, req)
-                        .await
-                        .context("opening the conversation")?;
-                }
-            }
-
-            // Start forwarding now rather than when somebody opens the session.
-            // What the agent says is how the control plane learns that it
-            // finished, or stopped to ask something — and a session nobody is
-            // watching is exactly the one that most needs to be able to say so.
-            self.watch_agent(&id, 0, out).await;
-        }
-
-        self.store.set_status(&id, SessionStatus::Working).await?;
-        self.emit(
-            &id,
-            EventKind::StatusChanged {
-                status: SessionStatus::Working,
-                note: None,
+        self.launch_agent(
+            Launch {
+                id: &id,
+                path: &path,
+                tmux: &tmux,
+                env: &env,
+                agent: spec.agent,
+                prompt: &spec.prompt,
             },
             out,
         )
@@ -1896,12 +2132,20 @@ fn takes_a_while(frame: &ToWorker) -> bool {
     matches!(
         frame,
         ToWorker::CreateWorkspace(_)
+            // Starts a process and waits for it to bind its socket. Handled
+            // inline it blocked the read loop, and the events it emitted then
+            // sat in a channel only that loop drains — so a second agent
+            // produced no tmux session, no events and no explanation.
+            | ToWorker::StartAgent(_)
             | ToWorker::Destroy { .. }
             | ToWorker::Stop { .. }
             | ToWorker::RunAction { .. }
             | ToWorker::Summarize { .. }
             | ToWorker::ProbeRemote { .. }
             | ToWorker::ProbeAgents { .. }
+            // npm, fetching a few hundred megabytes. Minutes on a slow line,
+            // and every heartbeat is due during it.
+            | ToWorker::InstallAgent { .. }
             // Starting a login is two round trips to a process this has to
             // spawn first. The waiting after that is its own task; getting as
             // far as a code is still too slow to do on the loop.
@@ -2631,6 +2875,205 @@ mod tests {
         );
 
         cleanup(&id).await;
+    }
+
+    /// A second agent, in a workspace the first one made.
+    ///
+    /// The point of the whole arrangement: one directory, two agents, each with
+    /// its own session id — which is what gives each its own socket and its own
+    /// tmux without anything being invented for it.
+    #[tokio::test]
+    async fn a_second_agent_joins_a_workspace_that_exists() {
+        let home = TempDir::new().unwrap();
+        let worker = std::sync::Arc::new(Worker::open(home.path()).await.unwrap());
+        let first = SessionId::new();
+
+        // A place, made the usual way.
+        exchange(
+            &worker,
+            vec![
+                hello(),
+                ToWorker::CreateWorkspace(Box::new(CreateWorkspace {
+                    session_id: first.clone(),
+                    repos: vec![],
+                    prompt: String::new(),
+                    agent: Agent::Shell,
+                    size: WorkspaceSize::Medium,
+                    workspace: first.as_str().to_string(),
+                    env: vec![],
+                    agent_home: vec![],
+                })),
+            ],
+        )
+        .await;
+
+        let path = worker
+            .store()
+            .workspace_path(&first)
+            .await
+            .unwrap()
+            .unwrap();
+
+        // And another agent in it.
+        let second = SessionId::new();
+        let out = exchange(
+            &worker,
+            vec![
+                hello(),
+                ToWorker::StartAgent(Box::new(ft_proto::StartAgent {
+                    session_id: second.clone(),
+                    workspace: first.as_str().to_string(),
+                    prompt: String::new(),
+                    agent: Agent::Shell,
+                    title: "Shell".into(),
+                    repo: None,
+                    branch: None,
+                    base: None,
+                    size: WorkspaceSize::Medium,
+                    env: vec![],
+                    agent_home: vec![],
+                })),
+            ],
+        )
+        .await;
+
+        let labels: Vec<&str> = out
+            .iter()
+            .filter_map(|f| match f {
+                ToServer::Event { kind, .. } => Some(kind.label()),
+                _ => None,
+            })
+            .collect();
+
+        assert!(labels.contains(&"Launched the agent"), "{labels:?}");
+        assert!(
+            !labels.contains(&"Fetched the repository") && !labels.contains(&"Added a worktree"),
+            "a second agent builds nothing: {labels:?}"
+        );
+
+        // The same directory, under its own id.
+        assert_eq!(
+            worker
+                .store()
+                .workspace_path(&second)
+                .await
+                .unwrap()
+                .unwrap(),
+            path,
+            "both agents work in one place"
+        );
+
+        cleanup(&first).await;
+        cleanup(&second).await;
+    }
+
+    #[tokio::test]
+    async fn ending_one_agent_leaves_the_workspace_for_the_others() {
+        // Closing an agent's tab ends that agent. If that also reclaimed the
+        // worktree, the sibling still working in it would have the directory
+        // deleted underneath it — its files, its git metadata, its socket.
+        let home = TempDir::new().unwrap();
+        let worker = std::sync::Arc::new(Worker::open(home.path()).await.unwrap());
+        let first = SessionId::new();
+
+        exchange(
+            &worker,
+            vec![
+                hello(),
+                ToWorker::CreateWorkspace(Box::new(CreateWorkspace {
+                    session_id: first.clone(),
+                    repos: vec![],
+                    prompt: String::new(),
+                    agent: Agent::Shell,
+                    size: WorkspaceSize::Medium,
+                    workspace: first.as_str().to_string(),
+                    env: vec![],
+                    agent_home: vec![],
+                })),
+            ],
+        )
+        .await;
+
+        let path = worker
+            .store()
+            .workspace_path(&first)
+            .await
+            .unwrap()
+            .unwrap();
+
+        let second = SessionId::new();
+        exchange(
+            &worker,
+            vec![
+                hello(),
+                ToWorker::StartAgent(Box::new(ft_proto::StartAgent {
+                    session_id: second.clone(),
+                    workspace: first.as_str().to_string(),
+                    prompt: String::new(),
+                    agent: Agent::Shell,
+                    title: "Shell".into(),
+                    repo: None,
+                    branch: None,
+                    base: None,
+                    size: WorkspaceSize::Medium,
+                    env: vec![],
+                    agent_home: vec![],
+                })),
+            ],
+        )
+        .await;
+
+        // End the second one, the way closing its tab does.
+        exchange(
+            &worker,
+            vec![
+                hello(),
+                ToWorker::Destroy {
+                    session_id: second.clone(),
+                    force: false,
+                },
+            ],
+        )
+        .await;
+
+        assert_eq!(
+            worker.store().status_of(&second).await.unwrap(),
+            Some(SessionStatus::Ended),
+            "the agent that was asked to end should be gone"
+        );
+        assert!(
+            !tmux::Tmux::for_session(second.as_str()).exists().await,
+            "its process should be gone with it"
+        );
+        assert!(
+            std::path::Path::new(&path).exists(),
+            "the workspace belongs to the place, and another agent is still in it"
+        );
+        assert!(
+            tmux::Tmux::for_session(first.as_str()).exists().await,
+            "the agent nobody ended should still be running"
+        );
+
+        // And when the last one goes, the worktree is reclaimed.
+        exchange(
+            &worker,
+            vec![
+                hello(),
+                ToWorker::Destroy {
+                    session_id: first.clone(),
+                    force: false,
+                },
+            ],
+        )
+        .await;
+
+        assert!(
+            !std::path::Path::new(&path).exists(),
+            "the last agent out should reclaim the worktree, not leak it"
+        );
+
+        cleanup(&first).await;
+        cleanup(&second).await;
     }
 
     #[tokio::test]

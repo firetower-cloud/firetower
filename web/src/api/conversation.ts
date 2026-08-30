@@ -9,7 +9,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { apiBase, token } from "./http";
+import { useSocket } from "./socket";
 import type {
   Attached,
   ConversationEvent,
@@ -386,89 +386,62 @@ export function apply(state: Conversation, event: ConversationEvent): Conversati
  * reconnection, which is the loop below; the alternative was putting a
  * credential in a query string, where it would end up in logs.
  */
-export function useConversation(sessionId: string, live: boolean) {
+/**
+ * Follow a session's conversation.
+ *
+ * Took a `live` flag until the socket arrived: it decided whether to reopen the
+ * stream after it closed, which mattered when this held a connection of its
+ * own. Reconnection belongs to the socket now, and a session that has ended
+ * still has a transcript worth reading, so there is nothing left for it to
+ * decide.
+ */
+export function useConversation(sessionId: string) {
   const [state, setState] = useState<Conversation>(nothing);
-  /** Read by the reconnect loop without making it a dependency. */
+  /** Read when resubscribing, without making it a dependency. */
   const cursor = useRef(0);
-  const [attempt, setAttempt] = useState(0);
+  const { follow } = useSocket();
 
-  useEffect(() => {
-    cursor.current = 0;
+  // Moving to another session starts from nothing rather than showing the last
+  // one's transcript while this one loads. Adjusted during render rather than
+  // in an effect: an effect would paint the wrong conversation first and then
+  // correct it, which is a visible flash of somebody else's work.
+  const [shownFor, setShownFor] = useState(sessionId);
+  if (shownFor !== sessionId) {
+    setShownFor(sessionId);
     setState(nothing);
-  }, [sessionId]);
+  }
 
+  // Followed over the page's one socket rather than a connection of its own.
+  //
+  // This used to hold an SSE stream per open agent tab, which is what capped a
+  // workspace at three or four agents: a browser allows six connections per
+  // origin on HTTP/1.1, and four of them held open here left nothing for
+  // `POST /sessions` or `GET /agents` to run on. The tab that could not open
+  // was not being refused — its request never got a connection.
+  //
+  // A subscription costs nothing, so this is now free to be open in as many
+  // tabs as somebody wants.
   useEffect(() => {
-    const stop = new AbortController();
-    let cancelled = false;
-
-    (async () => {
-      try {
-        const response = await fetch(
-          `${apiBase()}/api/v1/sessions/${encodeURIComponent(sessionId)}/conversation/stream`,
-          {
-            signal: stop.signal,
-            headers: {
-              Accept: "text/event-stream",
-              ...(token() ? { Authorization: `Bearer ${token()}` } : {}),
-              // Where we got to, so a reconnect is not the whole session again.
-              ...(cursor.current ? { "Last-Event-ID": String(cursor.current) } : {}),
-            },
-          },
-        );
-
-        if (!response.ok || !response.body) {
-          throw new Error(`the conversation stream answered ${response.status}`);
-        }
-
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = "";
-
-        for (;;) {
-          const { done, value } = await reader.read();
-          if (done || cancelled) break;
-          buffer += decoder.decode(value, { stream: true });
-
-          // SSE separates messages with a blank line.
-          let split: number;
-          while ((split = buffer.indexOf("\n\n")) >= 0) {
-            const message = buffer.slice(0, split);
-            buffer = buffer.slice(split + 2);
-
-            const data = message
-              .split("\n")
-              .filter((l) => l.startsWith("data:"))
-              .map((l) => l.slice(5).trim())
-              .join("");
-            if (!data) continue;
-
-            let event: ConversationEvent;
-            try {
-              event = JSON.parse(data);
-            } catch {
-              continue;
-            }
-            cursor.current = Math.max(cursor.current, event.lineNo);
-            setState((current) => apply(current, event));
+    // Belongs with the subscription, and this re-runs when the session does.
+    cursor.current = 0;
+    return follow({
+        topic: "conversation",
+        id: sessionId,
+        // Where this got to, read at resubscribe time — so a reconnect
+        // continues rather than replaying the session from the top.
+        cursor: () => cursor.current || undefined,
+        onFrame: (frame) => {
+          if (frame.t === "error") {
+            setState((current) => ({ ...current, trouble: frame.message }));
+            return;
           }
-        }
-      } catch (e) {
-        if (cancelled || stop.signal.aborted) return;
-        setState((current) => ({ ...current, trouble: String(e) }));
-      }
-
-      // A finished session's stream closes and should stay closed. A running
-      // one gets another go — the cursor means nothing is read twice.
-      if (!cancelled && live) {
-        setTimeout(() => !cancelled && setAttempt((n) => n + 1), 2_000);
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-      stop.abort();
-    };
-  }, [sessionId, live, attempt]);
+          if (frame.t !== "line") return;
+          const event = frame.line as ConversationEvent;
+          cursor.current = Math.max(cursor.current, event.lineNo);
+          setState((current) => apply(current, event));
+        },
+    });
+  }, [sessionId, follow]);
 
   /**
    * Show a setting as chosen before the agent confirms it.

@@ -15,7 +15,7 @@ use utoipa::ToSchema;
 /// Identifies us politely, and some hosts refuse requests without one.
 const USER_AGENT: &str = concat!("firetower/", env!("CARGO_PKG_VERSION"));
 
-fn client() -> Result<reqwest::Client> {
+pub(crate) fn client() -> Result<reqwest::Client> {
     reqwest::Client::builder()
         .user_agent(USER_AGENT)
         .timeout(Duration::from_secs(30))

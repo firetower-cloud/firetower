@@ -66,59 +66,122 @@ pub struct Page {
     pub before: Option<String>,
 }
 
-/// End every session that is still running.
+/// End every workspace that is still running.
 ///
 /// Destructive in the same way as ending one, multiplied — every workspace goes
 /// and anything unpushed with it. The count comes back so the interface can say
 /// what it did rather than guess.
+///
+/// Counted in workspaces rather than sessions. A workspace holds any number of
+/// agents now, so "48 ended" was a number nobody recognised: what somebody is
+/// about to lose is six places, not forty-eight processes.
 #[utoipa::path(
     post, path = "/api/v1/sessions/end-all", tag = "sessions",
+    request_body = EndAll,
     responses((status = 200, body = EndedAll)),
 )]
 pub(super) async fn end_all_sessions(
     State(state): State<AppState>,
     Extension(principal): Extension<Principal>,
+    Json(req): Json<EndAll>,
 ) -> ApiResult<Json<EndedAll>> {
     // Yours. "End all" has never meant anybody else's, and with two people on
     // one Firetower it would be a button that ends a colleague's work.
     let live = state.db.live_sessions(owner(&principal)?).await?;
 
+    // By the place rather than by the process. Every agent in a workspace shares
+    // its worktree, so they go together or the directory is pulled out from
+    // under whichever is left — and one unreachable host should skip a
+    // workspace whole rather than half of it.
+    let mut places: Vec<(String, Vec<Session>)> = Vec::new();
+    for session in live {
+        let key = session
+            .workspace_id
+            .as_ref()
+            .map(|w| w.as_str().to_string())
+            .unwrap_or_else(|| session.id.as_str().to_string());
+        match places.iter_mut().find(|(id, _)| id == &key) {
+            Some((_, held)) => held.push(session),
+            None => places.push((key, vec![session])),
+        }
+    }
+
+    // What was asked for, if anything was. Filtered after grouping because a
+    // workspace is what goes: naming one is naming every agent in it, which is
+    // the same promise the button makes.
+    places.retain(|(id, _)| asked_for(id, req.workspaces.as_deref()));
+
     let mut ended = 0;
     let mut unreachable = 0;
 
-    for session in live {
-        // A host we can't talk to keeps its sessions; marking them ended here
+    for (_, sessions) in places {
+        let host = &sessions[0].host_id;
+
+        // A host we can't talk to keeps its workspaces; marking them ended here
         // would be a lie the next reconnect corrects.
-        if !state.fleet.is_connected(&session.host_id).await {
+        if !state.fleet.is_connected(host).await {
             unreachable += 1;
             continue;
         }
 
-        match state
-            .fleet
-            .send(
-                &session.host_id,
-                ToWorker::Destroy {
-                    session_id: session.id.clone(),
-                    force: true,
-                },
-            )
-            .await
-        {
-            Ok(()) => ended += 1,
-            Err(e) => {
+        let mut lost = false;
+        for session in &sessions {
+            if let Err(e) = state
+                .fleet
+                .send(
+                    &session.host_id,
+                    ToWorker::Destroy {
+                        session_id: session.id.clone(),
+                        force: true,
+                    },
+                )
+                .await
+            {
                 tracing::warn!(session = %session.id, "ending: {e:#}");
-                unreachable += 1;
+                lost = true;
             }
+        }
+
+        // The worktree is reclaimed by whichever of them finishes last, which
+        // the worker decides for itself — so the order these go out in does not
+        // matter, only that they all do.
+        if lost {
+            unreachable += 1;
+        } else {
+            ended += 1;
         }
     }
 
     Ok(Json(EndedAll { ended, unreachable }))
 }
 
+/// Whether this workspace is one of the ones asked for.
+///
+/// No list means every one of them, which is what `end-all` meant before it
+/// could be narrowed. An *empty* list is not the same thing and must never be
+/// read as one: it names nothing, so nothing goes.
+fn asked_for(id: &str, wanted: Option<&[String]>) -> bool {
+    match wanted {
+        None => true,
+        Some(ids) => ids.iter().any(|w| w == id),
+    }
+}
+
+/// Which workspaces to end.
+#[derive(Debug, Default, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct EndAll {
+    /// The workspaces to end, by id. Every one of yours when omitted — which
+    /// is what this endpoint did before it could be narrowed, and what an
+    /// empty body still means.
+    #[serde(default)]
+    pub workspaces: Option<Vec<String>>,
+}
+
 #[derive(Debug, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct EndedAll {
+    /// Workspaces ended, not sessions: a workspace is what somebody loses.
     pub ended: u32,
     /// Left alone because their host wasn't answering.
     pub unreachable: u32,
@@ -161,10 +224,23 @@ pub(super) async fn create_session(
     // whose name goes on its commits — is answered from here.
     let owner = owner(&principal)?.to_string();
 
-    if req.prompt.trim().is_empty() {
+    // Another agent in a place that already exists, which is a different job
+    // from making one: the host, the repositories, the branch and the directory
+    // are all decided, and everything below about choosing them does not apply.
+    if let Some(workspace_id) = req.workspace_id.clone() {
+        return start_another_agent(state, owner, workspace_id, req).await;
+    }
+
+    // What was actually asked for, if anything. A workspace may be created
+    // empty — a branch, a checkout and an agent waiting in it — so the only
+    // thing genuinely required is something to call it by.
+    let prompt = req.prompt.as_deref().map(str::trim).unwrap_or_default();
+    let asked_name = req.name.as_deref().map(str::trim).unwrap_or_default();
+
+    if prompt.is_empty() && asked_name.is_empty() {
         return Err(ApiError::new(
             ErrorCode::InvalidRequest,
-            "a session needs a prompt",
+            "a workspace needs a name, or something to do",
         ));
     }
 
@@ -267,6 +343,31 @@ pub(super) async fn create_session(
         }
     }
 
+    // The binary has to be on the machine that will run it.
+    //
+    // Asked here, where there is somewhere to say it, rather than found out at
+    // the launch step — which is what used to happen, and it arrived as the
+    // agent never becoming ready. That reads as a broken agent and is a
+    // missing one. The worker checks again before it launches, because this
+    // answer is only as fresh as the last probe.
+    let installed_here = state
+        .db
+        .presence()
+        .await?
+        .into_iter()
+        .any(|p| p.host == host.id && p.found.kind == req.agent && p.found.installed);
+
+    if !installed_here {
+        return Err(ApiError::new(
+            ErrorCode::InvalidRequest,
+            format!(
+                "{} isn't installed on {}. Install it from the Agents page and try again.",
+                req.agent.label(),
+                host.name
+            ),
+        ));
+    }
+
     // A path is a path on *this* machine. Anywhere else it is a directory that
     // doesn't exist, and the session would fail several steps later with a git
     // error that says nothing about why.
@@ -299,7 +400,19 @@ pub(super) async fn create_session(
             .map(str::trim)
             .filter(|b| !b.is_empty())
             .map(str::to_string)
-            .unwrap_or_else(|| format!("agent/{}", ft_core::slugify(&req.prompt))),
+            .unwrap_or_else(|| {
+                // The name first: it is what somebody chose, and the prompt is
+                // only a fallback for the case where they typed a task and let
+                // everything else be worked out.
+                format!(
+                    "agent/{}",
+                    ft_core::slugify(if asked_name.is_empty() {
+                        prompt
+                    } else {
+                        asked_name
+                    })
+                )
+            }),
     );
 
     // The base is per repository, because each has its own trunk and they are
@@ -371,7 +484,13 @@ pub(super) async fn create_session(
     }
 
     let id = SessionId::new();
-    let title = title_from(&req.prompt);
+    // What the work is called in a list. The prompt says it best when there is
+    // one; otherwise the name is all there is, and it was chosen for this.
+    let title = if prompt.is_empty() {
+        asked_name.to_string()
+    } else {
+        title_from(prompt)
+    };
 
     // Named after the branch when there is a checkout; after the session
     // otherwise. One name for the whole workspace, whatever is inside it.
@@ -403,14 +522,33 @@ pub(super) async fn create_session(
             &owner,
             repo.as_ref().map(|r| r.slug.as_str()),
             &title,
-            &req.prompt,
+            prompt,
             checkouts.first().map(|c| c.branch.as_str()),
             checkouts.first().map(|c| c.base.as_str()),
             &agent_name,
             req.size,
             &steps,
+            // What it is called, and what it is: the branch without the
+            // `agent/` that every one of them carries, which would be four
+            // characters of nothing repeated down the whole rail.
+            Some(
+                req.name
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|n| !n.is_empty())
+                    .unwrap_or_else(|| branch.strip_prefix("agent/").unwrap_or(&branch)),
+            ),
         )
         .await?;
+
+    // What this worktree is for, when it was started from a task. Recorded
+    // after the place exists rather than inside its insert: a failure here
+    // costs the `#5138` on its row and nothing else, which is not worth
+    // threading two more arguments through every caller of `insert_session`.
+    if let (Some(key), Some(url)) = (&req.task_key, &req.task_url) {
+        state.db.bind_task(&id, key, url).await?;
+    }
+
     state.db.record_checkouts(&id, &checkouts).await?;
 
     // Each repository's own variables, opened once. Every read is a line in the
@@ -513,9 +651,169 @@ pub(super) async fn create_session(
                 session_id: id.clone(),
                 repos: specs,
                 workspace,
-                prompt: req.prompt.clone(),
+                prompt: prompt.to_string(),
                 agent: req.agent,
                 size: req.size,
+                env,
+                agent_home,
+            })),
+        )
+        .await?;
+
+    let session = state
+        .db
+        .session_of(&owner, &id)
+        .await?
+        .ok_or_else(|| ApiError::not_found("session"))?;
+
+    Ok((StatusCode::CREATED, Json(session)))
+}
+
+/// Another agent, in a workspace that is already there.
+///
+/// The place is not made again: its host, its repositories, its branch and its
+/// directory are what they were, and a second agent shares all of them. What is
+/// created is a session — a second run — with its own conversation, its own
+/// socket on the host and its own tmux.
+///
+/// Deliberately not a flag on the path above. That one decides where to put a
+/// workspace and then builds it; this one decides nothing and builds nothing,
+/// and the two share only the launch at the end.
+async fn start_another_agent(
+    state: AppState,
+    owner: String,
+    workspace_id: ft_core::WorkspaceId,
+    req: NewSession,
+) -> ApiResult<(StatusCode, Json<Session>)> {
+    if !req.agent.speaks_a_protocol() {
+        return Err(ApiError::new(
+            ErrorCode::InvalidRequest,
+            format!(
+                "Firetower has no driver for {} yet, so it cannot run one",
+                req.agent.label()
+            ),
+        ));
+    }
+
+    let place = state
+        .db
+        .workspace_for(&owner, &workspace_id)
+        .await?
+        .ok_or_else(|| ApiError::not_found("workspace"))?;
+
+    // Removed here while its host was away. The directory may or may not still
+    // be on that machine, and starting an agent in one we have already given up
+    // on is how a workspace comes back from the dead.
+    if place.forgotten {
+        return Err(ApiError::new(
+            ErrorCode::InvalidRequest,
+            "that workspace has been removed",
+        ));
+    }
+
+    // The agent has to be on the machine the workspace is on. There is no
+    // choosing here: a workspace is one directory on one host, and an agent
+    // anywhere else could not see it.
+    let host = state
+        .db
+        .host_by_id(&place.host_id)
+        .await?
+        .ok_or_else(|| ApiError::new(ErrorCode::NoCapacity, "that workspace's host is gone"))?;
+
+    let installed_here = state
+        .db
+        .presence()
+        .await?
+        .into_iter()
+        .any(|p| p.host == host.id && p.found.kind == req.agent && p.found.installed);
+
+    if !installed_here {
+        return Err(ApiError::new(
+            ErrorCode::InvalidRequest,
+            format!(
+                "{} isn't installed on {}, which is where this workspace is.",
+                req.agent.label(),
+                host.name
+            ),
+        ));
+    }
+
+    // A host that has just dropped is usually seconds from being back, so wait
+    // for one something is actively reconnecting. One nobody is reconnecting is
+    // not coming back on its own, and waiting would be a promise rather than a
+    // delay.
+    let reachable = state.fleet.is_connected(&host.id).await
+        || (state.fleet.is_supervised(&host.id).await
+            && state
+                .fleet
+                .wait_until_connected(&host.id, RECONNECT_GRACE)
+                .await);
+
+    if !reachable {
+        return Err(ApiError::new(
+            ErrorCode::HostUnreachable,
+            format!("{} isn't responding", host.name),
+        ));
+    }
+
+    let prompt = req.prompt.as_deref().map(str::trim).unwrap_or_default();
+    let id = SessionId::new();
+    let title = if prompt.is_empty() {
+        req.agent.label().to_string()
+    } else {
+        title_from(prompt)
+    };
+
+    // The directory the workspace occupies, derived the same way it was when it
+    // was built. A workspace carries the id of the session it was split from,
+    // so this is that session's name for it — see `a_workspace_keeps_its_first
+    // _sessions_id`, which is what stops this being a guess.
+    let directory = match place.branch.as_deref() {
+        Some(branch) if place.repo.is_some() => ft_core::workspace_name(branch, place.id.as_str()),
+        _ => place.id.as_str().to_string(),
+    };
+
+    // One step. A second agent does not fetch, does not cut a worktree and does
+    // not run setup, and drawing those as skipped would say something happened.
+    let steps = vec![ft_core::Step::Launch];
+    let agent_name = format!("{:?}", req.agent);
+
+    state
+        .db
+        .insert_run(crate::db::NewRun {
+            id: &id,
+            workspace_id: &place.id,
+            owner: &owner,
+            title: &title,
+            prompt,
+            agent: &agent_name,
+            steps: &steps,
+        })
+        .await?;
+
+    // Its own credential and its own environment, resolved against this session
+    // so the vault's log names the run that spent it.
+    let mut env: Vec<(String, String)> = Vec::new();
+    for (name, value) in agent_env(&state, req.agent, &id, &owner).await? {
+        env.retain(|(existing, _)| *existing != name);
+        env.push((name, value));
+    }
+    let agent_home = agent_home(&state, req.agent, &id, &owner).await?;
+
+    state
+        .fleet
+        .send(
+            &host.id,
+            ToWorker::StartAgent(Box::new(ft_proto::StartAgent {
+                session_id: id.clone(),
+                workspace: directory,
+                prompt: prompt.to_string(),
+                agent: req.agent,
+                title: title.clone(),
+                repo: place.repo.clone(),
+                branch: place.branch.clone(),
+                base: place.base.clone(),
+                size: place.size,
                 env,
                 agent_home,
             })),
@@ -583,6 +881,41 @@ pub(super) async fn destroy_session(
         // time that host connects; see `Fleet`'s reconnect.
         state.db.forget_session(&id).await?;
         return Ok(StatusCode::ACCEPTED);
+    }
+
+    // Ending the workspace's own session ends the workspace, so the other
+    // agents in it go too. They share its directory, and it is about to be
+    // reclaimed; left running they would be working in a place that no longer
+    // exists, and nothing would list them, because a session is only reachable
+    // through the workspace it belongs to.
+    //
+    // Ending one of the others is just that one agent — the place and its
+    // neighbours carry on.
+    let workspace = session.workspace_id.clone();
+    if workspace
+        .as_ref()
+        .is_some_and(|w| w.as_str() == session.id.as_str())
+    {
+        for run in state
+            .db
+            .live_runs_beside(
+                owner(&principal)?,
+                workspace.as_ref().expect("checked just above"),
+                &id,
+            )
+            .await?
+        {
+            state
+                .fleet
+                .send(
+                    &session.host_id,
+                    ToWorker::Destroy {
+                        session_id: run,
+                        force: false,
+                    },
+                )
+                .await?;
+        }
     }
 
     state
@@ -1758,7 +2091,25 @@ pub struct PullRequest {
 
 #[cfg(test)]
 mod tests {
-    use super::{nothing_to_do, within};
+    use super::{asked_for, nothing_to_do, within};
+
+    /// Ending a filtered list must end that list and nothing beside it.
+    #[test]
+    fn only_the_workspaces_named_are_ended() {
+        let wanted = ["s_two".to_string(), "s_three".to_string()];
+
+        assert!(!asked_for("s_one", Some(&wanted)));
+        assert!(asked_for("s_two", Some(&wanted)));
+        assert!(asked_for("s_three", Some(&wanted)));
+
+        // No list at all is the whole fleet — what the button did before it
+        // could be narrowed, and what an empty body still means.
+        assert!(asked_for("s_one", None));
+
+        // An empty list names nothing. Reading it as "everything" would turn a
+        // press meant for a filtered-to-nothing list into ending the fleet.
+        assert!(!asked_for("s_one", Some(&[])));
+    }
 
     #[test]
     fn a_path_belongs_to_the_checkout_it_is_under() {

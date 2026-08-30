@@ -12,6 +12,7 @@ import {
 import { AgentMode, type AgentView, type AgentOnHost } from "@/src/api/generated/model";
 import { ApiError } from "@/src/api/http";
 import { CodeToType, Spinner } from "./ConnectRepo";
+import { Install } from "./InstallAgent";
 
 /**
  * How an agent authenticates.
@@ -54,6 +55,13 @@ function WithACode({ agent, onClose }: { agent: AgentView; onClose: () => void }
   });
   const signedIn = agents.data?.find((a) => a.kind === agent.kind)?.credentialSet;
 
+  // Whether any host could ask for a code at all. Read from the list rather
+  // than the prop so that installing one from inside this modal turns the
+  // button on without reopening it.
+  const anywhere = (agents.data?.find((a) => a.kind === agent.kind) ?? agent).hosts.some(
+    (h) => h.installed,
+  );
+
   const queryClient = useQueryClient();
   useEffect(() => {
     if (!pending || !signedIn) return;
@@ -71,7 +79,7 @@ function WithACode({ agent, onClose }: { agent: AgentView; onClose: () => void }
     <Modal title={`Connect ${agent.label}`} onClose={onClose} wide>
       {!pending ? (
         <>
-          <p className="max-w-[52ch] text-[13.5px] leading-[1.6] text-dim">
+          <p className="max-w-[52ch] text-ui leading-[1.6] text-dim">
             {agent.label} signs a machine in rather than handing you a token to
             copy. One of your hosts asks for a code, you approve it in a browser,
             and the credential comes back here.
@@ -82,7 +90,7 @@ function WithACode({ agent, onClose }: { agent: AgentView; onClose: () => void }
               "It is encrypted before it is stored, and every read of it is logged.",
               "Signed in once — every host uses it, not one sign-in per server.",
             ].map((line) => (
-              <li key={line} className="flex gap-2.5 text-[12.5px] text-slate">
+              <li key={line} className="flex gap-2.5 text-meta text-slate">
                 <span className="mt-[7px] h-[3px] w-[3px] shrink-0 rounded-full bg-mute" />
                 {line}
               </li>
@@ -94,21 +102,28 @@ function WithACode({ agent, onClose }: { agent: AgentView; onClose: () => void }
           {signIn.isError && <Failure error={signIn.error} />}
 
           <Foot>
-            <Go onClick={start} disabled={signIn.isPending}>
-              {signIn.isPending ? "Asking for a code…" : `Sign in to ${agent.label}`}
+            {/* A host has to have the binary: asking for a code means running
+                `codex app-server` on one. Refused by the server too — this
+                only means finding out before the click rather than after. */}
+            <Go onClick={start} disabled={signIn.isPending || !anywhere}>
+              {signIn.isPending
+                ? "Asking for a code…"
+                : anywhere
+                  ? `Sign in to ${agent.label}`
+                  : `Install ${agent.label} on a host first`}
             </Go>
             <Quiet onClick={onClose}>Cancel</Quiet>
           </Foot>
         </>
       ) : (
         <>
-          <p className="text-[13.5px] text-dim">
+          <p className="text-ui text-dim">
             A tab opened at{" "}
             <a
               href={pending.verificationUri}
               target="_blank"
               rel="noopener"
-              className="text-ember underline underline-offset-2"
+              className="text-dim underline underline-offset-2 transition-colors hover:text-bone"
             >
               {pending.verificationUri.replace(/^https?:\/\//, "")}
             </a>
@@ -117,12 +132,12 @@ function WithACode({ agent, onClose }: { agent: AgentView; onClose: () => void }
 
           <CodeToType code={pending.userCode} />
 
-          <p className="mt-4 flex items-center gap-2 text-[12.5px] text-mute">
+          <p className="mt-4 flex items-center gap-2 text-meta text-mute">
             <Spinner />
             Waiting for you to approve it…
           </p>
 
-          <p className="mt-3 text-[12px] text-mute">
+          <p className="mt-3 text-meta text-mute">
             The code lasts fifteen minutes. Closing this gives up on it.
           </p>
         </>
@@ -173,14 +188,14 @@ function WithAToken({ agent, onClose }: { agent: AgentView; onClose: () => void 
 
       {mode === AgentMode.Subscription && agent.tokenCommand && (
         <div className="mt-4">
-          <p className="text-[13px] leading-[1.6] text-dim">
+          <p className="text-ui leading-[1.6] text-dim">
             Run this <span className="text-bone">on your own machine</span> — it opens a
             browser and prints a token that lasts a year.
           </p>
           <div className="mt-2.5">
             <Command text={agent.tokenCommand} />
           </div>
-          <p className="mt-2 text-[12px] text-mute">
+          <p className="mt-2 text-meta text-mute">
             Your servers have no browser, so signing in happens where you are. The token is
             what travels — obtained once, used by every host.
           </p>
@@ -197,7 +212,7 @@ function WithAToken({ agent, onClose }: { agent: AgentView; onClose: () => void 
           placeholder={agent.credentialSet ? "•••••••• — replace it" : "paste it here"}
           spellCheck={false}
           onKeyDown={(e) => e.key === "Enter" && secret.trim() && save()}
-          className="mt-2 w-full rounded-[6px] border border-line bg-ground px-3 py-2 font-mono text-[12.5px] text-bone outline-none placeholder:text-mute focus:border-ember/40"
+          className="mt-2 w-full rounded-sm border border-line bg-ground px-3 py-2 font-mono text-meta text-bone outline-none placeholder:text-mute focus:border-dim/40"
         />
       </div>
 
@@ -222,30 +237,31 @@ function Hosts({ agent }: { agent: AgentView }) {
       <div className="eyebrow mb-2">Where it will run</div>
 
       {agent.hosts.length === 0 && (
-        <p className="text-[12.5px] text-mute">No hosts yet.</p>
+        <p className="text-meta text-mute">No hosts yet.</p>
       )}
 
       <div className="flex flex-col gap-px">
         {agent.hosts.map((h) => (
-          <div key={h.hostId} className="flex items-center gap-2.5 rounded-[5px] px-2 py-2">
+          <div key={h.hostId} className="flex items-center gap-2.5 rounded-sm px-2 py-2">
             <span
               className={`h-1.5 w-1.5 shrink-0 rounded-full ${
                 h.loggedIn ? "bg-sage" : "border border-mute"
               }`}
             />
-            <span className="font-mono text-[12px] text-dim">{h.hostName}</span>
+            <span className="font-mono text-meta text-dim">{h.hostName}</span>
 
-            <span className="min-w-0 flex-1 truncate text-[11.5px] text-mute">
+            <span className="min-w-0 flex-1 truncate text-meta text-mute">
               {reads(h, agent)}
             </span>
+            {!h.installed && <Install agent={agent} host={h} />}
           </div>
         ))}
       </div>
 
       {agent.hosts.some((h) => !h.installed) && (
-        <p className="mt-3 text-[12px] text-mute">
+        <p className="mt-3 text-meta text-mute">
           A host without {agent.label} installed needs it there first — Firetower runs the
-          real CLI rather than shipping its own.
+          real CLI rather than shipping its own. Installing takes about a minute.
         </p>
       )}
     </div>
@@ -267,8 +283,8 @@ function reads(host: AgentOnHost, agent: AgentView) {
 
 function Failure({ error }: { error: unknown }) {
   return (
-    <div className="mt-4 rounded-[6px] border border-ember/30 bg-ember/[0.05] px-3.5 py-2.5">
-      <p className="text-[12.5px] leading-[1.55] text-bone">
+    <div className="mt-4 rounded-md border border-line bg-raise px-3.5 py-2.5">
+      <p className="text-meta leading-[1.55] text-bone">
         {error instanceof ApiError ? error.message : "Something went wrong. Try again."}
       </p>
     </div>

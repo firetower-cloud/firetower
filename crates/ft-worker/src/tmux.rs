@@ -101,7 +101,24 @@ impl Tmux {
             tmux.arg("-e").arg(format!("{key}={value}"));
         }
 
-        tmux.arg(command);
+        // And again, in front of the command itself.
+        //
+        // `-e` is not enough on its own: **tmux does not give the first pane
+        // the `PATH` it was handed here.** Every other variable arrives — this
+        // was found with one that did and one that didn't, on tmux 3.3a — but
+        // `PATH` is taken from the server's own environment instead, so the
+        // pane gets whatever started the tmux server and never ours.
+        //
+        // That matters because the agents are on the volume now rather than in
+        // the image, and the only thing that says where they are *is* `PATH`.
+        // Without this the agent is not on it, and the session fails at
+        // `starting codex: No such file or directory` — which reads as a
+        // missing install rather than a dropped variable.
+        //
+        // `-e` stays as well: it is what a window opened later inherits, and
+        // somebody attaching to poke around should find the same agent the
+        // session ran.
+        tmux.arg(format!("{} {}", env_prefix(env), command));
 
         let output = tmux.output().await.context("starting tmux")?;
         if !output.status.success() {
@@ -194,6 +211,26 @@ impl Tmux {
     }
 }
 
+/// `env 'K=V' 'K=V'` — the environment, set by the shell tmux runs the command
+/// with rather than by tmux itself.
+///
+/// Quoted the same way `structured::tmux_command` quotes its arguments, because
+/// this is prepended to exactly that string and goes to the same shell. A value
+/// holding a quote is a token, not an attack, but it would break the command
+/// just as effectively.
+fn env_prefix(env: &[(String, String)]) -> String {
+    let mut out = String::from("env");
+    for (key, value) in env {
+        out.push(' ');
+        out.push_str(&quote(&format!("{key}={value}")));
+    }
+    out
+}
+
+fn quote(text: &str) -> String {
+    format!("'{}'", text.replace('\'', r"'\''"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -202,6 +239,64 @@ mod tests {
     /// Unique per test, so a failure never leaves a name that breaks the next run.
     fn unique(tag: &str) -> Tmux {
         Tmux::for_session(&format!("test-{tag}-{}", std::process::id()))
+    }
+
+    /// The one tmux drops.
+    ///
+    /// `-e PATH=…` sets the session environment and the first pane never sees
+    /// it — tmux uses the server's own `PATH` instead. Everything else passes,
+    /// which is what made this hard to see: the agent's `CODEX_HOME` arrived
+    /// and the agent itself could not be found.
+    #[tokio::test]
+    async fn the_first_pane_gets_the_path_it_was_given() {
+        let dir = TempDir::new().unwrap();
+        let tmux = unique("path");
+        let marker = dir.path().join("seen");
+
+        // A directory holding one program, which is only findable through the
+        // PATH we pass — exactly the shape of an agent on the volume.
+        let bin = dir.path().join("bin");
+        tokio::fs::create_dir_all(&bin).await.unwrap();
+        let program = bin.join("firetower-test-agent");
+        tokio::fs::write(
+            &program,
+            format!("#!/bin/sh\necho found > {}\n", marker.display()),
+        )
+        .await
+        .unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            tokio::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755))
+                .await
+                .unwrap();
+        }
+
+        let path = format!(
+            "{}:{}",
+            std::env::var("PATH").unwrap_or_default(),
+            bin.display()
+        );
+        tmux.start(
+            dir.path(),
+            "firetower-test-agent",
+            &[("PATH".to_string(), path)],
+        )
+        .await
+        .unwrap();
+
+        for _ in 0..50 {
+            if marker.exists() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+        let _ = tmux.kill().await;
+
+        assert!(
+            marker.exists(),
+            "the pane could not run a program that was on the PATH it was given"
+        );
     }
 
     #[tokio::test]

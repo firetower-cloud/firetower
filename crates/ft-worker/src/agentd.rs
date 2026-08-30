@@ -47,13 +47,39 @@ use std::sync::Arc;
 /// anything behind to sweep up.
 pub const DIR: &str = ".firetower";
 /// Everything the agent has ever printed, in order.
-pub const LOG: &str = "agent.ndjson";
+/// What the first agent in a workspace wrote, before there could be a second.
+///
+/// Kept as a fallback so a session started by an older worker — one still
+/// appending here — goes on being readable. Nothing new is written to it.
+pub const LEGACY_LOG: &str = "agent.ndjson";
 
 pub fn dir_for(workspace: &Path) -> PathBuf {
     workspace.join(DIR)
 }
-pub fn log_path(workspace: &Path) -> PathBuf {
-    dir_for(workspace).join(LOG)
+
+/// Where one agent's output lands.
+///
+/// Per session, not per directory. A workspace can hold several agents and they
+/// share the directory they work in — so a single `agent.ndjson` meant every
+/// one of them appended to and read back the same file. Two agents in a
+/// workspace saw each other's conversation as their own, and a third saw both.
+pub fn log_path(workspace: &Path, session_id: &str) -> PathBuf {
+    dir_for(workspace).join(format!("agent-{session_id}.ndjson"))
+}
+
+/// The per-session log, or the shared one an older session is still using.
+///
+/// Reading only: what gets written is always the per-session path.
+pub fn readable_log(workspace: &Path, session_id: &str) -> PathBuf {
+    let mine = log_path(workspace, session_id);
+    if mine.exists() {
+        return mine;
+    }
+    let legacy = dir_for(workspace).join(LEGACY_LOG);
+    if legacy.exists() {
+        return legacy;
+    }
+    mine
 }
 
 /// Where a session's socket lives.
@@ -246,7 +272,7 @@ async fn start(launch: Launch, socket: PathBuf) -> Result<(Session, Child, JoinH
     tokio::fs::create_dir_all(&dir)
         .await
         .with_context(|| format!("making {}", dir.display()))?;
-    let log = dir.join(LOG);
+    let log = log_path(&launch.workspace, &launch.session_id);
 
     let (program, args) = launch
         .argv
@@ -626,7 +652,7 @@ mod tests {
         .await
         .unwrap();
 
-        let log = tokio::fs::read_to_string(log_path(workspace.path()))
+        let log = tokio::fs::read_to_string(log_path(workspace.path(), &session))
             .await
             .unwrap();
         assert_eq!(log.lines().count(), 2, "both lines should be in the log");
@@ -728,7 +754,7 @@ mod tests {
             .unwrap();
         serving.await.unwrap();
 
-        let log = tokio::fs::read_to_string(log_path(workspace.path()))
+        let log = tokio::fs::read_to_string(log_path(workspace.path(), &session))
             .await
             .unwrap();
         assert!(
@@ -763,10 +789,81 @@ mod tests {
         .await
         .expect("a deep workspace should still start");
 
-        let log = tokio::fs::read_to_string(log_path(&workspace))
+        let log = tokio::fs::read_to_string(log_path(&workspace, &session))
             .await
             .unwrap();
         assert_eq!(log.trim(), "deep");
+    }
+
+    /// Two agents in one workspace keep their own transcripts.
+    ///
+    /// The log used to be `agent.ndjson` in the workspace directory, which two
+    /// agents share — so each appended to and read back the same file. A second
+    /// agent showed the first's conversation as its own, and a third showed
+    /// both. Its own file per session is the whole fix.
+    #[tokio::test]
+    async fn two_agents_in_one_workspace_do_not_share_a_transcript() {
+        let workspace = tempfile::tempdir().unwrap();
+
+        let first = a_session("first");
+        run(Launch {
+            session_id: first.clone(),
+            workspace: workspace.path().to_path_buf(),
+            argv: shell("echo '{\"who\":\"first\"}'"),
+            env: vec![],
+        })
+        .await
+        .unwrap();
+
+        let second = a_session("second");
+        run(Launch {
+            session_id: second.clone(),
+            workspace: workspace.path().to_path_buf(),
+            argv: shell("echo '{\"who\":\"second\"}'"),
+            env: vec![],
+        })
+        .await
+        .unwrap();
+
+        let one = tokio::fs::read_to_string(log_path(workspace.path(), &first))
+            .await
+            .unwrap();
+        let two = tokio::fs::read_to_string(log_path(workspace.path(), &second))
+            .await
+            .unwrap();
+
+        assert!(one.contains("first") && !one.contains("second"), "{one}");
+        assert!(two.contains("second") && !two.contains("first"), "{two}");
+    }
+
+    /// A session an older worker started is still readable.
+    ///
+    /// It is appending to the shared name, and changing where we look must not
+    /// make its history vanish.
+    #[tokio::test]
+    async fn a_transcript_from_before_the_split_is_still_found() {
+        let workspace = tempfile::tempdir().unwrap();
+        tokio::fs::create_dir_all(dir_for(workspace.path()))
+            .await
+            .unwrap();
+        tokio::fs::write(
+            dir_for(workspace.path()).join(LEGACY_LOG),
+            "{\"old\":true}\n",
+        )
+        .await
+        .unwrap();
+
+        let found = readable_log(workspace.path(), "s_whoever");
+        assert_eq!(found, dir_for(workspace.path()).join(LEGACY_LOG));
+
+        // And once it has one of its own, that is what is read.
+        tokio::fs::write(log_path(workspace.path(), "s_whoever"), "{\"new\":true}\n")
+            .await
+            .unwrap();
+        assert_eq!(
+            readable_log(workspace.path(), "s_whoever"),
+            log_path(workspace.path(), "s_whoever")
+        );
     }
 
     #[tokio::test]
@@ -795,7 +892,7 @@ mod tests {
 
         let frames = {
             // Nothing is running now, so this reads purely from the file.
-            let log = tokio::fs::read_to_string(log_path(workspace.path()))
+            let log = tokio::fs::read_to_string(log_path(workspace.path(), &session))
                 .await
                 .unwrap();
             log.lines().map(str::to_string).collect::<Vec<_>>()

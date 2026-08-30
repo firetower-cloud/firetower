@@ -22,6 +22,13 @@ use tokio::sync::{broadcast, mpsc, oneshot, RwLock};
 /// itself stopped answering.
 const PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
+/// How long an agent install may take before we stop waiting.
+///
+/// Its own number rather than [`PROBE_TIMEOUT`] because it is not a probe: npm
+/// is fetching a few hundred megabytes over whatever line that host has, and
+/// thirty seconds is an ordinary amount of time for that to still be going.
+const INSTALL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
+
 /// How often to provoke an answer when nothing else is being said.
 const HEARTBEAT: std::time::Duration = std::time::Duration::from_secs(20);
 
@@ -153,8 +160,18 @@ impl Progress {
             // Codex cannot be given work until a thread exists, so its first
             // prompt waits here for the answer that creates one. Claude Code
             // was handed its prompt with the first message and has none.
+            //
+            // Only when there is one to wait for. A workspace can be made
+            // without a task, and an agent started from the `+` menu never has
+            // one — sending the empty string anyway opened every Codex session
+            // with a turn, so it drew a blank message bubble from the person
+            // who had not typed anything and then answered it with "what would
+            // you like me to work on?".
+            //
+            // `Agent::opening` makes the same decision for Claude Code, one
+            // layer down, and has since it was written.
             opening_prompt: match agent {
-                ft_core::Agent::Codex => Some(prompt),
+                ft_core::Agent::Codex if !prompt.trim().is_empty() => Some(prompt),
                 _ => None,
             },
             settings: ft_core::codex::Settings::default(),
@@ -1361,6 +1378,20 @@ impl Fleet {
                                 let _ = tx.send(AgentSpeech::Closed);
                             }
                         }
+                        Ok(ToServer::AgentUnwatched { session_id }) => {
+                            // The agent is still there. So what it is blocked
+                            // on and what it has told us about itself both
+                            // still stand — clearing those, as an exit does,
+                            // dropped the very question somebody was being
+                            // asked to answer.
+                            //
+                            // The broadcast does go, because its readers have
+                            // to find out: each one resubscribes from its own
+                            // cursor, and that is what starts the watching
+                            // again.
+                            tracing::debug!(session = %session_id, "the watcher stopped; the agent has not");
+                            conversations.write().await.remove(session_id.as_str());
+                        }
                         Ok(ToServer::PtyClosed { session_id, pty }) => {
                             if let Some(tx) = terminals.write().await.remove(&terminal_key(&session_id, pty)) {
                                 let _ = tx.send(Terminal::Closed);
@@ -1433,6 +1464,13 @@ impl Fleet {
                                 Some(Asked { waiting: Waiting::Agents(reply), .. }) => { let _ = reply.send(agents); }
                                 Some(other) => { probes.write().await.insert(req, other); }
                                 None => tracing::debug!("an agent probe answered after its request gave up"),
+                            }
+                        }
+                        Ok(ToServer::AgentInstalled { req, result }) => {
+                            match probes.write().await.remove(&req) {
+                                Some(Asked { waiting: Waiting::Action(reply), .. }) => { let _ = reply.send(result); }
+                                Some(other) => { probes.write().await.insert(req, other); }
+                                None => tracing::debug!("an install answered after its request gave up"),
                             }
                         }
                         Ok(ToServer::CodexLoginPending { req, result }) => {
@@ -1674,6 +1712,61 @@ impl Fleet {
             Err(_) => {
                 self.probes.write().await.remove(&req);
                 anyhow::bail!("{host_id} did not answer within {PROBE_TIMEOUT:?}")
+            }
+        }
+    }
+
+    /// Fetch an agent onto a host, and say which version landed.
+    ///
+    /// Waits for the install rather than returning once it has started: the
+    /// caller is a person watching a button, and "it is happening somewhere"
+    /// is not an answer they can do anything with.
+    pub async fn install_agent(
+        &self,
+        host_id: &HostId,
+        kind: ft_core::Agent,
+        version: Option<&str>,
+    ) -> Result<String> {
+        let req = ulid::Ulid::new().to_string();
+        let (tx, rx) = oneshot::channel();
+        self.probes.write().await.insert(
+            req.clone(),
+            Asked {
+                host: host_id.to_string(),
+                waiting: Waiting::Action(tx),
+            },
+        );
+
+        if let Err(e) = self
+            .send(
+                host_id,
+                ToWorker::InstallAgent {
+                    req: req.clone(),
+                    kind,
+                    version: version.map(str::to_string),
+                },
+            )
+            .await
+        {
+            self.probes.write().await.remove(&req);
+            return Err(e);
+        }
+
+        match tokio::time::timeout(INSTALL_TIMEOUT, rx).await {
+            Ok(Ok(Ok(version))) => Ok(version),
+            Ok(Ok(Err(why))) => anyhow::bail!("{why}"),
+            Ok(Err(_)) => {
+                anyhow::bail!(
+                    "the worker connection dropped while installing {}",
+                    kind.label()
+                )
+            }
+            Err(_) => {
+                self.probes.write().await.remove(&req);
+                anyhow::bail!(
+                    "{host_id} was still installing {} after {INSTALL_TIMEOUT:?}",
+                    kind.label()
+                )
             }
         }
     }
@@ -2358,6 +2451,26 @@ mod progress_tests {
         assert!(again.send.is_empty(), "the opening prompt is spent");
     }
 
+    /// A workspace made without a task, and every agent started from the `+`
+    /// menu, has no opening prompt. Sending the empty string anyway opened the
+    /// conversation with a turn — which drew a blank message bubble from
+    /// somebody who had typed nothing, and Codex then answered it.
+    #[test]
+    fn a_codex_session_with_nothing_to_do_says_nothing() {
+        for nothing in ["", "   ", "\n"] {
+            let mut progress = Progress::for_agent(ft_core::Agent::Codex, nothing.into());
+
+            progress.read(r#"{"id":1,"result":{"userAgent":"firetower/0.1","codexHome":"/tmp"}}"#);
+            let after =
+                progress.read(r#"{"id":2,"result":{"thread":{"id":"th_9"},"model":"gpt-5.6-sol"}}"#);
+
+            assert!(
+                after.send.is_empty(),
+                "a thread is not a reason to say something: {nothing:?}"
+            );
+        }
+    }
+
     /// The whole point of the controls work: a Codex session offers what Codex
     /// said it can run, and never Claude Code's list.
     ///
@@ -2520,6 +2633,27 @@ mod tests {
             .await
             .unwrap();
         (Fleet::new(db), host.id)
+    }
+
+    /// An install that can't even be sent must not leave the request behind.
+    ///
+    /// Every one of these holds a `oneshot` and a host id until something
+    /// removes it, and nothing else would: the answer that would have cleared
+    /// it is never coming. A button somebody presses while a host is down is
+    /// exactly the case that would leak, and it is the case they press twice.
+    #[tokio::test]
+    async fn an_install_that_cannot_be_sent_is_not_left_waiting() {
+        let (fleet, host) = fleet().await;
+
+        let failed = fleet
+            .install_agent(&host, ft_core::Agent::Codex, None)
+            .await;
+
+        assert!(failed.is_err(), "a host with no worker cannot install");
+        assert!(
+            fleet.probes.read().await.is_empty(),
+            "the request outlived the send that failed"
+        );
     }
 
     #[test]

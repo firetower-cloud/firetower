@@ -12,6 +12,18 @@ pub enum SessionStatus {
     Starting,
     /// The agent is doing something.
     Working,
+    /// Up, idle, and waiting for its first instruction.
+    ///
+    /// A workspace may be made without a task — a branch checked out and an
+    /// agent waiting in it, to be told what to do once you are looking at the
+    /// files. That agent is not `Working`: nothing is in flight and nothing
+    /// will arrive to say otherwise, so a session created that way sat under a
+    /// breathing "Working" light forever.
+    ///
+    /// Not [`needs_you`](Self::needs_you) either. Nothing is blocked and
+    /// nothing went wrong — you have simply not said anything yet, and a
+    /// workspace you made ten seconds ago does not belong in an inbox.
+    Ready,
     /// Blocked on a question only you can answer.
     NeedsYou,
     /// Did a turn and is waiting for the next thing. A resting state, not an end.
@@ -54,6 +66,7 @@ impl SessionStatus {
         match self {
             Self::Starting => "Starting up",
             Self::Working => "Working",
+            Self::Ready => "Ready",
             Self::NeedsYou => "Asked a question",
             Self::HandedBack => "Handed it back",
             Self::Failed => "Failed",
@@ -75,8 +88,9 @@ impl SessionStatus {
             // Anything can be ended or fail.
             (_, Ended) | (_, Failed) => true,
 
-            // Booting.
-            (Starting, Working) => true,
+            // Booting. A session with a first prompt goes straight to work;
+            // one made without a task comes up idle instead.
+            (Starting, Working | Ready) => true,
             (Starting, _) => false,
 
             // Working either stops for you, or keeps going.
@@ -84,9 +98,11 @@ impl SessionStatus {
             (Working, Starting) => false,
 
             // You replied, or asked for something else. Back to work.
-            (NeedsYou | HandedBack | Failed, Working) => true,
+            (NeedsYou | HandedBack | Failed | Ready, Working) => true,
 
-            // Sideways moves between resting states.
+            // Sideways moves between resting states. `Ready` is not among
+            // them: it means "has never been asked for anything", and nothing
+            // that has done a turn can go back to never having done one.
             (NeedsYou, HandedBack) | (HandedBack, NeedsYou) => true,
 
             _ => false,

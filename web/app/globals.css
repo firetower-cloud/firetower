@@ -1,49 +1,82 @@
 @import "tailwindcss";
 
 @theme {
-  /* ── Ground: warm ash, not neutral black ────────────────────
-     Five surfaces, far enough apart to tell without a border. The old set
-     lived inside four points of lightness, so a card on the page and the page
-     under it were the same colour and everything had to be drawn with a line.
-     Nothing here is #000: the hue is ash, and ash is warm. */
-  --color-ground: #171411;
-  --color-panel: #201c18;
-  --color-raise: #2b2620;
-  --color-line: #3a342c;
-  --color-line-soft: #2b2620;
+  /* ── Ground: neutral graphite, six steps ────────────────────
+     Each surface is far enough from the one under it to read without a border,
+     so elevation is a colour change and a highlight rather than a line drawn
+     around everything. The hue is neutral on purpose: the warmth in this app
+     belongs to the ember, not to the walls. */
+  --color-ground: #0b0b0c;
+  --color-panel: #111113;
+  --color-raise: #17171a;
+  --color-overlay: #1e1e22;
+  --color-line: #26262b;
+  --color-line-soft: #1a1a1e;
 
-  /* ── Text ─────────────────────────────────────────────────── */
-  --color-mute: #857b70;
-  --color-dim: #a89e93;
-  --color-text: #ddd5ca;
-  --color-bone: #f7f3ec;
+  /* ── Text: four tiers, a real gap between each ──────────────
+     Titles are bright and metadata falls away. The reverse — everything within
+     one step of everything else — is what makes a screen read as grey. */
+  --color-bone: #f4f4f5;
+  --color-text: #c8c8ce;
+  --color-dim: #8b8b93;
+  --color-mute: #5e5e67;
 
-  /* ── Type: four sizes, and a name for each ──────────────────
+  /* ── Type: six sizes, and a name for each ───────────────────
      Sizes were written at the point of use, so a label and a sentence and a
      caption drifted a half-pixel apart in twenty files. These are the sizes;
-     anything not one of them is a mistake. */
-  --text-body: 0.9375rem; /* 15px — what somebody reads: prose, a message */
-  --text-body--line-height: 1.7;
+     anything not one of them is a mistake, and `just check-style` says so. */
+  --text-display: 1.5rem; /* 24px — the one heading on a page */
+  --text-display--line-height: 1.2;
+  --text-display--letter-spacing: -0.02em;
+  --text-title: 1rem; /* 16px — a row title, a card heading */
+  --text-title--line-height: 1.35;
+  --text-title--letter-spacing: -0.01em;
+  --text-body: 0.875rem; /* 14px — what somebody reads: prose, a message */
+  --text-body--line-height: 1.65;
   --text-ui: 0.8125rem; /* 13px — controls and labels */
   --text-ui--line-height: 1.45;
-  --text-meta: 0.75rem; /* 12px — captions, counts, paths */
+  --text-meta: 0.71875rem; /* 11.5px — captions, counts, paths */
   --text-meta--line-height: 1.45;
+  --text-micro: 0.65625rem; /* 10.5px — eyebrows and column headers */
+  --text-micro--line-height: 1.4;
   --text-code: 0.8125rem; /* 13px — what the machine said */
   --text-code--line-height: 1.6;
 
-  /* ── Signals: only ember is allowed to be loud ────────────── */
+  /* ── Signals ────────────────────────────────────────────────
+     Semantic only. Ember answers one question — is something waiting on you —
+     and when it answered forty others it stopped answering that one. Each
+     colour carries a tint for the background of a badge and a deep for its
+     border, so a badge is never a flat block of colour. */
   --color-ember: #ff6b2c;
   --color-ember-soft: #ff9a6b;
+  --color-ember-tint: #2a1509;
   --color-ember-deep: #7a3417;
-  --color-slate: #7d8f99;
-  --color-sage: #8fae86;
-  --color-brick: #c9584b;
+  --color-sage: #6ec08a;
+  --color-sage-tint: #12251a;
+  --color-sage-deep: #2c5b3d;
+  --color-brick: #e5645a;
+  --color-brick-tint: #2a1414;
+  --color-brick-deep: #6e2f2b;
+  --color-slate: #7d95b0;
+  --color-slate-tint: #161d26;
+  --color-slate-deep: #35485c;
 
   --font-sans: var(--font-archivo), ui-sans-serif, system-ui, sans-serif;
   --font-narrow: var(--font-archivo-narrow), ui-sans-serif, system-ui, sans-serif;
   --font-mono: var(--font-jetbrains), ui-monospace, "SF Mono", monospace;
 
-  --radius: 10px;
+  /* ── Radii: three, plus pill ────────────────────────────────── */
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius: 8px;
+
+  /* ── Elevation: a top highlight and a soft drop, never a 1px box ── */
+  --shadow-raise: inset 0 1px 0 rgb(255 255 255 / 0.04), 0 1px 2px rgb(0 0 0 / 0.4);
+  --shadow-float: inset 0 1px 0 rgb(255 255 255 / 0.05), 0 16px 40px -16px rgb(0 0 0 / 0.7);
+
+  /* ── Motion ─────────────────────────────────────────────────── */
+  --ease-swift: cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 @layer base {
@@ -56,33 +89,45 @@
     background: var(--color-ground);
     color: var(--color-text);
     font-family: var(--font-sans);
+    font-size: var(--text-ui);
     -webkit-font-smoothing: antialiased;
     font-feature-settings: "cv05" 1;
   }
 
+  /* Selecting text is not the app asking for you. Ember is reserved for that,
+     and a page where every highlighted sentence glows orange spends the one
+     colour that means something on the most ordinary thing anybody does. */
   ::selection {
-    background: color-mix(in srgb, var(--color-ember) 30%, transparent);
+    background: color-mix(in srgb, var(--color-slate) 35%, transparent);
     color: var(--color-bone);
   }
 
   :focus-visible {
-    outline: 1px solid var(--color-ember);
+    outline: 1px solid var(--color-bone);
     outline-offset: 2px;
   }
 
+  /* The standard properties, not only the WebKit pseudo-elements: with
+     overlay scrollbars the browser draws a fat translucent bar of its own and
+     ignores anything ::-webkit-scrollbar has to say about it. */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-line) transparent;
+  }
+
   ::-webkit-scrollbar {
-    width: 9px;
-    height: 9px;
+    width: 8px;
+    height: 8px;
   }
   ::-webkit-scrollbar-track {
     background: transparent;
   }
   ::-webkit-scrollbar-thumb {
-    background: var(--color-raise);
+    background: var(--color-line);
     border-radius: 99px;
   }
   ::-webkit-scrollbar-thumb:hover {
-    background: var(--color-line);
+    background: var(--color-overlay);
   }
 }
 
@@ -90,7 +135,7 @@
   /* Instrument-panel label: the map-legend voice of the UI */
   .eyebrow {
     font-family: var(--font-narrow);
-    font-size: 10.5px;
+    font-size: var(--text-micro);
     font-weight: 600;
     letter-spacing: 0.18em;
     text-transform: uppercase;
@@ -101,10 +146,34 @@
     border-color: var(--color-line);
   }
 
+  /* A scrollbar you only notice while you are using it.
+     The 9px bar the app draws everywhere is right for a page and wrong inside
+     a control: a message box two lines tall with a bar down the side of it
+     reads as broken furniture rather than as somewhere to type. */
+  .scroll-slim {
+    scrollbar-width: thin;
+    scrollbar-color: transparent transparent;
+  }
+  .scroll-slim:hover {
+    scrollbar-color: var(--color-line) transparent;
+  }
+  .scroll-slim::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  .scroll-slim::-webkit-scrollbar-thumb {
+    background: transparent;
+    border-radius: 99px;
+  }
+  .scroll-slim:hover::-webkit-scrollbar-thumb {
+    background: var(--color-line);
+  }
+
   .panel {
     background: var(--color-panel);
     border: 1px solid var(--color-line);
-    border-radius: var(--radius);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-raise);
   }
 }
 
@@ -170,7 +239,7 @@
 }
 .stem-rise {
   transform-origin: bottom;
-  animation: stem-rise 700ms cubic-bezier(0.16, 1, 0.3, 1) backwards;
+  animation: stem-rise 700ms var(--ease-swift) backwards;
 }
 .caret {
   animation: caret 1.05s step-end infinite;
@@ -233,7 +302,9 @@
   color: var(--color-ember);
 }
 
-/* Where it stops, which is the answer to "what is it doing". */
+/* Where it stops, which is the answer to "what is it doing".
+   Slate while it is going, ember only once it is waiting on you — the same two
+   colours the rest of the app uses for those two facts. */
 .spine-end {
   position: relative;
   height: 16px;
@@ -245,6 +316,9 @@
   width: 6px;
   height: 6px;
   border-radius: 99px;
+  background: var(--color-slate);
+}
+.spine-end > .tip[data-state="you"] {
   background: var(--color-ember);
 }
 

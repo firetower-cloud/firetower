@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect } from "react";
+import { X } from "lucide-react";
+import { Button, Icon } from "./ui";
 
 export function Modal({
   title,
@@ -21,56 +23,29 @@ export function Modal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto p-6 sm:p-10">
+      <div className="fixed inset-0 bg-ground/80 backdrop-blur-[3px]" onClick={onClose} />
       <div
-        className="fixed inset-0 bg-[#070605]/80 backdrop-blur-[2px]"
-        onClick={onClose}
-      />
-      <div
-        className={`panel relative my-auto w-full ${wide ? "max-w-[620px]" : "max-w-[520px]"} shadow-[0_30px_80px_-20px_rgba(0,0,0,0.9)]`}
+        className={`relative my-auto w-full rounded-lg border border-line bg-panel shadow-float ${
+          wide ? "max-w-[620px]" : "max-w-[520px]"
+        }`}
       >
-        <div className="flex items-center gap-3 border-b border-line px-4 py-3">
+        <div className="flex items-center gap-3 border-b border-line px-5 py-3">
           <span className="eyebrow">{title}</span>
           <button
             onClick={onClose}
-            className="ml-auto text-[14px] text-mute transition-colors hover:text-text"
+            className="-mr-1 ml-auto rounded-sm p-1 text-mute transition-colors hover:bg-raise hover:text-bone"
             aria-label="Close"
           >
-            ✕
+            <Icon of={X} size={14} />
           </button>
         </div>
-        <div className="p-4">{children}</div>
+        <div className="p-5">{children}</div>
       </div>
     </div>
   );
 }
 
 /* Shared bits used by both connect flows. */
-
-export function Segmented({
-  options,
-  value,
-  onChange,
-}: {
-  options: string[];
-  value: string;
-  onChange: (v: string) => void;
-}) {
-  return (
-    <div className="flex gap-1 rounded-[6px] border border-line bg-ground p-1">
-      {options.map((o) => (
-        <button
-          key={o}
-          onClick={() => onChange(o)}
-          className={`flex-1 rounded-[4px] px-3 py-1.5 text-[12.5px] transition-colors ${
-            value === o ? "bg-raise text-bone" : "text-mute hover:text-text"
-          }`}
-        >
-          {o}
-        </button>
-      ))}
-    </div>
-  );
-}
 
 export function Choice({
   on,
@@ -88,27 +63,27 @@ export function Choice({
   return (
     <button
       onClick={onClick}
-      className={`flex w-full items-start gap-3 rounded-[6px] border px-3.5 py-2.5 text-left transition-colors ${
-        on ? "border-ember/40 bg-ember/[0.04]" : "border-line hover:border-[#3a3631]"
+      className={`flex w-full items-start gap-3 rounded-md border px-3.5 py-3 text-left transition-colors duration-150 ${
+        on ? "border-line bg-raise" : "border-line-soft hover:border-line hover:bg-raise/50"
       }`}
     >
       <span
         className={`mt-[3px] flex h-[13px] w-[13px] shrink-0 items-center justify-center rounded-full border ${
-          on ? "border-ember" : "border-line"
+          on ? "border-bone" : "border-line"
         }`}
       >
-        {on && <span className="h-[5px] w-[5px] rounded-full bg-ember" />}
+        {on && <span className="h-[5px] w-[5px] rounded-full bg-bone" />}
       </span>
       <span className="min-w-0 flex-1">
         <span className="flex items-baseline gap-2">
-          <span className="text-[13px] text-bone">{title}</span>
+          <span className={`text-ui ${on ? "text-bone" : "text-text"}`}>{title}</span>
           {tag && (
-            <span className="font-narrow text-[9.5px] font-semibold tracking-[0.12em] text-mute uppercase">
+            <span className="font-narrow text-micro font-semibold tracking-[0.12em] text-mute uppercase">
               {tag}
             </span>
           )}
         </span>
-        <span className="mt-0.5 block text-[12px] leading-[1.5] text-dim">{body}</span>
+        <span className="mt-0.5 block text-meta text-dim">{body}</span>
       </span>
     </button>
   );
@@ -116,7 +91,7 @@ export function Choice({
 
 export function Command({ text }: { text: string }) {
   return (
-    <code className="block rounded-[5px] border border-line bg-ground px-3 py-2 font-mono text-[12.5px] text-bone">
+    <code className="block rounded-md border border-line bg-ground px-3 py-2 font-mono text-meta text-bone">
       <span className="text-mute select-none">$ </span>
       {text}
     </code>
@@ -139,13 +114,9 @@ export function Go({
   disabled?: boolean;
 }) {
   return (
-    <button
-      onClick={onClick}
-      disabled={disabled}
-      className="rounded-[5px] bg-ember px-3.5 py-1.5 text-[12.5px] font-semibold text-[#1a0c04] transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:bg-line disabled:text-mute"
-    >
+    <Button variant="primary" onClick={onClick} disabled={disabled}>
       {children}
-    </button>
+    </Button>
   );
 }
 
@@ -159,12 +130,8 @@ export function Quiet({
   disabled?: boolean;
 }) {
   return (
-    <button
-      onClick={onClick}
-      disabled={disabled}
-      className="text-[12.5px] text-mute transition-colors hover:text-text disabled:opacity-40 disabled:hover:text-mute"
-    >
+    <Button variant="quiet" onClick={onClick} disabled={disabled}>
       {children}
-    </button>
+    </Button>
   );
 }

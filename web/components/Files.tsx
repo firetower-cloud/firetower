@@ -62,11 +62,11 @@ export function Files({ sessionId }: { sessionId: string }) {
   const parts = path ? path.split("/") : [];
 
   return (
-    <div className="flex h-full flex-col overflow-hidden rounded-[6px] border border-line bg-[#0f0e0d]">
+    <div className="flex h-full flex-col overflow-hidden rounded-sm border border-line bg-ground">
       <div className="flex items-center gap-1.5 border-b border-line px-3 py-1.5">
         <button
           onClick={() => setPath("")}
-          className="font-mono text-[11.5px] text-mute transition-colors hover:text-ember"
+          className="font-mono text-meta text-mute transition-colors hover:text-bone"
         >
           workspace
         </button>
@@ -75,7 +75,7 @@ export function Files({ sessionId }: { sessionId: string }) {
             <span className="text-mute/60">/</span>
             <button
               onClick={() => setPath(parts.slice(0, i + 1).join("/"))}
-              className="font-mono text-[11.5px] text-dim transition-colors hover:text-ember"
+              className="font-mono text-meta text-dim transition-colors hover:text-bone"
             >
               {part}
             </button>
@@ -83,17 +83,17 @@ export function Files({ sessionId }: { sessionId: string }) {
         ))}
         <button
           onClick={() => refetch()}
-          className="ml-auto text-[11px] text-mute transition-colors hover:text-ember"
+          className="ml-auto text-meta text-mute transition-colors hover:text-bone"
         >
           ↻
         </button>
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-2 py-1.5">
-        {isLoading && <p className="px-1.5 py-1 text-[12px] text-mute">Looking…</p>}
+        {isLoading && <p className="px-1.5 py-1 text-meta text-mute">Looking…</p>}
 
         {error && (
-          <p className="px-1.5 py-1 text-[12px] text-bone">
+          <p className="px-1.5 py-1 text-meta text-bone">
             {error instanceof ApiError ? error.message : "Couldn't read that directory."}
           </p>
         )}
@@ -101,37 +101,37 @@ export function Files({ sessionId }: { sessionId: string }) {
         {path && (
           <button
             onClick={() => setPath(parts.slice(0, -1).join("/"))}
-            className="flex w-full items-center gap-2 rounded-[4px] px-1.5 py-1 text-left transition-colors hover:bg-panel"
+            className="flex w-full items-center gap-2 rounded-sm px-1.5 py-1 text-left transition-colors hover:bg-panel"
           >
             <span className="text-mute">⟵</span>
-            <span className="font-mono text-[12px] text-dim">..</span>
+            <span className="font-mono text-meta text-dim">..</span>
           </button>
         )}
 
         {entries.map((entry) => (
           <div
             key={entry.name}
-            className="flex items-center gap-2 rounded-[4px] px-1.5 py-1 transition-colors hover:bg-panel"
+            className="flex items-center gap-2 rounded-sm px-1.5 py-1 transition-colors hover:bg-panel"
           >
             <span className="text-mute">{entry.directory ? "▸" : entry.link ? "↗" : "▪"}</span>
 
             {entry.directory ? (
               <button
                 onClick={() => setPath(path ? `${path}/${entry.name}` : entry.name)}
-                className="min-w-0 flex-1 truncate text-left font-mono text-[12px] text-bone transition-colors hover:text-ember"
+                className="min-w-0 flex-1 truncate text-left font-mono text-meta text-bone transition-colors hover:text-bone"
               >
                 {entry.name}/
               </button>
             ) : (
-              <span className="min-w-0 flex-1 truncate font-mono text-[12px] text-text">
+              <span className="min-w-0 flex-1 truncate font-mono text-meta text-text">
                 {entry.name}
               </span>
             )}
 
-            <span className="w-16 text-right font-mono text-[11px] text-mute">
+            <span className="w-16 text-right font-mono text-meta text-mute">
               {entry.directory ? "" : size(entry.size)}
             </span>
-            <span className="hidden w-24 text-right font-mono text-[11px] text-mute sm:block">
+            <span className="hidden w-24 text-right font-mono text-meta text-mute sm:block">
               {when(entry.modified)}
             </span>
 
@@ -141,7 +141,7 @@ export function Files({ sessionId }: { sessionId: string }) {
               <button
                 onClick={() => download(entry)}
                 disabled={fetching != null}
-                className="w-5 text-[12px] text-mute transition-colors hover:text-ember disabled:opacity-40"
+                className="w-5 text-meta text-mute transition-colors hover:text-bone disabled:opacity-40"
                 title={`Download ${entry.name}`}
               >
                 {fetching === (path ? `${path}/${entry.name}` : entry.name) ? "…" : "↓"}
@@ -151,12 +151,12 @@ export function Files({ sessionId }: { sessionId: string }) {
         ))}
 
         {!isLoading && !error && entries.length === 0 && (
-          <p className="px-1.5 py-1 text-[12px] text-mute">Nothing here.</p>
+          <p className="px-1.5 py-1 text-meta text-mute">Nothing here.</p>
         )}
       </div>
 
       {failed && (
-        <p className="border-t border-line px-3 py-2 text-[11.5px] leading-[1.5] text-bone">
+        <p className="border-t border-line px-3 py-2 text-meta leading-[1.5] text-bone">
           {failed}
         </p>
       )}

@@ -43,9 +43,9 @@ export function AddRepo({
       onClick={(e) => e.target === e.currentTarget && !add.isPending && onClose()}
       className="fixed inset-0 z-50 flex items-center justify-center bg-ground/70 p-4 backdrop-blur-[2px]"
     >
-      <div className="flex max-h-[70vh] w-full max-w-[480px] flex-col overflow-hidden rounded-[14px] border border-line bg-panel">
+      <div className="flex max-h-[70vh] w-full max-w-[480px] flex-col overflow-hidden rounded-lg border border-line bg-panel">
         <header className="shrink-0 border-b border-line px-4 py-3">
-          <p className="text-[14px] font-semibold text-bone">Check in another repository</p>
+          <p className="text-body font-semibold text-bone">Check in another repository</p>
           <p className="mt-1 text-meta text-mute">
             It is cut on <span className="font-mono">{session.branch}</span>, beside what is
             already here, and the agent is told where it landed.
@@ -59,13 +59,13 @@ export function AddRepo({
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search repositories"
             disabled={add.isPending}
-            className="w-full rounded-[8px] border border-line bg-ground px-3 py-2 text-ui text-bone placeholder:text-mute focus:border-ember focus:outline-none disabled:opacity-50"
+            className="w-full rounded-md border border-line bg-ground px-3 py-2 text-ui text-bone placeholder:text-mute focus:border-dim focus:outline-none disabled:opacity-50"
           />
         </div>
 
         <ul className="min-h-0 flex-1 overflow-y-auto p-1.5">
           {offered.length === 0 && (
-            <li className="px-2.5 py-3 text-[13px] text-mute">
+            <li className="px-2.5 py-3 text-ui text-mute">
               {repos.length === 0
                 ? "Nothing is connected yet."
                 : "Everything connected is already in this session."}
@@ -90,7 +90,7 @@ export function AddRepo({
                     },
                   )
                 }
-                className="w-full rounded-[8px] px-2.5 py-2 text-left font-mono text-[13px] text-text transition-colors hover:bg-raise disabled:opacity-40"
+                className="w-full rounded-md px-2.5 py-2 text-left font-mono text-ui text-text transition-colors hover:bg-raise disabled:opacity-40"
               >
                 {r.slug}
               </button>

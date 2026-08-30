@@ -35,6 +35,7 @@ import type {
   DestroySessionParams,
   Done,
   DownloadFileParams,
+  EndAll,
   EndedAll,
   FileDiff,
   FileEntry,
@@ -280,16 +281,20 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
  * Destructive in the same way as ending one, multiplied — every workspace goes
  * and anything unpushed with it. The count comes back so the interface can say
  * what it did rather than guess.
- * @summary End every session that is still running.
+ *
+ * Counted in workspaces rather than sessions. A workspace holds any number of
+ * agents now, so "48 ended" was a number nobody recognised: what somebody is
+ * about to lose is six places, not forty-eight processes.
+ * @summary End every workspace that is still running.
  */
-export const endAllSessions = async ( options?: Parameters<typeof http>[1]): Promise<EndedAll> => {
+export const endAllSessions = async (endAll: EndAll, options?: Parameters<typeof http>[1]): Promise<EndedAll> => {
 
   return http<EndedAll>(getEndAllSessionsUrl(),
   {
     ...options,
-    method: 'POST'
-
-
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(endAll)
   }
 );}
 
@@ -298,8 +303,8 @@ export const endAllSessions = async ( options?: Parameters<typeof http>[1]): Pro
 
 
 export const getEndAllSessionsMutationOptions = <TError = unknown,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof endAllSessions>>, TError,void, TContext>, request?: SecondParameter<typeof http>}
-): UseMutationOptions<Awaited<ReturnType<typeof endAllSessions>>, TError,void, TContext> => {
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof endAllSessions>>, TError,{data: EndAll}, TContext>, request?: SecondParameter<typeof http>}
+): UseMutationOptions<Awaited<ReturnType<typeof endAllSessions>>, TError,{data: EndAll}, TContext> => {
 
 const mutationKey = ['endAllSessions'];
 const {mutation: mutationOptions, request: requestOptions} = options ?
@@ -311,10 +316,10 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof endAllSessions>>, void> = () => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof endAllSessions>>, {data: EndAll}> = (props) => {
+          const {data} = props ?? {};
 
-
-          return  endAllSessions(requestOptions)
+          return  endAllSessions(data,requestOptions)
         }
 
 
@@ -325,18 +330,18 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
   return  { mutationFn, ...mutationOptions }}
 
     export type EndAllSessionsMutationResult = NonNullable<Awaited<ReturnType<typeof endAllSessions>>>
-
+    export type EndAllSessionsMutationBody = EndAll
     export type EndAllSessionsMutationError = unknown
 
     /**
- * @summary End every session that is still running.
+ * @summary End every workspace that is still running.
  */
 export const useEndAllSessions = <TError = unknown,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof endAllSessions>>, TError,void, TContext>, request?: SecondParameter<typeof http>}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof endAllSessions>>, TError,{data: EndAll}, TContext>, request?: SecondParameter<typeof http>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof endAllSessions>>,
         TError,
-        void,
+        {data: EndAll},
         TContext
       > => {
       return useMutation(getEndAllSessionsMutationOptions(options), queryClient);

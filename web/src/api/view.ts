@@ -83,6 +83,7 @@ export const holdsHost = unfinished;
 export const STATUS_LABEL: Record<SessionStatus, string> = {
   Starting: "Starting up",
   Working: "Working",
+  Ready: "Ready",
   NeedsYou: "Asked a question",
   HandedBack: "Handed it back",
   Failed: "Failed",

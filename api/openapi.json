@@ -149,6 +149,82 @@
         }
       }
     },
+    "/api/v1/agents/{kind}/install": {
+      "post": {
+        "tags": [
+          "agents"
+        ],
+        "summary": "Fetch an agent onto a host.",
+        "description": "The alternative was a shell command on the machine itself, which is fine\nfor a server somebody is already logged in to and useless for the container\nFiretower is running inside. The work happens on the host either way — this\nonly means nobody has to reach it by hand.\n\nSlow on purpose: the request is held until npm is done, because the answer\nsomebody wants is which version they now have.",
+        "operationId": "install_agent",
+        "parameters": [
+          {
+            "name": "kind",
+            "in": "path",
+            "description": "Agent kind",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InstallAgent"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/AgentView"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/agents/{kind}/login": {
       "post": {
         "tags": [
@@ -1759,9 +1835,19 @@
         "tags": [
           "sessions"
         ],
-        "summary": "End every session that is still running.",
-        "description": "Destructive in the same way as ending one, multiplied — every workspace goes\nand anything unpushed with it. The count comes back so the interface can say\nwhat it did rather than guess.",
+        "summary": "End every workspace that is still running.",
+        "description": "Destructive in the same way as ending one, multiplied — every workspace goes\nand anything unpushed with it. The count comes back so the interface can say\nwhat it did rather than guess.\n\nCounted in workspaces rather than sessions. A workspace holds any number of\nagents now, so \"48 ended\" was a number nobody recognised: what somebody is\nabout to lose is six places, not forty-eight processes.",
         "operationId": "end_all_sessions",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EndAll"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
             "description": "",
@@ -3084,6 +3170,148 @@
           }
         }
       }
+    },
+    "/api/v1/stream": {
+      "get": {
+        "tags": [
+          "stream"
+        ],
+        "summary": "The live feed: session events and conversations, multiplexed.",
+        "description": "Documented as an operation carrying both frame types so the generator emits\nTypeScript **and** zod validators for them — orval builds validators from\noperations, not from loose components. The HTTP shape below is therefore a\npolite fiction: this is a websocket upgrade, the \"request body\" is what the\nclient sends as frames and the \"response body\" is what it receives. The cost\nis one generated hook nobody imports, which is cheaper than a second\nspecification and a second generator to describe eleven messages.",
+        "operationId": "stream",
+        "requestBody": {
+          "description": "Frames the client sends",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClientFrame"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Frames the server sends",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServerFrame"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/tasks": {
+      "get": {
+        "tags": [
+          "tasks"
+        ],
+        "summary": "What could be worked on.",
+        "description": "Read from the tracker every time rather than from a copy here. Issues are\nsomebody else's source of truth and change under us; a conditional request\nthat has not changed costs nothing, and one that has is exactly the moment\nthe new data is wanted.",
+        "operationId": "list_tasks",
+        "parameters": [
+          {
+            "name": "source",
+            "in": "query",
+            "description": "Which tracker; github by default",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "repo",
+            "in": "query",
+            "description": "acme/web, when the source has repositories",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "kind",
+            "in": "query",
+            "description": "issue or pullRequest",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/TaskKind"
+            }
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "description": "open or closed",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/TaskState"
+            }
+          },
+          {
+            "name": "mine",
+            "in": "query",
+            "description": "Only what you are assigned",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "description": "The query box, passed to the source verbatim",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "description": "One-based",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -3413,6 +3641,14 @@
           "Unknown"
         ]
       },
+      "ChangedWhat": {
+        "type": "string",
+        "description": "What changed in a workspace, when the socket says something did.",
+        "enum": [
+          "diff",
+          "files"
+        ]
+      },
       "Checkout": {
         "type": "object",
         "description": "One repository checked out into a session's workspace.\n\nA session used to be one of these, spread across three nullable columns on\nthe session itself. It is a list now, because the work is often two\nrepositories — a client and the API it calls — and two sessions that cannot\nsee each other is not an answer to that.",
@@ -3594,6 +3830,83 @@
             "type": "string"
           }
         }
+      },
+      "ClientFrame": {
+        "oneOf": [
+          {
+            "type": "object",
+            "description": "Start receiving a topic, optionally from where you got to.\n\n`id` names the session for a per-session topic and is ignored otherwise.\n`from` is a resume cursor — a sequence number for `sessions`, a line\nnumber for `conversation`. Absent means live only, with no replay.",
+            "required": [
+              "topic",
+              "t"
+            ],
+            "properties": {
+              "from": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "format": "int64",
+                "minimum": 0
+              },
+              "id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "t": {
+                "type": "string",
+                "enum": [
+                  "sub"
+                ]
+              },
+              "topic": {
+                "$ref": "#/components/schemas/Topic"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Stop receiving it. A closed tab should stop costing anything.",
+            "required": [
+              "topic",
+              "t"
+            ],
+            "properties": {
+              "id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "t": {
+                "type": "string",
+                "enum": [
+                  "unsub"
+                ]
+              },
+              "topic": {
+                "$ref": "#/components/schemas/Topic"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "t"
+            ],
+            "properties": {
+              "t": {
+                "type": "string",
+                "enum": [
+                  "ping"
+                ]
+              }
+            }
+          }
+        ],
+        "description": "What a client says."
       },
       "ClientId": {
         "type": "object",
@@ -3972,6 +4285,22 @@
           }
         }
       },
+      "EndAll": {
+        "type": "object",
+        "description": "Which workspaces to end.",
+        "properties": {
+          "workspaces": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "description": "The workspaces to end, by id. Every one of yours when omitted — which\nis what this endpoint did before it could be narrowed, and what an\nempty body still means."
+          }
+        }
+      },
       "EndedAll": {
         "type": "object",
         "required": [
@@ -3982,6 +4311,7 @@
           "ended": {
             "type": "integer",
             "format": "int32",
+            "description": "Workspaces ended, not sessions: a workspace is what somebody loses.",
             "minimum": 0
           },
           "unreachable": {
@@ -4499,6 +4829,26 @@
           "Draining"
         ]
       },
+      "InstallAgent": {
+        "type": "object",
+        "description": "What a host is being asked to fetch.",
+        "required": [
+          "hostId"
+        ],
+        "properties": {
+          "hostId": {
+            "type": "string",
+            "description": "Which machine gets it. Agents are per host: a token travels, a binary\ndoes not."
+          },
+          "version": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Which version. The newest published one when nobody says."
+          }
+        }
+      },
       "ItemId": {
         "type": "string",
         "description": "One thing in the transcript — a message, a thought, a tool call."
@@ -4528,6 +4878,24 @@
           "Failed",
           "Declined"
         ]
+      },
+      "Label": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "colour": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Six hex digits, no `#`. Whatever the source calls it."
+          },
+          "name": {
+            "type": "string"
+          }
+        }
       },
       "Me": {
         "type": "object",
@@ -4738,9 +5106,6 @@
       "NewSession": {
         "type": "object",
         "description": "What the API accepts to launch one.",
-        "required": [
-          "prompt"
-        ],
         "properties": {
           "agent": {
             "$ref": "#/components/schemas/Agent"
@@ -4770,8 +5135,19 @@
               }
             ]
           },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What to call the workspace. Omit to derive one from the branch.\n\nThe name a person reads in the rail, not an identifier: it is free text,\nit can be changed afterwards, and two workspaces may share one. The\nbranch is what has to be unique, and git enforces that itself."
+          },
           "prompt": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What to ask for first. Optional, because a workspace is a place before\nit is a task: you may want the branch checked out and an agent waiting\nin it, and to say what you want once you are looking at the files.\n\nAbsent means the agent starts and says nothing until you do."
           },
           "repoId": {
             "oneOf": [
@@ -4793,6 +5169,30 @@
           },
           "size": {
             "$ref": "#/components/schemas/WorkspaceSize"
+          },
+          "taskKey": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The task this is for, when it was started from one."
+          },
+          "taskUrl": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "workspaceId": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/WorkspaceId",
+                "description": "A workspace to start this agent in, instead of making one.\n\nThe place already exists — its host, its repositories, its branch and\nits directory — so all of those are read from it and anything sent\nalongside is ignored. What is left is the agent and what to ask it.\n\nThis is how a workspace comes to hold two agents: they are two sessions\nnaming one `workspace_id`, each with its own conversation."
+              }
+            ]
           }
         }
       },
@@ -4815,6 +5215,34 @@
           }
         }
       },
+      "Page": {
+        "type": "object",
+        "required": [
+          "tasks",
+          "more"
+        ],
+        "properties": {
+          "more": {
+            "type": "boolean",
+            "description": "Whether asking for the next page is worth it."
+          },
+          "tasks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Task"
+            }
+          },
+          "total": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "How many there are in total, when the source will say.",
+            "minimum": 0
+          }
+        }
+      },
       "PendingAuth": {
         "type": "object",
         "description": "A device authorization waiting for someone to approve it in a browser.",
@@ -4830,6 +5258,23 @@
           "verificationUri": {
             "type": "string",
             "description": "Where to type it."
+          }
+        }
+      },
+      "Person": {
+        "type": "object",
+        "required": [
+          "login"
+        ],
+        "properties": {
+          "avatar": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "login": {
+            "type": "string"
           }
         }
       },
@@ -5264,6 +5709,178 @@
           }
         }
       },
+      "ServerFrame": {
+        "oneOf": [
+          {
+            "type": "object",
+            "description": "The socket is live. Everything after this is a subscription of yours.",
+            "required": [
+              "t"
+            ],
+            "properties": {
+              "t": {
+                "type": "string",
+                "enum": [
+                  "ready"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "A session of yours changed.",
+            "required": [
+              "event",
+              "t"
+            ],
+            "properties": {
+              "event": {
+                "type": "object",
+                "description": "Something that happened, recorded by the worker that it happened on.\n\nSessions are a projection of these, never the other way round.",
+                "required": [
+                  "seq",
+                  "sessionId",
+                  "kind",
+                  "at"
+                ],
+                "properties": {
+                  "at": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "kind": {
+                    "$ref": "#/components/schemas/EventKind"
+                  },
+                  "seq": {
+                    "type": "integer",
+                    "format": "int64",
+                    "description": "Monotonic per worker. This is the resume cursor."
+                  },
+                  "sessionId": {
+                    "$ref": "#/components/schemas/SessionId"
+                  }
+                }
+              },
+              "t": {
+                "type": "string",
+                "enum": [
+                  "event"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "One line of a session's transcript.",
+            "required": [
+              "id",
+              "line",
+              "t"
+            ],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "line": {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/TurnEvent"
+                  },
+                  {
+                    "type": "object",
+                    "required": [
+                      "lineNo"
+                    ],
+                    "properties": {
+                      "lineNo": {
+                        "type": "integer",
+                        "format": "int64",
+                        "minimum": 0
+                      }
+                    }
+                  }
+                ],
+                "description": "One thing that happened, and where in the log it was said.\n\nThe line number travels with the event because several events can come from\none line, and a client's cursor has to be a position in the agent's log\nrather than a count of what it drew."
+              },
+              "t": {
+                "type": "string",
+                "enum": [
+                  "line"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Frames were dropped because this subscription fell behind. Resubscribe\nfrom your cursor; nothing else on the socket is affected.",
+            "required": [
+              "topic",
+              "t"
+            ],
+            "properties": {
+              "id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "t": {
+                "type": "string",
+                "enum": [
+                  "reset"
+                ]
+              },
+              "topic": {
+                "$ref": "#/components/schemas/Topic"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "This subscription cannot be served, and why.",
+            "required": [
+              "topic",
+              "message",
+              "t"
+            ],
+            "properties": {
+              "id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "message": {
+                "type": "string"
+              },
+              "t": {
+                "type": "string",
+                "enum": [
+                  "error"
+                ]
+              },
+              "topic": {
+                "$ref": "#/components/schemas/Topic"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "t"
+            ],
+            "properties": {
+              "t": {
+                "type": "string",
+                "enum": [
+                  "pong"
+                ]
+              }
+            }
+          }
+        ],
+        "description": "What the server says.\n\nThe two payloads that matter are the ones the SSE endpoints already send,\nunchanged: `ft_core::Event` and `ConversationEvent`. This is not a second\nevent system — it is the same events with a topic on the front, sharing one\nconnection."
+      },
       "Session": {
         "type": "object",
         "description": "A line of work with a conversation attached and a branch at the end.",
@@ -5386,9 +6003,21 @@
             },
             "description": "What this session is going to do, in order, decided when it was created.\n\nHere rather than inferred from events so the screen has something to\nshow before the worker has said a word — the difference between \"this\nis fetching a repository\" and a blank page."
           },
+          "taskKey": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Short, derived from the prompt — the prompt itself lives in the transcript.\nThe task this worktree was cut for, if it came from one.\n\nSource-scoped — `github:acme/web#5138` — so a second tracker cannot\ncollide with the first. Everything else about the task is read from the\ntracker when somebody looks; these two are ours, and they are what lets\nthe rail show `#5138` and shipping offer to close it."
+          },
+          "taskUrl": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "title": {
-            "type": "string",
-            "description": "Short, derived from the prompt — the prompt itself lives in the transcript."
+            "type": "string"
           },
           "updatedAt": {
             "type": "string",
@@ -5415,6 +6044,7 @@
         "enum": [
           "Starting",
           "Working",
+          "Ready",
           "NeedsYou",
           "HandedBack",
           "Failed",
@@ -5642,9 +6272,105 @@
           "ToolInput"
         ]
       },
+      "Task": {
+        "type": "object",
+        "description": "One thing to work on, whatever tracks it.\n\nThe fields are the intersection every tracker has, plus the two that make a\nrow worth showing: what it is called, and when it last moved.",
+        "required": [
+          "id",
+          "source",
+          "key",
+          "title",
+          "url",
+          "state",
+          "kind",
+          "assignees",
+          "labels",
+          "updatedAt"
+        ],
+        "properties": {
+          "assignees": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Person"
+            }
+          },
+          "body": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Seeds the first prompt, so nobody types the problem out twice."
+          },
+          "id": {
+            "type": "string",
+            "description": "Stable within its source: `github:acme/web#5138`."
+          },
+          "key": {
+            "type": "string",
+            "description": "What a person calls it. `#5138`."
+          },
+          "kind": {
+            "$ref": "#/components/schemas/TaskKind"
+          },
+          "labels": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Label"
+            }
+          },
+          "repo": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Where the work would happen. Known for an issue; a binding for a ticket."
+          },
+          "source": {
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/TaskState"
+          },
+          "title": {
+            "type": "string"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "url": {
+            "type": "string",
+            "description": "Always somewhere to go and read it."
+          }
+        }
+      },
       "TaskId": {
         "type": "string",
         "description": "One subagent run, from the moment it was spawned to its report."
+      },
+      "TaskKind": {
+        "type": "string",
+        "description": "What sort of thing it is.\n\nThe one field the Issues/PRs toggle reads, and the reason \"filter by kind\"\nis a query parameter rather than a migration when a second source lands.",
+        "enum": [
+          "issue",
+          "pullRequest",
+          "ticket"
+        ]
+      },
+      "TaskState": {
+        "type": "string",
+        "enum": [
+          "open",
+          "closed"
+        ]
+      },
+      "Topic": {
+        "type": "string",
+        "description": "What a client can subscribe to.",
+        "enum": [
+          "sessions",
+          "conversation"
+        ]
       },
       "Turn": {
         "type": "object",

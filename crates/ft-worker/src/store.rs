@@ -396,6 +396,36 @@ impl Store {
             .await?;
         Ok(row.map(|r| r.get("path")))
     }
+
+    /// The other agents still working in this session's directory.
+    ///
+    /// A workspace holds any number of agents and they all share one checkout,
+    /// so the worktree belongs to the place rather than to whichever session
+    /// was asked to end. Reclaiming it while a sibling is still running would
+    /// delete the directory out from under a live process — the files it is
+    /// editing, the git metadata, the socket it answers on.
+    ///
+    /// Ended ones do not count, which is what makes the last one out reclaim
+    /// the worktree without anybody having to track who was first.
+    pub async fn others_in_workspace(&self, session_id: &SessionId) -> Result<Vec<SessionId>> {
+        let rows = sqlx::query(
+            "SELECT w.session_id AS id
+               FROM workspaces w
+               JOIN sessions s ON s.id = w.session_id
+              WHERE w.path = (SELECT path FROM workspaces WHERE session_id = ?)
+                AND w.session_id <> ?
+                AND s.status <> 'Ended'",
+        )
+        .bind(session_id.as_str())
+        .bind(session_id.as_str())
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows
+            .into_iter()
+            .map(|r| SessionId::from_stored(r.get::<String, _>("id")))
+            .collect())
+    }
 }
 
 #[cfg(test)]

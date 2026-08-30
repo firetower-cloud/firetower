@@ -523,6 +523,88 @@ pub(super) async fn forget_agent(
     Ok(StatusCode::NO_CONTENT)
 }
 
+/// What a host is being asked to fetch.
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct InstallAgent {
+    /// Which machine gets it. Agents are per host: a token travels, a binary
+    /// does not.
+    pub host_id: String,
+    /// Which version. The newest published one when nobody says.
+    pub version: Option<String>,
+}
+
+/// Fetch an agent onto a host.
+///
+/// The alternative was a shell command on the machine itself, which is fine
+/// for a server somebody is already logged in to and useless for the container
+/// Firetower is running inside. The work happens on the host either way — this
+/// only means nobody has to reach it by hand.
+///
+/// Slow on purpose: the request is held until npm is done, because the answer
+/// somebody wants is which version they now have.
+#[utoipa::path(
+    post, path = "/api/v1/agents/{kind}/install", tag = "agents",
+    params(("kind" = String, Path, description = "Agent kind")),
+    request_body = InstallAgent,
+    responses(
+        (status = 200, body = Vec<AgentView>),
+        (status = 400, body = ApiError),
+        (status = 404, body = ApiError),
+        (status = 503, body = ApiError),
+    ),
+)]
+pub(super) async fn install_agent(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Path(kind): Path<String>,
+    Json(req): Json<InstallAgent>,
+) -> ApiResult<Json<Vec<AgentView>>> {
+    let kind = agent_from_path(&kind)?;
+
+    // Not every agent is something we fetch. Saying so here means the worker
+    // is never asked a question it can only refuse.
+    if kind.package().is_none() {
+        return Err(ApiError::new(
+            ErrorCode::InvalidRequest,
+            format!("{} is not something Firetower installs", kind.label()),
+        ));
+    }
+
+    let host = state
+        .db
+        .hosts()
+        .await?
+        .into_iter()
+        .find(|h| h.id.as_str() == req.host_id)
+        .ok_or_else(|| ApiError::not_found("host"))?;
+
+    if !state.fleet.is_connected(&host.id).await {
+        return Err(ApiError::new(
+            ErrorCode::HostUnreachable,
+            format!("{} is not connected", host.name),
+        ));
+    }
+
+    let version = state
+        .fleet
+        .install_agent(&host.id, kind, req.version.as_deref())
+        .await
+        .map_err(|e| ApiError::new(ErrorCode::HostUnreachable, format!("{e:#}")))?;
+
+    tracing::info!(host = %host.name, "installed {} {version}", kind.label());
+
+    // Ask rather than assume. The install said what it fetched; whether that
+    // is now the copy answering on `PATH` is a different question, and the
+    // host is the only one who can answer it.
+    match state.fleet.probe_agents(&host.id).await {
+        Ok(found) => state.db.record_presence(&host.id, &found).await?,
+        Err(e) => tracing::warn!(host = %host.name, "asking what it has now: {e:#}"),
+    }
+
+    list_agents(State(state), Extension(principal)).await
+}
+
 /// Re-ask every reachable host what it has.
 ///
 /// Hosts we can't reach are skipped rather than failing the request: their last

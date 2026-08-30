@@ -122,6 +122,16 @@ pub async fn install(state: &Path, kind: Agent, version: Option<&str>) -> Result
 
     // `--no-audit --no-fund` are noise on a machine nobody is reading, and
     // `--omit=dev` because we want the thing, not its test suite.
+    //
+    // **`stdin` is nulled deliberately.** `tokio`'s `output()` pipes stdout and
+    // stderr and leaves stdin inherited — where `std`'s nulls it — so npm would
+    // be handed whatever this process has on fd 0. When the caller is the
+    // worker daemon that is the frame pipe from the control plane, and node
+    // sets `O_NONBLOCK` on a pipe it is given. That flag lives on the open file
+    // description, which the two processes share, so it stays set after npm
+    // exits: the worker's next read of its own stdin returns `EAGAIN`, the
+    // connection dies, and it dies again on every reconnect that installs
+    // anything. Nothing here has a use for stdin regardless.
     let output = Command::new("npm")
         .arg("install")
         .arg("--prefix")
@@ -130,6 +140,7 @@ pub async fn install(state: &Path, kind: Agent, version: Option<&str>) -> Result
         .arg("--no-fund")
         .arg("--omit=dev")
         .arg(&wanted)
+        .stdin(std::process::Stdio::null())
         .output()
         .await
         .context("running npm — is node installed on this machine?")?;

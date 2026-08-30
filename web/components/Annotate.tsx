@@ -136,7 +136,7 @@ export function Annotatable({
             setOffer(null);
           }}
           style={{ left: offer.x, top: offer.y }}
-          className="absolute z-20 -translate-x-1/2 -translate-y-[calc(100%+6px)] rounded-[8px] border border-line bg-panel px-2.5 py-1.5 text-[12.5px] text-dim shadow-[0_8px_24px_-10px_rgba(0,0,0,0.8)] transition-colors hover:border-ember hover:text-bone"
+          className="absolute z-20 -translate-x-1/2 -translate-y-[calc(100%+6px)] rounded-md border border-line bg-panel px-2.5 py-1.5 text-meta text-dim shadow-[0_8px_24px_-10px_rgba(0,0,0,0.8)] transition-colors hover:border-line hover:text-bone"
         >
           Start typing to annotate
         </button>
@@ -190,8 +190,8 @@ export function Drafting({
   }, [draft.item, draft.quote]);
 
   return (
-    <div className="mb-2 shrink-0 rounded-[12px] border border-ember-deep bg-panel p-3">
-      <blockquote className="mb-2 border-l-2 border-ember-deep pl-2.5 text-[13.5px] text-dim">
+    <div className="mb-2 shrink-0 rounded-lg border border-line bg-panel p-3">
+      <blockquote className="mb-2 border-l-2 border-line pl-2.5 text-ui text-dim">
         {draft.quote.length > 240 ? `${draft.quote.slice(0, 240)}…` : draft.quote}
       </blockquote>
       <textarea
@@ -210,27 +210,27 @@ export function Drafting({
         }}
         rows={2}
         placeholder="What about it?"
-        className="w-full resize-none rounded-[8px] border border-line bg-ground px-3 py-2.5 text-[13.5px] text-text placeholder:text-mute focus:border-ember focus:outline-none"
+        className="w-full resize-none rounded-md border border-line bg-ground px-3 py-2.5 text-ui text-text placeholder:text-mute focus:border-dim focus:outline-none"
       />
       <div className="mt-2 flex items-center gap-2">
         <button
           onClick={onKeep}
           disabled={!draft.note.trim()}
           title="Keep (↵)"
-          className="flex min-h-[34px] items-center gap-2 rounded-[8px] bg-ember px-3.5 text-[13px] font-medium text-ground disabled:opacity-40"
+          className="flex min-h-[34px] items-center gap-2 rounded-md bg-bone px-3.5 text-ui font-medium text-ground transition-colors hover:bg-white disabled:bg-line disabled:text-mute"
         >
           Keep
-          <span aria-hidden className="font-mono text-[12px] opacity-60">
+          <span aria-hidden className="font-mono text-meta opacity-60">
             ↵
           </span>
         </button>
         <button
           onClick={onCancel}
-          className="min-h-[32px] rounded-[6px] px-2 text-[13px] text-mute transition-colors hover:text-text"
+          className="min-h-[32px] rounded-sm px-2 text-ui text-mute transition-colors hover:text-text"
         >
           Cancel
         </button>
-        <span className="ml-auto text-[12px] text-mute">Kept until you send them</span>
+        <span className="ml-auto text-meta text-mute">Kept until you send them</span>
       </div>
     </div>
   );
@@ -251,19 +251,19 @@ export function Notes({ notes, onDrop }: { notes: Note[]; onDrop: (id: string) =
       {notes.map((note) => (
         <li
           key={note.id}
-          className="rounded-[12px] border border-line bg-panel px-3 py-2.5"
+          className="rounded-lg border border-line bg-panel px-3 py-2.5"
         >
-          <blockquote className="mb-1.5 border-l-2 border-line pl-2.5 text-[13px] text-mute">
+          <blockquote className="mb-1.5 border-l-2 border-line pl-2.5 text-ui text-mute">
             {note.quote.length > 160 ? `${note.quote.slice(0, 160)}…` : note.quote}
           </blockquote>
           <div className="flex items-start gap-2">
-            <p className="min-w-0 flex-1 text-[13.5px] whitespace-pre-wrap text-text">
+            <p className="min-w-0 flex-1 text-ui whitespace-pre-wrap text-text">
               {note.note}
             </p>
             <button
               onClick={() => onDrop(note.id)}
               aria-label="Remove this note"
-              className="shrink-0 text-[13px] text-mute transition-colors hover:text-brick"
+              className="shrink-0 text-ui text-mute transition-colors hover:text-brick"
             >
               ×
             </button>

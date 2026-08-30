@@ -7,7 +7,10 @@
  */
 
 export interface EndedAll {
-  /** @minimum 0 */
+  /**
+     * Workspaces ended, not sessions: a workspace is what somebody loses.
+     * @minimum 0
+     */
   ended: number;
   /**
      * Left alone because their host wasn't answering.

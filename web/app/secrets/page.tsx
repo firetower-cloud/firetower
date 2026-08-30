@@ -34,36 +34,34 @@ export default function Secrets() {
     <div className="max-w-[900px] px-8 pt-8 pb-24">
       <header className="mb-7">
         <div className="eyebrow">Secrets</div>
-        <h1 className="mt-2 text-[26px] font-semibold tracking-[-0.02em] text-bone">
+        <h1 className="mt-2 text-display font-semibold text-bone">
           {isLoading
             ? "Looking…"
             : held.length === 0
               ? "Nothing stored yet."
               : `${held.length} ${held.length === 1 ? "credential" : "credentials"}, encrypted.`}
         </h1>
-        <p className="mt-1.5 max-w-[58ch] text-[14px] text-dim">
-          Each one is sealed with a key of its own, and those keys are sealed with a root
-          key kept outside the database. Reading one — whether a session needs it or you
-          ask to see it — leaves a line below.
+        <p className="mt-1.5 text-ui text-dim">
+          Each is sealed with its own key. Every read leaves a line below.
         </p>
       </header>
 
       {isError && (
-        <p className="panel mb-4 px-4 py-3 text-[13px] text-brick">
+        <p className="panel mb-4 px-4 py-3 text-ui text-brick">
           Couldn&apos;t reach the control plane. Is Firetower running?
         </p>
       )}
 
       {problem && (
-        <p className="mb-4 rounded-[6px] border border-ember/30 bg-ember/[0.05] px-3.5 py-2.5 text-[12.5px] text-bone">
+        <p className="mb-4 rounded-md border border-brick-deep bg-brick-tint px-3.5 py-2.5 text-meta text-brick">
           {problem}
         </p>
       )}
 
       {data && !data.intact && (
-        <div className="mb-4 rounded-[6px] border border-brick/40 bg-brick/[0.06] px-3.5 py-3">
-          <p className="text-[13px] font-medium text-bone">This log doesn&apos;t verify.</p>
-          <p className="mt-1 text-[12.5px] leading-[1.55] text-dim">
+        <div className="mb-4 rounded-md border border-brick-deep bg-brick-tint px-3.5 py-3">
+          <p className="text-ui font-medium text-bone">This log doesn&apos;t verify.</p>
+          <p className="mt-1 text-meta leading-[1.55] text-dim">
             Entry {data.brokenAt} doesn&apos;t follow from the one before it. Either a row
             was edited or removed directly in the database, or the root key isn&apos;t the
             one these entries were written with — and if it isn&apos;t, nothing held here
@@ -83,7 +81,7 @@ export default function Secrets() {
             />
           ))}
           {!isLoading && held.length === 0 && !isError && (
-            <p className="panel px-4 py-6 text-center text-[13px] text-mute">
+            <p className="panel px-4 py-6 text-center text-ui text-mute">
               Authorize a git host or configure an agent, and it lands here.
             </p>
           )}
@@ -97,13 +95,13 @@ export default function Secrets() {
             <AccessRow key={a.id} entry={a} />
           ))}
           {!isLoading && access.length === 0 && (
-            <p className="px-4 py-6 text-center text-[13px] text-mute">
+            <p className="px-4 py-6 text-center text-ui text-mute">
               Nothing has been read yet.
             </p>
           )}
         </div>
         {data && (
-          <p className="mt-3 text-[12px] leading-[1.6] text-mute">
+          <p className="mt-3 text-meta leading-[1.6] text-mute">
             Each line carries a fingerprint of the line before it, keyed with the root
             key, so a row edited or deleted in the database stops the chain. The root key
             is in {data.rootKey} — back it up separately; the database alone can&apos;t
@@ -198,8 +196,8 @@ function HeldRow({
     <div className="panel px-4 py-3.5">
       <div className="flex items-center gap-3">
         <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-sage" />
-        <span className="font-mono text-[13.5px] text-bone">{name}</span>
-        <span className="rounded-[4px] border border-line px-1.5 py-0.5 font-mono text-[10.5px] text-slate">
+        <span className="font-mono text-ui text-bone">{name}</span>
+        <span className="rounded-sm border border-line px-1.5 py-0.5 font-mono text-micro text-slate">
           {what(scope)}
         </span>
 
@@ -208,7 +206,7 @@ function HeldRow({
             <button
               onClick={show}
               disabled={reveal.isPending}
-              className="text-[11.5px] text-mute transition-colors hover:text-ember"
+              className="text-meta text-mute transition-colors hover:text-bone"
             >
               {reveal.isPending ? "Reading…" : "Reveal"}
             </button>
@@ -218,7 +216,7 @@ function HeldRow({
                 setShown(null);
                 setCopied(false);
               }}
-              className="text-[11.5px] text-mute transition-colors hover:text-ember"
+              className="text-meta text-mute transition-colors hover:text-bone"
             >
               Hide
             </button>
@@ -229,7 +227,7 @@ function HeldRow({
               setReplacing(!replacing);
               setDraft("");
             }}
-            className="text-[11.5px] text-mute transition-colors hover:text-ember"
+            className="text-meta text-mute transition-colors hover:text-bone"
           >
             {replacing ? "Cancel" : "Replace"}
           </button>
@@ -239,7 +237,7 @@ function HeldRow({
               if (!confirm(consequence(secret))) return;
               remove.mutate({ scope, name }, { onSuccess: refresh, onError: failed });
             }}
-            className="text-[11.5px] text-mute transition-colors hover:text-ember"
+            className="text-meta text-mute transition-colors hover:text-bone"
           >
             Remove
           </button>
@@ -249,7 +247,7 @@ function HeldRow({
       {shown !== null && (
         <div className="mt-3 border-t border-line pt-3">
           <div className="flex items-start gap-3">
-            <code className="min-w-0 flex-1 break-all font-mono text-[12px] leading-[1.6] text-bone">
+            <code className="min-w-0 flex-1 break-all font-mono text-meta leading-[1.6] text-bone">
               {shown}
             </code>
             <button
@@ -257,12 +255,12 @@ function HeldRow({
                 navigator.clipboard.writeText(shown);
                 setCopied(true);
               }}
-              className="shrink-0 text-[11.5px] text-mute transition-colors hover:text-ember"
+              className="shrink-0 text-meta text-mute transition-colors hover:text-bone"
             >
               {copied ? "Copied" : "Copy"}
             </button>
           </div>
-          <p className="mt-2 text-[11.5px] text-mute">
+          <p className="mt-2 text-meta text-mute">
             This is now in the log below, with the time you did it.
           </p>
         </div>
@@ -278,17 +276,17 @@ function HeldRow({
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && draft.trim() && save()}
             spellCheck={false}
-            className="mt-2 w-full rounded-[6px] border border-line bg-ground px-3 py-2 font-mono text-[12.5px] text-bone outline-none placeholder:text-mute focus:border-ember/40"
+            className="mt-2 w-full rounded-sm border border-line bg-ground px-3 py-2 font-mono text-meta text-bone outline-none placeholder:text-mute focus:border-dim/40"
           />
           <div className="mt-2.5 flex items-center gap-3">
             <button
               onClick={save}
               disabled={!draft.trim() || replace.isPending}
-              className="rounded-[6px] border border-ember/40 px-3 py-1.5 text-[12px] text-ember transition-colors hover:bg-ember/[0.06] disabled:border-line disabled:text-mute disabled:hover:bg-transparent"
+              className="rounded-md border border-brick-deep px-3 py-1.5 text-meta text-brick transition-colors hover:bg-brick-tint disabled:border-line disabled:text-mute disabled:hover:bg-transparent"
             >
               {replace.isPending ? "Saving…" : "Save it"}
             </button>
-            <span className="text-[11.5px] text-mute">
+            <span className="text-meta text-mute">
               What&apos;s there now is overwritten and can&apos;t be recovered.
             </span>
           </div>
@@ -303,7 +301,7 @@ function HeldRow({
 const TONE: Record<string, string> = {
   Write: "text-sage",
   Read: "text-slate",
-  Reveal: "text-ember",
+  Reveal: "text-bone",
   Delete: "text-mute",
   Failed: "text-brick",
 };
@@ -313,13 +311,13 @@ function AccessRow({ entry }: { entry: AccessEntry }) {
 
   return (
     <div className="flex items-baseline gap-3 px-4 py-2.5">
-      <span className={`w-[52px] shrink-0 font-mono text-[11px] ${TONE[entry.action] ?? "text-mute"}`}>
+      <span className={`w-[52px] shrink-0 font-mono text-meta ${TONE[entry.action] ?? "text-mute"}`}>
         {entry.action.toLowerCase()}
       </span>
-      <span className="shrink-0 font-mono text-[12px] text-bone">{entry.name}</span>
-      <span className="truncate text-[12.5px] text-dim">{entry.reason}</span>
+      <span className="shrink-0 font-mono text-meta text-bone">{entry.name}</span>
+      <span className="truncate text-meta text-dim">{entry.reason}</span>
       <span
-        className="ml-auto shrink-0 font-mono text-[11px] text-mute"
+        className="ml-auto shrink-0 font-mono text-meta text-mute"
         title={when.toLocaleString()}
       >
         {when.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}

@@ -90,8 +90,24 @@ pub async fn wait_until_listening(session_id: &SessionId) -> Result<()> {
 /// Read from the log rather than from a socket because the log is where every
 /// line already lands, written and flushed before anybody is offered it — so
 /// there is no window in which an answer arrives and nothing sees it.
-pub async fn wait_for_answer(workspace: &Path, id: u64) -> Result<()> {
-    let log = crate::agentd::log_path(workspace);
+pub async fn wait_for_answer(workspace: &Path, session_id: &str, id: u64) -> Result<()> {
+    // This agent's own log, and only ever that one.
+    //
+    // Not `readable_log`: its fallback to the pre-split `agent.ndjson` is for
+    // *reading back* a transcript written before a workspace could hold more
+    // than one agent. Here the file is always about to be written, so at the
+    // moment this is called the agent has produced nothing and its own log
+    // does not exist yet — the fallback would resolve to the neighbour's,
+    // once, and then poll that for the whole timeout.
+    //
+    // Which is how starting a second agent in an older workspace failed. The
+    // first agent there was Claude, so `agent.ndjson` holds stream-json with
+    // no JSON-RPC reply in it: a Codex run watched it for thirty seconds,
+    // never saw an answer to request 1, and came up `Failed` while its process
+    // sat there perfectly healthy. A second Claude run was worse — it matched
+    // the *previous* agent's answer and reported itself ready on somebody
+    // else's reply.
+    let log = crate::agentd::log_path(workspace, session_id);
     let deadline = std::time::Instant::now() + STARTUP;
 
     loop {
@@ -136,11 +152,21 @@ pub async fn tell(session_id: &SessionId, frame: &ToAgent) -> Result<()> {
 ///
 /// Returns when the agent exits or the connection drops. The caller runs this
 /// off the serve loop; it is unbounded in time by nature.
+/// How a watch ended, which the caller has to tell apart.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Ended {
+    /// The agent exited. Nothing more is coming, ever.
+    AgentExited,
+    /// Only the watching stopped. The agent is still there and still writing,
+    /// so somebody asking again will pick up where this left off.
+    WatcherStopped,
+}
+
 pub async fn watch(
     session_id: SessionId,
     since_line: u64,
     out: mpsc::Sender<ToServer>,
-) -> Result<()> {
+) -> Result<Ended> {
     let mut client = AgentClient::connect(session_id.as_str())
         .await
         .with_context(|| format!("no agent is listening for {session_id}"))?;
@@ -183,13 +209,16 @@ pub async fn watch(
         if out.send(forwarded).await.is_err() {
             // The control plane went away. The log has everything, so there is
             // nothing to rescue — whoever comes back asks from their cursor.
-            return Ok(());
+            return Ok(Ended::WatcherStopped);
         }
         if closing {
-            return Ok(());
+            return Ok(Ended::AgentExited);
         }
     }
-    Ok(())
+
+    // The frames ran out without the agent saying it had exited: agentd hung
+    // up, or the read ended. The agent is still running.
+    Ok(Ended::WatcherStopped)
 }
 
 #[cfg(test)]
@@ -209,6 +238,54 @@ mod tests {
         assert!(command.contains("--agent 'ClaudeCode'"));
     }
 
+    /// Starting an agent in a workspace that predates the per-session log must
+    /// not answer out of the log left behind there.
+    ///
+    /// This is what capped a workspace at the agents it already had. The
+    /// leftover `agent.ndjson` is a Claude transcript, so a new Codex run
+    /// waited the full thirty seconds for a JSON-RPC reply that file could
+    /// never contain and came up `Failed` — with its process running fine and
+    /// nothing on screen saying why.
+    #[tokio::test]
+    async fn a_new_agent_never_answers_out_of_the_log_left_in_the_workspace() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let workspace = dir.path();
+        tokio::fs::create_dir_all(crate::agentd::dir_for(workspace))
+            .await
+            .unwrap();
+
+        // What the workspace's first agent left, holding an answer to id 1.
+        tokio::fs::write(
+            crate::agentd::dir_for(workspace).join(crate::agentd::LEGACY_LOG),
+            "{\"id\":1,\"result\":{\"whose\":\"the agent that was here first\"}}\n",
+        )
+        .await
+        .unwrap();
+
+        // The newcomer has written nothing yet, which is the moment this runs.
+        let waiting = wait_for_answer(workspace, "s_newcomer", 1);
+        tokio::pin!(waiting);
+        assert!(
+            tokio::time::timeout(Duration::from_millis(200), &mut waiting)
+                .await
+                .is_err(),
+            "the neighbour's answer is not this agent's answer"
+        );
+
+        // Its own reply is, the moment it lands.
+        tokio::fs::write(
+            crate::agentd::log_path(workspace, "s_newcomer"),
+            "{\"id\":1,\"result\":{\"whose\":\"mine\"}}\n",
+        )
+        .await
+        .unwrap();
+
+        tokio::time::timeout(Duration::from_secs(5), waiting)
+            .await
+            .expect("it should notice its own log appearing")
+            .expect("and take the answer in it");
+    }
+
     /// A request carries an id *and* a method; only an answer carries an id
     /// alone. Reading a request as the answer to itself would let the opening
     /// run on before the agent was ready, which is the bug this exists for.
@@ -220,7 +297,7 @@ mod tests {
             .await
             .unwrap();
 
-        let log = crate::agentd::log_path(workspace);
+        let log = crate::agentd::log_path(workspace, "test");
         tokio::fs::write(
             &log,
             concat!(
@@ -232,18 +309,42 @@ mod tests {
         .await
         .unwrap();
 
-        let waited =
-            tokio::time::timeout(Duration::from_millis(150), wait_for_answer(workspace, 1)).await;
+        let waited = tokio::time::timeout(
+            Duration::from_millis(150),
+            wait_for_answer(workspace, "test", 1),
+        )
+        .await;
         assert!(waited.is_err(), "a request is not an answer to itself");
 
         // And the real answer ends it.
         tokio::fs::write(&log, "{\"id\":1,\"result\":{}}\n")
             .await
             .unwrap();
-        tokio::time::timeout(Duration::from_secs(2), wait_for_answer(workspace, 1))
-            .await
-            .expect("should not have timed out")
-            .expect("the answer is there");
+        tokio::time::timeout(
+            Duration::from_secs(2),
+            wait_for_answer(workspace, "test", 1),
+        )
+        .await
+        .expect("should not have timed out")
+        .expect("the answer is there");
+    }
+
+    #[tokio::test]
+    async fn a_watch_that_cannot_connect_does_not_claim_the_agent_exited() {
+        // The distinction this exists for. `watch` failing means the *watching*
+        // failed; the agent may be running perfectly and still writing. Saying
+        // it exited makes the control plane drop the conversation, and every
+        // reader of it stops mid-word while the answer goes on being written.
+        let session = SessionId::from_stored("s_definitely-not-running-02");
+        let (out, mut heard) = mpsc::channel(8);
+
+        let ended = watch(session, 0, out).await;
+
+        assert!(ended.is_err(), "there is nothing to connect to");
+        assert!(
+            heard.try_recv().is_err(),
+            "and nothing should have been said about the agent itself"
+        );
     }
 
     #[tokio::test]
