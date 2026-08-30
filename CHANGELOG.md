@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.15.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.14.0...firetower-v0.15.0) (2026-08-30)
+
+
+### Features
+
+* **web:** drawings render as drawings ([728bd84](https://github.com/firetower-cloud/firetower/commit/728bd84453791e18578337fc14345af7b02f7cd6))
+
+
+### Bug Fixes
+
+* **server:** push a branch with the owner's token ([592308a](https://github.com/firetower-cloud/firetower/commit/592308a8b2ca8da03cf2504c71cd8850d032c0e7))
+* **server:** record session status against the workspace ([0794861](https://github.com/firetower-cloud/firetower/commit/07948610c2c3841e900a19f2d2c7cf6f8d4b4ad5))
+
 ## [0.14.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.13.0...firetower-v0.14.0) (2026-08-30)
 
 
