@@ -799,7 +799,7 @@ dependencies = [
 
 [[package]]
 name = "ft-cli"
-version = "0.14.0"
+version = "0.15.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -817,7 +817,7 @@ dependencies = [
 
 [[package]]
 name = "ft-core"
-version = "0.14.0"
+version = "0.15.0"
 dependencies = [
  "chrono",
  "serde",
@@ -831,7 +831,7 @@ dependencies = [
 
 [[package]]
 name = "ft-proto"
-version = "0.14.0"
+version = "0.15.0"
 dependencies = [
  "chrono",
  "ft-core",
@@ -843,7 +843,7 @@ dependencies = [
 
 [[package]]
 name = "ft-server"
-version = "0.14.0"
+version = "0.15.0"
 dependencies = [
  "anyhow",
  "argon2",
@@ -878,7 +878,7 @@ dependencies = [
 
 [[package]]
 name = "ft-worker"
-version = "0.14.0"
+version = "0.15.0"
 dependencies = [
  "anyhow",
  "async-trait",
