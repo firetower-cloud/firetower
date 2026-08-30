@@ -1251,6 +1251,24 @@ pub(super) async fn push_session(
     let mut done = Vec::new();
     let mut refused = Vec::new();
     for c in known_checkouts(&session) {
+        // Per checkout, not per session: a session can hold repositories on
+        // different remotes, and the token that opens one opens neither the
+        // other nor a self-hosted git that needs none. The session's owner
+        // rather than whoever pressed the button — it is their branch going up
+        // under their name.
+        let credential = match state.db.repo_by_slug(&c.slug).await? {
+            Some(repo) => {
+                credential_for(
+                    &state,
+                    &repo.remote,
+                    session.owner.as_str(),
+                    &format!("pushing {} for {id}", c.branch),
+                )
+                .await
+            }
+            None => None,
+        };
+
         match one(
             &state,
             &principal,
@@ -1258,6 +1276,7 @@ pub(super) async fn push_session(
             ft_proto::Action::Push {
                 checkout: c.path.clone(),
             },
+            credential,
         )
         .await
         {
@@ -1390,6 +1409,9 @@ pub(super) async fn commit_session(
                     None => None,
                 },
             },
+            // A commit is local. The remote is not touched until the push,
+            // which is the one that needs a token.
+            None,
         )
         .await
         {
@@ -1468,11 +1490,12 @@ async fn one(
     principal: &Principal,
     id: &SessionId,
     action: ft_proto::Action,
+    credential: Option<ft_proto::Credential>,
 ) -> Result<String, String> {
     let (_, host) = session_context(state, principal, id)
         .await
         .map_err(|e| e.message.clone())?;
-    match state.fleet.run_action(&host, id, action, None).await {
+    match state.fleet.run_action(&host, id, action, credential).await {
         Ok(Ok(detail)) => Ok(detail),
         Ok(Err(why)) => Err(why),
         Err(e) => Err(format!("{e:#}")),
