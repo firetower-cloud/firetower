@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.16.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.15.0...firetower-v0.16.0) (2026-08-30)
+
+
+### Features
+
+* **core:** bring a session's agent back ([fd8d607](https://github.com/firetower-cloud/firetower/commit/fd8d60758c7c6244d77355c241f92ec0c204d742))
+
+
+### Bug Fixes
+
+* **core:** say when a question has been answered ([b349627](https://github.com/firetower-cloud/firetower/commit/b3496275b703e103cc36324b741e9d3422ed0c1a))
+
 ## [0.15.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.14.0...firetower-v0.15.0) (2026-08-30)
 
 
