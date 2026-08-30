@@ -23,13 +23,8 @@ pub async fn run_agent(session: &str, workspace: PathBuf, agent: &str) -> Result
         .await
         .context("setting up how the agent asks for permission")?;
 
-    // Whether this session has ever run is a fact on the volume, not something
-    // the caller has to be trusted to pass down: the log is per session and
-    // survives the container that wrote it. Anything in it means an agent has
-    // spoken here before, so this is that conversation continuing.
-    //
-    // The same file `agentd` counts to decide where its line numbering resumes,
-    // read for the same reason one line earlier.
+    // The log is per session and outlives the container that wrote it, so
+    // anything in it means this conversation is being continued.
     let start = match crate::agentd::has_spoken(&workspace, session).await {
         true => ft_core::Start::Resume,
         false => ft_core::Start::Fresh,
@@ -39,6 +34,13 @@ pub async fn run_agent(session: &str, workspace: PathBuf, agent: &str) -> Result
         .launch_headless(session, &asking, start)
         .with_context(|| format!("{} cannot be driven this way yet", kind.label()))?;
 
+    // Our record of a session is not the agent's. One from before its directory
+    // was kept on the volume has none of its own, so send what to do instead.
+    let fallback = match start {
+        ft_core::Start::Resume => kind.launch_headless(session, &asking, ft_core::Start::Fresh),
+        ft_core::Start::Fresh => None,
+    };
+
     crate::agentd::run(crate::agentd::Launch {
         session_id: session.to_string(),
         workspace,
@@ -46,6 +48,7 @@ pub async fn run_agent(session: &str, workspace: PathBuf, agent: &str) -> Result
         // Inherited from tmux, which was handed the session's environment when
         // it started this. Nothing to add.
         env: vec![],
+        fallback_argv: fallback,
     })
     .await
     .context("supervising the agent")

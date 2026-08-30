@@ -116,6 +116,12 @@ pub struct Launch {
     /// about which agent it is.
     pub argv: Vec<String>,
     pub env: Vec<(String, String)>,
+    /// What to run instead if the first command line does nothing at all.
+    ///
+    /// Asking Claude Code to resume a conversation it does not have is fatal.
+    /// Trying and reading the answer beats knowing where it keeps its history,
+    /// which is theirs to change.
+    pub fallback_argv: Option<Vec<String>>,
 }
 
 /// What a worker asks of a running agent.
@@ -213,7 +219,7 @@ struct Session {
 ///
 /// Returns when the agent does. tmux keeps this alive in between; nothing else
 /// needs to.
-pub async fn run(launch: Launch) -> Result<()> {
+pub async fn run(mut launch: Launch) -> Result<()> {
     let socket = socket_path(&launch.session_id);
     if let Some(parent) = socket.parent() {
         tokio::fs::create_dir_all(parent)
@@ -221,6 +227,49 @@ pub async fn run(launch: Launch) -> Result<()> {
             .with_context(|| format!("making {}", parent.display()))?;
     }
 
+    let log = log_path(&launch.workspace, &launch.session_id);
+    let fallback = launch.fallback_argv.take();
+    let before = count_lines(&log).await;
+
+    run_once(launch.clone(), socket.clone()).await?;
+
+    // It said nothing at all, which means it would not start. Starting a fresh
+    // conversation loses the agent's memory and keeps the workspace.
+    if let Some(argv) = fallback {
+        if did_nothing(&log, before).await {
+            tracing::warn!(
+                session = %launch.session_id,
+                "the agent would not pick the conversation up; starting one instead"
+            );
+            launch.argv = argv;
+            return run_once(launch, socket).await;
+        }
+    }
+
+    Ok(())
+}
+
+/// Whether everything this run appended was it refusing to start: an error
+/// result with no turns, which is enough to act on without reading the sentence.
+async fn did_nothing(log: &Path, before: u64) -> bool {
+    let Ok(text) = tokio::fs::read_to_string(log).await else {
+        return false;
+    };
+    let added: Vec<&str> = text.lines().skip(before as usize).collect();
+    if added.is_empty() {
+        return false;
+    }
+    added.iter().all(|line| {
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
+            return false;
+        };
+        value.get("is_error").and_then(serde_json::Value::as_bool) == Some(true)
+            && value.get("num_turns").and_then(serde_json::Value::as_u64) == Some(0)
+    })
+}
+
+/// One attempt: the agent, its socket, and everything said until it exits.
+async fn run_once(launch: Launch, socket: PathBuf) -> Result<()> {
     let (session, mut child, pump) = start(launch, socket.clone()).await?;
     let session = Arc::new(session);
 
@@ -657,6 +706,7 @@ mod tests {
             workspace: workspace.path().to_path_buf(),
             argv: shell("echo '{\"a\":1}'; echo '{\"b\":2}'"),
             env: vec![],
+            fallback_argv: None,
         })
         .await
         .unwrap();
@@ -666,6 +716,57 @@ mod tests {
             .unwrap();
         assert_eq!(log.lines().count(), 2, "both lines should be in the log");
         assert!(log.contains("\"a\":1"));
+    }
+
+    /// Claude Code refuses to resume a conversation it cannot find, and the
+    /// sessions that happens to are the ones a relaunch is for: anything from
+    /// before the agent's directory was kept on the volume has none of its own.
+    #[tokio::test]
+    async fn an_agent_that_will_not_resume_starts_a_conversation_instead() {
+        let session = a_session("fallback");
+        let workspace = tempfile::tempdir().unwrap();
+        let refused =
+            r#"{"type":"result","is_error":true,"num_turns":0,"errors":["No conversation found"]}"#;
+
+        run(Launch {
+            session_id: session.clone(),
+            workspace: workspace.path().to_path_buf(),
+            argv: shell(&format!("echo '{refused}'")),
+            env: vec![],
+            fallback_argv: Some(shell("echo '{\"type\":\"system\"}'")),
+        })
+        .await
+        .unwrap();
+
+        let log = tokio::fs::read_to_string(log_path(workspace.path(), &session))
+            .await
+            .unwrap();
+        assert!(
+            log.contains("\"type\":\"system\""),
+            "the second command line should have run: {log}"
+        );
+    }
+
+    /// And an agent that said something real is left alone, however it exited.
+    #[tokio::test]
+    async fn an_agent_that_did_something_is_not_started_again() {
+        let session = a_session("no-fallback");
+        let workspace = tempfile::tempdir().unwrap();
+
+        run(Launch {
+            session_id: session.clone(),
+            workspace: workspace.path().to_path_buf(),
+            argv: shell("echo '{\"type\":\"assistant\"}'"),
+            env: vec![],
+            fallback_argv: Some(shell("echo '{\"type\":\"system\"}'")),
+        })
+        .await
+        .unwrap();
+
+        let log = tokio::fs::read_to_string(log_path(workspace.path(), &session))
+            .await
+            .unwrap();
+        assert!(!log.contains("\"type\":\"system\""), "{log}");
     }
 
     #[tokio::test]
@@ -681,6 +782,7 @@ mod tests {
                 // Prints, waits long enough to be attached to mid-flight, prints again.
                 argv: shell("echo one; sleep 0.4; echo two"),
                 env: vec![],
+                fallback_argv: None,
             })
             .await
             .unwrap();
@@ -715,6 +817,7 @@ mod tests {
                 workspace: path,
                 argv: shell("echo one; echo two; sleep 0.3; echo three"),
                 env: vec![],
+                fallback_argv: None,
             })
             .await
             .unwrap();
@@ -748,6 +851,7 @@ mod tests {
                 // pipe is open and reaches the process.
                 argv: shell("head -n 1"),
                 env: vec![],
+                fallback_argv: None,
             })
             .await
             .unwrap();
@@ -794,6 +898,7 @@ mod tests {
             workspace: workspace.clone(),
             argv: shell("echo deep"),
             env: vec![],
+            fallback_argv: None,
         })
         .await
         .expect("a deep workspace should still start");
@@ -820,6 +925,7 @@ mod tests {
             workspace: workspace.path().to_path_buf(),
             argv: shell("echo '{\"who\":\"first\"}'"),
             env: vec![],
+            fallback_argv: None,
         })
         .await
         .unwrap();
@@ -830,6 +936,7 @@ mod tests {
             workspace: workspace.path().to_path_buf(),
             argv: shell("echo '{\"who\":\"second\"}'"),
             env: vec![],
+            fallback_argv: None,
         })
         .await
         .unwrap();
@@ -886,6 +993,7 @@ mod tests {
             workspace: workspace.path().to_path_buf(),
             argv: shell("echo one; echo two"),
             env: vec![],
+            fallback_argv: None,
         })
         .await
         .unwrap();
@@ -895,6 +1003,7 @@ mod tests {
             workspace: workspace.path().to_path_buf(),
             argv: shell("echo three"),
             env: vec![],
+            fallback_argv: None,
         })
         .await
         .unwrap();
