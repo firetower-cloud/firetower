@@ -1,5 +1,55 @@
 # Changelog
 
+## [0.14.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.13.0...firetower-v0.14.0) (2026-08-30)
+
+
+### Features
+
+* closing an agent's tab ends the agent ([c298374](https://github.com/firetower-cloud/firetower/commit/c2983740e4293bd72489b9e3936f0264ee68e7fb))
+* create a workspace, and see what it is called ([c980019](https://github.com/firetower-cloud/firetower/commit/c98001994776e49b5d8f11ff10daceec4d610627))
+* home is a page in the rail again, with an overview of everything ([bad6bf1](https://github.com/firetower-cloud/firetower/commit/bad6bf1d0c17e064241f1db2331280ff6fe2f8bb))
+* home is a place again, and the workspace screen is only work ([17fafd2](https://github.com/firetower-cloud/firetower/commit/17fafd2fc6a6e40de9e22eb5d1eb4c0e3d2d6342))
+* install an agent onto a host from the interface ([7a13941](https://github.com/firetower-cloud/firetower/commit/7a139416a2c825e2dbc04ac054534b528e7192ab))
+* one rail everywhere, and setup behind Configuration ([f4931d0](https://github.com/firetower-cloud/firetower/commit/f4931d083013c0fb6f768fe815486eeb3a4b5136))
+* pull tasks from GitHub and start a worktree from one ([8e28f30](https://github.com/firetower-cloud/firetower/commit/8e28f30b00e153cb52fa8ab15ef5a9b3b35c94f2))
+* redesign the tab system and theme ([ba5d4b3](https://github.com/firetower-cloud/firetower/commit/ba5d4b3f5b1d568a9b4863d645baf436e5d44ba7))
+* **server:** one socket for everything that changes on its own ([b5358d7](https://github.com/firetower-cloud/firetower/commit/b5358d7f56bc01531ff0a13d7eaaf7d0f90643a2))
+* several agents in one workspace ([7a7217a](https://github.com/firetower-cloud/firetower/commit/7a7217a62d883ec00aafc213cbdc3a68d58690ff))
+* the interface on the new system, and a dashboard you can act on ([514dd0c](https://github.com/firetower-cloud/firetower/commit/514dd0c5743966728dc91a03fb91b1bf1353b97c))
+* **web:** a workbench, instead of one session per page ([0ec96fb](https://github.com/firetower-cloud/firetower/commit/0ec96fb6515d292dcac0d9e01befd4820dfd4a8d))
+* **web:** connect a repository from the new-worktree dialog ([da74565](https://github.com/firetower-cloud/firetower/commit/da745653332800ac73570a75c56522c051602bb9))
+* **web:** name the workspace, not the task ([73de7b1](https://github.com/firetower-cloud/firetower/commit/73de7b1119722cc1495a179ce4876b9e070ce8b5))
+* **web:** read a task before starting it, and never send it for you ([6d8fea2](https://github.com/firetower-cloud/firetower/commit/6d8fea21340e828fb02c12e09529f95a8cd28c93))
+* **web:** show the work, not a summary of it ([68583d0](https://github.com/firetower-cloud/firetower/commit/68583d0f7ace7978fb1d398651fd60cf0bd30cc0))
+* **web:** tabs belong to a session, and the header between them goes ([a6851e3](https://github.com/firetower-cloud/firetower/commit/a6851e3b824180b1e858753d71dab1b19e92f58f))
+* **web:** the page follows one socket instead of one stream per tab ([1be40d9](https://github.com/firetower-cloud/firetower/commit/1be40d9967f93adfdbece8fd083c7bca4cb09f6e))
+* **web:** the rail groups runs under the workspace they are in ([d6a6f57](https://github.com/firetower-cloud/firetower/commit/d6a6f579e75e02a2f14c4f654e5a628e077d25eb))
+* **web:** the rail's + cuts a worktree ([4efe344](https://github.com/firetower-cloud/firetower/commit/4efe34430153b3482faa0421a048fc4eee8b57f6))
+* **web:** the right panel switches views, and shipping is one of them ([063f926](https://github.com/firetower-cloud/firetower/commit/063f9269c8dd8e98c841dc4ad82386a7ddb0c058))
+* **web:** tokens and primitives for one design system ([647270f](https://github.com/firetower-cloud/firetower/commit/647270f06139f6409c8c803657f1872cdb073c53))
+
+
+### Bug Fixes
+
+* a conversation that stopped had nothing to restart it ([ffc5d96](https://github.com/firetower-cloud/firetower/commit/ffc5d96b5bfe37e99d8b066c4287a69b982e3c1f))
+* an agent's transcript is its own, and so is its tab ([d026ee0](https://github.com/firetower-cloud/firetower/commit/d026ee0de8f0be87201d68649cb8cb32b40d7469))
+* say when the agent is ready, and stop calling it Working ([143aae8](https://github.com/firetower-cloud/firetower/commit/143aae895e574403fafd443c712cfb2d869ba9b2))
+* **server:** Codex opened every session by asking it nothing ([62111a6](https://github.com/firetower-cloud/firetower/commit/62111a6e3397b33d2b477dc410f3d89e6c0d727d))
+* **web:** a discarded socket was clearing the reference to its replacement ([56f6674](https://github.com/firetower-cloud/firetower/commit/56f66743239ab5732bfe481d56e875afe83861a5))
+* **web:** four pixels inside the terminal, not three ([0f68128](https://github.com/firetower-cloud/firetower/commit/0f681283798a4b834795071e4ac4c4a20b046897))
+* **web:** give the composer its edges back, and stop the restore eating a link ([db85dfa](https://github.com/firetower-cloud/firetower/commit/db85dfabbaa34a9eda3b9ec818f82d6c39102910))
+* **web:** the agent list vanished from the new-tab menu ([b522a49](https://github.com/firetower-cloud/firetower/commit/b522a498c63d60f5e69629304da08ccef77a1e1f))
+* **web:** the new-tab menu said "no agents" while it was still asking ([0037bc4](https://github.com/firetower-cloud/firetower/commit/0037bc44a0bded17ae66e38c94a08e164ba415c5))
+* **web:** the terminal is the pane ([b51f833](https://github.com/firetower-cloud/firetower/commit/b51f83390f5c50834020a6962ce7df07ad89e6de))
+* **web:** three pixels inside the terminal ([31d2aab](https://github.com/firetower-cloud/firetower/commit/31d2aabd3208154894bd24bf56e8ecc0e80c64ea))
+* **worker:** a new agent waited on the log its neighbour left behind ([dc0b409](https://github.com/firetower-cloud/firetower/commit/dc0b409812689c71b69a6d53630346c0f993bea9))
+* **worker:** one diff from the merge base, so a file is listed once ([538fedd](https://github.com/firetower-cloud/firetower/commit/538feddd9c82c22a93d97103188f41fb0989c211))
+
+
+### Performance Improvements
+
+* **web:** stop polling for what the socket already pushes ([0cb8b19](https://github.com/firetower-cloud/firetower/commit/0cb8b1905f495afcf03c112272a9df1195982b28))
+
 ## [0.13.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.12.0...firetower-v0.13.0) (2026-08-27)
 
 
