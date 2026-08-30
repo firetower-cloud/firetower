@@ -57,6 +57,7 @@ export function Chat({
   onAddRepo,
   steps = [],
   head,
+  notice,
 }: {
   sessionId: string;
   live: boolean;
@@ -75,6 +76,15 @@ export function Chat({
   onAddRepo?: () => void;
   /** How the workspace was built, drawn at the top of the transcript. */
   steps?: Line[];
+  /**
+   * Something to deal with that is not the agent's doing — an agent that has
+   * stopped, and the way to start it again.
+   *
+   * Drawn with the agent's own cards rather than above the transcript, because
+   * it is the same kind of thing: the one item between you and saying anything
+   * else.
+   */
+  notice?: React.ReactNode;
 }) {
   const { conversation, echo, settle, remember } = useConversation(sessionId);
   const { notes, add, drop, clear } = useNotes(sessionId);
@@ -339,6 +349,7 @@ export function Chat({
             many cards the agent has open, the composer below them keeps its
             full height. */}
         <div className="min-h-0 overflow-y-auto">
+          {notice}
           {conversation.questions.map((asking) => (
             <Questions
               key={asking.req}

@@ -376,6 +376,15 @@ async fn append(log: &Path, line: &str) -> Result<()> {
     Ok(())
 }
 
+/// Whether an agent has ever said anything in this session.
+///
+/// Which is the same question as "has this session run before", and the only
+/// place it is answered by something that outlives the process: the log is on
+/// the volume, so it is still there after the container that wrote it is gone.
+pub async fn has_spoken(workspace: &Path, session_id: &str) -> bool {
+    count_lines(&readable_log(workspace, session_id)).await > 0
+}
+
 async fn count_lines(log: &Path) -> u64 {
     let Ok(text) = tokio::fs::read_to_string(log).await else {
         return 0;

@@ -540,6 +540,19 @@ async fn tell(
     );
 }
 
+/// What went wrong, in words somebody can act on.
+///
+/// `AgentUnavailable` is the ordinary one and reads as gibberish: it means the
+/// process is gone, which after an upgrade is every session on the machine at
+/// once. Saying so — and that the work is still there — is the difference
+/// between a page that looks broken and one with a button on it.
+fn note_for(code: &str, message: &str) -> String {
+    match code {
+        "AgentUnavailable" => "The agent is not running. Its workspace is still here.".to_string(),
+        _ => message.to_string(),
+    }
+}
+
 /// A question, short enough for a card in the inbox.
 fn asking_about(tool: &str, args: &serde_json::Value) -> String {
     for key in ["command", "file_path", "path", "url"] {
@@ -1494,8 +1507,32 @@ impl Fleet {
                                 None => tracing::debug!("a Codex sign-in finished after its request gave up"),
                             }
                         }
-                        Ok(ToServer::Error { code, message, .. }) => {
+                        Ok(ToServer::Error { session_id, code, message }) => {
                             tracing::warn!(host = %host_id, "worker error {code}: {message}");
+                            // A fault the worker took the trouble to name a
+                            // session for is that session's news, not the log's.
+                            // Dropping it is what left somebody typing into a
+                            // page that would never answer: the agent had gone,
+                            // the worker said so, and the only place it was
+                            // written down was inside a container.
+                            //
+                            // A host-level fault names nothing, and must not be
+                            // pinned on whichever session went last.
+                            if let Some(session_id) = session_id {
+                                let note = note_for(&code, &message);
+                                if let Err(e) = db
+                                    .set_session_state(&session_id, SessionStatus::Failed, Some(&note))
+                                    .await
+                                {
+                                    tracing::warn!(session = %session_id, "recording a worker error: {e:#}");
+                                }
+                                // So an open browser stops waiting without
+                                // being reloaded.
+                                if let Some(tx) = conversations.read().await.get(session_id.as_str()) {
+                                    let _ = tx.send(AgentSpeech::Closed);
+                                }
+                                tell(&db, &notify, &session_id, Some(&note)).await;
+                            }
                         }
                         Ok(_) => {}
                         Err(CodecError::Closed) => {

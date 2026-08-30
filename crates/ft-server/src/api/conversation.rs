@@ -297,7 +297,35 @@ pub(super) async fn send_turn(
             "there is nothing to send",
         ));
     }
-    let host = host_of(&state, &principal, &id).await?;
+    let who = owner(&principal)?.to_string();
+    let session = state
+        .db
+        .session_of(&who, &id)
+        .await?
+        .ok_or_else(|| ApiError::new(ErrorCode::NotFound, "no such session"))?;
+    let host = session.host_id.clone();
+
+    // Speaking to a session whose agent has gone brings it back first.
+    //
+    // The ordinary way to arrive here is an upgrade: recreating the container
+    // ends every agent on the machine, and the first anybody knows of it is
+    // typing into one. Making that restart the agent rather than report a
+    // corpse is the difference between an upgrade being invisible and every
+    // workspace on the machine being abandoned.
+    //
+    // Only from `Failed`, which is the state a worker error puts a session in,
+    // so this cannot fire for a session that is merely busy. And only once: the
+    // relaunch either works or leaves the same state behind, and the next
+    // message is somebody deciding to try again rather than a loop.
+    if session.status == ft_core::SessionStatus::Failed {
+        crate::api::sessions::relaunch(&state, &session, &who).await?;
+        // Long enough for the supervisor to bind its socket, which is all this
+        // is waiting for — the agent behind it can still be starting, because
+        // what we send lands on a pipe it will read when it is ready. If it is
+        // not there even so, the turn fails the way it did before and now says
+        // so.
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+    }
 
     state
         .fleet

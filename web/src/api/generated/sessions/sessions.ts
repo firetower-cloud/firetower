@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.12.0
+ * OpenAPI spec version: 0.15.0
  */
 import {
   useMutation,
@@ -1917,6 +1917,87 @@ export const usePushSession = <TError = ApiError,
         TContext
       > => {
       return useMutation(getPushSessionMutationOptions(options), queryClient);
+    }
+    export const getRelaunchSessionUrl = (id: string,) => {
+
+
+
+
+  return `/api/v1/sessions/${id}/relaunch`
+}
+
+/**
+ * A session outlives the process running it. The worktree, the branch, the
+ * commits and everything said so far are on the volume; the agent is a child
+ * process with a socket in `/tmp`, and recreating the container to upgrade
+ * Firetower ends every one of them at once. Without this, an upgrade turned
+ * every workspace on the machine into a page that could be typed into and
+ * would never answer, and the only way on was to start again somewhere else.
+ *
+ * Not [`start_another_agent`]: that one makes a *second* run in the same
+ * place, with its own conversation. This is the same run coming back — same
+ * id, and therefore the same `--session-id`, which is what lets the agent pick
+ * the conversation up rather than begin one.
+ * @summary Start this session's agent again, in the workspace it already has.
+ */
+export const relaunchSession = async (id: string, options?: Parameters<typeof http>[1]): Promise<Done> => {
+
+  return http<Done>(getRelaunchSessionUrl(id),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getRelaunchSessionMutationOptions = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof relaunchSession>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof http>}
+): UseMutationOptions<Awaited<ReturnType<typeof relaunchSession>>, TError,{id: string}, TContext> => {
+
+const mutationKey = ['relaunchSession'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof relaunchSession>>, {id: string}> = (props) => {
+          const {id} = props ?? {};
+
+          return  relaunchSession(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RelaunchSessionMutationResult = NonNullable<Awaited<ReturnType<typeof relaunchSession>>>
+
+    export type RelaunchSessionMutationError = ApiError
+
+    /**
+ * @summary Start this session's agent again, in the workspace it already has.
+ */
+export const useRelaunchSession = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof relaunchSession>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof relaunchSession>>,
+        TError,
+        {id: string},
+        TContext
+      > => {
+      return useMutation(getRelaunchSessionMutationOptions(options), queryClient);
     }
     export const getAddRepoUrl = (id: string,) => {
 

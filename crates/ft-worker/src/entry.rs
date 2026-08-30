@@ -23,8 +23,20 @@ pub async fn run_agent(session: &str, workspace: PathBuf, agent: &str) -> Result
         .await
         .context("setting up how the agent asks for permission")?;
 
+    // Whether this session has ever run is a fact on the volume, not something
+    // the caller has to be trusted to pass down: the log is per session and
+    // survives the container that wrote it. Anything in it means an agent has
+    // spoken here before, so this is that conversation continuing.
+    //
+    // The same file `agentd` counts to decide where its line numbering resumes,
+    // read for the same reason one line earlier.
+    let start = match crate::agentd::has_spoken(&workspace, session).await {
+        true => ft_core::Start::Resume,
+        false => ft_core::Start::Fresh,
+    };
+
     let argv = kind
-        .launch_headless(session, &asking)
+        .launch_headless(session, &asking, start)
         .with_context(|| format!("{} cannot be driven this way yet", kind.label()))?;
 
     crate::agentd::run(crate::agentd::Launch {

@@ -7,6 +7,7 @@ import { useListHosts } from "@/src/api/generated/hosts/hosts";
 import { useSessionControls } from "@/src/api/generated/conversation/conversation";
 import { Chat } from "@/components/Chat";
 import { AddRepo } from "@/components/AddRepo";
+import { RestartAgent } from "@/components/RestartAgent";
 import { stepLines } from "@/components/Steps";
 import { AgentMark, AGENT_LABEL } from "@/components/AgentMark";
 import { answerable, unfinished } from "@/src/api/view";
@@ -72,6 +73,10 @@ export function SessionTab({ sessionId }: { sessionId: string }) {
         onAddRepo={busy ? () => setAdding(true) : undefined}
         steps={stepLines(session, events)}
         head={<Plate session={session} />}
+        /* `Failed` is a resting state, not the end — see `answerable`. It is
+           where a session lands when its agent has gone, which after an
+           upgrade is every session on the machine. */
+        notice={session.status === "Failed" ? <RestartAgent session={session} /> : undefined}
       />
     </div>
   );

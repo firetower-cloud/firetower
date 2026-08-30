@@ -647,6 +647,16 @@ impl Worker {
                     structured::tell(&session_id, &agentd::ToAgent::Decide { req, result }).await
                 {
                     tracing::warn!(session = %session_id, "answering: {e:#}");
+                    // The same report a failed turn makes. Answering a question
+                    // whose agent has gone was the quieter half of the same
+                    // fault: the card stayed, the answer went nowhere, and
+                    // nothing said which had happened.
+                    out.send(ToServer::Error {
+                        session_id: Some(session_id),
+                        code: "AgentUnavailable".into(),
+                        message: format!("{e:#}"),
+                    })
+                    .await?;
                 }
             }
 

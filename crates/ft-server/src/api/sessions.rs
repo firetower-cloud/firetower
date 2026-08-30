@@ -669,6 +669,147 @@ pub(super) async fn create_session(
     Ok((StatusCode::CREATED, Json(session)))
 }
 
+/// Start this session's agent again, in the workspace it already has.
+///
+/// A session outlives the process running it. The worktree, the branch, the
+/// commits and everything said so far are on the volume; the agent is a child
+/// process with a socket in `/tmp`, and recreating the container to upgrade
+/// Firetower ends every one of them at once. Without this, an upgrade turned
+/// every workspace on the machine into a page that could be typed into and
+/// would never answer, and the only way on was to start again somewhere else.
+///
+/// Not [`start_another_agent`]: that one makes a *second* run in the same
+/// place, with its own conversation. This is the same run coming back — same
+/// id, and therefore the same `--session-id`, which is what lets the agent pick
+/// the conversation up rather than begin one.
+#[utoipa::path(
+    post, path = "/api/v1/sessions/{id}/relaunch", tag = "sessions",
+    params(("id" = String, Path, description = "Session id")),
+    responses(
+        (status = 200, body = Done),
+        (status = 404, body = ApiError),
+        (status = 409, body = ApiError),
+    ),
+)]
+pub(super) async fn relaunch_session(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Path(id): Path<String>,
+) -> ApiResult<Json<Done>> {
+    let id = SessionId::from_stored(id);
+    let owner = owner(&principal)?.to_string();
+    let session = state
+        .db
+        .session_of(&owner, &id)
+        .await?
+        .ok_or_else(|| ApiError::not_found("session"))?;
+
+    relaunch(&state, &session, &owner).await?;
+
+    Ok(Json(Done {
+        detail: format!("{} is starting again", session.agent.label()),
+    }))
+}
+
+/// The work behind [`relaunch_session`], so a turn can do it without a request.
+///
+/// Everything is resolved fresh rather than remembered: the credential comes
+/// out of the vault against this session, and the directory is derived the way
+/// it was when the workspace was built. Nothing about a relaunch may depend on
+/// state the restarted process was holding, because there isn't any.
+pub(crate) async fn relaunch(
+    state: &AppState,
+    session: &Session,
+    owner: &str,
+) -> Result<(), ApiError> {
+    if session.forgotten_at.is_some() {
+        return Err(ApiError::new(
+            ErrorCode::InvalidRequest,
+            "that workspace has been removed",
+        ));
+    }
+
+    let host = state
+        .db
+        .host_by_id(&session.host_id)
+        .await?
+        .ok_or_else(|| ApiError::new(ErrorCode::NoCapacity, "that session's host is gone"))?;
+
+    // The same grace the other launch path gives: a host that has just dropped
+    // is usually seconds from being back, and after an upgrade that is exactly
+    // where everything is.
+    let reachable = state.fleet.is_connected(&host.id).await
+        || (state.fleet.is_supervised(&host.id).await
+            && state
+                .fleet
+                .wait_until_connected(&host.id, RECONNECT_GRACE)
+                .await);
+
+    if !reachable {
+        return Err(ApiError::new(
+            ErrorCode::HostUnreachable,
+            format!("{} isn't responding", host.name),
+        ));
+    }
+
+    // Derived the same way it was when the workspace was built — see
+    // `start_another_agent`, which reads it from the same two facts.
+    let directory = match session.branch.as_deref() {
+        Some(branch) if session.repo.is_some() => {
+            let workspace = session
+                .workspace_id
+                .as_ref()
+                .map(|w| w.as_str().to_string())
+                .unwrap_or_else(|| session.id.as_str().to_string());
+            ft_core::workspace_name(branch, &workspace)
+        }
+        _ => session
+            .workspace_id
+            .as_ref()
+            .map(|w| w.as_str().to_string())
+            .unwrap_or_else(|| session.id.as_str().to_string()),
+    };
+
+    let mut env: Vec<(String, String)> = Vec::new();
+    for (name, value) in agent_env(state, session.agent, &session.id, owner).await? {
+        env.retain(|(existing, _)| *existing != name);
+        env.push((name, value));
+    }
+    let agent_home = agent_home(state, session.agent, &session.id, owner).await?;
+
+    state
+        .fleet
+        .send(
+            &host.id,
+            ToWorker::StartAgent(Box::new(ft_proto::StartAgent {
+                session_id: session.id.clone(),
+                workspace: directory,
+                // Nothing to ask for. The conversation is being picked up, not
+                // opened, and a prompt here would be a turn nobody typed.
+                prompt: String::new(),
+                agent: session.agent,
+                title: session.title.clone(),
+                repo: session.repo.clone(),
+                branch: session.branch.clone(),
+                base: session.base.clone(),
+                size: session.size,
+                env,
+                agent_home,
+            })),
+        )
+        .await?;
+
+    if let Err(e) = state
+        .db
+        .set_session_state(&session.id, ft_core::SessionStatus::Starting, None)
+        .await
+    {
+        tracing::warn!(session = %session.id, "recording a relaunch: {e:#}");
+    }
+
+    Ok(())
+}
+
 /// Another agent, in a workspace that is already there.
 ///
 /// The place is not made again: its host, its repositories, its branch and its

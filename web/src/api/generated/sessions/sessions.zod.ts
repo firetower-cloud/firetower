@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.12.0
+ * OpenAPI spec version: 0.15.0
  */
 import * as zod from 'zod';
 
@@ -658,6 +658,28 @@ export const PushSessionParams = zod.object({
 })
 
 export const PushSessionResponse = zod.object({
+  "detail": zod.string()
+})
+
+/**
+ * A session outlives the process running it. The worktree, the branch, the
+ * commits and everything said so far are on the volume; the agent is a child
+ * process with a socket in `/tmp`, and recreating the container to upgrade
+ * Firetower ends every one of them at once. Without this, an upgrade turned
+ * every workspace on the machine into a page that could be typed into and
+ * would never answer, and the only way on was to start again somewhere else.
+ *
+ * Not [`start_another_agent`]: that one makes a *second* run in the same
+ * place, with its own conversation. This is the same run coming back — same
+ * id, and therefore the same `--session-id`, which is what lets the agent pick
+ * the conversation up rather than begin one.
+ * @summary Start this session's agent again, in the workspace it already has.
+ */
+export const RelaunchSessionParams = zod.object({
+  "id": zod.string().describe('Session id')
+})
+
+export const RelaunchSessionResponse = zod.object({
   "detail": zod.string()
 })
 

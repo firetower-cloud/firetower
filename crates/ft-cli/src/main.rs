@@ -325,6 +325,22 @@ async fn main() -> Result<()> {
                 .await
                 .with_context(|| format!("creating {}", home.display()))?;
 
+            // The agent's own directory, when the image has pointed `HOME` at
+            // one. It sits inside the volume deliberately — an agent's memory
+            // of a conversation has to outlive the container, or upgrading
+            // Firetower silently forgets every session on the machine.
+            //
+            // Made here rather than in the image because a named volume that
+            // already has content is mounted over what the image built: an
+            // install that predates this would start with `HOME` naming a
+            // directory that does not exist, which is a worse failure than the
+            // one it is fixing.
+            if let Some(agent_home) = std::env::var_os("HOME").map(std::path::PathBuf::from) {
+                if let Err(e) = tokio::fs::create_dir_all(&agent_home).await {
+                    tracing::warn!("creating {}: {e:#}", agent_home.display());
+                }
+            }
+
             // The banner belongs to the server, not to this: it is printed
             // once the checks that can refuse to start have passed. Printing
             // an address here and then failing to bind it announced a server

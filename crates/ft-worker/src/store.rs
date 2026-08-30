@@ -98,10 +98,31 @@ impl Store {
         size: ft_core::WorkspaceSize,
     ) -> Result<()> {
         let now = chrono::Utc::now().to_rfc3339();
+        // A session that is already here is one starting again, not a second
+        // one. This database is on the volume, so it outlives the container —
+        // and after an upgrade every session on the machine is relaunched into
+        // a row that still describes it correctly. A plain insert answered that
+        // with a constraint violation, which left the run in `Starting` with
+        // nothing to explain it.
+        //
+        // `created_at` is deliberately not touched: the session began when it
+        // began. Everything else is restated, because the caller has just been
+        // told what this session is by the control plane and that is newer than
+        // whatever is here.
         sqlx::query(
             "INSERT INTO sessions
                (id, repo, title, prompt, branch, base, agent, size, status, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             ON CONFLICT(id) DO UPDATE SET
+               repo = excluded.repo,
+               title = excluded.title,
+               prompt = excluded.prompt,
+               branch = excluded.branch,
+               base = excluded.base,
+               agent = excluded.agent,
+               size = excluded.size,
+               status = excluded.status,
+               updated_at = excluded.updated_at",
         )
         .bind(id.as_str())
         .bind(repo)
@@ -434,6 +455,54 @@ mod tests {
 
     async fn store() -> Store {
         Store::open_ephemeral().await.unwrap()
+    }
+
+    /// Upgrading Firetower recreates the container, which kills every agent on
+    /// the machine — and this database is on the volume, so their rows are all
+    /// still here when they come back. A plain insert answered that with a
+    /// constraint violation, and the relaunch died before it started.
+    #[tokio::test]
+    async fn a_session_that_is_already_here_can_start_again() {
+        let store = store().await;
+        let id = a_session(&store).await;
+
+        store.set_status(&id, SessionStatus::Working).await.unwrap();
+        store
+            .append(
+                &id,
+                &EventKind::AgentLaunched {
+                    agent: ft_core::Agent::ClaudeCode,
+                },
+            )
+            .await
+            .unwrap();
+        let before = store.head().await.unwrap();
+
+        // The same session, starting again, exactly as `start_agent` does it.
+        store
+            .create_session(
+                &id,
+                Some("acme/backend"),
+                "Fix retries",
+                "Fix retries",
+                Some("agent/fix"),
+                Some("main"),
+                "ClaudeCode",
+                ft_core::WorkspaceSize::Medium,
+            )
+            .await
+            .expect("a session that already exists starts again rather than failing");
+
+        assert_eq!(
+            store.status_of(&id).await.unwrap(),
+            Some(SessionStatus::Starting),
+            "it is starting, which is what it is doing"
+        );
+        assert_eq!(
+            store.head().await.unwrap(),
+            before,
+            "and its history is still there, because this is the same session"
+        );
     }
 
     async fn a_session(s: &Store) -> SessionId {

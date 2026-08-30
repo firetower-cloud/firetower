@@ -288,6 +288,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(sessions::list_files))
         .routes(routes!(sessions::download_file))
         .routes(routes!(sessions::stop_session))
+        .routes(routes!(sessions::relaunch_session))
         .routes(routes!(sessions::rename_session))
         .routes(routes!(sessions::push_session))
         .routes(routes!(sessions::commit_session))

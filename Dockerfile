@@ -117,6 +117,20 @@ ENV FIRETOWER_HOME=/var/lib/firetower
 RUN mkdir -p "$FIRETOWER_HOME"
 VOLUME /var/lib/firetower
 
+# The agent's own directory, on the volume — the same arrangement, and for the
+# same reason, as the worker image.
+#
+# This image runs agents too: `firetower serve` supervises this machine's worker
+# itself, so `localhost` is a real host with real sessions on it. Their memory
+# of a conversation lives here, and with it under the container's own root it
+# was thrown away every time this image was upgraded — which is the one moment
+# it is guaranteed to happen, and to every session at once.
+#
+# Not for credentials: what an agent authenticates with is handed to a session
+# as it starts and is never written here.
+ENV HOME=/var/lib/firetower/home
+RUN mkdir -p "$HOME"
+
 # A container that only listened on loopback would be reachable by nothing.
 # Firetower refuses to bind this without authentication configured, so the two
 # settings belong next to each other.

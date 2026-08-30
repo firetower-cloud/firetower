@@ -121,15 +121,30 @@ impl Agent {
     ///   worker keeps is the whole conversation rather than half of it.
     /// - `--session-id` fixes the identifier up front instead of learning it
     ///   afterwards, which is what makes a session resumable even if the first
-    ///   thing that happens is a crash.
+    ///   thing that happens is a crash. [`Start::Resume`] is that promise being
+    ///   collected: same identifier, `--resume` instead.
     ///
     /// `--bare` is deliberately absent. It skips hooks, skills, MCP servers and
     /// `CLAUDE.md` — everything that makes an agent useful in somebody's actual
     /// repository — and refuses to read a subscription login.
-    pub fn launch_headless(&self, session_id: &str, asking: &Asking) -> Option<Vec<String>> {
+    pub fn launch_headless(
+        &self,
+        session_id: &str,
+        asking: &Asking,
+        start: Start,
+    ) -> Option<Vec<String>> {
         let agent_session = agent_session_uuid(session_id);
         match self {
             Agent::ClaudeCode => {
+                // The same name either way, and two different things to do with
+                // it. `--session-id` means *begin one called this*, which is
+                // right once and a refusal every time after — and the times
+                // after are ordinary now: upgrading Firetower recreates the
+                // container and every agent on it has to come back.
+                let naming = match start {
+                    Start::Fresh => "--session-id",
+                    Start::Resume => "--resume",
+                };
                 let mut argv: Vec<String> = [
                     self.command(),
                     "-p",
@@ -140,7 +155,7 @@ impl Agent {
                     "--include-partial-messages",
                     "--verbose",
                     "--replay-user-messages",
-                    "--session-id",
+                    naming,
                     &agent_session,
                 ]
                 .iter()
@@ -244,7 +259,8 @@ impl Agent {
     /// tab a session gets, whether it is watched or attached to, and whether
     /// it is asked to report on itself.
     pub fn speaks_a_protocol(&self) -> bool {
-        self.launch_headless("probe", &Asking::CannotAsk).is_some()
+        self.launch_headless("probe", &Asking::CannotAsk, Start::Fresh)
+            .is_some()
     }
 }
 
@@ -712,6 +728,21 @@ pub enum AgentMode {
 /// Changeable per session — see the composer — so this is a starting point
 /// rather than a policy.
 pub const BIGGEST: &str = "opus[1m]";
+
+/// Whether this agent is beginning a conversation or picking one back up.
+///
+/// A session outlives the process running it. The worktree, the branch and
+/// everything said so far are on the volume; the agent is a child process with
+/// a socket in `/tmp`, and recreating the container to upgrade Firetower ends
+/// every one of them. Coming back has to be ordinary, so which of the two this
+/// is has to be said rather than assumed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Start {
+    /// Nothing has run under this session id before.
+    Fresh,
+    /// It has, and its conversation is still on disk.
+    Resume,
+}
 
 /// Whether there is anybody to answer a permission prompt.
 ///
