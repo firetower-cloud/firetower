@@ -48,6 +48,26 @@ pub struct Checkout {
     /// other, not one object spanning both.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pull_request: Option<String>,
+    /// What became of it, last time anybody asked.
+    ///
+    /// `None` is not `Open`: one means nobody has looked, the other means we
+    /// looked and it is still waiting for a reviewer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pull_state: Option<PullState>,
+}
+
+/// What became of a pull request.
+///
+/// Merged and abandoned are the same `state` to a git host — only the moment it
+/// was merged tells them apart — so the reading happens once, here, rather than
+/// in every screen that shows one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum PullState {
+    Open,
+    Merged,
+    /// Closed without merging. The branch and the work are still there.
+    Closed,
 }
 
 impl Checkout {
@@ -398,6 +418,7 @@ mod tests {
             path: String::new(),
             trouble: None,
             pull_request: None,
+            pull_state: None,
         };
         // Every session made before a session could hold more than one is laid
         // out this way, and something still has to draw it.

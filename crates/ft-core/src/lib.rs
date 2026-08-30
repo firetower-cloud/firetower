@@ -1115,6 +1115,9 @@ pub struct CheckoutWork {
     /// Where its pull request is, once it has one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pull_request: Option<String>,
+    /// What became of that request, last time anybody asked.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pull_state: Option<crate::session::PullState>,
     /// Why this repository is not checked out, when it is not.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub trouble: Option<String>,

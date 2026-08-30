@@ -1107,7 +1107,7 @@ impl Db {
 
         let rows = sqlx::query(
             "SELECT s.id AS session_id, r.repo_id, r.slug, r.base, r.branch,
-                    r.path, r.trouble, r.pull_request
+                    r.path, r.trouble, r.pull_request, r.pull_state
                FROM workspace_repos r
                JOIN sessions s ON s.workspace_id = r.workspace_id
               WHERE s.id = ANY($1)
@@ -1133,6 +1133,7 @@ impl Db {
                     path: r.get("path"),
                     trouble: r.get("trouble"),
                     pull_request: r.get("pull_request"),
+                    pull_state: Self::read_pull_state(r.get("pull_state")),
                 });
         }
 
@@ -1228,6 +1229,67 @@ impl Db {
         .execute(&self.pool)
         .await?;
         Ok(())
+    }
+
+    /// Remember what became of a request, and when we last asked.
+    ///
+    /// The time is kept as well as the answer so the asking can be throttled:
+    /// this is a call to somebody else's API on a screen that refreshes.
+    pub async fn set_checkout_pull_state(
+        &self,
+        workspace: &WorkspaceId,
+        path: &str,
+        state: crate::oauth::PullState,
+    ) -> Result<()> {
+        sqlx::query(
+            "UPDATE workspace_repos SET pull_state = $1, pull_checked_at = now()
+              WHERE workspace_id = $2 AND path = $3",
+        )
+        .bind(serde_json::to_string(&state)?.trim_matches('"'))
+        .bind(workspace.as_str())
+        .bind(path)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Every request in a workspace worth asking about, and how stale each is.
+    ///
+    /// Only the ones that have an address and are not already finished: merged
+    /// and closed do not change back, so asking again is a call spent on an
+    /// answer that cannot differ.
+    pub async fn pull_requests_to_check(
+        &self,
+        workspace: &WorkspaceId,
+    ) -> Result<Vec<(String, String, Option<chrono::DateTime<chrono::Utc>>)>> {
+        let rows = sqlx::query(
+            "SELECT path, pull_request, pull_checked_at FROM workspace_repos
+              WHERE workspace_id = $1
+                AND pull_request IS NOT NULL
+                AND (pull_state IS NULL OR pull_state = 'open')",
+        )
+        .bind(workspace.as_str())
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows
+            .into_iter()
+            .map(|r| {
+                (
+                    r.get::<String, _>("path"),
+                    r.get::<String, _>("pull_request"),
+                    r.get("pull_checked_at"),
+                )
+            })
+            .collect())
+    }
+
+    /// The stored word for what became of a request, back into the type.
+    ///
+    /// Anything unrecognised reads as "nobody has asked", which is what an older
+    /// row says and the honest answer for a word a later version wrote.
+    fn read_pull_state(stored: Option<String>) -> Option<ft_core::session::PullState> {
+        serde_json::from_str(&format!("\"{}\"", stored?)).ok()
     }
 
     // ── events ─────────────────────────────────────────────────────────
@@ -2143,6 +2205,7 @@ mod tests {
             path: path.into(),
             trouble: None,
             pull_request: None,
+            pull_state: None,
         };
 
         db.record_checkouts(&id, &[checkout("acme/backend", "backend")])
@@ -2203,6 +2266,7 @@ mod tests {
                 path: "backend".into(),
                 trouble: None,
                 pull_request: None,
+                pull_state: None,
             }],
         )
         .await
@@ -2801,6 +2865,7 @@ mod tests {
                 path: String::new(),
                 trouble: None,
                 pull_request: None,
+                pull_state: None,
             }],
         )
         .await
@@ -3129,7 +3194,10 @@ mod tests {
             .unwrap();
         assert_eq!(beside.len(), 2, "both of the workspace's other agents");
         for id in &runs {
-            assert!(beside.iter().any(|f| f == id), "{id} should be in {beside:?}");
+            assert!(
+                beside.iter().any(|f| f == id),
+                "{id} should be in {beside:?}"
+            );
         }
 
         // One that has already ended is not ended twice.

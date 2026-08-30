@@ -19,9 +19,9 @@ mod repos;
 mod secrets;
 mod sessions;
 mod setup;
-mod terminal;
 mod stream;
 mod tasks;
+mod terminal;
 
 // `providers` on its own is the module below, which is this crate's git-host
 // screen rather than the git hosts themselves.

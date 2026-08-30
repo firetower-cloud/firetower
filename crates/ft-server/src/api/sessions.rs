@@ -480,6 +480,7 @@ pub(super) async fn create_session(
             path: dir,
             trouble: None,
             pull_request: None,
+            pull_state: None,
         });
     }
 
@@ -1643,6 +1644,61 @@ async fn one(
     }
 }
 
+/// How stale an answer has to be before it is worth asking again.
+///
+/// The panel refreshes while somebody is looking at it, and every refresh here
+/// is a call to somebody else's API against one shared token.
+const PULL_STATE_MAX_AGE: chrono::Duration = chrono::Duration::seconds(30);
+
+/// Ask the git host what became of this session's pull requests.
+///
+/// Only the ones still believed open: merged and closed do not change back, so
+/// asking again spends a call on an answer that cannot differ. A host that
+/// cannot be reached leaves the last answer standing rather than failing the
+/// request — the panel is drawn either way, and being unable to check is not
+/// something to put in front of somebody who is trying to work.
+pub(crate) async fn refresh_pull_state(state: &AppState, session: &Session, owner: &str) {
+    let Some(workspace) = session.workspace_id.clone() else {
+        return;
+    };
+    let Ok(waiting) = state.db.pull_requests_to_check(&workspace).await else {
+        return;
+    };
+
+    let now = chrono::Utc::now();
+    for (path, url, checked) in waiting {
+        if checked.is_some_and(|at| now - at < PULL_STATE_MAX_AGE) {
+            continue;
+        }
+        let Some(provider) = crate::providers::for_remote(&url) else {
+            continue;
+        };
+        let Ok(Some(token)) = state
+            .vault
+            .get(
+                crate::vault::Key::of(vault::GIT, provider.id, owner),
+                "checking a pull request",
+            )
+            .await
+        else {
+            continue;
+        };
+
+        match oauth::pull_request_state(provider, &token, &url).await {
+            Ok(went) => {
+                if let Err(e) = state
+                    .db
+                    .set_checkout_pull_state(&workspace, &path, went)
+                    .await
+                {
+                    tracing::warn!(session = %session.id, "recording a pull request state: {e:#}");
+                }
+            }
+            Err(e) => tracing::debug!(session = %session.id, "asking about {url}: {e:#}"),
+        }
+    }
+}
+
 #[derive(Debug, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Proposal {
@@ -1826,6 +1882,7 @@ pub(super) async fn add_repo(
                 path: path.clone(),
                 trouble: None,
                 pull_request: None,
+                pull_state: None,
             },
         )
         .await?;
@@ -1865,6 +1922,19 @@ pub(super) async fn session_work(
         ));
     }
 
+    // Before the checkouts are read back, so what this returns is the answer
+    // that was just fetched rather than the one from the refresh before it.
+    // Throttled inside, and it asks about nothing once every request is
+    // settled — which is the state a workspace spends most of its life in.
+    refresh_pull_state(&state, &session, owner(&principal)?).await;
+    // Read back, because the refresh writes to the database and the copy
+    // loaded above still holds what was true before it.
+    let session = state
+        .db
+        .session_of(owner(&principal)?, &id)
+        .await?
+        .unwrap_or(session);
+
     let summaries = state
         .fleet
         .summarize(&host, &id)
@@ -1891,6 +1961,7 @@ pub(super) async fn session_work(
             // interface treats those differently on purpose.
             commits: found.and_then(|s| s.summary.commits),
             pull_request: c.pull_request,
+            pull_state: c.pull_state,
             trouble: c.trouble,
         });
     }
@@ -1928,6 +1999,7 @@ fn known_checkouts(session: &Session) -> Vec<Held> {
                 branch: c.branch.clone(),
                 base: c.base.clone(),
                 pull_request: c.pull_request.clone(),
+                pull_state: c.pull_state,
                 trouble: c.trouble.clone(),
             })
             .collect();
@@ -1941,6 +2013,7 @@ fn known_checkouts(session: &Session) -> Vec<Held> {
             base: base.clone(),
             pull_request: session.pull_request.clone(),
             trouble: None,
+            pull_state: None,
         }],
         _ => Vec::new(),
     }
@@ -1952,6 +2025,7 @@ struct Held {
     branch: String,
     base: String,
     pull_request: Option<String>,
+    pull_state: Option<ft_core::session::PullState>,
     trouble: Option<String>,
 }
 

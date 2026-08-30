@@ -438,13 +438,55 @@ pub async fn whoami(provider: &Provider, token: &str) -> Result<ft_proto::Author
 ///
 /// Takes the web URL because that is what was recorded — the API path is
 /// derived from it rather than kept alongside.
-pub async fn amend_pull_request(
-    provider: &Provider,
-    token: &str,
-    url: &str,
-    body: &str,
-) -> Result<()> {
-    // `https://github.com/acme/api/pull/12` → `acme/api` and `12`.
+pub use ft_core::session::PullState;
+
+/// Ask what became of one.
+///
+/// The sibling of [`existing_pull_request`], which cannot answer this: it asks
+/// for `state=open` and so cannot see the two states worth knowing about.
+pub async fn pull_request_state(provider: &Provider, token: &str, url: &str) -> Result<PullState> {
+    #[derive(Deserialize)]
+    struct Went {
+        state: String,
+        merged_at: Option<String>,
+    }
+
+    let (owner, repo, number) = pull_request_parts(url)?;
+
+    let went: Went = client()?
+        .get(format!(
+            "{}/repos/{owner}/{repo}/pulls/{number}",
+            provider.api_base
+        ))
+        .bearer_auth(token)
+        .header("accept", "application/vnd.github+json")
+        .send()
+        .await
+        .with_context(|| format!("asking {} about a pull request", provider.label))?
+        .error_for_status()
+        .with_context(|| format!("asking {} about a pull request", provider.label))?
+        .json()
+        .await
+        .context("reading what it said about the pull request")?;
+
+    Ok(read_state(&went.state, went.merged_at.as_deref()))
+}
+
+/// Merged or abandoned, out of the two fields that say so.
+///
+/// Both are `closed` to a git host. Only the moment it was merged tells them
+/// apart, and they mean opposite things to somebody deciding whether the work
+/// is safe to throw away.
+fn read_state(state: &str, merged_at: Option<&str>) -> PullState {
+    match (state, merged_at) {
+        ("open", _) => PullState::Open,
+        (_, Some(_)) => PullState::Merged,
+        _ => PullState::Closed,
+    }
+}
+
+/// `https://github.com/acme/api/pull/12` → `acme`, `api`, `12`.
+fn pull_request_parts(url: &str) -> Result<(String, String, String)> {
     let rest = url
         .split("://")
         .nth(1)
@@ -457,6 +499,16 @@ pub async fn amend_pull_request(
     else {
         bail!("{url} is not a pull request address this understands");
     };
+    Ok((owner.to_string(), repo.to_string(), number.to_string()))
+}
+
+pub async fn amend_pull_request(
+    provider: &Provider,
+    token: &str,
+    url: &str,
+    body: &str,
+) -> Result<()> {
+    let (owner, repo, number) = pull_request_parts(url)?;
 
     let response = client()?
         .patch(format!(
@@ -484,6 +536,32 @@ pub async fn amend_pull_request(
 mod tests {
     use super::*;
     use crate::providers;
+
+    #[test]
+    fn merged_and_abandoned_are_told_apart_by_the_timestamp() {
+        assert_eq!(read_state("open", None), PullState::Open);
+        // Still `closed`, and the opposite outcome.
+        assert_eq!(
+            read_state("closed", Some("2026-08-30T10:00:00Z")),
+            PullState::Merged
+        );
+        assert_eq!(read_state("closed", None), PullState::Closed);
+    }
+
+    /// A request is stored as the address somebody would click, and asking
+    /// about it needs the three parts inside that address.
+    #[test]
+    fn a_pull_request_address_gives_up_its_parts() {
+        let (owner, repo, number) =
+            pull_request_parts("https://github.com/acme/api/pull/12").unwrap();
+        assert_eq!(
+            (owner.as_str(), repo.as_str(), number.as_str()),
+            ("acme", "api", "12")
+        );
+
+        assert!(pull_request_parts("https://github.com/acme").is_err());
+        assert!(pull_request_parts("not an address").is_err());
+    }
 
     /// The bug this exists to stop coming back: a 422 read as
     /// "Validation Failed", which is what GitHub says every time and tells

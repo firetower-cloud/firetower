@@ -10,7 +10,7 @@
       "name": "AGPL-3.0-only",
       "identifier": "AGPL-3.0-only"
     },
-    "version": "0.15.0"
+    "version": "0.16.0"
   },
   "paths": {
     "/api/v1/agents": {
@@ -3730,6 +3730,17 @@
             ],
             "description": "Where this repository's pull request went, once it has one.\n\nPer repository, because that is what a git host can represent: one\nchange across two repositories is two pull requests that point at each\nother, not one object spanning both."
           },
+          "pullState": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/PullState",
+                "description": "What became of it, last time anybody asked.\n\n`None` is not `Open`: one means nobody has looked, the other means we\nlooked and it is still waiting for a reviewer."
+              }
+            ]
+          },
           "repoId": {
             "oneOf": [
               {
@@ -3818,6 +3829,17 @@
               "null"
             ],
             "description": "Where its pull request is, once it has one."
+          },
+          "pullState": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/PullState",
+                "description": "What became of that request, last time anybody asked."
+              }
+            ]
           },
           "pushed": {
             "type": "boolean"
@@ -5485,6 +5507,15 @@
             "type": "string"
           }
         }
+      },
+      "PullState": {
+        "type": "string",
+        "description": "What became of a pull request.\n\nMerged and abandoned are the same `state` to a git host — only the moment it\nwas merged tells them apart — so the reading happens once, here, rather than\nin every screen that shows one.",
+        "enum": [
+          "open",
+          "merged",
+          "closed"
+        ]
       },
       "Question": {
         "type": "object",

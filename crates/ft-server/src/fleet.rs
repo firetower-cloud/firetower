@@ -2498,8 +2498,8 @@ mod progress_tests {
             let mut progress = Progress::for_agent(ft_core::Agent::Codex, nothing.into());
 
             progress.read(r#"{"id":1,"result":{"userAgent":"firetower/0.1","codexHome":"/tmp"}}"#);
-            let after =
-                progress.read(r#"{"id":2,"result":{"thread":{"id":"th_9"},"model":"gpt-5.6-sol"}}"#);
+            let after = progress
+                .read(r#"{"id":2,"result":{"thread":{"id":"th_9"},"model":"gpt-5.6-sol"}}"#);
 
             assert!(
                 after.send.is_empty(),

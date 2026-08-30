@@ -13,10 +13,11 @@ import {
   getSessionWorkQueryKey,
   getGetSessionQueryKey,
 } from "@/src/api/generated/sessions/sessions";
-import { shipping, sequence, done } from "@/src/api/ship";
+import { shipping, sequence, done, awaiting } from "@/src/api/ship";
 import { ApiError } from "@/src/api/http";
 import { useOpen } from "@/src/workspace/tabs";
 import { PathRow, Counts, Fold } from "./PathRow";
+import { CloseWorkspace } from "./CloseWorkspace";
 
 /**
  * Everything between "it finished" and "it is on the git host".
@@ -39,8 +40,19 @@ export function ShipPanel({ sessionId }: { sessionId: string }) {
   const openTab = useOpen();
 
   const { data: session } = useGetSession(sessionId);
+  // While a request is open this is also what asks the git host whether it has
+  // been merged, so it keeps its own pace: 10s while somebody is waiting on a
+  // review, and nothing once every request is settled — merged does not go
+  // back to open, and this unmounts with the page.
   const { data: work } = useSessionWork(sessionId, {
-    query: { enabled: !!session?.repo, refetchInterval: 10_000 },
+    query: {
+      enabled: !!session?.repo,
+      refetchInterval: (query) => {
+        const latest = query.state.data;
+        if (!session || !latest) return 10_000;
+        return awaiting(shipping(session, latest)) ? 10_000 : 30_000;
+      },
+    },
   });
   const { data: files = [], isLoading } = useSessionDiff(sessionId, undefined, {
     query: { refetchInterval: 8_000 },
@@ -190,13 +202,47 @@ export function ShipPanel({ sessionId }: { sessionId: string }) {
 
         {done(ship) ? (
           <div className="flex flex-col gap-1.5">
+            {/* What became of it, once it has become anything. The panel used
+                to draw "View pull request" for ever, whatever happened to the
+                change — so a workspace whose work went in a week ago looked
+                exactly like one still waiting for a reviewer. */}
+            {(ship.stage === "merged" || ship.stage === "closed") && (
+              <div
+                className={`rounded-md border px-2.5 py-2 ${
+                  ship.stage === "merged"
+                    ? "border-sage-deep bg-sage-tint"
+                    : "border-line bg-raise"
+                }`}
+              >
+                <p
+                  className={`text-meta font-medium ${
+                    ship.stage === "merged" ? "text-sage" : "text-dim"
+                  }`}
+                >
+                  {ship.stage === "merged" ? "✓ Merged" : "· Closed"}
+                </p>
+                <p className="mt-0.5 text-meta leading-[1.5] text-mute">
+                  {ship.stage === "merged"
+                    ? "The work is on the base branch. Nothing here is waiting."
+                    : "It was closed without merging. The branch and the work are still here."}
+                </p>
+              </div>
+            )}
+
+            {/* The next thing to do, once there is nothing left to review. */}
+            {ship.stage === "merged" && <CloseWorkspace session={session} prominent />}
+
             {ship.links.map((l) => (
               <a
                 key={l.url}
                 href={l.url}
                 target="_blank"
                 rel="noreferrer"
-                className="flex items-center justify-center gap-1.5 rounded-md border border-sage-deep bg-sage-tint py-2 text-meta font-medium text-sage transition-opacity hover:opacity-80"
+                className={`flex items-center justify-center gap-1.5 rounded-md border py-2 text-meta font-medium transition-opacity hover:opacity-80 ${
+                  ship.stage === "open"
+                    ? "border-sage-deep bg-sage-tint text-sage"
+                    : "border-line text-dim"
+                }`}
               >
                 {ship.links.length === 1 ? "View pull request" : l.slug} ↗
               </a>
@@ -281,6 +327,13 @@ export function ShipPanel({ sessionId }: { sessionId: string }) {
             </p>
           )}
         </Fold>
+      </div>
+
+      {/* Always, whatever the stage. Most workspaces never get a pull request,
+          so the way to finish with one cannot live in the half of the panel
+          that only appears when there is one. */}
+      <div className="flex shrink-0 items-center justify-end border-t border-line px-2 py-1.5">
+        <CloseWorkspace session={session} />
       </div>
     </div>
   );

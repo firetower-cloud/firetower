@@ -456,7 +456,11 @@ impl Worker {
                 // With a sibling still running in it, removing it would delete
                 // the directory out from under a live process; the last agent
                 // out reclaims it instead.
-                let alone = self.store.others_in_workspace(&session_id).await?.is_empty();
+                let alone = self
+                    .store
+                    .others_in_workspace(&session_id)
+                    .await?
+                    .is_empty();
                 if !alone {
                     tracing::info!(
                         session = %session_id,

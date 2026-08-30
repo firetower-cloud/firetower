@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.15.0
+ * OpenAPI spec version: 0.16.0
  */
 import * as zod from 'zod';
 
@@ -32,6 +32,7 @@ export const ListSessionsResponseItem = zod.object({
   "branch": zod.string().describe('The branch git actually made.\n\nNot always the one asked for: the same prompt twice wants the same\nname, and git numbers the second. Per checkout because git may number\ndifferently in each repository.'),
   "path": zod.string().optional().describe('Where it sits inside the workspace.\n\nEmpty means the checkout \*is\* the workspace — how every session made\nbefore a session could hold more than one is laid out on disk. Those\ndirectories are not moving.'),
   "pullRequest": zod.string().nullish().describe('Where this repository\'s pull request went, once it has one.\n\nPer repository, because that is what a git host can represent: one\nchange across two repositories is two pull requests that point at each\nother, not one object spanning both.'),
+  "pullState": zod.union([zod.null(),zod.enum(['open', 'merged', 'closed']).describe('What became of it, last time anybody asked.\n\n`None` is not `Open`: one means nobody has looked, the other means we\nlooked and it is still waiting for a reviewer.')]).optional(),
   "repoId": zod.union([zod.null(),zod.string().describe('Absent when the repository has since been disconnected. The slug is what\nthis checkout \*is\*, and that does not stop being true.')]).optional(),
   "slug": zod.string().describe('`acme\/backend`'),
   "trouble": zod.string().nullish().describe('Why it is not there, when it is not.\n\nA repository the host could not reach fails its own checkout rather than\nthe session: two of three is still a session worth having, and saying\nwhich one is missing beats pretending it was never asked for.')
@@ -87,6 +88,7 @@ export const CreateSessionResponse = zod.object({
   "branch": zod.string().describe('The branch git actually made.\n\nNot always the one asked for: the same prompt twice wants the same\nname, and git numbers the second. Per checkout because git may number\ndifferently in each repository.'),
   "path": zod.string().optional().describe('Where it sits inside the workspace.\n\nEmpty means the checkout \*is\* the workspace — how every session made\nbefore a session could hold more than one is laid out on disk. Those\ndirectories are not moving.'),
   "pullRequest": zod.string().nullish().describe('Where this repository\'s pull request went, once it has one.\n\nPer repository, because that is what a git host can represent: one\nchange across two repositories is two pull requests that point at each\nother, not one object spanning both.'),
+  "pullState": zod.union([zod.null(),zod.enum(['open', 'merged', 'closed']).describe('What became of it, last time anybody asked.\n\n`None` is not `Open`: one means nobody has looked, the other means we\nlooked and it is still waiting for a reviewer.')]).optional(),
   "repoId": zod.union([zod.null(),zod.string().describe('Absent when the repository has since been disconnected. The slug is what\nthis checkout \*is\*, and that does not stop being true.')]).optional(),
   "slug": zod.string().describe('`acme\/backend`'),
   "trouble": zod.string().nullish().describe('Why it is not there, when it is not.\n\nA repository the host could not reach fails its own checkout rather than\nthe session: two of three is still a session worth having, and saying\nwhich one is missing beats pretending it was never asked for.')
@@ -152,6 +154,7 @@ export const GetSessionResponse = zod.object({
   "branch": zod.string().describe('The branch git actually made.\n\nNot always the one asked for: the same prompt twice wants the same\nname, and git numbers the second. Per checkout because git may number\ndifferently in each repository.'),
   "path": zod.string().optional().describe('Where it sits inside the workspace.\n\nEmpty means the checkout \*is\* the workspace — how every session made\nbefore a session could hold more than one is laid out on disk. Those\ndirectories are not moving.'),
   "pullRequest": zod.string().nullish().describe('Where this repository\'s pull request went, once it has one.\n\nPer repository, because that is what a git host can represent: one\nchange across two repositories is two pull requests that point at each\nother, not one object spanning both.'),
+  "pullState": zod.union([zod.null(),zod.enum(['open', 'merged', 'closed']).describe('What became of it, last time anybody asked.\n\n`None` is not `Open`: one means nobody has looked, the other means we\nlooked and it is still waiting for a reviewer.')]).optional(),
   "repoId": zod.union([zod.null(),zod.string().describe('Absent when the repository has since been disconnected. The slug is what\nthis checkout \*is\*, and that does not stop being true.')]).optional(),
   "slug": zod.string().describe('`acme\/backend`'),
   "trouble": zod.string().nullish().describe('Why it is not there, when it is not.\n\nA repository the host could not reach fails its own checkout rather than\nthe session: two of three is still a session worth having, and saying\nwhich one is missing beats pretending it was never asked for.')
@@ -212,6 +215,7 @@ export const RenameSessionResponse = zod.object({
   "branch": zod.string().describe('The branch git actually made.\n\nNot always the one asked for: the same prompt twice wants the same\nname, and git numbers the second. Per checkout because git may number\ndifferently in each repository.'),
   "path": zod.string().optional().describe('Where it sits inside the workspace.\n\nEmpty means the checkout \*is\* the workspace — how every session made\nbefore a session could hold more than one is laid out on disk. Those\ndirectories are not moving.'),
   "pullRequest": zod.string().nullish().describe('Where this repository\'s pull request went, once it has one.\n\nPer repository, because that is what a git host can represent: one\nchange across two repositories is two pull requests that point at each\nother, not one object spanning both.'),
+  "pullState": zod.union([zod.null(),zod.enum(['open', 'merged', 'closed']).describe('What became of it, last time anybody asked.\n\n`None` is not `Open`: one means nobody has looked, the other means we\nlooked and it is still waiting for a reviewer.')]).optional(),
   "repoId": zod.union([zod.null(),zod.string().describe('Absent when the repository has since been disconnected. The slug is what\nthis checkout \*is\*, and that does not stop being true.')]).optional(),
   "slug": zod.string().describe('`acme\/backend`'),
   "trouble": zod.string().nullish().describe('Why it is not there, when it is not.\n\nA repository the host could not reach fails its own checkout rather than\nthe session: two of three is still a session worth having, and saying\nwhich one is missing beats pretending it was never asked for.')
@@ -755,6 +759,7 @@ export const SessionWorkResponseItem = zod.object({
   "commits": zod.int().min(sessionWorkResponseCommitsMin).nullish().describe('Commits on this branch that its base does not have. See\n[`WorkSummary::commits`]; `None` means the worker did not say.'),
   "path": zod.string().optional(),
   "pullRequest": zod.string().nullish().describe('Where its pull request is, once it has one.'),
+  "pullState": zod.union([zod.null(),zod.enum(['open', 'merged', 'closed']).describe('What became of that request, last time anybody asked.')]).optional(),
   "pushed": zod.boolean(),
   "slug": zod.string(),
   "trouble": zod.string().nullish().describe('Why this repository is not checked out, when it is not.'),

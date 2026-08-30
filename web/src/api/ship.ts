@@ -32,7 +32,11 @@ export type Stage =
    * Every pull request is open and up to date. Nothing is left to do, which
    * makes this the one stage with no action attached to it.
    */
-  | "open";
+  | "open"
+  /** Every request went in. The work is on the base branch. */
+  | "merged"
+  /** Every request was closed without merging. The branch is still here. */
+  | "closed";
 
 export type Ship = {
   stage: Stage;
@@ -138,6 +142,31 @@ export function shipping(session: Session, work?: CheckoutWork[]): Ship {
   }
 
   if (links.length > 0) {
+    // What became of them, when every one has been answered the same way.
+    // Mixed — one merged, one still open — stays `open`, because the honest
+    // next thing is still the one waiting for a reviewer.
+    const answered = held.filter((c) => c.pullRequest && c.pullState);
+    if (answered.length === links.length) {
+      if (answered.every((c) => c.pullState === "merged")) {
+        return {
+          stage: "merged",
+          label: links.length === 1 ? "Merged" : `${links.length} merged`,
+          url: single(held),
+          links,
+          count: links.length,
+        };
+      }
+      if (answered.every((c) => c.pullState === "closed")) {
+        return {
+          stage: "closed",
+          label: links.length === 1 ? "Closed" : `${links.length} closed`,
+          url: single(held),
+          links,
+          count: links.length,
+        };
+      }
+    }
+
     // A statement, not a verb. Nothing here is pressable, and what draws this
     // stage renders it as a link out rather than as the primary control.
     return {
@@ -238,7 +267,17 @@ export function ready(ship: Ship): boolean {
  * its own predicate: what draws it has to render something other than a button.
  */
 export function done(ship: Ship): boolean {
-  return ship.stage === "open";
+  return ship.stage === "open" || ship.stage === "merged" || ship.stage === "closed";
+}
+
+/**
+ * Whether a request is still out there waiting on somebody.
+ *
+ * What decides whether to keep asking the git host: a merged request does not
+ * un-merge, so once every one is settled there is nothing left to poll for.
+ */
+export function awaiting(ship: Ship): boolean {
+  return ship.stage === "open" || ship.stage === "open-behind";
 }
 
 /** Whether ending this would lose something. */

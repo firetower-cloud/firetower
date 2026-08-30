@@ -3,8 +3,9 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.15.0
+ * OpenAPI spec version: 0.16.0
  */
+import type { PullState } from './pullState';
 
 /**
  * A checkout, what is unsaved in it, and where its pull request went.
@@ -30,6 +31,7 @@ export interface CheckoutWork {
      * @nullable
      */
   pullRequest?: string | null;
+  pullState?: null | PullState;
   pushed: boolean;
   slug: string;
   /**

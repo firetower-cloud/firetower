@@ -126,11 +126,7 @@ pub(crate) async fn conversation_events(
     // A session on a host that is not answering still has a history worth
     // reading; it just will not grow while nobody can reach it.
     let already = state.db.last_agent_line(id).await.unwrap_or(0).max(0) as u64;
-    let live = match state
-        .fleet
-        .watch_agent(host_id, id, already)
-        .await
-    {
+    let live = match state.fleet.watch_agent(host_id, id, already).await {
         Ok(receiver) => receiver,
         Err(e) => {
             tracing::debug!(session = %id, "not following live: {e:#}");
@@ -240,7 +236,6 @@ pub(super) async fn stream_conversation(
     let stream = conversation_events(&state, &session.host_id, &id, resume_from)
         .await
         .map(|event| {
-
             Ok(sse::Event::default()
                 .id(event.line_no.to_string())
                 .event("turn")
