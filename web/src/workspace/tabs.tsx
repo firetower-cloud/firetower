@@ -3,7 +3,7 @@
 /**
  * What is open inside each session, and which session you are in.
  *
- * A session is a worktree. It is the container, and everything you open — the
+ * A session is a workspace. It is the container, and everything you open — the
  * conversation, a terminal, a file, a diff — happens *inside* it. So the tabs
  * belong to a session rather than to the window: picking one in the rail
  * changes which workspace you are in, and the strip shows that workspace's

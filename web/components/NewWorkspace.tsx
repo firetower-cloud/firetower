@@ -15,6 +15,43 @@ import { slugify } from "@/src/api/slug";
 import { leaveDraft } from "@/src/workspace/draft";
 import { ConnectRepo } from "@/components/ConnectRepo";
 import { getListReposQueryKey } from "@/src/api/generated/repos/repos";
+import { Modal } from "@/components/Modal";
+import { useRouter } from "next/navigation";
+
+/**
+ * The form, in the dialog it always opens in.
+ *
+ * Three screens start a workspace — the `+` in the rail, the dashboard, a task
+ * you decided to take — and each of them used to write its own `<Modal>` around
+ * the same form. Which meant three titles to keep in step, and they did not:
+ * two said "New worktree" and one said "New workspace" for the identical
+ * dialog. The title and what happens after belong to the thing being made, not
+ * to whichever screen you happened to be on when you asked for it.
+ */
+export function NewWorkspaceModal({
+  startWith,
+  fromTask,
+  onClose,
+}: {
+  startWith?: string;
+  fromTask?: { key: string; title: string; url: string; body?: string };
+  onClose: () => void;
+}) {
+  const router = useRouter();
+
+  return (
+    <Modal onClose={onClose} title="New workspace" wide>
+      <NewWorkspace
+        startWith={startWith}
+        fromTask={fromTask}
+        onCreated={(id) => {
+          onClose();
+          router.push(`/sessions/${id}`);
+        }}
+      />
+    </Modal>
+  );
+}
 
 /**
  * Making a workspace.
@@ -39,7 +76,7 @@ export function NewWorkspace({
   /** A repository slug to begin with, from the `+` beside a group in the rail. */
   startWith?: string;
   /**
-   * The task this worktree is for, when it came from one.
+   * The task this workspace is for, when it came from one.
    *
    * Fills in the name and the branch, and is written to the workspace so the
    * rail can say `#5138` and shipping can offer to close it. The prompt is the

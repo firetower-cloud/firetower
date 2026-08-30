@@ -1,15 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { useMe, useLogout } from "@/src/api/generated/auth/auth";
 import { forgetToken } from "@/src/api/http";
 import { useState } from "react";
 import { BookOpen, CircleDashed, LayoutList, ListTodo, Plus, Settings2 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { Mark, Signal } from "./Signal";
-import { Modal } from "./Modal";
-import { NewWorkspace } from "./NewWorkspace";
+import { NewWorkspaceModal } from "./NewWorkspace";
 import { AgentMark } from "./AgentMark";
 import { Button, GithubMark, Icon } from "./ui";
 import { useListSessions } from "@/src/api/generated/sessions/sessions";
@@ -66,7 +65,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
           })}
         </nav>
 
-        <Worktrees />
+        <Workspaces />
 
         {/* Configuration, Documentation, then who you are. The three things
             you reach for after the work rather than during it, in the order you
@@ -187,16 +186,15 @@ function WhoAmI() {
 }
 
 /**
- * Every repository, and the worktrees cut from each.
+ * Every repository, and the workspaces cut from each.
  *
  * The tree is the entry point rather than a settings page: picking where work
  * happens is the first thing somebody does, and it is the same list whether
  * they are on the dashboard or reading a conversation — which is why the rail
  * is shared now and the workbench no longer brings one of its own.
  */
-function Worktrees() {
+function Workspaces() {
   const path = usePathname();
-  const router = useRouter();
   const [starting, setStarting] = useState<{ repo?: string } | null>(null);
   // The rail is on screen the whole time. Faster while something is still
   // going, and slow rather than never once nothing is — a workspace started
@@ -213,16 +211,16 @@ function Worktrees() {
   return (
     <div className="mt-6 flex min-h-0 flex-1 flex-col">
       <div className="flex items-center gap-2 px-4 pb-1.5">
-        <span className="eyebrow">Worktrees</span>
+        <span className="eyebrow">Workspaces</span>
         {/* Making one, not connecting a repository. Connecting is a once-a-year
-            thing and lives in Configuration; cutting a worktree is the reason
+            thing and lives in Configuration; opening a workspace is the reason
             somebody opened Firetower, so it is the `+` nearest the list of
             them. */}
         <Button
           variant="quiet"
           size="sm"
           icon={Plus}
-          title="New worktree"
+          title="New workspace"
           onClick={() => setStarting({})}
           className="-mr-1.5 ml-auto px-1"
         />
@@ -249,29 +247,21 @@ function Worktrees() {
               <span className="font-mono text-micro text-mute">{places.length}</span>
             </div>
             {places.map((place) => (
-              <Worktree key={place.id} place={place} on={path === `/sessions/${place.id}`} />
+              <WorkspaceRow key={place.id} place={place} on={path === `/sessions/${place.id}`} />
             ))}
           </div>
         ))}
       </div>
 
       {starting && (
-        <Modal onClose={() => setStarting(null)} title="New worktree" wide>
-          <NewWorkspace
-            startWith={starting.repo}
-            onCreated={(id) => {
-              setStarting(null);
-              router.push(`/sessions/${id}`);
-            }}
-          />
-        </Modal>
+        <NewWorkspaceModal startWith={starting.repo} onClose={() => setStarting(null)} />
       )}
     </div>
   );
 }
 
-/** One worktree: its branch, and what is happening in it. */
-function Worktree({ place, on }: { place: Workspace; on: boolean }) {
+/** One workspace: its branch, and what is happening in it. */
+function WorkspaceRow({ place, on }: { place: Workspace; on: boolean }) {
   const state = doing(place);
 
   return (

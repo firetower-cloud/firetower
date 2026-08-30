@@ -9,6 +9,7 @@ import {
   getListReposQueryKey,
 } from "@/src/api/generated/repos/repos";
 import { useListSessions } from "@/src/api/generated/sessions/sessions";
+import { group } from "@/src/api/workspaces";
 import { ConnectRepo } from "@/components/ConnectRepo";
 import { RepoSettings } from "@/components/RepoSettings";
 import { ApiError } from "@/src/api/http";
@@ -22,6 +23,11 @@ export default function Repos() {
   const queryClient = useQueryClient();
   const { data: repos = [], isLoading } = useListRepos();
   const { data: sessions = [] } = useListSessions();
+  // Counted the way the rail and the dashboard count, because it is the same
+  // number about the same repository: live workspaces, not agent runs and not
+  // everything that ever ran. A place holding three agents is one row there,
+  // and reading "3" here for it was the list disagreeing with itself.
+  const places = new Map(group(sessions.filter((s) => s.status !== "Ended")).groups);
   const disconnect = useDeleteRepo();
 
   const forget = (id: string) => {
@@ -45,7 +51,7 @@ export default function Repos() {
           {isLoading ? "Looking…" : `${repos.length} connected.`}
         </h1>
         <p className="mt-1.5 text-ui text-dim">
-          Each host keeps a mirror, so a worktree is ready in under a second.
+          Each host keeps a mirror, so a workspace is ready in under a second.
         </p>
 
         {/* Here rather than on an account screen: this belongs to the git host,
@@ -56,7 +62,7 @@ export default function Repos() {
 
       <div className="flex flex-col gap-2.5">
         {repos.map((r) => {
-          const count = sessions.filter((s) => s.repo === r.slug).length;
+          const count = places.get(r.slug)?.length ?? 0;
           return (
             <div key={r.id} className="panel px-4 py-3.5">
               <div className="flex items-center gap-3">
@@ -65,7 +71,7 @@ export default function Repos() {
                   {r.defaultBranch ? `⑂ ${r.defaultBranch}` : "not read yet"}
                 </span>
                 <span className="ml-auto font-mono text-meta text-mute">
-                  {count} {count === 1 ? "session" : "sessions"}
+                  {count} {count === 1 ? "workspace" : "workspaces"}
                 </span>
                 <button
                   onClick={() => setSettling(r.id)}

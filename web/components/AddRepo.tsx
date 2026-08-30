@@ -68,7 +68,7 @@ export function AddRepo({
             <li className="px-2.5 py-3 text-ui text-mute">
               {repos.length === 0
                 ? "Nothing is connected yet."
-                : "Everything connected is already in this session."}
+                : "Everything connected is already in this workspace."}
             </li>
           )}
           {offered.map((r) => (

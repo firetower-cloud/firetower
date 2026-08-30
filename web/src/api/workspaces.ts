@@ -1,7 +1,7 @@
 /**
  * Sessions, read as the places they work in.
  *
- * The API returns sessions; a person thinks in worktrees. A workspace is a
+ * The API returns sessions; a person thinks in workspaces. A workspace is a
  * checkout on a host with any number of agents in it, and the first session of
  * one carries the workspace's own id — so grouping by `workspaceId` and taking
  * the name from the first run gives back the shape somebody actually has.
@@ -13,7 +13,7 @@
 import type { Session } from "./generated/model";
 import { inFlight, needsYou } from "./view";
 
-/** A worktree, and the agents working in it. */
+/** A workspace: a checkout on a host, and the agents working in it. */
 export type Workspace = {
   id: string;
   name: string;

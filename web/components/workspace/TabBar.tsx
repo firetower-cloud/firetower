@@ -30,7 +30,7 @@ import {
  *
  * A tab is the conversation, a terminal, a file or a diff — the same strip for
  * all four, because moving between "what is the agent doing" and "what did it
- * write to this file" is one activity inside one worktree.
+ * write to this file" is one activity inside one workspace.
  *
  * Dragging a tab onto the other half splits, which is how the plan-beside-the-
  * conversation layout is reached without a menu.
