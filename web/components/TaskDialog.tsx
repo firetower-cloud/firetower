@@ -125,10 +125,10 @@ export function TaskDialog({
 
       <div className="flex items-center justify-between gap-4 border-t border-line pt-3">
         <p className="text-meta text-mute">
-          Cuts a worktree and puts this in the composer, unsent.
+          Opens a workspace and puts this in the composer, unsent.
         </p>
         <Button variant="primary" trailing={ArrowRight} onClick={onStart}>
-          Start a worktree
+          Start a workspace
         </Button>
       </div>
     </Modal>

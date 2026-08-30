@@ -17,15 +17,13 @@
  * other and why a second tracker can keep the controls and change dialect.
  */
 
-import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { ArrowRight, RotateCw, UserRound } from "lucide-react";
 import { useListTasks } from "@/src/api/generated/tasks/tasks";
 import { useListRepos } from "@/src/api/generated/repos/repos";
 import type { Task, TaskKind, TaskState } from "@/src/api/generated/model";
-import { Modal } from "@/components/Modal";
 import { TaskDialog } from "@/components/TaskDialog";
-import { NewWorkspace } from "@/components/NewWorkspace";
+import { NewWorkspaceModal } from "@/components/NewWorkspace";
 import {
   Avatar,
   Badge,
@@ -52,7 +50,6 @@ const COL = {
 };
 
 export function Tasks() {
-  const router = useRouter();
   const { data: repos = [] } = useListRepos();
 
   const [kind, setKind] = useState<TaskKind>("issue");
@@ -88,7 +85,7 @@ export function Tasks() {
   return (
     <div className="px-8 pt-6 pb-24">
       <PageHead eyebrow="Tasks" title={isPending ? "Looking…" : `${data?.total ?? tasks.length} to pick from.`}>
-        Read from GitHub as you look. Starting one cuts a worktree.
+        Read from GitHub as you look. Starting one opens a workspace.
       </PageHead>
 
       {/* One card: what you are asking for, and what came back. The filters
@@ -237,7 +234,7 @@ export function Tasks() {
           onClose={() => setReading(null)}
           onStart={() => {
             // Read, then decide. Closing this one and opening the other keeps
-            // one dialog on screen at a time, and the worktree form is the same
+            // one dialog on screen at a time, and the workspace form is the same
             // one the `+` in the rail opens rather than a second copy of it.
             setStarting(tasks[reading]);
             setReading(null);
@@ -246,27 +243,22 @@ export function Tasks() {
       )}
 
       {starting && (
-        <Modal onClose={() => setStarting(null)} title="New worktree" wide>
-          <NewWorkspace
-            startWith={starting.repo ?? undefined}
-            fromTask={{
-              key: starting.key,
-              title: starting.title,
-              url: starting.url,
-              body: starting.body ?? undefined,
-            }}
-            onCreated={(id) => {
-              setStarting(null);
-              router.push(`/sessions/${id}`);
-            }}
-          />
-        </Modal>
+        <NewWorkspaceModal
+          startWith={starting.repo ?? undefined}
+          fromTask={{
+            key: starting.key,
+            title: starting.title,
+            url: starting.url,
+            body: starting.body ?? undefined,
+          }}
+          onClose={() => setStarting(null)}
+        />
       )}
     </div>
   );
 }
 
-/** One task, and the button that turns it into a worktree. */
+/** One task, and the button that turns it into a workspace. */
 function TaskRow({
   task,
   onRead,

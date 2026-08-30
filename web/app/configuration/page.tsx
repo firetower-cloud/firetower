@@ -5,7 +5,7 @@
  *
  * Agents, secrets, hosts and repositories were four rows at the top of the
  * rail, level with the work — which made the rail read as a settings menu with
- * some sessions underneath. They are not the same kind of thing as a worktree:
+ * some sessions underneath. They are not the same kind of thing as a workspace:
  * you touch them on the first day and then not again until something breaks.
  *
  * One page, four sections. The sections are the pages that already existed,

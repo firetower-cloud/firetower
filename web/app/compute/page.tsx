@@ -16,6 +16,7 @@ import type { Host, SshKey } from "@/src/api/generated/model";
 import { SetUpHost, canBeSetUp } from "@/components/SetUpHost";
 import { AddCompute } from "@/components/AddCompute";
 import { holdsHost } from "@/src/api/view";
+import { group } from "@/src/api/workspaces";
 import { ApiError } from "@/src/api/http";
 
 /**
@@ -61,17 +62,23 @@ export default function Compute() {
       )}
 
       <div className="flex flex-col gap-2.5">
-        {hosts.map((h) => (
-          <HostRow
-            key={h.id}
-            host={h}
-            running={sessions.filter((s) => s.hostId === h.id && holdsHost(s)).length}
-            agents={agents
-              .filter((a) => a.hosts.some((x) => x.hostId === h.id && x.installed))
-              .map((a) => a.label)}
-            onProblem={setProblem}
-          />
-        ))}
+        {hosts.map((h) => {
+          // Counted two ways from one pass: agents for "is it busy", and the
+          // places they sit in for "what would removing this cost you".
+          const here = sessions.filter((s) => s.hostId === h.id && holdsHost(s));
+          return (
+            <HostRow
+              key={h.id}
+              host={h}
+              running={here.length}
+              places={group(here).total}
+              agents={agents
+                .filter((a) => a.hosts.some((x) => x.hostId === h.id && x.installed))
+                .map((a) => a.label)}
+              onProblem={setProblem}
+            />
+          );
+        })}
         {!isLoading && hosts.length === 0 && !isError && (
           <p className="panel px-4 py-6 text-center text-ui text-mute">
             Nowhere to run anything yet.
@@ -94,11 +101,15 @@ export default function Compute() {
 function HostRow({
   host,
   running,
+  places,
   agents,
   onProblem,
 }: {
   host: Host;
+  /** Agents holding the machine — what "idle" is about, and what `force` means. */
   running: number;
+  /** The same agents, counted as the places they are in — what removing loses. */
+  places: number;
   agents: string[];
   onProblem: (message: string | null) => void;
 }) {
@@ -185,7 +196,7 @@ function HostRow({
           <button
             onClick={() => {
               onProblem(null);
-              if (!confirm(removalWarning(host, running))) return;
+              if (!confirm(removalWarning(host, places))) return;
               // Anything still running was named in the warning above, so this
               // is already the answer to "and end them?".
               remove.mutate(
@@ -291,16 +302,19 @@ function Wrong({ host, onRetry }: { host: Host; onRetry: () => void }) {
  * different sentence — not the same prompt followed by an error you then have
  * to confirm past.
  */
-function removalWarning(host: Host, running: number) {
+function removalWarning(host: Host, places: number) {
   const container = host.compute.type === "Container";
   const machine = container
     ? `Its container is stopped and removed, and its session history goes with it.`
     : `Its session history goes with it. The machine itself is left alone.`;
 
-  if (running === 0) return `Remove ${host.name}? ${machine}`;
+  if (places === 0) return `Remove ${host.name}? ${machine}`;
 
+  // Counted in workspaces rather than the agents inside them, for the reason
+  // ending the whole fleet is: what somebody is about to lose is places, and
+  // "6 workspaces" is a number they recognise where "48 sessions" is not.
   return (
-    `Remove ${host.name}? ${running} ${running === 1 ? "session is" : "sessions are"} ` +
+    `Remove ${host.name}? ${places} ${places === 1 ? "workspace is" : "workspaces are"} ` +
     `still running there. They're ended first, and anything unpushed goes with them. ` +
     machine
   );

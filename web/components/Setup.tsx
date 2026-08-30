@@ -21,7 +21,7 @@ import { ConnectAgent } from "./ConnectAgent";
  * done. It is gone: it told you that Firetower was running, which you could
  * tell from looking at it.
  */
-const TOUR_STEPS = ["Repository", "Agent", "First session"];
+const TOUR_STEPS = ["Repository", "Agent", "First workspace"];
 
 export function Setup() {
   const router = useRouter();
@@ -100,8 +100,8 @@ export function Setup() {
             <StepRepository onNext={() => setStep(step + 1)} />
           )}
           {current === "Agent" && <StepAgent onNext={() => setStep(step + 1)} />}
-          {current === "First session" && (
-            <StepSession onDone={() => complete.mutate()} />
+          {current === "First workspace" && (
+            <StepWorkspace onDone={() => complete.mutate()} />
           )}
         </div>
       </div>
@@ -179,7 +179,7 @@ function StepRepository({ onNext }: { onNext: () => void }) {
   return (
     <Card
       title="Connect a repository."
-      sub="Firetower clones once per host and gives each session its own worktree, so only the first one waits. Pasting a URL works with nothing configured — the worker uses whatever git credentials the machine already has."
+      sub="Firetower clones once per host and gives each workspace its own worktree, so only the first one waits. Pasting a URL works with nothing configured — the worker uses whatever git credentials the machine already has."
     >
       {repos.length > 0 && (
         <div className="panel divide-y divide-line-soft">
@@ -295,7 +295,7 @@ function StepAgent({ onNext }: { onNext: () => void }) {
   );
 }
 
-function StepSession({ onDone }: { onDone: () => void }) {
+function StepWorkspace({ onDone }: { onDone: () => void }) {
   const router = useRouter();
 
   // One way out, and it is the home page — which is where sessions are started
@@ -310,7 +310,7 @@ function StepSession({ onDone }: { onDone: () => void }) {
   return (
     <Card
       title="That's everything."
-      sub="A session is a branch, a worktree and an agent running in tmux on one of your hosts. It survives you closing the laptop, and describing what you want on the next screen is how you start one."
+      sub="A workspace is a branch, a git worktree and an agent running in tmux on one of your hosts. It survives you closing the laptop, and describing what you want on the next screen is how you start one."
     >
       <Actions>
         <Primary onClick={leave}>Go to Firetower</Primary>

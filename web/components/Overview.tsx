@@ -11,12 +11,11 @@
  * overview, which is why forty-eight runs felt unmanageable.
  *
  * So: **home is about the fleet, a workspace is about the work.** It is a page
- * like Repos or Agents, inside the same rail they have — Sessions, and the four
+ * like Repos or Agents, inside the same rail they have — Workspaces, and the four
  * others, and what is in flight, and the hosts. The workbench is the only thing
  * that takes the whole window, because it is the only thing that needs it.
  */
 
-import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Plus, Waypoints } from "lucide-react";
@@ -27,7 +26,7 @@ import {
 } from "@/src/api/generated/sessions/sessions";
 import { AgentMark, AGENT_SHORT } from "@/components/AgentMark";
 import { Modal } from "@/components/Modal";
-import { NewWorkspace } from "@/components/NewWorkspace";
+import { NewWorkspaceModal } from "@/components/NewWorkspace";
 import { Signal } from "@/components/Signal";
 import {
   Badge,
@@ -64,7 +63,6 @@ const STATES: ["all" | Doing, string][] = [
 ];
 
 export function Overview() {
-  const router = useRouter();
   const [starting, setStarting] = useState<{ repo?: string } | null>(null);
   /* Never remembered between visits. This is the screen somebody lands on to
      see everything, and a filter still applied from yesterday is a page lying
@@ -154,7 +152,7 @@ export function Overview() {
   return (
     <div className="px-8 pt-8 pb-24">
       <PageHead
-        eyebrow="Sessions"
+        eyebrow="Workspaces"
         title={
           isPending
             ? "Looking…"
@@ -170,7 +168,8 @@ export function Overview() {
           </Button>
         }
       >
-        A worktree on one of your hosts, with any number of agents in it.
+        A branch on one of your hosts — a git worktree per repository — with any
+        number of agents in it.
       </PageHead>
 
       {/* What the last press actually did. The server skips a workspace whose
@@ -301,7 +300,7 @@ export function Overview() {
               <List flush>
                 {shown.groups.map(([name, workspaces]) => (
                   <div key={name}>
-                    {/* The repository, once, above the worktrees cut from it —
+                    {/* The repository, once, above the workspaces cut from it —
                         rather than its slug repeated down forty rows. Filtered
                         to one, it would be a heading over the only group there
                         is, so it goes. */}
@@ -342,15 +341,7 @@ export function Overview() {
       )}
 
       {starting && (
-        <Modal onClose={() => setStarting(null)} title="New workspace" wide>
-          <NewWorkspace
-            startWith={starting.repo}
-            onCreated={(id) => {
-              setStarting(null);
-              router.push(`/sessions/${id}`);
-            }}
-          />
-        </Modal>
+        <NewWorkspaceModal startWith={starting.repo} onClose={() => setStarting(null)} />
       )}
     </div>
   );

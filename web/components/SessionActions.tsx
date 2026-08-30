@@ -210,7 +210,7 @@ export function SessionMenu({
                     <p className="text-meta leading-[1.5] text-dim">
                       {host?.name ?? "That machine"} isn&apos;t answering, so the
                       workspace can&apos;t be removed. The agent keeps running
-                      there, holding its worktree and its terminal. If that
+                      there, holding its workspace and its terminal. If that
                       machine comes back, Firetower tears them down then. We also
                       can&apos;t tell you what is unpushed, because we can&apos;t
                       reach it to look.

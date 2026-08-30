@@ -1,7 +1,7 @@
 /**
  * Words waiting in a composer that has not been drawn yet.
  *
- * Starting a worktree from a task fills the first message in, and then the page
+ * Starting a workspace from a task fills the first message in, and then the page
  * navigates — so the text is written on one screen and read on another. This is
  * the handoff.
  *
@@ -35,7 +35,7 @@ export function leaveDraft(sessionId: string, text: string) {
   try {
     window.sessionStorage.setItem(KEY + sessionId, text);
   } catch {
-    // Private windows and blocked site data. The worktree is still made and the
+    // Private windows and blocked site data. The workspace is still made and the
     // task is still on it; the composer just starts empty.
   }
 }

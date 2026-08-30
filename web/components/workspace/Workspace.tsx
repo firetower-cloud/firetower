@@ -30,7 +30,7 @@ import { useWorkbenchKeys } from "@/src/workspace/keys";
  * use Firetower is watching several at once and dipping into whichever one
  * stopped — which is a workbench, not a series of pages.
  *
- * A session is a worktree, so it owns its tabs. Picking one in the rail changes
+ * A session is a workspace, so it owns its tabs. Picking one in the rail changes
  * which workspace you are in rather than adding to a pile.
  */
 export function Workspace({ initialSession }: { initialSession?: string }) {
