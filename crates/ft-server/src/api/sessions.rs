@@ -1646,9 +1646,11 @@ async fn one(
 
 /// How stale an answer has to be before it is worth asking again.
 ///
-/// The panel refreshes while somebody is looking at it, and every refresh here
-/// is a call to somebody else's API against one shared token.
-const PULL_STATE_MAX_AGE: chrono::Duration = chrono::Duration::seconds(30);
+/// Every refresh here is a call to somebody else's API against one shared
+/// token. At this cadence one watched request costs 720 calls an hour against
+/// GitHub's 5000, and only while a page is open on it — so the ceiling is the
+/// number of workspaces somebody is looking at, which is one.
+const PULL_STATE_MAX_AGE: chrono::Duration = chrono::Duration::seconds(5);
 
 /// Ask the git host what became of this session's pull requests.
 ///

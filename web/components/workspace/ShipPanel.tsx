@@ -50,7 +50,9 @@ export function ShipPanel({ sessionId }: { sessionId: string }) {
       refetchInterval: (query) => {
         const latest = query.state.data;
         if (!session || !latest) return 10_000;
-        return awaiting(shipping(session, latest)) ? 10_000 : 30_000;
+        // Matched to the server's own throttle: asking faster than it will
+        // answer only spends requests on the reply it already gave.
+        return awaiting(shipping(session, latest)) ? 5_000 : 30_000;
       },
     },
   });
