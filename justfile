@@ -25,6 +25,15 @@ doctor:
     check docker      "docker --version"      "https://docs.docker.com/get-docker"
     echo
     [ $missing -eq 0 ] || { echo "  Install what's missing, then run just doctor again."; exit 1; }
+    # web/package.json pins a pnpm version. Plain pnpm switches to it on its own; under
+    # corepack it can't, and `just setup` dies on a version mismatch instead.
+    want=$(sed -n 's/.*"packageManager": *"pnpm@\([^"]*\)".*/\1/p' web/package.json)
+    have=$(pnpm --version 2>/dev/null)
+    if [ -n "$want" ] && [ "$want" != "$have" ]; then
+        printf '  note     %-12s v%s here, web/package.json pins %s\n' pnpm "$have" "$want"
+        echo "           Fine unless setup complains. If it does: corepack prepare pnpm@$want --activate"
+        echo
+    fi
     echo "  Everything's here. Run: just setup"
 
 # Install dependencies. Once, after cloning.
