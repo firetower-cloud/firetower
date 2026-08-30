@@ -410,6 +410,13 @@ pub struct CodexNormaliser {
     /// Only the ones whose answers say something: everything else is allowed
     /// to arrive and be ignored.
     awaiting: HashMap<u64, Awaiting>,
+    /// The question each unanswered item is, keyed the way its ending is.
+    ///
+    /// Two identifiers name the same question here: the request carries the
+    /// rpc id that any answer has to quote, and its ending arrives as
+    /// `item/completed` under the item id. Without the pair, a replayed
+    /// transcript re-asks every question it has ever contained.
+    asked: HashMap<String, RequestId>,
 }
 
 /// A request we sent and have not had the answer to.
@@ -573,6 +580,10 @@ impl CodexNormaliser {
                     .and_then(Value::as_array)
                     .map(|asked| asked.iter().map(question).collect())
                     .unwrap_or_default();
+                // Paired with the item, because that is what its ending names.
+                if let Some(item) = params.get("itemId").and_then(Value::as_str) {
+                    self.asked.insert(item.to_string(), req.clone());
+                }
                 vec![TurnEvent::UserInputRequested { req, questions }]
             }
             // A tool asking for a permission, a server asking to elicit
@@ -819,6 +830,15 @@ impl CodexNormaliser {
             item: ItemId::new(id),
             status,
         });
+
+        // After the item is finished, so the transcript entry is complete
+        // before the card asking for an answer is taken away.
+        if let Some(req) = self.asked.remove(id) {
+            events.push(TurnEvent::UserInputResolved {
+                req,
+                answers: item.clone(),
+            });
+        }
         events
     }
 
@@ -1322,6 +1342,66 @@ mod tests {
             }
             other => panic!("expected questions, got {other:?}"),
         }
+    }
+
+    /// The whole transcript is replayed whenever a browser attaches, so a
+    /// question already answered must not come back as one still waiting. The
+    /// request and its ending are keyed differently — the rpc id that an answer
+    /// has to quote, and the item id that `item/completed` names — so the pair
+    /// has to be remembered for the second to resolve the first.
+    #[test]
+    fn an_answered_question_is_reported_as_resolved() {
+        let seen = events(&[
+            r#"{"id":5,"method":"item/tool/requestUserInput","params":{"itemId":"i","threadId":"t","turnId":"u","isBlocking":true,"questions":[{"id":"q1","header":"Deploy","question":"Which environment?","options":[{"label":"staging","description":"safe"}]}]}}"#,
+            r#"{"method":"item/completed","params":{"item":{"id":"i","status":"completed"}}}"#,
+        ]);
+
+        let resolved: Vec<String> = seen
+            .iter()
+            .filter_map(|e| match e {
+                TurnEvent::UserInputResolved { req, .. } => Some(req.to_string()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            resolved,
+            vec!["5"],
+            "resolved under the id the request was asked with, not the item's"
+        );
+
+        // After the item, so the transcript entry is whole before the card goes.
+        let completed = seen
+            .iter()
+            .position(|e| matches!(e, TurnEvent::ItemCompleted { .. }))
+            .expect("the item finishes");
+        let at = seen
+            .iter()
+            .position(|e| matches!(e, TurnEvent::UserInputResolved { .. }))
+            .expect("the question resolves");
+        assert!(completed < at);
+    }
+
+    /// Until it is answered the agent is blocked, and the question is the one
+    /// thing the session needs somebody for.
+    #[test]
+    fn an_unanswered_question_stays_open() {
+        let seen = events(&[
+            r#"{"id":5,"method":"item/tool/requestUserInput","params":{"itemId":"i","threadId":"t","turnId":"u","isBlocking":true,"questions":[{"id":"q1","header":"Deploy","question":"Which environment?","options":[{"label":"staging","description":"safe"}]}]}}"#,
+        ]);
+        assert!(!seen
+            .iter()
+            .any(|e| matches!(e, TurnEvent::UserInputResolved { .. })));
+    }
+
+    /// Every other item completes the same way and must not take a card away.
+    #[test]
+    fn an_ordinary_item_completing_resolves_no_question() {
+        let seen = events(&[
+            r#"{"method":"item/completed","params":{"item":{"id":"i3","type":"reasoning","summary":[{"text":"Weighing two options"}],"status":"completed"}}}"#,
+        ]);
+        assert!(!seen
+            .iter()
+            .any(|e| matches!(e, TurnEvent::UserInputResolved { .. })));
     }
 
     #[test]

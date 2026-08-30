@@ -25,7 +25,7 @@
 //! card with the tool's name, input and output. Being wrong costs a nicer card.
 //! It never costs the event.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use serde_json::Value;
 
@@ -184,6 +184,14 @@ pub struct ClaudeNormaliser {
     open_blocks: HashMap<u64, OpenBlock>,
     /// Tool calls we have seen start and not yet seen finish.
     open_tools: HashMap<String, ItemKind>,
+    /// Tool calls that asked somebody a question and have not been answered.
+    ///
+    /// The whole transcript is replayed on every attach, so without this every
+    /// question ever asked comes back as a question still waiting: nothing else
+    /// in a stored line distinguishes one the agent is blocked on from one it
+    /// acted on an hour ago. The `tool_result` is what says which — it carries
+    /// the id of the call it answers.
+    asked: HashSet<String>,
     /// The subagent each spawning tool call owns, so its work can be attributed.
     tasks: HashMap<String, TaskId>,
     /// The agent's own task list, accumulated.
@@ -482,6 +490,7 @@ impl ClaudeNormaliser {
             let name = str_at(block, "name").unwrap_or_default();
             if name == "AskUserQuestion" {
                 if let Some(questions) = questions_from_input(input) {
+                    self.asked.insert(id.to_string());
                     out.push(TurnEvent::UserInputRequested {
                         req: RequestId::new(id),
                         questions,
@@ -640,6 +649,19 @@ impl ClaudeNormaliser {
                     ItemStatus::Completed
                 },
             });
+
+            // After the item is finished, so the transcript entry is complete
+            // before the card asking for an answer is taken away.
+            if self.asked.remove(id) {
+                out.push(TurnEvent::UserInputResolved {
+                    req: RequestId::new(id),
+                    // What came back, not a reading of it. The interface parses
+                    // the choices out of the result for the transcript entry;
+                    // this event is about the card going away, and passing the
+                    // block along keeps a second parser from existing here.
+                    answers: result.clone(),
+                });
+            }
         }
     }
 

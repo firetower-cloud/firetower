@@ -545,3 +545,115 @@ fn reading_the_same_log_twice_names_the_same_things() {
     // after fixing a mapping produces a different history.
     assert_eq!(replay("edit"), replay("edit"));
 }
+
+// ---- a question, and the moment it stops being one ----------------------
+
+/// Two lines rather than a recording, deliberately.
+///
+/// The recordings cover what Claude Code's output *looks* like. This covers
+/// correlating two of its lines, which is our own bookkeeping — and there is no
+/// captured session with a question in it, because capturing one means
+/// answering it by hand.
+fn asked_then_answered(answer: Option<&str>) -> Vec<TurnEvent> {
+    let ask = r#"{"type":"assistant","uuid":"u1","message":{"id":"m1","content":[
+        {"type":"tool_use","id":"toolu_ask","name":"AskUserQuestion","input":{"questions":[
+            {"question":"Which environment?","header":"Deploy","options":[
+                {"label":"staging","description":"safe"},
+                {"label":"production","description":"not"}]}]}}]}}"#;
+
+    let mut normaliser = ClaudeNormaliser::new();
+    let mut events = normaliser.push(ask);
+    if let Some(chosen) = answer {
+        let result = format!(
+            r#"{{"type":"user","uuid":"u2","message":{{"content":[
+                {{"tool_use_id":"toolu_ask","type":"tool_result","content":{},"is_error":false}}]}}}}"#,
+            serde_json::to_string(chosen).unwrap()
+        );
+        events.extend(normaliser.push(&result));
+    }
+    events
+}
+
+fn resolved(events: &[TurnEvent]) -> Vec<String> {
+    events
+        .iter()
+        .filter_map(|e| match e {
+            TurnEvent::UserInputResolved { req, .. } => Some(req.to_string()),
+            _ => None,
+        })
+        .collect()
+}
+
+fn requested(events: &[TurnEvent]) -> Vec<String> {
+    events
+        .iter()
+        .filter_map(|e| match e {
+            TurnEvent::UserInputRequested { req, .. } => Some(req.to_string()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The whole transcript is replayed every time a browser attaches, so a
+/// question that was answered an hour ago must not come back as one still
+/// waiting. The `tool_result` is the only thing that says which it is.
+#[test]
+fn an_answered_question_is_reported_as_resolved() {
+    let events = asked_then_answered(Some(r#""Which environment?"="staging""#));
+
+    assert_eq!(
+        requested(&events),
+        vec!["toolu_ask"],
+        "the question is still asked"
+    );
+    assert_eq!(
+        resolved(&events),
+        vec!["toolu_ask"],
+        "and answering it says so, under the same request"
+    );
+}
+
+/// It goes after the item, so the transcript entry is whole before the card
+/// asking for an answer is taken off the screen.
+#[test]
+fn a_question_is_resolved_only_once_its_item_has_finished() {
+    let events = asked_then_answered(Some("staging"));
+
+    let completed = events
+        .iter()
+        .position(|e| matches!(e, TurnEvent::ItemCompleted { .. }))
+        .expect("the tool call finishes");
+    let resolved_at = events
+        .iter()
+        .position(|e| matches!(e, TurnEvent::UserInputResolved { .. }))
+        .expect("the question resolves");
+
+    assert!(
+        completed < resolved_at,
+        "the card must not go before the transcript entry is complete"
+    );
+}
+
+/// The agent really is blocked until the result arrives, and until then the
+/// question is the one thing the session needs somebody for.
+#[test]
+fn an_unanswered_question_stays_open() {
+    let events = asked_then_answered(None);
+
+    assert_eq!(requested(&events), vec!["toolu_ask"]);
+    assert!(
+        resolved(&events).is_empty(),
+        "nothing answered it, so nothing may say it was"
+    );
+}
+
+/// Only questions. Every other tool call finishes the same way and must not
+/// produce an event that takes a card off the screen.
+#[test]
+fn an_ordinary_tool_result_resolves_no_question() {
+    let events = replay("bash");
+    assert!(
+        resolved(&events).is_empty(),
+        "a command's result is not an answer to anything"
+    );
+}
