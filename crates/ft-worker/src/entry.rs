@@ -25,33 +25,48 @@ pub async fn run_agent(session: &str, workspace: PathBuf, agent: &str) -> Result
 
     // The log is per session and outlives the container that wrote it, so
     // anything in it means this conversation is being continued.
-    let start = match crate::agentd::has_spoken(&workspace, session).await {
+    let resuming = crate::agentd::has_spoken(&workspace, session).await;
+    let start = match resuming {
         true => ft_core::Start::Resume,
         false => ft_core::Start::Fresh,
     };
 
-    let argv = kind
-        .launch_headless(session, &asking, start)
-        .with_context(|| format!("{} cannot be driven this way yet", kind.label()))?;
-
-    // Our record of a session is not the agent's. One from before its directory
-    // was kept on the volume has none of its own, so send what to do instead.
-    let fallback = match start {
-        ft_core::Start::Resume => kind.launch_headless(session, &asking, ft_core::Start::Fresh),
-        ft_core::Start::Fresh => None,
+    let launch = |start| {
+        kind.launch_headless(session, &asking, start)
+            .map(|argv| crate::agentd::Launch {
+                session_id: session.to_string(),
+                workspace: workspace.clone(),
+                argv,
+                // Inherited from tmux, which was handed the session's
+                // environment when it started this. Nothing to add.
+                env: vec![],
+            })
+            .with_context(|| format!("{} cannot be driven this way yet", kind.label()))
     };
 
-    crate::agentd::run(crate::agentd::Launch {
-        session_id: session.to_string(),
-        workspace,
-        argv,
-        // Inherited from tmux, which was handed the session's environment when
-        // it started this. Nothing to add.
-        env: vec![],
-        fallback_argv: fallback,
-    })
-    .await
-    .context("supervising the agent")
+    let ran = crate::agentd::run(launch(start)?)
+        .await
+        .context("supervising the agent")?;
+
+    // Our record of a session is not the agent's. One from before its directory
+    // was kept on the volume has none of its own, and Claude Code treats being
+    // asked to resume what it cannot find as fatal.
+    if resuming && ran.said_nothing {
+        tracing::warn!(
+            session,
+            "it would not pick the conversation up; starting one instead"
+        );
+        match crate::history::write(&workspace, session, kind).await {
+            Ok(true) => tracing::info!(session, "left it what was said before"),
+            Ok(false) => {}
+            Err(e) => tracing::warn!(session, "writing what was said before: {e:#}"),
+        }
+        crate::agentd::run(launch(ft_core::Start::Fresh)?)
+            .await
+            .context("supervising the agent")?;
+    }
+
+    Ok(())
 }
 
 /// Write the permission tool's configuration, and say how to reach it.

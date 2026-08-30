@@ -36,6 +36,7 @@ pub mod describe;
 pub mod entry;
 pub mod first_run;
 pub mod git;
+pub mod history;
 pub mod hooks;
 pub mod runtime;
 pub mod store;
