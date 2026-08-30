@@ -72,6 +72,30 @@ fn nothing_else_about_the_launch_changes() {
     assert_eq!(strip(argv(Start::Fresh)), strip(argv(Start::Resume)));
 }
 
+/// What was said before has to reach the agent, not sit in a file it may
+/// decide not to read. It said it had no idea what the conversation was about
+/// while the file was on disk beside it, named in `AGENTS.md`.
+#[test]
+fn a_restarted_agent_is_handed_the_conversation() {
+    let argv = Agent::ClaudeCode
+        .launch_headless(
+            "s_01example",
+            &Asking::CannotAsk,
+            Start::Carrying("they asked for drawings".into()),
+        )
+        .expect("Claude Code is driven headless");
+
+    assert_eq!(
+        after(&argv, "--append-system-prompt").as_deref(),
+        Some("they asked for drawings"),
+        "it goes in the system prompt, where it cannot be missed"
+    );
+    assert!(
+        argv.iter().any(|a| a == "--session-id"),
+        "a carried conversation is still a new one"
+    );
+}
+
 /// Codex is told what to do over its own protocol rather than argv, so there is
 /// nothing here to vary — its resume is a different mechanism, in `thread/start`.
 #[test]

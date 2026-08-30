@@ -23,6 +23,10 @@ pub const FILE: &str = "conversation-so-far.md";
 /// How many exchanges to carry. A week-old session is not 14 KB.
 const KEEP: usize = 40;
 
+/// And a ceiling in bytes, because this rides in the launch and forty
+/// exchanges is not a size.
+const CAP: usize = 60_000;
+
 /// One thing that happened, as it will be read back.
 #[derive(Debug, PartialEq, Eq)]
 enum Said {
@@ -33,54 +37,35 @@ enum Said {
     Did(String),
 }
 
-/// Write the conversation beside the log, and say whether there was one.
-pub async fn write(workspace: &Path, session_id: &str, agent: ft_core::Agent) -> Result<bool> {
+/// The conversation, ready to hand to an agent that has to start over.
+///
+/// Written beside the log as well, so it can be read by a person wondering what
+/// the agent was told.
+pub async fn carry(
+    workspace: &Path,
+    session_id: &str,
+    agent: ft_core::Agent,
+) -> Result<Option<String>> {
     let log = crate::agentd::readable_log(workspace, session_id);
     let Ok(text) = tokio::fs::read_to_string(&log).await else {
-        return Ok(false);
+        return Ok(None);
     };
 
     let mut reader = Reader::for_agent(agent);
     let events: Vec<TurnEvent> = text.lines().flat_map(|line| reader.push(line)).collect();
 
     let Some(rendered) = render(&events) else {
-        return Ok(false);
+        return Ok(None);
     };
 
     let dir = crate::agentd::dir_for(workspace);
     tokio::fs::create_dir_all(&dir).await?;
     let at = dir.join(FILE);
-    tokio::fs::write(&at, rendered)
+    tokio::fs::write(&at, &rendered)
         .await
         .with_context(|| format!("writing {}", at.display()))?;
 
-    point_at_it(workspace).await;
-    Ok(true)
-}
-
-/// The marker around what this adds to `AGENTS.md`, so a second restart
-/// replaces it rather than stacking another copy underneath.
-const MARK: &str = "<!-- firetower:restarted -->";
-
-/// Tell the agent the file is there, where it already reads.
-async fn point_at_it(workspace: &Path) {
-    let at = workspace.join("AGENTS.md");
-    let existing = tokio::fs::read_to_string(&at).await.unwrap_or_default();
-    let kept = match existing.split_once(MARK) {
-        Some((before, _)) => before.trim_end().to_string(),
-        None => existing.trim_end().to_string(),
-    };
-
-    let note = format!(
-        "{kept}\n\n{MARK}\n\n## This session was restarted\n\n\
-         You are picking up work already in progress and you do not remember \
-         it. `.firetower/{FILE}` is what was said before — read it before \
-         answering. The branch and the files are as they were left.\n"
-    );
-
-    if let Err(e) = tokio::fs::write(&at, note).await {
-        tracing::warn!("could not write {}: {e:#}", at.display());
-    }
+    Ok(Some(rendered))
 }
 
 /// Turn the events into something worth reading, or nothing.
@@ -94,8 +79,10 @@ fn render(events: &[TurnEvent]) -> Option<String> {
     let over = said.len().saturating_sub(KEEP);
     let mut out = String::from("# The conversation so far\n\n");
     out.push_str(
-        "This session was restarted and its agent no longer remembers it. \
-         The workspace, the branch and the files are unchanged.\n\n",
+        "You are picking up a session that was restarted, and you do not \
+         remember it. This is what was said before you started. The workspace, \
+         the branch and the files are as they were left — treat all of it as \
+         yours, and carry on from it rather than asking what happened.\n\n",
     );
     if over > 0 {
         out.push_str(&format!("_The earliest {over} are left out._\n\n"));
@@ -126,6 +113,17 @@ fn render(events: &[TurnEvent]) -> Option<String> {
                 out.push_str(&format!("- {what}\n"));
             }
         }
+    }
+    // From the front, so the end of a conversation survives its beginning.
+    if out.len() > CAP {
+        let from = out.len() - CAP;
+        let at = (from..out.len())
+            .find(|i| out.is_char_boundary(*i))
+            .unwrap_or(out.len());
+        out = format!(
+            "# The conversation so far\n\n_Only the end of it fits._\n\n{}",
+            &out[at..]
+        );
     }
     Some(out)
 }

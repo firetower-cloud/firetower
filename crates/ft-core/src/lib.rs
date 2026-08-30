@@ -142,7 +142,7 @@ impl Agent {
                 // after are ordinary now: upgrading Firetower recreates the
                 // container and every agent on it has to come back.
                 let naming = match start {
-                    Start::Fresh => "--session-id",
+                    Start::Fresh | Start::Carrying(_) => "--session-id",
                     Start::Resume => "--resume",
                 };
                 let mut argv: Vec<String> = [
@@ -170,6 +170,10 @@ impl Agent {
                 // A session that takes an hour should not be run by whichever
                 // model was cheapest at the moment it started.
                 argv.extend(["--model".into(), BIGGEST.into()]);
+
+                if let Start::Carrying(before) = &start {
+                    argv.extend(["--append-system-prompt".into(), before.clone()]);
+                }
 
                 match asking {
                     // The agent stops and asks, and the question is routed to
@@ -736,12 +740,18 @@ pub const BIGGEST: &str = "opus[1m]";
 /// a socket in `/tmp`, and recreating the container to upgrade Firetower ends
 /// every one of them. Coming back has to be ordinary, so which of the two this
 /// is has to be said rather than assumed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Start {
     /// Nothing has run under this session id before.
     Fresh,
     /// It has, and its conversation is still on disk.
     Resume,
+    /// A new conversation that has to know what the last one said.
+    ///
+    /// Handed over rather than left somewhere to be found: a file the agent is
+    /// merely told about is a file it can decide not to read, and the first
+    /// thing it then says is that it has no idea what you are talking about.
+    Carrying(String),
 }
 
 /// Whether there is anybody to answer a permission prompt.

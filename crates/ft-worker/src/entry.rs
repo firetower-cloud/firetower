@@ -56,12 +56,22 @@ pub async fn run_agent(session: &str, workspace: PathBuf, agent: &str) -> Result
             session,
             "it would not pick the conversation up; starting one instead"
         );
-        match crate::history::write(&workspace, session, kind).await {
-            Ok(true) => tracing::info!(session, "left it what was said before"),
-            Ok(false) => {}
-            Err(e) => tracing::warn!(session, "writing what was said before: {e:#}"),
-        }
-        crate::agentd::run(launch(ft_core::Start::Fresh)?)
+        let carrying = match crate::history::carry(&workspace, session, kind).await {
+            Ok(Some(text)) => {
+                tracing::info!(
+                    session,
+                    bytes = text.len(),
+                    "handing it what was said before"
+                );
+                ft_core::Start::Carrying(text)
+            }
+            Ok(None) => ft_core::Start::Fresh,
+            Err(e) => {
+                tracing::warn!(session, "reading what was said before: {e:#}");
+                ft_core::Start::Fresh
+            }
+        };
+        crate::agentd::run(launch(carrying)?)
             .await
             .context("supervising the agent")?;
     }
