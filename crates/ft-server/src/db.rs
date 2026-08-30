@@ -1467,9 +1467,15 @@ impl Db {
         status: SessionStatus,
         note: Option<&str>,
     ) -> Result<()> {
+        // `forgotten_at` is a fact about the directory, so it moved to
+        // `workspaces` with the rest of them. Asked for on `sessions` it is not
+        // a filter that matches nothing — it is an error, and this statement
+        // had been failing on every call since.
         sqlx::query(
             "UPDATE sessions SET status = $1, note = $2, updated_at = now()
-              WHERE id = $3 AND forgotten_at IS NULL AND status <> $4",
+              WHERE id = $3
+                AND workspace_id IN (SELECT id FROM workspaces WHERE forgotten_at IS NULL)
+                AND status <> $4",
         )
         .bind(format!("{status:?}"))
         .bind(note)
@@ -2592,6 +2598,75 @@ mod tests {
             "a removed session does not come back"
         );
         assert_eq!(still.note, None, "and brings no question with it");
+    }
+
+    /// What the fleet calls every time a session moves.
+    ///
+    /// It went untested, and so did the fact that it names a column. When
+    /// `forgotten_at` moved to `workspaces` this statement kept asking
+    /// `sessions` for it — which postgres answers with an error rather than
+    /// with no rows, so every status change since had been thrown away in a
+    /// warning nobody reads.
+    #[tokio::test]
+    async fn a_session_state_is_written_unless_the_workspace_is_gone() {
+        let (db, owner) = db_with_user().await;
+        let host = db.ensure_host("fire-01", Compute::Local).await.unwrap();
+
+        let id = SessionId::new();
+        db.insert_session(
+            &id,
+            &host.id,
+            &owner,
+            Some("acme/backend"),
+            "Fix the flaky test",
+            "fix the flaky test",
+            None,
+            Some("main"),
+            "ClaudeCode",
+            WorkspaceSize::Medium,
+            &[],
+            None,
+        )
+        .await
+        .unwrap();
+
+        db.set_session_state(&id, ft_core::SessionStatus::NeedsYou, Some("which one?"))
+            .await
+            .unwrap();
+
+        let moved = db.session(&id).await.unwrap().unwrap();
+        assert_eq!(
+            moved.status,
+            ft_core::SessionStatus::NeedsYou,
+            "the status the fleet reported is the status stored"
+        );
+        assert_eq!(moved.note.as_deref(), Some("which one?"));
+
+        // The note is replaced every time, including with nothing.
+        db.set_session_state(&id, ft_core::SessionStatus::Working, None)
+            .await
+            .unwrap();
+        let back = db.session(&id).await.unwrap().unwrap();
+        assert_eq!(back.status, ft_core::SessionStatus::Working);
+        assert_eq!(
+            back.note, None,
+            "an answered question does not stay on the card"
+        );
+
+        // Removed here while the host was away: the worker knows nothing about
+        // it and goes on reporting, and none of that applies any more.
+        db.forget_session(&id).await.unwrap();
+        db.set_session_state(&id, ft_core::SessionStatus::Working, Some("still going"))
+            .await
+            .unwrap();
+
+        let ghost = db.session(&id).await.unwrap().unwrap();
+        assert_eq!(
+            ghost.status,
+            ft_core::SessionStatus::Ended,
+            "a forgotten session is not brought back by its host"
+        );
+        assert_eq!(ghost.note, None);
     }
 
     /// Removing it here leaves a teardown owed on the machine.
