@@ -169,6 +169,26 @@
     background: var(--color-line);
   }
 
+  /* A drawing wider than the column, with a bar you can see.
+     The opposite call to `.scroll-slim`: this one is drawn without being
+     hovered, because the thing it runs under is a diagram whose right-hand
+     side is off the screen. Waiting for a hover to admit that means the first
+     read of it is of a picture that appears to be missing a piece. */
+  .ft-pre {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-line) transparent;
+  }
+  .ft-pre::-webkit-scrollbar {
+    height: 6px;
+  }
+  .ft-pre::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .ft-pre::-webkit-scrollbar-thumb {
+    background: var(--color-line);
+    border-radius: 99px;
+  }
+
   .panel {
     background: var(--color-panel);
     border: 1px solid var(--color-line);

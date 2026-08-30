@@ -506,7 +506,7 @@ function Says({
   const text = useReveal(item.text, settled);
 
   const body = (
-    <div className="max-w-[72ch]">
+    <div>
       <Markdown>{text}</Markdown>
     </div>
   );
@@ -566,7 +566,7 @@ function Thought({ item }: { item: Item }) {
         {open ? "Hide thinking" : "Thinking"}
       </button>
       {open && (
-        <div className="mt-1 max-w-[74ch] text-mute">
+        <div className="mt-1 text-mute">
           <Markdown>{item.text}</Markdown>
         </div>
       )}
@@ -883,7 +883,7 @@ function Delegated({ item, tasks, items }: { item: Item; tasks: Task[]; items: I
         <div className="mt-2">
           {mine.length > 0 && <Rail items={mine} tasks={tasks} all={items} nested />}
           {task?.summary && (
-            <div className="mt-2 max-w-[74ch] border-l border-line-soft pl-3">
+            <div className="mt-2 border-l border-line-soft pl-3">
               <Markdown>{task.summary}</Markdown>
             </div>
           )}
