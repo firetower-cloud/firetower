@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.17.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.16.0...firetower-v0.17.0) (2026-08-30)
+
+
+### Features
+
+* **worker:** hand the conversation to a restarted agent ([b9fa5b6](https://github.com/firetower-cloud/firetower/commit/b9fa5b61e75469457c8674b002e4eaa67b151fa3))
+
+
+### Bug Fixes
+
+* **worker:** hand the conversation over instead of leaving it about ([aa7a78e](https://github.com/firetower-cloud/firetower/commit/aa7a78e7faacca901a2c925fa7abcb2f31abbcda))
+* **worker:** start a conversation when one cannot be resumed ([7b6620e](https://github.com/firetower-cloud/firetower/commit/7b6620e1b46eab85e6d33576a73be4d3335c9a6d))
+
 ## [0.16.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.15.0...firetower-v0.16.0) (2026-08-30)
 
 
