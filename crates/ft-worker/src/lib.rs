@@ -15,6 +15,28 @@ use std::path::{Path, PathBuf};
 /// it has hundreds of thousands of entries and nobody reads past the first few.
 const LISTING_LIMIT: usize = 500;
 
+/// The most paths a search walks before it stops looking. A monorepo's index
+/// is tens of thousands; past this the ranking is decided long before the walk
+/// would finish.
+const SEARCH_LIMIT: usize = 20_000;
+
+/// Directories a filename search never descends into. Every one of them is
+/// generated, and finding `index.js` four thousand times inside `node_modules`
+/// is the same as finding it nowhere.
+const UNSEARCHED: &[&str] = &[
+    ".git",
+    "node_modules",
+    "target",
+    "dist",
+    ".next",
+    ".venv",
+    "venv",
+    "__pycache__",
+    ".mypy_cache",
+    ".pytest_cache",
+    "vendor",
+];
+
 /// How much of a file goes in one frame. Small enough that terminal output for
 /// other sessions on this machine gets a turn between the pieces.
 const CHUNK: usize = 256 * 1024;
@@ -683,6 +705,19 @@ impl Worker {
                 out.send(ToServer::Listed { req, result }).await?;
             }
 
+            ToWorker::FindFiles {
+                req,
+                session_id,
+                query,
+                limit,
+            } => {
+                let result = self
+                    .find_files(&session_id, &query, limit)
+                    .await
+                    .map_err(|e| format!("{e:#}"));
+                out.send(ToServer::Found { req, result }).await?;
+            }
+
             ToWorker::ReadFile {
                 req,
                 session_id,
@@ -779,6 +814,29 @@ impl Worker {
         });
 
         Ok(entries)
+    }
+
+    /// Files in this session's workspace whose path matches a query.
+    ///
+    /// The index comes from git where there is one: `ls-files` knows what is
+    /// tracked and what is untracked-but-not-ignored, which is exactly the set
+    /// somebody means by "the files in this repository", and it answers in
+    /// milliseconds because git already has it. A workspace that is not a
+    /// checkout — or a git that says no — falls back to walking it.
+    async fn find_files(
+        &self,
+        session_id: &SessionId,
+        query: &str,
+        limit: usize,
+    ) -> Result<Vec<String>> {
+        let workspace = self.workspace_of(session_id).await?;
+
+        let paths = match git_index(&workspace).await {
+            Some(paths) if !paths.is_empty() => paths,
+            _ => walk(&workspace).await,
+        };
+
+        Ok(rank(&paths, query, limit))
     }
 
     /// Send a file back in pieces.
@@ -2215,6 +2273,170 @@ fn inside(workspace: &Path, path: &str) -> Result<PathBuf> {
     Ok(workspace.join(relative))
 }
 
+/// Every file in a workspace, according to git.
+///
+/// Tracked plus untracked-but-not-ignored, which is what somebody means by
+/// "the files in this repository" — and git already holds the answer, so it
+/// arrives in milliseconds where a walk would take seconds. `None` when the
+/// workspace is not a checkout, or git will not say; the caller walks instead.
+async fn git_index(workspace: &Path) -> Option<Vec<String>> {
+    let out = tokio::process::Command::new("git")
+        .arg("-C")
+        .arg(workspace)
+        .args([
+            "ls-files",
+            "--cached",
+            "--others",
+            "--exclude-standard",
+            "-z",
+        ])
+        .output()
+        .await
+        .ok()?;
+
+    if !out.status.success() {
+        return None;
+    }
+
+    Some(
+        String::from_utf8_lossy(&out.stdout)
+            .split('\0')
+            .filter(|line| !line.is_empty())
+            .take(SEARCH_LIMIT)
+            .map(str::to_string)
+            .collect(),
+    )
+}
+
+/// Every file under a directory, for a workspace git has nothing to say about.
+///
+/// Breadth-first, so a cap falls on the deepest corners rather than on the
+/// second half of the alphabet. Links are skipped rather than followed: one
+/// pointing at `/` would turn a filename search into a walk of the machine.
+async fn walk(root: &Path) -> Vec<String> {
+    let mut found = Vec::new();
+    let mut queue = std::collections::VecDeque::from([root.to_path_buf()]);
+
+    while let Some(dir) = queue.pop_front() {
+        let Ok(mut reading) = tokio::fs::read_dir(&dir).await else {
+            continue;
+        };
+
+        while let Ok(Some(entry)) = reading.next_entry().await {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if UNSEARCHED.contains(&name.as_str()) {
+                continue;
+            }
+
+            let Ok(kind) = entry.file_type().await else {
+                continue;
+            };
+            if kind.is_symlink() {
+                continue;
+            }
+
+            let path = entry.path();
+            if kind.is_dir() {
+                queue.push_back(path);
+            } else {
+                found.push(showable(root, &path));
+                if found.len() >= SEARCH_LIMIT {
+                    return found;
+                }
+            }
+        }
+    }
+
+    found
+}
+
+/// The paths that match, best first.
+///
+/// Loose matching, because nobody types a path — they type the four letters
+/// they remember, in order, and expect `sesv` to find `SessionView.tsx`.
+fn rank(paths: &[String], query: &str, limit: usize) -> Vec<String> {
+    let needle: Vec<char> = query
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .flat_map(char::to_lowercase)
+        .collect();
+
+    if needle.is_empty() {
+        let mut all: Vec<String> = paths.to_vec();
+        all.sort();
+        all.truncate(limit);
+        return all;
+    }
+
+    let mut scored: Vec<(i64, &String)> = paths
+        .iter()
+        .filter_map(|path| score(path, &needle).map(|s| (s, path)))
+        .collect();
+
+    // Score, then the shorter path, then alphabetical — so the same query
+    // twice gives the same list rather than whatever order the walk found.
+    scored.sort_by(|a, b| {
+        b.0.cmp(&a.0)
+            .then_with(|| a.1.len().cmp(&b.1.len()))
+            .then_with(|| a.1.cmp(b.1))
+    });
+
+    scored
+        .into_iter()
+        .take(limit)
+        .map(|(_, path)| path.clone())
+        .collect()
+}
+
+/// How well a path answers a query, or `None` if it does not.
+///
+/// Scored twice: once against the whole path and once against the filename
+/// alone, with the filename worth much more. Somebody typing `session` wants
+/// `session.rs`, not the eleven files that happen to live under `sessions/`.
+fn score(path: &str, needle: &[char]) -> Option<i64> {
+    let hay: Vec<char> = path.chars().flat_map(char::to_lowercase).collect();
+    let name_at = hay.iter().rposition(|&c| c == '/').map_or(0, |i| i + 1);
+
+    let whole = run(&hay, 0, needle);
+    let name = run(&hay, name_at, needle).map(|s| s + 500);
+
+    let best = whole.into_iter().chain(name).max()?;
+    // Ties go to the shorter path: the same letters spread over a longer one is
+    // a worse answer to the same question.
+    Some(best * 100 - hay.len() as i64)
+}
+
+/// One pass of the match, from `from` onwards.
+///
+/// Leftmost-first. It is not the highest-scoring arrangement of the characters,
+/// but it always finds one if one exists, and the bonuses below do the ranking
+/// that the arrangement would have.
+fn run(hay: &[char], from: usize, needle: &[char]) -> Option<i64> {
+    let mut total = 0i64;
+    let mut at = from;
+    let mut last: Option<usize> = None;
+
+    for &want in needle {
+        let found = at + hay[at..].iter().position(|&c| c == want)?;
+
+        let mut point = 1;
+        // A run of letters is what somebody was actually typing.
+        if last == Some(found.wrapping_sub(1)) {
+            point += 6;
+        }
+        // The start of a word: `st` should find `SessionTab`, not `assets`.
+        if found == 0 || matches!(hay[found - 1], '/' | '_' | '-' | '.' | ' ') {
+            point += 4;
+        }
+        total += point;
+
+        last = Some(found);
+        at = found + 1;
+    }
+
+    Some(total)
+}
+
 /// A size in the unit somebody would say it in.
 ///
 /// 101 MB was reading as "0.1 GB", which is both true and no use to anyone
@@ -2414,6 +2636,67 @@ mod tests {
     use super::*;
     use ft_core::{Agent, WorkspaceSize};
     use tempfile::TempDir;
+
+    /// The filename wins over the directory it is in.
+    ///
+    /// Somebody typing `session` means the file called that, not the eleven
+    /// files that happen to live under `sessions/` — which is what a match
+    /// against the whole path, scored evenly, hands back.
+    #[test]
+    fn a_name_beats_the_directory_around_it() {
+        let paths = vec![
+            "crates/ft-server/src/api/sessions.rs".to_string(),
+            "crates/ft-server/src/sessions/mod.rs".to_string(),
+            "crates/ft-core/src/session.rs".to_string(),
+        ];
+
+        let found = rank(&paths, "session.rs", 10);
+        assert_eq!(found[0], "crates/ft-core/src/session.rs");
+    }
+
+    /// The letters somebody remembers, in order, with the rest left out.
+    #[test]
+    fn letters_in_order_are_enough() {
+        let paths = vec![
+            "web/components/workspace/SessionTab.tsx".to_string(),
+            "web/components/Settings.chat.tsx".to_string(),
+            "web/app/page.tsx".to_string(),
+        ];
+
+        let found = rank(&paths, "sestab", 10);
+        assert_eq!(found, vec!["web/components/workspace/SessionTab.tsx"]);
+    }
+
+    /// A run of letters beats the same letters scattered, and a shorter path
+    /// beats a longer one holding the same match — so the order is the order
+    /// somebody would have picked, not the order the walk found them in.
+    #[test]
+    fn the_closer_match_comes_first() {
+        let paths = vec![
+            "a/b/c/d/e/tree.tsx".to_string(),
+            "tree.tsx".to_string(),
+            "the/rest/of/everything.tsx".to_string(),
+        ];
+
+        let found = rank(&paths, "tree", 10);
+        assert_eq!(found[0], "tree.tsx");
+        assert_eq!(found[1], "a/b/c/d/e/tree.tsx");
+    }
+
+    /// Nothing typed is not "nothing matches": it is the workspace, in order.
+    #[test]
+    fn an_empty_query_is_the_whole_list() {
+        let paths = vec!["b.rs".to_string(), "a.rs".to_string()];
+        assert_eq!(rank(&paths, "  ", 10), vec!["a.rs", "b.rs"]);
+    }
+
+    /// Case is not something anybody remembers about a filename.
+    #[test]
+    fn case_is_not_asked_about() {
+        let paths = vec!["web/components/FileGlyph.tsx".to_string()];
+        assert_eq!(rank(&paths, "FILEGLYPH", 10).len(), 1);
+        assert_eq!(rank(&paths, "fileglyph", 10).len(), 1);
+    }
 
     /// The file a repository asked for, where it asked for it, and invisible
     /// to git.

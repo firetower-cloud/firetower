@@ -579,6 +579,8 @@ enum Waiting {
     Remote(oneshot::Sender<Result<RemoteInfo, ProbeFailure>>),
     /// What is in a directory.
     Listing(oneshot::Sender<Result<Vec<ft_core::FileEntry>, String>>),
+    /// Which paths in a workspace match a query.
+    Finding(oneshot::Sender<Result<Vec<String>, String>>),
     /// A file: whether it is coming, and then the pieces of it.
     ///
     /// Two channels for one request because a browser needs an answer before a
@@ -1417,6 +1419,13 @@ impl Fleet {
                                 None => tracing::debug!("a listing arrived after its request gave up"),
                             }
                         }
+                        Ok(ToServer::Found { req, result }) => {
+                            match probes.write().await.remove(&req) {
+                                Some(Asked { waiting: Waiting::Finding(reply), .. }) => { let _ = reply.send(result); }
+                                Some(other) => { probes.write().await.insert(req, other); }
+                                None => tracing::debug!("a search arrived after its request gave up"),
+                            }
+                        }
                         Ok(ToServer::FileOpened { req, result }) => {
                             // The entry stays: the chunks that follow are
                             // routed by the same id, and it is removed when the
@@ -1577,6 +1586,9 @@ impl Fleet {
                         let _ = reply.send(Err("the host stopped answering".into()));
                     }
                     Waiting::Listing(reply) => {
+                        let _ = reply.send(Err("the host stopped answering".into()));
+                    }
+                    Waiting::Finding(reply) => {
                         let _ = reply.send(Err("the host stopped answering".into()));
                     }
                     // A download in flight ends where it got to. Dropping the
@@ -2190,6 +2202,51 @@ impl Fleet {
                     req: req.clone(),
                     session_id: session_id.clone(),
                     path: path.to_string(),
+                },
+            )
+            .await;
+
+        if let Err(e) = sent {
+            self.probes.write().await.remove(&req);
+            return Err(e);
+        }
+
+        match tokio::time::timeout(std::time::Duration::from_secs(20), rx).await {
+            Ok(Ok(result)) => Ok(result),
+            Ok(Err(_)) => Err(anyhow::anyhow!("the host stopped answering")),
+            Err(_) => {
+                self.probes.write().await.remove(&req);
+                Err(anyhow::anyhow!("the host didn't answer in time"))
+            }
+        }
+    }
+
+    /// Which paths in a session's workspace match a query.
+    pub async fn find_files(
+        &self,
+        host_id: &HostId,
+        session_id: &SessionId,
+        query: &str,
+        limit: usize,
+    ) -> Result<Result<Vec<String>, String>> {
+        let req = ulid::Ulid::new().to_string();
+        let (tx, rx) = oneshot::channel();
+        self.probes.write().await.insert(
+            req.clone(),
+            Asked {
+                host: host_id.to_string(),
+                waiting: Waiting::Finding(tx),
+            },
+        );
+
+        let sent = self
+            .send(
+                host_id,
+                ToWorker::FindFiles {
+                    req: req.clone(),
+                    session_id: session_id.clone(),
+                    query: query.to_string(),
+                    limit,
                 },
             )
             .await;

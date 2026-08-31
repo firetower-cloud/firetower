@@ -10,7 +10,7 @@
       "name": "AGPL-3.0-only",
       "identifier": "AGPL-3.0-only"
     },
-    "version": "0.16.0"
+    "version": "0.18.0"
   },
   "paths": {
     "/api/v1/agents": {
@@ -2590,6 +2590,81 @@
                   "type": "array",
                   "items": {
                     "$ref": "#/components/schemas/FileEntry"
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sessions/{id}/files/search": {
+      "get": {
+        "tags": [
+          "sessions"
+        ],
+        "summary": "Files in a session's workspace whose path matches a query.",
+        "description": "Loose matching, best first: nobody types a path, they type the letters they\nremember in the order they remember them. The list is capped — a search\nnobody scrolls past twenty results of should not cost a megabyte on a pipe\nshared with every terminal on the host.",
+        "operationId": "find_files",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Session id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "description": "What to look for, matched loosely against the whole path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "The most paths to send back. 200 by default.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
                   }
                 }
               }

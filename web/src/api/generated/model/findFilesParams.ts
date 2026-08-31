@@ -6,10 +6,14 @@
  * OpenAPI spec version: 0.18.0
  */
 
-export type GetConversationParams = {
+export type FindFilesParams = {
 /**
- * Continue from this line
+ * What to look for, matched loosely against the whole path
+ */
+q: string;
+/**
+ * The most paths to send back. 200 by default.
  * @minimum 0
  */
-sinceLine?: number;
+limit?: number;
 };

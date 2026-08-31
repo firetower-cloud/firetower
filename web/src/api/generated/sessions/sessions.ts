@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.16.0
+ * OpenAPI spec version: 0.18.0
  */
 import {
   useMutation,
@@ -39,6 +39,7 @@ import type {
   EndedAll,
   FileDiff,
   FileEntry,
+  FindFilesParams,
   GetConversationParams,
   ListFilesParams,
   ListSessionsParams,
@@ -1561,6 +1562,144 @@ export const useGetListFilesQueryData = () => {
   return (id: string,
     params?: ListFilesParams,) =>
     queryClient.getQueryData<Awaited<ReturnType<typeof listFiles>>>(getListFilesQueryKey(id,params));
+}
+
+
+export const getFindFilesUrl = (id: string,
+    params: FindFilesParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/v1/sessions/${id}/files/search?${stringifiedParams}` : `/api/v1/sessions/${id}/files/search`
+}
+
+/**
+ * Loose matching, best first: nobody types a path, they type the letters they
+ * remember in the order they remember them. The list is capped — a search
+ * nobody scrolls past twenty results of should not cost a megabyte on a pipe
+ * shared with every terminal on the host.
+ * @summary Files in a session's workspace whose path matches a query.
+ */
+export const findFiles = async (id: string,
+    params: FindFilesParams, options?: Parameters<typeof http>[1]): Promise<string[]> => {
+
+  return http<string[]>(getFindFilesUrl(id,params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getFindFilesQueryKey = (id: string,
+    params?: FindFilesParams,) => {
+    return [
+    `/api/v1/sessions/${id}/files/search`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getFindFilesQueryOptions = <TData = Awaited<ReturnType<typeof findFiles>>, TError = ApiError>(id: string,
+    params: FindFilesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof findFiles>>, TError, TData>>, request?: SecondParameter<typeof http>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getFindFilesQueryKey(id,params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof findFiles>>> = ({ signal }) => findFiles(id,params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: id !== null && id !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof findFiles>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type FindFilesQueryResult = NonNullable<Awaited<ReturnType<typeof findFiles>>>
+export type FindFilesQueryError = ApiError
+
+
+export function useFindFiles<TData = Awaited<ReturnType<typeof findFiles>>, TError = ApiError>(
+ id: string,
+    params: FindFilesParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof findFiles>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof findFiles>>,
+          TError,
+          Awaited<ReturnType<typeof findFiles>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useFindFiles<TData = Awaited<ReturnType<typeof findFiles>>, TError = ApiError>(
+ id: string,
+    params: FindFilesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof findFiles>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof findFiles>>,
+          TError,
+          Awaited<ReturnType<typeof findFiles>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useFindFiles<TData = Awaited<ReturnType<typeof findFiles>>, TError = ApiError>(
+ id: string,
+    params: FindFilesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof findFiles>>, TError, TData>>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Files in a session's workspace whose path matches a query.
+ */
+
+export function useFindFiles<TData = Awaited<ReturnType<typeof findFiles>>, TError = ApiError>(
+ id: string,
+    params: FindFilesParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof findFiles>>, TError, TData>>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getFindFilesQueryOptions(id,params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+/**
+ * @summary Files in a session's workspace whose path matches a query.
+ */
+export const useSetFindFilesQueryData = () => {
+  const queryClient = useQueryClient();
+  return (id: string,
+    params: FindFilesParams | undefined,updater: Awaited<ReturnType<typeof findFiles>> | undefined | ((old: Awaited<ReturnType<typeof findFiles>> | undefined) => Awaited<ReturnType<typeof findFiles>> | undefined)) => {
+    queryClient.setQueriesData<Awaited<ReturnType<typeof findFiles>>>({ queryKey: getFindFilesQueryKey(id,params) }, updater);
+  };
+}
+
+/**
+ * @summary Files in a session's workspace whose path matches a query.
+ */
+export const useGetFindFilesQueryData = () => {
+  const queryClient = useQueryClient();
+  return (id: string,
+    params: FindFilesParams,) =>
+    queryClient.getQueryData<Awaited<ReturnType<typeof findFiles>>>(getFindFilesQueryKey(id,params));
 }
 
 

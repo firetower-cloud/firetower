@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.16.0
+ * OpenAPI spec version: 0.18.0
  */
 import * as zod from 'zod';
 
@@ -595,6 +595,29 @@ export const ListFilesResponseItem = zod.object({
   "size": zod.int().min(listFilesResponseSizeMin).describe('Zero for a directory — counting what is inside would mean walking it.')
 }).describe('One thing in a workspace directory.\n\nEnough to draw a row and decide what to do with it, and nothing about where\nit is: paths are the caller\'s, resolved against the workspace on the machine\nthat holds it.')
 export const ListFilesResponse = zod.array(ListFilesResponseItem)
+
+/**
+ * Loose matching, best first: nobody types a path, they type the letters they
+ * remember in the order they remember them. The list is capped — a search
+ * nobody scrolls past twenty results of should not cost a megabyte on a pipe
+ * shared with every terminal on the host.
+ * @summary Files in a session's workspace whose path matches a query.
+ */
+export const FindFilesParams = zod.object({
+  "id": zod.string().describe('Session id')
+})
+
+export const findFilesQueryLimitMin = 0;
+
+
+
+export const FindFilesQueryParams = zod.object({
+  "q": zod.string().describe('What to look for, matched loosely against the whole path'),
+  "limit": zod.int().min(findFilesQueryLimitMin).optional().describe('The most paths to send back. 200 by default.')
+})
+
+export const FindFilesResponseItem = zod.string()
+export const FindFilesResponse = zod.array(FindFilesResponseItem)
 
 /**
  * @summary Stop what the agent is doing, without ending the session.

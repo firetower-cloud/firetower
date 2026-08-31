@@ -32,7 +32,11 @@ use serde::{Deserialize, Serialize};
 /// became `repos`, each carrying the setup, environment file and credential
 /// that used to sit beside it; and the git actions name which checkout they
 /// mean. An older worker would read a two-repository session as none at all.
-pub const PROTOCOL_VERSION: u32 = 10;
+///
+/// 11 — a workspace can be searched by filename. An older worker has no
+/// `FindFiles` and would fail to read the frame asking for one, taking the
+/// connection down with it rather than answering "I can't".
+pub const PROTOCOL_VERSION: u32 = 11;
 
 mod codec;
 pub use codec::{Codec, CodecError, FrameReader, FrameWriter};
@@ -172,6 +176,19 @@ pub enum ToWorker {
         session_id: SessionId,
         /// Relative to the workspace. Empty is the workspace itself.
         path: String,
+    },
+    /// Files in a session's workspace whose path matches a query.
+    ///
+    /// Separate from [`ToWorker::ListFiles`] because it answers a different
+    /// question: not "what is in here" but "where is the thing called this",
+    /// which needs the whole workspace rather than one directory of it.
+    FindFiles {
+        req: ReqId,
+        session_id: SessionId,
+        /// What somebody typed. Matched loosely against the whole path.
+        query: String,
+        /// The most paths worth sending back. Nobody reads past the first few.
+        limit: usize,
     },
     /// Send a file back, in pieces.
     ReadFile {
@@ -562,6 +579,11 @@ pub enum ToServer {
     Listed {
         req: ReqId,
         result: Result<Vec<ft_core::FileEntry>, String>,
+    },
+    /// The answer to [`ToWorker::FindFiles`], best match first.
+    Found {
+        req: ReqId,
+        result: Result<Vec<String>, String>,
     },
     /// Whether a [`ToWorker::ReadFile`] is coming, and how much of it.
     ///

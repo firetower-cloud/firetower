@@ -61,6 +61,19 @@
   --color-slate-tint: #161d26;
   --color-slate-deep: #35485c;
 
+  /* File kinds: what a file *is*, in the tree and nowhere else. A separate
+     namespace from the signals above, and deliberately below them in
+     saturation: a panel of four hundred rows must not be able to out-shout the
+     one thing on screen that means an agent is waiting on you. Nine
+     categories, not ninety formats. */
+  --color-kind-source: #7b93b8;
+  --color-kind-native: #b8845f;
+  --color-kind-data: #c2ab63;
+  --color-kind-style: #9a8cc4;
+  --color-kind-media: #79b58d;
+  --color-kind-store: #bd79a1;
+  --color-kind-prose: #9a9aa4;
+
   --font-sans: var(--font-archivo), ui-sans-serif, system-ui, sans-serif;
   --font-narrow: var(--font-archivo-narrow), ui-sans-serif, system-ui, sans-serif;
   --font-mono: var(--font-jetbrains), ui-monospace, "SF Mono", monospace;
@@ -100,6 +113,15 @@
   ::selection {
     background: color-mix(in srgb, var(--color-slate) 35%, transparent);
     color: var(--color-bone);
+  }
+
+  /* Tailwind v4 resets a button to the arrow the page ships with, so every
+     control in the app looked like text until it was pressed. A pointer over
+     something pressable is not decoration — it is how a page says which parts
+     of it are alive. */
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]) {
+    cursor: pointer;
   }
 
   :focus-visible {

@@ -8,6 +8,7 @@ import { apiBase } from "@/src/api/http";
 import { Terminal } from "@/components/Terminal";
 import { TabBar } from "./TabBar";
 import { Inspector } from "./Inspector";
+import { Finder } from "./Finder";
 import { SessionTab } from "./SessionTab";
 import { FileTab } from "./FileTab";
 import { DiffTab } from "./DiffTab";
@@ -96,6 +97,10 @@ function Bench({ initialSession }: { initialSession?: string }) {
 
       <Inspector sessionId={current} />
 
+      {/* Over everything, and only when it is asked for. It owns its own key
+          because ⌘P has to work while somebody is typing a message, which is
+          exactly what `useWorkbenchKeys` refuses to do. */}
+      <Finder />
     </div>
   );
 }

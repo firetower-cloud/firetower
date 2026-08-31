@@ -1119,6 +1119,43 @@ pub(super) async fn list_files(
         .map_err(|refused| ApiError::new(ErrorCode::InvalidRequest, refused))
 }
 
+/// Files in a session's workspace whose path matches a query.
+///
+/// Loose matching, best first: nobody types a path, they type the letters they
+/// remember in the order they remember them. The list is capped — a search
+/// nobody scrolls past twenty results of should not cost a megabyte on a pipe
+/// shared with every terminal on the host.
+#[utoipa::path(
+    get, path = "/api/v1/sessions/{id}/files/search", tag = "sessions",
+    params(
+        ("id" = String, Path, description = "Session id"),
+        ("q" = String, Query, description = "What to look for, matched loosely against the whole path"),
+        ("limit" = Option<usize>, Query, description = "The most paths to send back. 200 by default."),
+    ),
+    responses((status = 200, body = Vec<String>), (status = 404, body = ApiError), (status = 409, body = ApiError)),
+)]
+pub(super) async fn find_files(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Path(id): Path<String>,
+    Query(req): Query<FileQuery>,
+) -> ApiResult<Json<Vec<String>>> {
+    let id = SessionId::from_stored(id);
+    let (_, host) = session_context(&state, &principal, &id).await?;
+
+    // Capped whatever the caller asks for: the limit is there to protect the
+    // pipe, and a limit a caller can raise is not a limit.
+    let limit = req.limit.unwrap_or(200).clamp(1, 500);
+
+    state
+        .fleet
+        .find_files(&host, &id, req.q.trim(), limit)
+        .await
+        .map_err(|e| ApiError::new(ErrorCode::HostUnreachable, format!("{e:#}")))?
+        .map(Json)
+        .map_err(|refused| ApiError::new(ErrorCode::InvalidRequest, refused))
+}
+
 /// A file out of the workspace, streamed.
 ///
 /// Chunked all the way through: the worker reads it in pieces, the pieces cross
@@ -1173,6 +1210,16 @@ pub(super) async fn download_file(
         )
         .body(body)
         .map_err(|e| ApiError::new(ErrorCode::Internal, format!("{e:#}")))
+}
+
+#[derive(Debug, Deserialize, utoipa::IntoParams)]
+pub(super) struct FileQuery {
+    /// What somebody typed.
+    #[serde(default)]
+    q: String,
+    /// The most paths to send back.
+    #[serde(default)]
+    limit: Option<usize>,
 }
 
 #[derive(Debug, Deserialize, utoipa::IntoParams)]

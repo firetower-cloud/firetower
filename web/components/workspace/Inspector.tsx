@@ -4,21 +4,15 @@ import { FileDiff, FolderOpen, GitBranch, PanelRight } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { Icon } from "@/components/ui";
 import { useState } from "react";
-import {
-  useGetSession,
-  useListFiles,
-  useSessionDiff,
-} from "@/src/api/generated/sessions/sessions";
-import { ApiError, apiBase, token } from "@/src/api/http";
-import type { FileEntry } from "@/src/api/generated/model";
+import { useGetSession, useSessionDiff } from "@/src/api/generated/sessions/sessions";
 import { useOpen } from "@/src/workspace/tabs";
 import { usePanel, VIEWS, type View } from "@/src/workspace/panel";
-import { FileGlyph } from "@/components/FileGlyph";
 import { Signal } from "@/components/Signal";
 import { STATUS_LABEL } from "@/src/api/view";
 import { useListEvents } from "@/src/api/generated/events/events";
 import { stepLines, ready } from "@/components/Steps";
 import { PathRow, Counts } from "./PathRow";
+import { Tree } from "./Tree";
 import { ShipPanel } from "./ShipPanel";
 
 /**
@@ -266,142 +260,6 @@ const LABEL: Record<string, string> = {
   Setup: "Running setup",
   Launch: "Starting the agent",
 };
-
-/**
- * The workspace as a directory you can walk.
- *
- * Confined to the workspace: paths resolve inside it, `..` is refused by the
- * worker, and a symbolic link is shown rather than followed. The shell is the
- * escape hatch for anything outside.
- */
-function Tree({ sessionId, changed }: { sessionId: string; changed: Set<string> }) {
-  const [path, setPath] = useState("");
-  const { data: entries = [], isLoading, error, refetch } = useListFiles(sessionId, { path });
-  const open = useOpen();
-
-  const parts = path ? path.split("/") : [];
-  const full = (name: string) => (path ? `${path}/${name}` : name);
-
-  return (
-    <section className="flex min-h-0 flex-1 flex-col overflow-hidden">
-      <div className="flex shrink-0 items-center gap-1.5 border-b border-line px-3 py-1.5">
-        <span className="eyebrow">Files</span>
-        <span className="ml-auto flex min-w-0 items-center gap-1 overflow-hidden">
-          <button
-            onClick={() => setPath("")}
-            className="shrink-0 font-mono text-micro text-mute transition-colors hover:text-bone"
-          >
-            /
-          </button>
-          {parts.slice(-2).map((part, i, shown) => (
-            <span key={`${part}-${i}`} className="flex min-w-0 items-center gap-1">
-              <button
-                onClick={() =>
-                  setPath(parts.slice(0, parts.length - shown.length + i + 1).join("/"))
-                }
-                className="min-w-0 truncate font-mono text-micro text-dim transition-colors hover:text-bone"
-              >
-                {part}
-              </button>
-              {i < shown.length - 1 && <span className="text-mute/60">/</span>}
-            </span>
-          ))}
-        </span>
-        <button
-          onClick={() => refetch()}
-          className="shrink-0 text-micro text-mute transition-colors hover:text-bone"
-        >
-          ↻
-        </button>
-      </div>
-
-      <div className="min-h-0 flex-1 overflow-y-auto px-1.5 py-1">
-        {isLoading && <Line>Looking…</Line>}
-        {error && <Line>{error instanceof ApiError ? error.message : "Couldn't read that."}</Line>}
-
-        {path && (
-          <button
-            onClick={() => setPath(parts.slice(0, -1).join("/"))}
-            className="flex w-full items-center gap-2 rounded-sm px-1.5 py-1 text-left transition-colors hover:bg-raise/60"
-          >
-            <span className="text-mute">⟵</span>
-            <span className="font-mono text-meta text-dim">..</span>
-          </button>
-        )}
-
-        {entries.map((entry: FileEntry) => (
-          <div
-            key={entry.name}
-            className="group flex items-center gap-2 rounded-sm px-1.5 py-1 transition-colors hover:bg-raise/60"
-          >
-            <span className="shrink-0 text-mute">
-              <FileGlyph name={entry.name} directory={entry.directory} link={entry.link} />
-            </span>
-            <button
-              onClick={() =>
-                entry.directory ? setPath(full(entry.name)) : open.file(full(entry.name))
-              }
-              title={full(entry.name)}
-              className={`min-w-0 flex-1 truncate text-left font-mono text-meta transition-colors hover:text-bone ${
-                entry.directory ? "text-bone" : "text-dim"
-              }`}
-            >
-              {entry.name}
-              {entry.directory ? "/" : ""}
-            </button>
-
-            {/* The tree and Changes are the same fact asked twice. Marking it
-                here means finding a modified file does not cost a trip to the
-                other list and back. */}
-            {changed.has(full(entry.name)) && (
-              <span
-                title="Changed"
-                className="h-1.5 w-1.5 shrink-0 rounded-full bg-slate group-hover:hidden"
-              />
-            )}
-
-            {/* A link is shown, never followed — so there is nothing here we
-                could be sure is inside the workspace. */}
-            {!entry.directory && !entry.link && (
-              <button
-                onClick={() => download(sessionId, full(entry.name), entry.name)}
-                title={`Download ${entry.name}`}
-                className="shrink-0 px-0.5 text-meta text-mute opacity-0 transition-opacity group-hover:opacity-100 hover:text-bone"
-              >
-                ↓
-              </button>
-            )}
-          </div>
-        ))}
-
-        {!isLoading && !error && entries.length === 0 && <Line>Nothing here.</Line>}
-      </div>
-    </section>
-  );
-}
-
-/**
- * Saved through `fetch` rather than followed as a link, so the token travels in
- * a header. The terminal puts one in a query string only because a web socket
- * cannot set headers, and a URL is the one place a credential should not end up.
- */
-async function download(sessionId: string, path: string, name: string) {
-  const url = new URL(`${apiBase()}/api/v1/sessions/${sessionId}/file`);
-  url.searchParams.set("path", path);
-
-  const auth = token();
-  const answer = await fetch(url, {
-    headers: auth ? { authorization: `Bearer ${auth}` } : undefined,
-  });
-  if (!answer.ok) return;
-
-  const href = URL.createObjectURL(await answer.blob());
-  const a = document.createElement("a");
-  a.href = href;
-  a.download = name;
-  a.click();
-  URL.revokeObjectURL(href);
-}
 
 /** What is in the workspace that is not safely elsewhere. */
 function Changes({ sessionId }: { sessionId: string }) {
