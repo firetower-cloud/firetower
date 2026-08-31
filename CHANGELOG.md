@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.19.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.18.0...firetower-v0.19.0) (2026-08-31)
+
+
+### Features
+
+* file search and better file tree ([f059c14](https://github.com/firetower-cloud/firetower/commit/f059c145b299faa832d172867259d312d3cc6479))
+* preview a session's ports on your own machine ([05bd861](https://github.com/firetower-cloud/firetower/commit/05bd8619ab9aa390ce5f2a7b9998cf57afb8a0eb))
+
 ## [0.18.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.17.0...firetower-v0.18.0) (2026-08-30)
 
 
