@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.20.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.19.0...firetower-v0.20.0) (2026-08-31)
+
+
+### Features
+
+* reach a session's preview at a hostname of its own ([62f4b58](https://github.com/firetower-cloud/firetower/commit/62f4b587d752b5b6427a56cfb52b68fa21727a70))
+
 ## [0.19.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.18.0...firetower-v0.19.0) (2026-08-31)
 
 
