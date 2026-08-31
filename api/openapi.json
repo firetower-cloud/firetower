@@ -2693,6 +2693,175 @@
         }
       }
     },
+    "/api/v1/sessions/{id}/forwards": {
+      "get": {
+        "tags": [
+          "sessions"
+        ],
+        "summary": "Ports open for this session, and whether opening one would help.",
+        "operationId": "list_forwards",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Session id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Ports"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "sessions"
+        ],
+        "summary": "Open a port on this machine for one inside the session.",
+        "description": "The same number whenever this machine will give it, because an application\nthat hardcodes its own address only works if it does.",
+        "operationId": "create_forward",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Session id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewForward"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Forwarded"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sessions/{id}/forwards/{port}": {
+      "delete": {
+        "tags": [
+          "sessions"
+        ],
+        "summary": "Close a port opened for this session.",
+        "operationId": "delete_forward",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Session id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "port",
+            "in": "path",
+            "description": "The port inside the workspace",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/sessions/{id}/interrupt": {
       "post": {
         "tags": [
@@ -4859,6 +5028,33 @@
           }
         }
       },
+      "Forwarded": {
+        "type": "object",
+        "description": "A port on this machine, and the one inside the session it stands for.",
+        "required": [
+          "port",
+          "local",
+          "url"
+        ],
+        "properties": {
+          "local": {
+            "type": "integer",
+            "format": "int32",
+            "description": "What was actually bound here.\n\nThe same number whenever it can be — see [`Forwards::start`]. When it\nis not, an application that hardcodes its own address will not find\nitself, and whoever is looking has to be told.",
+            "minimum": 0
+          },
+          "port": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The port inside the session's workspace.",
+            "minimum": 0
+          },
+          "url": {
+            "type": "string",
+            "description": "Ready to paste, because that is what it is for."
+          }
+        }
+      },
       "GitIdentity": {
         "type": "object",
         "description": "What a person's commits are signed with, and where that came from.",
@@ -5171,6 +5367,20 @@
           }
         }
       },
+      "NewForward": {
+        "type": "object",
+        "required": [
+          "port"
+        ],
+        "properties": {
+          "port": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The port inside the session's workspace.",
+            "minimum": 0
+          }
+        }
+      },
       "NewHost": {
         "type": "object",
         "required": [
@@ -5463,6 +5673,32 @@
           "InProgress",
           "Completed"
         ]
+      },
+      "Ports": {
+        "type": "object",
+        "description": "What the interface needs to decide what to show.",
+        "required": [
+          "forwards",
+          "availableHere",
+          "alreadyReachable"
+        ],
+        "properties": {
+          "alreadyReachable": {
+            "type": "boolean",
+            "description": "Whether a port needs forwarding at all.\n\nA worker that is a child process of this control plane shares this\nmachine's network, so its dev server is already on `localhost`. There\nis nothing to tunnel, and forwarding anyway would bind a second port\nthat loops out and straight back in."
+          },
+          "availableHere": {
+            "type": "boolean",
+            "description": "Whether opening one would reach the person asking.\n\nFalse when the control plane is somewhere other than the machine\nholding the browser: the port would be opened there, and sending\nsomebody to `localhost` would send them to their own machine — where\nthere is either nothing, or something else of theirs. The interface\nsays so rather than offering a link that goes to the wrong place."
+          },
+          "forwards": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Forwarded"
+            },
+            "description": "Ports already open on this machine for this session."
+          }
+        }
       },
       "ProbeRequest": {
         "type": "object",

@@ -13,6 +13,7 @@ mod agents;
 mod auth;
 mod conversation;
 mod events;
+mod forwards;
 mod hosts;
 mod providers;
 mod repos;
@@ -220,6 +221,9 @@ async fn credential_for(
         ft_core::SshKey,
         crate::sshkey::PublicIdentity,
         hosts::Reached,
+        forwards::Ports,
+        forwards::NewForward,
+        crate::forward::Forwarded,
         stream::Topic,
         stream::ChangedWhat,
         stream::ClientFrame,
@@ -288,6 +292,8 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(sessions::list_files))
         .routes(routes!(sessions::find_files))
         .routes(routes!(sessions::download_file))
+        .routes(routes!(forwards::list_forwards, forwards::create_forward))
+        .routes(routes!(forwards::delete_forward))
         .routes(routes!(sessions::stop_session))
         .routes(routes!(sessions::relaunch_session))
         .routes(routes!(sessions::rename_session))

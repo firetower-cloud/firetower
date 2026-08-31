@@ -64,6 +64,7 @@ pub mod runtime;
 pub mod store;
 pub mod structured;
 pub mod tmux;
+pub mod tunnel;
 
 use git::GitRoot;
 use store::Store;
@@ -96,6 +97,9 @@ pub struct Worker {
     /// Held so a second watcher does not double every line, and so closing a
     /// session stops the forwarding rather than leaving it talking to nobody.
     watching: Mutex<HashMap<String, tokio::task::JoinHandle<()>>>,
+    /// Ports of this machine's sessions, reached over the pipe rather than the
+    /// network. Still nothing listening here — see [`tunnel`].
+    tunnels: std::sync::Arc<tunnel::Tunnels>,
 }
 
 /// How many frames may be queued for the control plane at once.
@@ -139,6 +143,7 @@ impl Worker {
             git: GitRoot::new(&root),
             attached: Mutex::new(HashMap::new()),
             watching: Mutex::new(HashMap::new()),
+            tunnels: std::sync::Arc::new(tunnel::Tunnels::new()),
             root,
             // Everything already in the log predates this connection. A
             // control plane that wants it asks, with `Resume`.
@@ -449,7 +454,9 @@ impl Worker {
             }
 
             ToWorker::Destroy { session_id, .. } => {
-                // Everything goes: the agent, its terminal, and the worktree.
+                // Everything goes: the agent, its terminal, its ports, and the
+                // worktree.
+                self.tunnels.close_session(&session_id).await;
                 self.attached.lock().await.remove(session_id.as_str());
                 self.attached
                     .lock()
@@ -750,6 +757,46 @@ impl Worker {
                     .await?;
                 }
             },
+
+            ToWorker::TunnelOpen {
+                tunnel,
+                session_id,
+                port,
+            } => {
+                // Refused here rather than at the socket, so an id that names
+                // nothing says so instead of connecting to a port that some
+                // other session on this machine happens to be serving.
+                if let Err(e) = self.workspace_of(&session_id).await {
+                    out.send(ToServer::TunnelOpened {
+                        tunnel,
+                        result: Err(format!("{e:#}")),
+                    })
+                    .await?;
+                    return Ok(true);
+                }
+
+                self.tunnels
+                    .open(tunnel, session_id, port, out)
+                    .await;
+            }
+
+            ToWorker::TunnelData { tunnel, data } => {
+                if let Some(bytes) = data.bytes() {
+                    self.tunnels.write(&tunnel, bytes).await;
+                }
+            }
+
+            ToWorker::TunnelCredit { tunnel, bytes } => {
+                self.tunnels.grant(&tunnel, bytes).await;
+            }
+
+            ToWorker::TunnelClose { tunnel, half } => {
+                if half {
+                    self.tunnels.half_close(&tunnel).await;
+                } else {
+                    self.tunnels.close(&tunnel).await;
+                }
+            }
 
             ToWorker::Stop { session_id } => {
                 tracing::debug!("superseded by RunAction ({session_id})");

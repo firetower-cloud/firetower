@@ -147,7 +147,9 @@ function TabButton({
           ? tab.n === 1
             ? "Terminal"
             : `Terminal ${tab.n}`
-          : leafOf(tab.path);
+          : tab.kind === "preview"
+            ? `Preview ${tab.port}`
+            : leafOf(tab.path);
 
   const closable = tab.kind !== "agent";
 
@@ -221,6 +223,9 @@ function Glyph({
   }
   if (tab.kind === "diff") {
     return <span className="font-mono text-meta opacity-70">±</span>;
+  }
+  if (tab.kind === "preview") {
+    return <span className="font-mono text-meta opacity-70">◈</span>;
   }
   return <FileGlyph name={tab.path} size={12} className="opacity-70" />;
 }
@@ -310,6 +315,12 @@ function NewTab() {
               opener.terminal();
             }}
           />
+          <Preview
+            onOpen={(port) => {
+              setOpen(false);
+              opener.preview(port);
+            }}
+          />
           <Choice
             glyph="▤"
             label="Open a file"
@@ -327,6 +338,45 @@ function NewTab() {
           />
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * The application this session is running, on a port of this machine.
+ *
+ * A field rather than a list: nothing knows what is running in there until
+ * something answers, and asking is cheaper than discovering. 3000 is filled in
+ * because it is what most of them pick.
+ */
+function Preview({ onOpen }: { onOpen: (port: number) => void }) {
+  const [port, setPort] = useState("3000");
+
+  const go = () => {
+    const n = Number(port);
+    if (Number.isInteger(n) && n > 0 && n < 65536) onOpen(n);
+  };
+
+  return (
+    <div className="flex items-center gap-2 rounded-sm px-2 py-1.5 text-left">
+      <span className="w-4 shrink-0 text-center font-mono text-meta text-mute">◈</span>
+      <div className="min-w-0 flex-1">
+        <div className="text-meta text-bone">Preview a port</div>
+        <div className="text-meta text-mute">The application, running in here</div>
+      </div>
+      <input
+        value={port}
+        onChange={(e) => setPort(e.target.value)}
+        onKeyDown={(e) => e.key === "Enter" && go()}
+        aria-label="Port"
+        className="w-14 shrink-0 rounded-sm border border-line bg-ground px-1.5 py-0.5 text-right font-mono text-meta text-dim outline-none focus:border-mute"
+      />
+      <button
+        onClick={go}
+        className="shrink-0 rounded-sm border border-line px-1.5 py-0.5 text-meta text-dim transition-colors hover:bg-raise/60"
+      >
+        Open
+      </button>
     </div>
   );
 }

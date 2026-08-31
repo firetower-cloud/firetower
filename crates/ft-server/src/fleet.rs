@@ -15,7 +15,7 @@ use ft_proto::{
 };
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::{broadcast, mpsc, oneshot, RwLock};
+use tokio::sync::{broadcast, mpsc, oneshot, Mutex, Notify, RwLock};
 
 /// Long enough for a cold network, short enough that nobody watches a spinner
 /// forever. The worker gives up before this, so hitting it means the worker
@@ -600,6 +600,240 @@ enum Waiting {
     },
     Action(oneshot::Sender<Result<String, String>>),
     Summary(oneshot::Sender<Vec<CheckoutSummary>>),
+    /// A tunnel: whether it connected, and then the bytes coming back.
+    ///
+    /// Shaped like a file for the same reason — an answer is due before a body
+    /// — and held in the same map so that a timeout and a host disconnecting
+    /// are handled in the one place they are handled for everything else.
+    Tunnel {
+        opened: Option<oneshot::Sender<Result<(), String>>>,
+        bytes: mpsc::Sender<Vec<u8>>,
+        /// How much this end may still send. Granted by the worker as it puts
+        /// bytes into the far socket.
+        credit: Arc<Credit>,
+    },
+}
+
+/// How much may still be sent down a tunnel before the far end says it has
+/// written some.
+///
+/// Deliberately not shared with the worker's copy. They are separate processes
+/// protecting separate things: the worker's window keeps a dev server from
+/// outrunning a browser, this one keeps a request body from outrunning a dev
+/// server. Making them one type would couple two decisions that should be free
+/// to differ.
+pub struct Credit {
+    left: Mutex<u32>,
+    granted: Notify,
+}
+
+impl Credit {
+    fn new() -> Self {
+        Self {
+            left: Mutex::new(TUNNEL_WINDOW),
+            granted: Notify::new(),
+        }
+    }
+
+    /// Wait until there is room, then claim up to `most` bytes of it.
+    async fn claim(&self, most: usize) -> usize {
+        loop {
+            {
+                let mut left = self.left.lock().await;
+                if *left > 0 {
+                    let take = (*left as usize).min(most);
+                    *left -= take as u32;
+                    return take;
+                }
+            }
+            self.granted.notified().await;
+        }
+    }
+
+    async fn give_back(&self, bytes: u32) {
+        if bytes == 0 {
+            return;
+        }
+        *self.left.lock().await += bytes;
+        self.granted.notify_waiters();
+    }
+}
+
+/// How much may be in flight down one tunnel, each way.
+///
+/// Matches the worker's window. The number that matters is not this one but
+/// its ratio to [`TUNNEL_CHUNK`]: eight frames outstanding is enough that a
+/// fast answer is not one round trip per frame, and few enough that the
+/// channel holding them cannot fill and stall the loop that also carries every
+/// terminal on this host.
+const TUNNEL_WINDOW: u32 = 256 * 1024;
+
+/// How much goes in one frame, going down.
+const TUNNEL_CHUNK: usize = 32 * 1024;
+
+/// How many pieces may wait to be read out of a tunnel.
+///
+/// Twice what the window allows in flight, so that the fleet loop never blocks
+/// handing a piece over. That is the whole point of the window: without it,
+/// this channel filling would stop every session on the host.
+const TUNNEL_PIECES: usize = (TUNNEL_WINDOW as usize / TUNNEL_CHUNK) * 2;
+
+/// One end of a TCP connection inside a session's workspace.
+///
+/// Reads and writes bytes and knows nothing about what they mean. What sits on
+/// top is an ordinary port on this machine — see [`crate::forward`].
+///
+/// Split into halves before use. A response can begin before a request has
+/// finished arriving — that is what a websocket is, permanently — so both
+/// directions have to be driven at once, and one object borrowed two ways
+/// cannot be.
+pub struct Tunnel {
+    shared: Arc<Open>,
+    incoming: mpsc::Receiver<Vec<u8>>,
+}
+
+/// What both halves need, and what closes the tunnel when the last one goes.
+struct Open {
+    id: ft_proto::TunnelId,
+    host: HostId,
+    fleet: Fleet,
+    credit: Arc<Credit>,
+    /// Set once the far end is known to be gone, so `Drop` does not send a
+    /// close for a tunnel that has already closed itself.
+    ended: std::sync::atomic::AtomicBool,
+}
+
+/// The half that reads.
+pub struct TunnelIn {
+    shared: Arc<Open>,
+    incoming: mpsc::Receiver<Vec<u8>>,
+}
+
+/// The half that writes. Cloneable, because nothing about it is exclusive.
+#[derive(Clone)]
+pub struct TunnelOut {
+    shared: Arc<Open>,
+}
+
+impl Tunnel {
+    pub fn split(self) -> (TunnelIn, TunnelOut) {
+        (
+            TunnelIn {
+                shared: self.shared.clone(),
+                incoming: self.incoming,
+            },
+            TunnelOut {
+                shared: self.shared,
+            },
+        )
+    }
+}
+
+impl TunnelIn {
+    /// The next bytes from the far end, or `None` when it is done.
+    pub async fn recv(&mut self) -> Option<Vec<u8>> {
+        let bytes = self.incoming.recv().await;
+
+        match &bytes {
+            Some(got) => {
+                // Granted on the way out, not on arrival: the window is meant
+                // to track what has actually been consumed, and telling the
+                // worker to send more the instant something lands would make it
+                // track nothing at all.
+                let _ = self
+                    .shared
+                    .fleet
+                    .send(
+                        &self.shared.host,
+                        ToWorker::TunnelCredit {
+                            tunnel: self.shared.id.clone(),
+                            bytes: got.len() as u32,
+                        },
+                    )
+                    .await;
+            }
+            None => self
+                .shared
+                .ended
+                .store(true, std::sync::atomic::Ordering::Relaxed),
+        }
+
+        bytes
+    }
+}
+
+impl TunnelOut {
+    /// Send bytes to the far end, waiting when it is not keeping up.
+    pub async fn send(&self, mut bytes: &[u8]) -> Result<()> {
+        while !bytes.is_empty() {
+            let budget = self
+                .shared
+                .credit
+                .claim(TUNNEL_CHUNK.min(bytes.len()))
+                .await;
+            let (now, rest) = bytes.split_at(budget);
+
+            self.shared
+                .fleet
+                .send(
+                    &self.shared.host,
+                    ToWorker::TunnelData {
+                        tunnel: self.shared.id.clone(),
+                        data: ft_proto::Payload::of(now),
+                    },
+                )
+                .await?;
+
+            bytes = rest;
+        }
+
+        Ok(())
+    }
+
+    /// Nothing more is coming from this end; the far end may still answer.
+    pub async fn half_close(&self) -> Result<()> {
+        self.shared
+            .fleet
+            .send(
+                &self.shared.host,
+                ToWorker::TunnelClose {
+                    tunnel: self.shared.id.clone(),
+                    half: true,
+                },
+            )
+            .await
+    }
+}
+
+impl Drop for Open {
+    fn drop(&mut self) {
+        if self.ended.load(std::sync::atomic::Ordering::Relaxed) {
+            return;
+        }
+
+        // Nothing to spawn onto, which happens while the runtime is shutting
+        // down — and a control plane going away closes every connection anyway,
+        // so there is nothing this would have achieved.
+        if tokio::runtime::Handle::try_current().is_err() {
+            return;
+        }
+
+        // Somebody hung up mid-request. Telling the worker is what stops a dev
+        // server writing a response into a socket nobody will ever read.
+        let (fleet, host, id) = (self.fleet.clone(), self.host.clone(), self.id.clone());
+        tokio::spawn(async move {
+            fleet.probes.write().await.remove(&id);
+            let _ = fleet
+                .send(
+                    &host,
+                    ToWorker::TunnelClose {
+                        tunnel: id,
+                        half: false,
+                    },
+                )
+                .await;
+        });
+    }
 }
 
 /// A request waiting on an answer, and which host owes it.
@@ -1464,6 +1698,61 @@ impl Fleet {
                                 probes.write().await.remove(&req);
                             }
                         }
+                        Ok(ToServer::TunnelOpened { tunnel, result }) => {
+                            // The entry stays: the bytes that follow are routed
+                            // by the same id, and it is removed when the far end
+                            // closes or the reader goes away.
+                            let mut held = probes.write().await;
+                            if let Some(Asked { waiting: Waiting::Tunnel { opened, .. }, .. }) = held.get_mut(&tunnel) {
+                                if let Some(tell) = opened.take() {
+                                    let _ = tell.send(result);
+                                    continue;
+                                }
+                            }
+                            tracing::debug!("a tunnel answered after its request gave up");
+                        }
+                        Ok(ToServer::TunnelData { tunnel, data }) => {
+                            let sender = {
+                                let held = probes.read().await;
+                                match held.get(&tunnel) {
+                                    Some(Asked { waiting: Waiting::Tunnel { bytes, .. }, .. }) => Some(bytes.clone()),
+                                    _ => None,
+                                }
+                            };
+
+                            if let Some(sender) = sender {
+                                if let Some(got) = data.bytes() {
+                                    // Never blocks in practice: the worker holds
+                                    // a window and this channel is twice it. If
+                                    // it ever did, it would stall every session
+                                    // on this host, which is why the window is
+                                    // not optional.
+                                    if sender.send(got).await.is_err() {
+                                        probes.write().await.remove(&tunnel);
+                                    }
+                                }
+                            }
+                        }
+                        Ok(ToServer::TunnelClosed { tunnel, reason }) => {
+                            if let Some(reason) = &reason {
+                                tracing::debug!(tunnel = %tunnel, "the far end ended it: {reason}");
+                            }
+                            // Dropping the sender is what tells the reader the
+                            // bytes are over. There is no other end marker.
+                            probes.write().await.remove(&tunnel);
+                        }
+                        Ok(ToServer::TunnelCredit { tunnel, bytes }) => {
+                            let credit = {
+                                let held = probes.read().await;
+                                match held.get(&tunnel) {
+                                    Some(Asked { waiting: Waiting::Tunnel { credit, .. }, .. }) => Some(credit.clone()),
+                                    _ => None,
+                                }
+                            };
+                            if let Some(credit) = credit {
+                                credit.give_back(bytes).await;
+                            }
+                        }
                         Ok(ToServer::ActionDone { req, result }) => {
                             match probes.write().await.remove(&req) {
                                 Some(Asked { waiting: Waiting::Action(reply), .. }) => { let _ = reply.send(result); }
@@ -1599,6 +1888,15 @@ impl Fleet {
                             let _ = tell.send(Err("the host stopped answering".into()));
                         }
                     }
+                    // Same shape as a file, and the same reasoning: a request
+                    // still waiting to be told whether it connected is told;
+                    // one already carrying bytes ends where it got to, because
+                    // dropping the sender is what a hung-up connection is.
+                    Waiting::Tunnel { opened, .. } => {
+                        if let Some(tell) = opened {
+                            let _ = tell.send(Err("the host stopped answering".into()));
+                        }
+                    }
                     // A sign-in belongs to the host that asked for the code:
                     // OpenAI is delivering the credential *there*, and no
                     // other host can be told to collect it. Losing the
@@ -1619,6 +1917,82 @@ impl Fleet {
         }
 
         Ok(())
+    }
+
+    /// Open a TCP connection to a port inside a session's workspace.
+    ///
+    /// The outer error means we could not ask — the host is unreachable, or it
+    /// stopped answering. The inner one means we asked and the answer was no,
+    /// which is almost always "nothing is listening on 3000 yet". They read
+    /// very differently to somebody looking at a screen, so they stay apart.
+    ///
+    /// Shaped like [`Self::read_file`]: an answer before a body, because a
+    /// browser needs to be told what happened before it can be shown anything.
+    pub async fn open_tunnel(
+        &self,
+        host_id: &HostId,
+        session_id: &SessionId,
+        port: u16,
+    ) -> Result<Result<Tunnel, String>> {
+        let id = ulid::Ulid::new().to_string();
+        let (opened, wait) = oneshot::channel();
+        let (bytes, incoming) = mpsc::channel(TUNNEL_PIECES);
+        let credit = Arc::new(Credit::new());
+
+        self.probes.write().await.insert(
+            id.clone(),
+            Asked {
+                host: host_id.to_string(),
+                waiting: Waiting::Tunnel {
+                    opened: Some(opened),
+                    bytes,
+                    credit: credit.clone(),
+                },
+            },
+        );
+
+        let sent = self
+            .send(
+                host_id,
+                ToWorker::TunnelOpen {
+                    tunnel: id.clone(),
+                    session_id: session_id.clone(),
+                    port,
+                },
+            )
+            .await;
+
+        if let Err(e) = sent {
+            self.probes.write().await.remove(&id);
+            return Err(e);
+        }
+
+        // Connecting to loopback is immediate or refused. A wait this long is
+        // for the round trip through ssh, not for the connection.
+        match tokio::time::timeout(std::time::Duration::from_secs(20), wait).await {
+            Ok(Ok(Ok(()))) => Ok(Ok(Tunnel {
+                shared: Arc::new(Open {
+                    id,
+                    host: host_id.clone(),
+                    fleet: self.clone(),
+                    credit,
+                    ended: std::sync::atomic::AtomicBool::new(false),
+                }),
+                incoming,
+            })),
+            Ok(Ok(Err(refused))) => {
+                self.probes.write().await.remove(&id);
+                Ok(Err(refused))
+            }
+            Ok(Err(_)) => {
+                self.probes.write().await.remove(&id);
+                Err(anyhow::anyhow!("the host stopped answering"))
+            }
+            Err(_) => {
+                self.probes.write().await.remove(&id);
+                Err(anyhow::anyhow!("the host did not answer in time"))
+            }
+        }
     }
 
     /// Send a frame to a host, if we can currently reach it.

@@ -996,6 +996,11 @@ pub(super) async fn destroy_session(
         return Err(ApiError::new(ErrorCode::SessionEnded, "already ended"));
     }
 
+    // Before anything else, and whether or not the host answers: a port on this
+    // machine pointing at a workspace that is being torn down is a link that
+    // hangs rather than one that says what happened.
+    state.forwards.stop_session(&id).await;
+
     // Ending is normally the worker's word: it tears the workspace down and
     // reports it, and the row follows. With nobody listening there is no such
     // word, and this used to fail as an internal error — a 500 for a machine
@@ -1268,7 +1273,7 @@ async fn repo_env(
 }
 
 /// The session, its host, and the credential its remote needs.
-async fn session_context(
+pub(super) async fn session_context(
     state: &AppState,
     principal: &Principal,
     id: &SessionId,

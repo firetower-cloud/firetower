@@ -15,6 +15,7 @@ mod container;
 pub mod db;
 pub mod diagnose;
 pub mod fleet;
+pub mod forward;
 pub mod notify;
 pub mod oauth;
 pub mod providers;
@@ -51,6 +52,12 @@ pub struct AppState {
     pub pending: Arc<tokio::sync::RwLock<std::collections::HashMap<String, api::Pending>>>,
     /// Organisations, users, sessions and settings.
     pub accounts: accounts::Accounts,
+    /// Ports this machine is holding open on behalf of a session.
+    ///
+    /// In memory on purpose, like `pending`: a forwarded port is a view
+    /// somebody left open, not state. Rebinding them at start-up would mean
+    /// opening ports for sessions that may be long gone.
+    pub forwards: Arc<forward::Forwards>,
 }
 
 pub struct Config {
@@ -156,6 +163,7 @@ pub async fn run(config: Config) -> Result<()> {
         home: config.home.clone(),
         pending: Default::default(),
         accounts: accounts.clone(),
+        forwards: Default::default(),
     };
     // In the background: it fetches a few hundred megabytes, and nothing else
     // start-up does should wait on somebody's connection to npm.

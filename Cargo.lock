@@ -853,6 +853,7 @@ dependencies = [
  "chrono",
  "ft-core",
  "ft-proto",
+ "ft-worker",
  "futures",
  "hmac",
  "mime_guess",

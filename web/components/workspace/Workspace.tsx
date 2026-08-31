@@ -12,6 +12,7 @@ import { Finder } from "./Finder";
 import { SessionTab } from "./SessionTab";
 import { FileTab } from "./FileTab";
 import { DiffTab } from "./DiffTab";
+import { PreviewTab } from "./PreviewTab";
 import {
   Tabs,
   paneTabs,
@@ -181,6 +182,8 @@ function Content({
       return <FileTab sessionId={sessionId} path={tab.path} />;
     case "diff":
       return <DiffTab sessionId={sessionId} path={tab.path} />;
+    case "preview":
+      return <PreviewTab sessionId={sessionId} port={tab.port} />;
   }
 }
 

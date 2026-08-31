@@ -40,13 +40,16 @@ import type {
   FileDiff,
   FileEntry,
   FindFilesParams,
+  Forwarded,
   GetConversationParams,
   ListFilesParams,
   ListSessionsParams,
   NewCheckout,
+  NewForward,
   NewPullRequest,
   NewSession,
   Placed,
+  Ports,
   Proposal,
   PullRequest,
   RenameSession,
@@ -1703,7 +1706,269 @@ export const useGetFindFilesQueryData = () => {
 }
 
 
-export const getInterruptSessionUrl = (id: string,) => {
+export const getListForwardsUrl = (id: string,) => {
+
+
+
+
+  return `/api/v1/sessions/${id}/forwards`
+}
+
+/**
+ * @summary Ports open for this session, and whether opening one would help.
+ */
+export const listForwards = async (id: string, options?: Parameters<typeof http>[1]): Promise<Ports> => {
+
+  return http<Ports>(getListForwardsUrl(id),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListForwardsQueryKey = (id: string,) => {
+    return [
+    `/api/v1/sessions/${id}/forwards`
+    ] as const;
+    }
+
+
+export const getListForwardsQueryOptions = <TData = Awaited<ReturnType<typeof listForwards>>, TError = ApiError>(id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listForwards>>, TError, TData>>, request?: SecondParameter<typeof http>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListForwardsQueryKey(id);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listForwards>>> = ({ signal }) => listForwards(id, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: id !== null && id !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listForwards>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListForwardsQueryResult = NonNullable<Awaited<ReturnType<typeof listForwards>>>
+export type ListForwardsQueryError = ApiError
+
+
+export function useListForwards<TData = Awaited<ReturnType<typeof listForwards>>, TError = ApiError>(
+ id: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listForwards>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listForwards>>,
+          TError,
+          Awaited<ReturnType<typeof listForwards>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListForwards<TData = Awaited<ReturnType<typeof listForwards>>, TError = ApiError>(
+ id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listForwards>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listForwards>>,
+          TError,
+          Awaited<ReturnType<typeof listForwards>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListForwards<TData = Awaited<ReturnType<typeof listForwards>>, TError = ApiError>(
+ id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listForwards>>, TError, TData>>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Ports open for this session, and whether opening one would help.
+ */
+
+export function useListForwards<TData = Awaited<ReturnType<typeof listForwards>>, TError = ApiError>(
+ id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listForwards>>, TError, TData>>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getListForwardsQueryOptions(id,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+/**
+ * @summary Ports open for this session, and whether opening one would help.
+ */
+export const useSetListForwardsQueryData = () => {
+  const queryClient = useQueryClient();
+  return (id: string,updater: Awaited<ReturnType<typeof listForwards>> | undefined | ((old: Awaited<ReturnType<typeof listForwards>> | undefined) => Awaited<ReturnType<typeof listForwards>> | undefined)) => {
+    queryClient.setQueriesData<Awaited<ReturnType<typeof listForwards>>>({ queryKey: getListForwardsQueryKey(id) }, updater);
+  };
+}
+
+/**
+ * @summary Ports open for this session, and whether opening one would help.
+ */
+export const useGetListForwardsQueryData = () => {
+  const queryClient = useQueryClient();
+  return (id: string,) =>
+    queryClient.getQueryData<Awaited<ReturnType<typeof listForwards>>>(getListForwardsQueryKey(id));
+}
+
+
+export const getCreateForwardUrl = (id: string,) => {
+
+
+
+
+  return `/api/v1/sessions/${id}/forwards`
+}
+
+/**
+ * The same number whenever this machine will give it, because an application
+ * that hardcodes its own address only works if it does.
+ * @summary Open a port on this machine for one inside the session.
+ */
+export const createForward = async (id: string,
+    newForward: NewForward, options?: Parameters<typeof http>[1]): Promise<Forwarded> => {
+
+  return http<Forwarded>(getCreateForwardUrl(id),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(newForward)
+  }
+);}
+
+
+
+
+
+export const getCreateForwardMutationOptions = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createForward>>, TError,{id: string;data: NewForward}, TContext>, request?: SecondParameter<typeof http>}
+): UseMutationOptions<Awaited<ReturnType<typeof createForward>>, TError,{id: string;data: NewForward}, TContext> => {
+
+const mutationKey = ['createForward'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createForward>>, {id: string;data: NewForward}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  createForward(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateForwardMutationResult = NonNullable<Awaited<ReturnType<typeof createForward>>>
+    export type CreateForwardMutationBody = NewForward
+    export type CreateForwardMutationError = ApiError
+
+    /**
+ * @summary Open a port on this machine for one inside the session.
+ */
+export const useCreateForward = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createForward>>, TError,{id: string;data: NewForward}, TContext>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof createForward>>,
+        TError,
+        {id: string;data: NewForward},
+        TContext
+      > => {
+      return useMutation(getCreateForwardMutationOptions(options), queryClient);
+    }
+    export const getDeleteForwardUrl = (id: string,
+    port: number,) => {
+
+
+
+
+  return `/api/v1/sessions/${id}/forwards/${port}`
+}
+
+/**
+ * @summary Close a port opened for this session.
+ */
+export const deleteForward = async (id: string,
+    port: number, options?: Parameters<typeof http>[1]): Promise<void> => {
+
+  return http<void>(getDeleteForwardUrl(id,port),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+
+export const getDeleteForwardMutationOptions = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteForward>>, TError,{id: string;port: number}, TContext>, request?: SecondParameter<typeof http>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteForward>>, TError,{id: string;port: number}, TContext> => {
+
+const mutationKey = ['deleteForward'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteForward>>, {id: string;port: number}> = (props) => {
+          const {id,port} = props ?? {};
+
+          return  deleteForward(id,port,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteForwardMutationResult = NonNullable<Awaited<ReturnType<typeof deleteForward>>>
+
+    export type DeleteForwardMutationError = ApiError
+
+    /**
+ * @summary Close a port opened for this session.
+ */
+export const useDeleteForward = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteForward>>, TError,{id: string;port: number}, TContext>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof deleteForward>>,
+        TError,
+        {id: string;port: number},
+        TContext
+      > => {
+      return useMutation(getDeleteForwardMutationOptions(options), queryClient);
+    }
+    export const getInterruptSessionUrl = (id: string,) => {
 
 
 

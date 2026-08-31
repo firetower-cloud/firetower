@@ -61,7 +61,15 @@ export type Tab =
   /** A shell in the workspace. Numbered, because two is a normal thing to want. */
   | { id: string; kind: "terminal"; n: number }
   | { id: string; kind: "file"; path: string }
-  | { id: string; kind: "diff"; path: string };
+  | { id: string; kind: "diff"; path: string }
+  /**
+   * The application this session is running, on a port of this machine.
+   *
+   * Keyed by the port inside the workspace rather than the one bound here: the
+   * local one can differ when something already had that number, and it is not
+   * what somebody means when they say "the preview on 3000".
+   */
+  | { id: string; kind: "preview"; port: number };
 
 /** The address of a thing inside a session, which is also its tab id. */
 export const addressOf = {
@@ -70,6 +78,7 @@ export const addressOf = {
   terminal: (n: number) => `terminal:${n}`,
   file: (path: string) => `file:${path}`,
   diff: (path: string) => `diff:${path}`,
+  preview: (port: number) => `preview:${port}`,
 };
 
 /** What is open in one session. */
@@ -420,5 +429,10 @@ export function useOpen() {
       const n = set ? nextTerminal(set) : 1;
       open({ id: addressOf.terminal(n), kind: "terminal", n });
     }, [open, set]),
+    preview: useCallback(
+      (port: number, beside?: boolean) =>
+        open({ id: addressOf.preview(port), kind: "preview", port }, beside),
+      [open],
+    ),
   };
 }

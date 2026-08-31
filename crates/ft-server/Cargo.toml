@@ -42,3 +42,6 @@ mime_guess.workspace = true
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 tempfile.workspace = true
+# The real worker, so the tunnel tests exercise the code that actually runs
+# rather than a fake that agrees with them.
+ft-worker.workspace = true

@@ -620,6 +620,72 @@ export const FindFilesResponseItem = zod.string()
 export const FindFilesResponse = zod.array(FindFilesResponseItem)
 
 /**
+ * @summary Ports open for this session, and whether opening one would help.
+ */
+export const ListForwardsParams = zod.object({
+  "id": zod.string().describe('Session id')
+})
+
+export const listForwardsResponseForwardsItemLocalMin = 0;
+
+export const listForwardsResponseForwardsItemPortMin = 0;
+
+
+
+export const ListForwardsResponse = zod.object({
+  "alreadyReachable": zod.boolean().describe('Whether a port needs forwarding at all.\n\nA worker that is a child process of this control plane shares this\nmachine\'s network, so its dev server is already on `localhost`. There\nis nothing to tunnel, and forwarding anyway would bind a second port\nthat loops out and straight back in.'),
+  "availableHere": zod.boolean().describe('Whether opening one would reach the person asking.\n\nFalse when the control plane is somewhere other than the machine\nholding the browser: the port would be opened there, and sending\nsomebody to `localhost` would send them to their own machine — where\nthere is either nothing, or something else of theirs. The interface\nsays so rather than offering a link that goes to the wrong place.'),
+  "forwards": zod.array(zod.object({
+  "local": zod.int().min(listForwardsResponseForwardsItemLocalMin).describe('What was actually bound here.\n\nThe same number whenever it can be — see [`Forwards::start`]. When it\nis not, an application that hardcodes its own address will not find\nitself, and whoever is looking has to be told.'),
+  "port": zod.int().min(listForwardsResponseForwardsItemPortMin).describe('The port inside the session\'s workspace.'),
+  "url": zod.string().describe('Ready to paste, because that is what it is for.')
+}).describe('A port on this machine, and the one inside the session it stands for.')).describe('Ports already open on this machine for this session.')
+}).describe('What the interface needs to decide what to show.')
+
+/**
+ * The same number whenever this machine will give it, because an application
+ * that hardcodes its own address only works if it does.
+ * @summary Open a port on this machine for one inside the session.
+ */
+export const CreateForwardParams = zod.object({
+  "id": zod.string().describe('Session id')
+})
+
+export const createForwardBodyPortMin = 0;
+
+
+
+export const CreateForwardBody = zod.object({
+  "port": zod.int().min(createForwardBodyPortMin).describe('The port inside the session\'s workspace.')
+})
+
+export const createForwardResponseLocalMin = 0;
+
+export const createForwardResponsePortMin = 0;
+
+
+
+export const CreateForwardResponse = zod.object({
+  "local": zod.int().min(createForwardResponseLocalMin).describe('What was actually bound here.\n\nThe same number whenever it can be — see [`Forwards::start`]. When it\nis not, an application that hardcodes its own address will not find\nitself, and whoever is looking has to be told.'),
+  "port": zod.int().min(createForwardResponsePortMin).describe('The port inside the session\'s workspace.'),
+  "url": zod.string().describe('Ready to paste, because that is what it is for.')
+}).describe('A port on this machine, and the one inside the session it stands for.')
+
+/**
+ * @summary Close a port opened for this session.
+ */
+export const deleteForwardPathPortMin = 0;
+
+
+
+export const DeleteForwardParams = zod.object({
+  "id": zod.string().describe('Session id'),
+  "port": zod.int().min(deleteForwardPathPortMin).describe('The port inside the workspace')
+})
+
+export const DeleteForwardResponse = zod.void()
+
+/**
  * @summary Stop what the agent is doing, without ending the session.
  */
 export const InterruptSessionParams = zod.object({

@@ -36,7 +36,12 @@ use serde::{Deserialize, Serialize};
 /// 11 — a workspace can be searched by filename. An older worker has no
 /// `FindFiles` and would fail to read the frame asking for one, taking the
 /// connection down with it rather than answering "I can't".
-pub const PROTOCOL_VERSION: u32 = 11;
+///
+/// 12 — raw TCP travels over this connection, so a port a session is serving
+/// on can be reached without anything listening on the machine it runs on. An
+/// older worker cannot read `TunnelOpen`, and a preview against one would take
+/// the connection down rather than answering "I can't".
+pub const PROTOCOL_VERSION: u32 = 12;
 
 mod codec;
 pub use codec::{Codec, CodecError, FrameReader, FrameWriter};
@@ -49,6 +54,39 @@ pub use base64::{decode, encode};
 /// Most frames are one-way and correlate on `session_id`. Probing a remote has
 /// no session yet, so it carries its own id.
 pub type ReqId = String;
+
+/// Correlates the two ends of one tunnel.
+///
+/// A ULID from the same mint as [`ReqId`], and held in the same map: a tunnel
+/// is a request whose answer arrives in pieces and does not stop, which is what
+/// a file download already was.
+pub type TunnelId = String;
+
+/// base64 bytes travelling through a tunnel.
+///
+/// A newtype for one reason: frames are logged, and what goes through a tunnel
+/// is somebody's application — its pages, its cookies, its `Authorization`
+/// headers. Deriving `Debug` on the enum would print all of it. This prints how
+/// much there was, which is the only part of it a log has any business knowing.
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct Payload(pub String);
+
+impl std::fmt::Debug for Payload {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "<{} base64 bytes>", self.0.len())
+    }
+}
+
+impl Payload {
+    pub fn of(bytes: &[u8]) -> Self {
+        Self(encode(bytes))
+    }
+
+    pub fn bytes(&self) -> Option<Vec<u8>> {
+        decode(&self.0)
+    }
+}
 
 /// A git credential, valid for one operation.
 ///
@@ -195,6 +233,45 @@ pub enum ToWorker {
         req: ReqId,
         session_id: SessionId,
         path: String,
+    },
+    /// Open a TCP connection to a port this session is serving on.
+    ///
+    /// A port and nothing else. Never a host: the worker connects to
+    /// `127.0.0.1` and only ever to `127.0.0.1`, so a mistake in a URL
+    /// upstream cannot turn a worker into a gateway into the machine's private
+    /// network. That is a one-line property and it is worth keeping unarguable.
+    TunnelOpen {
+        tunnel: TunnelId,
+        session_id: SessionId,
+        port: u16,
+    },
+    /// Bytes for an open tunnel, in order.
+    TunnelData {
+        tunnel: TunnelId,
+        data: Payload,
+    },
+    /// Done with this tunnel, in one of the two senses.
+    ///
+    /// `half` is the end of a request body: nothing more is coming from this
+    /// end, but the far end still has an answer to finish writing. Without it
+    /// a server that reads to end-of-input never replies.
+    ///
+    /// Not `half` is a hang-up — the browser navigated away — and the worker
+    /// drops the socket.
+    TunnelClose {
+        tunnel: TunnelId,
+        half: bool,
+    },
+    /// The worker may send this many more bytes down this tunnel.
+    ///
+    /// Without this, a page load of a dev server's unbundled modules arrives
+    /// faster than a browser drains it, and the frames pile up in the control
+    /// plane's memory — or block the one loop that also carries every terminal
+    /// on this host. With it, a worker out of credit stops reading its socket
+    /// and the dev server feels the backpressure through TCP, where it belongs.
+    TunnelCredit {
+        tunnel: TunnelId,
+        bytes: u32,
     },
     /// Stop the agent but keep the workspace.
     Stop {
@@ -602,6 +679,36 @@ pub enum ToServer {
         /// The last one. There is no other end-of-file marker.
         last: bool,
     },
+    /// Whether a [`ToWorker::TunnelOpen`] connected, and if not, why not.
+    ///
+    /// Separate from the bytes for the same reason [`ToServer::FileOpened`] is:
+    /// the control plane has to answer a browser before it has a body, and
+    /// "nothing is listening on 3000" is a sentence somebody can act on rather
+    /// than a page that never loads.
+    TunnelOpened {
+        tunnel: TunnelId,
+        result: Result<(), String>,
+    },
+    /// Bytes from an open tunnel, in order.
+    TunnelData {
+        tunnel: TunnelId,
+        data: Payload,
+    },
+    /// The far end is done, or gone. No more bytes under this id.
+    TunnelClosed {
+        tunnel: TunnelId,
+        reason: Option<String>,
+    },
+    /// The control plane may send this many more bytes down this tunnel.
+    ///
+    /// The mirror of [`ToWorker::TunnelCredit`], and load-bearing for a
+    /// different reason: without it a request body the far end is slow to read
+    /// would either pile up in the worker's memory or stop the one loop that
+    /// serves every session on the machine.
+    TunnelCredit {
+        tunnel: TunnelId,
+        bytes: u32,
+    },
     /// How a [`ToWorker::RunAction`] ended.
     ActionDone {
         req: ReqId,
@@ -749,6 +856,83 @@ mod tests {
             let back: ToServer = serde_json::from_str(&json).unwrap();
             assert!(matches!(back, ToServer::RemoteProbed { .. }), "{json}");
         }
+    }
+
+    #[test]
+    fn a_tunnel_round_trips_in_both_directions() {
+        let out = ToWorker::TunnelOpen {
+            tunnel: "t_1".into(),
+            session_id: SessionId::from_stored("s_abc"),
+            port: 3000,
+        };
+        let back: ToWorker = serde_json::from_str(&serde_json::to_string(&out).unwrap()).unwrap();
+        assert!(matches!(back, ToWorker::TunnelOpen { port: 3000, .. }));
+
+        let out = ToWorker::TunnelData {
+            tunnel: "t_1".into(),
+            data: Payload::of(b"GET / HTTP/1.1\r\n"),
+        };
+        let back: ToWorker = serde_json::from_str(&serde_json::to_string(&out).unwrap()).unwrap();
+        match back {
+            ToWorker::TunnelData { data, .. } => {
+                assert_eq!(data.bytes().unwrap(), b"GET / HTTP/1.1\r\n")
+            }
+            other => panic!("{other:?}"),
+        }
+
+        for frame in [
+            ToWorker::TunnelClose {
+                tunnel: "t_1".into(),
+                half: true,
+            },
+            ToWorker::TunnelCredit {
+                tunnel: "t_1".into(),
+                bytes: 65536,
+            },
+        ] {
+            let json = serde_json::to_string(&frame).unwrap();
+            serde_json::from_str::<ToWorker>(&json).unwrap();
+        }
+
+        for frame in [
+            ToServer::TunnelOpened {
+                tunnel: "t_1".into(),
+                result: Ok(()),
+            },
+            ToServer::TunnelOpened {
+                tunnel: "t_1".into(),
+                result: Err("nothing is listening on 3000".into()),
+            },
+            ToServer::TunnelData {
+                tunnel: "t_1".into(),
+                data: Payload::of(b"HTTP/1.1 200 OK"),
+            },
+            ToServer::TunnelClosed {
+                tunnel: "t_1".into(),
+                reason: None,
+            },
+            ToServer::TunnelCredit {
+                tunnel: "t_1".into(),
+                bytes: 65536,
+            },
+        ] {
+            let json = serde_json::to_string(&frame).unwrap();
+            serde_json::from_str::<ToServer>(&json).unwrap();
+        }
+    }
+
+    /// What goes through a tunnel is somebody's application, headers and all.
+    #[test]
+    fn a_tunnels_bytes_are_not_in_the_log() {
+        let frame = ToWorker::TunnelData {
+            tunnel: "t_1".into(),
+            data: Payload::of(b"Cookie: session=averyrealsecret"),
+        };
+        let shown = format!("{frame:?}");
+        assert!(!shown.contains("averyrealsecret"), "{shown}");
+        // base64 of the same string, in case it is printed undecoded.
+        assert!(!shown.contains(&encode(b"averyrealsecret")), "{shown}");
+        assert!(shown.contains("base64 bytes"), "{shown}");
     }
 
     #[test]
