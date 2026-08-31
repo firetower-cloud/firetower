@@ -87,6 +87,8 @@ export * from './placed';
 export * from './planStep';
 export * from './planStepStatus';
 export * from './ports';
+export * from './previewAddress';
+export * from './previewAddressParams';
 export * from './probeRequest';
 export * from './probeResponse';
 export * from './proposal';

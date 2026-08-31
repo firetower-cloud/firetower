@@ -50,6 +50,8 @@ import type {
   NewSession,
   Placed,
   Ports,
+  PreviewAddress,
+  PreviewAddressParams,
   Proposal,
   PullRequest,
   RenameSession,
@@ -2038,7 +2040,146 @@ export const useInterruptSession = <TError = ApiError,
       > => {
       return useMutation(getInterruptSessionMutationOptions(options), queryClient);
     }
-    export const getSessionPtyUrl = (id: string,
+    export const getPreviewAddressUrl = (id: string,
+    params: PreviewAddressParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/v1/sessions/${id}/preview?${stringifiedParams}` : `/api/v1/sessions/${id}/preview`
+}
+
+/**
+ * Signed rather than stored, so it survives a restart of the control plane and
+ * there is nothing to expire. Nothing is opened by asking: the tunnel is built
+ * when the browser actually arrives, which is also when "nothing is listening
+ * on 3000" would be found out — and that is a page saying so rather than an
+ * error here, because by then a browser is looking at it.
+ * @summary The address a session's port can be reached at.
+ */
+export const previewAddress = async (id: string,
+    params: PreviewAddressParams, options?: Parameters<typeof http>[1]): Promise<PreviewAddress> => {
+
+  return http<PreviewAddress>(getPreviewAddressUrl(id,params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getPreviewAddressQueryKey = (id: string,
+    params?: PreviewAddressParams,) => {
+    return [
+    `/api/v1/sessions/${id}/preview`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getPreviewAddressQueryOptions = <TData = Awaited<ReturnType<typeof previewAddress>>, TError = ApiError>(id: string,
+    params: PreviewAddressParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof previewAddress>>, TError, TData>>, request?: SecondParameter<typeof http>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getPreviewAddressQueryKey(id,params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof previewAddress>>> = ({ signal }) => previewAddress(id,params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: id !== null && id !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof previewAddress>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type PreviewAddressQueryResult = NonNullable<Awaited<ReturnType<typeof previewAddress>>>
+export type PreviewAddressQueryError = ApiError
+
+
+export function usePreviewAddress<TData = Awaited<ReturnType<typeof previewAddress>>, TError = ApiError>(
+ id: string,
+    params: PreviewAddressParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof previewAddress>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof previewAddress>>,
+          TError,
+          Awaited<ReturnType<typeof previewAddress>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function usePreviewAddress<TData = Awaited<ReturnType<typeof previewAddress>>, TError = ApiError>(
+ id: string,
+    params: PreviewAddressParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof previewAddress>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof previewAddress>>,
+          TError,
+          Awaited<ReturnType<typeof previewAddress>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function usePreviewAddress<TData = Awaited<ReturnType<typeof previewAddress>>, TError = ApiError>(
+ id: string,
+    params: PreviewAddressParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof previewAddress>>, TError, TData>>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary The address a session's port can be reached at.
+ */
+
+export function usePreviewAddress<TData = Awaited<ReturnType<typeof previewAddress>>, TError = ApiError>(
+ id: string,
+    params: PreviewAddressParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof previewAddress>>, TError, TData>>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getPreviewAddressQueryOptions(id,params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+/**
+ * @summary The address a session's port can be reached at.
+ */
+export const useSetPreviewAddressQueryData = () => {
+  const queryClient = useQueryClient();
+  return (id: string,
+    params: PreviewAddressParams | undefined,updater: Awaited<ReturnType<typeof previewAddress>> | undefined | ((old: Awaited<ReturnType<typeof previewAddress>> | undefined) => Awaited<ReturnType<typeof previewAddress>> | undefined)) => {
+    queryClient.setQueriesData<Awaited<ReturnType<typeof previewAddress>>>({ queryKey: getPreviewAddressQueryKey(id,params) }, updater);
+  };
+}
+
+/**
+ * @summary The address a session's port can be reached at.
+ */
+export const useGetPreviewAddressQueryData = () => {
+  const queryClient = useQueryClient();
+  return (id: string,
+    params: PreviewAddressParams,) =>
+    queryClient.getQueryData<Awaited<ReturnType<typeof previewAddress>>>(getPreviewAddressQueryKey(id,params));
+}
+
+
+export const getSessionPtyUrl = (id: string,
     params?: SessionPtyParams,) => {
   const normalizedParams = new URLSearchParams();
 

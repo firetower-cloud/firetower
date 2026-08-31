@@ -222,6 +222,7 @@ async fn credential_for(
         crate::sshkey::PublicIdentity,
         hosts::Reached,
         forwards::Ports,
+        forwards::PreviewAddress,
         forwards::NewForward,
         crate::forward::Forwarded,
         stream::Topic,
@@ -294,6 +295,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(sessions::download_file))
         .routes(routes!(forwards::list_forwards, forwards::create_forward))
         .routes(routes!(forwards::delete_forward))
+        .routes(routes!(forwards::preview_address))
         .routes(routes!(sessions::stop_session))
         .routes(routes!(sessions::relaunch_session))
         .routes(routes!(sessions::rename_session))

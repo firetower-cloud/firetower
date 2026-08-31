@@ -730,6 +730,49 @@ impl Tunnel {
 }
 
 impl TunnelIn {
+    /// The next bytes from the far end, for a caller that cannot await.
+    ///
+    /// Exists for [`crate::preview::TunnelStream`], which has to answer
+    /// `poll_read`. The credit for what it hands over is granted on its own
+    /// task rather than inline: a grant is additive, so the order they arrive
+    /// in does not matter, and there is nowhere here to wait for one.
+    pub fn poll_recv(
+        &mut self,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Vec<u8>>> {
+        let polled = self.incoming.poll_recv(cx);
+
+        if let std::task::Poll::Ready(ref bytes) = polled {
+            match bytes {
+                Some(got) => self.grant(got.len() as u32),
+                None => self
+                    .shared
+                    .ended
+                    .store(true, std::sync::atomic::Ordering::Relaxed),
+            }
+        }
+
+        polled
+    }
+
+    /// Tell the far end it may send this much more.
+    fn grant(&self, bytes: u32) {
+        if tokio::runtime::Handle::try_current().is_err() {
+            return;
+        }
+
+        let (fleet, host, id) = (
+            self.shared.fleet.clone(),
+            self.shared.host.clone(),
+            self.shared.id.clone(),
+        );
+        tokio::spawn(async move {
+            let _ = fleet
+                .send(&host, ToWorker::TunnelCredit { tunnel: id, bytes })
+                .await;
+        });
+    }
+
     /// The next bytes from the far end, or `None` when it is done.
     pub async fn recv(&mut self) -> Option<Vec<u8>> {
         let bytes = self.incoming.recv().await;

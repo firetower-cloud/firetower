@@ -18,6 +18,7 @@ pub mod fleet;
 pub mod forward;
 pub mod notify;
 pub mod oauth;
+pub mod preview;
 pub mod providers;
 pub mod sshkey;
 pub mod tasks;
@@ -52,6 +53,11 @@ pub struct AppState {
     pub pending: Arc<tokio::sync::RwLock<std::collections::HashMap<String, api::Pending>>>,
     /// Organisations, users, sessions and settings.
     pub accounts: accounts::Accounts,
+    /// Signs and checks the hostnames a preview is reached at.
+    ///
+    /// Derived from the vault's root key, so a name survives a restart and an
+    /// open preview does not need reopening.
+    pub names: preview::Names,
     /// Ports this machine is holding open on behalf of a session.
     ///
     /// In memory on purpose, like `pending`: a forwarded port is a view
@@ -155,6 +161,9 @@ pub async fn run(config: Config) -> Result<()> {
         tracing::info!(host = %host.name, kind = host.compute.label(), "supervised");
     }
 
+    // Before `vault` is moved into the state below.
+    let names = preview::Names::from_vault(&vault);
+
     let state = AppState {
         db,
         fleet,
@@ -164,6 +173,7 @@ pub async fn run(config: Config) -> Result<()> {
         pending: Default::default(),
         accounts: accounts.clone(),
         forwards: Default::default(),
+        names,
     };
     // In the background: it fetches a few hundred megabytes, and nothing else
     // start-up does should wait on somebody's connection to npm.
@@ -468,6 +478,7 @@ fn build_router(
     policy: auth::Policy,
     accounts: accounts::Accounts,
 ) -> axum::Router {
+    let state_for_preview = state.clone();
     let (router, _api) = api::router().with_state(state.clone()).split_for_parts();
 
     // Only the API. Whether the machine is up is not a secret, and a health
@@ -499,7 +510,33 @@ fn build_router(
         );
     }
 
-    app
+    // Outermost, so it is asked before the authentication gate and before any
+    // route matching. A preview is a whole hostname rather than a path: it
+    // carries its own credential in its name, it must not be answered with the
+    // interface's own 404 page, and every path under it belongs to somebody
+    // else's application rather than to us.
+    app.layer(axum::middleware::from_fn_with_state(
+        state_for_preview,
+        preview_first,
+    ))
+}
+
+/// Anything addressed to a preview hostname belongs to that preview.
+async fn preview_first(
+    axum::extract::State(state): axum::extract::State<AppState>,
+    request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    match preview::proxy::addressed_to(&state.names, &request) {
+        Some(preview) => preview::proxy::serve(state, preview, request).await,
+        None => next.run(request).await,
+    }
+}
+
+/// What Caddy asks about before requesting a certificate.
+#[derive(serde::Deserialize)]
+struct PreviewAsked {
+    domain: String,
 }
 
 /// Liveness and readiness, deliberately outside the API contract.
@@ -513,6 +550,26 @@ fn operational(state: AppState) -> axum::Router {
     axum::Router::new()
         // Up. Says nothing about whether it can work — that is the other one.
         .route("/healthz", get(|| async { "ok" }))
+        // Whether a hostname is a preview of ours.
+        //
+        // Caddy asks before it will request a certificate for a name it has
+        // never seen, which is what stops anybody pointing a domain at a
+        // deployment and having it mint certificates on request. Outside the
+        // gate because Caddy has no credential — and it needs none: this
+        // answers a question anybody could answer for themselves by trying the
+        // name.
+        .route(
+            "/preview-known",
+            get(
+                |axum::extract::State(state): axum::extract::State<AppState>,
+                 axum::extract::Query(asked): axum::extract::Query<PreviewAsked>| async move {
+                    match state.names.resolve(&asked.domain) {
+                        Some(_) => axum::http::StatusCode::OK,
+                        None => axum::http::StatusCode::NOT_FOUND,
+                    }
+                },
+            ),
+        )
         // Up *and* able to answer. The distinction matters to a load balancer:
         // a control plane whose database has gone should stop being sent
         // requests without being killed and restarted into the same failure.

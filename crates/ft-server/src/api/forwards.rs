@@ -1,12 +1,17 @@
-//! Ports of a session's workspace, opened on this machine.
+//! Reaching a port of a session's workspace.
 //!
-//! Three operations and no cleverness. What makes this worth a module rather
-//! than three lines in `sessions` is the two answers that are not a port:
-//! whether opening one would help whoever is asking, and whether one is needed
-//! at all.
+//! Two ways, and the interface uses the first.
 //!
-//! See [`crate::forward`] for why a real port rather than a path under the
-//! interface.
+//! **A hostname.** [`preview_address`] hands back
+//! `<session>-<port>-<signature>.localhost`, which needs nothing published and
+//! works whether or not this control plane is in a container. See
+//! [`crate::preview`].
+//!
+//! **A port on this machine.** The rest of this module. Only useful when the
+//! control plane is a process on the machine holding the browser — not in a
+//! container, which is how the production install ships — but it is what a
+//! real port is for: curl, Postman, a phone on the same wifi. See
+//! [`crate::forward`].
 
 use super::sessions::session_context;
 use super::{ApiError, ApiResult, ErrorCode};
@@ -20,7 +25,75 @@ use axum::{
 };
 use ft_core::SessionId;
 use serde::{Deserialize, Serialize};
-use utoipa::ToSchema;
+use utoipa::{IntoParams, ToSchema};
+
+/// Where a session's port can be opened in a browser.
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewAddress {
+    /// Ready to put in an `iframe` or paste into a tab.
+    pub url: String,
+    /// The port inside the session's workspace.
+    pub port: u16,
+}
+
+#[derive(Debug, Deserialize, IntoParams)]
+pub(super) struct WhichPort {
+    /// The port inside the session's workspace.
+    port: u16,
+}
+
+/// The address a session's port can be reached at.
+///
+/// Signed rather than stored, so it survives a restart of the control plane and
+/// there is nothing to expire. Nothing is opened by asking: the tunnel is built
+/// when the browser actually arrives, which is also when "nothing is listening
+/// on 3000" would be found out — and that is a page saying so rather than an
+/// error here, because by then a browser is looking at it.
+#[utoipa::path(
+    get, path = "/api/v1/sessions/{id}/preview", tag = "sessions",
+    params(("id" = String, Path, description = "Session id"), WhichPort),
+    responses((status = 200, body = PreviewAddress), (status = 404, body = ApiError), (status = 409, body = ApiError)),
+)]
+pub(super) async fn preview_address(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    axum::extract::Query(which): axum::extract::Query<WhichPort>,
+) -> ApiResult<Json<PreviewAddress>> {
+    let id = SessionId::from_stored(id);
+    // Asked for the ownership check, not for the host: whoever opens the
+    // address is admitted by its signature, and this is where we decide
+    // whether they are allowed one at all.
+    session_context(&state, &principal, &id).await?;
+
+    let preview = crate::preview::Preview {
+        session: id,
+        port: which.port,
+    };
+
+    Ok(Json(PreviewAddress {
+        url: state.names.url(scheme_of(&headers), &preview),
+        port: which.port,
+    }))
+}
+
+/// Behind Caddy this process is only ever spoken to over plain HTTP, so its own
+/// connection says nothing about what the browser used. The proxy in front is
+/// the only thing that knows, and this is how it says so.
+fn scheme_of(headers: &HeaderMap) -> &'static str {
+    let forwarded = headers
+        .get("x-forwarded-proto")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+
+    if forwarded.eq_ignore_ascii_case("https") {
+        "https"
+    } else {
+        "http"
+    }
+}
 
 /// What the interface needs to decide what to show.
 #[derive(Debug, Serialize, ToSchema)]
@@ -157,6 +230,14 @@ pub(super) async fn delete_forward(
 /// the only one available: nothing else in a request says where the person
 /// reading it is sitting.
 fn available_here(headers: &HeaderMap) -> bool {
+    // A container is reached at `localhost` and binds its own loopback, which
+    // is not the one the browser is on. The `Host` header cannot tell those
+    // apart — it says the browser reached us at a loopback name, not that our
+    // loopback is the browser's — so it is asked second.
+    if crate::forward::Forwards::in_a_container() {
+        return false;
+    }
+
     let host = headers
         .get(header::HOST)
         .and_then(|value| value.to_str().ok());
@@ -171,6 +252,15 @@ fn available_here(headers: &HeaderMap) -> bool {
 /// worker in a container publishes nothing and needs the tunnel, even when the
 /// container is on this very machine.
 async fn already_reachable(state: &AppState, host: &ft_core::HostId) -> bool {
+    // Not when we are in a container. The worker is then a child process
+    // sharing the *container's* network, so its dev server is on a loopback
+    // the browser cannot reach — and telling somebody to open `localhost:3000`
+    // sends them to their own machine, which is the bug this whole check
+    // exists to avoid.
+    if crate::forward::Forwards::in_a_container() {
+        return false;
+    }
+
     matches!(
         state.db.host_by_id(host).await,
         Ok(Some(host)) if host.compute == ft_core::Compute::Local

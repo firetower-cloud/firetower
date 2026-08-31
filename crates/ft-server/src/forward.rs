@@ -191,6 +191,20 @@ impl Forwards {
     /// thing they are already doing — forward the application's port the same
     /// way — and a wrong guess in the other direction would hide the feature
     /// from everybody running Firetower on their own laptop.
+    /// Whether this control plane is inside a container.
+    ///
+    /// It matters because a container's `127.0.0.1` is not the browser's, and
+    /// a container cannot gain a published port while it is running — so a
+    /// port bound in here reaches nobody, however local the request looked.
+    ///
+    /// Asked of the filesystem rather than guessed from a header: `/.dockerenv`
+    /// is written by Docker into every container it creates, and the
+    /// deployment knowing what it is beats us inferring it from how we were
+    /// addressed. That inference is exactly what got this wrong.
+    pub fn in_a_container() -> bool {
+        std::path::Path::new("/.dockerenv").exists()
+    }
+
     pub fn available_here(host_header: Option<&str>) -> bool {
         let Some(host) = host_header else {
             return false;
@@ -337,21 +351,22 @@ async fn carry(
     Ok(())
 }
 
+/// A worker that speaks the tunnel frames, for tests in this crate.
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::db::Db;
+pub mod testing {
     use crate::transport::{Connection, Transport};
+    use anyhow::{Context, Result};
     use ft_proto::{Codec, ToServer, ToWorker, PROTOCOL_VERSION};
     use std::sync::Arc;
 
-    /// A worker that speaks the tunnel frames, using the real implementation.
-    ///
-    /// Not a fake that agrees with the test: `ft_worker::tunnel` is the code
-    /// that runs on a real machine, and a stand-in here would only prove the
-    /// stand-in works. Everything else a worker does is out of scope, so it is
-    /// answered with silence.
-    struct Worker {
+    pub fn worker() -> Arc<Worker> {
+        Worker::new()
+    }
+
+    /// Uses the real `ft_worker::tunnel`, not a stand-in that would only prove
+    /// the stand-in works. Everything else a worker does is answered with
+    /// silence.
+    pub struct Worker {
         once: std::sync::Mutex<Option<Connection>>,
     }
 
@@ -428,6 +443,12 @@ mod tests {
                 .context("this worker can only be connected to once")
         }
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::Db;
 
     /// A connected fleet and a host to ask things of.
     async fn fleet() -> (Fleet, HostId) {
@@ -437,7 +458,7 @@ mod tests {
             .await
             .unwrap();
         let fleet = Fleet::new(db);
-        fleet.supervise(host.id.clone(), Worker::new()).await;
+        fleet.supervise(host.id.clone(), super::testing::worker()).await;
         (fleet, host.id)
     }
 

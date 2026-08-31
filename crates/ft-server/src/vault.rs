@@ -131,6 +131,16 @@ impl Vault {
         Self { pool, root }
     }
 
+    /// A key for something outside the vault, derived from the root.
+    ///
+    /// The root never leaves this type. What comes back is scoped to a purpose
+    /// and cannot open anything sealed here — which is what lets a preview
+    /// hostname be signed by the same installation without handing the signer
+    /// the ability to read a credential.
+    pub fn derive(&self, purpose: &str) -> [u8; 32] {
+        self.root.derive(purpose)
+    }
+
     /// Store a value, replacing whatever was there.
     ///
     /// Replacing bumps the version, and the version is sealed into the

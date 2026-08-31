@@ -39,6 +39,12 @@ tokio-util = { version = "0.7", features = ["io"] }
 
 # http
 axum = { version = "0.8", features = ["ws"] }
+# The preview is an ordinary reverse proxy over a tunnel. hyper does the HTTP —
+# framing, chunked bodies, keep-alive and upgrades — rather than us doing it
+# again and worse.
+hyper = { version = "1", features = ["client", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+http-body-util = "0.1"
 tower-http = { version = "0.6", features = ["cors", "trace"] }
 
 # api contract

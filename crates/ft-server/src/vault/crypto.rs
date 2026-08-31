@@ -119,6 +119,18 @@ impl RootKey {
         Self(*random_key())
     }
 
+    /// A key for something that is not a secret in the vault.
+    ///
+    /// Derived rather than the root itself, and separated by purpose, so that
+    /// whatever holds one of these cannot read a stored credential with it and
+    /// two purposes cannot be made to agree.
+    pub fn derive(&self, purpose: &str) -> [u8; KEY_LEN] {
+        let mut mac = <hmac::Hmac<sha2::Sha256>>::new_from_slice(&self.0)
+            .expect("HMAC accepts any key length");
+        hmac::Mac::update(&mut mac, purpose.as_bytes());
+        hmac::Mac::finalize(mac).into_bytes().into()
+    }
+
     pub fn from_bytes(bytes: &[u8]) -> Result<Self> {
         let bytes: [u8; KEY_LEN] = bytes
             .try_into()

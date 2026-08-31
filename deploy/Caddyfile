@@ -24,6 +24,35 @@
 #   * `encode gzip`. It buys little on small JSON and is a way to introduce
 #     buffering on the one stream where that would be felt.
 
+# Certificates for preview hostnames are asked for as they are first used,
+# rather than one wildcard certificate obtained up front. That is what keeps
+# this to a DNS record and no provider plugin, no API token and no DNS-01.
+#
+# Firetower is asked before each one, so a name nobody signed never becomes a
+# certificate request — otherwise pointing any domain at this deployment would
+# make it mint them on demand.
+{
+	on_demand_tls {
+		ask http://firetower:4400/preview-known
+	}
+}
+
 {$DOMAIN} {
+	reverse_proxy firetower:4400
+}
+
+# The application a session is running, at `<session>-<port>-<signature>`.
+#
+# **With no DOMAIN this block never matches**, and does not need to: the site
+# above is then `:80`, which already answers every hostname — so previews on a
+# laptop work with no DNS, no certificate and nothing configured here at all.
+# The placeholder is a name that resolves nowhere.
+#
+# **With a domain**, set PREVIEW_SITE to `*.your-domain` in `.env` and add one
+# wildcard record pointing there. Nothing else.
+{$PREVIEW_SITE:*.preview.invalid} {
+	tls {
+		on_demand
+	}
 	reverse_proxy firetower:4400
 }

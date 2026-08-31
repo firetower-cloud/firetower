@@ -56,6 +56,11 @@ services:
     environment:
       DOMAIN: ${DOMAIN:-:80}
       ACME_EMAIL: ${ACME_EMAIL:-}
+      # Where previews are served. `*.your-domain` when DOMAIN is set, and one
+      # wildcard DNS record pointing here. Left alone with no domain: the site
+      # block above is `:80`, which already answers every hostname, so previews
+      # on `*.localhost` need nothing.
+      PREVIEW_SITE: ${PREVIEW_SITE:-*.preview.invalid}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       # The certificate and the ACME account key. Lose this and every restart
@@ -87,6 +92,17 @@ services:
       # start. This process listens on 4400 in here and has no way to know it
       # is reached on 443 through Caddy.
       FIRETOWER_PUBLIC_URL: ${FIRETOWER_PUBLIC_URL:-http://localhost}
+
+      # What a session's preview hangs off.
+      #
+      # `localhost` needs nothing: every browser resolves anything under it to
+      # this machine, so a laptop gets previews with no DNS and no certificate.
+      #
+      # With a domain, set this to it and add `*.that-domain` as a DNS record —
+      # then a preview is a link somebody else can open. **The hostname is the
+      # credential**: it carries a signature, and anyone holding one reaches
+      # that port of that session. Treat one like a share link.
+      FIRETOWER_PREVIEW_DOMAIN: ${FIRETOWER_PREVIEW_DOMAIN:-localhost}
     volumes:
       # The root key, the token, and everything the worker on this machine
       # keeps: repository mirrors, worktrees, the event log, and the agent's

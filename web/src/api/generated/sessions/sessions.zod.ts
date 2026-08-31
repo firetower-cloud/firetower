@@ -697,6 +697,35 @@ export const InterruptSessionResponse = zod.object({
 })
 
 /**
+ * Signed rather than stored, so it survives a restart of the control plane and
+ * there is nothing to expire. Nothing is opened by asking: the tunnel is built
+ * when the browser actually arrives, which is also when "nothing is listening
+ * on 3000" would be found out — and that is a page saying so rather than an
+ * error here, because by then a browser is looking at it.
+ * @summary The address a session's port can be reached at.
+ */
+export const PreviewAddressParams = zod.object({
+  "id": zod.string().describe('Session id')
+})
+
+export const previewAddressQueryPortMin = 0;
+
+
+
+export const PreviewAddressQueryParams = zod.object({
+  "port": zod.int().min(previewAddressQueryPortMin).describe('The port inside the session\'s workspace.')
+})
+
+export const previewAddressResponsePortMin = 0;
+
+
+
+export const PreviewAddressResponse = zod.object({
+  "port": zod.int().min(previewAddressResponsePortMin).describe('The port inside the session\'s workspace.'),
+  "url": zod.string().describe('Ready to put in an `iframe` or paste into a tab.')
+}).describe('Where a session\'s port can be opened in a browser.')
+
+/**
  * A websocket rather than the event stream: this is the one thing in Firetower
  * that genuinely flows both ways, byte at a time, and where latency is felt.
  *

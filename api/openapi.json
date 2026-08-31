@@ -2914,6 +2914,70 @@
         }
       }
     },
+    "/api/v1/sessions/{id}/preview": {
+      "get": {
+        "tags": [
+          "sessions"
+        ],
+        "summary": "The address a session's port can be reached at.",
+        "description": "Signed rather than stored, so it survives a restart of the control plane and\nthere is nothing to expire. Nothing is opened by asking: the tunnel is built\nwhen the browser actually arrives, which is also when \"nothing is listening\non 3000\" would be found out — and that is a page saying so rather than an\nerror here, because by then a browser is looking at it.",
+        "operationId": "preview_address",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Session id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "port",
+            "in": "query",
+            "description": "The port inside the session's workspace.",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PreviewAddress"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/sessions/{id}/pty": {
       "get": {
         "tags": [
@@ -5697,6 +5761,26 @@
               "$ref": "#/components/schemas/Forwarded"
             },
             "description": "Ports already open on this machine for this session."
+          }
+        }
+      },
+      "PreviewAddress": {
+        "type": "object",
+        "description": "Where a session's port can be opened in a browser.",
+        "required": [
+          "url",
+          "port"
+        ],
+        "properties": {
+          "port": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The port inside the session's workspace.",
+            "minimum": 0
+          },
+          "url": {
+            "type": "string",
+            "description": "Ready to put in an `iframe` or paste into a tab."
           }
         }
       },
