@@ -17,7 +17,6 @@ import { shipping, sequence, done, awaiting } from "@/src/api/ship";
 import { ApiError } from "@/src/api/http";
 import { useOpen } from "@/src/workspace/tabs";
 import { PathRow, Counts, Fold } from "./PathRow";
-import { CloseWorkspace } from "./CloseWorkspace";
 
 /**
  * Everything between "it finished" and "it is on the git host".
@@ -231,9 +230,6 @@ export function ShipPanel({ sessionId }: { sessionId: string }) {
               </div>
             )}
 
-            {/* The next thing to do, once there is nothing left to review. */}
-            {ship.stage === "merged" && <CloseWorkspace session={session} prominent />}
-
             {ship.links.map((l) => (
               <a
                 key={l.url}
@@ -329,13 +325,6 @@ export function ShipPanel({ sessionId }: { sessionId: string }) {
             </p>
           )}
         </Fold>
-      </div>
-
-      {/* Always, whatever the stage. Most workspaces never get a pull request,
-          so the way to finish with one cannot live in the half of the panel
-          that only appears when there is one. */}
-      <div className="flex shrink-0 items-center justify-end border-t border-line px-2 py-1.5">
-        <CloseWorkspace session={session} />
       </div>
     </div>
   );

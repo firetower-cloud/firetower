@@ -4,16 +4,22 @@ import { FileDiff, FolderOpen, GitBranch, PanelRight } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { Icon } from "@/components/ui";
 import { useState } from "react";
-import { useGetSession, useSessionDiff } from "@/src/api/generated/sessions/sessions";
+import {
+  useGetSession,
+  useSessionDiff,
+  useSessionWork,
+} from "@/src/api/generated/sessions/sessions";
 import { useOpen } from "@/src/workspace/tabs";
 import { usePanel, VIEWS, type View } from "@/src/workspace/panel";
 import { Signal } from "@/components/Signal";
 import { STATUS_LABEL } from "@/src/api/view";
+import { shipping } from "@/src/api/ship";
 import { useListEvents } from "@/src/api/generated/events/events";
 import { stepLines, ready } from "@/components/Steps";
 import { PathRow, Counts } from "./PathRow";
 import { Tree } from "./Tree";
 import { ShipPanel } from "./ShipPanel";
+import { CloseWorkspace } from "./CloseWorkspace";
 
 /**
  * The workspace of whatever is in front of you.
@@ -213,17 +219,36 @@ function Grip() {
 }
 
 /**
- * What the session is doing, pinned under every view.
+ * What the session is doing, and the way out of it, pinned under every view.
  *
  * The answer to "is it still going" was at the bottom of the transcript, which
  * meant scrolling away from whatever you were reading to find it. It is one
  * line, and it belongs somewhere that does not move.
+ *
+ * Closing sits on that line. It used to be a word at the bottom of the Ship
+ * view — so the only control that ends a workspace was filed under the one
+ * thing most workspaces never do, and you had to already know it was there.
+ * This row is the part of the panel that talks *about* the workspace rather
+ * than showing a view of it, which makes it the honest place for the exit and
+ * the reason it is under every view rather than one of them.
+ *
+ * A fourth glyph in the strip was the other candidate and is worse: the strip
+ * is a set of views, and one of them silently being a destructive action is a
+ * thing you only mispress once.
  */
 function Doing({ sessionId }: { sessionId: string }) {
   const { data: session } = useGetSession(sessionId);
   // The same query the session tab runs, served from one cache entry — and kept
   // current by the socket rather than by either of them polling.
   const { data: events = [] } = useListEvents({ since: 0, sessionId });
+  // No interval of its own. Ship polls this same cache entry while it is open,
+  // and all this reads from it is whether the work went in — which, once it
+  // has, does not go back to open. Asking the git host on every view, for every
+  // workspace somebody has open, to decide how to draw one button is not worth
+  // the requests.
+  const { data: work } = useSessionWork(sessionId, {
+    query: { enabled: !!session?.repo, staleTime: 30_000 },
+  });
 
   if (!session) return null;
 
@@ -235,18 +260,29 @@ function Doing({ sessionId }: { sessionId: string }) {
   const now = ready(lines) ? undefined : lines.find((l) => l.state === "running");
   const under = now?.detail || (now ? LABEL[now.step] : undefined);
 
+  // Merged is the one state where closing is the next thing to do rather than
+  // one of the things you may do, so it takes the room to say so — in place of
+  // the quiet one on the status line, never beside it.
+  const finished = shipping(session, work).stage === "merged";
+
   return (
     <div className="shrink-0 border-t border-line px-3 py-2">
       <div className="flex items-center gap-2">
         <Signal status={session.status} size={6} />
-        <span className="truncate text-meta text-dim">
+        <span className="min-w-0 flex-1 truncate text-meta text-dim">
           {STATUS_LABEL[session.status] ?? session.status}
         </span>
+        {!finished && <CloseWorkspace session={session} />}
       </div>
       {under && (
         <p className="mt-0.5 truncate pl-[14px] font-mono text-micro text-mute" title={under}>
           {under}
         </p>
+      )}
+      {finished && (
+        <div className="mt-2">
+          <CloseWorkspace session={session} prominent />
+        </div>
       )}
     </div>
   );
