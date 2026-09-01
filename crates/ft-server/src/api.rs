@@ -310,6 +310,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(conversation::stream_conversation))
         .routes(routes!(stream::stream))
         .routes(routes!(tasks::list_tasks))
+        .routes(routes!(tasks::get_task))
         .routes(routes!(conversation::send_turn))
         .routes(routes!(
             conversation::session_controls,

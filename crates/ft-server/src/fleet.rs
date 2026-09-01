@@ -416,15 +416,22 @@ fn summarise(said: &str) -> Option<String> {
 /// anybody could think of a name for it, and the sheet works with an empty box.
 async fn describe(fleet: &Fleet, db: &Db, host_id: &HostId, session_id: &SessionId) {
     // Nothing to describe without a checkout, and nothing to open either.
-    match db.session(session_id).await {
-        Ok(Some(session)) if session.repo.is_some() => {}
+    let session = match db.session(session_id).await {
+        Ok(Some(session)) if session.repo.is_some() => session,
         _ => return,
-    }
+    };
 
-    let answer = match fleet
-        .run_action(host_id, session_id, ft_proto::Action::Describe, None)
-        .await
-    {
+    // What was asked for, and not the issue behind it. Reading the tracker
+    // needs the vault, which this side of the connection loop does not hold —
+    // and this is the *speculative* description, made because a session
+    // happened to hand back. The one somebody is waiting for goes through
+    // `sessions::propose`, which has the vault and fetches the issue there.
+    let action = ft_proto::Action::Describe {
+        asked_for: Some(session.prompt.trim().to_string()).filter(|p| !p.is_empty()),
+        task: None,
+    };
+
+    let answer = match fleet.run_action(host_id, session_id, action, None).await {
         Ok(Ok(answer)) => answer,
         Ok(Err(why)) => {
             tracing::debug!(session = %session_id, "nothing to describe: {why}");
@@ -436,12 +443,12 @@ async fn describe(fleet: &Fleet, db: &Db, host_id: &HostId, session_id: &Session
         }
     };
 
-    let (title, body) = answer.split_once("\n\n").unwrap_or((answer.as_str(), ""));
-    if title.trim().is_empty() {
+    let described = ft_proto::Described::read(&answer);
+    if described.title.is_empty() {
         return;
     }
     if let Err(e) = db
-        .record_proposal(session_id, title.trim(), body.trim())
+        .record_proposal(session_id, &described.title, &described.body)
         .await
     {
         tracing::warn!(session = %session_id, "could not keep the proposal: {e:#}");

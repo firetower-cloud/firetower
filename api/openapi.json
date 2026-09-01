@@ -3673,6 +3673,68 @@
           }
         }
       }
+    },
+    "/api/v1/tasks/one": {
+      "get": {
+        "tags": [
+          "tasks"
+        ],
+        "summary": "One task, by its link.",
+        "description": "A workspace remembers the task it was cut for as a key and a URL — two\nfacts of ours that survive the tracker going down. Everything a person\nwants to *see* about it (what it is called, whether it is still open) is\nsomebody else's, and is asked for here.\n\nWhoever calls this must be able to carry on without it: an issue that\ncannot be read is still an issue you can reference by number.",
+        "operationId": "get_task",
+        "parameters": [
+          {
+            "name": "source",
+            "in": "query",
+            "description": "Which tracker; github by default",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "url",
+            "in": "query",
+            "description": "Where a person would read it",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Task"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -5822,11 +5884,19 @@
         "type": "object",
         "required": [
           "title",
-          "body"
+          "body",
+          "issues"
         ],
         "properties": {
           "body": {
             "type": "string"
+          },
+          "issues": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Issues the run noticed being talked about: `#18`, `acme/web#41`.\n\nSuggestions, and nothing has been done with them. A model that invents\na number would otherwise be writing `Closes #23` into a pull request,\nand closing the wrong issue on merge is not a mistake review catches —\nso these are offered on screen and become references when somebody\npicks one."
           },
           "title": {
             "type": "string"

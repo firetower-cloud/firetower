@@ -23,8 +23,10 @@ import type {
 
 import type {
   ApiError,
+  GetTaskParams,
   ListTasksParams,
-  Page
+  Page,
+  Task
 } from '../model';
 
 import { http } from '../../http';
@@ -174,6 +176,137 @@ export const useGetListTasksQueryData = () => {
   const queryClient = useQueryClient();
   return (params?: ListTasksParams,) =>
     queryClient.getQueryData<Awaited<ReturnType<typeof listTasks>>>(getListTasksQueryKey(params));
+}
+
+
+export const getGetTaskUrl = (params: GetTaskParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/v1/tasks/one?${stringifiedParams}` : `/api/v1/tasks/one`
+}
+
+/**
+ * A workspace remembers the task it was cut for as a key and a URL — two
+ * facts of ours that survive the tracker going down. Everything a person
+ * wants to *see* about it (what it is called, whether it is still open) is
+ * somebody else's, and is asked for here.
+ *
+ * Whoever calls this must be able to carry on without it: an issue that
+ * cannot be read is still an issue you can reference by number.
+ * @summary One task, by its link.
+ */
+export const getTask = async (params: GetTaskParams, options?: Parameters<typeof http>[1]): Promise<Task> => {
+
+  return http<Task>(getGetTaskUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetTaskQueryKey = (params?: GetTaskParams,) => {
+    return [
+    `/api/v1/tasks/one`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetTaskQueryOptions = <TData = Awaited<ReturnType<typeof getTask>>, TError = ApiError>(params: GetTaskParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getTask>>, TError, TData>>, request?: SecondParameter<typeof http>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetTaskQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getTask>>> = ({ signal }) => getTask(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getTask>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetTaskQueryResult = NonNullable<Awaited<ReturnType<typeof getTask>>>
+export type GetTaskQueryError = ApiError
+
+
+export function useGetTask<TData = Awaited<ReturnType<typeof getTask>>, TError = ApiError>(
+ params: GetTaskParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getTask>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getTask>>,
+          TError,
+          Awaited<ReturnType<typeof getTask>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetTask<TData = Awaited<ReturnType<typeof getTask>>, TError = ApiError>(
+ params: GetTaskParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getTask>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getTask>>,
+          TError,
+          Awaited<ReturnType<typeof getTask>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetTask<TData = Awaited<ReturnType<typeof getTask>>, TError = ApiError>(
+ params: GetTaskParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getTask>>, TError, TData>>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary One task, by its link.
+ */
+
+export function useGetTask<TData = Awaited<ReturnType<typeof getTask>>, TError = ApiError>(
+ params: GetTaskParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getTask>>, TError, TData>>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetTaskQueryOptions(params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+/**
+ * @summary One task, by its link.
+ */
+export const useSetGetTaskQueryData = () => {
+  const queryClient = useQueryClient();
+  return (params: GetTaskParams | undefined,updater: Awaited<ReturnType<typeof getTask>> | undefined | ((old: Awaited<ReturnType<typeof getTask>> | undefined) => Awaited<ReturnType<typeof getTask>> | undefined)) => {
+    queryClient.setQueriesData<Awaited<ReturnType<typeof getTask>>>({ queryKey: getGetTaskQueryKey(params) }, updater);
+  };
+}
+
+/**
+ * @summary One task, by its link.
+ */
+export const useGetGetTaskQueryData = () => {
+  const queryClient = useQueryClient();
+  return (params: GetTaskParams,) =>
+    queryClient.getQueryData<Awaited<ReturnType<typeof getTask>>>(getGetTaskQueryKey(params));
 }
 
 

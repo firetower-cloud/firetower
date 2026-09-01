@@ -135,9 +135,9 @@ const DEEPEST: u32 = 1_000;
 
 /// Everything a source has to be able to do.
 ///
-/// One method, because listing is the whole feature: starting work on a task
-/// happens here, and closing it happens through the pull request that already
-/// exists.
+/// Listing is the feature; [`one`](Source::one) is there because a workspace
+/// remembers the task it was cut for as a key and a URL and nothing else, so
+/// anything that wants to *say* what #32 is has to go and ask.
 pub trait Source {
     fn id(&self) -> SourceId;
 
@@ -147,6 +147,16 @@ pub trait Source {
         token: &str,
         ask: &Query,
     ) -> impl std::future::Future<Output = Result<Page>> + Send;
+
+    /// One task, by where a person would find it.
+    ///
+    /// Addressed by its browser URL rather than by `{source, repo, number}`
+    /// because the URL is what [`bind_task`] wrote down. Re-deriving the parts
+    /// here means there is one parser rather than a stored triple that can
+    /// disagree with the link beside it.
+    ///
+    /// [`bind_task`]: crate::db::Db::bind_task
+    fn one(&self, token: &str, url: &str) -> impl std::future::Future<Output = Result<Task>> + Send;
 }
 
 /// The git host, which is also a task tracker.
@@ -201,6 +211,56 @@ impl Source for GitHub<'_> {
             more,
         })
     }
+
+    async fn one(&self, token: &str, url: &str) -> Result<Task> {
+        let (slug, number) = located(url).with_context(|| format!("{url} is not an issue"))?;
+
+        // `/issues/{n}` rather than `/pulls/{n}`: on GitHub every pull request
+        // is also an issue at the same number, so one path answers for both and
+        // `pull_request` on the body is what tells them apart. The URL somebody
+        // pasted may say either.
+        let item: Item = crate::oauth::client()?
+            .get(format!(
+                "{}/repos/{slug}/issues/{number}",
+                self.provider.api_base
+            ))
+            .bearer_auth(token)
+            .header("accept", "application/vnd.github+json")
+            .send()
+            .await
+            .context("asking GitHub about an issue")?
+            .error_for_status()
+            .with_context(|| format!("GitHub would not say what {slug}#{number} is"))?
+            .json()
+            .await
+            .context("reading the issue GitHub sent")?;
+
+        Ok(item.into())
+    }
+}
+
+/// `https://github.com/acme/web/issues/32` → `("acme/web", 32)`.
+///
+/// Deliberately forgiving about the tail — a link copied from a browser often
+/// carries `#issuecomment-…` or a query string, and a person pasting one into
+/// the issue picker has not done anything wrong.
+pub fn located(url: &str) -> Option<(String, u64)> {
+    let rest = url.split_once("://").map(|(_, r)| r).unwrap_or(url);
+    // Past the host. Everything that matters is the last four segments.
+    let (_, path) = rest.split_once('/')?;
+    let path = path.split(['?', '#']).next()?;
+
+    let parts: Vec<&str> = path.split('/').filter(|p| !p.is_empty()).collect();
+    let at = parts
+        .iter()
+        .position(|p| *p == "issues" || *p == "pull" || *p == "pulls")?;
+    // owner / repo / issues / number
+    if at < 2 {
+        return None;
+    }
+
+    let number: u64 = parts.get(at + 1)?.parse().ok()?;
+    Some((format!("{}/{}", parts[at - 2], parts[at - 1]), number))
 }
 
 /// The chips and the box, as one string.
@@ -357,6 +417,59 @@ fn slug_of(repository_url: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_issue_link_says_which_repository_and_which_number() {
+        assert_eq!(
+            located("https://github.com/acme/web/issues/32"),
+            Some(("acme/web".to_string(), 32))
+        );
+        // A pull request is an issue at the same number, and the link may say
+        // either.
+        assert_eq!(
+            located("https://github.com/acme/web/pull/32"),
+            Some(("acme/web".to_string(), 32))
+        );
+    }
+
+    #[test]
+    fn a_link_copied_from_a_browser_still_reads() {
+        // What you get from the address bar after clicking a comment, and from
+        // anything that appends its own tracking.
+        for url in [
+            "https://github.com/acme/web/issues/32#issuecomment-1234",
+            "https://github.com/acme/web/issues/32?foo=bar",
+            "https://github.com/acme/web/issues/32/",
+            "github.com/acme/web/issues/32",
+        ] {
+            assert_eq!(
+                located(url),
+                Some(("acme/web".to_string(), 32)),
+                "{url}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_enterprise_host_is_not_special() {
+        // The host is skipped rather than matched, so a self-hosted GitHub
+        // works without knowing its name.
+        assert_eq!(
+            located("https://git.acme.internal/acme/web/issues/7"),
+            Some(("acme/web".to_string(), 7))
+        );
+    }
+
+    #[test]
+    fn something_that_is_not_an_issue_is_not_one() {
+        assert_eq!(located("https://github.com/acme/web"), None);
+        assert_eq!(located("https://github.com/acme/web/issues"), None);
+        // No number.
+        assert_eq!(located("https://github.com/acme/web/issues/new"), None);
+        // Nothing in front of `issues` to name a repository.
+        assert_eq!(located("https://github.com/issues/32"), None);
+        assert_eq!(located(""), None);
+    }
 
     #[test]
     fn a_repository_is_read_out_of_the_api_url() {
