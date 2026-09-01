@@ -6,17 +6,16 @@ import {
   useGetSession,
   useSessionWork,
   useSessionDiff,
-  useCommitSession,
   usePushSession,
-  useOpenPullRequest,
-  useDescribeSession,
   getSessionWorkQueryKey,
   getGetSessionQueryKey,
 } from "@/src/api/generated/sessions/sessions";
+import { useGetTask } from "@/src/api/generated/tasks/tasks";
 import { shipping, sequence, done, awaiting } from "@/src/api/ship";
 import { ApiError } from "@/src/api/http";
 import { useOpen } from "@/src/workspace/tabs";
 import { PathRow, Counts, Fold } from "./PathRow";
+import { ShipSheet } from "./ShipSheet";
 
 /**
  * Everything between "it finished" and "it is on the git host".
@@ -26,9 +25,21 @@ import { PathRow, Counts, Fold } from "./PathRow";
  * that produced the change*, which is the one thing you want beside you while
  * reviewing.
  *
- * In the panel it keeps the first three and gives up the fourth: clicking a
+ * In the panel it keeps the file list and gives up the diff pane: clicking a
  * file opens a diff **tab**, at full width, in the middle. A modal could never
- * do that, and it is the reason this is worth moving rather than restyling.
+ * do that, and it is the reason this is worth being a panel rather than a
+ * restyled sheet.
+ *
+ * ## Why the words moved back out
+ *
+ * The title and the body did go back to a modal — [`ShipSheet`] — and the
+ * distinction is what each half is for. Reviewing is continuous: you read a
+ * file, look at the conversation, untick a lockfile, read another. Describing
+ * is one decision, made once, and it wants the title, the body, the issues and
+ * the sequence visible at the same time, which 320px of rail cannot do.
+ *
+ * So the panel is the review surface and the sheet is the decision. Nothing is
+ * in both: the sheet has no file list, and this has no text boxes.
  *
  * There is no staging. An editor has Stage All because a person stages; here
  * the agent did the work and `shipping()` already reduces the whole state to
@@ -59,24 +70,13 @@ export function ShipPanel({ sessionId }: { sessionId: string }) {
     query: { refetchInterval: 8_000 },
   });
 
-  const commit = useCommitSession();
   const push = usePushSession();
-  const open = useOpenPullRequest();
-  const describe = useDescribeSession();
 
-  const [title, setTitle] = useState<string | null>(null);
-  const [body, setBody] = useState<string | null>(null);
-  const [draft, setDraft] = useState(false);
   /** Files left out. Everything is in by default — that is what finishing means. */
   const [dropped, setDropped] = useState<Set<string>>(new Set());
   const [trouble, setTrouble] = useState<string | null>(null);
   const [listing, setListing] = useState(true);
-
-  // The agent writes a title and body when it finishes. Held as `null` until
-  // somebody types, so a description arriving after the panel opened is not
-  // shadowed by an empty string somebody never chose.
-  const shownTitle = title ?? session?.proposedTitle ?? "";
-  const shownBody = body ?? session?.proposedBody ?? "";
+  const [deciding, setDeciding] = useState(false);
 
   const keeping = files.filter((f) => !dropped.has(f.path));
   const totals = useMemo(
@@ -92,56 +92,30 @@ export function ShipPanel({ sessionId }: { sessionId: string }) {
   }
 
   const ship = shipping(session, work);
-  const busy = commit.isPending || push.isPending || open.isPending;
 
   const refresh = () => {
     cache.invalidateQueries({ queryKey: getSessionWorkQueryKey(sessionId) });
     cache.invalidateQueries({ queryKey: getGetSessionQueryKey(sessionId) });
   };
 
-  const failed = (e: unknown) =>
-    setTrouble(e instanceof ApiError ? e.message : "That didn't work.");
-
   /**
    * Whether pressing will end with a pull request being created.
    *
    * `open-behind` pushes onto a branch whose request is already open, which
-   * amends it — so the draft choice does not apply and nothing new is opened.
+   * amends it — so there is no title, no body and nothing to decide. That one
+   * stays a single press here rather than opening a sheet that would ask for
+   * words nobody can use.
    */
   const opening =
     ship.stage === "uncommitted" || ship.stage === "unpushed" || ship.stage === "pushed";
 
-  /** One press, however many steps it takes from here. */
-  const go = async () => {
+  const amend = async () => {
     setTrouble(null);
     try {
-      if (ship.stage === "uncommitted") {
-        if (!shownTitle.trim()) {
-          setTrouble("A commit needs a message. The title is used as one.");
-          return;
-        }
-        await commit.mutateAsync({
-          id: sessionId,
-          data: { message: shownTitle.trim(), paths: keeping.map((f) => f.path) },
-        });
-      }
-      if (
-        ship.stage === "uncommitted" ||
-        ship.stage === "unpushed" ||
-        ship.stage === "open-behind"
-      ) {
-        await push.mutateAsync({ id: sessionId });
-      }
-      if (opening) {
-        const made = await open.mutateAsync({
-          id: sessionId,
-          data: { title: shownTitle.trim(), body: shownBody.trim(), draft },
-        });
-        window.open(made.url, "_blank", "noreferrer");
-      }
+      await push.mutateAsync({ id: sessionId });
       refresh();
     } catch (e) {
-      failed(e);
+      setTrouble(e instanceof ApiError ? e.message : "That didn't work.");
       refresh();
     }
   };
@@ -153,48 +127,14 @@ export function ShipPanel({ sessionId }: { sessionId: string }) {
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
       <div className="shrink-0 space-y-2 p-2.5">
-        <input
-          value={shownTitle}
-          onChange={(e) => setTitle(e.target.value)}
-          placeholder="Title — the commit message and the pull request"
-          className="w-full rounded-md border border-line bg-ground px-2.5 py-2 text-meta text-text placeholder:text-mute focus:border-dim focus:outline-none"
-        />
+        <p className="min-w-0 truncate font-mono text-micro text-mute">⑂ {session.branch}</p>
 
-        <div className="relative">
-          <textarea
-            value={shownBody}
-            onChange={(e) => setBody(e.target.value)}
-            rows={4}
-            placeholder="What changed and why, for whoever reviews it"
-            className="w-full resize-none rounded-md border border-line bg-ground py-2 pr-8 pl-2.5 text-meta leading-[1.5] text-text placeholder:text-mute focus:border-dim focus:outline-none"
-          />
-          <button
-            onClick={() =>
-              describe.mutate(
-                { id: sessionId },
-                {
-                  onSuccess: (p) => {
-                    setTitle(p.title);
-                    setBody(p.body);
-                  },
-                  onError: failed,
-                },
-              )
-            }
-            disabled={describe.isPending}
-            title="Ask the agent to describe the change"
-            className="absolute top-1.5 right-1.5 rounded-sm px-1 py-0.5 text-meta text-mute transition-colors hover:text-bone disabled:opacity-40"
-          >
-            {describe.isPending ? "…" : "✦"}
-          </button>
-        </div>
+        {/* The issue this workspace was cut for. It has been a column on the
+            session since sessions could be started from a task, and nothing
+            ever showed it — so the one screen that is about to reference it
+            was also the one place you could not see what it was. */}
+        <TaskLine session={session} merged={ship.stage === "merged"} />
 
-        {sequence(ship.stage) && (
-          <p className="text-meta leading-[1.5] text-mute">{sequence(ship.stage)}</p>
-        )}
-
-        {/* Read and acted on, not a toast: a refused push is something to fix,
-            and a message that disappears is neither. */}
         {trouble && (
           <p className="rounded-sm border border-brick/40 bg-ground px-2.5 py-2 text-meta leading-[1.5] text-brick">
             {trouble}
@@ -247,37 +187,29 @@ export function ShipPanel({ sessionId }: { sessionId: string }) {
             ))}
           </div>
         ) : (
-          <button
-            onClick={go}
-            disabled={busy || (keeping.length === 0 && ship.stage === "uncommitted")}
-            title={ship.blocked ?? ship.label}
-            className="w-full rounded-md bg-bone py-2 text-meta font-medium text-ground transition-colors hover:bg-white disabled:bg-line disabled:text-mute"
-          >
-            {busy ? "Working…" : ship.label}
-          </button>
+          <>
+            <button
+              onClick={() => (opening ? setDeciding(true) : amend())}
+              disabled={
+                push.isPending ||
+                !!ship.blocked ||
+                (keeping.length === 0 && ship.stage === "uncommitted")
+              }
+              title={ship.blocked ?? ship.label}
+              className="w-full rounded-md bg-bone py-2 text-meta font-medium text-ground transition-colors hover:bg-white disabled:bg-line disabled:text-mute"
+            >
+              {push.isPending ? "Working…" : ship.label}
+            </button>
+            {sequence(ship.stage) && (
+              <p className="text-meta leading-[1.5] text-mute">{sequence(ship.stage)}</p>
+            )}
+          </>
         )}
-
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-          <span className="min-w-0 truncate font-mono text-micro text-mute">
-            ⑂ {session.branch}
-          </span>
-          {opening && (
-            <label className="flex cursor-pointer items-center gap-1.5 text-meta text-dim">
-              <input
-                type="checkbox"
-                checked={draft}
-                onChange={(e) => setDraft(e.target.checked)}
-                className="accent-bone"
-              />
-              Draft
-            </label>
-          )}
-        </div>
       </div>
 
       <div className="min-h-0 border-t border-line px-1 pt-1 pb-2">
         <Fold
-          label="Going in"
+          label={done(ship) ? "Went in" : "Going in"}
           count={keeping.length}
           open={listing}
           onToggle={() => setListing(!listing)}
@@ -326,7 +258,68 @@ export function ShipPanel({ sessionId }: { sessionId: string }) {
           )}
         </Fold>
       </div>
+
+      {deciding && (
+        <ShipSheet
+          session={session}
+          ship={ship}
+          paths={keeping.map((f) => f.path)}
+          added={totals.added}
+          removed={totals.removed}
+          dropped={dropped.size}
+          onClose={() => setDeciding(false)}
+          onReviewFiles={() => {
+            setDeciding(false);
+            setListing(true);
+          }}
+        />
+      )}
     </div>
+  );
+}
+
+/**
+ * `#32`, and what it is called.
+ *
+ * The number and the link are ours — two columns written when the workspace
+ * was cut, which survive the tracker being unreachable. The title is the
+ * tracker's, so it is asked for and then done without: a rate limit or a
+ * revoked token leaves the number, which is still the thing this branch is
+ * about and still somewhere to click through to.
+ */
+function TaskLine({
+  session,
+  merged,
+}: {
+  session: { taskKey?: string | null; taskUrl?: string | null };
+  merged: boolean;
+}) {
+  const url = session.taskUrl ?? undefined;
+  const { data: task } = useGetTask(
+    { url: url ?? "" },
+    { query: { enabled: !!url, staleTime: 5 * 60_000, retry: false } },
+  );
+
+  if (!session.taskKey && !url) return null;
+  const key = task?.key ?? session.taskKey ?? "the issue";
+
+  return (
+    <p className="flex min-w-0 items-baseline gap-1.5 text-meta">
+      <span className="shrink-0 font-mono text-micro text-dim">⌗ {key}</span>
+      {url ? (
+        <a
+          href={url}
+          target="_blank"
+          rel="noreferrer"
+          className="min-w-0 flex-1 truncate text-mute transition-colors hover:text-bone"
+          title={task?.title ?? url}
+        >
+          {task?.title ?? (merged ? "closes when this merges" : "the issue this came from")}
+        </a>
+      ) : (
+        <span className="min-w-0 flex-1 truncate text-mute">the issue this came from</span>
+      )}
+    </p>
   );
 }
 

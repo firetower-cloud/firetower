@@ -53,6 +53,7 @@ export * from './fileEntry';
 export * from './findFilesParams';
 export * from './forwarded';
 export * from './getConversationParams';
+export * from './getTaskParams';
 export * from './gitIdentity';
 export * from './heldSecret';
 export * from './host';

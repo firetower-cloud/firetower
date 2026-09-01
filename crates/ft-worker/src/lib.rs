@@ -1981,7 +1981,7 @@ You are in the directory that holds them, not inside one of them.              P
                 attachments::keep(&dest, &name, &bytes).await
             }
 
-            ft_proto::Action::Describe => {
+            ft_proto::Action::Describe { asked_for, task } => {
                 let workspace = self.workspace_of(session_id).await?;
                 let (agent, prompt) = self.store.session_brief(session_id).await?;
 
@@ -2001,12 +2001,36 @@ You are in the directory that holds them, not inside one of them.              P
                     diff.push_str(&format!("# {}\n{part}", c.slug));
                 }
 
-                let proposal =
-                    describe::propose(agent, &workspace, &prompt, &diff, &self.root).await?;
-                // Two values through a channel that carries one string. The
+                // What the control plane knows, then what this machine knows.
+                // The session's prompt is empty for every workspace cut from an
+                // issue — those put the issue in the composer rather than in a
+                // prompt — which is exactly when the control plane has
+                // something better to send.
+                let asked_for = asked_for
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|a| !a.is_empty())
+                    .unwrap_or(prompt.trim());
+
+                let proposal = describe::propose(describe::About {
+                    agent,
+                    workspace: &workspace,
+                    session_id: session_id.as_str(),
+                    asked_for: Some(asked_for).filter(|a| !a.is_empty()),
+                    task: task.as_deref(),
+                    diff: &diff,
+                    state: &self.root,
+                })
+                .await?;
+
+                // Three values through a channel that carries one string. The
                 // shape the control plane reads it back with is right beside
                 // this, in `sessions::describe`.
-                Ok(format!("{}\n\n{}", proposal.title, proposal.body))
+                Ok(serde_json::to_string(&ft_proto::Described {
+                    title: proposal.title,
+                    body: proposal.body,
+                    issues: proposal.issues,
+                })?)
             }
 
             ft_proto::Action::Diff { checkout } => {

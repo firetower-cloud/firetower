@@ -46,13 +46,9 @@ pub async fn carry(
     session_id: &str,
     agent: ft_core::Agent,
 ) -> Result<Option<String>> {
-    let log = crate::agentd::readable_log(workspace, session_id);
-    let Ok(text) = tokio::fs::read_to_string(&log).await else {
+    let Some(events) = read(workspace, session_id, agent).await else {
         return Ok(None);
     };
-
-    let mut reader = Reader::for_agent(agent);
-    let events: Vec<TurnEvent> = text.lines().flat_map(|line| reader.push(line)).collect();
 
     let Some(rendered) = render(&events) else {
         return Ok(None);
@@ -66,6 +62,76 @@ pub async fn carry(
         .with_context(|| format!("writing {}", at.display()))?;
 
     Ok(Some(rendered))
+}
+
+/// The agent's own log, as events. Nothing when there is no log yet.
+async fn read(workspace: &Path, session_id: &str, agent: ft_core::Agent) -> Option<Vec<TurnEvent>> {
+    let log = crate::agentd::readable_log(workspace, session_id);
+    let text = tokio::fs::read_to_string(&log).await.ok()?;
+
+    let mut reader = Reader::for_agent(agent);
+    Some(text.lines().flat_map(|line| reader.push(line)).collect())
+}
+
+/// What was said, for something that has to describe the work rather than
+/// continue it.
+///
+/// The same filtering as [`carry`] and a different frame. `carry` is written to
+/// the agent that lost its memory — "this is yours, carry on from it" — which
+/// is an instruction, and an instruction is the last thing a run that has been
+/// asked for one sentence about a diff should be given. This says what
+/// happened and stops.
+///
+/// It is worth the bytes because the diff does not carry any of it: which
+/// approach was rejected, what somebody asked for halfway through, and every
+/// issue number that came up in conversation and appears in no file.
+pub async fn recap(
+    workspace: &Path,
+    session_id: &str,
+    agent: ft_core::Agent,
+    room: usize,
+) -> Option<String> {
+    let events = read(workspace, session_id, agent).await?;
+    let said = collect(&events);
+
+    // Tool calls are dropped entirely here, where `carry` keeps them. The diff
+    // is in the same prompt and says what changed far better than a list of
+    // the commands that changed it.
+    let talk: Vec<&Said> = said
+        .iter()
+        .filter(|s| !matches!(s, Said::Did(_)))
+        .collect();
+    if talk.is_empty() {
+        return None;
+    }
+
+    let mut out = String::new();
+    for item in talk {
+        match item {
+            Said::You(text) => out.push_str(&format!("They said:\n{}\n\n", text.trim())),
+            Said::Agent(text) => out.push_str(&format!("The agent said:\n{}\n\n", text.trim())),
+            Said::Answered(pairs) => {
+                out.push_str("They chose:\n");
+                for (question, answer) in pairs {
+                    out.push_str(&format!("- {question} → {answer}\n"));
+                }
+                out.push('\n');
+            }
+            Said::Did(_) => {}
+        }
+    }
+
+    // From the front. The end of a conversation is where the work ended up,
+    // and the beginning is the part the diff already tells you about.
+    if out.len() > room {
+        let from = out.len() - room;
+        let at = (from..out.len())
+            .find(|i| out.is_char_boundary(*i))
+            .unwrap_or(out.len());
+        out = format!("[earlier talk left out]\n\n{}", &out[at..]);
+    }
+
+    Some(out.trim().to_string())
 }
 
 /// Turn the events into something worth reading, or nothing.

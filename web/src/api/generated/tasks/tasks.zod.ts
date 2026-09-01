@@ -58,3 +58,39 @@ export const ListTasksResponse = zod.object({
   "total": zod.int().min(listTasksResponseTotalMin).nullish().describe('How many there are in total, when the source will say.')
 })
 
+/**
+ * A workspace remembers the task it was cut for as a key and a URL — two
+ * facts of ours that survive the tracker going down. Everything a person
+ * wants to *see* about it (what it is called, whether it is still open) is
+ * somebody else's, and is asked for here.
+ *
+ * Whoever calls this must be able to carry on without it: an issue that
+ * cannot be read is still an issue you can reference by number.
+ * @summary One task, by its link.
+ */
+export const GetTaskQueryParams = zod.object({
+  "source": zod.string().optional().describe('Which tracker; github by default'),
+  "url": zod.string().describe('Where a person would read it')
+})
+
+export const GetTaskResponse = zod.object({
+  "assignees": zod.array(zod.object({
+  "avatar": zod.string().nullish(),
+  "login": zod.string()
+})),
+  "body": zod.string().nullish().describe('Seeds the first prompt, so nobody types the problem out twice.'),
+  "id": zod.string().describe('Stable within its source: `github:acme\/web#5138`.'),
+  "key": zod.string().describe('What a person calls it. `#5138`.'),
+  "kind": zod.enum(['issue', 'pullRequest', 'ticket']).describe('What sort of thing it is.\n\nThe one field the Issues\/PRs toggle reads, and the reason \"filter by kind\"\nis a query parameter rather than a migration when a second source lands.'),
+  "labels": zod.array(zod.object({
+  "colour": zod.string().nullish().describe('Six hex digits, no `#`. Whatever the source calls it.'),
+  "name": zod.string()
+})),
+  "repo": zod.string().nullish().describe('Where the work would happen. Known for an issue; a binding for a ticket.'),
+  "source": zod.string(),
+  "state": zod.enum(['open', 'closed']),
+  "title": zod.string(),
+  "updatedAt": zod.iso.datetime({"offset":true}),
+  "url": zod.string().describe('Always somewhere to go and read it.')
+}).describe('One thing to work on, whatever tracks it.\n\nThe fields are the intersection every tracker has, plus the two that make a\nrow worth showing: what it is called, and when it last moved.')
+

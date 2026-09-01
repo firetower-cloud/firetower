@@ -10,6 +10,7 @@ use super::{credential_for, ApiError, ApiResult, ErrorCode};
 use crate::auth::Principal;
 use crate::oauth;
 use crate::providers;
+use crate::tasks::{self, Source};
 use crate::vault;
 use crate::vault::Key;
 use crate::AppState;
@@ -1758,6 +1759,15 @@ pub(crate) async fn refresh_pull_state(state: &AppState, session: &Session, owne
 pub struct Proposal {
     pub title: String,
     pub body: String,
+    /// Issues the run noticed being talked about: `#18`, `acme/web#41`.
+    ///
+    /// Suggestions, and nothing has been done with them. A model that invents
+    /// a number would otherwise be writing `Closes #23` into a pull request,
+    /// and closing the wrong issue on merge is not a mistake review catches —
+    /// so these are offered on screen and become references when somebody
+    /// picks one.
+    #[serde(default)]
+    pub issues: Vec<String>,
 }
 
 /// What the agent would call this work.
@@ -1801,16 +1811,16 @@ pub(crate) async fn propose(
 
     let answer = state
         .fleet
-        .run_action(&host, id, ft_proto::Action::Describe, None)
+        .run_action(&host, id, describing(state, &session).await, None)
         .await
         .map_err(|e| ApiError::new(ErrorCode::HostUnreachable, format!("{e:#}")))?
         .map_err(|why| ApiError::new(ErrorCode::ActionFailed, why))?;
 
-    // Title, blank line, body — the shape the worker sends it in.
-    let (title, body) = answer.split_once("\n\n").unwrap_or((answer.as_str(), ""));
+    let described = ft_proto::Described::read(&answer);
     let proposal = Proposal {
-        title: title.trim().to_string(),
-        body: body.trim().to_string(),
+        title: described.title,
+        body: described.body,
+        issues: described.issues,
     };
 
     if let Err(e) = state
@@ -1821,6 +1831,73 @@ pub(crate) async fn propose(
         tracing::warn!(session = %id, "could not keep the proposal: {e:#}");
     }
     Ok(proposal)
+}
+
+/// What to send with a request to describe some work.
+///
+/// Everything here is context the *worker* cannot reach: what a session was
+/// asked to do is a column on this side, and the tracker is somebody else's
+/// server that only this end is authorized against.
+///
+/// Best effort throughout. A description written without the issue is worth
+/// far more than no description, so nothing in here is allowed to fail the
+/// request that carries it.
+async fn describing(state: &AppState, session: &Session) -> ft_proto::Action {
+    ft_proto::Action::Describe {
+        asked_for: Some(session.prompt.trim().to_string()).filter(|p| !p.is_empty()),
+        task: tracked(state, session).await.map(Box::new),
+    }
+}
+
+/// The issue a session was cut for, with as much of it as could be read.
+///
+/// The key and the URL are ours and always there. The title and the body are
+/// the tracker's, so they are asked for and then done without: a rate limit, a
+/// revoked token or a deleted issue leaves the number, which is the part the
+/// branch was actually cut for.
+async fn tracked(state: &AppState, session: &Session) -> Option<ft_proto::Tracked> {
+    let url = session.task_url.as_deref()?;
+    let mut out = ft_proto::Tracked {
+        key: session.task_key.clone().unwrap_or_else(|| url.to_string()),
+        url: url.to_string(),
+        title: None,
+        body: None,
+    };
+
+    match read_task(state, session, url).await {
+        Ok(task) => {
+            out.title = Some(task.title);
+            out.body = task.body;
+        }
+        Err(e) => tracing::debug!(session = %session.id, "could not read {url}: {e:#}"),
+    }
+
+    Some(out)
+}
+
+/// Ask the tracker what an issue says, with the session owner's own token.
+async fn read_task(state: &AppState, session: &Session, url: &str) -> anyhow::Result<tasks::Task> {
+    let slug = session
+        .repo
+        .as_deref()
+        .ok_or_else(|| anyhow::anyhow!("no repository"))?;
+    let repo = state
+        .db
+        .repo_by_slug(slug)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("{slug} isn't connected"))?;
+    let provider = providers::for_remote(&repo.remote)
+        .ok_or_else(|| anyhow::anyhow!("no provider for {slug}"))?;
+    let token = state
+        .vault
+        .get(
+            Key::of(vault::GIT, provider.id, session.owner.as_str()),
+            "reading the issue a session was started from",
+        )
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("not authorized"))?;
+
+    tasks::GitHub { provider }.one(&token, url).await
 }
 
 /// Check another repository into a session that is already running.

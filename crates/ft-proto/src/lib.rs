@@ -409,7 +409,25 @@ pub enum Action {
     ///
     /// Runs on the host, where the code is — the control plane never sees the
     /// diff and needs no model credentials of its own.
-    Describe,
+    ///
+    /// Both fields are context the *control plane* holds and the worker cannot
+    /// look up: what a session was asked to do lives in its transcript there,
+    /// and the tracker is somebody else's server that only this end is
+    /// authorized against. Defaulted, so a worker built before either existed
+    /// still understands the frame and describes what it can see — an
+    /// internally tagged unit variant ignores the fields it does not know.
+    Describe {
+        /// What the session was asked to do, when anybody said.
+        ///
+        /// The session's prompt, or its first message when it was started with
+        /// none — which is every session cut from an issue, because those put
+        /// the issue in the composer rather than in a prompt.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        asked_for: Option<String>,
+        /// The issue this work was started from, if it was.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        task: Option<Box<Tracked>>,
+    },
     /// Check another repository into a session that is already running.
     ///
     /// The same work as bring-up, done once more: fetch, cut the worktree, and
@@ -504,6 +522,58 @@ pub struct StartAgent {
     pub env: Vec<(String, String)>,
     #[serde(default)]
     pub agent_home: Vec<(String, String)>,
+}
+
+/// The issue a session was cut for, as much of it as could be read.
+///
+/// Carried rather than fetched: the worker has no tracker credentials and no
+/// reason to gain any. `title` and `body` are optional because the tracker may
+/// be down or the token may have expired, and a description written without
+/// them is better than no description at all.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct Tracked {
+    /// What a person calls it. `#32`.
+    pub key: String,
+    pub url: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub body: Option<String>,
+}
+
+/// What a describing run came back with.
+///
+/// The action channel carries one string, so this rides through it as JSON. A
+/// control plane reading a worker too old to send it finds no JSON and falls
+/// back to the shape that came before: a title, a blank line, and a body.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct Described {
+    pub title: String,
+    pub body: String,
+    /// Issues the run noticed being talked about. Offered, never applied.
+    #[serde(default)]
+    pub issues: Vec<String>,
+}
+
+impl Described {
+    /// Read a worker's answer, whichever shape it sent.
+    ///
+    /// JSON from a worker that knows about issues; a title, a blank line and a
+    /// body from one that does not. Worth keeping both: a control plane is
+    /// upgraded before the machines it talks to, and the older shape is what
+    /// every worker already in the field sends.
+    pub fn read(answer: &str) -> Self {
+        if let Ok(described) = serde_json::from_str::<Self>(answer) {
+            return described;
+        }
+
+        let (title, body) = answer.split_once("\n\n").unwrap_or((answer, ""));
+        Self {
+            title: title.trim().to_string(),
+            body: body.trim().to_string(),
+            issues: Vec::new(),
+        }
+    }
 }
 
 /// Who a commit belongs to.
@@ -824,6 +894,63 @@ mod tests {
             }
             other => panic!("came back as {other:?}"),
         }
+    }
+
+    /// A control plane that knows about the issue, and a worker that does not.
+    ///
+    /// `Describe` used to be a unit variant, and every worker in the field
+    /// still decodes it as one. Serde's internally-tagged unit visitor drains
+    /// the map and ignores what it does not recognise, so the fields added
+    /// here cost an old worker nothing — it describes the diff, as it always
+    /// did. This asserts the shape that relies on: a map, tagged `Describe`.
+    #[test]
+    fn describing_stays_a_tagged_map_whatever_it_carries() {
+        let wire = serde_json::to_string(&Action::Describe {
+            asked_for: Some("make the thing faster".into()),
+            task: Some(Box::new(Tracked {
+                key: "#32".into(),
+                url: "https://github.com/acme/web/issues/32".into(),
+                title: Some("the thing is slow".into()),
+                body: None,
+            })),
+        })
+        .expect("encoding");
+
+        assert!(wire.contains("\"action\":\"Describe\""), "{wire}");
+        assert!(wire.contains("asked_for"), "{wire}");
+        // Absent rather than null, so nothing has to distinguish the two.
+        assert!(!wire.contains("\"body\""), "{wire}");
+    }
+
+    /// And the other direction: a control plane too old to send either.
+    #[test]
+    fn describing_with_no_context_is_still_understood() {
+        let back: Action = serde_json::from_str(r#"{"action":"Describe"}"#).expect("decoding");
+        match back {
+            Action::Describe { asked_for, task } => {
+                assert!(asked_for.is_none());
+                assert!(task.is_none());
+            }
+            other => panic!("came back as {other:?}"),
+        }
+    }
+
+    #[test]
+    fn an_answer_is_read_from_either_worker() {
+        let new = Described::read(
+            r##"{"title":"feat: x","body":"Because.","issues":["#18"]}"##,
+        );
+        assert_eq!(new.title, "feat: x");
+        assert_eq!(new.issues, vec!["#18"]);
+
+        // A worker that predates issues, and the shape it has always sent.
+        let old = Described::read("feat: x\n\nBecause.");
+        assert_eq!(old.title, "feat: x");
+        assert_eq!(old.body, "Because.");
+        assert!(old.issues.is_empty());
+
+        // A title on its own is still an answer.
+        assert_eq!(Described::read("docs: typo").title, "docs: typo");
     }
 
     #[test]

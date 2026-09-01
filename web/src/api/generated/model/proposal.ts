@@ -8,5 +8,15 @@
 
 export interface Proposal {
   body: string;
+  /**
+     * Issues the run noticed being talked about: `#18`, `acme/web#41`.
+     *
+     * Suggestions, and nothing has been done with them. A model that invents
+     * a number would otherwise be writing `Closes #23` into a pull request,
+     * and closing the wrong issue on merge is not a mistake review catches —
+     * so these are offered on screen and become references when somebody
+     * picks one.
+     */
+  issues: string[];
   title: string;
 }

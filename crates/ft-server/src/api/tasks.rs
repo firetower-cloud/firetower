@@ -23,6 +23,32 @@ fn owner(principal: &Principal) -> Result<&str, ApiError> {
         .ok_or_else(|| ApiError::new(ErrorCode::Unauthorized, "sign in to use this Firetower"))
 }
 
+/// This person's token for a tracker, or the reason there isn't one.
+///
+/// Asked with their own credential so the answer is what *they* can see, and
+/// charged to their own rate limit rather than to a pool.
+///
+/// Wrapped as the vault handed it over, rather than unwrapped for
+/// convenience: it derefs to `&str` at every call site that needs one, and
+/// keeping the wrapper is what erases it from memory afterwards.
+async fn token_for(
+    state: &AppState,
+    principal: &Principal,
+    provider: &crate::providers::Provider,
+    why: &str,
+) -> Result<zeroize::Zeroizing<String>, ApiError> {
+    state
+        .vault
+        .get(Key::of(vault::GIT, provider.id, owner(principal)?), why)
+        .await?
+        .ok_or_else(|| {
+            ApiError::new(
+                ErrorCode::ProviderNotConnected,
+                format!("{} hasn't been authorized yet", provider.label),
+            )
+        })
+}
+
 /// What to list.
 ///
 /// `q` is passed to the source rather than parsed. The chips on screen write
@@ -79,21 +105,7 @@ pub(super) async fn list_tasks(
     let id = ask.source.as_deref().unwrap_or("github");
     let provider = providers::find(id).ok_or_else(|| ApiError::not_found("source"))?;
 
-    // Asked with this person's token, so the list is what *they* can see — and
-    // charged to their own rate limit rather than to a pool.
-    let token = state
-        .vault
-        .get(
-            Key::of(vault::GIT, provider.id, owner(&principal)?),
-            "listing tasks to work on",
-        )
-        .await?
-        .ok_or_else(|| {
-            ApiError::new(
-                ErrorCode::ProviderNotConnected,
-                format!("{} hasn't been authorized yet", provider.label),
-            )
-        })?;
+    let token = token_for(&state, &principal, provider, "listing tasks to work on").await?;
 
     // Scoped to what this Firetower is connected to unless somebody narrows it
     // further. A task list that answers about repositories you have never heard
@@ -118,6 +130,53 @@ pub(super) async fn list_tasks(
 
     tasks::GitHub { provider }
         .list(&token, &query)
+        .await
+        .map(Json)
+        .map_err(|e| ApiError::new(ErrorCode::Internal, format!("{e:#}")))
+}
+
+/// What to look up. A link, because a link is what gets stored and pasted.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct Locating {
+    /// Which tracker. The only one today is `github`.
+    pub source: Option<String>,
+    /// Where a person would read it: `https://github.com/acme/web/issues/32`.
+    pub url: String,
+}
+
+/// One task, by its link.
+///
+/// A workspace remembers the task it was cut for as a key and a URL — two
+/// facts of ours that survive the tracker going down. Everything a person
+/// wants to *see* about it (what it is called, whether it is still open) is
+/// somebody else's, and is asked for here.
+///
+/// Whoever calls this must be able to carry on without it: an issue that
+/// cannot be read is still an issue you can reference by number.
+#[utoipa::path(
+    get, path = "/api/v1/tasks/one", tag = "tasks",
+    params(
+        ("source" = Option<String>, Query, description = "Which tracker; github by default"),
+        ("url" = String, Query, description = "Where a person would read it"),
+    ),
+    responses(
+        (status = 200, body = tasks::Task),
+        (status = 404, body = ApiError),
+        (status = 409, body = ApiError),
+    ),
+)]
+pub(super) async fn get_task(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Params(ask): Params<Locating>,
+) -> ApiResult<Json<tasks::Task>> {
+    let id = ask.source.as_deref().unwrap_or("github");
+    let provider = providers::find(id).ok_or_else(|| ApiError::not_found("source"))?;
+    let token = token_for(&state, &principal, provider, "reading a task").await?;
+
+    tasks::GitHub { provider }
+        .one(&token, &ask.url)
         .await
         .map(Json)
         .map_err(|e| ApiError::new(ErrorCode::Internal, format!("{e:#}")))
