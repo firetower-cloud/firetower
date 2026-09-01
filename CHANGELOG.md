@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.21.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.20.0...firetower-v0.21.0) (2026-09-01)
+
+
+### Features
+
+* close a workspace from any view of the panel ([01795eb](https://github.com/firetower-cloud/firetower/commit/01795eb1376e3f9b57973847c09a285cb6e57a63))
+* close a workspace from any view of the panel ([d0dd92a](https://github.com/firetower-cloud/firetower/commit/d0dd92a96f456c6c43892f67c9b4b209bcb0f9cf))
+* reauthorize GitHub to add organizations and repositories ([5ac7fee](https://github.com/firetower-cloud/firetower/commit/5ac7fee3c328118a26465fd1123ef04d6fa7009d))
+* reauthorize GitHub to add organizations and repositories ([a65ff24](https://github.com/firetower-cloud/firetower/commit/a65ff243abcb2ffac7c36f0f59447d8e1789ec38))
+* write the pull request in a sheet, and link the issue ([0ea4f1a](https://github.com/firetower-cloud/firetower/commit/0ea4f1ae4a32010b4d8ccf55efd63537a39914d9))
+* write the pull request in a sheet, and link the issue ([6bd6268](https://github.com/firetower-cloud/firetower/commit/6bd626824d38d1ca1f6786098fbcaccfc65906c8))
+
+
+### Bug Fixes
+
+* ⌘P opens the file search from anywhere in a session ([bdaa5de](https://github.com/firetower-cloud/firetower/commit/bdaa5de4c9f4ae375a601913a45c1684590a79e4))
+* ⌘P opens the file search from anywhere in a session ([f10d24d](https://github.com/firetower-cloud/firetower/commit/f10d24da8cc884e6b6c9cb53580265516f307075))
+
 ## [0.20.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.19.0...firetower-v0.20.0) (2026-08-31)
 
 
