@@ -8,13 +8,36 @@
  * something else inside one page is the kind of cleverness that loses somebody
  * a tab they meant to keep, so closing is `⌘⌥W` and there is no `⌘T`.
  *
- * Nothing here fires while a field has focus. A person typing a message is
- * typing a message, and `1` in a prompt must never mean "go to the first tab".
+ * Nothing in `useWorkbenchKeys` fires while a field has focus. A person typing
+ * a message is typing a message, and `1` in a prompt must never mean "go to the
+ * first tab".
+ *
+ * `⌘P` is the exception on both counts — it takes a browser shortcut, and it
+ * takes it while somebody is typing. It is still described here, with the rest
+ * of the keyboard, because a rule about what a key means belongs in one file
+ * even when the component that acts on it lives somewhere else. The finder
+ * reads it: see `isFindFile`.
  */
 
 import { useEffect } from "react";
 import { paneTabs, useTabs } from "./tabs";
 import { revealPanel, VIEWS } from "./panel";
+
+/**
+ * ⌘P — find a file.
+ *
+ * The one browser shortcut this app takes. Nobody prints a workbench, and every
+ * editor somebody arrives here from has trained the same two keys; the browser's
+ * own File › Print is still there for the case that proves us wrong.
+ *
+ * Matched on the physical key as well as the character it produces, so the P of
+ * an AZERTY or Dvorak keyboard is the P people press. `⇧⌘P` is deliberately not
+ * this — it is where a command palette goes.
+ */
+export function isFindFile(e: KeyboardEvent): boolean {
+  if (!(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey) return false;
+  return e.code === "KeyP" || e.key.toLowerCase() === "p";
+}
 
 export function useWorkbenchKeys() {
   const { set, focus, close, move, unsplit, focusPane } = useTabs();
