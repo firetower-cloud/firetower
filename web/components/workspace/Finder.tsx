@@ -6,7 +6,8 @@
  * Two ways in, one list. The rail carries a filter above the tree, for when you
  * are already looking at the workspace; `⌘P` opens the same list over the
  * middle pane, for when you are not — and that one is muscle memory from every
- * editor anybody arrives here from.
+ * editor anybody arrives here from. The rail says so, on a chip beside its
+ * filter: a shortcut nobody has been told about is a shortcut nobody has.
  *
  * The matching happens on the machine that holds the workspace. The alternative
  * is sending the whole path index to the browser and filtering it here, which
@@ -14,13 +15,14 @@
  * down a pipe shared with every terminal on that host.
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { Search } from "lucide-react";
 import { useFindFiles } from "@/src/api/generated/sessions/sessions";
 import { Icon } from "@/components/ui";
 import { FileGlyph } from "@/components/FileGlyph";
 import { useCurrentSession, useOpen } from "@/src/workspace/tabs";
 import { reveal } from "@/src/workspace/tree";
+import { isFindFile } from "@/src/workspace/keys";
 
 /** Long enough that a fast typist sends one search, not eight. */
 const SETTLE = 120;
@@ -75,6 +77,36 @@ export function Results({
 }
 
 /**
+ * Whether the finder is up.
+ *
+ * A module store rather than component state, for the same reason the tree is
+ * one: the finder is mounted over the middle pane and the chip advertising it
+ * sits in the rail, and there is nothing between the two to thread a callback
+ * through.
+ *
+ * Not kept anywhere. A search box that happened to be open when a tab was
+ * closed is not a thing to restore somebody to.
+ */
+let up = false;
+const watching = new Set<() => void>();
+
+function listen(onChange: () => void) {
+  watching.add(onChange);
+  return () => void watching.delete(onChange);
+}
+
+function show(next: boolean) {
+  if (up === next) return;
+  up = next;
+  for (const tell of watching) tell();
+}
+
+/** Open the finder from somewhere that is not the keyboard. */
+export function openFinder() {
+  show(true);
+}
+
+/**
  * The same list, over the middle pane, on `⌘P`.
  *
  * It listens for the key itself rather than going through `useWorkbenchKeys`,
@@ -86,33 +118,57 @@ export function Results({
  * and every editor this replaces has trained the same two keys.
  */
 export function Finder() {
-  const [open, setOpen] = useState(false);
+  const open = useSyncExternalStore(listen, () => up, () => false);
+  const sessionId = useCurrentSession();
+
+  useEffect(() => {
+    // Nothing to find outside a workspace, and taking the key there would make
+    // it a dead one: no print, no finder, no answer at all.
+    if (!sessionId) {
+      show(false);
+      return;
+    }
+
+    const pressed = (e: KeyboardEvent) => {
+      if (!isFindFile(e)) return;
+      e.preventDefault();
+      // Read through the store rather than a captured value: the listener is
+      // registered once per session and would otherwise toggle against
+      // whatever was true when it was.
+      show(!up);
+    };
+
+    // Captured, so this is the first handler to see the key rather than the
+    // last. Nothing on the way up swallows a `p` today, but `Chat` already
+    // stops a `⌘↵` from the same phase, and the next one to do that would
+    // silently give ⌘P back to the printer.
+    window.addEventListener("keydown", pressed, true);
+    return () => window.removeEventListener("keydown", pressed, true);
+  }, [sessionId]);
+
+  if (!open || !sessionId) return null;
+  return <Overlay sessionId={sessionId} />;
+}
+
+/**
+ * The box itself, mounted only while it is up.
+ *
+ * Which is what empties it. Every opening should start on a blank query at the
+ * first row, and a component that only exists while the finder is open gets
+ * that from its own initial state rather than from an effect reaching back to
+ * clear the last visit.
+ */
+function Overlay({ sessionId }: { sessionId: string }) {
   const [q, setQ] = useState("");
   const [at, setAt] = useState(0);
-  const sessionId = useCurrentSession();
   const openTab = useOpen();
   const field = useRef<HTMLInputElement>(null);
 
-  const { paths, waiting } = useFind(sessionId ?? "", sessionId ? q : "");
+  const { paths, waiting } = useFind(sessionId, q);
 
   useEffect(() => {
-    const pressed = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === "p") {
-        e.preventDefault();
-        setQ("");
-        setAt(0);
-        setOpen(true);
-      }
-    };
-    window.addEventListener("keydown", pressed);
-    return () => window.removeEventListener("keydown", pressed);
+    field.current?.focus();
   }, []);
-
-  useEffect(() => {
-    if (open) field.current?.focus();
-  }, [open]);
-
-  if (!open || !sessionId) return null;
 
   // Clamped rather than reset from an effect: a shorter list arriving under a
   // cursor sitting on row nine is a render, not an event to react to.
@@ -121,11 +177,11 @@ export function Finder() {
   const take = (path: string, beside: boolean) => {
     reveal(sessionId, path);
     openTab.file(path, beside);
-    setOpen(false);
+    show(false);
   };
 
   const typed = (e: React.KeyboardEvent) => {
-    if (e.key === "Escape") return setOpen(false);
+    if (e.key === "Escape") return show(false);
     if (e.key === "ArrowDown") {
       e.preventDefault();
       return setAt(paths.length ? (cursor + 1) % paths.length : 0);
@@ -142,7 +198,7 @@ export function Finder() {
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center pt-[14vh]">
-      <div className="fixed inset-0 bg-ground/70 backdrop-blur-[3px]" onClick={() => setOpen(false)} />
+      <div className="fixed inset-0 bg-ground/70 backdrop-blur-[3px]" onClick={() => show(false)} />
 
       <div className="relative w-full max-w-[560px] overflow-hidden rounded-lg border border-line bg-panel shadow-float">
         <div className="flex items-center gap-2 border-b border-line px-3 py-2.5">

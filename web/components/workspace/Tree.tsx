@@ -25,7 +25,7 @@ import { Icon } from "@/components/ui";
 import { FileGlyph } from "@/components/FileGlyph";
 import { useOpen, useTabs } from "@/src/workspace/tabs";
 import { useRevealed, useTree } from "@/src/workspace/tree";
-import { Results } from "./Finder";
+import { openFinder, Results } from "./Finder";
 
 /** One level of nesting, in pixels. Deep enough to read, tight enough to fit. */
 const STEP = 12;
@@ -164,7 +164,14 @@ function Body({ sessionId, children }: { sessionId: string; children: React.Reac
   );
 }
 
-/** Find a file by name, without leaving the panel. */
+/**
+ * Find a file by name, without leaving the panel.
+ *
+ * The chip on the right is the only place `⌘P` is written down. It is the one
+ * spot somebody already looks when they want to find a file, which makes it the
+ * one spot worth teaching the shortcut from — and it is pressable, because a
+ * hint you cannot act on is a hint that has to be believed rather than tried.
+ */
 function Filter({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   return (
     <div className="flex shrink-0 items-center gap-2 border-b border-line px-3 py-1.5">
@@ -177,13 +184,22 @@ function Filter({ value, onChange }: { value: string; onChange: (v: string) => v
         aria-label="Find a file"
         className="min-w-0 flex-1 bg-transparent text-ui text-text placeholder:text-mute focus:outline-none"
       />
-      {value && (
+      {value ? (
         <button
           onClick={() => onChange("")}
           aria-label="Clear"
           className="shrink-0 rounded-sm p-0.5 text-mute transition-colors hover:text-bone"
         >
           <Icon of={X} size={12} />
+        </button>
+      ) : (
+        <button
+          onClick={openFinder}
+          title="Find a file from anywhere"
+          aria-label="Find a file from anywhere"
+          className="shrink-0 rounded-sm px-1 py-0.5 font-mono text-micro text-mute transition-colors hover:bg-raise/60 hover:text-bone"
+        >
+          ⌘P
         </button>
       )}
     </div>
