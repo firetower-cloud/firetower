@@ -122,6 +122,14 @@ pub struct ProviderStatus {
     pub configured: bool,
     /// Set while an authorization is in flight.
     pub pending: Option<PendingAuth>,
+    /// The identifier being authorized against, when there is one.
+    ///
+    /// Sent so the interface can link to the page on the host where this
+    /// application's access is reviewed — the only place an organization that
+    /// restricts third-party applications can be requested after the fact, and
+    /// the address of it contains the client id. Public by design: a
+    /// device-flow application has no paired secret.
+    pub client_id: Option<String>,
 }
 
 /// A device authorization waiting for someone to approve it in a browser.
@@ -158,6 +166,32 @@ mod tests {
             client_id(&accounts, "github").await.as_deref(),
             Some("Ov23liSTORED")
         );
+    }
+
+    /// The interface builds the address of the host's own access page out of
+    /// this, and cannot ask anywhere else for it. A rename here breaks that
+    /// link silently, which is the kind of thing this pins.
+    #[test]
+    fn a_status_carries_the_identifier_it_authorizes_against() {
+        let status = ProviderStatus {
+            id: "github".into(),
+            label: "GitHub".into(),
+            connected: true,
+            configured: true,
+            pending: None,
+            client_id: Some("Ov23liEXAMPLE".into()),
+        };
+
+        let json = serde_json::to_value(&status).unwrap();
+        assert_eq!(json["clientId"], "Ov23liEXAMPLE");
+
+        // Nothing registered is `null` rather than an empty string, which
+        // would build an address to a page that does not exist.
+        let none = ProviderStatus {
+            client_id: None,
+            ..status
+        };
+        assert!(serde_json::to_value(&none).unwrap()["clientId"].is_null());
     }
 
     #[test]

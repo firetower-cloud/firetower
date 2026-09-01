@@ -9,6 +9,7 @@ import * as zod from 'zod';
 
 
 export const ListProvidersResponseItem = zod.object({
+  "clientId": zod.string().nullish().describe('The identifier being authorized against, when there is one.\n\nSent so the interface can link to the page on the host where this\napplication\'s access is reviewed — the only place an organization that\nrestricts third-party applications can be requested after the fact, and\nthe address of it contains the client id. Public by design: a\ndevice-flow application has no paired secret.'),
   "configured": zod.boolean().describe('False when nobody has registered an application for this build, which is\na setup problem rather than something the person using it did wrong.'),
   "connected": zod.boolean().describe('We hold a token for it.'),
   "id": zod.string(),

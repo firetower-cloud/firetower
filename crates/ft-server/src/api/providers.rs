@@ -243,6 +243,7 @@ pub(super) async fn list_providers(
 
     let mut out = Vec::new();
     for p in providers::PROVIDERS {
+        let client_id = providers::client_id(&state.accounts, p.id).await;
         out.push(ProviderStatus {
             id: p.id.to_string(),
             label: p.label.to_string(),
@@ -250,10 +251,11 @@ pub(super) async fn list_providers(
             // operating system may put behind a prompt, and this endpoint only
             // renders a screen.
             connected: state.vault.holds(Key::of(vault::GIT, p.id, owner)).await?,
-            configured: providers::client_id(&state.accounts, p.id).await.is_some(),
+            configured: client_id.is_some(),
             pending: pending
                 .get(&format!("{}:{owner}", p.id))
                 .map(|p| p.auth.clone()),
+            client_id,
         });
     }
     Ok(Json(out))
@@ -263,6 +265,15 @@ pub(super) async fn list_providers(
 ///
 /// Returns immediately with the code to show. The waiting happens here rather
 /// than in the browser so that closing the tab doesn't abandon it.
+///
+/// Asked again by somebody already connected, and deliberately so: the host's
+/// approval screen is where organizations are granted, and it is shown once
+/// per authorization. Somebody who skipped an organization the first time has
+/// nowhere else to go. Nothing is given up by trying — the vault is written
+/// only where the poll below approves, so a re-authorization that is abandoned
+/// or declined leaves the token that is already there untouched, and the
+/// insert at the end replaces any earlier attempt, whose `Drop` stops its
+/// poller.
 #[utoipa::path(
     post, path = "/api/v1/providers/{id}/authorize", tag = "providers",
     params(("id" = String, Path, description = "Provider id")),

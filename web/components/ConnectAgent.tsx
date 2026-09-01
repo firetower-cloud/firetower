@@ -11,7 +11,7 @@ import {
 } from "@/src/api/generated/agents/agents";
 import { AgentMode, type AgentView, type AgentOnHost } from "@/src/api/generated/model";
 import { ApiError } from "@/src/api/http";
-import { CodeToType, Spinner } from "./ConnectRepo";
+import { CodeToType, Spinner } from "./Modal";
 import { Install } from "./InstallAgent";
 
 /**
