@@ -12,6 +12,17 @@ import type { PendingAuth } from './pendingAuth';
  */
 export interface ProviderStatus {
   /**
+     * The identifier being authorized against, when there is one.
+     *
+     * Sent so the interface can link to the page on the host where this
+     * application's access is reviewed — the only place an organization that
+     * restricts third-party applications can be requested after the fact, and
+     * the address of it contains the client id. Public by design: a
+     * device-flow application has no paired secret.
+     * @nullable
+     */
+  clientId?: string | null;
+  /**
      * False when nobody has registered an application for this build, which is
      * a setup problem rather than something the person using it did wrong.
      */

@@ -1,10 +1,10 @@
 "use client";
 
-import { Check, LoaderCircle } from "lucide-react";
+import { Check } from "lucide-react";
 import { Icon } from "@/components/ui";
 import { useEffect, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Modal, Foot, Go, Quiet } from "./Modal";
+import { Modal, Foot, Go, Quiet, DeviceCode, Failure, Spinner } from "./Modal";
 import { ClientIdForm } from "./SetupAccount";
 import {
   useListProviders,
@@ -17,7 +17,7 @@ import {
   getListReposQueryKey,
 } from "@/src/api/generated/repos/repos";
 import type { ProviderStatus, RemoteRepo } from "@/src/api/generated/model";
-import { ApiError } from "@/src/api/http";
+import { Access } from "./GitHubAccess";
 
 /**
  * Authorize once, pick from what comes back.
@@ -28,6 +28,8 @@ import { ApiError } from "@/src/api/http";
  */
 export function ConnectRepo({ onClose }: { onClose: () => void }) {
   const [manual, setManual] = useState(false);
+  /** Widening what the authorization covers, from inside the picker. */
+  const [widening, setWidening] = useState(false);
 
   const [started, setStarted] = useState(false);
 
@@ -44,6 +46,15 @@ export function ConnectRepo({ onClose }: { onClose: () => void }) {
     <Modal title="Connect a repository" onClose={onClose} wide>
       {manual ? (
         <PasteRemote onBack={() => setManual(false)} onClose={onClose} />
+      ) : widening && provider ? (
+        // In this window rather than another: somebody who came to pick a
+        // repository and could not find it should get the picker back, with
+        // the list asked for again.
+        <Access
+          provider={provider}
+          onDone={() => setWidening(false)}
+          backLabel="Back to the list"
+        />
       ) : !provider ? (
         <p className="py-6 text-center text-ui text-mute">Looking…</p>
       ) : !provider.configured ? (
@@ -55,7 +66,12 @@ export function ConnectRepo({ onClose }: { onClose: () => void }) {
           onManual={() => setManual(true)}
         />
       ) : (
-        <Pick provider={provider} onManual={() => setManual(true)} onClose={onClose} />
+        <Pick
+          provider={provider}
+          onManual={() => setManual(true)}
+          onWiden={() => setWidening(true)}
+          onClose={onClose}
+        />
       )}
     </Modal>
   );
@@ -128,53 +144,11 @@ function Authorize({
 
   return (
     <>
-      <p className="text-ui text-dim">
-        A tab opened at{" "}
-        <a
-          href={pending.verificationUri}
-          target="_blank"
-          rel="noopener"
-          className="text-dim underline underline-offset-2 transition-colors hover:text-bone"
-        >
-          {pending.verificationUri.replace(/^https?:\/\//, "")}
-        </a>
-        . Enter this code:
-      </p>
-
-      <CodeToType code={pending.userCode} />
-
-      <p className="mt-4 flex items-center gap-2 text-meta text-mute">
-        <Spinner />
-        Waiting for you to approve it…
-      </p>
-
+      <DeviceCode pending={pending} />
       <Foot>
         <Quiet onClick={onManual}>Paste a URL instead</Quiet>
       </Foot>
     </>
-  );
-}
-
-/** Shown, not clicked — so it needs to be readable and copyable. */
-export function CodeToType({ code }: { code: string }) {
-  const [copied, setCopied] = useState(false);
-
-  return (
-    <div className="mt-3 flex items-center gap-3">
-      <code className="rounded-md border border-line bg-raise px-4 py-2.5 font-mono text-display tracking-[0.18em] text-bone">
-        {code}
-      </code>
-      <button
-        onClick={() => {
-          navigator.clipboard.writeText(code);
-          setCopied(true);
-          setTimeout(() => setCopied(false), 1600);
-        }}
-        className="text-meta text-mute transition-colors hover:text-text"
-      >
-        {copied ? "Copied" : "Copy"}
-      </button>
-    </div>
   );
 }
 
@@ -183,10 +157,12 @@ export function CodeToType({ code }: { code: string }) {
 function Pick({
   provider,
   onManual,
+  onWiden,
   onClose,
 }: {
   provider: ProviderStatus;
   onManual: () => void;
+  onWiden: () => void;
   onClose: () => void;
 }) {
   const [q, setQ] = useState("");
@@ -267,6 +243,18 @@ function Pick({
         </Go>
         <Quiet onClick={onManual}>Paste a URL instead</Quiet>
       </Foot>
+
+      {/* Said here because this is where it is felt: the list is what somebody
+          is staring at when they notice their organization is not in it. */}
+      <p className="mt-3 text-meta text-mute">
+        Missing one?{" "}
+        <button
+          onClick={onWiden}
+          className="text-dim underline underline-offset-2 transition-colors hover:text-bone"
+        >
+          Add an organization
+        </button>
+      </p>
     </>
   );
 }
@@ -414,28 +402,5 @@ function NotConfigured({
         <Go onClick={onManual}>Paste a URL instead</Go>
       </Foot>
     </>
-  );
-}
-
-/* ── shared ────────────────────────────────────────────────────────── */
-
-/**
- * The server writes these messages because only it knows which of several
- * things went wrong. Repeating them verbatim beats a generic line here.
- */
-function Failure({ error }: { error: unknown }) {
-  const message =
-    error instanceof ApiError ? error.message : "Something went wrong. Try again.";
-
-  return (
-    <div className="mt-4 rounded-md border border-line bg-raise px-3.5 py-2.5">
-      <p className="text-meta leading-[1.55] text-bone">{message}</p>
-    </div>
-  );
-}
-
-export function Spinner() {
-  return (
-    <Icon of={LoaderCircle} size={12} className="animate-spin" />
   );
 }

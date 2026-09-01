@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { GitIdentity } from "@/components/GitIdentity";
+import { GitHubAccess } from "@/components/GitHubAccess";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   useListRepos,
@@ -57,6 +58,10 @@ export default function Repos() {
         {/* Here rather than on an account screen: this belongs to the git host,
             not to your Firetower login. Signing in and being credited for a
             commit are facts about two different accounts. */}
+        {/* What the host shares with us, and the way back to that choice.
+            Above the identity because it is the wider fact: what can be seen
+            at all comes before what a commit is signed with. */}
+        <GitHubAccess provider="github" label="GitHub" />
         <GitIdentity provider="github" label="GitHub" />
       </header>
 
