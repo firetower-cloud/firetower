@@ -9,7 +9,7 @@
 //! only what every one of them needs: the error type, the document, and the
 //! router that puts them in order.
 
-mod agents;
+pub(crate) mod agents;
 mod auth;
 mod conversation;
 mod events;

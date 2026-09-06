@@ -109,6 +109,39 @@ impl std::fmt::Debug for Credential {
     }
 }
 
+/// One environment variable's value, which nobody should print.
+///
+/// A credential travelling to a host is a string like any other, and the only
+/// thing that keeps it out of a log is the type it arrives in. Serialises as
+/// the bare string, so the wire is what it would have been.
+#[derive(Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(transparent)]
+pub struct Secret(pub String);
+
+impl Secret {
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl From<String> for Secret {
+    fn from(value: String) -> Self {
+        Self(value)
+    }
+}
+
+impl From<&str> for Secret {
+    fn from(value: &str) -> Self {
+        Self(value.to_string())
+    }
+}
+
+impl std::fmt::Debug for Secret {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("<redacted>")
+    }
+}
+
 /// What `git ls-remote` tells us about a repository we can reach.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -408,7 +441,9 @@ pub enum Action {
     /// message and a pull request.
     ///
     /// Runs on the host, where the code is — the control plane never sees the
-    /// diff and needs no model credentials of its own.
+    /// diff. What it does send is the credential that run authenticates with,
+    /// because it holds the session owner's already and the run has no other
+    /// way to get one.
     ///
     /// Both fields are context the *control plane* holds and the worker cannot
     /// look up: what a session was asked to do lives in its transcript there,
@@ -427,6 +462,18 @@ pub enum Action {
         /// The issue this work was started from, if it was.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         task: Option<Box<Tracked>>,
+        /// What the describing run needs in its environment to authenticate.
+        ///
+        /// The run is a short-lived agent of its own, started by the worker
+        /// daemon rather than inside the session — so it inherits none of the
+        /// session's environment, and the credential the session was launched
+        /// with is not there. It comes from the vault with the request that
+        /// needs it, exactly as a git credential does.
+        ///
+        /// Defaulted, so a worker that predates it still understands the frame;
+        /// it will fail to authenticate as it did before, which is no worse.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        env: Vec<(String, Secret)>,
     },
     /// Check another repository into a session that is already running.
     ///
@@ -913,6 +960,7 @@ mod tests {
                 title: Some("the thing is slow".into()),
                 body: None,
             })),
+            env: vec![("CLAUDE_CODE_OAUTH_TOKEN".into(), "sk-ant-oat".into())],
         })
         .expect("encoding");
 
@@ -920,6 +968,10 @@ mod tests {
         assert!(wire.contains("asked_for"), "{wire}");
         // Absent rather than null, so nothing has to distinguish the two.
         assert!(!wire.contains("\"body\""), "{wire}");
+        // A secret is still a plain string on the wire; only printing it
+        // differs. The worker sets it as a variable, so anything else would
+        // arrive as the wrong value.
+        assert!(wire.contains("\"sk-ant-oat\""), "{wire}");
     }
 
     /// And the other direction: a control plane too old to send either.
@@ -927,9 +979,14 @@ mod tests {
     fn describing_with_no_context_is_still_understood() {
         let back: Action = serde_json::from_str(r#"{"action":"Describe"}"#).expect("decoding");
         match back {
-            Action::Describe { asked_for, task } => {
+            Action::Describe {
+                asked_for,
+                task,
+                env,
+            } => {
                 assert!(asked_for.is_none());
                 assert!(task.is_none());
+                assert!(env.is_empty());
             }
             other => panic!("came back as {other:?}"),
         }
@@ -962,6 +1019,22 @@ mod tests {
         };
         let shown = format!("{c:?}");
         assert!(!shown.contains("averyrealsecret"), "{shown}");
+        assert!(shown.contains("redacted"), "{shown}");
+    }
+
+    /// The same for the variable an agent authenticates with. A describing
+    /// action carries one, and `{action:?}` is written into the vault's own
+    /// access log.
+    #[test]
+    fn a_secret_variable_never_prints_itself() {
+        let action = Action::Describe {
+            asked_for: None,
+            task: None,
+            env: vec![("CLAUDE_CODE_OAUTH_TOKEN".into(), "sk-ant-oat-real".into())],
+        };
+        let shown = format!("{action:?}");
+        assert!(!shown.contains("sk-ant-oat-real"), "{shown}");
+        assert!(shown.contains("CLAUDE_CODE_OAUTH_TOKEN"), "{shown}");
         assert!(shown.contains("redacted"), "{shown}");
     }
 

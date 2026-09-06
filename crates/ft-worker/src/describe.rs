@@ -22,8 +22,11 @@
 //! says why, and what else it was about.
 //!
 //! It runs where the code is. The control plane never sees the diff or the
-//! conversation, needs no model credentials of its own, and gains no second
-//! opinion about work it did not watch.
+//! conversation, and gains no second opinion about work it did not watch. What
+//! it does send is the credential this run authenticates with: a run started by
+//! the worker daemon inherits none of the session's environment, so the token
+//! the session was launched with is not here, and the vault is the only place
+//! another copy exists.
 
 use std::process::Stdio;
 
@@ -62,6 +65,12 @@ pub struct About<'a> {
     pub diff: &'a str,
     /// Where the worker keeps its state, for the PATH the agents live on.
     pub state: &'a std::path::Path,
+    /// What this run needs in its environment to authenticate.
+    ///
+    /// Empty is a real answer and not an error: an account with no credential
+    /// for this agent has none to send, and a host with the agent signed in on
+    /// it needs none. The run says which it was, in the agent's own words.
+    pub env: &'a [(String, ft_proto::Secret)],
 }
 
 /// How much of a diff is worth sending.
@@ -110,6 +119,14 @@ pub async fn propose(about: About<'_>) -> Result<Proposal> {
     // The same PATH a session gets, so describing a change uses whichever copy
     // of the agent this machine actually runs.
     command.env("PATH", crate::runtime::path_with_agents(about.state).await);
+    // And the same credential. This runs from the worker daemon rather than
+    // from inside the session, so it inherits none of the session's
+    // environment — the token the session was launched with is not here, and a
+    // run without one exits without a word about the diff it was given.
+    for (name, value) in about.env {
+        command.env(name, value.as_str());
+    }
+    authenticate(&about, &mut command).await;
     invocation(about.agent, &mut command, &prompt);
 
     let output = command
@@ -125,13 +142,69 @@ pub async fn propose(about: About<'_>) -> Result<Proposal> {
 
     anyhow::ensure!(
         output.status.success(),
-        "{} exited {}: {}",
+        "{} exited {}: {}{}",
         about.agent.command(),
         output.status.code().unwrap_or(-1),
-        String::from_utf8_lossy(&output.stderr).trim()
+        complaint(&output.stderr, &output.stdout),
+        // The failure this is most often, said plainly. An agent reports it in
+        // its own words — "please run /login" — which sends whoever reads it to
+        // the host to sign in by hand, when what is actually missing is a
+        // credential on the account.
+        if about.env.is_empty() {
+            ". Nothing was sent for it to authenticate with"
+        } else {
+            ""
+        }
     );
 
     read(&String::from_utf8_lossy(&output.stdout)).context("the answer had no title in it")
+}
+
+/// Point the agent at the directory its credential was written into, for the
+/// agents that keep one in a file rather than in a variable.
+///
+/// Only when it is there. A session launched before the credential existed, or
+/// on an account that needs none, has no such directory — and pointing an agent
+/// at a home that does not exist is how a run that would have worked stops
+/// working.
+async fn authenticate(about: &About<'_>, command: &mut Command) {
+    let Some(var) = about.agent.home_var() else {
+        return;
+    };
+    let home = crate::agentd::dir_for(about.workspace).join("agent-home");
+    if tokio::fs::metadata(&home).await.is_ok() {
+        command.env(var, &home);
+    }
+}
+
+/// What to quote back when a run fails.
+///
+/// stderr first, because that is where a shell reports a missing binary or a
+/// rejected flag. But an agent that started and then could not authenticate
+/// says so on *stdout*, as its answer, and leaves stderr empty — which read as
+/// `claude exited 1:` and told whoever saw it nothing at all.
+fn complaint(stderr: &[u8], stdout: &[u8]) -> String {
+    /// Enough for the sentence that names the problem, and not a transcript.
+    const ENOUGH_COMPLAINT: usize = 500;
+
+    let said = |bytes: &[u8]| String::from_utf8_lossy(bytes).trim().to_string();
+    let out = match said(stderr) {
+        empty if empty.is_empty() => said(stdout),
+        complaint => complaint,
+    };
+
+    if out.is_empty() {
+        // It said nothing anywhere. Better than an empty string after a colon,
+        // which reads as a bug in this rather than in the run.
+        return "it said nothing".to_string();
+    }
+
+    // The end, not the beginning: a run that printed a banner and then failed
+    // has the reason underneath it.
+    match out.char_indices().nth_back(ENOUGH_COMPLAINT - 1) {
+        Some((at, _)) if at > 0 => format!("…{}", &out[at..]),
+        _ => out,
+    }
 }
 
 /// How to run this agent once, without a session.
@@ -451,7 +524,104 @@ mod tests {
             task,
             diff: "",
             state: std::path::Path::new("/nowhere"),
+            env: &[],
         }
+    }
+
+    /// The failure that read as `claude exited 1:` and said nothing else.
+    ///
+    /// An agent that starts and then cannot authenticate reports it as its
+    /// answer, on stdout, and leaves stderr empty.
+    #[test]
+    fn a_failure_with_nothing_on_stderr_is_quoted_from_stdout() {
+        let said = complaint(b"", "Invalid API key · Please run /login\n".as_bytes());
+        assert_eq!(said, "Invalid API key · Please run /login");
+    }
+
+    #[test]
+    fn stderr_is_preferred_when_there_is_any() {
+        let said = complaint(b"unknown flag: --nope\n", b"a banner nobody wants");
+        assert_eq!(said, "unknown flag: --nope");
+    }
+
+    /// Better than an empty string after a colon, which reads as a bug in this
+    /// rather than in the run.
+    #[test]
+    fn a_run_that_said_nothing_at_all_still_says_something() {
+        assert_eq!(complaint(b"", b"   \n"), "it said nothing");
+    }
+
+    /// The end, not the beginning: a run that printed a banner and then failed
+    /// has the reason underneath it.
+    #[test]
+    fn a_long_complaint_keeps_its_end() {
+        let long = format!("{}the reason", "banner ".repeat(400));
+        let said = complaint(long.as_bytes(), b"");
+        assert!(said.ends_with("the reason"), "{said}");
+        assert!(said.starts_with('…'), "{said}");
+        assert!(said.chars().count() <= 501, "{}", said.chars().count());
+    }
+
+    /// The credential the control plane sent, and the directory the ones that
+    /// read a file keep theirs in.
+    #[tokio::test]
+    async fn the_run_is_given_what_it_authenticates_with() {
+        let workspace = tempfile::tempdir().expect("a temporary directory");
+        let home = crate::agentd::dir_for(workspace.path()).join("agent-home");
+        tokio::fs::create_dir_all(&home).await.expect("making it");
+
+        let carried = vec![("OPENAI_API_KEY".to_string(), ft_proto::Secret::from("sk"))];
+        let about = About {
+            agent: ft_core::Agent::Codex,
+            workspace: workspace.path(),
+            session_id: "s_test",
+            asked_for: None,
+            task: None,
+            diff: "",
+            state: std::path::Path::new("/nowhere"),
+            env: &carried,
+        };
+
+        let mut command = Command::new("codex");
+        for (name, value) in about.env {
+            command.env(name, value.as_str());
+        }
+        authenticate(&about, &mut command).await;
+
+        let set: Vec<(String, String)> = command
+            .as_std()
+            .get_envs()
+            .filter_map(|(k, v)| Some((k.to_str()?.to_string(), v?.to_str()?.to_string())))
+            .collect();
+        assert!(
+            set.contains(&("OPENAI_API_KEY".to_string(), "sk".to_string())),
+            "{set:?}"
+        );
+        assert!(
+            set.contains(&("CODEX_HOME".to_string(), home.display().to_string())),
+            "{set:?}"
+        );
+    }
+
+    /// And not at a directory that isn't there. An agent pointed at a home it
+    /// cannot read is worse off than one left alone with the host's own.
+    #[tokio::test]
+    async fn an_agent_home_that_was_never_written_is_not_named() {
+        let workspace = tempfile::tempdir().expect("a temporary directory");
+        let about = About {
+            agent: ft_core::Agent::Codex,
+            workspace: workspace.path(),
+            session_id: "s_test",
+            asked_for: None,
+            task: None,
+            diff: "",
+            state: std::path::Path::new("/nowhere"),
+            env: &[],
+        };
+
+        let mut command = Command::new("codex");
+        authenticate(&about, &mut command).await;
+        assert_eq!(command.as_std().get_envs().count(), 0);
     }
 
     #[test]

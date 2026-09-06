@@ -124,6 +124,11 @@ pub async fn run(config: Config) -> Result<()> {
 
     let vault = Arc::new(Vault::new(db.pool().clone(), root));
 
+    // Before a single host is supervised. What a fleet opens the vault for is
+    // the credential a describing run authenticates with, and that run is
+    // started the moment the first session hands back.
+    let fleet = fleet.holding(vault.clone());
+
     // Made now rather than when the first server is added, so that start-up can
     // print it: the next thing anyone does after installing is add a machine,
     // and the key has to exist before it can be put on one.

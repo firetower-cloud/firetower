@@ -422,13 +422,34 @@ async fn describe(fleet: &Fleet, db: &Db, host_id: &HostId, session_id: &Session
     };
 
     // What was asked for, and not the issue behind it. Reading the tracker
-    // needs the vault, which this side of the connection loop does not hold —
-    // and this is the *speculative* description, made because a session
-    // happened to hand back. The one somebody is waiting for goes through
-    // `sessions::propose`, which has the vault and fetches the issue there.
+    // needs a token per provider and a request to somebody else's server, which
+    // is work this speculative run — made because a session happened to hand
+    // back — should not do. The one somebody is waiting for goes through
+    // `sessions::propose`, which fetches the issue there.
+    //
+    // The credential is not optional in the same way. Without it the run on the
+    // host cannot authenticate at all, and every session would hand back with
+    // nothing written in the sheet.
+    let env = match &fleet.vault {
+        Some(vault) => crate::api::agents::agent_credential(
+            db,
+            vault,
+            session.agent,
+            session.owner.as_str(),
+            &format!("describing the work in {session_id}"),
+        )
+        .await
+        .unwrap_or_else(|e| {
+            tracing::debug!(session = %session_id, "no credential to describe with: {e:#}");
+            Vec::new()
+        }),
+        None => Vec::new(),
+    };
+
     let action = ft_proto::Action::Describe {
         asked_for: Some(session.prompt.trim().to_string()).filter(|p| !p.is_empty()),
         task: None,
+        env,
     };
 
     let answer = match fleet.run_action(host_id, session_id, action, None).await {
@@ -933,6 +954,15 @@ pub struct Fleet {
     /// joined late has to replay the stored lines through a normaliser of its
     /// own to arrive in the right state.
     conversations: Arc<RwLock<HashMap<String, broadcast::Sender<AgentSpeech>>>>,
+    /// Every credential Firetower holds, for the few things this side of the
+    /// connection loop has to open it for.
+    ///
+    /// Optional because a fleet is startable without one — the tests build one,
+    /// and so does the preview proxy. What it costs when it is `None` is the
+    /// description written when a session hands back: that run authenticates
+    /// with the session owner's own credential, and there is nowhere else to
+    /// get it.
+    vault: Option<Arc<crate::vault::Vault>>,
     /// One per host we are keeping connected, whether or not it is answering.
     ///
     /// A host is in here from the moment it is added until it is removed, which
@@ -997,7 +1027,18 @@ impl Fleet {
             progress: Arc::new(RwLock::new(HashMap::new())),
             notify: crate::notify::Notifier::from_env(),
             supervised: Arc::new(RwLock::new(HashMap::new())),
+            vault: None,
         }
+    }
+
+    /// Hand it the vault, before any host is supervised.
+    ///
+    /// Separate from `new` because the vault is opened after the fleet exists —
+    /// and a fleet without one still works, minus the credential it would have
+    /// sent with a describing run.
+    pub fn holding(mut self, vault: Arc<crate::vault::Vault>) -> Self {
+        self.vault = Some(vault);
+        self
     }
 
     pub fn subscribe(&self) -> broadcast::Receiver<Event> {
