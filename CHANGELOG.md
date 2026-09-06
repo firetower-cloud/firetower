@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.23.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.22.0...firetower-v0.23.0) (2026-09-06)
+
+
+### Features
+
+* keep the control plane on loopback, and TLS behind a profile ([2564216](https://github.com/firetower-cloud/firetower/commit/2564216229b4b129cd0a60ffa9d433c6926a2a83))
+* keep the control plane on loopback, and TLS behind a profile ([7f0b967](https://github.com/firetower-cloud/firetower/commit/7f0b9672a0ea39d1d169b5a2b75f747545c6ceb2))
+
 ## [0.22.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.21.0...firetower-v0.22.0) (2026-09-06)
 
 
