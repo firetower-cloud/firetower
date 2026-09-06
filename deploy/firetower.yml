@@ -129,10 +129,16 @@ services:
       # answered on 80 at all.
       - "${HTTPS_BIND:-0.0.0.0}:80:80"
     environment:
-      # No default. A Caddyfile whose site address is empty starts and answers
-      # nothing, which looks like a Firetower bug for as long as it takes to
-      # find; refusing is faster to understand than a 404 with no cause.
-      DOMAIN: ${DOMAIN:?set DOMAIN in .env, or turn the tls profile off}
+      # **Not `${DOMAIN:?...}`, however much it wants to be.** Compose
+      # interpolates this whole file before it decides which profiles are on,
+      # so a `:?` here refuses every install that does not use this service —
+      # including the default one, which never creates it. The variable is
+      # required in practice and cannot be required in syntax.
+      #
+      # Left unset with the profile on, the Caddyfile's site address is empty
+      # and Caddy refuses the config rather than serving nothing.
+      # `firetower doctor` says so first.
+      DOMAIN: ${DOMAIN:-}
       # Unused while the certificate is one you supply — there is no authority
       # to warn you, and expiry is what `firetower doctor` watches instead.
       # Here for the day Firetower issues its own.
