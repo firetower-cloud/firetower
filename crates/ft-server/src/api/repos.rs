@@ -464,7 +464,7 @@ async fn local_host(state: &AppState) -> Option<ft_core::Host> {
     responses(
         (status = 200, body = ProbeResponse),
         (status = 400, body = ApiError),
-        (status = 401, body = ApiError),
+        (status = 409, body = ApiError, description = "The remote refused us"),
     ),
 )]
 pub(super) async fn probe_repo(

@@ -95,6 +95,7 @@ pub struct GitIdentity {
     responses(
         (status = 200, body = GitIdentity),
         (status = 404, body = ApiError, description = "Nothing to derive one from"),
+        (status = 409, body = ApiError, description = "That git host has not been authorized"),
     ),
 )]
 pub(super) async fn get_identity(
@@ -414,8 +415,8 @@ pub(super) async fn disconnect_provider(
     params(("id" = String, Path, description = "Provider id")),
     responses(
         (status = 200, body = Vec<RemoteRepo>),
-        (status = 401, body = ApiError),
         (status = 404, body = ApiError),
+        (status = 409, body = ApiError, description = "That git host has not been authorized"),
     ),
 )]
 pub(super) async fn list_provider_repos(
