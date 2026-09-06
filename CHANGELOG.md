@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.22.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.21.0...firetower-v0.22.0) (2026-09-06)
+
+
+### Features
+
+* **chat:** add copy to clipboard feature for command and files ([64eaa35](https://github.com/firetower-cloud/firetower/commit/64eaa3558f1f221329ab9696dc782a5aab7e541e))
+* **chat:** add copy to clipboard feature for command and files ([73b41da](https://github.com/firetower-cloud/firetower/commit/73b41da09084a715d2d958d3232e2a3f9e9dd0a5))
+* **login:** fix 401 responses causing login screen to be visible ([cdbe1bd](https://github.com/firetower-cloud/firetower/commit/cdbe1bda6886d6dfac1fa32ab864b4801c7091ff))
+* **login:** fix 401 responses causing login screen to be visible ([089dbae](https://github.com/firetower-cloud/firetower/commit/089dbaef44da74aa7cbe7e96c0b00875660c6322))
+
+
+### Bug Fixes
+
+* pass credentials to the agent to generate commit text ([f29ef1e](https://github.com/firetower-cloud/firetower/commit/f29ef1e623eaf9fc2f8a71a4d19b054bbde6c14d))
+* pass credentials to the agent to generate commit text ([a221c44](https://github.com/firetower-cloud/firetower/commit/a221c44ca12d88b45881b4acded12e0f17f7264e))
+
 ## [0.21.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.20.0...firetower-v0.21.0) (2026-09-01)
 
 
