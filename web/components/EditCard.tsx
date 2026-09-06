@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { CopyButton } from "@/components/ui";
 
 /**
  * What an edit actually did, in the transcript.
@@ -59,6 +60,14 @@ export function EditCard({
         {out.length > 0 && (
           <span className="shrink-0 font-mono text-micro text-brick">−{out.length}</span>
         )}
+        {/* What the file says now, not the diff around it — somebody copying
+            out of an edit wants the text that won. A deletion has only the
+            other half, so that is what it hands over. */}
+        <CopyButton
+          text={added ?? removed ?? ""}
+          label={added !== undefined ? "Copy what it wrote" : "Copy what it removed"}
+          className="-my-0.5"
+        />
         {onOpen && (
           <button
             onClick={onOpen}

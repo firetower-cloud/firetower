@@ -8,6 +8,7 @@ import { useNotes, asMessage } from "@/src/api/notes";
 import { useFileText, isMarkdown, MOST } from "@/src/api/text";
 import { ApiError } from "@/src/api/http";
 import { useOpen, useTabs } from "@/src/workspace/tabs";
+import { CopyButton } from "@/components/ui";
 
 /**
  * A file out of the workspace, as something to read and argue with.
@@ -53,6 +54,9 @@ export function FileTab({ sessionId, path }: { sessionId: string; path: string }
         <span className="min-w-0 flex-1 truncate font-mono text-meta text-slate" title={path}>
           {path}
         </span>
+        {/* Only for a file that was actually read — there is nothing to hand
+            over for one that is binary, too big, or still arriving. */}
+        {data?.kind === "text" && <CopyButton text={data.text} label="Copy the file" />}
         {!set?.split && (
           <button
             onClick={() => open.file(path, true)}
