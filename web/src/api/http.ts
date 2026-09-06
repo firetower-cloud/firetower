@@ -115,6 +115,30 @@ export class ApiError extends Error {
 }
 
 /**
+ * Whether a refusal means this browser is no longer signed in.
+ *
+ * The **code**, never the status. Signing somebody out is the most destructive
+ * thing a failed request can do — the token is thrown away and every cached
+ * query with it — and the status is shared between codes that mean entirely
+ * different things. `ProviderNotConnected` and `RepoAccessDenied` both answered
+ * 401 once, so a GitHub authorization nobody had done yet, or one private
+ * repository the token could not see, signed the person out of Firetower. The
+ * tasks list, the repository picker and the issue chips all ask for those
+ * without being told to — the chips while somebody is typing — so it read as
+ * being logged out at random.
+ *
+ * The server no longer answers 401 for either. This does not rely on that: an
+ * interface served from a newer build than the control plane behind it is an
+ * ordinary state during an upgrade, and the code is what both versions agree on.
+ *
+ * Signing in is exempt because a refused password is the answer to the question
+ * that screen is asking, not a session ending underneath it.
+ */
+export function meansSignedOut(code: string, url: string): boolean {
+  return code === "Unauthorized" && !url.startsWith("/api/v1/auth/login");
+}
+
+/**
  * Called by every generated operation as `http(url, requestInit)`. The URL
  * arrives already built, including its query string.
  */
@@ -137,7 +161,7 @@ export const http = async <T>(url: string, init: RequestInit = {}): Promise<T> =
     // The session ended, or there never was one. Signing in again is the only
     // thing to do about it, so do that rather than showing every screen its own
     // version of the same message.
-    if (error.status === 401 && !url.startsWith("/api/v1/auth/login")) {
+    if (meansSignedOut(error.code, url)) {
       toSignIn();
     }
 

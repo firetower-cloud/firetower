@@ -94,17 +94,28 @@ impl ErrorCode {
             Self::InvalidRequest => StatusCode::BAD_REQUEST,
             Self::NotFound | Self::RepoNotConnected => StatusCode::NOT_FOUND,
             Self::ProviderNotConfigured => StatusCode::NOT_IMPLEMENTED,
-            Self::ProviderNotConnected | Self::RepoAccessDenied | Self::Unauthorized => {
-                StatusCode::UNAUTHORIZED
-            }
+            // The only thing that means "we do not know who you are". Anything
+            // else answering 401 signs the person out: the interface reads a
+            // 401 as a session that has ended, forgets the token and goes to
+            // the sign-in screen.
+            Self::Unauthorized => StatusCode::UNAUTHORIZED,
             // Not 401: the credential was accepted. It is 403 because this
             // account may do exactly one thing until it does it.
             Self::PasswordChangeRequired => StatusCode::FORBIDDEN,
             Self::RepoUnreachable | Self::RepoUnusable => StatusCode::BAD_REQUEST,
+            // Not 401 either, for the same reason, and these two used to be —
+            // which meant a GitHub authorization that had never been done, or a
+            // private repository the token could not see, signed the person out
+            // of Firetower. They are about a credential we hold for somebody
+            // else's host, not about theirs: whoever asked is signed in, and
+            // this deployment is not in a state where the request can be
+            // answered yet.
             Self::NoCapacity
             | Self::HostUnreachable
             | Self::SessionEnded
             | Self::RepoInUse
+            | Self::ProviderNotConnected
+            | Self::RepoAccessDenied
             | Self::ActionFailed => StatusCode::CONFLICT,
             Self::Internal => StatusCode::INTERNAL_SERVER_ERROR,
         }
@@ -333,6 +344,43 @@ mod tests {
             ErrorCode::Internal.status(),
             StatusCode::INTERNAL_SERVER_ERROR
         );
+    }
+
+    /// Every other code answering 401 would sign somebody out.
+    ///
+    /// The interface treats a 401 as "this session has ended": it forgets the
+    /// token and goes to the sign-in screen. `ProviderNotConnected` and
+    /// `RepoAccessDenied` were both 401 once, so a GitHub authorization nobody
+    /// had done yet — asked for by the tasks list, the repository picker, and
+    /// the issue chips while somebody was typing — logged them out of Firetower
+    /// instead of saying which git host needed connecting.
+    #[test]
+    fn only_not_knowing_who_somebody_is_answers_401() {
+        for code in [
+            ErrorCode::InvalidRequest,
+            ErrorCode::NotFound,
+            ErrorCode::NoCapacity,
+            ErrorCode::HostUnreachable,
+            ErrorCode::RepoNotConnected,
+            ErrorCode::SessionEnded,
+            ErrorCode::ProviderNotConfigured,
+            ErrorCode::ProviderNotConnected,
+            ErrorCode::RepoAccessDenied,
+            ErrorCode::RepoUnreachable,
+            ErrorCode::RepoUnusable,
+            ErrorCode::RepoInUse,
+            ErrorCode::ActionFailed,
+            ErrorCode::PasswordChangeRequired,
+            ErrorCode::Internal,
+        ] {
+            assert_ne!(
+                code.status(),
+                StatusCode::UNAUTHORIZED,
+                "{code:?} answers 401, which the interface reads as a session that has ended"
+            );
+        }
+
+        assert_eq!(ErrorCode::Unauthorized.status(), StatusCode::UNAUTHORIZED);
     }
 
     #[test]
