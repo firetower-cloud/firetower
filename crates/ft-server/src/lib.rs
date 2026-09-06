@@ -557,12 +557,19 @@ fn operational(state: AppState) -> axum::Router {
         .route("/healthz", get(|| async { "ok" }))
         // Whether a hostname is a preview of ours.
         //
-        // Caddy asks before it will request a certificate for a name it has
-        // never seen, which is what stops anybody pointing a domain at a
-        // deployment and having it mint certificates on request. Outside the
-        // gate because Caddy has no credential — and it needs none: this
-        // answers a question anybody could answer for themselves by trying the
-        // name.
+        // Whether a preview hostname is one we signed.
+        //
+        // **Nothing asks this today.** It was Caddy's `on_demand_tls ask`,
+        // back when a certificate was obtained per preview hostname — which
+        // also meant publishing each one to Certificate Transparency logs,
+        // where a hostname that *is* the credential for that preview does not
+        // belong. The deployment now terminates TLS with one wildcard
+        // certificate and mints nothing on demand.
+        //
+        // Kept because it costs nothing and is the right answer for any future
+        // issuer that needs to ask. Outside the gate because whoever asks has
+        // no credential — and needs none: this answers a question anybody
+        // could answer for themselves by trying the name.
         .route(
             "/preview-known",
             get(

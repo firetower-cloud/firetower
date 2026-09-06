@@ -85,11 +85,25 @@ impl Names {
 
     /// The whole address, ready to put in an `iframe`.
     ///
-    /// Scheme included, and it is the caller's: a deployment behind Caddy with
-    /// a domain is on https, a laptop is not, and only the request that asked
-    /// knows which.
-    pub fn url(&self, scheme: &str, preview: &Preview) -> String {
-        format!("{scheme}://{}/", self.host(preview))
+    /// Scheme and port are both the caller's, because only the request that
+    /// asked knows either: a deployment behind Caddy with a certificate is
+    /// https on 443, and a control plane reached through an ssh tunnel is http
+    /// on whatever the operator forwarded.
+    ///
+    /// The port has to be here. A preview is a link the browser follows on its
+    /// own, so leaving it out of `localhost:8080` does not mean "the port I
+    /// came in on" — it means port 80, on the machine holding the browser,
+    /// where there is either nothing or something else of theirs.
+    ///
+    /// It is left out when it *is* the default for the scheme, so the ordinary
+    /// case does not grow a `:443` that nobody typed.
+    pub fn url(&self, scheme: &str, port: Option<u16>, preview: &Preview) -> String {
+        let host = self.host(preview);
+
+        match port {
+            Some(port) if !default_port(scheme, port) => format!("{scheme}://{host}:{port}/"),
+            _ => format!("{scheme}://{host}/"),
+        }
     }
 
     /// The hostname for a session's port.
@@ -147,6 +161,15 @@ impl Names {
 
         base32(&mac.finalize().into_bytes()[..SIGNATURE_BYTES])
     }
+}
+
+/// Whether a browser would have assumed this port from the scheme alone.
+///
+/// Only these two: a URL is not improved by `:8080` becoming implicit anywhere
+/// else, and guessing wrong here produces a link to the wrong port rather than
+/// an ugly one.
+fn default_port(scheme: &str, port: u16) -> bool {
+    matches!((scheme, port), ("http", 80) | ("https", 443))
 }
 
 /// Previews hang off this when nothing says otherwise.
@@ -446,7 +469,56 @@ mod tests {
     #[test]
     fn the_url_carries_the_callers_scheme() {
         let names = names();
-        assert!(names.url("https", &preview()).starts_with("https://"));
-        assert!(names.url("http", &preview()).ends_with("/"));
+        assert!(names.url("https", None, &preview()).starts_with("https://"));
+        assert!(names.url("http", None, &preview()).ends_with("/"));
+    }
+
+    #[test]
+    fn the_url_carries_the_callers_port() {
+        let names = names();
+        let host = names.host(&preview());
+
+        // The tunnel case, and the whole reason the port is threaded through:
+        // without it this link goes to port 80 of the browser's own machine.
+        assert_eq!(
+            names.url("http", Some(8080), &preview()),
+            format!("http://{host}:8080/")
+        );
+        assert_eq!(
+            names.url("https", Some(8443), &preview()),
+            format!("https://{host}:8443/")
+        );
+    }
+
+    #[test]
+    fn a_default_port_is_left_out() {
+        let names = names();
+        let host = names.host(&preview());
+
+        assert_eq!(
+            names.url("http", Some(80), &preview()),
+            format!("http://{host}/")
+        );
+        assert_eq!(
+            names.url("https", Some(443), &preview()),
+            format!("https://{host}/")
+        );
+
+        // Default for the *other* scheme is still a port worth printing.
+        assert_eq!(
+            names.url("http", Some(443), &preview()),
+            format!("http://{host}:443/")
+        );
+    }
+
+    #[test]
+    fn a_ported_url_still_resolves_back() {
+        let names = names();
+        let url = names.url("http", Some(8080), &preview());
+
+        // What the browser will put in `Host` for that link, which is what
+        // `preview_first` has to recognise on the way back in.
+        let authority = url.trim_start_matches("http://").trim_end_matches('/');
+        assert_eq!(names.resolve(authority), Some(preview()));
     }
 }

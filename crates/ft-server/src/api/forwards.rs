@@ -74,7 +74,9 @@ pub(super) async fn preview_address(
     };
 
     Ok(Json(PreviewAddress {
-        url: state.names.url(scheme_of(&headers), &preview),
+        url: state
+            .names
+            .url(scheme_of(&headers), port_of(&headers), &preview),
         port: which.port,
     }))
 }
@@ -93,6 +95,34 @@ fn scheme_of(headers: &HeaderMap) -> &'static str {
     } else {
         "http"
     }
+}
+
+/// The port the browser reached us on, if it named one.
+///
+/// The same problem as [`scheme_of`], for the same reason: this process only
+/// ever listens on 4400, so its own socket says nothing about the address in
+/// somebody's browser. `Host` carries it, and a proxy that moved the port says
+/// so in `X-Forwarded-Port` — asked first, exactly as `X-Forwarded-Proto` is.
+///
+/// `None` when the header names no port, which means the browser is using the
+/// scheme's default and the URL should not name one either.
+fn port_of(headers: &HeaderMap) -> Option<u16> {
+    let forwarded = headers
+        .get("x-forwarded-port")
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.trim().parse().ok());
+
+    if forwarded.is_some() {
+        return forwarded;
+    }
+
+    let host = headers.get(header::HOST)?.to_str().ok()?;
+
+    // From the right, so that an IPv6 literal's own colons are not mistaken
+    // for the separator: `[::1]:8080` splits after the bracket, and a bare
+    // `[::1]` splits into something that does not parse as a port.
+    let (_, port) = host.rsplit_once(':')?;
+    port.parse().ok()
 }
 
 /// What the interface needs to decide what to show.
@@ -265,4 +295,54 @@ async fn already_reachable(state: &AppState, host: &ft_core::HostId) -> bool {
         state.db.host_by_id(host).await,
         Ok(Some(host)) if host.compute == ft_core::Compute::Local
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn headers(pairs: &[(&str, &str)]) -> HeaderMap {
+        let mut map = HeaderMap::new();
+        for (name, value) in pairs {
+            map.insert(
+                axum::http::HeaderName::from_bytes(name.as_bytes()).expect("a header name"),
+                value.parse().expect("a header value"),
+            );
+        }
+        map
+    }
+
+    #[test]
+    fn the_port_comes_from_the_host_header() {
+        assert_eq!(port_of(&headers(&[("host", "localhost:8080")])), Some(8080));
+    }
+
+    #[test]
+    fn no_port_in_the_host_means_the_schemes_default() {
+        // Not `Some(80)`: the caller leaves the port out of the URL entirely,
+        // and saying "80" here would be a guess about the scheme.
+        assert_eq!(
+            port_of(&headers(&[("host", "firetower.example.com")])),
+            None
+        );
+    }
+
+    #[test]
+    fn a_proxy_that_moved_the_port_is_believed_first() {
+        let map = headers(&[("host", "firetower:4400"), ("x-forwarded-port", "443")]);
+        assert_eq!(port_of(&map), Some(443));
+    }
+
+    #[test]
+    fn an_ipv6_literal_is_not_split_on_its_own_colons() {
+        assert_eq!(port_of(&headers(&[("host", "[::1]:8080")])), Some(8080));
+        assert_eq!(port_of(&headers(&[("host", "[::1]")])), None);
+    }
+
+    #[test]
+    fn nonsense_is_no_port_rather_than_a_wrong_one() {
+        assert_eq!(port_of(&headers(&[("host", "localhost:")])), None);
+        assert_eq!(port_of(&headers(&[("host", "localhost:http")])), None);
+        assert_eq!(port_of(&HeaderMap::new()), None);
+    }
 }
