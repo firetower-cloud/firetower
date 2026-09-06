@@ -10,11 +10,23 @@
 #
 #   docker compose -f firetower.yml logs firetower
 #
-# **Only Caddy publishes a port.** The control plane holds every credential
-# Firetower has, and is reachable from nothing but the proxy in front of it —
-# which matters more than the certificate does. Which ports Caddy publishes is
-# HTTP_PORT and HTTPS_PORT, and both are pinned to 80 and 443 whenever DOMAIN
-# is set.
+# **The published port is on loopback, and that is the point.** The control
+# plane holds every credential Firetower has — every git token, every agent
+# credential, the root key. Somebody who reaches it can erase the codebase of
+# the company that installed it. So nothing here is published to the internet,
+# and the two shapes below are both ways of reaching it without doing that.
+#
+# **Reached from your own machine**, which is the default and needs nothing at
+# all. Firetower publishes HTTP_PORT on 127.0.0.1, no proxy is created, and an
+# ssh tunnel from wherever you actually sit is the whole story:
+#
+#   ssh -N -L 8080:127.0.0.1:8080 -o ServerAliveInterval=20 you@this-machine
+#
+# **Reached on a name, over HTTPS**, when more than one person uses it and a
+# tunnel each is not reasonable. That turns Caddy on — it is behind the `tls`
+# profile, so it is not created otherwise — and Caddy terminates TLS with a
+# certificate you supply. See the Caddyfile: the name never has to be
+# reachable from the internet, and it should not be.
 #
 # Sessions run in the control plane's own container, the same way they run on a
 # laptop: as a child process, with `localhost` in the fleet. To run them
@@ -31,50 +43,24 @@
 name: firetower
 
 services:
-  # The front door. Without DOMAIN it serves plain HTTP, which is the honest
-  # arrangement for something only ever reached from this machine — and for
-  # something behind a reverse proxy that terminates TLS itself. With one, it
-  # gets a certificate on its own and redirects 80 to 443.
-  caddy:
-    image: caddy:2-alpine
-    restart: unless-stopped
-    depends_on: [firetower]
-    ports:
-      # The host side moves; the container side does not. Caddy is configured
-      # by `{$DOMAIN}`, which names the certificate as well as the address, so
-      # a port belongs out here where changing it means nothing else.
-      #
-      # **Setting DOMAIN pins both of these to 80 and 443.** Let's Encrypt
-      # answers the challenge on those two specifically — HTTP-01 on 80,
-      # TLS-ALPN on 443 — so a certificate cannot be issued anywhere else.
-      # Move them when there is no domain here: either this is reached from
-      # the machine itself, or something else in front already holds 80.
-      - "${HTTP_PORT:-80}:80"
-      # Harmless with no domain: nothing answers there until there is a
-      # certificate to answer with.
-      - "${HTTPS_PORT:-443}:443"
-    environment:
-      DOMAIN: ${DOMAIN:-:80}
-      ACME_EMAIL: ${ACME_EMAIL:-}
-      # Where previews are served. `*.your-domain` when DOMAIN is set, and one
-      # wildcard DNS record pointing here. Left alone with no domain: the site
-      # block above is `:80`, which already answers every hostname, so previews
-      # on `*.localhost` need nothing.
-      PREVIEW_SITE: ${PREVIEW_SITE:-*.preview.invalid}
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      # The certificate and the ACME account key. Lose this and every restart
-      # asks Let's Encrypt for a new certificate — fine twice, rate-limited by
-      # the fifth time, and the limit is measured in days.
-      - caddy_data:/data
-      - caddy_config:/config
-
   firetower:
     image: ghcr.io/firetower-cloud/firetower:latest
     restart: unless-stopped
     depends_on:
       postgres:
         condition: service_healthy
+    ports:
+      # Loopback unless somebody asks otherwise, because the default has to be
+      # the safe one: a bare `${HTTP_PORT}:4400` would publish the vault on
+      # every interface this machine has, and `ufw deny` would not stop it —
+      # Docker's own DNAT rules are consulted before the host's INPUT chain.
+      #
+      # Reach it with an ssh tunnel. Widening this to 0.0.0.0 is a decision to
+      # put the control plane on the network, and one worth making on purpose.
+      #
+      # With the `tls` profile on, leave this alone: Caddy reaches 4400 over
+      # the network below, not through here.
+      - "${HTTP_BIND:-127.0.0.1}:${HTTP_PORT:-8080}:4400"
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-firetower}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-firetower}
 
@@ -89,26 +75,76 @@ services:
       FIRETOWER_ROOT_KEY: ${FIRETOWER_ROOT_KEY:-}
 
       # The address you actually open, for the URL the log prints on the first
-      # start. This process listens on 4400 in here and has no way to know it
-      # is reached on 443 through Caddy.
-      FIRETOWER_PUBLIC_URL: ${FIRETOWER_PUBLIC_URL:-http://localhost}
+      # start and for the deep link in a notification. This process listens on
+      # 4400 in here and has no way to know what is in front of it.
+      #
+      # The port belongs in here. Over a tunnel the browser is at
+      # `localhost:8080`, and a URL that says `localhost` sends somebody to
+      # port 80 on their own machine.
+      FIRETOWER_PUBLIC_URL: ${FIRETOWER_PUBLIC_URL:-http://localhost:8080}
 
       # What a session's preview hangs off.
       #
       # `localhost` needs nothing: every browser resolves anything under it to
-      # this machine, so a laptop gets previews with no DNS and no certificate.
+      # this machine, so a laptop — or anybody on a tunnel — gets previews with
+      # no DNS and no certificate.
       #
-      # With a domain, set this to it and add `*.that-domain` as a DNS record —
-      # then a preview is a link somebody else can open. **The hostname is the
-      # credential**: it carries a signature, and anyone holding one reaches
-      # that port of that session. Treat one like a share link.
+      # With the `tls` profile on, set this to DOMAIN and add `*.that-domain`
+      # as a DNS record. **The hostname is the credential**: it carries a
+      # signature, and anyone holding one reaches that port of that session.
+      # Treat one like a share link.
       FIRETOWER_PREVIEW_DOMAIN: ${FIRETOWER_PREVIEW_DOMAIN:-localhost}
     volumes:
       # The root key, the token, and everything the worker on this machine
       # keeps: repository mirrors, worktrees, the event log, and the agent's
       # own directory.
       - firetower:/var/lib/firetower
-    # No `ports`. On purpose — see the note at the top.
+
+  # TLS, and only TLS.
+  #
+  # Behind a profile because it is not needed otherwise: the control plane
+  # serves its own interface, its own API and its own preview routing, so with
+  # no certificate to terminate this container would be a pass-through in front
+  # of a server that is already complete. `docker compose up -d` does not
+  # create it. `COMPOSE_PROFILES=tls` — or `--profile tls` — does.
+  #
+  # Turning it on is a commitment to three things: DOMAIN, a certificate at
+  # ./certs, and DNS for both `DOMAIN` and `*.DOMAIN`. The Caddyfile explains
+  # where the certificate comes from.
+  caddy:
+    profiles: [tls]
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on: [firetower]
+    ports:
+      # 0.0.0.0 by default, unlike the control plane above: the entire reason
+      # this container exists is that somebody else has to reach it. Narrow it
+      # to one interface — a tailnet address, say — with HTTPS_BIND.
+      #
+      # Caddy always listens on 443 in here; HTTPS_PORT only moves the host
+      # side, for a machine where something else already holds it.
+      - "${HTTPS_BIND:-0.0.0.0}:${HTTPS_PORT:-443}:443"
+      # Redirects to the address above. Nothing is served here and no
+      # certificate is issued here; drop the line if you would rather nothing
+      # answered on 80 at all.
+      - "${HTTPS_BIND:-0.0.0.0}:80:80"
+    environment:
+      # No default. A Caddyfile whose site address is empty starts and answers
+      # nothing, which looks like a Firetower bug for as long as it takes to
+      # find; refusing is faster to understand than a 404 with no cause.
+      DOMAIN: ${DOMAIN:?set DOMAIN in .env, or turn the tls profile off}
+      # Unused while the certificate is one you supply — there is no authority
+      # to warn you, and expiry is what `firetower doctor` watches instead.
+      # Here for the day Firetower issues its own.
+      ACME_EMAIL: ${ACME_EMAIL:-}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # Your certificate and its key. Not optional with this profile on — see
+      # the Caddyfile for how to get one for a name the internet cannot reach,
+      # and for the two files this directory has to contain.
+      - ./certs:/certs:ro
+      - caddy_data:/data
+      - caddy_config:/config
 
   postgres:
     image: postgres:17-alpine
@@ -126,7 +162,7 @@ services:
       interval: 2s
       timeout: 3s
       retries: 30
-    # No `ports` either. Nothing outside this file has any business here.
+    # No `ports`. Nothing outside this file has any business here.
 
 volumes:
   postgres:
