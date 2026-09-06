@@ -11,6 +11,7 @@ import {
 } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { CopyButton } from "@/components/ui";
 
 /**
  * How wide a sentence gets.
@@ -206,7 +207,7 @@ function Block({ children }: { children: React.ReactNode }) {
   }, [measure, children]);
 
   return (
-    <div className="relative mb-4 last:mb-0">
+    <div className="group relative mb-4 last:mb-0">
       <InPre value={true}>
         <pre
           ref={ref}
@@ -222,6 +223,14 @@ function Block({ children }: { children: React.ReactNode }) {
           className="pointer-events-none absolute inset-y-px right-px w-10 rounded-r-md bg-gradient-to-l from-panel to-transparent"
         />
       )}
+      {/* Read off the element rather than out of `children`, which is a tree of
+          nodes for half a turn and a string only by accident. `textContent` is
+          what is on screen, newlines and all. */}
+      <CopyButton
+        text={() => ref.current?.textContent ?? ""}
+        label="Copy this block"
+        className="absolute top-1.5 right-1.5 z-10 border border-line-soft bg-panel group-hover:border-line"
+      />
     </div>
   );
 }

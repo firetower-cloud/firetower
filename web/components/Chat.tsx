@@ -18,6 +18,7 @@ import {
   type Task,
 } from "@/src/api/conversation";
 import { Markdown } from "@/components/Markdown";
+import { Copyable } from "@/components/ui";
 import { EditCard, editFrom } from "@/components/EditCard";
 import { ChatComposer } from "@/components/Composer.chat";
 import type { Control } from "@/components/Settings.chat";
@@ -802,13 +803,15 @@ function Edited({ item }: { item: Item }) {
       </div>
 
       {open && item.output && (
-        <pre
-          className={`max-h-[320px] overflow-auto rounded-md bg-panel px-3 py-2.5 font-mono text-meta whitespace-pre-wrap ${
-            failed ? "text-brick" : "text-dim"
-          }`}
-        >
-          {item.output}
-        </pre>
+        <Copyable text={item.output} label="Copy what it printed">
+          <pre
+            className={`max-h-[320px] overflow-auto rounded-md bg-panel px-3 py-2.5 font-mono text-meta whitespace-pre-wrap ${
+              failed ? "text-brick" : "text-dim"
+            }`}
+          >
+            {item.output}
+          </pre>
+        </Copyable>
       )}
     </li>
   );
@@ -843,18 +846,25 @@ function Tool({ item }: { item: Item }) {
       {open && (
         <div className="mt-1.5 flex flex-col gap-1.5">
           {item.input !== undefined && (
-            <pre className="overflow-x-auto rounded-md bg-panel px-3 py-2.5 font-mono text-meta whitespace-pre-wrap text-mute">
-              {JSON.stringify(item.input, null, 2)}
-            </pre>
+            <Copyable
+              text={() => JSON.stringify(item.input, null, 2)}
+              label="Copy what it was called with"
+            >
+              <pre className="overflow-x-auto rounded-md bg-panel px-3 py-2.5 font-mono text-meta whitespace-pre-wrap text-mute">
+                {JSON.stringify(item.input, null, 2)}
+              </pre>
+            </Copyable>
           )}
           {item.output && (
-            <pre
-              className={`max-h-[320px] overflow-auto rounded-md bg-panel px-3 py-2.5 font-mono text-meta whitespace-pre-wrap ${
-                failed ? "text-brick" : "text-dim"
-              }`}
-            >
-              {item.output}
-            </pre>
+            <Copyable text={item.output} label="Copy what it printed">
+              <pre
+                className={`max-h-[320px] overflow-auto rounded-md bg-panel px-3 py-2.5 font-mono text-meta whitespace-pre-wrap ${
+                  failed ? "text-brick" : "text-dim"
+                }`}
+              >
+                {item.output}
+              </pre>
+            </Copyable>
           )}
         </div>
       )}
@@ -983,9 +993,13 @@ function Approval({
         <span className="eyebrow text-ember">{ASKING[asked.kind]}</span>
       </div>
 
-      <pre className="mx-3 mt-1.5 max-h-[180px] overflow-auto rounded-md bg-ground px-3 py-2.5 font-mono text-ui whitespace-pre-wrap text-text">
-        {what(asked)}
-      </pre>
+      {/* What it wants to run, which is also the thing somebody deciding often
+          wants in a terminal of their own first. */}
+      <Copyable text={() => what(asked)} label="Copy this" className="mx-3 mt-1.5">
+        <pre className="max-h-[180px] overflow-auto rounded-md bg-ground px-3 py-2.5 font-mono text-ui whitespace-pre-wrap text-text">
+          {what(asked)}
+        </pre>
+      </Copyable>
 
       {explaining ? (
         <div className="flex flex-wrap items-center gap-2 p-3">

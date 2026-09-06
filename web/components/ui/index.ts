@@ -9,3 +9,4 @@ export { List, Columns, Row, Empty } from "./List";
 export { Avatar } from "./Avatar";
 export { Panel, PageHead } from "./Panel";
 export { Card, CardHead } from "./Card";
+export { CopyButton, Copyable } from "./Copy";
