@@ -1981,7 +1981,11 @@ You are in the directory that holds them, not inside one of them.              P
                 attachments::keep(&dest, &name, &bytes).await
             }
 
-            ft_proto::Action::Describe { asked_for, task } => {
+            ft_proto::Action::Describe {
+                asked_for,
+                task,
+                env,
+            } => {
                 let workspace = self.workspace_of(session_id).await?;
                 let (agent, prompt) = self.store.session_brief(session_id).await?;
 
@@ -2020,6 +2024,7 @@ You are in the directory that holds them, not inside one of them.              P
                     task: task.as_deref(),
                     diff: &diff,
                     state: &self.root,
+                    env: &env,
                 })
                 .await?;
 

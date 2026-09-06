@@ -44,8 +44,38 @@ pub(super) async fn agent_env(
     session: &SessionId,
     owner: &str,
 ) -> Result<Vec<(String, String)>, ApiError> {
-    let Some((_, mode, _)) = state
-        .db
+    let carried = agent_credential(
+        &state.db,
+        &state.vault,
+        kind,
+        owner,
+        &format!("starting {session} with {}", kind.label()),
+    )
+    .await?;
+    Ok(carried
+        .into_iter()
+        .map(|(name, secret)| (name, secret.0))
+        .collect())
+}
+
+/// The variable this account's agent authenticates with, and its value.
+///
+/// Shared by everything that starts one of these agents, which is no longer
+/// only a session: describing a change runs a short-lived agent of its own on
+/// the host, from the worker daemon rather than from inside the session, so it
+/// inherits nothing and has to be handed the same credential. Sent with the
+/// request that needs it, exactly as a git credential is.
+///
+/// `why` is written into the vault's access log, so it should say which run
+/// this was for.
+pub(crate) async fn agent_credential(
+    db: &crate::db::Db,
+    vault: &crate::vault::Vault,
+    kind: Agent,
+    owner: &str,
+    why: &str,
+) -> anyhow::Result<Vec<(String, ft_proto::Secret)>> {
+    let Some((_, mode, _)) = db
         .agent_modes(owner)
         .await?
         .into_iter()
@@ -65,18 +95,14 @@ pub(super) async fn agent_env(
         return Ok(Vec::new());
     };
 
-    let Some(secret) = state
-        .vault
-        .get(
-            Key::of(vault::AGENT, &agent_key(kind), owner),
-            &format!("starting {session} with {}", kind.label()),
-        )
+    let Some(secret) = vault
+        .get(Key::of(crate::vault::AGENT, &agent_key(kind), owner), why)
         .await?
     else {
         return Ok(Vec::new());
     };
 
-    Ok(vec![(variable.to_string(), secret.to_string())])
+    Ok(vec![(variable.to_string(), secret.to_string().into())])
 }
 
 /// The files an agent needs in its own directory, with what goes in them.

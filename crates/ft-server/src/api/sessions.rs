@@ -4,7 +4,7 @@
 //! own: it is what sees every host, so it is what picks. Everything after that
 //! is asking the worker that holds the workspace.
 
-use super::agents::{agent_env, agent_home};
+use super::agents::{agent_credential, agent_env, agent_home};
 use super::repos::is_local_path;
 use super::{credential_for, ApiError, ApiResult, ErrorCode};
 use crate::auth::Principal;
@@ -1836,16 +1836,30 @@ pub(crate) async fn propose(
 /// What to send with a request to describe some work.
 ///
 /// Everything here is context the *worker* cannot reach: what a session was
-/// asked to do is a column on this side, and the tracker is somebody else's
-/// server that only this end is authorized against.
+/// asked to do is a column on this side, the tracker is somebody else's server
+/// that only this end is authorized against, and the credential the run
+/// authenticates with is in the vault.
 ///
 /// Best effort throughout. A description written without the issue is worth
 /// far more than no description, so nothing in here is allowed to fail the
-/// request that carries it.
+/// request that carries it — including the credential, which is missing for an
+/// account whose host has the agent signed in on it already.
 async fn describing(state: &AppState, session: &Session) -> ft_proto::Action {
     ft_proto::Action::Describe {
         asked_for: Some(session.prompt.trim().to_string()).filter(|p| !p.is_empty()),
         task: tracked(state, session).await.map(Box::new),
+        env: agent_credential(
+            &state.db,
+            &state.vault,
+            session.agent,
+            session.owner.as_str(),
+            &format!("describing the work in {}", session.id),
+        )
+        .await
+        .unwrap_or_else(|e| {
+            tracing::warn!(session = %session.id, "no credential to describe with: {e:#}");
+            Vec::new()
+        }),
     }
 }
 
