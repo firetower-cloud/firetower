@@ -1,4 +1,4 @@
 {
-  "minimumCli": "0.5.0",
-  "reason": "the compose file publishes the control plane's port itself and puts Caddy behind the `tls` profile; a CLI older than this writes HTTP_PORT onto a service that no longer publishes it, and would create no proxy while promising one"
+  "minimumCli": "0.6.0",
+  "reason": "this release re-purposes HTTP_PORT — it was Caddy's host port and is now the control plane's — and moves Caddy behind the `tls` profile. A CLI older than this carries the old value forward on upgrade, so the control plane inherits a port that described something else, and the Caddy it is replacing stays up holding it."
 }
