@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.24.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.23.0...firetower-v0.24.0) (2026-09-07)
+
+
+### Features
+
+* **chat:** make the multi-choice component collapsible ([54d16db](https://github.com/firetower-cloud/firetower/commit/54d16dbb4c239b9f9dc59691bfafc450d877de74))
+* **chat:** make the multi-choice component collapsible ([a2f2edb](https://github.com/firetower-cloud/firetower/commit/a2f2edbb6bc3a0b310a08a680b72af42f7baf129))
+* give worker sessions a working Docker ([66da7b2](https://github.com/firetower-cloud/firetower/commit/66da7b2b91f6716ad6e7b79471e9e4d3fa96f1b1))
+* give worker sessions a working Docker ([4710498](https://github.com/firetower-cloud/firetower/commit/47104989fc41d4a0fb771bb6e6e2c35869c546b6))
+
 ## [0.23.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.22.0...firetower-v0.23.0) (2026-09-06)
 
 
