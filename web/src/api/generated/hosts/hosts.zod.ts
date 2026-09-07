@@ -3,10 +3,24 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.23.0
+ * OpenAPI spec version: 0.25.0
  */
 import * as zod from 'zod';
 
+
+export const listHostsResponseCapacityTwoDiskCachedImagesMbMin = 0;
+
+export const listHostsResponseCapacityTwoDiskFiretowerMbMin = 0;
+
+export const listHostsResponseCapacityTwoDiskReclaimableMbMin = 0;
+
+export const listHostsResponseCapacityTwoDiskTotalMbMin = 0;
+
+export const listHostsResponseCapacityTwoDiskUsedMbMin = 0;
+
+export const listHostsResponseCapacityTwoMemoryMbMin = 0;
+
+export const listHostsResponseCapacityTwoMemoryUsedMbMin = 0;
 
 export const listHostsResponseComputeThreePortMin = 0;
 
@@ -17,6 +31,15 @@ export const listHostsResponseMemoryMbMin = 0;
 
 
 export const ListHostsResponseItem = zod.object({
+  "capacity": zod.union([zod.null(),zod.object({
+  "diskCachedImagesMb": zod.int().min(listHostsResponseCapacityTwoDiskCachedImagesMbMin).describe('Images no container is currently using.\n\nDocker\'s own reclaimable figure, kept apart from the safe one because\nclearing it is a real choice: nothing is lost, but the next session\nwanting postgres waits for the pull again.'),
+  "diskFiretowerMb": zod.int().min(listHostsResponseCapacityTwoDiskFiretowerMbMin).describe('Of that, what Firetower is using: images its sessions pulled, the cache\ntheir builds left, the containers they started.\n\nSeparate from `disk_used_mb` because the difference is the whole of\nwhose mess it is. The machine\'s disk is the operator\'s business; this\npart is ours, and it is the only part anything here offers to clear.'),
+  "diskReclaimableMb": zod.int().min(listHostsResponseCapacityTwoDiskReclaimableMbMin).describe('What clearing the build cache would give back.\n\nRebuildable by definition, so this is the figure safe to offer without\nqualification: it costs one slower build and nothing else.\n\nDeliberately not Docker\'s own `RECLAIMABLE`, which counts every image no\ncontainer happens to be running — on a daemon shared by every session on\na worker, that is every image the next session was about to use, and\noffering it as free space would empty the cache the worker\'s volume\nexists to keep.'),
+  "diskTotalMb": zod.int().min(listHostsResponseCapacityTwoDiskTotalMbMin).describe('Where the daemon keeps images, which on most workers is also the disk\nthe worker itself is on.'),
+  "diskUsedMb": zod.int().min(listHostsResponseCapacityTwoDiskUsedMbMin),
+  "memoryMb": zod.int().min(listHostsResponseCapacityTwoMemoryMbMin).describe('What the machine has, or the ceiling the worker container was given.'),
+  "memoryUsedMb": zod.int().min(listHostsResponseCapacityTwoMemoryUsedMbMin)
+}).describe('What this machine has and what is being used of it.\n\n`None` from a worker too old to report it, which the interface draws as\nno capacity block rather than as an empty one.')]).optional(),
   "compute": zod.union([zod.object({
   "type": zod.enum(['Local'])
 }).describe('A worker as a child process here. Inherits your environment, and its\nworkspaces are directories you can open.'),zod.object({
@@ -109,6 +132,20 @@ export const CreateHostBody = zod.object({
   "name": zod.string().nullish().describe('What you\'ll call it. Defaults to something derived from the kind.')
 })
 
+export const createHostResponseCapacityTwoDiskCachedImagesMbMin = 0;
+
+export const createHostResponseCapacityTwoDiskFiretowerMbMin = 0;
+
+export const createHostResponseCapacityTwoDiskReclaimableMbMin = 0;
+
+export const createHostResponseCapacityTwoDiskTotalMbMin = 0;
+
+export const createHostResponseCapacityTwoDiskUsedMbMin = 0;
+
+export const createHostResponseCapacityTwoMemoryMbMin = 0;
+
+export const createHostResponseCapacityTwoMemoryUsedMbMin = 0;
+
 export const createHostResponseComputeThreePortMin = 0;
 
 export const createHostResponseCpusMin = 0;
@@ -118,6 +155,15 @@ export const createHostResponseMemoryMbMin = 0;
 
 
 export const CreateHostResponse = zod.object({
+  "capacity": zod.union([zod.null(),zod.object({
+  "diskCachedImagesMb": zod.int().min(createHostResponseCapacityTwoDiskCachedImagesMbMin).describe('Images no container is currently using.\n\nDocker\'s own reclaimable figure, kept apart from the safe one because\nclearing it is a real choice: nothing is lost, but the next session\nwanting postgres waits for the pull again.'),
+  "diskFiretowerMb": zod.int().min(createHostResponseCapacityTwoDiskFiretowerMbMin).describe('Of that, what Firetower is using: images its sessions pulled, the cache\ntheir builds left, the containers they started.\n\nSeparate from `disk_used_mb` because the difference is the whole of\nwhose mess it is. The machine\'s disk is the operator\'s business; this\npart is ours, and it is the only part anything here offers to clear.'),
+  "diskReclaimableMb": zod.int().min(createHostResponseCapacityTwoDiskReclaimableMbMin).describe('What clearing the build cache would give back.\n\nRebuildable by definition, so this is the figure safe to offer without\nqualification: it costs one slower build and nothing else.\n\nDeliberately not Docker\'s own `RECLAIMABLE`, which counts every image no\ncontainer happens to be running — on a daemon shared by every session on\na worker, that is every image the next session was about to use, and\noffering it as free space would empty the cache the worker\'s volume\nexists to keep.'),
+  "diskTotalMb": zod.int().min(createHostResponseCapacityTwoDiskTotalMbMin).describe('Where the daemon keeps images, which on most workers is also the disk\nthe worker itself is on.'),
+  "diskUsedMb": zod.int().min(createHostResponseCapacityTwoDiskUsedMbMin),
+  "memoryMb": zod.int().min(createHostResponseCapacityTwoMemoryMbMin).describe('What the machine has, or the ceiling the worker container was given.'),
+  "memoryUsedMb": zod.int().min(createHostResponseCapacityTwoMemoryUsedMbMin)
+}).describe('What this machine has and what is being used of it.\n\n`None` from a worker too old to report it, which the interface draws as\nno capacity block rather than as an empty one.')]).optional(),
   "compute": zod.union([zod.object({
   "type": zod.enum(['Local'])
 }).describe('A worker as a child process here. Inherits your environment, and its\nworkspaces are directories you can open.'),zod.object({
@@ -251,6 +297,20 @@ export const RenameHostBody = zod.object({
   "name": zod.string()
 })
 
+export const renameHostResponseCapacityTwoDiskCachedImagesMbMin = 0;
+
+export const renameHostResponseCapacityTwoDiskFiretowerMbMin = 0;
+
+export const renameHostResponseCapacityTwoDiskReclaimableMbMin = 0;
+
+export const renameHostResponseCapacityTwoDiskTotalMbMin = 0;
+
+export const renameHostResponseCapacityTwoDiskUsedMbMin = 0;
+
+export const renameHostResponseCapacityTwoMemoryMbMin = 0;
+
+export const renameHostResponseCapacityTwoMemoryUsedMbMin = 0;
+
 export const renameHostResponseComputeThreePortMin = 0;
 
 export const renameHostResponseCpusMin = 0;
@@ -260,6 +320,15 @@ export const renameHostResponseMemoryMbMin = 0;
 
 
 export const RenameHostResponse = zod.object({
+  "capacity": zod.union([zod.null(),zod.object({
+  "diskCachedImagesMb": zod.int().min(renameHostResponseCapacityTwoDiskCachedImagesMbMin).describe('Images no container is currently using.\n\nDocker\'s own reclaimable figure, kept apart from the safe one because\nclearing it is a real choice: nothing is lost, but the next session\nwanting postgres waits for the pull again.'),
+  "diskFiretowerMb": zod.int().min(renameHostResponseCapacityTwoDiskFiretowerMbMin).describe('Of that, what Firetower is using: images its sessions pulled, the cache\ntheir builds left, the containers they started.\n\nSeparate from `disk_used_mb` because the difference is the whole of\nwhose mess it is. The machine\'s disk is the operator\'s business; this\npart is ours, and it is the only part anything here offers to clear.'),
+  "diskReclaimableMb": zod.int().min(renameHostResponseCapacityTwoDiskReclaimableMbMin).describe('What clearing the build cache would give back.\n\nRebuildable by definition, so this is the figure safe to offer without\nqualification: it costs one slower build and nothing else.\n\nDeliberately not Docker\'s own `RECLAIMABLE`, which counts every image no\ncontainer happens to be running — on a daemon shared by every session on\na worker, that is every image the next session was about to use, and\noffering it as free space would empty the cache the worker\'s volume\nexists to keep.'),
+  "diskTotalMb": zod.int().min(renameHostResponseCapacityTwoDiskTotalMbMin).describe('Where the daemon keeps images, which on most workers is also the disk\nthe worker itself is on.'),
+  "diskUsedMb": zod.int().min(renameHostResponseCapacityTwoDiskUsedMbMin),
+  "memoryMb": zod.int().min(renameHostResponseCapacityTwoMemoryMbMin).describe('What the machine has, or the ceiling the worker container was given.'),
+  "memoryUsedMb": zod.int().min(renameHostResponseCapacityTwoMemoryUsedMbMin)
+}).describe('What this machine has and what is being used of it.\n\n`None` from a worker too old to report it, which the interface draws as\nno capacity block rather than as an empty one.')]).optional(),
   "compute": zod.union([zod.object({
   "type": zod.enum(['Local'])
 }).describe('A worker as a child process here. Inherits your environment, and its\nworkspaces are directories you can open.'),zod.object({

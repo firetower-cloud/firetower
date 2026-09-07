@@ -164,6 +164,20 @@ RUN case "$TARGETARCH" in \
 
 COPY --from=build /firetower-worker /usr/local/bin/firetower-worker
 
+# The `docker` a session finds before the real one.
+#
+# At /usr/local/bin, which is ahead of the /usr/bin the Docker package installs
+# into on every image this is built from — so a session's `docker run` and
+# `docker compose up` come through here, and their containers land in the cgroup
+# of the workspace that asked for them rather than beside it. See the header of
+# docker-shim.sh for what that costs and what it does not buy.
+#
+# Harmless where none of that applies: with no workspace cgroup in the
+# environment it is one `exec` in front of the client it was already going to
+# run.
+COPY docker-shim.sh /usr/local/bin/docker
+RUN chmod 0755 /usr/local/bin/docker
+
 # Starts the Docker daemon, then hands over to whatever was asked for.
 #
 # An entrypoint rather than something the worker supervises, because the worker

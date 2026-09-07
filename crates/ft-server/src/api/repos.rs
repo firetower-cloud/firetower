@@ -738,6 +738,7 @@ mod tests {
             worker_version: None,
             diagnosis: None,
             docker: ft_core::DockerState::default(),
+            capacity: None,
             reconnecting: false,
         }
     }

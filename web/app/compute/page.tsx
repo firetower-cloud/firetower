@@ -18,6 +18,7 @@ import { AddCompute } from "@/components/AddCompute";
 import { holdsHost } from "@/src/api/view";
 import { group } from "@/src/api/workspaces";
 import { ApiError } from "@/src/api/http";
+import { Meter, size } from "@/components/Meter";
 
 /**
  * Where agents run.
@@ -244,6 +245,43 @@ function HostRow({
         <span className="font-mono text-meta text-dim">
           {agents.length > 0 ? agents.join(", ") : <span className="text-mute">none installed</span>}
         </span>
+
+        {/* What the machine has, and what of it is gone. Beside the Docker
+            row and for the same reason: it decides which machine a piece of
+            work should go to, and a host with no room is worth knowing about
+            before a workspace is put on it rather than after.
+
+            Absent until a worker reports — every host was silent about this
+            before there was anything to say it with, and an old worker still
+            is. Drawn as no rows rather than as empty ones. */}
+        {host.capacity && (
+          <>
+            <span className="eyebrow">Memory</span>
+            <Meter
+              used={host.capacity.memoryUsedMb}
+              total={host.capacity.memoryMb}
+              label={`${size(host.capacity.memoryUsedMb)} of ${size(host.capacity.memoryMb)}`}
+            />
+
+            {/* Two numbers, and the order is the point. The machine's disk is
+                whoever owns the machine's business, so it is the context; what
+                Firetower is using is ours, so it is the sentence. Nothing here
+                offers to clear the difference between them. */}
+            <span className="eyebrow">Disk</span>
+            <span className="flex min-w-0 flex-col gap-1">
+              <Meter
+                used={host.capacity.diskUsedMb}
+                total={host.capacity.diskTotalMb}
+                label={`${size(host.capacity.diskUsedMb)} of ${size(host.capacity.diskTotalMb)}`}
+              />
+              <span className="text-meta text-mute">
+                Firetower is using {size(host.capacity.diskFiretowerMb)} of it
+                {host.capacity.diskReclaimableMb > 0 &&
+                  ` · ${size(host.capacity.diskReclaimableMb)} of that is build cache`}
+              </span>
+            </span>
+          </>
+        )}
 
         {/* Whether a session here can bring a compose stack up. Shown beside
             the worker rather than only in a session, because it decides which

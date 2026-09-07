@@ -1,6 +1,6 @@
 //! Sessions and the workspaces they run on.
 
-use crate::{Agent, HostId, RepoId, SessionId, SessionStatus, UserId, WorkspaceId};
+use crate::{Agent, HostId, RepoId, SessionId, SessionStatus, UserId, WorkspaceId, WorkspaceUsage};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
@@ -182,6 +182,15 @@ pub struct Session {
     pub checkouts: Vec<Checkout>,
     pub agent: Agent,
     pub size: WorkspaceSize,
+    #[serde(default)]
+    pub share: Share,
+    /// What this session's workspace is taking of its machine, right now.
+    ///
+    /// Not stored. Filled in from what the host last reported, so it is absent
+    /// on a session whose worker cannot measure and on one whose first report
+    /// has not landed — which the interface draws the same way, as no meters.
+    #[serde(default)]
+    pub usage: Option<WorkspaceUsage>,
     pub status: SessionStatus,
     /// Why it is in that status, when whatever set it knew.
     ///
@@ -288,6 +297,13 @@ pub struct NewSession {
     pub name: Option<String>,
     #[serde(default)]
     pub size: WorkspaceSize,
+    /// How this workspace competes when the machine is busy.
+    ///
+    /// Defaulted, so a caller that has never heard of it opens a workspace that
+    /// takes its turn — which is what every workspace did before there was a
+    /// choice.
+    #[serde(default)]
+    pub share: Share,
 }
 
 /// One repository to check out, as the API accepts it.
@@ -319,6 +335,63 @@ impl WorkspaceSize {
             Self::Small => (1, 2048),
             Self::Medium => (2, 4096),
             Self::Large => (4, 8192),
+        }
+    }
+}
+
+/// How a workspace competes for a machine that two of them want at once.
+///
+/// The other half of [`WorkspaceSize`], and a different question. A size is how
+/// much a workspace may have at most; a share is who yields when both want the
+/// same core in the same moment. Which means a size can be promised in
+/// gigabytes and a share cannot be promised in anything — on a quiet machine
+/// every share gets everything, and this only starts to decide between them
+/// once somebody else is working too.
+///
+/// Here rather than in the worker because both ends read it: the control plane
+/// offers the choice and stores it, and the worker turns it into a number the
+/// kernel understands.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum Share {
+    /// Waits for the others. Still works, just slower.
+    Yields,
+    /// Takes its turn.
+    #[default]
+    Equal,
+    /// Goes first, and the others slow down to allow it.
+    TakesMore,
+}
+
+impl Share {
+    /// What this is worth against the others, on the kernel's own scale where
+    /// 100 is the default weight.
+    ///
+    /// Measured rather than assumed: two cgroups at 100 and 400, each burning
+    /// two cores for ten seconds, split them 3.92 to 15.67 core-seconds. That
+    /// is 1:4.00, at 98% of the machine used — which is the property a weight
+    /// has and a cap does not.
+    pub fn weight(self) -> u32 {
+        match self {
+            Self::Yields => 50,
+            Self::Equal => 100,
+            Self::TakesMore => 400,
+        }
+    }
+
+    /// How much of its ceiling this workspace keeps when the machine runs
+    /// short, as a fraction.
+    ///
+    /// Memory is where the share stops being a share. A core nobody is using is
+    /// handed over and taken back in the same millisecond; a gigabyte already
+    /// written to is gone until something dies. So this cannot divide memory
+    /// continuously — it can only set the order the kernel reclaims in, which
+    /// is what "first to be squeezed" and "holds on to it" mean.
+    pub fn protection(self) -> f64 {
+        match self {
+            Self::Yields => 0.2,
+            Self::Equal => 0.4,
+            Self::TakesMore => 0.7,
         }
     }
 }

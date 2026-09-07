@@ -10,7 +10,7 @@
       "name": "AGPL-3.0-only",
       "identifier": "AGPL-3.0-only"
     },
-    "version": "0.23.0"
+    "version": "0.25.0"
   },
   "paths": {
     "/api/v1/agents": {
@@ -3287,6 +3287,59 @@
         }
       }
     },
+    "/api/v1/sessions/{id}/share": {
+      "patch": {
+        "tags": [
+          "sessions"
+        ],
+        "summary": "Change how a workspace competes for its machine.",
+        "description": "Takes effect on a running workspace with nothing restarted: `cpu.weight` is\nread by the scheduler at the next contended moment, so this is a knob\nsomebody can move while watching what it does.\n\nNothing happens on a machine nobody else is working on, which is not a\nfailure and is why this reports no error for it — a share only decides\nbetween workspaces that are both asking at once.",
+        "operationId": "set_share",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Session id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetShare"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Session"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/sessions/{id}/stop": {
       "post": {
         "tags": [
@@ -4056,6 +4109,61 @@
           },
           "defaultBranch": {
             "type": "string"
+          }
+        }
+      },
+      "Capacity": {
+        "type": "object",
+        "description": "What a machine has, and what of it is being used.\n\nReported by the worker rather than asked of the host record, for the same\nreason [`DockerState`] is: these are facts about the machine a worker is\nrunning on, and a container, a server and a server-with-a-container arrive\nat them differently. A worker in a container reports the container's\nceiling where it has one, which is what its sessions actually get.\n\nMegabytes throughout. Bytes would be exact and would also be a `u64` of\ndigits nobody reads; the interface rounds to gigabytes anyway, and a\nmegabyte is under a pixel of any meter drawn from this.",
+        "required": [
+          "memoryMb",
+          "memoryUsedMb",
+          "diskTotalMb",
+          "diskUsedMb",
+          "diskFiretowerMb",
+          "diskReclaimableMb",
+          "diskCachedImagesMb"
+        ],
+        "properties": {
+          "diskCachedImagesMb": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Images no container is currently using.\n\nDocker's own reclaimable figure, kept apart from the safe one because\nclearing it is a real choice: nothing is lost, but the next session\nwanting postgres waits for the pull again.",
+            "minimum": 0
+          },
+          "diskFiretowerMb": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Of that, what Firetower is using: images its sessions pulled, the cache\ntheir builds left, the containers they started.\n\nSeparate from `disk_used_mb` because the difference is the whole of\nwhose mess it is. The machine's disk is the operator's business; this\npart is ours, and it is the only part anything here offers to clear.",
+            "minimum": 0
+          },
+          "diskReclaimableMb": {
+            "type": "integer",
+            "format": "int64",
+            "description": "What clearing the build cache would give back.\n\nRebuildable by definition, so this is the figure safe to offer without\nqualification: it costs one slower build and nothing else.\n\nDeliberately not Docker's own `RECLAIMABLE`, which counts every image no\ncontainer happens to be running — on a daemon shared by every session on\na worker, that is every image the next session was about to use, and\noffering it as free space would empty the cache the worker's volume\nexists to keep.",
+            "minimum": 0
+          },
+          "diskTotalMb": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Where the daemon keeps images, which on most workers is also the disk\nthe worker itself is on.",
+            "minimum": 0
+          },
+          "diskUsedMb": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "memoryMb": {
+            "type": "integer",
+            "format": "int64",
+            "description": "What the machine has, or the ceiling the worker container was given.",
+            "minimum": 0
+          },
+          "memoryUsedMb": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
           }
         }
       },
@@ -5272,6 +5380,17 @@
           "compute"
         ],
         "properties": {
+          "capacity": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Capacity",
+                "description": "What this machine has and what is being used of it.\n\n`None` from a worker too old to report it, which the interface draws as\nno capacity block rather than as an empty one."
+              }
+            ]
+          },
           "compute": {
             "$ref": "#/components/schemas/Compute"
           },
@@ -5695,6 +5814,10 @@
               "$ref": "#/components/schemas/NewCheckout"
             },
             "description": "Every repository to check out, in the order they should appear.\n\nEach may name its own base branch; the working branch is the session's\nand is the same in all of them, which is what makes a change across two\nrepositories reviewable."
+          },
+          "share": {
+            "$ref": "#/components/schemas/Share",
+            "description": "How this workspace competes when the machine is busy.\n\nDefaulted, so a caller that has never heard of it opens a workspace that\ntakes its turn — which is what every workspace did before there was a\nchoice."
           },
           "size": {
             "$ref": "#/components/schemas/WorkspaceSize"
@@ -6588,6 +6711,9 @@
             ],
             "description": "The first checkout's slug, or `None` for a bare agent.\n\nA convenience for the places that want one name — a row in a list, a\ncaption. [`Session::checkouts`] is what is actually true."
           },
+          "share": {
+            "$ref": "#/components/schemas/Share"
+          },
           "size": {
             "$ref": "#/components/schemas/WorkspaceSize"
           },
@@ -6620,6 +6746,17 @@
           "updatedAt": {
             "type": "string",
             "format": "date-time"
+          },
+          "usage": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/WorkspaceUsage",
+                "description": "What this session's workspace is taking of its machine, right now.\n\nNot stored. Filled in from what the host last reported, so it is absent\non a session whose worker cannot measure and on one whose first report\nhas not landed — which the interface draws the same way, as no meters."
+              }
+            ]
           },
           "workspaceId": {
             "oneOf": [
@@ -6665,6 +6802,17 @@
           }
         }
       },
+      "SetShare": {
+        "type": "object",
+        "required": [
+          "share"
+        ],
+        "properties": {
+          "share": {
+            "$ref": "#/components/schemas/Share"
+          }
+        }
+      },
       "SetupState": {
         "type": "object",
         "description": "Which parts of setting up are still outstanding.\n\nRead before anything else, so the interface knows whether to show the\nwizard, and how much of it.",
@@ -6702,6 +6850,15 @@
             ]
           }
         }
+      },
+      "Share": {
+        "type": "string",
+        "description": "How a workspace competes for a machine that two of them want at once.\n\nThe other half of [`WorkspaceSize`], and a different question. A size is how\nmuch a workspace may have at most; a share is who yields when both want the\nsame core in the same moment. Which means a size can be promised in\ngigabytes and a share cannot be promised in anything — on a quiet machine\nevery share gets everything, and this only starts to decide between them\nonce somebody else is working too.\n\nHere rather than in the worker because both ends read it: the control plane\noffers the choice and stores it, and the worker turns it into a number the\nkernel understands.",
+        "enum": [
+          "yields",
+          "equal",
+          "takesMore"
+        ]
       },
       "SignIn": {
         "type": "object",
@@ -7697,6 +7854,49 @@
           "Medium",
           "Large"
         ]
+      },
+      "WorkspaceUsage": {
+        "type": "object",
+        "description": "What one workspace is taking of its machine.\n\n`WorkspaceUsage` rather than `Usage`: [`turn::Usage`] is what a model turn\ncost, both cross into one OpenAPI document, and two schemas of one name\nthere means the second quietly becomes the first — which typed a session's\nmemory as a count of tokens.\n\n`None` on a session whose worker cannot divide its machine up — an old\nworker, a container created without `--privileged`, a host still on cgroup\nv1. Absent rather than zero, because \"nothing is being measured\" and\n\"nothing is being used\" are different things and a meter should not draw\nthe first as the second.",
+        "required": [
+          "memoryMb",
+          "memoryPeakMb",
+          "cpu",
+          "oomKills"
+        ],
+        "properties": {
+          "cpu": {
+            "type": "number",
+            "format": "float",
+            "description": "Cores in use, averaged over the interval between two reports."
+          },
+          "memoryMaxMb": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "The ceiling, where there is one.",
+            "minimum": 0
+          },
+          "memoryMb": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "memoryPeakMb": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The high-water mark since the workspace started.\n\nThe number worth showing next to a ceiling: what a workspace is using\nwhile its agent thinks says little, and the question behind \"how much\ndoes this need\" is always about the peak.",
+            "minimum": 0
+          },
+          "oomKills": {
+            "type": "integer",
+            "format": "int64",
+            "description": "How many times something in this workspace was killed for going over.\n\nCarried so a session can say so. Without it, a build that vanishes is a\nmystery that reads as a crash in whatever was running.",
+            "minimum": 0
+          }
+        }
       }
     }
   }

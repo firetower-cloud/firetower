@@ -3,8 +3,9 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.23.0
+ * OpenAPI spec version: 0.25.0
  */
+import type { Capacity } from './capacity';
 import type { Compute } from './compute';
 import type { Diagnosis } from './diagnosis';
 import type { DockerState } from './dockerState';
@@ -15,6 +16,7 @@ import type { HostState } from './hostState';
  * A machine that can run workspaces.
  */
 export interface Host {
+  capacity?: null | Capacity;
   compute: Compute;
   /**
      * @minimum 0

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   useStopSession,
+  useSetShare,
   useDestroySession,
   getListSessionsQueryKey,
   getGetSessionQueryKey,
@@ -12,6 +13,8 @@ import {
 } from "@/src/api/generated/sessions/sessions";
 import { useListHosts } from "@/src/api/generated/hosts/hosts";
 import type { CheckoutWork, Session } from "@/src/api/generated/model";
+import { Share } from "@/src/api/generated/model";
+import { Meter, size } from "./Meter";
 import { ApiError } from "@/src/api/http";
 import { GetLocally } from "./GetLocally";
 import { atRisk } from "@/src/api/ship";
@@ -66,6 +69,7 @@ export function SessionMenu({
   const host = hosts?.find((h) => h.id === session.hostId);
   const unreachable = host?.state === "Unreachable";
 
+  const reweight = useSetShare();
   const stop = useStopSession();
   const destroy = useDestroySession();
   const busy = stop.isPending || destroy.isPending;
@@ -169,6 +173,81 @@ export function SessionMenu({
                   here reaches the agent until it does — you can still remove the
                   session from Firetower.
                 </p>
+              )}
+
+              {/* What this workspace is taking, and what it competes with.
+                  Here rather than on the session header because it is the same
+                  kind of thing as the rest of this menu: facts about the place
+                  and the two knobs that change them.
+
+                  Absent on a machine that cannot measure itself, which is the
+                  honest drawing — an empty meter would say the workspace is
+                  using nothing. */}
+              {session.usage && (
+                <div className="mb-1 flex flex-col gap-2 rounded-md bg-raise px-2 py-2">
+                  <Meter
+                    used={session.usage.memoryMb}
+                    total={session.usage.memoryMaxMb ?? host?.capacity?.memoryMb}
+                    limit={session.usage.memoryMaxMb}
+                    label={`${size(session.usage.memoryMb)}${
+                      session.usage.memoryMaxMb ? ` of ${size(session.usage.memoryMaxMb)}` : ""
+                    } · peak ${size(session.usage.memoryPeakMb)}`}
+                  />
+                  <Meter
+                    used={session.usage.cpu}
+                    total={host?.cpus ?? undefined}
+                    label={`${Math.round(session.usage.cpu * 10) / 10} of ${host?.cpus ?? "?"} cores`}
+                  />
+
+                  {/* Said only when it has happened. A line about what would
+                      happen if a workspace ran out of memory is noise on every
+                      workspace that never does. */}
+                  {session.usage.oomKills > 0 && (
+                    <p className="text-meta leading-[1.5] text-brick">
+                      Something here asked for more than{" "}
+                      {size(session.usage.memoryMaxMb)} and was stopped. The session is
+                      still running.
+                    </p>
+                  )}
+
+                  {/* Live: the scheduler reads a weight at the next contended
+                      moment, so nothing restarts and the meter above answers
+                      within a tick. */}
+                  <span className="flex items-center gap-1.5">
+                    {[
+                      { share: Share.yields, label: "Yields" },
+                      { share: Share.equal, label: "Equal" },
+                      { share: Share.takesMore, label: "Takes more" },
+                    ].map((c) => (
+                      <button
+                        key={c.share}
+                        type="button"
+                        disabled={reweight.isPending}
+                        onClick={() =>
+                          reweight.mutate(
+                            { id: session.id, data: { share: c.share } },
+                            {
+                              onSuccess: () => {
+                                cache.invalidateQueries({ queryKey: getListSessionsQueryKey() });
+                              },
+                              onError: problem,
+                            },
+                          )
+                        }
+                        className={`flex-1 rounded-sm border px-1.5 py-1 text-micro transition-colors ${
+                          (session.share ?? Share.equal) === c.share
+                            ? "border-mute/60 text-bone"
+                            : "border-line text-mute hover:border-mute/60 hover:text-dim"
+                        }`}
+                      >
+                        {c.label}
+                      </button>
+                    ))}
+                  </span>
+                  <p className="text-micro leading-[1.4] text-mute">
+                    Only decides between workspaces that both want the machine at once.
+                  </p>
+                </div>
               )}
 
               {running && (

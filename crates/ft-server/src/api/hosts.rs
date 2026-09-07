@@ -376,6 +376,9 @@ pub(super) async fn list_hosts(State(state): State<AppState>) -> ApiResult<Json<
 async fn seen(state: &AppState, mut host: Host) -> Host {
     host.reconnecting =
         host.state != ft_core::HostState::Online && state.fleet.is_supervised(&host.id).await;
+    // For the same reason, and from the same place: what a machine has is what
+    // it last said it has, which no row can hold and no restart should invent.
+    host.capacity = state.fleet.capacity_of(&host.id).await;
     host
 }
 
@@ -577,6 +580,7 @@ pub(super) async fn probe_host(
         // Nothing has been asked, and a probe never asks: it only wants to
         // know whether the machine answers as a worker at all.
         docker: ft_core::DockerState::default(),
+        capacity: None,
         reconnecting: false,
     };
 

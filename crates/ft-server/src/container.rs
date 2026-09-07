@@ -59,6 +59,17 @@ fn docker_wanted() -> bool {
     !std::env::var(DOCKER_ENV).is_ok_and(|v| v.eq_ignore_ascii_case("off"))
 }
 
+/// The ceiling an operator put on a worker, if they put one there.
+///
+/// Blank is the same as unset. An operator who cleared the variable meant to
+/// turn it off, and `--memory ""` is an error rather than a worker with no
+/// limit.
+fn memory_wanted() -> Option<String> {
+    let said = std::env::var(ft_core::WORKER_MEMORY_ENV).ok()?;
+    let said = said.trim();
+    (!said.is_empty()).then(|| said.to_string())
+}
+
 /// Where a worker's image cache lives, keyed to the worker.
 ///
 /// Named, and per worker rather than shared: two workers on one machine are
@@ -188,6 +199,20 @@ fn run_args(image: &str, name: &str, docker: bool) -> Vec<String> {
         args.push(format!("{DOCKER_ENV}=off"));
     }
 
+    // What this worker may take of its machine. See `WORKER_MEMORY_ENV` for
+    // why a machine with one worker on it still wants a number here.
+    //
+    // Swap is pinned to the same figure, which turns it off for this container
+    // rather than leaving Docker's default of twice the limit. A worker allowed
+    // to swap does not fail when it goes over — it gets slow enough that
+    // everything in it looks broken, which is a worse way to find out.
+    if let Some(memory) = memory_wanted() {
+        args.push("--memory".into());
+        args.push(memory.clone());
+        args.push("--memory-swap".into());
+        args.push(memory);
+    }
+
     args.push(image.to_string());
     args.extend(["sleep", "infinity"].iter().map(|s| s.to_string()));
     args
@@ -238,8 +263,56 @@ pub(crate) async fn remove(name: &str) -> Result<()> {
 mod tests {
     use super::*;
 
+    /// The environment is process-wide and these tests set it. Taken by every
+    /// test that reads `WORKER_MEMORY_ENV`, so two of them cannot interleave a
+    /// set with a read.
+    fn env_lock() -> std::sync::MutexGuard<'static, ()> {
+        static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
     /// The three things a session needs to run a compose stack, and the one
     /// that keeps a worker from filling up with zombies.
+    /// Unset is unlimited, which is what every worker created before there was
+    /// a setting had — so an operator who has not asked for one gets exactly
+    /// the command they got last release.
+    #[test]
+    fn a_worker_has_no_ceiling_unless_an_operator_sets_one() {
+        // Guarded: `set_var` is process-wide, and these run in one process.
+        let _guard = env_lock();
+        std::env::remove_var(ft_core::WORKER_MEMORY_ENV);
+        let args = run_args("img", "w", true);
+        assert!(!args.contains(&"--memory".to_string()), "{args:?}");
+    }
+
+    #[test]
+    fn a_ceiling_is_passed_through_with_swap_pinned_to_it() {
+        let _guard = env_lock();
+        std::env::set_var(ft_core::WORKER_MEMORY_ENV, "17g");
+        let args = run_args("img", "w", true);
+        let at = args.iter().position(|a| a == "--memory").expect("--memory");
+        assert_eq!(args[at + 1], "17g");
+        // Left to Docker's default this would be twice the limit, and a worker
+        // that swaps instead of failing is a worker everything in looks broken.
+        let swap = args
+            .iter()
+            .position(|a| a == "--memory-swap")
+            .expect("swap");
+        assert_eq!(args[swap + 1], "17g");
+        std::env::remove_var(ft_core::WORKER_MEMORY_ENV);
+    }
+
+    /// An operator who emptied the variable meant to turn it off. `--memory ""`
+    /// is a worker that refuses to start.
+    #[test]
+    fn an_empty_ceiling_is_no_ceiling() {
+        let _guard = env_lock();
+        std::env::set_var(ft_core::WORKER_MEMORY_ENV, "   ");
+        let args = run_args("img", "w", true);
+        assert!(!args.contains(&"--memory".to_string()), "{args:?}");
+        std::env::remove_var(ft_core::WORKER_MEMORY_ENV);
+    }
+
     #[test]
     fn a_worker_that_runs_docker_is_privileged_with_its_own_cache() {
         let args = run_args("firetower/worker:dev", "fire-01", true);

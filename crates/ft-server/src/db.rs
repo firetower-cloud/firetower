@@ -797,6 +797,45 @@ impl Db {
     // ── sessions ───────────────────────────────────────────────────────
 
     #[allow(clippy::too_many_arguments)]
+    /// Every session sharing a workspace with this one, including itself.
+    ///
+    /// A workspace reading covers the place, and the place holds any number of
+    /// agents — so a reading named by one of them belongs to all of them. Two
+    /// agents in one directory are not using half each; they are both using
+    /// what the directory is using.
+    /// Change a workspace's share, named by any session in it.
+    pub async fn set_workspace_share(
+        &self,
+        session_id: &SessionId,
+        share: ft_core::Share,
+    ) -> Result<()> {
+        sqlx::query(
+            "UPDATE workspaces SET share = $1, updated_at = $2
+              WHERE id = (SELECT workspace_id FROM sessions WHERE id = $3)",
+        )
+        .bind(serde_json::to_string(&share)?.trim_matches('"').to_string())
+        .bind(chrono::Utc::now())
+        .bind(session_id.as_str())
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn sessions_in_workspace_of(&self, session_id: &SessionId) -> Result<Vec<SessionId>> {
+        let rows = sqlx::query(
+            "SELECT id FROM sessions
+              WHERE workspace_id = (SELECT workspace_id FROM sessions WHERE id = $1)",
+        )
+        .bind(session_id.as_str())
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows
+            .into_iter()
+            .map(|r| SessionId::from_stored(r.get::<String, _>("id")))
+            .collect())
+    }
+
     pub async fn insert_session(
         &self,
         id: &SessionId,
@@ -809,6 +848,7 @@ impl Db {
         base: Option<&str>,
         agent: &str,
         size: WorkspaceSize,
+        share: ft_core::Share,
         steps: &[ft_core::Step],
         // What to call the place. `None` falls back to `Agent {number}`, which
         // is all a bare agent with no branch to be named after has.
@@ -833,8 +873,8 @@ impl Db {
 
         sqlx::query(
             "INSERT INTO workspaces
-               (id, user_id, host_id, repo, branch, base, size, name, created_at, updated_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $9)",
+               (id, user_id, host_id, repo, branch, base, size, share, name, created_at, updated_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $10)",
         )
         .bind(id.as_str())
         .bind(owner)
@@ -843,6 +883,7 @@ impl Db {
         .bind(branch)
         .bind(base)
         .bind(serde_json::to_string(&size)?.trim_matches('"').to_string())
+        .bind(serde_json::to_string(&share)?.trim_matches('"').to_string())
         .bind(
             name.map(str::to_string)
                 .unwrap_or_else(|| format!("Agent {number}")),
@@ -903,7 +944,7 @@ impl Db {
         id: &WorkspaceId,
     ) -> Result<Option<WorkspacePlace>> {
         let row = sqlx::query(
-            "SELECT id, host_id, repo, branch, base, size, forgotten_at
+            "SELECT id, host_id, repo, branch, base, size, share, forgotten_at
                FROM workspaces WHERE id = $1 AND user_id = $2",
         )
         .bind(id.as_str())
@@ -913,6 +954,7 @@ impl Db {
 
         let Some(r) = row else { return Ok(None) };
         let size: String = r.get("size");
+        let share: String = r.get("share");
         Ok(Some(WorkspacePlace {
             id: WorkspaceId::from_stored(r.get::<String, _>("id")),
             host_id: HostId::from_stored(r.get::<String, _>("host_id")),
@@ -920,6 +962,7 @@ impl Db {
             branch: r.get("branch"),
             base: r.get("base"),
             size: serde_json::from_str(&format!("\"{size}\"")).context("decoding size")?,
+            share: serde_json::from_str(&format!("\"{share}\"")).context("decoding share")?,
             forgotten: r
                 .get::<Option<chrono::DateTime<chrono::Utc>>, _>("forgotten_at")
                 .is_some(),
@@ -1750,6 +1793,8 @@ fn host_from_row(r: sqlx::postgres::PgRow) -> Result<Host> {
             .and_then(|v| serde_json::from_value(v).ok())
             .unwrap_or_default(),
         // Answered by the fleet, which is the only thing that knows.
+        // Filled in by `api::hosts::seen` from what the fleet was last told.
+        capacity: None,
         reconnecting: false,
     })
 }
@@ -1801,18 +1846,20 @@ pub struct WorkspacePlace {
     pub branch: Option<String>,
     pub base: Option<String>,
     pub size: ft_core::WorkspaceSize,
+    pub share: ft_core::Share,
     /// Removed here while its host was away. Nothing new starts in one.
     pub forgotten: bool,
 }
 
 const SESSION_COLUMNS: &str = "\
-    s.*, w.host_id, w.repo, w.branch, w.base, w.size, w.pull_request, \
+    s.*, w.host_id, w.repo, w.branch, w.base, w.size, w.share, w.pull_request, \
     w.forgotten_at, w.cleaned_at, w.name, w.task_key, w.task_url";
 
 fn session_from_row(r: sqlx::postgres::PgRow) -> Result<Session> {
     let status: String = r.get("status");
     let agent: String = r.get("agent");
     let size: String = r.get("size");
+    let share: String = r.get("share");
 
     Ok(Session {
         number: r.get("number"),
@@ -1833,6 +1880,10 @@ fn session_from_row(r: sqlx::postgres::PgRow) -> Result<Session> {
         base: r.get("base"),
         agent: serde_json::from_str(&format!("\"{agent}\"")).context("decoding agent")?,
         size: serde_json::from_str(&format!("\"{size}\"")).context("decoding size")?,
+        share: serde_json::from_str(&format!("\"{share}\"")).context("decoding share")?,
+        // Filled in by the handlers from what the fleet was last told; the
+        // database has never been shown it. See `fleet::usage_of`.
+        usage: None,
         status: serde_json::from_str::<SessionStatus>(&format!("\"{status}\""))
             .context("decoding session status")?,
         forgotten_at: r.get("forgotten_at"),
@@ -1962,6 +2013,7 @@ mod tests {
             Some("main"),
             "Shell",
             WorkspaceSize::Medium,
+            ft_core::Share::Equal,
             &ft_core::Step::plan(true, false),
             None,
         )
@@ -2113,6 +2165,7 @@ mod tests {
             Some("main"),
             "ClaudeCode",
             WorkspaceSize::Medium,
+            ft_core::Share::Equal,
             &ft_core::Step::plan(true, false),
             None,
         )
@@ -2159,6 +2212,7 @@ mod tests {
             Some("main"),
             "ClaudeCode",
             WorkspaceSize::Medium,
+            ft_core::Share::Equal,
             &ft_core::Step::plan(true, false),
             None,
         )
@@ -2202,6 +2256,7 @@ mod tests {
             Some("main"),
             "ClaudeCode",
             WorkspaceSize::Medium,
+            ft_core::Share::Equal,
             &ft_core::Step::plan(true, false),
             None,
         )
@@ -2242,6 +2297,7 @@ mod tests {
             Some("main"),
             "ClaudeCode",
             WorkspaceSize::Medium,
+            ft_core::Share::Equal,
             &ft_core::Step::plan(true, false),
             None,
         )
@@ -2301,6 +2357,7 @@ mod tests {
             Some("main"),
             "ClaudeCode",
             WorkspaceSize::Medium,
+            ft_core::Share::Equal,
             &ft_core::Step::plan(true, false),
             None,
         )
@@ -2372,6 +2429,7 @@ mod tests {
             None,
             "Shell",
             WorkspaceSize::Medium,
+            ft_core::Share::Equal,
             &ft_core::Step::plan(true, false),
             None,
         )
@@ -2402,6 +2460,7 @@ mod tests {
                 Some("main"),
                 "Shell",
                 WorkspaceSize::Medium,
+                ft_core::Share::Equal,
                 &ft_core::Step::plan(true, false),
                 None,
             )
@@ -2466,6 +2525,7 @@ mod tests {
                 None,
                 "ClaudeCode",
                 WorkspaceSize::Medium,
+                ft_core::Share::Equal,
                 &[],
                 None,
             )
@@ -2515,6 +2575,7 @@ mod tests {
             Some("main"),
             "Shell",
             WorkspaceSize::Medium,
+            ft_core::Share::Equal,
             &ft_core::Step::plan(true, false),
             None,
         )
@@ -2677,6 +2738,7 @@ mod tests {
             Some("main"),
             "ClaudeCode",
             WorkspaceSize::Medium,
+            ft_core::Share::Equal,
             &[],
             None,
         )
@@ -2739,6 +2801,7 @@ mod tests {
             Some("main"),
             "ClaudeCode",
             WorkspaceSize::Medium,
+            ft_core::Share::Equal,
             &[],
             None,
         )
@@ -2802,6 +2865,7 @@ mod tests {
             None,
             "ClaudeCode",
             WorkspaceSize::Medium,
+            ft_core::Share::Equal,
             &[],
             None,
         )
@@ -2849,6 +2913,7 @@ mod tests {
             Some("main"),
             "ClaudeCode",
             WorkspaceSize::Medium,
+            ft_core::Share::Equal,
             &[],
             None,
         )
@@ -2900,6 +2965,7 @@ mod tests {
             Some("main"),
             "ClaudeCode",
             WorkspaceSize::Medium,
+            ft_core::Share::Equal,
             &[],
             None,
         )
@@ -2964,6 +3030,7 @@ mod tests {
             None,
             "ClaudeCode",
             WorkspaceSize::Medium,
+            ft_core::Share::Equal,
             &[],
             None,
         )
@@ -3007,6 +3074,7 @@ mod tests {
             Some("main"),
             "ClaudeCode",
             WorkspaceSize::Medium,
+            ft_core::Share::Equal,
             &[],
             Some("auth-refactor"),
         )
@@ -3031,6 +3099,7 @@ mod tests {
             None,
             "ClaudeCode",
             WorkspaceSize::Medium,
+            ft_core::Share::Equal,
             &[],
             None,
         )
@@ -3058,6 +3127,7 @@ mod tests {
             None,
             "ClaudeCode",
             WorkspaceSize::Medium,
+            ft_core::Share::Equal,
             &[],
             Some("first-name"),
         )
@@ -3103,6 +3173,7 @@ mod tests {
             Some("main"),
             "ClaudeCode",
             WorkspaceSize::Medium,
+            ft_core::Share::Equal,
             &[],
             None,
         )
@@ -3134,6 +3205,7 @@ mod tests {
             Some("main"),
             "ClaudeCode",
             WorkspaceSize::Medium,
+            ft_core::Share::Equal,
             &[],
             Some("auth"),
         )
@@ -3208,6 +3280,7 @@ mod tests {
             Some("main"),
             "ClaudeCode",
             WorkspaceSize::Medium,
+            ft_core::Share::Equal,
             &[],
             Some("auth"),
         )
@@ -3278,6 +3351,7 @@ mod tests {
             None,
             "ClaudeCode",
             WorkspaceSize::Medium,
+            ft_core::Share::Equal,
             &[],
             Some("shared"),
         )
@@ -3340,6 +3414,7 @@ mod tests {
                 Some("main"),
                 "ClaudeCode",
                 WorkspaceSize::Medium,
+                ft_core::Share::Equal,
                 &[],
                 None,
             )
@@ -3459,6 +3534,7 @@ mod tests {
             None,
             "ClaudeCode",
             WorkspaceSize::Medium,
+            ft_core::Share::Equal,
             &[],
             None,
         )
@@ -3492,6 +3568,7 @@ mod tests {
                 None,
                 "ClaudeCode",
                 WorkspaceSize::Medium,
+                ft_core::Share::Equal,
                 &[],
                 None,
             )
@@ -3523,6 +3600,7 @@ mod tests {
             None,
             "ClaudeCode",
             WorkspaceSize::Medium,
+            ft_core::Share::Equal,
             &[],
             None,
         )

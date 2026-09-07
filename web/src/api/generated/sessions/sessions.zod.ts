@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.23.0
+ * OpenAPI spec version: 0.25.0
  */
 import * as zod from 'zod';
 
@@ -22,6 +22,16 @@ export const ListSessionsQueryParams = zod.object({
   "limit": zod.int().min(listSessionsQueryLimitMin).optional().describe('How many to return'),
   "before": zod.string().optional().describe('Continue after this id')
 })
+
+export const listSessionsResponseUsageTwoMemoryMaxMbMin = 0;
+
+export const listSessionsResponseUsageTwoMemoryMbMin = 0;
+
+export const listSessionsResponseUsageTwoMemoryPeakMbMin = 0;
+
+export const listSessionsResponseUsageTwoOomKillsMin = 0;
+
+
 
 export const ListSessionsResponseItem = zod.object({
   "agent": zod.enum(['ClaudeCode', 'Codex', 'Shell']).describe('Which agent runs inside a workspace.\n\nSerialised as the variant name — see the wire conventions in the brief: a\nfield takes the consumer\'s casing, an enum value stays the symbol it is.'),
@@ -50,6 +60,7 @@ export const ListSessionsResponseItem = zod.object({
   "proposedTitle": zod.string().nullish().describe('What the agent proposed calling this work, when it finished.\n\nA draft to edit rather than a box to fill. Nothing acts on it: it is\nwhat the review sheet starts with, and whoever is shipping decides what\nit actually says.'),
   "pullRequest": zod.string().nullish().describe('Where the pull request is, once one has been opened.\n\nRemembered so a screen can tell \"pushed\" from \"already open\" without\nasking GitHub, which is what lets one control name the next step rather\nthan offering every verb at once.'),
   "repo": zod.string().nullish().describe('The first checkout\'s slug, or `None` for a bare agent.\n\nA convenience for the places that want one name — a row in a list, a\ncaption. [`Session::checkouts`] is what is actually true.'),
+  "share": zod.enum(['yields', 'equal', 'takesMore']).optional().describe('How a workspace competes for a machine that two of them want at once.\n\nThe other half of [`WorkspaceSize`], and a different question. A size is how\nmuch a workspace may have at most; a share is who yields when both want the\nsame core in the same moment. Which means a size can be promised in\ngigabytes and a share cannot be promised in anything — on a quiet machine\nevery share gets everything, and this only starts to decide between them\nonce somebody else is working too.\n\nHere rather than in the worker because both ends read it: the control plane\noffers the choice and stores it, and the worker turns it into a number the\nkernel understands.'),
   "size": zod.enum(['Small', 'Medium', 'Large']),
   "status": zod.enum(['Starting', 'Working', 'Ready', 'NeedsYou', 'HandedBack', 'Failed', 'Ended']),
   "steps": zod.array(zod.enum(['Fetch', 'Worktree', 'Workspace', 'Setup', 'Launch']).describe('One stage of bringing a session up.\n\nThe point of naming them is that the whole list is knowable \*before\* any of\nit runs — so a session can show what it is going to do the moment it is\ncreated, rather than assembling a shape out of events as they arrive. A step\nnobody has reached yet is still worth showing.')).optional().describe('What this session is going to do, in order, decided when it was created.\n\nHere rather than inferred from events so the screen has something to\nshow before the worker has said a word — the difference between \"this\nis fetching a repository\" and a blank page.'),
@@ -57,6 +68,13 @@ export const ListSessionsResponseItem = zod.object({
   "taskUrl": zod.string().nullish(),
   "title": zod.string(),
   "updatedAt": zod.iso.datetime({"offset":true}),
+  "usage": zod.union([zod.null(),zod.object({
+  "cpu": zod.number().describe('Cores in use, averaged over the interval between two reports.'),
+  "memoryMaxMb": zod.int().min(listSessionsResponseUsageTwoMemoryMaxMbMin).nullish().describe('The ceiling, where there is one.'),
+  "memoryMb": zod.int().min(listSessionsResponseUsageTwoMemoryMbMin),
+  "memoryPeakMb": zod.int().min(listSessionsResponseUsageTwoMemoryPeakMbMin).describe('The high-water mark since the workspace started.\n\nThe number worth showing next to a ceiling: what a workspace is using\nwhile its agent thinks says little, and the question behind \"how much\ndoes this need\" is always about the peak.'),
+  "oomKills": zod.int().min(listSessionsResponseUsageTwoOomKillsMin).describe('How many times something in this workspace was killed for going over.\n\nCarried so a session can say so. Without it, a build that vanishes is a\nmystery that reads as a crash in whatever was running.')
+}).describe('What this session\'s workspace is taking of its machine, right now.\n\nNot stored. Filled in from what the host last reported, so it is absent\non a session whose worker cannot measure and on one whose first report\nhas not landed — which the interface draws the same way, as no meters.')]).optional(),
   "workspaceId": zod.union([zod.null(),zod.string().describe('Identifies a workspace — the compute a session runs on.')]).optional()
 }).describe('A line of work with a conversation attached and a branch at the end.')
 export const ListSessionsResponse = zod.array(ListSessionsResponseItem)
@@ -73,11 +91,22 @@ export const CreateSessionBody = zod.object({
   "base": zod.string().nullish().describe('The branch to start from. Omit for the repository\'s own default.'),
   "repoId": zod.string().describe('Identifies a connected repository.')
 }).describe('One repository to check out, as the API accepts it.')).optional().describe('Every repository to check out, in the order they should appear.\n\nEach may name its own base branch; the working branch is the session\'s\nand is the same in all of them, which is what makes a change across two\nrepositories reviewable.'),
+  "share": zod.enum(['yields', 'equal', 'takesMore']).optional().describe('How this workspace competes when the machine is busy.\n\nDefaulted, so a caller that has never heard of it opens a workspace that\ntakes its turn — which is what every workspace did before there was a\nchoice.'),
   "size": zod.enum(['Small', 'Medium', 'Large']).optional(),
   "taskKey": zod.string().nullish().describe('The task this is for, when it was started from one.'),
   "taskUrl": zod.string().nullish(),
   "workspaceId": zod.union([zod.null(),zod.string().describe('A workspace to start this agent in, instead of making one.\n\nThe place already exists — its host, its repositories, its branch and\nits directory — so all of those are read from it and anything sent\nalongside is ignored. What is left is the agent and what to ask it.\n\nThis is how a workspace comes to hold two agents: they are two sessions\nnaming one `workspace_id`, each with its own conversation.')]).optional()
 }).describe('What the API accepts to launch one.')
+
+export const createSessionResponseUsageTwoMemoryMaxMbMin = 0;
+
+export const createSessionResponseUsageTwoMemoryMbMin = 0;
+
+export const createSessionResponseUsageTwoMemoryPeakMbMin = 0;
+
+export const createSessionResponseUsageTwoOomKillsMin = 0;
+
+
 
 export const CreateSessionResponse = zod.object({
   "agent": zod.enum(['ClaudeCode', 'Codex', 'Shell']).describe('Which agent runs inside a workspace.\n\nSerialised as the variant name — see the wire conventions in the brief: a\nfield takes the consumer\'s casing, an enum value stays the symbol it is.'),
@@ -106,6 +135,7 @@ export const CreateSessionResponse = zod.object({
   "proposedTitle": zod.string().nullish().describe('What the agent proposed calling this work, when it finished.\n\nA draft to edit rather than a box to fill. Nothing acts on it: it is\nwhat the review sheet starts with, and whoever is shipping decides what\nit actually says.'),
   "pullRequest": zod.string().nullish().describe('Where the pull request is, once one has been opened.\n\nRemembered so a screen can tell \"pushed\" from \"already open\" without\nasking GitHub, which is what lets one control name the next step rather\nthan offering every verb at once.'),
   "repo": zod.string().nullish().describe('The first checkout\'s slug, or `None` for a bare agent.\n\nA convenience for the places that want one name — a row in a list, a\ncaption. [`Session::checkouts`] is what is actually true.'),
+  "share": zod.enum(['yields', 'equal', 'takesMore']).optional().describe('How a workspace competes for a machine that two of them want at once.\n\nThe other half of [`WorkspaceSize`], and a different question. A size is how\nmuch a workspace may have at most; a share is who yields when both want the\nsame core in the same moment. Which means a size can be promised in\ngigabytes and a share cannot be promised in anything — on a quiet machine\nevery share gets everything, and this only starts to decide between them\nonce somebody else is working too.\n\nHere rather than in the worker because both ends read it: the control plane\noffers the choice and stores it, and the worker turns it into a number the\nkernel understands.'),
   "size": zod.enum(['Small', 'Medium', 'Large']),
   "status": zod.enum(['Starting', 'Working', 'Ready', 'NeedsYou', 'HandedBack', 'Failed', 'Ended']),
   "steps": zod.array(zod.enum(['Fetch', 'Worktree', 'Workspace', 'Setup', 'Launch']).describe('One stage of bringing a session up.\n\nThe point of naming them is that the whole list is knowable \*before\* any of\nit runs — so a session can show what it is going to do the moment it is\ncreated, rather than assembling a shape out of events as they arrive. A step\nnobody has reached yet is still worth showing.')).optional().describe('What this session is going to do, in order, decided when it was created.\n\nHere rather than inferred from events so the screen has something to\nshow before the worker has said a word — the difference between \"this\nis fetching a repository\" and a blank page.'),
@@ -113,6 +143,13 @@ export const CreateSessionResponse = zod.object({
   "taskUrl": zod.string().nullish(),
   "title": zod.string(),
   "updatedAt": zod.iso.datetime({"offset":true}),
+  "usage": zod.union([zod.null(),zod.object({
+  "cpu": zod.number().describe('Cores in use, averaged over the interval between two reports.'),
+  "memoryMaxMb": zod.int().min(createSessionResponseUsageTwoMemoryMaxMbMin).nullish().describe('The ceiling, where there is one.'),
+  "memoryMb": zod.int().min(createSessionResponseUsageTwoMemoryMbMin),
+  "memoryPeakMb": zod.int().min(createSessionResponseUsageTwoMemoryPeakMbMin).describe('The high-water mark since the workspace started.\n\nThe number worth showing next to a ceiling: what a workspace is using\nwhile its agent thinks says little, and the question behind \"how much\ndoes this need\" is always about the peak.'),
+  "oomKills": zod.int().min(createSessionResponseUsageTwoOomKillsMin).describe('How many times something in this workspace was killed for going over.\n\nCarried so a session can say so. Without it, a build that vanishes is a\nmystery that reads as a crash in whatever was running.')
+}).describe('What this session\'s workspace is taking of its machine, right now.\n\nNot stored. Filled in from what the host last reported, so it is absent\non a session whose worker cannot measure and on one whose first report\nhas not landed — which the interface draws the same way, as no meters.')]).optional(),
   "workspaceId": zod.union([zod.null(),zod.string().describe('Identifies a workspace — the compute a session runs on.')]).optional()
 }).describe('A line of work with a conversation attached and a branch at the end.')
 
@@ -145,6 +182,16 @@ export const GetSessionParams = zod.object({
   "id": zod.string().describe('Session id')
 })
 
+export const getSessionResponseUsageTwoMemoryMaxMbMin = 0;
+
+export const getSessionResponseUsageTwoMemoryMbMin = 0;
+
+export const getSessionResponseUsageTwoMemoryPeakMbMin = 0;
+
+export const getSessionResponseUsageTwoOomKillsMin = 0;
+
+
+
 export const GetSessionResponse = zod.object({
   "agent": zod.enum(['ClaudeCode', 'Codex', 'Shell']).describe('Which agent runs inside a workspace.\n\nSerialised as the variant name — see the wire conventions in the brief: a\nfield takes the consumer\'s casing, an enum value stays the symbol it is.'),
   "base": zod.string().nullish(),
@@ -172,6 +219,7 @@ export const GetSessionResponse = zod.object({
   "proposedTitle": zod.string().nullish().describe('What the agent proposed calling this work, when it finished.\n\nA draft to edit rather than a box to fill. Nothing acts on it: it is\nwhat the review sheet starts with, and whoever is shipping decides what\nit actually says.'),
   "pullRequest": zod.string().nullish().describe('Where the pull request is, once one has been opened.\n\nRemembered so a screen can tell \"pushed\" from \"already open\" without\nasking GitHub, which is what lets one control name the next step rather\nthan offering every verb at once.'),
   "repo": zod.string().nullish().describe('The first checkout\'s slug, or `None` for a bare agent.\n\nA convenience for the places that want one name — a row in a list, a\ncaption. [`Session::checkouts`] is what is actually true.'),
+  "share": zod.enum(['yields', 'equal', 'takesMore']).optional().describe('How a workspace competes for a machine that two of them want at once.\n\nThe other half of [`WorkspaceSize`], and a different question. A size is how\nmuch a workspace may have at most; a share is who yields when both want the\nsame core in the same moment. Which means a size can be promised in\ngigabytes and a share cannot be promised in anything — on a quiet machine\nevery share gets everything, and this only starts to decide between them\nonce somebody else is working too.\n\nHere rather than in the worker because both ends read it: the control plane\noffers the choice and stores it, and the worker turns it into a number the\nkernel understands.'),
   "size": zod.enum(['Small', 'Medium', 'Large']),
   "status": zod.enum(['Starting', 'Working', 'Ready', 'NeedsYou', 'HandedBack', 'Failed', 'Ended']),
   "steps": zod.array(zod.enum(['Fetch', 'Worktree', 'Workspace', 'Setup', 'Launch']).describe('One stage of bringing a session up.\n\nThe point of naming them is that the whole list is knowable \*before\* any of\nit runs — so a session can show what it is going to do the moment it is\ncreated, rather than assembling a shape out of events as they arrive. A step\nnobody has reached yet is still worth showing.')).optional().describe('What this session is going to do, in order, decided when it was created.\n\nHere rather than inferred from events so the screen has something to\nshow before the worker has said a word — the difference between \"this\nis fetching a repository\" and a blank page.'),
@@ -179,6 +227,13 @@ export const GetSessionResponse = zod.object({
   "taskUrl": zod.string().nullish(),
   "title": zod.string(),
   "updatedAt": zod.iso.datetime({"offset":true}),
+  "usage": zod.union([zod.null(),zod.object({
+  "cpu": zod.number().describe('Cores in use, averaged over the interval between two reports.'),
+  "memoryMaxMb": zod.int().min(getSessionResponseUsageTwoMemoryMaxMbMin).nullish().describe('The ceiling, where there is one.'),
+  "memoryMb": zod.int().min(getSessionResponseUsageTwoMemoryMbMin),
+  "memoryPeakMb": zod.int().min(getSessionResponseUsageTwoMemoryPeakMbMin).describe('The high-water mark since the workspace started.\n\nThe number worth showing next to a ceiling: what a workspace is using\nwhile its agent thinks says little, and the question behind \"how much\ndoes this need\" is always about the peak.'),
+  "oomKills": zod.int().min(getSessionResponseUsageTwoOomKillsMin).describe('How many times something in this workspace was killed for going over.\n\nCarried so a session can say so. Without it, a build that vanishes is a\nmystery that reads as a crash in whatever was running.')
+}).describe('What this session\'s workspace is taking of its machine, right now.\n\nNot stored. Filled in from what the host last reported, so it is absent\non a session whose worker cannot measure and on one whose first report\nhas not landed — which the interface draws the same way, as no meters.')]).optional(),
   "workspaceId": zod.union([zod.null(),zod.string().describe('Identifies a workspace — the compute a session runs on.')]).optional()
 }).describe('A line of work with a conversation attached and a branch at the end.')
 
@@ -205,6 +260,16 @@ export const RenameSessionParams = zod.object({
 export const RenameSessionBody = zod.object({
   "name": zod.string()
 })
+
+export const renameSessionResponseUsageTwoMemoryMaxMbMin = 0;
+
+export const renameSessionResponseUsageTwoMemoryMbMin = 0;
+
+export const renameSessionResponseUsageTwoMemoryPeakMbMin = 0;
+
+export const renameSessionResponseUsageTwoOomKillsMin = 0;
+
+
 
 export const RenameSessionResponse = zod.object({
   "agent": zod.enum(['ClaudeCode', 'Codex', 'Shell']).describe('Which agent runs inside a workspace.\n\nSerialised as the variant name — see the wire conventions in the brief: a\nfield takes the consumer\'s casing, an enum value stays the symbol it is.'),
@@ -233,6 +298,7 @@ export const RenameSessionResponse = zod.object({
   "proposedTitle": zod.string().nullish().describe('What the agent proposed calling this work, when it finished.\n\nA draft to edit rather than a box to fill. Nothing acts on it: it is\nwhat the review sheet starts with, and whoever is shipping decides what\nit actually says.'),
   "pullRequest": zod.string().nullish().describe('Where the pull request is, once one has been opened.\n\nRemembered so a screen can tell \"pushed\" from \"already open\" without\nasking GitHub, which is what lets one control name the next step rather\nthan offering every verb at once.'),
   "repo": zod.string().nullish().describe('The first checkout\'s slug, or `None` for a bare agent.\n\nA convenience for the places that want one name — a row in a list, a\ncaption. [`Session::checkouts`] is what is actually true.'),
+  "share": zod.enum(['yields', 'equal', 'takesMore']).optional().describe('How a workspace competes for a machine that two of them want at once.\n\nThe other half of [`WorkspaceSize`], and a different question. A size is how\nmuch a workspace may have at most; a share is who yields when both want the\nsame core in the same moment. Which means a size can be promised in\ngigabytes and a share cannot be promised in anything — on a quiet machine\nevery share gets everything, and this only starts to decide between them\nonce somebody else is working too.\n\nHere rather than in the worker because both ends read it: the control plane\noffers the choice and stores it, and the worker turns it into a number the\nkernel understands.'),
   "size": zod.enum(['Small', 'Medium', 'Large']),
   "status": zod.enum(['Starting', 'Working', 'Ready', 'NeedsYou', 'HandedBack', 'Failed', 'Ended']),
   "steps": zod.array(zod.enum(['Fetch', 'Worktree', 'Workspace', 'Setup', 'Launch']).describe('One stage of bringing a session up.\n\nThe point of naming them is that the whole list is knowable \*before\* any of\nit runs — so a session can show what it is going to do the moment it is\ncreated, rather than assembling a shape out of events as they arrive. A step\nnobody has reached yet is still worth showing.')).optional().describe('What this session is going to do, in order, decided when it was created.\n\nHere rather than inferred from events so the screen has something to\nshow before the worker has said a word — the difference between \"this\nis fetching a repository\" and a blank page.'),
@@ -240,6 +306,13 @@ export const RenameSessionResponse = zod.object({
   "taskUrl": zod.string().nullish(),
   "title": zod.string(),
   "updatedAt": zod.iso.datetime({"offset":true}),
+  "usage": zod.union([zod.null(),zod.object({
+  "cpu": zod.number().describe('Cores in use, averaged over the interval between two reports.'),
+  "memoryMaxMb": zod.int().min(renameSessionResponseUsageTwoMemoryMaxMbMin).nullish().describe('The ceiling, where there is one.'),
+  "memoryMb": zod.int().min(renameSessionResponseUsageTwoMemoryMbMin),
+  "memoryPeakMb": zod.int().min(renameSessionResponseUsageTwoMemoryPeakMbMin).describe('The high-water mark since the workspace started.\n\nThe number worth showing next to a ceiling: what a workspace is using\nwhile its agent thinks says little, and the question behind \"how much\ndoes this need\" is always about the peak.'),
+  "oomKills": zod.int().min(renameSessionResponseUsageTwoOomKillsMin).describe('How many times something in this workspace was killed for going over.\n\nCarried so a session can say so. Without it, a build that vanishes is a\nmystery that reads as a crash in whatever was running.')
+}).describe('What this session\'s workspace is taking of its machine, right now.\n\nNot stored. Filled in from what the host last reported, so it is absent\non a session whose worker cannot measure and on one whose first report\nhas not landed — which the interface draws the same way, as no meters.')]).optional(),
   "workspaceId": zod.union([zod.null(),zod.string().describe('Identifies a workspace — the compute a session runs on.')]).optional()
 }).describe('A line of work with a conversation attached and a branch at the end.')
 
@@ -823,6 +896,79 @@ export const AddRepoBody = zod.object({
 export const AddRepoResponse = zod.object({
   "detail": zod.string()
 })
+
+/**
+ * Takes effect on a running workspace with nothing restarted: `cpu.weight` is
+ * read by the scheduler at the next contended moment, so this is a knob
+ * somebody can move while watching what it does.
+ *
+ * Nothing happens on a machine nobody else is working on, which is not a
+ * failure and is why this reports no error for it — a share only decides
+ * between workspaces that are both asking at once.
+ * @summary Change how a workspace competes for its machine.
+ */
+export const SetShareParams = zod.object({
+  "id": zod.string().describe('Session id')
+})
+
+export const SetShareBody = zod.object({
+  "share": zod.enum(['yields', 'equal', 'takesMore']).describe('How a workspace competes for a machine that two of them want at once.\n\nThe other half of [`WorkspaceSize`], and a different question. A size is how\nmuch a workspace may have at most; a share is who yields when both want the\nsame core in the same moment. Which means a size can be promised in\ngigabytes and a share cannot be promised in anything — on a quiet machine\nevery share gets everything, and this only starts to decide between them\nonce somebody else is working too.\n\nHere rather than in the worker because both ends read it: the control plane\noffers the choice and stores it, and the worker turns it into a number the\nkernel understands.')
+})
+
+export const setShareResponseUsageTwoMemoryMaxMbMin = 0;
+
+export const setShareResponseUsageTwoMemoryMbMin = 0;
+
+export const setShareResponseUsageTwoMemoryPeakMbMin = 0;
+
+export const setShareResponseUsageTwoOomKillsMin = 0;
+
+
+
+export const SetShareResponse = zod.object({
+  "agent": zod.enum(['ClaudeCode', 'Codex', 'Shell']).describe('Which agent runs inside a workspace.\n\nSerialised as the variant name — see the wire conventions in the brief: a\nfield takes the consumer\'s casing, an enum value stays the symbol it is.'),
+  "base": zod.string().nullish(),
+  "branch": zod.string().nullish().describe('The first checkout\'s branch, or `None` for a bare agent.\n\nEvery checkout in a session is cut with the same requested name, so this\nis the right thing to show once — but git may have numbered them\ndifferently, so anything acting on a branch reads it from the checkout.'),
+  "checkouts": zod.array(zod.object({
+  "base": zod.string().describe('The branch it was cut from.'),
+  "branch": zod.string().describe('The branch git actually made.\n\nNot always the one asked for: the same prompt twice wants the same\nname, and git numbers the second. Per checkout because git may number\ndifferently in each repository.'),
+  "path": zod.string().optional().describe('Where it sits inside the workspace.\n\nEmpty means the checkout \*is\* the workspace — how every session made\nbefore a session could hold more than one is laid out on disk. Those\ndirectories are not moving.'),
+  "pullRequest": zod.string().nullish().describe('Where this repository\'s pull request went, once it has one.\n\nPer repository, because that is what a git host can represent: one\nchange across two repositories is two pull requests that point at each\nother, not one object spanning both.'),
+  "pullState": zod.union([zod.null(),zod.enum(['open', 'merged', 'closed']).describe('What became of it, last time anybody asked.\n\n`None` is not `Open`: one means nobody has looked, the other means we\nlooked and it is still waiting for a reviewer.')]).optional(),
+  "repoId": zod.union([zod.null(),zod.string().describe('Absent when the repository has since been disconnected. The slug is what\nthis checkout \*is\*, and that does not stop being true.')]).optional(),
+  "slug": zod.string().describe('`acme\/backend`'),
+  "trouble": zod.string().nullish().describe('Why it is not there, when it is not.\n\nA repository the host could not reach fails its own checkout rather than\nthe session: two of three is still a session worth having, and saying\nwhich one is missing beats pretending it was never asked for.')
+}).describe('One repository checked out into a session\'s workspace.\n\nA session used to be one of these, spread across three nullable columns on\nthe session itself. It is a list now, because the work is often two\nrepositories — a client and the API it calls — and two sessions that cannot\nsee each other is not an answer to that.')).optional().describe('Every repository checked out into this session\'s workspace.\n\nEmpty for a bare agent. One for most sessions. The whole point of the\nlist is the third case.'),
+  "createdAt": zod.iso.datetime({"offset":true}),
+  "forgottenAt": zod.iso.datetime({"offset":true}).nullish().describe('When it was removed from here without the machine being told.\n\nSet only by a forced removal: the host was not answering, so nobody\ncould tear the workspace down. The session is `Ended` here from that\nmoment, and the agent may well still be running there.'),
+  "hostId": zod.string().describe('Identifies a host.'),
+  "id": zod.string().describe('Identifies a session — the unit of work you talk to.'),
+  "name": zod.string().describe('What to call it. `Agent 3` until somebody says otherwise.\n\nSeparate from `title`, which is cut from the prompt and describes the\nwork. This one identifies the session, which is a different job: five\nsessions on one repository all called \"Ask me…\" are impossible to tell\napart, and renaming one of them to \"the flaky test\" fixes that.'),
+  "note": zod.string().nullish().describe('Why it is in that status, when whatever set it knew.\n\nOnly ever the agent\'s own words, and only for the statuses that mean\nyour move. Cleared when it goes back to working — a question that has\nbeen answered is not worth keeping on screen.'),
+  "number": zod.int().describe('Assigned once, never reused, and the same for as long as the session\nexists. What `name` is derived from, and what a name that has been\nchanged can always be traced back to.'),
+  "owner": zod.string().describe('Whoever started it.\n\nEverything else about who may do what follows from this: who can open\nthe session, whose token pushes its branch, whose name goes on its\ncommits. Carried on the session rather than looked up each time,\nbecause every one of those questions is asked while it is already\nloaded.'),
+  "prompt": zod.string(),
+  "proposedBody": zod.string().nullish(),
+  "proposedTitle": zod.string().nullish().describe('What the agent proposed calling this work, when it finished.\n\nA draft to edit rather than a box to fill. Nothing acts on it: it is\nwhat the review sheet starts with, and whoever is shipping decides what\nit actually says.'),
+  "pullRequest": zod.string().nullish().describe('Where the pull request is, once one has been opened.\n\nRemembered so a screen can tell \"pushed\" from \"already open\" without\nasking GitHub, which is what lets one control name the next step rather\nthan offering every verb at once.'),
+  "repo": zod.string().nullish().describe('The first checkout\'s slug, or `None` for a bare agent.\n\nA convenience for the places that want one name — a row in a list, a\ncaption. [`Session::checkouts`] is what is actually true.'),
+  "share": zod.enum(['yields', 'equal', 'takesMore']).optional().describe('How a workspace competes for a machine that two of them want at once.\n\nThe other half of [`WorkspaceSize`], and a different question. A size is how\nmuch a workspace may have at most; a share is who yields when both want the\nsame core in the same moment. Which means a size can be promised in\ngigabytes and a share cannot be promised in anything — on a quiet machine\nevery share gets everything, and this only starts to decide between them\nonce somebody else is working too.\n\nHere rather than in the worker because both ends read it: the control plane\noffers the choice and stores it, and the worker turns it into a number the\nkernel understands.'),
+  "size": zod.enum(['Small', 'Medium', 'Large']),
+  "status": zod.enum(['Starting', 'Working', 'Ready', 'NeedsYou', 'HandedBack', 'Failed', 'Ended']),
+  "steps": zod.array(zod.enum(['Fetch', 'Worktree', 'Workspace', 'Setup', 'Launch']).describe('One stage of bringing a session up.\n\nThe point of naming them is that the whole list is knowable \*before\* any of\nit runs — so a session can show what it is going to do the moment it is\ncreated, rather than assembling a shape out of events as they arrive. A step\nnobody has reached yet is still worth showing.')).optional().describe('What this session is going to do, in order, decided when it was created.\n\nHere rather than inferred from events so the screen has something to\nshow before the worker has said a word — the difference between \"this\nis fetching a repository\" and a blank page.'),
+  "taskKey": zod.string().nullish().describe('Short, derived from the prompt — the prompt itself lives in the transcript.\nThe task this worktree was cut for, if it came from one.\n\nSource-scoped — `github:acme\/web#5138` — so a second tracker cannot\ncollide with the first. Everything else about the task is read from the\ntracker when somebody looks; these two are ours, and they are what lets\nthe rail show `#5138` and shipping offer to close it.'),
+  "taskUrl": zod.string().nullish(),
+  "title": zod.string(),
+  "updatedAt": zod.iso.datetime({"offset":true}),
+  "usage": zod.union([zod.null(),zod.object({
+  "cpu": zod.number().describe('Cores in use, averaged over the interval between two reports.'),
+  "memoryMaxMb": zod.int().min(setShareResponseUsageTwoMemoryMaxMbMin).nullish().describe('The ceiling, where there is one.'),
+  "memoryMb": zod.int().min(setShareResponseUsageTwoMemoryMbMin),
+  "memoryPeakMb": zod.int().min(setShareResponseUsageTwoMemoryPeakMbMin).describe('The high-water mark since the workspace started.\n\nThe number worth showing next to a ceiling: what a workspace is using\nwhile its agent thinks says little, and the question behind \"how much\ndoes this need\" is always about the peak.'),
+  "oomKills": zod.int().min(setShareResponseUsageTwoOomKillsMin).describe('How many times something in this workspace was killed for going over.\n\nCarried so a session can say so. Without it, a build that vanishes is a\nmystery that reads as a crash in whatever was running.')
+}).describe('What this session\'s workspace is taking of its machine, right now.\n\nNot stored. Filled in from what the host last reported, so it is absent\non a session whose worker cannot measure and on one whose first report\nhas not landed — which the interface draws the same way, as no meters.')]).optional(),
+  "workspaceId": zod.union([zod.null(),zod.string().describe('Identifies a workspace — the compute a session runs on.')]).optional()
+}).describe('A line of work with a conversation attached and a branch at the end.')
 
 /**
  * @summary Stop the agent. The workspace and its branch stay.

@@ -418,6 +418,55 @@ impl Store {
         Ok(row.map(|r| r.get("path")))
     }
 
+    /// The size a session was launched with.
+    ///
+    /// Read back when a share changes, because a weight and a ceiling are
+    /// applied together — re-weighting with a default size would quietly move
+    /// somebody's memory limit as a side effect of changing their CPU share.
+    pub async fn session_size(&self, session_id: &SessionId) -> Result<ft_core::WorkspaceSize> {
+        let row = sqlx::query("SELECT size FROM sessions WHERE id = ?")
+            .bind(session_id.as_str())
+            .fetch_optional(&self.pool)
+            .await?;
+
+        let Some(row) = row else {
+            return Ok(ft_core::WorkspaceSize::default());
+        };
+        let size: String = row.get("size");
+        Ok(serde_json::from_str(&format!("\"{size}\"")).unwrap_or_default())
+    }
+
+    /// Every workspace with an agent still in it, and where it sits.
+    ///
+    /// One row per *place*, not per session: two agents in one directory share
+    /// a cgroup and would otherwise be reported twice, which an interface
+    /// summing them would draw as double the memory actually in use.
+    ///
+    /// Ended sessions are left out for the reason they are everywhere else —
+    /// a workspace nobody is working in has no usage to report, and its cgroup
+    /// has already been taken away.
+    pub async fn live_workspaces(&self) -> Result<Vec<(SessionId, String)>> {
+        let rows = sqlx::query(
+            "SELECT MIN(w.session_id) AS id, w.path AS path
+               FROM workspaces w
+               JOIN sessions s ON s.id = w.session_id
+              WHERE s.status <> 'Ended'
+              GROUP BY w.path",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows
+            .into_iter()
+            .map(|r| {
+                (
+                    SessionId::from_stored(r.get::<String, _>("id")),
+                    r.get::<String, _>("path"),
+                )
+            })
+            .collect())
+    }
+
     /// The other agents still working in this session's directory.
     ///
     /// A workspace holds any number of agents and they all share one checkout,

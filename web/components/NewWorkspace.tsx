@@ -7,8 +7,12 @@ import { useListAgents } from "@/src/api/generated/agents/agents";
 import { useListHosts } from "@/src/api/generated/hosts/hosts";
 import {
   useCreateSession,
+  useListSessions,
   getListSessionsQueryKey,
 } from "@/src/api/generated/sessions/sessions";
+import { group } from "@/src/api/workspaces";
+import { holdsHost } from "@/src/api/view";
+import { Share } from "@/src/api/generated/model";
 import type { Agent, AgentView, Host, Repo } from "@/src/api/generated/model";
 import { AgentMark, AGENT_LABEL } from "@/components/AgentMark";
 import { slugify } from "@/src/api/slug";
@@ -93,6 +97,7 @@ export function NewWorkspace({
   const [checkouts, setCheckouts] = useState<{ id: string; slug: string; base?: string }[]>([]);
   const [agent, setAgent] = useState<Agent | "">("");
   const [hostId, setHostId] = useState("");
+  const [share, setShare] = useState<Share>(Share.equal);
   const [adding, setAdding] = useState(false);
 
   const first = useRef<HTMLInputElement>(null);
@@ -120,6 +125,16 @@ export function NewWorkspace({
   // this second" is a different thing from "you have none".
   const hosts = allHosts.filter((h) => !h.drained);
   const host = hosts.find((h) => h.id === hostId) ?? hosts.find((h) => h.state === "Online") ?? hosts[0];
+
+  // What is already running where this would go, one entry per workspace —
+  // two agents in one place share its cgroup and would otherwise be counted as
+  // two claims on the machine.
+  const { data: running = [] } = useListSessions();
+  const busyHere = host
+    ? group(running.filter((x) => x.hostId === host.id && holdsHost(x))).groups.flatMap(
+        ([, places]) => places.map((place) => ({ share: place.runs[0].share ?? Share.equal })),
+      )
+    : [];
 
   const runsHere = (a: AgentView) => (host ? canRun(a, host.id) : false);
   const choices = [...agents].sort((a, b) => Number(runsHere(b)) - Number(runsHere(a)));
@@ -165,6 +180,7 @@ export function NewWorkspace({
         agent: chosenKind,
         branch: checkouts.length ? shownBranch.trim() || undefined : undefined,
         hostId: host?.id,
+        share,
       },
     });
   };
@@ -255,6 +271,8 @@ export function NewWorkspace({
         </Row>
       </div>
 
+      <ShareRow share={share} onChange={setShare} host={host} busy={busyHere} />
+
       {create.isError && (
         <p className="rounded-md border border-brick/40 bg-ground px-3 py-2 font-mono text-meta text-brick">
           {(create.error as { code?: string }).code === "NoCapacity"
@@ -324,6 +342,102 @@ export function NewWorkspace({
 }
 
 /** A labelled field. The label is above, because these are not chips. */
+/** What each choice is worth against the others. Mirrors `Share::weight`. */
+const WEIGHT: Record<Share, number> = {
+  [Share.yields]: 50,
+  [Share.equal]: 100,
+  [Share.takesMore]: 400,
+};
+
+const CHOICE: { share: Share; label: string; verb: string }[] = [
+  { share: Share.yields, label: "Yields", verb: "Waits for the others." },
+  { share: Share.equal, label: "Equal share", verb: "Takes its turn." },
+  { share: Share.takesMore, label: "Takes more", verb: "Goes first." },
+];
+
+/**
+ * How this workspace competes when the machine is busy.
+ *
+ * ## Why the copy is computed rather than written
+ *
+ * A share is meaningless on its own — the same choice is "all eight cores" on
+ * a quiet machine and "two of eight" on a busy one, and no fixed sentence is
+ * true in both. So the description is worked out from what is actually running
+ * on the host that was picked, and it changes when the choice or the host does.
+ *
+ * Every one of them ends on what happens when nothing else is running, because
+ * that is the part people get wrong: this is not a speed setting, and a
+ * workspace on an idle machine has the whole of it whatever is chosen here.
+ */
+function ShareRow({
+  share,
+  onChange,
+  host,
+  busy,
+}: {
+  share: Share;
+  onChange: (share: Share) => void;
+  host?: Host;
+  busy: { share: Share }[];
+}) {
+  const cores = host?.cpus ?? 0;
+
+  // The others' actual choices, not an assumption that they all took their
+  // turn: a machine already carrying something that takes more is exactly when
+  // this estimate matters, and averaging it away would say the opposite of
+  // what will happen.
+  const theirs = busy.reduce((total, w) => total + WEIGHT[w.share], 0);
+  const mine = WEIGHT[share];
+  const contended = cores > 0 && busy.length > 0;
+  const got = contended ? (mine / (mine + theirs)) * cores : cores;
+
+  // Halves, because a third of eight cores is 2.67 and nobody wants that in a
+  // sentence. `about` is doing real work in this copy — the scheduler is
+  // proportional over time, not a promise about any given second.
+  const rounded = Math.round(got * 2) / 2;
+
+  return (
+    <Row label="When the machine is busy">
+      <span className="flex flex-col gap-2">
+        <span className="flex gap-1.5">
+          {CHOICE.map((c) => (
+            <button
+              key={c.share}
+              type="button"
+              onClick={() => onChange(c.share)}
+              className={`flex-1 rounded-md border px-3 py-2 text-meta transition-colors ${
+                share === c.share
+                  ? "border-mute/60 bg-raise text-bone"
+                  : "border-line text-mute hover:border-mute/60 hover:text-dim"
+              }`}
+            >
+              {c.label}
+            </button>
+          ))}
+        </span>
+        <span className="text-meta leading-[1.5] text-mute">
+          {!host || cores === 0 ? (
+            "Once this is running somewhere, this decides what it gets when something else wants the machine too."
+          ) : !contended ? (
+            <>
+              Nothing else is running on {host.name}. This workspace gets all {cores} cores
+              whichever you pick — this only starts to matter when someone else is working here
+              too.
+            </>
+          ) : (
+            <>
+              {CHOICE.find((c) => c.share === share)?.verb} While the others are busy this
+              workspace gets about {rounded} of {cores} cores
+              {share === Share.takesMore && ", and they slow down to allow it"}. When they are
+              idle it gets all {cores}.
+            </>
+          )}
+        </span>
+      </span>
+    </Row>
+  );
+}
+
 function Row({
   label,
   hint,
