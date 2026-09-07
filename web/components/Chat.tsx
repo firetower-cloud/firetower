@@ -1061,6 +1061,13 @@ function Approval({
  * on it could be pressed. So every question carries a way to answer in your own
  * words, which is what a person would do if this were a conversation — which it
  * is.
+ *
+ * ## And a way to put it down for a minute
+ *
+ * The card is allowed most of the screen, and it sits between you and the
+ * transcript — so a question about a plan covered the plan it was about, and
+ * answering meant deciding from memory. It folds to its top line instead, and
+ * unfolds with what you had already picked still picked.
  */
 function Questions({
   sessionId,
@@ -1075,6 +1082,17 @@ function Questions({
   const [chosen, setChosen] = useState<Record<string, string[]>>({});
   /** What has been typed instead. Absent means the box is not open. */
   const [written, setWritten] = useState<Record<string, string | undefined>>({});
+  /**
+   * Whether the card is showing its questions, or folded down to one line.
+   *
+   * Open to start with — the session is stopped on this, so it is the thing to
+   * deal with. But it sits above the composer, it is allowed most of the
+   * screen, and what somebody wants to read before answering is usually the
+   * plan the question is about, which is behind it. So it folds. Nothing is
+   * lost by folding: the picks and the typing are held here, and folding only
+   * stops drawing them.
+   */
+  const [open, setOpen] = useState(true);
 
   const pick = (question: string, label: string, many: boolean) => {
     setChosen((current) => {
@@ -1104,6 +1122,12 @@ function Questions({
 
   const ready = asking.questions.every((q) => answered(q.question).length > 0);
 
+  /** What the folded line says, so what is waiting is still named. */
+  const summary =
+    asking.questions.length > 1
+      ? `${asking.questions.length} questions`
+      : (asking.questions[0]?.question ?? "");
+
   const send = () => {
     onAnswered();
     answer.mutate({
@@ -1127,95 +1151,116 @@ function Questions({
     // looking at.
     <div
       onKeyDown={(e) => {
-        if (e.key !== "Enter" || !(e.metaKey || e.ctrlKey) || !ready) return;
+        // Not while folded: nothing on the screen says what would be sent.
+        if (e.key !== "Enter" || !(e.metaKey || e.ctrlKey) || !ready || !open) return;
         e.preventDefault();
         send();
       }}
-      className="mb-4 flex max-h-[60vh] flex-col rounded-lg border border-ember-deep bg-panel p-4"
+      className={`mb-4 flex max-h-[60vh] flex-col rounded-lg border border-ember-deep bg-panel ${
+        open ? "p-4" : "px-4 py-2.5"
+      }`}
     >
-      {/* The questions scroll; the button below them does not. Three questions
-          with described options is taller than a laptop screen, and this card
-          sits in the bar above the composer rather than in the transcript — so
-          without a ceiling it grew past the bottom of the window, taking the
-          composer and its own Answer button with it, and nothing on the page
-          could scroll to reach them. */}
-      <div className="min-h-0 overflow-y-auto">
-      {asking.questions.map((q) => {
-        const picked = chosen[q.question] ?? [];
-        const mine = written[q.question];
-        return (
-          <div key={q.question} className="mb-3 last:mb-2">
-            <div className="flex items-baseline gap-2">
-              <span className="eyebrow text-ember">{q.header}</span>
-              {q.multiSelect && <span className="eyebrow">any</span>}
-            </div>
-            <p className="mt-1 mb-2 text-body text-text">{q.question}</p>
-
-            <div className="flex flex-col gap-1.5">
-              {q.options.map((option) => {
-                const on = picked.includes(option.label);
-                return (
-                  <button
-                    key={option.label}
-                    onClick={() => pick(q.question, option.label, q.multiSelect ?? false)}
-                    className={`min-h-[44px] rounded-md border px-3 py-2 text-left transition-colors ${
-                      on ? "border-bone bg-raise" : "border-line hover:border-mute"
-                    }`}
-                  >
-                    <span className={`block text-ui ${on ? "text-bone" : "text-text"}`}>
-                      {option.label}
-                    </span>
-                    {option.description && (
-                      <span className="block text-meta text-mute">{option.description}</span>
-                    )}
-                  </button>
-                );
-              })}
-
-              {/* Last, and quieter than the options: it is the way out, not the
-                  expected answer. */}
-              {mine === undefined ? (
-                <button
-                  onClick={() => say(q.question, "", q.multiSelect ?? false)}
-                  className="min-h-[44px] rounded-md border border-dashed border-line px-3 py-2 text-left text-ui text-mute transition-colors hover:border-mute hover:text-text"
-                >
-                  Something else…
-                </button>
-              ) : (
-                <div className="rounded-md border border-bone bg-raise px-3 py-2">
-                  <input
-                    autoFocus
-                    value={mine}
-                    onChange={(e) => say(q.question, e.target.value, q.multiSelect ?? false)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Escape") {
-                        e.preventDefault();
-                        setWritten((current) => ({ ...current, [q.question]: undefined }));
-                      }
-                    }}
-                    placeholder="Say what instead"
-                    className="min-h-[28px] w-full bg-transparent text-ui text-bone placeholder:text-mute focus:outline-none"
-                  />
-                </div>
-              )}
-            </div>
-          </div>
-        );
-      })}
-
-      </div>
-
+      {/* Folded, the card is this line and nothing else — still ember, still
+          above the composer, so the session plainly still wants something. */}
       <button
-        onClick={send}
-        disabled={!ready}
-        title="Answer (⌘↵)"
-        className="mt-3 flex min-h-[44px] w-full shrink-0 items-center justify-center gap-2 rounded-md bg-bone px-4 text-ui font-medium text-ground transition-colors hover:bg-white disabled:bg-line disabled:text-mute sm:w-auto"
+        onClick={() => setOpen(!open)}
+        aria-expanded={open}
+        title={open ? "Fold it away" : "Open it"}
+        className="flex w-full shrink-0 items-baseline gap-2 text-left"
       >
-        Answer
-        <span aria-hidden className="font-mono text-meta opacity-60">
-          ⌘↵
+        <span className="eyebrow shrink-0 text-ember">asking</span>
+        {!open && <span className="min-w-0 flex-1 truncate text-ui text-dim">{summary}</span>}
+        <span aria-hidden className="ml-auto shrink-0 text-meta text-mute">
+          {open ? "⌃" : "⌄"}
         </span>
       </button>
+
+      {open && (
+        <>
+          {/* The questions scroll; the button below them does not. Three questions
+              with described options is taller than a laptop screen, and this card
+              sits in the bar above the composer rather than in the transcript — so
+              without a ceiling it grew past the bottom of the window, taking the
+              composer and its own Answer button with it, and nothing on the page
+              could scroll to reach them. */}
+          <div className="mt-3 min-h-0 overflow-y-auto">
+            {asking.questions.map((q) => {
+              const picked = chosen[q.question] ?? [];
+              const mine = written[q.question];
+              return (
+                <div key={q.question} className="mb-3 last:mb-2">
+                  <div className="flex items-baseline gap-2">
+                    <span className="eyebrow text-ember">{q.header}</span>
+                    {q.multiSelect && <span className="eyebrow">any</span>}
+                  </div>
+                  <p className="mt-1 mb-2 text-body text-text">{q.question}</p>
+
+                  <div className="flex flex-col gap-1.5">
+                    {q.options.map((option) => {
+                      const on = picked.includes(option.label);
+                      return (
+                        <button
+                          key={option.label}
+                          onClick={() => pick(q.question, option.label, q.multiSelect ?? false)}
+                          className={`min-h-[44px] rounded-md border px-3 py-2 text-left transition-colors ${
+                            on ? "border-bone bg-raise" : "border-line hover:border-mute"
+                          }`}
+                        >
+                          <span className={`block text-ui ${on ? "text-bone" : "text-text"}`}>
+                            {option.label}
+                          </span>
+                          {option.description && (
+                            <span className="block text-meta text-mute">{option.description}</span>
+                          )}
+                        </button>
+                      );
+                    })}
+
+                    {/* Last, and quieter than the options: it is the way out, not the
+                        expected answer. */}
+                    {mine === undefined ? (
+                      <button
+                        onClick={() => say(q.question, "", q.multiSelect ?? false)}
+                        className="min-h-[44px] rounded-md border border-dashed border-line px-3 py-2 text-left text-ui text-mute transition-colors hover:border-mute hover:text-text"
+                      >
+                        Something else…
+                      </button>
+                    ) : (
+                      <div className="rounded-md border border-bone bg-raise px-3 py-2">
+                        <input
+                          autoFocus
+                          value={mine}
+                          onChange={(e) => say(q.question, e.target.value, q.multiSelect ?? false)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Escape") {
+                              e.preventDefault();
+                              setWritten((current) => ({ ...current, [q.question]: undefined }));
+                            }
+                          }}
+                          placeholder="Say what instead"
+                          className="min-h-[28px] w-full bg-transparent text-ui text-bone placeholder:text-mute focus:outline-none"
+                        />
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          <button
+            onClick={send}
+            disabled={!ready}
+            title="Answer (⌘↵)"
+            className="mt-3 flex min-h-[44px] w-full shrink-0 items-center justify-center gap-2 rounded-md bg-bone px-4 text-ui font-medium text-ground transition-colors hover:bg-white disabled:bg-line disabled:text-mute sm:w-auto"
+          >
+            Answer
+            <span aria-hidden className="font-mono text-meta opacity-60">
+              ⌘↵
+            </span>
+          </button>
+        </>
+      )}
     </div>
   );
 }
