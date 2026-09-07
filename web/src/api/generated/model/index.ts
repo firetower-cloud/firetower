@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.18.0
+ * OpenAPI spec version: 0.23.0
  */
 
 export * from './accessEntry';
@@ -39,6 +39,8 @@ export * from './decision';
 export * from './deleteHostParams';
 export * from './destroySessionParams';
 export * from './diagnosis';
+export * from './dockerState';
+export * from './dockerStatus';
 export * from './done';
 export * from './downloadFileParams';
 export * from './drain';

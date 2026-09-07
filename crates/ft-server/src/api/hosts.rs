@@ -574,6 +574,9 @@ pub(super) async fn probe_host(
         memory_mb: None,
         worker_version: None,
         diagnosis: None,
+        // Nothing has been asked, and a probe never asks: it only wants to
+        // know whether the machine answers as a worker at all.
+        docker: ft_core::DockerState::default(),
         reconnecting: false,
     };
 

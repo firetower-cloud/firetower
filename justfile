@@ -152,6 +152,128 @@ db-clean:
       | docker compose exec -T postgres psql -U "${POSTGRES_USER:-firetower}" -d "${POSTGRES_DB:-firetower}" -q
     echo "  swept. Reclaim the disk with: just db-vacuum"
 
+# Prove a session can actually run things. Run this *inside* a session.
+#
+# Everything here is a claim that cannot be checked from the machine hosting
+# the worker: whether the daemon in this container works, whether a compose
+# service is reachable on this container's loopback, and whether a preview
+# reaches the same bytes. That last one is the one worth running — it is what
+# distinguishes a daemon publishing ports into this network namespace from one
+# publishing them somewhere the tunnel cannot see.
+#
+#   just session-check
+#   PREVIEW_URL=https://<session>-8080-<sig>.<domain> just session-check
+#
+# The preview is skipped without a URL, because a session cannot derive its own
+# — the hostname is signed by the control plane. Copy it from the session's
+# preview for port 8080.
+session-check:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    passed=0; failed=0; skipped=0
+    ok()   { printf '  \033[32mok\033[0m       %s\n' "$1"; passed=$((passed+1)); }
+    no()   { printf '  \033[31mFAILED\033[0m   %s\n' "$1"; failed=$((failed+1)); }
+    skip() { printf '  skipped  %s\n' "$1"; skipped=$((skipped+1)); }
+    try()  { if eval "$2" >/dev/null 2>&1; then ok "$1"; else no "$1"; fi; }
+
+    work=$(mktemp -d)
+
+    # A project of this check's own, not the session's.
+    #
+    # The session sets COMPOSE_PROJECT_NAME for everything it runs, so without
+    # this the check would share a project with whatever the agent already has
+    # up — and `compose down --remove-orphans` would then tear down that work,
+    # because from this directory's compose file every one of its containers is
+    # an orphan. Isolating also makes the teardown assertion below mean
+    # something rather than counting somebody else's containers.
+    export COMPOSE_PROJECT_NAME="ft-session-check-$$"
+
+    # Whatever happens, this check does not leave a stack running.
+    trap 'cd "$work" 2>/dev/null && docker compose down -v --remove-orphans >/dev/null 2>&1; rm -rf "$work"' EXIT
+
+    echo
+    echo "  Tools"
+    for tool in docker just pnpm cargo git tmux node; do
+        try "$tool" "command -v $tool"
+    done
+
+    echo
+    echo "  Daemon"
+    try "docker version"          "docker version"
+    try "docker compose version"  "docker compose version"
+    try "docker run hello-world"  "docker run --rm hello-world"
+
+    echo
+    echo "  A compose stack, reachable on this container's loopback"
+    cd "$work"
+    # printf rather than a heredoc: `just` dedents a recipe body, and YAML is
+    # the one format where being dedented by four spaces is silent corruption.
+    printf 'services:\n  web:\n    image: nginx:alpine\n    ports: ["8080:80"]\n' > compose.yaml
+    if docker compose up -d >/dev/null 2>&1; then
+        ok "docker compose up"
+        if curl -sf --retry 15 --retry-delay 1 http://127.0.0.1:8080 2>/dev/null | grep -q nginx; then
+            ok "127.0.0.1:8080 answers"
+        else
+            no "127.0.0.1:8080 answers"
+        fi
+    else
+        no "docker compose up"
+    fi
+
+    echo
+    echo "  The preview reaches the same bytes"
+    if [ -z "${PREVIEW_URL:-}" ]; then
+        skip "no PREVIEW_URL given — see the comment above this recipe"
+    elif curl -sf --retry 5 --retry-delay 1 "$PREVIEW_URL" 2>/dev/null | grep -q nginx; then
+        ok "$PREVIEW_URL"
+    else
+        no "$PREVIEW_URL — the daemon is publishing where the tunnel cannot see"
+    fi
+
+    echo
+    echo "  Builds"
+    printf 'FROM alpine\nRUN echo built\n' > Dockerfile
+    try "docker build" "docker build -t ft-session-check ."
+
+    echo
+    echo "  Teardown leaves nothing"
+    docker compose down -v --remove-orphans >/dev/null 2>&1
+    left=$(docker ps -aq --filter "label=com.docker.compose.project=$COMPOSE_PROJECT_NAME" | wc -l)
+    if [ "$left" -eq 0 ]; then ok "no containers left"; else no "$left container(s) left"; fi
+
+    echo
+    printf '  %d passed, %d failed, %d skipped\n\n' "$passed" "$failed" "$skipped"
+    [ "$failed" -eq 0 ]
+
+# Reclaim what the workers' image caches have grown to.
+#
+# Each container host keeps its own `/var/lib/docker` on a volume, so that
+# sessions can run compose stacks and so that upgrading a worker does not
+# re-pull postgres and node from scratch. It grows and never shrinks: a cache
+# is only useful because nothing prunes it.
+#
+# Stops each worker first — a daemon does not survive its storage being
+# removed underneath it — and starts them again after. Sessions on those
+# workers keep their worktrees and their tmux; what they lose is any container
+# they had running, and the next pull is a slow one.
+worker-cache-clean:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    volumes=$(docker volume ls -q --filter name='^firetower-docker-')
+    if [ -z "$volumes" ]; then
+        echo "  no worker image caches on this machine."
+        exit 0
+    fi
+    echo "  reclaiming:"
+    for volume in $volumes; do
+        worker=${volume#firetower-docker-}
+        docker stop "$worker" >/dev/null 2>&1 || true
+        docker volume rm "$volume" >/dev/null
+        docker start "$worker" >/dev/null 2>&1 || true
+        echo "    $volume"
+    done
+    echo "  done. The next compose up on those workers will pull again."
+
 # Give the space back to the filesystem. Only worth it after db-clean.
 db-vacuum:
     docker compose exec -T postgres psql -U "${POSTGRES_USER:-firetower}" -d "${POSTGRES_DB:-firetower}" -c "VACUUM FULL;"

@@ -1369,6 +1369,7 @@ impl Fleet {
                 worker_version,
                 cpus,
                 memory_mb,
+                docker,
                 ..
             }) => {
                 if protocol != PROTOCOL_VERSION {
@@ -1381,9 +1382,14 @@ impl Fleet {
                 }
                 // Online, so the last failure no longer applies.
                 self.db
-                    .mark_host_online(&host_id, &worker_version, cpus, memory_mb)
+                    .mark_host_online(&host_id, &worker_version, cpus, memory_mb, &docker)
                     .await?;
-                tracing::info!(host = %host_id, version = %worker_version, "worker online");
+                tracing::info!(
+                    host = %host_id,
+                    version = %worker_version,
+                    docker = %docker.summary(),
+                    "worker online"
+                );
             }
             Ok(_) => anyhow::bail!("worker replied with something other than Hello"),
             Err(e) => {
@@ -3340,6 +3346,7 @@ mod supervisor_tests {
                             arch: "test".to_string(),
                             cpus: 1,
                             memory_mb: 0,
+                            docker: ft_core::DockerState::default(),
                         }),
                         ToWorker::Ping => Some(ToServer::Pong),
                         _ => None,

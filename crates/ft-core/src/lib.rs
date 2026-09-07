@@ -33,6 +33,20 @@ pub const SESSION_ENV: &str = "FIRETOWER_SESSION";
 /// Where the worker on this machine keeps its state.
 pub const WORKER_ROOT_ENV: &str = "FIRETOWER_WORKER_ROOT";
 
+/// Turns the Docker daemon inside worker containers off: `off`, or anything
+/// else to leave it on.
+///
+/// Here for the reason [`SESSION_ENV`] is — every end reads it, and there are
+/// four. An operator sets it on the control plane; `ft_server::container`
+/// passes it into the container it creates; that image's entrypoint reads it
+/// to decide whether to start a daemon; and `ft_worker::docker` reads it to
+/// know that "no daemon" was somebody's decision rather than a fault. Four
+/// spellings of one string is how a setting comes to be silently ignored.
+///
+/// Any value but `off` leaves it on, because the useful configuration is the
+/// default one and a typo should not quietly remove a feature.
+pub const DOCKER_ENV: &str = "FIRETOWER_WORKER_DOCKER";
+
 /// Which agent runs inside a workspace.
 ///
 /// Serialised as the variant name — see the wire conventions in the brief: a
@@ -588,6 +602,14 @@ pub struct Host {
     /// Why it isn't answering, when it isn't. Cleared as soon as it does.
     #[serde(default)]
     pub diagnosis: Option<Diagnosis>,
+    /// Whether a session on this machine can run containers.
+    ///
+    /// Reported by the worker at every handshake rather than inferred from the
+    /// kind of host: the answer is a fact about the machine the worker is on,
+    /// and a container, a server and a server-with-a-container each arrive at
+    /// it differently.
+    #[serde(default)]
+    pub docker: DockerState,
     /// Whether we are still trying to reach it.
     ///
     /// A fact about the running control plane rather than about the host, so it
@@ -595,6 +617,93 @@ pub struct Host {
     /// way back from one nobody is looking for.
     #[serde(default)]
     pub reconnecting: bool,
+}
+
+/// Whether a session on a host can run containers, and why not when it can't.
+///
+/// A struct holding a small enum, rather than an enum carrying its own data —
+/// the same shape as [`Diagnosis`] and [`Cause`] beside it, and for the same
+/// reason. This crosses the API into a generated TypeScript client, and an
+/// object with a string discriminant and an optional detail is a shape every
+/// step of that pipeline represents the same way. A Rust enum with payloads
+/// is the tidier type and the one whose JSON depends on which serde attribute
+/// somebody reached for.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, ToSchema)]
+pub struct DockerState {
+    pub status: DockerStatus,
+    /// The daemon's version where it is running, and why it isn't where it
+    /// isn't. Absent when there is nothing to add: a machine with no Docker on
+    /// it has said everything there is to say.
+    #[serde(default)]
+    pub detail: Option<String>,
+}
+
+/// The four answers to "can a session here run a container?".
+///
+/// Two kinds of no, because they have different fixes and an agent told only
+/// "no" keeps trying. The distinction that matters is between a machine where
+/// Docker was never meant to be and one where it was and did not start.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, ToSchema)]
+pub enum DockerStatus {
+    /// Nobody has asked, or the worker is too old to say.
+    ///
+    /// The default on purpose: a worker from before this existed omits the
+    /// field, and reading its silence as "no Docker" would be a claim with no
+    /// evidence behind it.
+    #[default]
+    Unknown,
+    /// A daemon answered.
+    Running,
+    /// Docker is installed here and the daemon is not answering.
+    Stopped,
+    /// There is no Docker on this machine. Not a fault — a worker that only
+    /// ever serves terminals and git is a working worker.
+    Absent,
+}
+
+impl DockerState {
+    pub fn running(version: impl Into<String>) -> Self {
+        Self {
+            status: DockerStatus::Running,
+            detail: Some(version.into()),
+        }
+    }
+
+    pub fn stopped(why: impl Into<String>) -> Self {
+        Self {
+            status: DockerStatus::Stopped,
+            detail: Some(why.into()),
+        }
+    }
+
+    pub fn absent() -> Self {
+        Self {
+            status: DockerStatus::Absent,
+            detail: None,
+        }
+    }
+
+    /// Whether a session here can run `docker compose up`.
+    pub fn usable(&self) -> bool {
+        self.status == DockerStatus::Running
+    }
+
+    /// One line for a person, in the same voice as a [`Diagnosis`] summary.
+    pub fn summary(&self) -> String {
+        let detail = self.detail.as_deref().filter(|d| !d.is_empty());
+        match (self.status, detail) {
+            (DockerStatus::Running, Some(version)) => format!("Docker {version}"),
+            (DockerStatus::Running, None) => "Docker is running here.".into(),
+            (DockerStatus::Stopped, Some(why)) => {
+                format!("Docker is installed here and isn't running: {why}")
+            }
+            (DockerStatus::Stopped, None) => "Docker is installed here and isn't running.".into(),
+            (DockerStatus::Absent, _) => "No Docker on this machine.".into(),
+            (DockerStatus::Unknown, _) => {
+                "Whether Docker works here hasn't been established.".into()
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]

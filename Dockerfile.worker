@@ -78,10 +78,18 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
 
 FROM debian:bookworm-slim
 
+# Declared again: build arguments do not cross a stage boundary, and the steps
+# below pick a Docker repository and a `just` release by architecture.
+ARG TARGETARCH
+
 # What a worker actually uses: git for repositories, tmux so agents outlive the
 # connection, ca-certificates so it can reach a git host over https.
+#
+# `iptables` is Docker's, and here rather than left to the package because the
+# daemon publishing a port into this container's own network namespace is what
+# makes a preview reach a compose service at all.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        git tmux ca-certificates curl \
+        git tmux ca-certificates curl iptables \
     && rm -rf /var/lib/apt/lists/*
 
 # Node, for installing agents rather than for running Firetower.
@@ -102,11 +110,83 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && npm cache clean --force \
     && rm -rf /var/lib/apt/lists/*
 
+# Docker, so a session can run the stack the repository actually runs on.
+#
+# **The largest thing in this image, by a lot.** The stage above is 5.6 MB of
+# Rust on a slim base and everything else here is small; this is a few hundred
+# megabytes of daemon, containerd, runc and two plugins. It is worth it because
+# without it an agent cannot start the application it just changed — it can
+# write code and run unit tests, and then has to say "this should work" rather
+# than "I ran it". Most repositories worth pointing an agent at come up with
+# `docker compose up`, and the difference between an agent that can do that and
+# one that cannot is the difference between a suggestion and a verified change.
+#
+# The daemon, not only the client. A client with nothing to talk to is a worse
+# failure than no client at all — see docker-entrypoint.sh for what starts it,
+# and why it is pid 1's child rather than the worker's.
+#
+# **No images are baked in.** The layer cache is not the image cache: pulling
+# `postgres` here would be paid by every worker on every release, and the
+# volume at /var/lib/docker keeps them across upgrades instead.
+#
+# `$TARGETARCH` is Docker's own spelling — `amd64`/`arm64` — which is exactly
+# what its apt repository indexes by, so this needs no mapping of its own.
+RUN install -m 0755 -d /etc/apt/keyrings \
+    && curl -fsSL https://download.docker.com/linux/debian/gpg \
+         -o /etc/apt/keyrings/docker.asc \
+    && chmod a+r /etc/apt/keyrings/docker.asc \
+    && echo "deb [arch=$TARGETARCH signed-by=/etc/apt/keyrings/docker.asc] \
+https://download.docker.com/linux/debian bookworm stable" \
+         > /etc/apt/sources.list.d/docker.list \
+    && apt-get update && apt-get install -y --no-install-recommends \
+        docker-ce docker-ce-cli containerd.io \
+        docker-buildx-plugin docker-compose-plugin \
+    && rm -rf /var/lib/apt/lists/*
+
+# What this repository's own documentation tells you to run, and what any
+# repository pinned to pnpm needs.
+#
+# `just` is not in Debian, so it comes from its own release. `pnpm` refuses to
+# be replaced by npm — a `web/` directory with a `pnpm-lock.yaml` is a hard
+# requirement, not a preference — and the version is pinned so that what an
+# agent gets does not change under it between releases of this image.
+ARG JUST_VERSION=1.43.0
+ARG PNPM_VERSION=10.20.0
+RUN case "$TARGETARCH" in \
+        amd64) just_arch=x86_64-unknown-linux-musl  ;; \
+        arm64) just_arch=aarch64-unknown-linux-musl ;; \
+        *) echo "no just release known for $TARGETARCH" >&2; exit 1 ;; \
+    esac \
+    && curl -fsSL "https://github.com/casey/just/releases/download/${JUST_VERSION}/just-${JUST_VERSION}-${just_arch}.tar.gz" \
+         | tar -xz -C /usr/local/bin just \
+    && npm install -g "pnpm@${PNPM_VERSION}" \
+    && npm cache clean --force
+
 COPY --from=build /firetower-worker /usr/local/bin/firetower-worker
+
+# Starts the Docker daemon, then hands over to whatever was asked for.
+#
+# An entrypoint rather than something the worker supervises, because the worker
+# is not long-lived: `firetower-worker --stdio` is one process per control-plane
+# connection and dies whenever that connection does. A daemon parented to it
+# would take every running compose stack down on each reconnect — the exact
+# thing tmux exists here to prevent.
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod 0755 /usr/local/bin/docker-entrypoint.sh
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 
 # Where this worker keeps its mirrors, worktrees and event log.
 RUN mkdir -p /var/lib/firetower/worker
 VOLUME /var/lib/firetower
+
+# Where the daemon keeps what it has pulled and built.
+#
+# Declared so that a container started without one gets an anonymous volume
+# rather than writing a filesystem onto its own overlay — which is the classic
+# way nested Docker fails, and fails confusingly. `container.rs` mounts a named
+# one here so the cache survives the container being recreated to upgrade it.
+RUN mkdir -p /var/lib/docker
+VOLUME /var/lib/docker
 
 # The agent's own directory, on the volume.
 #
@@ -116,6 +196,20 @@ VOLUME /var/lib/firetower
 # upgrade it doesn't start from nothing.
 ENV HOME=/var/lib/firetower/home
 RUN mkdir -p "$HOME"
+
+# A toolchain an agent installs for itself, findable in the session after.
+#
+# No Rust is in this image — rustup and a toolchain are about 1.5 GB, and most
+# sessions never want one. But `$HOME` is on the volume, so an agent that runs
+# `rustup` once has left something behind that outlives its session, and the
+# only reason the next one could not use it was that this line was missing:
+# cargo lands in `$HOME/.cargo/bin` and nothing ever looked there. The same
+# holds for anything else installed into a home directory that persists.
+#
+# Last on the PATH, for the reason `runtime.rs` appends the agents' own
+# directories: a copy the image or the machine provides is somebody's
+# deliberate choice, and ours answers only when nothing else does.
+ENV PATH=$PATH:/var/lib/firetower/home/.cargo/bin:/var/lib/firetower/home/.local/bin
 
 # Readable without starting anything. The control plane compares it with its
 # own and reports a drift.

@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.18.0
+ * OpenAPI spec version: 0.23.0
  */
 import * as zod from 'zod';
 
@@ -523,7 +523,7 @@ export const DescribeSessionParams = zod.object({
 
 export const DescribeSessionResponse = zod.object({
   "body": zod.string(),
-  "issues": zod.array(zod.string()).describe('Issues the run noticed being talked about: `#18`, `acme\/web#41`.\n\nSuggestions, and nothing has been done with them. A model that invents\na number would otherwise be writing `Closes #23` into a pull request,\nand closing the wrong issue on merge is not a mistake review catches —\nso these are offered on screen and become references when somebody\npicks one.'),
+  "issues": zod.array(zod.string()).optional().describe('Issues the run noticed being talked about: `#18`, `acme\/web#41`.\n\nSuggestions, and nothing has been done with them. A model that invents\na number would otherwise be writing `Closes #23` into a pull request,\nand closing the wrong issue on merge is not a mistake review catches —\nso these are offered on screen and become references when somebody\npicks one.'),
   "title": zod.string()
 })
 

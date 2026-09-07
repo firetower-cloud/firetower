@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.18.0
+ * OpenAPI spec version: 0.23.0
  */
 
 export interface Proposal {
@@ -17,6 +17,6 @@ export interface Proposal {
      * so these are offered on screen and become references when somebody
      * picks one.
      */
-  issues: string[];
+  issues?: string[];
   title: string;
 }

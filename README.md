@@ -73,6 +73,8 @@ npm i -g @firetower/cli
 firetower worker install
 ```
 
+A session can run Docker: `docker compose up` inside a session works, and the preview for a published port reaches it. The worker runs a daemon of its own, which means **worker containers are privileged** — anything in a session can become root on the machine hosting that worker. Give a worker a machine of its own and treat everything else on it as reachable from any session. Set `FIRETOWER_WORKER_DOCKER=off` to turn it off: workers come up as before, without Docker in sessions.
+
 Everything else — putting it on a domain, adding a server, connecting repositories, secrets, upgrades — is in the documentation.
 
 <div align="center">

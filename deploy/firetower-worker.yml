@@ -8,6 +8,28 @@
 #
 # No secrets belong here. What an agent authenticates with is held by the
 # control plane and handed over per session.
+#
+# ## This container is privileged, and that is a decision
+#
+# A session's value is being able to run what the repository runs, and for most
+# repositories that is `docker compose up`. So the worker runs a Docker daemon
+# of its own, and that needs privileges an ordinary container does not have.
+#
+# It has to be a daemon *in here* rather than the machine's own: a preview
+# reaches a port by the worker connecting to its own `127.0.0.1`, so a service's
+# port has to be published into this container. A daemon on the machine
+# publishes on the machine, where this container's loopback cannot see it.
+#
+# **What it costs.** Anything running in a session can become root on this
+# machine if it tries. The boundary is therefore this machine, not this
+# container: give a worker a VM of its own, and treat everything else on that
+# VM as reachable from any session. That is a real arrangement — it is roughly
+# how per-job CI runners work — but it is one you should have chosen.
+#
+# **If you have not chosen it** — if sessions here belong to people who do not
+# own this machine — uncomment FIRETOWER_WORKER_DOCKER below and drop
+# `privileged`. The worker still serves terminals, git and agents; sessions
+# just have no Docker, and say so rather than failing at a shell prompt.
 services:
   worker:
     # The newest release. Pin a version here — `:0.2.0` — if you would rather
@@ -19,14 +41,49 @@ services:
     # Comes back after a reboot, and after Docker restarts.
     restart: unless-stopped
 
+    # So a session can run the stack its repository runs on. See the note at
+    # the top of this file for what this costs and when not to do it.
+    privileged: true
+
+    # tini as pid 1, to reap what the daemon leaves behind.
+    #
+    # The command below is `sleep infinity`, which reaps nothing, and the
+    # daemon's children — containerd, a shim per container — reparent to pid 1
+    # when they exit. Without this a worker that stays up for weeks slowly
+    # fills with zombie processes.
+    init: true
+
+    # environment:
+    #   # Turns the daemon off: no Docker in sessions here, everything else
+    #   # unchanged. For a machine whose sessions belong to people who do not
+    #   # own it.
+    #   FIRETOWER_WORKER_DOCKER: "off"
+
     volumes:
       # Repository mirrors, worktrees, the event log and the agent's own
       # directory — everything that has to survive recreating the container.
       - firetower:/var/lib/firetower
 
+      # What the daemon has pulled and built.
+      #
+      # **Not an optimisation.** A daemon writing its overlay filesystem onto
+      # the overlay filesystem it is running on is the classic nested-Docker
+      # failure, and it presents as broken images rather than as a bad mount.
+      #
+      # That it keeps the cache is the second reason and the one you notice:
+      # without it, every upgrade of this container costs a fresh pull of
+      # postgres, node and everything else your sessions had built up.
+      #
+      # It grows without bound. To reclaim it, stop this container and
+      # `docker volume rm` the volume below — sessions re-pull what they need.
+      - firetower-docker:/var/lib/docker
+
     # Nothing listens. Work happens in `docker exec`, in tmux sessions that
-    # outlive the connection.
+    # outlive the connection. Ports a session publishes are published inside
+    # this container, which is what lets a preview reach them and what keeps
+    # them off this machine's network.
     command: ["sleep", "infinity"]
 
 volumes:
   firetower:
+  firetower-docker:

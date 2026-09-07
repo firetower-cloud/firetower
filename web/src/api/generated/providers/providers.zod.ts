@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.18.0
+ * OpenAPI spec version: 0.23.0
  */
 import * as zod from 'zod';
 
@@ -33,6 +33,15 @@ export const DisconnectProviderResponse = zod.void()
 /**
  * Returns immediately with the code to show. The waiting happens here rather
  * than in the browser so that closing the tab doesn't abandon it.
+ *
+ * Asked again by somebody already connected, and deliberately so: the host's
+ * approval screen is where organizations are granted, and it is shown once
+ * per authorization. Somebody who skipped an organization the first time has
+ * nowhere else to go. Nothing is given up by trying — the vault is written
+ * only where the poll below approves, so a re-authorization that is abandoned
+ * or declined leaves the token that is already there untouched, and the
+ * insert at the end replaces any earlier attempt, whose `Drop` stops its
+ * poller.
  * @summary Start an authorization and begin waiting for it to be approved.
  */
 export const AuthorizeProviderParams = zod.object({
