@@ -2028,6 +2028,49 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_workspace_left_on_the_column_default_still_decodes() {
+        // `share` goes to the database through serde, and `Share` renames to
+        // camelCase — so a default written in the enum's Rust spelling is a
+        // value nothing can read back, and every session in that workspace
+        // 500s instead of loading.
+        let (db, owner) = db_with_user().await;
+        let host = db.ensure_host("localhost", Compute::Local).await.unwrap();
+        let id = SessionId::new();
+
+        db.insert_session(
+            &id,
+            &host.id,
+            &owner,
+            Some("acme/backend"),
+            "Takes its turn",
+            "do a thing",
+            Some("agent/x"),
+            Some("main"),
+            "Shell",
+            WorkspaceSize::Medium,
+            ft_core::Share::Equal,
+            &ft_core::Step::plan(true, false),
+            None,
+        )
+        .await
+        .unwrap();
+
+        // What a row that predates the column has: nobody wrote the share, so
+        // it holds whatever the migration put there.
+        sqlx::query("UPDATE workspaces SET share = DEFAULT")
+            .execute(&db.pool)
+            .await
+            .unwrap();
+
+        let session = db.session_of(&owner, &id).await.unwrap().unwrap();
+        assert_eq!(
+            session.share,
+            ft_core::Share::Equal,
+            "the default has to be the spelling serde writes"
+        );
+    }
+
+    #[tokio::test]
     async fn draining_is_separate_from_being_unreachable() {
         // A draining host is still online and still finishing what it has;
         // folding the two together would make its sessions look lost.
