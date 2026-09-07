@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.26.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.25.0...firetower-v0.26.0) (2026-09-07)
+
+
+### Features
+
+* enforce workspace resource limits with live controls ([c24113c](https://github.com/firetower-cloud/firetower/commit/c24113cabcc6048562d7f852b5f488a87d6d6920))
+* enforce workspace resource limits with live controls ([5023d83](https://github.com/firetower-cloud/firetower/commit/5023d832b3995720a3e337e8e3f9a5412450c3fd))
+
 ## [0.25.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.24.0...firetower-v0.25.0) (2026-09-07)
 
 
