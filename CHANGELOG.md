@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.26.1](https://github.com/firetower-cloud/firetower/compare/firetower-v0.26.0...firetower-v0.26.1) (2026-09-07)
+
+
+### Bug Fixes
+
+* store the workspace share in the spelling serde reads ([2e7070c](https://github.com/firetower-cloud/firetower/commit/2e7070cdda17421d5c0ea36ec717abc0342dae66))
+
 ## [0.26.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.25.0...firetower-v0.26.0) (2026-09-07)
 
 
