@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.25.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.24.0...firetower-v0.25.0) (2026-09-07)
+
+
+### Features
+
+* give worker sessions a working docker ([010231c](https://github.com/firetower-cloud/firetower/commit/010231c06578274eda1b2b7cb63a1a48ef672766))
+* give worker sessions a working docker ([83543cb](https://github.com/firetower-cloud/firetower/commit/83543cbd7da00e3828a15ebc60a26d3f3b40ceae))
+
 ## [0.24.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.23.0...firetower-v0.24.0) (2026-09-07)
 
 
