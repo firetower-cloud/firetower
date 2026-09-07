@@ -56,6 +56,49 @@ if [ -S /var/run/docker.sock ] && docker info >/dev/null 2>&1; then
     exec "$@"
 fi
 
+# Whether this container was given the privileges a daemon needs.
+#
+# **What this prevents is a wrong diagnosis, not a failure.** Without
+# `--privileged` dockerd starts, logs two hundred cheerful lines about loading
+# plugins, and then dies registering its bridge driver with `iptables ...
+# Permission denied (you must be root)`. A session sees "cannot connect to the
+# Docker daemon"; whoever reads the log sees an iptables error, and iptables
+# errors read as a firewall problem on the host rather than as a missing flag
+# on the `docker run` that created this container.
+#
+# Both capabilities are checked because fixing either one alone still leaves a
+# broken worker: CAP_NET_ADMIN is what the bridge and its NAT chain need, and
+# CAP_SYS_ADMIN is what mounting an image's layers needs. A container missing
+# them was created without `--privileged` — by a CLI too old to pass it, most
+# likely — and the fix is on the machine outside this one.
+#
+# **Fails open.** An unreadable or unparseable `CapEff` is not evidence of
+# anything, and declining to start a daemon that would have worked is a worse
+# outcome than the log line this check exists to improve.
+#
+# `CapEff` is a 64-bit mask in hex; CAP_SYS_ADMIN is bit 21 and CAP_NET_ADMIN
+# is bit 12. `$((0x...))` is arithmetic every POSIX shell has, which is why
+# this needs neither capsh nor python — neither is in the image.
+caps=$(sed -n 's/^CapEff:[[:space:]]*//p' /proc/self/status 2>/dev/null)
+case "$caps" in
+    # Empty, or something that is not a hex number. Treated as "we do not
+    # know", which starts the daemon exactly as before.
+    '' | *[!0-9A-Fa-f]*) caps='' ;;
+esac
+
+if [ -n "$caps" ] &&
+    { [ "$(((0x$caps >> 21) & 1))" -eq 0 ] || [ "$(((0x$caps >> 12) & 1))" -eq 0 ]; }; then
+    # Two lines, and the second one says everything. The worker reports the
+    # *last* complaint in this file as the reason Docker is not running — see
+    # `why_not` in ft-worker — so the line that has to stand on its own is the
+    # one at the bottom.
+    {
+        echo "firetower: Docker cannot run here: this container was created without --privileged."
+        echo "firetower: dockerd needs CAP_SYS_ADMIN to mount image layers and CAP_NET_ADMIN to create its bridge, and this container has neither. Recreate it with \`firetower worker upgrade\` to get a worker that can run Docker."
+    } | tee "$DAEMON_LOG"
+    exec "$@"
+fi
+
 # The packet size of the network this container is on.
 #
 # **The failure this prevents has no error message.** dockerd gives its bridge
