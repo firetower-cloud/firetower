@@ -1,0 +1,17 @@
+-- Whether a session on this host can run containers.
+--
+-- Reported by the worker at every handshake and kept, so a screen listing
+-- hosts can say which of them an agent could bring a compose stack up on
+-- without connecting to each one to ask.
+--
+-- Null means nobody has established it: a host that has never connected, or
+-- one running a worker from before it reported this. Distinct from a stored
+-- `"absent"`, which means we asked and the machine has no Docker — the two
+-- have different answers, and a null read as "no" would send somebody looking
+-- for a fault on a machine nobody had asked yet.
+--
+-- Cleared rather than kept when a host goes unreachable, for the reason
+-- `diagnosis` is cleared when one comes back: an answer about a machine we
+-- cannot currently reach describes what was true at some point in the past,
+-- and there is no way to tell from the row how long ago that was.
+alter table hosts add column docker jsonb;

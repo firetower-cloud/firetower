@@ -5,9 +5,16 @@
 //! published on their own schedules, and a new one would mean a new Firetower
 //! release before anybody could use it.
 //!
-//! So they are installed onto the volume instead — the same volume that
-//! already survives `docker rm -f` and holds mirrors, worktrees and the event
-//! log. Recreating a container to upgrade the worker keeps them.
+//! So they are installed onto the volume instead — the same one that holds
+//! mirrors, worktrees and the event log, at `/var/lib/firetower`.
+//!
+//! **How long that volume lives depends on how the worker was created**, and
+//! this used to claim it always survived `docker rm -f`. It does for a worker
+//! from `deploy/firetower-worker.yml`, which names the volume, so recreating
+//! the container to upgrade it keeps everything here. A worker the control
+//! plane created itself gets an anonymous one from the image's `VOLUME` line,
+//! and `container::remove` passes `--volumes` — so removing that host takes
+//! the agents with it, and installing them again is part of adding it back.
 //!
 //! **Nothing here touches a credential.** Installing a binary and signing it
 //! in are separate acts, and only the first happens on this machine: what an

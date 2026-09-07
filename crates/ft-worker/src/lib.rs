@@ -55,6 +55,7 @@ pub mod attach;
 pub mod attachments;
 pub mod codex;
 pub mod describe;
+pub mod docker;
 pub mod entry;
 pub mod first_run;
 pub mod git;
@@ -178,6 +179,14 @@ impl Worker {
             Err(e) => return Err(e.into()),
         }
 
+        // Asked here, on every handshake, rather than once at start-up: this
+        // process is short-lived — one per control-plane connection — and the
+        // answer can change under a long-lived container when a daemon is
+        // restarted or an operator installs Docker on a host that had none.
+        // Every reconnect is therefore a fresh answer rather than a cached one.
+        let docker = crate::docker::state().await;
+        tracing::info!(docker = %docker.summary(), "reporting what this machine can run");
+
         outbound
             .write(&ToServer::Hello {
                 protocol: PROTOCOL_VERSION,
@@ -185,6 +194,7 @@ impl Worker {
                 arch: std::env::consts::ARCH.to_string(),
                 cpus: num_cpus(),
                 memory_mb: 0,
+                docker,
             })
             .await?;
 
@@ -469,6 +479,19 @@ impl Worker {
                 Tmux::named(Pty::Shell.tmux_name(session_id.as_str()))
                     .kill()
                     .await?;
+
+                // And whatever it started in Docker.
+                //
+                // **Before the worktree goes, not after.** A compose service
+                // almost always bind-mounts the checkout, and removing the
+                // directory under a running container leaves it writing into
+                // a path that no longer exists — and the removal itself
+                // fighting a container still holding files open in it.
+                //
+                // This is the whole of teardown for Docker: the daemon is
+                // shared by every session on this worker, so there is no
+                // container of its own to throw away. See `docker::sweep`.
+                crate::docker::sweep(&session_id).await;
 
                 // Ended before the count is taken, so that the last agent out
                 // is decided the same way however many are ending at once. Two
@@ -775,9 +798,7 @@ impl Worker {
                     return Ok(true);
                 }
 
-                self.tunnels
-                    .open(tunnel, session_id, port, out)
-                    .await;
+                self.tunnels.open(tunnel, session_id, port, out).await;
             }
 
             ToWorker::TunnelData { tunnel, data } => {
@@ -1286,6 +1307,62 @@ impl Worker {
         Ok(path)
     }
 
+    /// What the workspace guide says about Docker.
+    ///
+    /// Here rather than only on a screen somebody might look at, because the
+    /// question "can I run this?" is asked by the agent and answered by the
+    /// machine — and the guide is the one place it reads before deciding. An
+    /// agent told nothing runs `docker compose up`, gets `command not found`,
+    /// and concludes something is broken; an agent told plainly there is no
+    /// Docker here runs the tests it *can* run and says which it couldn't.
+    ///
+    /// The caveats are stated for the same reason. A shared daemon and a
+    /// shared port space are surprising, and finding them out by colliding
+    /// with another session is a bad way to learn.
+    fn docker_guidance(state: &ft_core::DockerState, id: &SessionId) -> String {
+        match state.status {
+            ft_core::DockerStatus::Running => format!(
+                "
+## Docker
+
+Docker and `docker compose` work here — bring the stack up and check your work against it rather than reasoning about whether it would run.
+
+This daemon is shared with the other sessions on this machine, so:
+
+- Published ports are shared. If a port is taken, another session has it; pick another rather than assuming something is broken.
+- `docker ps` lists their containers too. Yours are the ones in the `{project}` project.
+- Anything you start with `docker compose` is removed when this session ends. For a bare `docker run`, add `--label {label}={id}` and it will be cleared up too — without it, it is left behind.
+",
+                project = crate::docker::project(id),
+                label = crate::docker::SESSION_LABEL,
+                id = id.as_str(),
+            ),
+            ft_core::DockerStatus::Absent => "
+## Docker
+
+There is no Docker on this machine. `docker` and `docker compose` will not run, so don't reach for them — run what you can without them, and say which checks you could not do rather than leaving it implied.
+"
+            .to_string(),
+            ft_core::DockerStatus::Stopped => format!(
+                "
+## Docker
+
+Docker is installed here and the daemon is not answering, so `docker` commands will fail. This is a fault on the machine rather than something to work around: report it rather than trying to start the daemon yourself.
+
+  {why}
+",
+                why = state
+                    .detail
+                    .as_deref()
+                    .filter(|d| !d.is_empty())
+                    .unwrap_or("it did not say why"),
+            ),
+            // Nothing established, so nothing claimed. A guess in either
+            // direction costs more than the silence does.
+            ft_core::DockerStatus::Unknown => String::new(),
+        }
+    }
+
     /// Write down what is checked out and where.
     ///
     /// The agent starts at the workspace rather than inside a repository, so
@@ -1324,6 +1401,7 @@ impl Worker {
 You are in the directory that holds them, not inside one of them.              Paths in what you say should be relative to here.
 ",
         );
+        text.push_str(&Self::docker_guidance(&crate::docker::state().await, id));
 
         let at = workspace.join("AGENTS.md");
         if let Err(e) = tokio::fs::write(&at, text).await {
@@ -1591,6 +1669,17 @@ You are in the directory that holds them, not inside one of them.              P
                 .to_string(),
         ));
 
+        // Compose scopes a stack by project name, and every session on this
+        // worker shares one daemon — so without this, two sessions running the
+        // same `compose.yaml` are one stack: the second `up` adopts and
+        // restarts the first session's containers, in the first session's
+        // directories. Naming it per session also gives teardown the label it
+        // sweeps by. See `docker::project`.
+        env.push((
+            "COMPOSE_PROJECT_NAME".to_string(),
+            crate::docker::project(&id),
+        ));
+
         // The same directory the workspace's first agent uses, deliberately.
         // What lands there is one person's credential for one agent, so two
         // runs of theirs write the same bytes; giving the second its own copy
@@ -1721,6 +1810,17 @@ You are in the directory that holds them, not inside one of them.              P
                 .await
                 .to_string_lossy()
                 .to_string(),
+        ));
+
+        // Compose scopes a stack by project name, and every session on this
+        // worker shares one daemon — so without this, two sessions running the
+        // same `compose.yaml` are one stack: the second `up` adopts and
+        // restarts the first session's containers, in the first session's
+        // directories. Naming it per session also gives teardown the label it
+        // sweeps by. See `docker::project`.
+        env.push((
+            "COMPOSE_PROJECT_NAME".to_string(),
+            crate::docker::project(&id),
         ));
 
         // A directory of this session's own, for an agent that keeps its
@@ -2047,12 +2147,19 @@ You are in the directory that holds them, not inside one of them.              P
                 let workspace = self.workspace_of(session_id).await?;
                 let position = self.store.checkouts_of(session_id).await?.len() as i64;
 
-                // The same two the session started with, so a setup script run
-                // now can find its way home exactly as one run at launch could.
+                // The same ones the session started with, so a setup script run
+                // now can find its way home exactly as one run at launch could
+                // — and so a repository whose setup brings up a database gets
+                // it in this session's Compose project rather than in a shared
+                // one that teardown would never find.
                 env.push((ft_core::SESSION_ENV.to_string(), session_id.to_string()));
                 env.push((
                     ft_core::WORKER_ROOT_ENV.to_string(),
                     self.root.display().to_string(),
+                ));
+                env.push((
+                    "COMPOSE_PROJECT_NAME".to_string(),
+                    crate::docker::project(session_id),
                 ));
 
                 self.prepare_checkout(session_id, &workspace, position, &repo, &env, out)
@@ -2712,6 +2819,70 @@ mod tests {
     use super::*;
     use ft_core::{Agent, WorkspaceSize};
     use tempfile::TempDir;
+
+    /// An agent told nothing runs `docker compose up`, meets `command not
+    /// found`, and concludes the workspace is broken. Being told plainly is
+    /// the whole point of putting this in the file it reads first.
+    #[test]
+    fn a_session_without_docker_is_told_so_rather_than_left_to_find_out() {
+        let id = SessionId::new();
+        let said = Worker::docker_guidance(&ft_core::DockerState::absent(), &id);
+
+        assert!(said.contains("no Docker on this machine"), "{said}");
+        assert!(
+            !said.contains("docker compose up"),
+            "do not suggest the thing that cannot work: {said}"
+        );
+    }
+
+    /// The two surprises about a shared daemon, in the file that gets read
+    /// before anybody trips over either.
+    #[test]
+    fn a_session_with_docker_is_told_what_it_shares_and_how_to_be_swept() {
+        let id = SessionId::new();
+        let said = Worker::docker_guidance(&ft_core::DockerState::running("27.0.3"), &id);
+
+        assert!(said.contains("shared"), "the port space is shared: {said}");
+        assert!(
+            said.contains(&crate::docker::project(&id)),
+            "it has to name the project its own containers are in: {said}"
+        );
+        // The one thing an agent must do for a bare `docker run` to be cleared
+        // up. Without the label in front of it, it will not add one.
+        assert!(said.contains(crate::docker::SESSION_LABEL), "{said}");
+        assert!(said.contains(id.as_str()), "{said}");
+    }
+
+    /// A daemon that died has a reason, and the reason is the whole value of
+    /// saying anything at all.
+    #[test]
+    fn a_broken_daemon_carries_why_rather_than_only_that() {
+        let id = SessionId::new();
+        let said = Worker::docker_guidance(
+            &ft_core::DockerState::stopped("failed to start daemon: no space left"),
+            &id,
+        );
+        assert!(said.contains("no space left"), "{said}");
+
+        // And one that would not say why still produces a usable sentence
+        // rather than a dangling colon.
+        let vague = Worker::docker_guidance(
+            &ft_core::DockerState {
+                status: ft_core::DockerStatus::Stopped,
+                detail: None,
+            },
+            &id,
+        );
+        assert!(vague.contains("it did not say why"), "{vague}");
+    }
+
+    /// Nothing established means nothing claimed. A guess in either direction
+    /// is worse than the silence — and this is what an older worker reports.
+    #[test]
+    fn an_unestablished_answer_says_nothing_at_all() {
+        let said = Worker::docker_guidance(&ft_core::DockerState::default(), &SessionId::new());
+        assert!(said.is_empty(), "{said}");
+    }
 
     /// The filename wins over the directory it is in.
     ///

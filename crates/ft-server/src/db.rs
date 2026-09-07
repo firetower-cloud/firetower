@@ -438,17 +438,24 @@ impl Db {
         version: &str,
         cpus: u32,
         memory_mb: u64,
+        docker: &ft_core::DockerState,
     ) -> Result<()> {
         // The diagnosis goes with it: it described a machine that is now
         // answering, and a stale one sends someone to fix what works.
+        //
+        // Docker is written on every handshake for the same reason it is asked
+        // on every handshake — an operator who installed Docker on this
+        // machine, or a daemon that died since last time, changes the answer
+        // without changing anything the control plane would otherwise notice.
         sqlx::query(
             "UPDATE hosts SET state = 'Online', worker_version = $1, cpus = $2, memory_mb = $3,
-                              last_seen_at = $4, diagnosis = NULL WHERE id = $5",
+                              last_seen_at = $4, diagnosis = NULL, docker = $5 WHERE id = $6",
         )
         .bind(version)
         .bind(cpus as i64)
         .bind(memory_mb as i64)
         .bind(chrono::Utc::now())
+        .bind(serde_json::to_value(docker)?)
         .bind(id.as_str())
         .execute(&self.pool)
         .await?;
@@ -1735,6 +1742,13 @@ fn host_from_row(r: sqlx::postgres::PgRow) -> Result<Host> {
         diagnosis: r
             .get::<Option<serde_json::Value>, _>("diagnosis")
             .and_then(|v| serde_json::from_value(v).ok()),
+        // Null, or a shape from an older release: both mean nobody has
+        // established this, which is what `Unknown` says. Same reasoning as
+        // the diagnosis above — the next handshake writes a fresh answer.
+        docker: r
+            .get::<Option<serde_json::Value>, _>("docker")
+            .and_then(|v| serde_json::from_value(v).ok())
+            .unwrap_or_default(),
         // Answered by the fleet, which is the only thing that knows.
         reconnecting: false,
     })
@@ -1991,12 +2005,49 @@ mod tests {
         let host = db.ensure_host("localhost", Compute::Local).await.unwrap();
         assert_eq!(host.state, HostState::Unreachable);
 
-        db.mark_host_online(&host.id, "0.1.0", 8, 16384)
-            .await
-            .unwrap();
+        assert_eq!(
+            host.docker.status,
+            ft_core::DockerStatus::Unknown,
+            "nobody has asked it anything yet"
+        );
+
+        db.mark_host_online(
+            &host.id,
+            "0.1.0",
+            8,
+            16384,
+            &ft_core::DockerState::running("27.0.3"),
+        )
+        .await
+        .unwrap();
         let online = db.host_by_name("localhost").await.unwrap().unwrap();
         assert_eq!(online.state, HostState::Online);
         assert_eq!(online.cpus, Some(8));
+
+        // What the worker said about its machine survives the round trip, so
+        // a screen listing hosts can say which of them can run a stack.
+        assert_eq!(online.docker, ft_core::DockerState::running("27.0.3"));
+        assert!(online.docker.usable());
+    }
+
+    /// The answer is re-read every handshake, so a machine that gained or lost
+    /// a daemon since last time is described as it is now rather than as it was.
+    #[tokio::test]
+    async fn what_a_host_can_run_is_replaced_rather_than_accumulated() {
+        let (db, _owner) = db_with_user().await;
+        let host = db.ensure_host("localhost", Compute::Local).await.unwrap();
+
+        for state in [
+            ft_core::DockerState::absent(),
+            ft_core::DockerState::running("27.0.3"),
+            ft_core::DockerState::stopped("it died"),
+        ] {
+            db.mark_host_online(&host.id, "0.1.0", 1, 1024, &state)
+                .await
+                .unwrap();
+            let back = db.host_by_id(&host.id).await.unwrap().unwrap();
+            assert_eq!(back.docker, state);
+        }
     }
 
     /// A failure that nobody was watching still has to be readable later.
@@ -2037,7 +2088,7 @@ mod tests {
         .await
         .unwrap();
 
-        db.mark_host_online(&host.id, "0.1.0", 4, 8192)
+        db.mark_host_online(&host.id, "0.1.0", 4, 8192, &ft_core::DockerState::absent())
             .await
             .unwrap();
 

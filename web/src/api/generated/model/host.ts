@@ -3,10 +3,11 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.18.0
+ * OpenAPI spec version: 0.23.0
  */
 import type { Compute } from './compute';
 import type { Diagnosis } from './diagnosis';
+import type { DockerState } from './dockerState';
 import type { HostId } from './hostId';
 import type { HostState } from './hostState';
 
@@ -21,6 +22,15 @@ export interface Host {
      */
   cpus?: number | null;
   diagnosis?: null | Diagnosis;
+  /**
+     * Whether a session on this machine can run containers.
+     *
+     * Reported by the worker at every handshake rather than inferred from the
+     * kind of host: the answer is a fact about the machine the worker is on,
+     * and a container, a server and a server-with-a-container each arrive at
+     * it differently.
+     */
+  docker?: DockerState;
   /**
      * Finishing what it has, taking nothing new. Separate from being
      * unreachable: a draining host is still online and still working.

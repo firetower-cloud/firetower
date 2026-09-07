@@ -716,6 +716,17 @@ pub enum ToServer {
         arch: String,
         cpus: u32,
         memory_mb: u64,
+        /// Whether a session on this machine can run containers.
+        ///
+        /// **No protocol bump.** `#[serde(default)]` and a `DockerState` whose
+        /// default is `Unknown`, so a worker from before this omits the field
+        /// and the control plane reads it as "not established" — which is what
+        /// it is. Reading the silence of an old worker as "no Docker" would be
+        /// a claim with no evidence behind it, and bumping the version would
+        /// take every worker in a fleet offline until it was upgraded, for a
+        /// field nothing depends on to work.
+        #[serde(default)]
+        docker: ft_core::DockerState,
     },
     /// Something happened. The worker recorded it before sending it.
     Event {
@@ -994,9 +1005,7 @@ mod tests {
 
     #[test]
     fn an_answer_is_read_from_either_worker() {
-        let new = Described::read(
-            r##"{"title":"feat: x","body":"Because.","issues":["#18"]}"##,
-        );
+        let new = Described::read(r##"{"title":"feat: x","body":"Because.","issues":["#18"]}"##);
         assert_eq!(new.title, "feat: x");
         assert_eq!(new.issues, vec!["#18"]);
 

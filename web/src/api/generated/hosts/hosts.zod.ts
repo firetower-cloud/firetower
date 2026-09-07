@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.18.0
+ * OpenAPI spec version: 0.23.0
  */
 import * as zod from 'zod';
 
@@ -50,6 +50,10 @@ export const ListHostsResponseItem = zod.object({
   "remedy": zod.string().nullish().describe('What to run, when there is something to run. Shown with a copy button,\nso it must be the whole command and nothing else.'),
   "summary": zod.string().describe('One sentence, written for whoever is looking at the screen.')
 }).describe('Why it isn\'t answering, when it isn\'t. Cleared as soon as it does.')]).optional(),
+  "docker": zod.object({
+  "detail": zod.string().nullish().describe('The daemon\'s version where it is running, and why it isn\'t where it\nisn\'t. Absent when there is nothing to add: a machine with no Docker on\nit has said everything there is to say.'),
+  "status": zod.enum(['Unknown', 'Running', 'Stopped', 'Absent']).describe('The four answers to \"can a session here run a container?\".\n\nTwo kinds of no, because they have different fixes and an agent told only\n\"no\" keeps trying. The distinction that matters is between a machine where\nDocker was never meant to be and one where it was and did not start.')
+}).optional().describe('Whether a session on this machine can run containers.\n\nReported by the worker at every handshake rather than inferred from the\nkind of host: the answer is a fact about the machine the worker is on,\nand a container, a server and a server-with-a-container each arrive at\nit differently.'),
   "drained": zod.boolean().optional().describe('Finishing what it has, taking nothing new. Separate from being\nunreachable: a draining host is still online and still working.'),
   "id": zod.string().describe('Identifies a host.'),
   "memoryMb": zod.int().min(listHostsResponseMemoryMbMin).nullish(),
@@ -147,6 +151,10 @@ export const CreateHostResponse = zod.object({
   "remedy": zod.string().nullish().describe('What to run, when there is something to run. Shown with a copy button,\nso it must be the whole command and nothing else.'),
   "summary": zod.string().describe('One sentence, written for whoever is looking at the screen.')
 }).describe('Why it isn\'t answering, when it isn\'t. Cleared as soon as it does.')]).optional(),
+  "docker": zod.object({
+  "detail": zod.string().nullish().describe('The daemon\'s version where it is running, and why it isn\'t where it\nisn\'t. Absent when there is nothing to add: a machine with no Docker on\nit has said everything there is to say.'),
+  "status": zod.enum(['Unknown', 'Running', 'Stopped', 'Absent']).describe('The four answers to \"can a session here run a container?\".\n\nTwo kinds of no, because they have different fixes and an agent told only\n\"no\" keeps trying. The distinction that matters is between a machine where\nDocker was never meant to be and one where it was and did not start.')
+}).optional().describe('Whether a session on this machine can run containers.\n\nReported by the worker at every handshake rather than inferred from the\nkind of host: the answer is a fact about the machine the worker is on,\nand a container, a server and a server-with-a-container each arrive at\nit differently.'),
   "drained": zod.boolean().optional().describe('Finishing what it has, taking nothing new. Separate from being\nunreachable: a draining host is still online and still working.'),
   "id": zod.string().describe('Identifies a host.'),
   "memoryMb": zod.int().min(createHostResponseMemoryMbMin).nullish(),
@@ -285,6 +293,10 @@ export const RenameHostResponse = zod.object({
   "remedy": zod.string().nullish().describe('What to run, when there is something to run. Shown with a copy button,\nso it must be the whole command and nothing else.'),
   "summary": zod.string().describe('One sentence, written for whoever is looking at the screen.')
 }).describe('Why it isn\'t answering, when it isn\'t. Cleared as soon as it does.')]).optional(),
+  "docker": zod.object({
+  "detail": zod.string().nullish().describe('The daemon\'s version where it is running, and why it isn\'t where it\nisn\'t. Absent when there is nothing to add: a machine with no Docker on\nit has said everything there is to say.'),
+  "status": zod.enum(['Unknown', 'Running', 'Stopped', 'Absent']).describe('The four answers to \"can a session here run a container?\".\n\nTwo kinds of no, because they have different fixes and an agent told only\n\"no\" keeps trying. The distinction that matters is between a machine where\nDocker was never meant to be and one where it was and did not start.')
+}).optional().describe('Whether a session on this machine can run containers.\n\nReported by the worker at every handshake rather than inferred from the\nkind of host: the answer is a fact about the machine the worker is on,\nand a container, a server and a server-with-a-container each arrive at\nit differently.'),
   "drained": zod.boolean().optional().describe('Finishing what it has, taking nothing new. Separate from being\nunreachable: a draining host is still online and still working.'),
   "id": zod.string().describe('Identifies a host.'),
   "memoryMb": zod.int().min(renameHostResponseMemoryMbMin).nullish(),

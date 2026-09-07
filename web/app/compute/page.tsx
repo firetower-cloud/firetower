@@ -244,6 +244,27 @@ function HostRow({
         <span className="font-mono text-meta text-dim">
           {agents.length > 0 ? agents.join(", ") : <span className="text-mute">none installed</span>}
         </span>
+
+        {/* Whether a session here can bring a compose stack up. Shown beside
+            the worker rather than only in a session, because it decides which
+            machine a piece of work should go to — and finding out in the
+            session is finding out too late. Hidden while unknown: a host
+            nobody has reached yet has nothing to say, and "unknown" on every
+            offline row is noise. */}
+        {host.docker && host.docker.status !== "Unknown" && (
+          <>
+            <span className="eyebrow">Docker</span>
+            <span className="font-mono text-meta text-dim">
+              {host.docker.status === "Running" ? (
+                host.docker.detail
+              ) : (
+                <span className="text-mute">
+                  {host.docker.status === "Absent" ? "not installed" : "not running"}
+                </span>
+              )}
+            </span>
+          </>
+        )}
       </div>
 
       {/* Until now this page showed a grey dot and "not connected" for a

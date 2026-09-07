@@ -395,6 +395,7 @@ pub mod testing {
                                         arch: "test".into(),
                                         cpus: 1,
                                         memory_mb: 0,
+                                        docker: ft_core::DockerState::default(),
                                     }).await;
                                 }
                                 ToWorker::Ping => { let _ = out.send(ToServer::Pong).await; }
@@ -458,7 +459,9 @@ mod tests {
             .await
             .unwrap();
         let fleet = Fleet::new(db);
-        fleet.supervise(host.id.clone(), super::testing::worker()).await;
+        fleet
+            .supervise(host.id.clone(), super::testing::worker())
+            .await;
         (fleet, host.id)
     }
 
@@ -648,7 +651,10 @@ mod tests {
         // The listener goes with it, so the number is free again.
         let freed = tokio::time::timeout(std::time::Duration::from_secs(5), async {
             loop {
-                if TcpListener::bind(("127.0.0.1", forwarded.local)).await.is_ok() {
+                if TcpListener::bind(("127.0.0.1", forwarded.local))
+                    .await
+                    .is_ok()
+                {
                     return;
                 }
                 tokio::task::yield_now().await;

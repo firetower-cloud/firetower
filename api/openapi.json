@@ -10,7 +10,7 @@
       "name": "AGPL-3.0-only",
       "identifier": "AGPL-3.0-only"
     },
-    "version": "0.18.0"
+    "version": "0.23.0"
   },
   "paths": {
     "/api/v1/agents": {
@@ -867,7 +867,7 @@
           "providers"
         ],
         "summary": "Start an authorization and begin waiting for it to be approved.",
-        "description": "Returns immediately with the code to show. The waiting happens here rather\nthan in the browser so that closing the tab doesn't abandon it.",
+        "description": "Returns immediately with the code to show. The waiting happens here rather\nthan in the browser so that closing the tab doesn't abandon it.\n\nAsked again by somebody already connected, and deliberately so: the host's\napproval screen is where organizations are granted, and it is shown once\nper authorization. Somebody who skipped an organization the first time has\nnowhere else to go. Nothing is given up by trying — the vault is written\nonly where the poll below approves, so a re-authorization that is abandoned\nor declined leaves the token that is already there untouched, and the\ninsert at the end replaces any earlier attempt, whose `Drop` stops its\npoller.",
         "operationId": "authorize_provider",
         "parameters": [
           {
@@ -4718,6 +4718,35 @@
           }
         }
       },
+      "DockerState": {
+        "type": "object",
+        "description": "Whether a session on a host can run containers, and why not when it can't.\n\nA struct holding a small enum, rather than an enum carrying its own data —\nthe same shape as [`Diagnosis`] and [`Cause`] beside it, and for the same\nreason. This crosses the API into a generated TypeScript client, and an\nobject with a string discriminant and an optional detail is a shape every\nstep of that pipeline represents the same way. A Rust enum with payloads\nis the tidier type and the one whose JSON depends on which serde attribute\nsomebody reached for.",
+        "required": [
+          "status"
+        ],
+        "properties": {
+          "detail": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The daemon's version where it is running, and why it isn't where it\nisn't. Absent when there is nothing to add: a machine with no Docker on\nit has said everything there is to say."
+          },
+          "status": {
+            "$ref": "#/components/schemas/DockerStatus"
+          }
+        }
+      },
+      "DockerStatus": {
+        "type": "string",
+        "description": "The four answers to \"can a session here run a container?\".\n\nTwo kinds of no, because they have different fixes and an agent told only\n\"no\" keeps trying. The distinction that matters is between a machine where\nDocker was never meant to be and one where it was and did not start.",
+        "enum": [
+          "Unknown",
+          "Running",
+          "Stopped",
+          "Absent"
+        ]
+      },
       "Done": {
         "type": "object",
         "required": [
@@ -5264,6 +5293,10 @@
                 "description": "Why it isn't answering, when it isn't. Cleared as soon as it does."
               }
             ]
+          },
+          "docker": {
+            "$ref": "#/components/schemas/DockerState",
+            "description": "Whether a session on this machine can run containers.\n\nReported by the worker at every handshake rather than inferred from the\nkind of host: the answer is a fact about the machine the worker is on,\nand a container, a server and a server-with-a-container each arrive at\nit differently."
           },
           "drained": {
             "type": "boolean",
@@ -5894,8 +5927,7 @@
         "type": "object",
         "required": [
           "title",
-          "body",
-          "issues"
+          "body"
         ],
         "properties": {
           "body": {
