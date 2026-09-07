@@ -118,7 +118,19 @@ impl Tmux {
         // `-e` stays as well: it is what a window opened later inherits, and
         // somebody attaching to poke around should find the same agent the
         // session ran.
-        tmux.arg(format!("{} {}", env_prefix(env), command));
+        //
+        // The cgroup join goes first of all, ahead of the environment and the
+        // command, because it has to happen while this pane is still a shell
+        // and before it becomes the agent. Every call into here starts a pane
+        // in a workspace's directory, which is the one thing that says which
+        // workspace it belongs to — see `cgroup::join_command` for why the
+        // pane has to move itself rather than be moved.
+        tmux.arg(format!(
+            "{} {} {}",
+            crate::cgroup::join_command(cwd),
+            env_prefix(env),
+            command
+        ));
 
         let output = tmux.output().await.context("starting tmux")?;
         if !output.status.success() {

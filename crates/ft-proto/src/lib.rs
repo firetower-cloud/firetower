@@ -8,7 +8,7 @@
 //! Encoding is newline-delimited JSON: debuggable with `tee`, and behind
 //! [`Codec`] so a compact binary format is a later swap rather than a rewrite.
 
-use ft_core::{Agent, AgentPresence, EventKind, SessionId, WorkspaceSize};
+use ft_core::{Agent, AgentPresence, EventKind, SessionId, Share, WorkspaceSize};
 use serde::{Deserialize, Serialize};
 
 /// Bumped when a frame changes shape incompatibly. Checked during the handshake.
@@ -175,6 +175,21 @@ pub enum ProbeFailure {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "frame")]
 pub enum ToWorker {
+    /// Change what a running workspace competes with.
+    ///
+    /// Applied to the cgroup as it stands, with nothing restarted: `cpu.weight`
+    /// is read by the scheduler at the next contended moment.
+    ///
+    /// A worker too old to know this frame ignores it and keeps the share the
+    /// workspace launched with — which is the stored one, so the change is
+    /// never lost, only deferred to the next launch.
+    ///
+    /// Named by a session and resolved to its workspace on the worker: a place
+    /// is what holds the cgroup, and every agent in it shares one.
+    SetShare {
+        session_id: SessionId,
+        share: Share,
+    },
     /// Always first.
     Hello {
         protocol: u32,
@@ -507,6 +522,12 @@ pub struct CreateWorkspace {
     pub prompt: String,
     pub agent: Agent,
     pub size: WorkspaceSize,
+    /// How this workspace competes when the machine is busy.
+    ///
+    /// Defaulted, because a control plane that predates the choice sends no
+    /// field and every workspace taking its turn is what used to happen.
+    #[serde(default)]
+    pub share: Share,
     /// Injected into the workspace environment. Secrets are already resolved.
     ///
     /// Everything every checkout brings, plus the agent's own. What belongs in
@@ -566,6 +587,10 @@ pub struct StartAgent {
     pub base: Option<String>,
     #[serde(default)]
     pub size: WorkspaceSize,
+    /// The workspace's share, repeated for the same reason its size is: this
+    /// agent is joining a place that already has one.
+    #[serde(default)]
+    pub share: Share,
     pub env: Vec<(String, String)>,
     #[serde(default)]
     pub agent_home: Vec<(String, String)>,
@@ -727,6 +752,25 @@ pub enum ToServer {
         /// field nothing depends on to work.
         #[serde(default)]
         docker: ft_core::DockerState,
+    },
+    /// What this machine has, and what each workspace on it is taking.
+    ///
+    /// Pushed on a timer rather than answered on request. The control plane has
+    /// no way to ask a worker a question and wait for it inside an HTTP
+    /// handler, and a `/sessions` that blocked on a round trip to a machine
+    /// over a possibly-slow link would be a list that hangs when one host is
+    /// unwell.
+    ///
+    /// **No protocol bump.** A worker too old to send this simply never does,
+    /// and the control plane holds `None` for it — which the interface draws as
+    /// no meters rather than as empty ones. An old worker keeps working.
+    Usage {
+        capacity: ft_core::Capacity,
+        /// One entry per workspace, named by any one session in it.
+        ///
+        /// The control plane spreads it back across that workspace's sessions;
+        /// see `live_workspaces` for why it is not sent per session.
+        workspaces: Vec<(SessionId, ft_core::WorkspaceUsage)>,
     },
     /// Something happened. The worker recorded it before sending it.
     Event {
@@ -936,6 +980,7 @@ mod tests {
             branch: Some("agent/auth-refactor".into()),
             base: Some("main".into()),
             size: WorkspaceSize::Medium,
+            share: Default::default(),
             env: vec![("KEY".into(), "value".into())],
             agent_home: Vec::new(),
         }));

@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.23.0
+ * OpenAPI spec version: 0.25.0
  */
 import {
   useMutation,
@@ -59,6 +59,7 @@ import type {
   Session,
   SessionDiffParams,
   SessionPtyParams,
+  SetShare,
   Turn
 } from '../model';
 
@@ -2616,6 +2617,84 @@ export const useAddRepo = <TError = ApiError,
         TContext
       > => {
       return useMutation(getAddRepoMutationOptions(options), queryClient);
+    }
+    export const getSetShareUrl = (id: string,) => {
+
+
+
+
+  return `/api/v1/sessions/${id}/share`
+}
+
+/**
+ * Takes effect on a running workspace with nothing restarted: `cpu.weight` is
+ * read by the scheduler at the next contended moment, so this is a knob
+ * somebody can move while watching what it does.
+ *
+ * Nothing happens on a machine nobody else is working on, which is not a
+ * failure and is why this reports no error for it — a share only decides
+ * between workspaces that are both asking at once.
+ * @summary Change how a workspace competes for its machine.
+ */
+export const setShare = async (id: string,
+    setShareBody: SetShare, options?: Parameters<typeof http>[1]): Promise<Session> => {
+
+  return http<Session>(getSetShareUrl(id),
+  {
+    ...options,
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(setShareBody)
+  }
+);}
+
+
+
+
+
+export const getSetShareMutationOptions = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setShare>>, TError,{id: string;data: SetShare}, TContext>, request?: SecondParameter<typeof http>}
+): UseMutationOptions<Awaited<ReturnType<typeof setShare>>, TError,{id: string;data: SetShare}, TContext> => {
+
+const mutationKey = ['setShare'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof setShare>>, {id: string;data: SetShare}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  setShare(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SetShareMutationResult = NonNullable<Awaited<ReturnType<typeof setShare>>>
+    export type SetShareMutationBody = SetShare
+    export type SetShareMutationError = ApiError
+
+    /**
+ * @summary Change how a workspace competes for its machine.
+ */
+export const useSetShare = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setShare>>, TError,{id: string;data: SetShare}, TContext>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof setShare>>,
+        TError,
+        {id: string;data: SetShare},
+        TContext
+      > => {
+      return useMutation(getSetShareMutationOptions(options), queryClient);
     }
     export const getStopSessionUrl = (id: string,) => {
 

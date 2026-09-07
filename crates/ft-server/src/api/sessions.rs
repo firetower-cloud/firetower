@@ -51,12 +51,19 @@ pub(super) async fn list_sessions(
     Extension(principal): Extension<Principal>,
     Query(page): Query<Page>,
 ) -> ApiResult<Json<Vec<Session>>> {
-    Ok(Json(
-        state
-            .db
-            .sessions_page(owner(&principal)?, page.limit, page.before.as_deref())
-            .await?,
-    ))
+    let mut sessions = state
+        .db
+        .sessions_page(owner(&principal)?, page.limit, page.before.as_deref())
+        .await?;
+
+    // What each one is taking, from what its host last said. Filled in here
+    // rather than stored, for the reason `Host::capacity` is — see
+    // `fleet::usage_of`.
+    for session in &mut sessions {
+        session.usage = state.fleet.usage_of(&session.id).await;
+    }
+
+    Ok(Json(sessions))
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -529,6 +536,7 @@ pub(super) async fn create_session(
             checkouts.first().map(|c| c.base.as_str()),
             &agent_name,
             req.size,
+            req.share,
             &steps,
             // What it is called, and what it is: the branch without the
             // `agent/` that every one of them carries, which would be four
@@ -656,6 +664,7 @@ pub(super) async fn create_session(
                 prompt: prompt.to_string(),
                 agent: req.agent,
                 size: req.size,
+                share: req.share,
                 env,
                 agent_home,
             })),
@@ -795,6 +804,7 @@ pub(crate) async fn relaunch(
                 branch: session.branch.clone(),
                 base: session.base.clone(),
                 size: session.size,
+                share: session.share,
                 env,
                 agent_home,
             })),
@@ -957,6 +967,7 @@ async fn start_another_agent(
                 branch: place.branch.clone(),
                 base: place.base.clone(),
                 size: place.size,
+                share: place.share,
                 env,
                 agent_home,
             })),
@@ -1404,6 +1415,74 @@ pub(super) async fn rename_session(
 #[derive(Debug, serde::Deserialize, utoipa::ToSchema)]
 pub struct RenameSession {
     pub name: String,
+}
+
+/// Change how a workspace competes for its machine.
+///
+/// Takes effect on a running workspace with nothing restarted: `cpu.weight` is
+/// read by the scheduler at the next contended moment, so this is a knob
+/// somebody can move while watching what it does.
+///
+/// Nothing happens on a machine nobody else is working on, which is not a
+/// failure and is why this reports no error for it — a share only decides
+/// between workspaces that are both asking at once.
+#[utoipa::path(
+    patch, path = "/api/v1/sessions/{id}/share", tag = "sessions",
+    params(("id" = String, Path, description = "Session id")),
+    request_body = SetShare,
+    responses(
+        (status = 200, body = Session),
+        (status = 404, body = ApiError),
+    ),
+)]
+pub(super) async fn set_share(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Path(id): Path<String>,
+    Json(req): Json<SetShare>,
+) -> ApiResult<Json<Session>> {
+    let id = SessionId::from_stored(id);
+    let owner = owner(&principal)?;
+
+    // Checked first, so somebody else's workspace cannot be re-weighted by
+    // guessing an id.
+    let session = state
+        .db
+        .session_of(owner, &id)
+        .await?
+        .ok_or_else(|| ApiError::not_found("session"))?;
+
+    // The workspace's, not this session's: every agent in a place shares one
+    // cgroup, so the choice belongs to the place and applying it to one agent
+    // would be applying it to all of them anyway.
+    state.db.set_workspace_share(&id, req.share).await?;
+
+    // Told to the worker, which is where the cgroup is. A host that is away
+    // gets it at its next launch from the stored value instead — the database
+    // is what the worker reads a workspace's share from, so nothing is lost by
+    // the message not arriving.
+    let _ = state
+        .fleet
+        .send(
+            &session.host_id,
+            ToWorker::SetShare {
+                session_id: id.clone(),
+                share: req.share,
+            },
+        )
+        .await;
+
+    state
+        .db
+        .session_of(owner, &id)
+        .await?
+        .map(Json)
+        .ok_or_else(|| ApiError::not_found("session"))
+}
+
+#[derive(Debug, serde::Deserialize, utoipa::ToSchema)]
+pub struct SetShare {
+    pub share: ft_core::Share,
 }
 
 /// Stop the agent. The workspace and its branch stay.

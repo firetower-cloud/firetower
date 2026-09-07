@@ -3,17 +3,19 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.23.0
+ * OpenAPI spec version: 0.25.0
  */
 import type { Agent } from './agent';
 import type { Checkout } from './checkout';
 import type { HostId } from './hostId';
 import type { SessionId } from './sessionId';
 import type { SessionStatus } from './sessionStatus';
+import type { Share } from './share';
 import type { Step } from './step';
 import type { UserId } from './userId';
 import type { WorkspaceId } from './workspaceId';
 import type { WorkspaceSize } from './workspaceSize';
+import type { WorkspaceUsage } from './workspaceUsage';
 
 /**
  * A line of work with a conversation attached and a branch at the end.
@@ -113,6 +115,7 @@ export interface Session {
      * @nullable
      */
   repo?: string | null;
+  share?: Share;
   size: WorkspaceSize;
   status: SessionStatus;
   /**
@@ -138,5 +141,6 @@ export interface Session {
   taskUrl?: string | null;
   title: string;
   updatedAt: string;
+  usage?: null | WorkspaceUsage;
   workspaceId?: null | WorkspaceId;
 }

@@ -18,7 +18,7 @@ pub mod turn;
 
 pub use ids::{HostId, OrgId, RepoId, SessionId, UserId, WorkspaceId};
 pub use session::{
-    sanitize_branch, slugify, title_from, workspace_name, NewSession, Session, Workspace,
+    sanitize_branch, slugify, title_from, workspace_name, NewSession, Session, Share, Workspace,
     WorkspaceSize,
 };
 pub use status::{SessionStatus, TransitionError};
@@ -46,6 +46,25 @@ pub const WORKER_ROOT_ENV: &str = "FIRETOWER_WORKER_ROOT";
 /// Any value but `off` leaves it on, because the useful configuration is the
 /// default one and a typo should not quietly remove a feature.
 pub const DOCKER_ENV: &str = "FIRETOWER_WORKER_DOCKER";
+
+/// How much memory a worker container may have, if an operator says.
+///
+/// Unset means unlimited, which is what a worker has always had and what a
+/// machine with one worker on it usually wants. The reason to set it is the
+/// machine, not the worker: without a limit the kernel's own out-of-memory
+/// killer chooses by size when a machine runs short, and the largest thing on a
+/// busy worker is frequently the agent rather than whatever ran away with the
+/// memory — so the session dies and the container that caused it does not.
+///
+/// A ceiling turns that into an ordinary cgroup kill inside the worker, where
+/// the workspace limits decide who goes. Worth leaving the machine a couple of
+/// gigabytes below its total: a host with nothing spare is a host nobody can
+/// ssh into to find out what happened.
+///
+/// Read by `ft_server::container` when it creates a worker, and passed to
+/// `docker run --memory`, so the value is whatever Docker accepts: `17g`,
+/// `2048m`.
+pub const WORKER_MEMORY_ENV: &str = "FIRETOWER_WORKER_MEMORY";
 
 /// Which agent runs inside a workspace.
 ///
@@ -610,6 +629,12 @@ pub struct Host {
     /// it differently.
     #[serde(default)]
     pub docker: DockerState,
+    /// What this machine has and what is being used of it.
+    ///
+    /// `None` from a worker too old to report it, which the interface draws as
+    /// no capacity block rather than as an empty one.
+    #[serde(default)]
+    pub capacity: Option<Capacity>,
     /// Whether we are still trying to reach it.
     ///
     /// A fact about the running control plane rather than about the host, so it
@@ -636,6 +661,88 @@ pub struct DockerState {
     /// it has said everything there is to say.
     #[serde(default)]
     pub detail: Option<String>,
+}
+
+/// What a machine has, and what of it is being used.
+///
+/// Reported by the worker rather than asked of the host record, for the same
+/// reason [`DockerState`] is: these are facts about the machine a worker is
+/// running on, and a container, a server and a server-with-a-container arrive
+/// at them differently. A worker in a container reports the container's
+/// ceiling where it has one, which is what its sessions actually get.
+///
+/// Megabytes throughout. Bytes would be exact and would also be a `u64` of
+/// digits nobody reads; the interface rounds to gigabytes anyway, and a
+/// megabyte is under a pixel of any meter drawn from this.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct Capacity {
+    /// What the machine has, or the ceiling the worker container was given.
+    pub memory_mb: u64,
+    pub memory_used_mb: u64,
+    /// Where the daemon keeps images, which on most workers is also the disk
+    /// the worker itself is on.
+    pub disk_total_mb: u64,
+    pub disk_used_mb: u64,
+    /// Of that, what Firetower is using: images its sessions pulled, the cache
+    /// their builds left, the containers they started.
+    ///
+    /// Separate from `disk_used_mb` because the difference is the whole of
+    /// whose mess it is. The machine's disk is the operator's business; this
+    /// part is ours, and it is the only part anything here offers to clear.
+    pub disk_firetower_mb: u64,
+    /// What clearing the build cache would give back.
+    ///
+    /// Rebuildable by definition, so this is the figure safe to offer without
+    /// qualification: it costs one slower build and nothing else.
+    ///
+    /// Deliberately not Docker's own `RECLAIMABLE`, which counts every image no
+    /// container happens to be running — on a daemon shared by every session on
+    /// a worker, that is every image the next session was about to use, and
+    /// offering it as free space would empty the cache the worker's volume
+    /// exists to keep.
+    pub disk_reclaimable_mb: u64,
+    /// Images no container is currently using.
+    ///
+    /// Docker's own reclaimable figure, kept apart from the safe one because
+    /// clearing it is a real choice: nothing is lost, but the next session
+    /// wanting postgres waits for the pull again.
+    pub disk_cached_images_mb: u64,
+}
+
+/// What one workspace is taking of its machine.
+///
+/// `WorkspaceUsage` rather than `Usage`: [`turn::Usage`] is what a model turn
+/// cost, both cross into one OpenAPI document, and two schemas of one name
+/// there means the second quietly becomes the first — which typed a session's
+/// memory as a count of tokens.
+///
+/// `None` on a session whose worker cannot divide its machine up — an old
+/// worker, a container created without `--privileged`, a host still on cgroup
+/// v1. Absent rather than zero, because "nothing is being measured" and
+/// "nothing is being used" are different things and a meter should not draw
+/// the first as the second.
+// No `Eq`: `cpu` is a rate and a float, and there is no sensible equality on
+// one. `PartialEq` is what the tests compare with.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceUsage {
+    pub memory_mb: u64,
+    /// The high-water mark since the workspace started.
+    ///
+    /// The number worth showing next to a ceiling: what a workspace is using
+    /// while its agent thinks says little, and the question behind "how much
+    /// does this need" is always about the peak.
+    pub memory_peak_mb: u64,
+    /// The ceiling, where there is one.
+    pub memory_max_mb: Option<u64>,
+    /// Cores in use, averaged over the interval between two reports.
+    pub cpu: f32,
+    /// How many times something in this workspace was killed for going over.
+    ///
+    /// Carried so a session can say so. Without it, a build that vanishes is a
+    /// mystery that reads as a crash in whatever was running.
+    pub oom_kills: u64,
 }
 
 /// The four answers to "can a session here run a container?".

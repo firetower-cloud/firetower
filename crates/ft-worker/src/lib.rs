@@ -53,6 +53,8 @@ pub mod approver;
 pub mod askpass;
 pub mod attach;
 pub mod attachments;
+pub mod capacity;
+pub mod cgroup;
 pub mod codex;
 pub mod describe;
 pub mod docker;
@@ -107,6 +109,13 @@ pub struct Worker {
 ///
 /// Anything that can produce more than this in one go has to run off the serve
 /// loop — see [`takes_a_while`].
+/// How often a worker says what its machine is doing.
+///
+/// Slow enough that `df` and `docker system df` cost nothing measurable, and
+/// fast enough that a meter follows a build starting. The numbers it carries
+/// are drawn as meters that move; they are not decisions anything waits on.
+const REPORT_EVERY: std::time::Duration = std::time::Duration::from_secs(5);
+
 const OUTBOUND: usize = 1024;
 
 /// One agent, and where to put it.
@@ -207,6 +216,21 @@ impl Worker {
         // wait for it rather than dropping a half-built workspace on the floor.
         let mut running = tokio::task::JoinSet::new();
 
+        // The last CPU reading for each workspace, so the next one can be a
+        // rate. A cgroup counts CPU as a total since it was made, and a total
+        // is not what anybody wants to see: two readings and the time between
+        // them are what turn it into cores in use.
+        //
+        // Here rather than on `self` because it belongs to this connection. A
+        // control plane that reconnects starts again from no history, and the
+        // first report after that carries no rate rather than a wrong one.
+        let mut cpu_seen: std::collections::HashMap<String, (u64, std::time::Instant)> =
+            std::collections::HashMap::new();
+
+        // Far enough in the past that the first tick reports rather than
+        // waiting five seconds to say anything at all.
+        let mut last_reported = std::time::Instant::now() - REPORT_EVERY;
+
         loop {
             tokio::select! {
                 // Bias towards draining output: a burst of terminal bytes
@@ -222,6 +246,18 @@ impl Worker {
                 _ = tokio::time::sleep(std::time::Duration::from_secs(1)) => {
                     if let Err(e) = self.forward_new_events(&out).await {
                         tracing::debug!("forwarding hook events: {e:#}");
+                    }
+
+                    // And what this machine is doing, rather less often.
+                    //
+                    // On the same tick because a second timer in this select
+                    // would be a second thing to keep in step with it, and this
+                    // is one comparison. Every five seconds is slow enough that
+                    // `df` and `docker system df` cost nothing measurable and
+                    // fast enough that a meter follows a build starting.
+                    if last_reported.elapsed() >= REPORT_EVERY {
+                        last_reported = std::time::Instant::now();
+                        self.report_usage(&out, &mut cpu_seen).await;
                     }
                 }
 
@@ -414,6 +450,32 @@ impl Worker {
                 out.send(ToServer::RemoteProbed { req, result }).await?;
             }
 
+            ToWorker::SetShare { session_id, share } => {
+                // Cheap and inline: two small writes to a cgroup file, with no
+                // process to start and nothing to wait for.
+                //
+                // Silent about a workspace it cannot find. The row is gone if
+                // the session ended between the control plane sending this and
+                // it arriving, and a session that has ended has no share left
+                // to change.
+                match self.store.workspace_path(&session_id).await {
+                    Ok(Some(path)) => {
+                        let path = std::path::PathBuf::from(path);
+                        let size = self
+                            .store
+                            .session_size(&session_id)
+                            .await
+                            .unwrap_or_default();
+                        crate::cgroup::apply(&path, crate::cgroup::Limits { share, size }).await;
+                        tracing::info!(session = %session_id, ?share, "workspace re-weighted");
+                    }
+                    Ok(None) => {
+                        tracing::debug!(session = %session_id, "no workspace to re-weight")
+                    }
+                    Err(e) => tracing::warn!(session = %session_id, "re-weighting: {e:#}"),
+                }
+            }
+
             ToWorker::StartAgent(spec) => {
                 let session_id = spec.session_id.clone();
                 if let Err(e) = self.start_agent(*spec, out).await {
@@ -529,6 +591,15 @@ impl Worker {
                     None
                 };
                 if let Some(workspace) = workspace.as_deref().map(std::path::Path::new) {
+                    // The accounting goes with the workspace it accounted for.
+                    //
+                    // Here rather than beside the Docker sweep because this is
+                    // the workspace's, not this agent's: `alone` is what put us
+                    // in this branch, so the last agent out is the one that
+                    // takes it away. A sibling still working keeps its cgroup
+                    // and the limits on it.
+                    crate::cgroup::remove(workspace, &session_id).await;
+
                     for c in self
                         .store
                         .checkouts_of(&session_id)
@@ -1680,6 +1751,29 @@ You are in the directory that holds them, not inside one of them.              P
             crate::docker::project(&id),
         ));
 
+        // What this workspace may take, and what it competes with when the
+        // machine is busy. The size is the one the control plane asked for,
+        // which a worker has always reported in `WorkspaceStarted` and never
+        // applied to anything.
+        //
+        // Before the pane starts, because the pane's first instruction is to
+        // put itself in this — see `cgroup::join_command`. A machine that
+        // cannot divide itself up says so once and runs the session anyway.
+        let limits = crate::cgroup::Limits {
+            share: spec.share,
+            size: spec.size,
+        };
+        if crate::cgroup::create(&path, limits).await {
+            // Read by the Docker shim, which passes it to the daemon as
+            // `--cgroup-parent`. Without it a container a session starts is a
+            // child of the daemon rather than of the workspace, and inherits
+            // none of this.
+            env.push((
+                crate::cgroup::CGROUP_PARENT_ENV.to_string(),
+                crate::cgroup::parent_arg(&path),
+            ));
+        }
+
         // The same directory the workspace's first agent uses, deliberately.
         // What lands there is one person's credential for one agent, so two
         // runs of theirs write the same bytes; giving the second its own copy
@@ -1822,6 +1916,29 @@ You are in the directory that holds them, not inside one of them.              P
             "COMPOSE_PROJECT_NAME".to_string(),
             crate::docker::project(&id),
         ));
+
+        // What this workspace may take, and what it competes with when the
+        // machine is busy. The size is the one the control plane asked for,
+        // which a worker has always reported in `WorkspaceStarted` and never
+        // applied to anything.
+        //
+        // Before the pane starts, because the pane's first instruction is to
+        // put itself in this — see `cgroup::join_command`. A machine that
+        // cannot divide itself up says so once and runs the session anyway.
+        let limits = crate::cgroup::Limits {
+            share: spec.share,
+            size: spec.size,
+        };
+        if crate::cgroup::create(&path, limits).await {
+            // Read by the Docker shim, which passes it to the daemon as
+            // `--cgroup-parent`. Without it a container a session starts is a
+            // child of the daemon rather than of the workspace, and inherits
+            // none of this.
+            env.push((
+                crate::cgroup::CGROUP_PARENT_ENV.to_string(),
+                crate::cgroup::parent_arg(&path),
+            ));
+        }
 
         // A directory of this session's own, for an agent that keeps its
         // credential in a file.
@@ -2344,6 +2461,83 @@ You are in the directory that holds them, not inside one of them.              P
     /// When no control plane is connected this never runs, and it does not
     /// need to: the rows stay in the log, and the next `Resume` collects them.
     /// That is the whole reason a hook writes to a file rather than to us.
+    /// Say what this machine has and what each workspace is taking of it.
+    ///
+    /// Best effort from end to end. A worker that cannot read a cgroup, cannot
+    /// reach its daemon, or whose control plane has gone quiet reports what it
+    /// has and drops the rest — none of which is a reason to disturb a session.
+    /// The interface draws a workspace with no reading as one with no meters,
+    /// which is honest: nothing is being measured there.
+    async fn report_usage(
+        &self,
+        out: &mpsc::Sender<ToServer>,
+        cpu_seen: &mut std::collections::HashMap<String, (u64, std::time::Instant)>,
+    ) {
+        let places = match self.store.live_workspaces().await {
+            Ok(places) => places,
+            Err(e) => {
+                tracing::debug!("listing workspaces to report: {e:#}");
+                return;
+            }
+        };
+
+        let mut workspaces = Vec::with_capacity(places.len());
+        for (session_id, path) in &places {
+            let path = std::path::Path::new(path);
+            let Some(raw) = crate::cgroup::usage(path).await else {
+                continue;
+            };
+
+            // A total becomes a rate only once there is something to compare it
+            // with, so the first reading after a connect reports no CPU rather
+            // than a number computed against zero — which would read as the
+            // workspace having used every core since the machine booted.
+            let now = std::time::Instant::now();
+            let key = crate::cgroup::name(path);
+            let cpu = match cpu_seen.insert(key, (raw.cpu_usec, now)) {
+                Some((was, then)) => {
+                    let elapsed = now.duration_since(then).as_micros() as f64;
+                    let spent = raw.cpu_usec.saturating_sub(was) as f64;
+                    if elapsed > 0.0 {
+                        (spent / elapsed) as f32
+                    } else {
+                        0.0
+                    }
+                }
+                None => 0.0,
+            };
+
+            workspaces.push((
+                session_id.clone(),
+                ft_core::WorkspaceUsage {
+                    memory_mb: raw.memory_current / 1024 / 1024,
+                    memory_peak_mb: raw.memory_peak / 1024 / 1024,
+                    memory_max_mb: raw.memory_max.map(|b| b / 1024 / 1024),
+                    cpu,
+                    oom_kills: raw.oom_kills,
+                },
+            ));
+        }
+
+        // Workspaces that have gone are dropped from the history, or a worker
+        // up for weeks would keep a reading per workspace it had ever seen.
+        let live: std::collections::HashSet<String> = places
+            .iter()
+            .map(|(_, p)| crate::cgroup::name(std::path::Path::new(p)))
+            .collect();
+        cpu_seen.retain(|name, _| live.contains(name));
+
+        let capacity = crate::capacity::read().await;
+        // The control plane is gone or not keeping up. Neither is worth a line
+        // in the log every five seconds, and the next tick tries again.
+        let _ = out
+            .send(ToServer::Usage {
+                capacity,
+                workspaces,
+            })
+            .await;
+    }
+
     async fn forward_new_events(&self, out: &mpsc::Sender<ToServer>) -> Result<()> {
         let mut forwarded = self.forwarded.lock().await;
 
@@ -3210,6 +3404,7 @@ mod tests {
             // anything that talks to a network or expects a subscription.
             agent: Agent::Shell,
             size: WorkspaceSize::Medium,
+            share: ft_core::Share::Equal,
             workspace: id.as_str().to_string(),
             env: vec![],
             agent_home: vec![],
@@ -3390,6 +3585,7 @@ mod tests {
                     prompt: "poke around".into(),
                     agent: Agent::Shell,
                     size: WorkspaceSize::Medium,
+                    share: ft_core::Share::Equal,
                     workspace: id.as_str().to_string(),
                     env: vec![],
                     agent_home: vec![],
@@ -3444,6 +3640,7 @@ mod tests {
                     prompt: String::new(),
                     agent: Agent::Shell,
                     size: WorkspaceSize::Medium,
+                    share: ft_core::Share::Equal,
                     workspace: first.as_str().to_string(),
                     env: vec![],
                     agent_home: vec![],
@@ -3475,6 +3672,7 @@ mod tests {
                     branch: None,
                     base: None,
                     size: WorkspaceSize::Medium,
+                    share: ft_core::Share::Equal,
                     env: vec![],
                     agent_home: vec![],
                 })),
@@ -3531,6 +3729,7 @@ mod tests {
                     prompt: String::new(),
                     agent: Agent::Shell,
                     size: WorkspaceSize::Medium,
+                    share: ft_core::Share::Equal,
                     workspace: first.as_str().to_string(),
                     env: vec![],
                     agent_home: vec![],
@@ -3561,6 +3760,7 @@ mod tests {
                     branch: None,
                     base: None,
                     size: WorkspaceSize::Medium,
+                    share: ft_core::Share::Equal,
                     env: vec![],
                     agent_home: vec![],
                 })),

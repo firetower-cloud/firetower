@@ -937,6 +937,18 @@ pub struct Fleet {
     /// The same events, read for a different purpose, and neither can stall
     /// the other.
     progress: Arc<RwLock<HashMap<String, Progress>>>,
+    /// What each host last said it has, and what each workspace is taking.
+    ///
+    /// In memory rather than in the database, for the reason `reconnecting` is
+    /// answered per request: these are facts about a machine right now, they
+    /// arrive every five seconds from every host, and writing them down would
+    /// be a row rewritten per host per tick forever to hold something that is
+    /// wrong the moment the process restarts. A control plane that has just
+    /// come up reports no usage until each worker's next tick, which is the
+    /// truth — it has not been told yet.
+    capacity: Arc<RwLock<HashMap<String, ft_core::Capacity>>>,
+    /// Keyed by session, spread from the workspace reading that covers it.
+    usage: Arc<RwLock<HashMap<String, ft_core::WorkspaceUsage>>>,
     /// How somebody is told a session stopped, when they asked to be.
     notify: crate::notify::Notifier,
     /// Questions each session is blocked on, until they are answered.
@@ -1025,6 +1037,8 @@ impl Fleet {
             conversations: Arc::new(RwLock::new(HashMap::new())),
             asked: Arc::new(RwLock::new(HashMap::new())),
             progress: Arc::new(RwLock::new(HashMap::new())),
+            capacity: Arc::new(RwLock::new(HashMap::new())),
+            usage: Arc::new(RwLock::new(HashMap::new())),
             notify: crate::notify::Notifier::from_env(),
             supervised: Arc::new(RwLock::new(HashMap::new())),
             vault: None,
@@ -1039,6 +1053,21 @@ impl Fleet {
     pub fn holding(mut self, vault: Arc<crate::vault::Vault>) -> Self {
         self.vault = Some(vault);
         self
+    }
+
+    /// What a host last said it has, if it has said.
+    pub async fn capacity_of(&self, host_id: &ft_core::HostId) -> Option<ft_core::Capacity> {
+        self.capacity.read().await.get(host_id.as_str()).copied()
+    }
+
+    /// What a session's workspace was last seen taking, if anything is
+    /// measuring it.
+    ///
+    /// `None` covers three cases that look the same from here and read the same
+    /// in the interface: a worker too old to report, a machine that cannot be
+    /// divided up, and a session whose first report has not arrived yet.
+    pub async fn usage_of(&self, session_id: &SessionId) -> Option<ft_core::WorkspaceUsage> {
+        self.usage.read().await.get(session_id.as_str()).copied()
     }
 
     pub fn subscribe(&self) -> broadcast::Receiver<Event> {
@@ -1525,6 +1554,8 @@ impl Fleet {
         let conversations = self.conversations.clone();
         let asked = self.asked.clone();
         let progress = self.progress.clone();
+        let capacity = self.capacity.clone();
+        let usage = self.usage.clone();
         let notify = self.notify.clone();
         let describing = self.clone();
         // For the frames a line makes us want to send back — an agent that has
@@ -1582,6 +1613,27 @@ impl Fleet {
                             last_heard = std::time::Instant::now();
                         }
                         match inbound {
+                        Ok(ToServer::Usage { capacity: said, workspaces }) => {
+                            capacity.write().await.insert(host_id.to_string(), said);
+
+                            // One reading covers a workspace, and a workspace
+                            // holds any number of agents — so it is spread
+                            // across the sessions in it rather than held
+                            // against the one that happened to be named. Two
+                            // agents in one directory each show what the place
+                            // is using, which is the truth: they share it.
+                            let mut writing = usage.write().await;
+                            for (named, reading) in workspaces {
+                                let siblings = db
+                                    .sessions_in_workspace_of(&named)
+                                    .await
+                                    .unwrap_or_else(|_| vec![named.clone()]);
+                                for id in siblings {
+                                    writing.insert(id.to_string(), reading);
+                                }
+                            }
+                        }
+
                         Ok(ToServer::Event { seq, session_id, kind, at }) => {
                             if let Err(e) = db.record_event(&host_id, seq, &session_id, &kind, at).await {
                                 tracing::error!("recording event: {e:#}");
