@@ -88,6 +88,23 @@
 	# be resolved.
 	tls {
 		dns {$DNS_PROVIDER} {env.DNS_API_TOKEN}
+
+		# Some providers serve a record minutes after their API has accepted
+		# it — GoDaddy and Namecheap among them. Caddy asks Let's Encrypt to
+		# validate within seconds of writing it, so the challenge fails with
+		# `No TXT record found` for a record that was written successfully,
+		# and the failure reads like a bad token or the wrong zone. Uncomment
+		# these three if that happens, and the wait becomes explicit.
+		#
+		# propagation_delay 2m
+		# propagation_timeout 10m
+		#
+		# The unit is not optional. A bare `600` is not a duration, and Caddy
+		# refuses the whole config rather than that one line — which takes the
+		# proxy down instead of degrading it. 600s is GoDaddy's minimum, and
+		# what it silently coerces a shorter TTL to anyway.
+		#
+		# dns_ttl 600s
 	}
 
 	# Bring your own certificate instead — for a corporate CA, a provider with
