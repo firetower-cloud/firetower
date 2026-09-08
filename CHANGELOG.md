@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.27.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.26.1...firetower-v0.27.0) (2026-09-08)
+
+
+### Features
+
+* automatic certificates for a private name, via DNS-01 ([1a13602](https://github.com/firetower-cloud/firetower/commit/1a13602df3ff3502215cc90deec3f41835df2e51))
+* obtain and renew the certificate over DNS-01 ([bfab182](https://github.com/firetower-cloud/firetower/commit/bfab18250fc0bd2abb7bd5509d693b0e57d9fb21))
+
 ## [0.26.1](https://github.com/firetower-cloud/firetower/compare/firetower-v0.26.0...firetower-v0.26.1) (2026-09-07)
 
 
