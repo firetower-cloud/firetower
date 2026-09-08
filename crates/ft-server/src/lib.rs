@@ -538,12 +538,6 @@ async fn preview_first(
     }
 }
 
-/// What Caddy asks about before requesting a certificate.
-#[derive(serde::Deserialize)]
-struct PreviewAsked {
-    domain: String,
-}
-
 /// Liveness and readiness, deliberately outside the API contract.
 ///
 /// They are for whatever restarts containers, not for the interface, and
@@ -555,33 +549,6 @@ fn operational(state: AppState) -> axum::Router {
     axum::Router::new()
         // Up. Says nothing about whether it can work — that is the other one.
         .route("/healthz", get(|| async { "ok" }))
-        // Whether a hostname is a preview of ours.
-        //
-        // Whether a preview hostname is one we signed.
-        //
-        // **Nothing asks this today.** It was Caddy's `on_demand_tls ask`,
-        // back when a certificate was obtained per preview hostname — which
-        // also meant publishing each one to Certificate Transparency logs,
-        // where a hostname that *is* the credential for that preview does not
-        // belong. The deployment now terminates TLS with one wildcard
-        // certificate and mints nothing on demand.
-        //
-        // Kept because it costs nothing and is the right answer for any future
-        // issuer that needs to ask. Outside the gate because whoever asks has
-        // no credential — and needs none: this answers a question anybody
-        // could answer for themselves by trying the name.
-        .route(
-            "/preview-known",
-            get(
-                |axum::extract::State(state): axum::extract::State<AppState>,
-                 axum::extract::Query(asked): axum::extract::Query<PreviewAsked>| async move {
-                    match state.names.resolve(&asked.domain) {
-                        Some(_) => axum::http::StatusCode::OK,
-                        None => axum::http::StatusCode::NOT_FOUND,
-                    }
-                },
-            ),
-        )
         // Up *and* able to answer. The distinction matters to a load balancer:
         // a control plane whose database has gone should stop being sent
         // requests without being killed and restarted into the same failure.
