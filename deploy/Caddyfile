@@ -6,45 +6,60 @@
 # no proxy is running: the control plane serves its own interface, its own API
 # and its own preview routing.
 #
-# **Where the certificate comes from.** From you. Put two files in `./certs`
-# beside firetower.yml:
+# **Where the certificate comes from.** Caddy asks Let's Encrypt for it, and
+# renews it, without this machine being reachable from the internet.
 #
-#   certs/fullchain.pem
-#   certs/privkey.pem
+# That combination is the whole point, and it is why the challenge below is
+# the one it is. HTTP-01 and TLS-ALPN-01 — the usual two — work by having the
+# authority open a connection *to us*, and a machine Let's Encrypt can reach
+# is a machine anyone can reach. This one holds every git token, every agent
+# credential and the root key, so that is not a trade worth making for a
+# padlock.
 #
-# Firetower does not ask a certificate authority for one, and that is
-# deliberate. Getting a certificate automatically means answering a challenge
-# on a port the authority can reach, which means putting the control plane on
-# the internet — and the control plane holds every credential Firetower has.
-# Nobody should have to make that trade to get HTTPS on their own network.
+# DNS-01 proves control the other way round: Caddy writes a TXT record through
+# your DNS provider's API and the authority reads it back out of DNS. Every
+# connection Caddy makes is outbound. The name is free to resolve to 10.0.0.5
+# and answer nobody outside your network, which is what it should do.
 #
-# So mint it wherever your DNS credentials already live — your laptop, your
-# CI, your corporate PKI — and copy the result here. The credential never
-# touches this machine.
-#
-#     certbot certonly --dns-cloudflare \
-#       -d firetower.example.com -d '*.firetower.example.com'
-#
-# **It has to cover both names.** The wildcard is not optional: a session's
-# preview is served at `<session>-<port>-<signature>.{$DOMAIN}`, so a
-# certificate for the bare name alone gives you an interface that works and
-# previews that do not.
+# **It has to cover both names, and DNS-01 is also the only challenge that can
+# do that.** A session's preview is served at
+# `<session>-<port>-<signature>.{$DOMAIN}`, so a certificate for the bare name
+# alone gives you an interface that works and previews that do not.
 #
 # A wildcard is also the safer shape. Issuing one certificate per preview
 # hostname would publish every one of them to Certificate Transparency logs,
 # which are public and continuously scraped — and a preview hostname *is* the
 # credential for that preview. One wildcard names nothing.
 #
-# **Renewal is yours.** Nothing here watches the expiry date. `firetower
-# doctor` warns when the certificate has less than three weeks left; a
-# `certbot renew` deploy hook that copies the files in and runs
-# `docker compose -f firetower.yml restart caddy` is the usual arrangement.
+# **What you have to give it.** Two values in .env:
+#
+#   DNS_PROVIDER    which provider module to compile into Caddy — see
+#                   Caddyfile.dockerfile, and https://github.com/caddy-dns
+#   DNS_API_TOKEN   a credential for that provider's API
+#
+# Scope the token to editing records in the one zone this domain is in, if
+# your provider lets you say that. It lives in .env on this machine and Caddy
+# reads it from the environment at run time — it is never written into this
+# file, and it is not in `docker compose config` output the way a build
+# argument would be.
+#
+# **Renewal is Caddy's.** It renews at about two-thirds of the certificate's
+# life, unattended, and `firetower doctor` reports the expiry it can see. The
+# certificate and the ACME account key live in the `caddy_data` volume:
+# keeping that volume across upgrades is what stops every restart from being a
+# fresh issuance, and Let's Encrypt's duplicate-certificate limit is five a
+# week.
 #
 # **DNS.** Both names must resolve to this machine from wherever the browsers
 # are. A private address is the right answer and a public one is usually not:
 #
 #   firetower.example.com     A   10.0.0.5
 #   *.firetower.example.com   A   10.0.0.5
+#
+# The wildcard record is what previews resolve through. The wildcard
+# *certificate* is a separate thing and comes from the block below — having
+# one without the other gives you previews that resolve and do not verify, or
+# verify and do not resolve.
 #
 # What this file does not need, and would be wrong to add:
 #
@@ -57,9 +72,38 @@
 #   * a separate site block for previews. Firetower routes those itself, on
 #     the `Host` header, before anything else it does. Caddy's job is to
 #     terminate TLS for both names and pass everything through.
+#   * `on_demand_tls`. It is what this replaces. A certificate per preview
+#     hostname is the Certificate Transparency problem described above.
+{
+	# Where Let's Encrypt writes about an expiry Caddy somehow did not handle.
+	# Optional, and quoted so that leaving it empty is not a parse error.
+	email "{$ACME_EMAIL}"
+}
 
 {$DOMAIN}, *.{$DOMAIN} {
-	tls /certs/fullchain.pem /certs/privkey.pem
+	# DNS_PROVIDER is substituted before this file is parsed, because Caddy has
+	# to resolve the module by name at that point — it is the module compiled
+	# in by Caddyfile.dockerfile, and the two must agree. DNS_API_TOKEN is read
+	# from the environment at run time instead, which is where a secret should
+	# be resolved.
+	tls {
+		dns {$DNS_PROVIDER} {env.DNS_API_TOKEN}
+	}
+
+	# Bring your own certificate instead — for a corporate CA, a provider with
+	# no Caddy module, or a machine that cannot reach a Go module proxy to
+	# build one. Set DNS_PROVIDER=none in .env, comment out the three-line
+	# `tls` block above, uncomment the one below, and put fullchain.pem and
+	# privkey.pem in ./certs beside firetower.yml. Renewal is yours again if
+	# you do.
+	#
+	#     certbot certonly --dns-cloudflare \
+	#       -d firetower.example.com -d '*.firetower.example.com'
+	#
+	# Edits here survive `firetower upgrade`, which rewrites firetower.yml and
+	# leaves this file alone.
+	#
+	# tls /certs/fullchain.pem /certs/privkey.pem
 
 	reverse_proxy firetower:4400
 }

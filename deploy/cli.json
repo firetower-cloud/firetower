@@ -1,4 +1,4 @@
 {
-  "minimumCli": "0.6.0",
-  "reason": "this release re-purposes HTTP_PORT — it was Caddy's host port and is now the control plane's — and moves Caddy behind the `tls` profile. A CLI older than this carries the old value forward on upgrade, so the control plane inherits a port that described something else, and the Caddy it is replacing stays up holding it."
+  "minimumCli": "0.9.0",
+  "reason": "the `tls` profile now builds Caddy rather than pulling it, so that a DNS provider module is compiled in and the certificate can be obtained and renewed over DNS-01. An older CLI does not fetch Caddyfile.dockerfile, so `up` fails with a missing dockerfile; does not write DNS_PROVIDER, DNS_API_TOKEN or DNS_MODULE_REPLACE, so Caddy refuses to start; writes the single-token `dns` line for every provider, which is a parse error for the ones that take several values; and runs a bare `docker compose pull`, which exits non-zero on a service that is built rather than pulled."
 }
