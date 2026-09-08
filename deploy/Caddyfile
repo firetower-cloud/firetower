@@ -90,21 +90,22 @@
 		dns {$DNS_PROVIDER} {env.DNS_API_TOKEN}
 
 		# Some providers serve a record minutes after their API has accepted
-		# it — GoDaddy and Namecheap among them. Caddy asks Let's Encrypt to
-		# validate within seconds of writing it, so the challenge fails with
-		# `No TXT record found` for a record that was written successfully,
-		# and the failure reads like a bad token or the wrong zone. Uncomment
-		# these three if that happens, and the wait becomes explicit.
+		# it, and Caddy asks Let's Encrypt to validate within seconds — so the
+		# challenge fails with `No TXT record found` for a record that was
+		# written successfully, which reads like a bad token or the wrong zone.
 		#
-		# propagation_delay 2m
-		# propagation_timeout 10m
+		# `firetower install` writes the settings for that in here, above,
+		# for the providers known to need them. Against a provider not on that
+		# list, add them by hand:
 		#
-		# The unit is not optional. A bare `600` is not a duration, and Caddy
+		#     propagation_delay 2m
+		#     propagation_timeout 10m
+		#     dns_ttl 600s
+		#     resolvers 1.1.1.1 8.8.8.8
+		#
+		# `dns_ttl` takes a unit. A bare `600` is not a duration, and Caddy
 		# refuses the whole config rather than that one line — which takes the
-		# proxy down instead of degrading it. 600s is GoDaddy's minimum, and
-		# what it silently coerces a shorter TTL to anyway.
-		#
-		# dns_ttl 600s
+		# proxy down instead of degrading it.
 	}
 
 	# Bring your own certificate instead — for a corporate CA, a provider with
