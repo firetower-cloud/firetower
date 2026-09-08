@@ -28,7 +28,11 @@ And yes, it works with your own subscription (Claude Code, Codex, etc.).
 
 ## Demo
 
-https://github.com/user-attachments/assets/aca9ef60-8d57-4443-bea7-57860e45aaba
+https://github.com/user-attachments/assets/694af074-f15f-42ef-a2ad-0a7b8a43dccf
+
+
+
+
 
 ## How it fits together
 
