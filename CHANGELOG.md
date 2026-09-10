@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.28.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.27.1...firetower-v0.28.0) (2026-09-10)
+
+
+### Features
+
+* mobile support ([ca0347f](https://github.com/firetower-cloud/firetower/commit/ca0347fc56cb3ef81fe2e167d67555528872733e))
+
+
+### Bug Fixes
+
+* let a sheet stay open on a phone ([6c715e5](https://github.com/firetower-cloud/firetower/commit/6c715e5a8921ff83b61c058df858afb477a32c14))
+
 ## [0.27.1](https://github.com/firetower-cloud/firetower/compare/firetower-v0.27.0...firetower-v0.27.1) (2026-09-10)
 
 
