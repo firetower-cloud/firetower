@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.30.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.29.0...firetower-v0.30.0) (2026-09-10)
+
+
+### Features
+
+* multiple accounts per provider ([3d0780d](https://github.com/firetower-cloud/firetower/commit/3d0780d57c50138942ba86d5718c700c405a9bd4))
+* multiple accounts per provider ([44ad3c1](https://github.com/firetower-cloud/firetower/commit/44ad3c17249609b8fa96bd0cef04361c885ca76b))
+* support multiple accounts per AI provider with quota detection and in-chat switching ([a2a03b0](https://github.com/firetower-cloud/firetower/commit/a2a03b0d33138306dca79ecfc95b4f35de7f8294))
+* support multiple accounts per AI provider with quota detection and in-chat switching ([8c08259](https://github.com/firetower-cloud/firetower/commit/8c082598d2b9fa0c0440916a3caa3527d4f9ce64))
+
+
+### Bug Fixes
+
+* claude token counter ([af5fd89](https://github.com/firetower-cloud/firetower/commit/af5fd898253f7f0afc8ce552b9b9358138a4ec58))
+
 ## [0.29.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.28.2...firetower-v0.29.0) (2026-09-10)
 
 
