@@ -58,6 +58,8 @@ pub struct AppState {
     /// Derived from the vault's root key, so a name survives a restart and an
     /// open preview does not need reopening.
     pub names: preview::Names,
+    /// Public UI address used to connect annotations from directly opened previews.
+    pub public_url: Arc<str>,
     /// Ports this machine is holding open on behalf of a session.
     ///
     /// In memory on purpose, like `pending`: a forwarded port is a view
@@ -186,6 +188,7 @@ pub async fn run(config: Config) -> Result<()> {
         forwards: Default::default(),
         previews: Default::default(),
         names,
+        public_url: public_url(&config).into(),
     };
     // In the background: it fetches a few hundred megabytes, and nothing else
     // start-up does should wait on somebody's connection to npm.

@@ -60,7 +60,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
   useDismissible(drawer, closeDrawer, "drawer");
 
   /* Onboarding and signing in run full-bleed — no fleet to navigate yet. */
-  if (path.startsWith("/setup") || path.startsWith("/login")) return <>{children}</>;
+  if (path.startsWith("/setup") || path.startsWith("/login") || path.startsWith("/preview-annotations")) return <>{children}</>;
 
   /* One rail, everywhere. The workbench used to bring its own — a second list
      of the same workspaces, with a back button to get out of it — which meant

@@ -2025,6 +2025,199 @@
         }
       }
     },
+    "/api/v1/sessions/{id}/annotations": {
+      "get": {
+        "tags": [
+          "sessions"
+        ],
+        "operationId": "list_annotations",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/PreviewAnnotation"
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "sessions"
+        ],
+        "operationId": "keep_annotation",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KeepAnnotation"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PreviewAnnotation"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "sessions"
+        ],
+        "operationId": "drop_annotations",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AnnotationSelection"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sessions/{id}/annotations/send": {
+      "post": {
+        "tags": [
+          "sessions"
+        ],
+        "summary": "A durable 'sending' marker is committed before contacting the worker. A\nlost acknowledgement must never turn a retry into a duplicate agent turn.",
+        "operationId": "send_annotations",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AnnotationSelection"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Sent"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/sessions/{id}/answer": {
       "post": {
         "tags": [
@@ -4008,6 +4201,36 @@
           }
         }
       },
+      "AnnotationSelection": {
+        "type": "object",
+        "required": [
+          "notes"
+        ],
+        "properties": {
+          "notes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AnnotationVersion"
+            }
+          }
+        }
+      },
+      "AnnotationVersion": {
+        "type": "object",
+        "required": [
+          "id",
+          "revision"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      },
       "Answer": {
         "type": "object",
         "required": [
@@ -4893,6 +5116,69 @@
           }
         }
       },
+      "ElementSnapshot": {
+        "type": "object",
+        "required": [
+          "path",
+          "selector",
+          "ancestors",
+          "label",
+          "html",
+          "capturedAt",
+          "viewport",
+          "scroll",
+          "bounds",
+          "truncated"
+        ],
+        "properties": {
+          "ancestors": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "bounds": {
+            "type": "array",
+            "items": {
+              "type": "number",
+              "format": "double"
+            }
+          },
+          "capturedAt": {
+            "type": "string"
+          },
+          "html": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "scroll": {
+            "type": "array",
+            "items": {
+              "type": "number",
+              "format": "double"
+            }
+          },
+          "selector": {
+            "type": "string"
+          },
+          "truncated": {
+            "type": "boolean"
+          },
+          "viewport": {
+            "type": "array",
+            "items": {
+              "type": "number",
+              "format": "double"
+            }
+          }
+        },
+        "additionalProperties": false
+      },
       "EndAll": {
         "type": "object",
         "description": "Which workspaces to end.",
@@ -5529,6 +5815,37 @@
           "Declined"
         ]
       },
+      "KeepAnnotation": {
+        "type": "object",
+        "required": [
+          "id",
+          "port",
+          "snapshot",
+          "note",
+          "revision"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "note": {
+            "type": "string"
+          },
+          "port": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Zero creates a note; edits must match the revision read by the caller."
+          },
+          "snapshot": {
+            "$ref": "#/components/schemas/ElementSnapshot"
+          }
+        }
+      },
       "Label": {
         "type": "object",
         "required": [
@@ -6025,6 +6342,39 @@
           "url": {
             "type": "string",
             "description": "Ready to put in an `iframe` or paste into a tab."
+          }
+        }
+      },
+      "PreviewAnnotation": {
+        "type": "object",
+        "required": [
+          "id",
+          "port",
+          "snapshot",
+          "note",
+          "revision",
+          "delivery"
+        ],
+        "properties": {
+          "delivery": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "note": {
+            "type": "string"
+          },
+          "port": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "snapshot": {
+            "$ref": "#/components/schemas/ElementSnapshot"
           }
         }
       },
