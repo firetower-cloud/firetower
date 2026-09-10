@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.25.0
+ * OpenAPI spec version: 0.27.0
  */
 import type { WorkSummary } from './workSummary';
 
@@ -13,8 +13,20 @@ import type { WorkSummary } from './workSummary';
  * A session holds any number of them, so a summary on its own no longer says
  * what it is a summary *of*.
  */
-export type CheckoutSummary = WorkSummary & {
+export type CheckoutSummary = WorkSummary & ({
   /** Relative to the workspace. Empty means the checkout is the workspace. */
   path?: string;
   slug: string;
-};
+  /**
+     * Why the numbers above are not to be believed, when they are not.
+     *
+     * A checkout git refused to read — a worktree that is gone, a directory
+     * that was never a repository — used to be left out of the answer
+     * entirely, with only a line in the worker's log. The control plane then
+     * had nothing for that row and filled it with zeros, and zero is what a
+     * finished session looks like. Sent instead, so the sentence git gave
+     * reaches whoever is looking at the workspace.
+     * @nullable
+     */
+  trouble?: string | null;
+});

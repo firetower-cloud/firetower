@@ -144,10 +144,16 @@ function reason(remote: string | null, state?: CheckoutWork): string | null {
   }
   if (!state) return null; // still loading; the commands are right anyway
   if (state.trouble) return state.trouble;
+  // Absent rather than zero: nobody could read the checkout. Falling through
+  // would end at "this branch has not been pushed", which is a different fact
+  // and one this does not know.
+  if (state.uncommitted == null || state.pushed == null) {
+    return "Firetower can't read this checkout on the worker, so it can't say whether these commands would get everything.";
+  }
   if (state.uncommitted > 0) {
     return `${state.uncommitted} ${state.uncommitted === 1 ? "file is" : "files are"} uncommitted on the worker. Commit and push first — what is only on that machine cannot be fetched from here.`;
   }
-  if (state.ahead > 0) {
+  if ((state.ahead ?? 0) > 0) {
     return `${state.ahead} ${state.ahead === 1 ? "commit is" : "commits are"} not pushed yet. Push first — until then they exist only on the worker.`;
   }
   if (!state.pushed) {

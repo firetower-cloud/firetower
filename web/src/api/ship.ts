@@ -17,6 +17,16 @@ import type { CheckoutWork, Session } from "./generated/model";
 export type Stage =
   /** Nothing has changed anywhere, so there is nothing to do. */
   | "clean"
+  /**
+   * Nobody could find out what is in this workspace.
+   *
+   * The host stopped answering, or answered and could not read the checkout.
+   * Deliberately not `clean`: those two used to be the same state here, so a
+   * worker that had gone away was drawn as a session with nothing left to
+   * commit — and somebody spent a day believing an afternoon of work was gone.
+   * Nothing is offered from here, because nothing here is known.
+   */
+  | "unknown"
   /** Files are edited but not committed. */
   | "uncommitted"
   /** Committed, and a remote hasn't got it. */
@@ -65,8 +75,14 @@ export type PullRequestLink = { slug: string; url: string };
  *
  * `work` is absent while the summary is still being fetched, which is a
  * different thing from a clean workspace and must not be drawn as one.
+ *
+ * `failed` separates the third case out from those two. A request that came
+ * back an error left `work` undefined, exactly like one still in flight, so the
+ * interface sat on "Looking…" for as long as a host stayed unreachable and the
+ * file list beside it read "Nothing has changed." Both were the same absence
+ * standing in for two opposite facts.
  */
-export function shipping(session: Session, work?: CheckoutWork[]): Ship {
+export function shipping(session: Session, work?: CheckoutWork[], failed?: boolean): Ship {
   const held = work ?? [];
 
   if (session.checkouts?.length === 0 && !session.repo) {
@@ -78,8 +94,38 @@ export function shipping(session: Session, work?: CheckoutWork[]): Ship {
       count: 0,
     };
   }
+  if (failed && !work) {
+    return {
+      stage: "unknown",
+      label: "Can't reach this session",
+      blocked:
+        "Firetower can't reach the machine this session is on, so it can't tell what has changed. Your work is still in the workspace there.",
+      links: [],
+      count: 0,
+    };
+  }
   if (!work) {
     return { stage: "clean", label: OPENS, blocked: "Looking…", links: [], count: 0 };
+  }
+
+  // A checkout nobody could read makes the whole session unknown rather than
+  // averaging into it. Two repositories where one is unreadable is not "half
+  // clean": it is a session whose state nobody can state.
+  const unreadable = held.filter((c) => c.uncommitted == null);
+  if (unreadable.length > 0) {
+    return {
+      stage: "unknown",
+      label: unreadable.length === 1 ? "Can't read the workspace" : "Can't read the workspaces",
+      blocked:
+        unreadable
+          .map((c) => c.trouble)
+          .find((t): t is string => !!t) ??
+        "Firetower could not read what is in this workspace.",
+      links: held
+        .filter((c) => c.pullRequest)
+        .map((c) => ({ slug: c.slug, url: c.pullRequest as string })),
+      count: unreadable.length,
+    };
   }
 
   // Every request already open, whatever stage the session as a whole is at.
@@ -92,7 +138,7 @@ export function shipping(session: Session, work?: CheckoutWork[]): Ship {
   // In the order the sequence runs, because the earliest unfinished step is the
   // one to offer: committing before pushing before opening, even when another
   // repository is further along.
-  const uncommitted = held.filter((c) => c.uncommitted > 0);
+  const uncommitted = held.filter((c) => (c.uncommitted ?? 0) > 0);
   if (uncommitted.length > 0) {
     return {
       stage: "uncommitted",
@@ -102,7 +148,7 @@ export function shipping(session: Session, work?: CheckoutWork[]): Ship {
     };
   }
 
-  const unpushed = held.filter((c) => c.ahead > 0);
+  const unpushed = held.filter((c) => (c.ahead ?? 0) > 0);
   if (unpushed.length > 0) {
     // Pushing to a branch a request is already open on amends that request
     // rather than opening a second one. Same verb, different outcome, so it is
@@ -127,7 +173,7 @@ export function shipping(session: Session, work?: CheckoutWork[]): Ship {
         };
   }
 
-  const pushed = held.filter((c) => c.pushed);
+  const pushed = held.filter((c) => c.pushed === true);
   // A branch with nothing on it has nothing to open a request for, and every
   // git host refuses one. `pushed` alone used to be enough to offer it, so a
   // branch that was pushed empty got a button that could only fail.
@@ -186,7 +232,7 @@ export function shipping(session: Session, work?: CheckoutWork[]): Ship {
   return {
     stage: "clean",
     label: "Nothing to commit",
-    blocked: held.some((c) => c.pushed)
+    blocked: held.some((c) => c.pushed === true)
       ? "This branch has no commits of its own, so there is nothing to open a pull request for."
       : "Nothing has changed yet.",
     links,
@@ -280,7 +326,19 @@ export function awaiting(ship: Ship): boolean {
   return ship.stage === "open" || ship.stage === "open-behind";
 }
 
-/** Whether ending this would lose something. */
+/**
+ * Whether ending this would lose something.
+ *
+ * Not knowing counts as at risk, and that is the safe way round: a checkout
+ * nobody could read may hold anything, and the cost of warning about a clean
+ * workspace is a sentence, while the cost of the reverse is somebody's
+ * afternoon.
+ */
 export function atRisk(work?: CheckoutWork[]): boolean {
-  return !work || work.some((c) => c.uncommitted > 0 || c.ahead > 0);
+  return (
+    !work ||
+    work.some(
+      (c) => c.uncommitted == null || c.uncommitted > 0 || (c.ahead ?? 0) > 0,
+    )
+  );
 }

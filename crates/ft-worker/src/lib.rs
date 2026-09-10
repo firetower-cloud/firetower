@@ -37,9 +37,14 @@ const UNSEARCHED: &[&str] = &[
     "vendor",
 ];
 
-/// How much of a file goes in one frame. Small enough that terminal output for
-/// other sessions on this machine gets a turn between the pieces.
-const CHUNK: usize = 256 * 1024;
+/// How much of a file goes in one frame.
+///
+/// Matched to the tunnels' chunk, and for the same reason: a frame that has
+/// started writing cannot be overtaken, so the control lane's head start is
+/// only ever as good as the largest bulk frame in front of it. At 256KB a
+/// heartbeat could still wait out a quarter-megabyte on a slow line, which is
+/// most of what the lane was meant to prevent.
+const CHUNK: usize = 32 * 1024;
 
 /// The most that comes down this pipe. Above it, the answer is a message
 /// naming a better tool rather than a minute of stuttering terminals.
@@ -117,6 +122,83 @@ pub struct Worker {
 const REPORT_EVERY: std::time::Duration = std::time::Duration::from_secs(5);
 
 const OUTBOUND: usize = 1024;
+
+/// How many control frames may wait. Small on purpose: they are tens of bytes
+/// and a few a second, so a backlog here would mean something else is wrong.
+const EXPRESS: usize = 256;
+
+/// Everything the worker says, in two lanes.
+///
+/// One pipe carries every terminal, every event, every preview and every
+/// download on this machine, and it is strictly ordered — so a heartbeat sent
+/// behind thirty megabytes of a preview page arrives thirty megabytes later.
+/// The control plane judges a host by whether it has heard from it in fifty
+/// seconds, which makes "busy" and "dead" the same observation.
+///
+/// So the frames that answer for the connection's life, and the ones somebody
+/// is actively waiting on — a summary, a commit, a pull request — go in a lane
+/// of their own that the writer drains first. They are tiny and rare, so
+/// nothing else is starved by letting them past.
+///
+/// Which lane a frame takes is decided here rather than at the call sites,
+/// because every one of those already says what it is sending.
+#[derive(Clone)]
+pub struct Out {
+    control: mpsc::Sender<ToServer>,
+    bulk: mpsc::Sender<ToServer>,
+}
+
+impl Out {
+    fn lane(&self, frame: &ToServer) -> &mpsc::Sender<ToServer> {
+        if is_bulk(frame) {
+            &self.bulk
+        } else {
+            &self.control
+        }
+    }
+
+    pub async fn send(&self, frame: ToServer) -> Result<(), mpsc::error::SendError<ToServer>> {
+        self.lane(&frame).send(frame).await
+    }
+
+    /// Two lanes, drained in that order by whoever holds the far ends.
+    pub fn new(control: mpsc::Sender<ToServer>, bulk: mpsc::Sender<ToServer>) -> Self {
+        Self { control, bulk }
+    }
+
+    /// Both lanes into one channel.
+    ///
+    /// For somewhere that only wants to see what came out — a test, or a fake
+    /// worker standing in for a real one — where the ordering the lanes exist
+    /// to produce is not what is being examined.
+    pub fn merged(sender: mpsc::Sender<ToServer>) -> Self {
+        Self {
+            control: sender.clone(),
+            bulk: sender,
+        }
+    }
+
+    /// From a thread that is not the runtime's — a pty reader, which is
+    /// blocking by nature.
+    pub fn blocking_send(&self, frame: ToServer) -> Result<(), mpsc::error::SendError<ToServer>> {
+        self.lane(&frame).blocking_send(frame)
+    }
+}
+
+/// Whether this frame is somebody's bytes rather than the worker's answer.
+///
+/// Bulk is anything whose size is set by what a session is doing: a page being
+/// served, a file being fetched, a terminal printing. Everything else is a
+/// sentence about the machine and belongs in front of it.
+fn is_bulk(frame: &ToServer) -> bool {
+    matches!(
+        frame,
+        ToServer::TunnelData { .. }
+            | ToServer::TunnelCredit { .. }
+            | ToServer::FileChunk { .. }
+            | ToServer::PtyOutput { .. }
+    )
+}
 
 /// One agent, and where to put it.
 ///
@@ -210,116 +292,164 @@ impl Worker {
         // Everything the worker says goes through here. A terminal streams
         // output while we're still waiting on the next command, which a single
         // read-then-write loop can't express.
-        let (out, mut pending) = mpsc::channel::<ToServer>(OUTBOUND);
+        let (control, mut express) = mpsc::channel::<ToServer>(EXPRESS);
+        let (bulk, mut pending) = mpsc::channel::<ToServer>(OUTBOUND);
+        let out = Out::new(control, bulk);
 
-        // Work that is happening off this loop. Held so that a disconnect can
-        // wait for it rather than dropping a half-built workspace on the floor.
-        let mut running = tokio::task::JoinSet::new();
-
-        // The last CPU reading for each workspace, so the next one can be a
-        // rate. A cgroup counts CPU as a total since it was made, and a total
-        // is not what anybody wants to see: two readings and the time between
-        // them are what turn it into cores in use.
+        // Draining is its own future, and that is not a tidiness point.
         //
-        // Here rather than on `self` because it belongs to this connection. A
-        // control plane that reconnects starts again from no history, and the
-        // first report after that carries no rate rather than a wrong one.
-        let mut cpu_seen: std::collections::HashMap<String, (u64, std::time::Instant)> =
-            std::collections::HashMap::new();
+        // It used to be a branch of the loop below, which made the loop both
+        // the only thing that fills this channel and the only thing that
+        // empties it. Any send from the loop — a `Pong`, a `Usage`, the
+        // `TunnelOpened` for a preview — was therefore waiting on a drain that
+        // could not happen until the send it was waiting on returned. Once the
+        // channel filled, the worker went silent for good with the connection
+        // still open and healthy-looking, and the control plane gave the host
+        // up as dead fifty seconds later. A preview page load, which opens one
+        // tunnel per request, filled it reliably.
+        //
+        // Joined rather than spawned so the bounds stay `Unpin` instead of
+        // `Send + 'static`: two futures in one task are polled independently,
+        // which is all this needs. A full channel is now backpressure — the
+        // loop pauses, this drains, the loop resumes.
+        let writing = async move {
+            loop {
+                // Control first, always. A `Pong` or a finished commit is tens
+                // of bytes and comes a few times a second at most, so nothing
+                // is starved by letting it past a preview that is mid-page.
+                let frame = tokio::select! {
+                    biased;
+                    Some(frame) = express.recv() => frame,
+                    Some(frame) = pending.recv() => frame,
+                    else => break,
+                };
+                outbound.write(&frame).await?;
+            }
+            Ok::<(), anyhow::Error>(())
+        };
 
-        // Far enough in the past that the first tick reports rather than
-        // waiting five seconds to say anything at all.
-        let mut last_reported = std::time::Instant::now() - REPORT_EVERY;
+        let serving = async move {
+            // Owned here rather than outside, so that returning from this drops
+            // the last sender and lets `writing` finish what is still queued.
+            let out = out;
 
-        loop {
-            tokio::select! {
-                // Bias towards draining output: a burst of terminal bytes
-                // should reach the viewer before we go looking for more work.
-                biased;
+            // Work that is happening off this loop. Held so that a disconnect can
+            // wait for it rather than dropping a half-built workspace on the floor.
+            let mut running = tokio::task::JoinSet::new();
 
-                Some(frame) = pending.recv() => {
-                    outbound.write(&frame).await?;
-                }
+            // The last CPU reading for each workspace, so the next one can be a
+            // rate. A cgroup counts CPU as a total since it was made, and a total
+            // is not what anybody wants to see: two readings and the time between
+            // them are what turn it into cores in use.
+            //
+            // Here rather than on `self` because it belongs to this connection. A
+            // control plane that reconnects starts again from no history, and the
+            // first report after that carries no rate rather than a wrong one.
+            let mut cpu_seen: std::collections::HashMap<String, (u64, std::time::Instant)> =
+                std::collections::HashMap::new();
 
-                // What the agent said about itself, through a hook, since we
-                // last looked.
-                _ = tokio::time::sleep(std::time::Duration::from_secs(1)) => {
-                    if let Err(e) = self.forward_new_events(&out).await {
-                        tracing::debug!("forwarding hook events: {e:#}");
-                    }
+            // Far enough in the past that the first tick reports rather than
+            // waiting five seconds to say anything at all.
+            let mut last_reported = std::time::Instant::now() - REPORT_EVERY;
 
-                    // And what this machine is doing, rather less often.
-                    //
-                    // On the same tick because a second timer in this select
-                    // would be a second thing to keep in step with it, and this
-                    // is one comparison. Every five seconds is slow enough that
-                    // `df` and `docker system df` cost nothing measurable and
-                    // fast enough that a meter follows a build starting.
-                    if last_reported.elapsed() >= REPORT_EVERY {
-                        last_reported = std::time::Instant::now();
-                        self.report_usage(&out, &mut cpu_seen).await;
-                    }
-                }
+            loop {
+                tokio::select! {
+                    // Bias towards the timer: what the agent said about itself
+                    // should reach the control plane before we go looking for more
+                    // work. Draining is no longer a branch here — see `writing`.
+                    biased;
 
-                incoming = inbound.read::<ToWorker>() => {
-                    let frame = match incoming {
-                        Ok(f) => f,
-                        Err(CodecError::Closed) => {
-                            // Finish what is already under way before going
-                            // quiet. Returning here instead would drop the
-                            // tasks — and a workspace abandoned halfway through
-                            // its clone is worse than one that finishes with
-                            // nobody listening. What it says is written out as
-                            // it says it, so a control plane that reconnects
-                            // has it waiting in the log.
-                            while !running.is_empty() {
-                                tokio::select! {
-                                    Some(frame) = pending.recv() => outbound.write(&frame).await?,
-                                    _ = running.join_next() => {}
-                                }
-                            }
-                            while let Ok(frame) = pending.try_recv() {
-                                outbound.write(&frame).await?;
-                            }
-                            tracing::info!("control plane disconnected; sessions keep running");
-                            return Ok(());
+                    // What the agent said about itself, through a hook, since we
+                    // last looked.
+                    _ = tokio::time::sleep(std::time::Duration::from_secs(1)) => {
+                        if let Err(e) = self.forward_new_events(&out).await {
+                            tracing::debug!("forwarding hook events: {e:#}");
                         }
-                        Err(CodecError::Malformed(e)) => {
-                            // One bad frame shouldn't take down a worker that
-                            // has live sessions on it — but swallowing it in a
-                            // log nobody reads is how a session sits in
-                            // `Starting` forever. Say it upward too.
-                            tracing::warn!("ignoring malformed frame: {e}");
-                            let _ = out
-                                .send(ToServer::Error {
-                                    session_id: None,
-                                    code: "MalformedFrame".into(),
-                                    message: format!(
-                                        "this worker couldn't read a frame — it is probably \
-                                         older than the control plane: {e}"
-                                    ),
-                                })
-                                .await;
+
+                        // And what this machine is doing, rather less often.
+                        //
+                        // On the same tick because a second timer in this select
+                        // would be a second thing to keep in step with it, and this
+                        // is one comparison. Every five seconds is slow enough that
+                        // `df` and `docker system df` cost nothing measurable and
+                        // fast enough that a meter follows a build starting.
+                        if last_reported.elapsed() >= REPORT_EVERY {
+                            last_reported = std::time::Instant::now();
+                            self.report_usage(&out, &mut cpu_seen).await;
+                        }
+                    }
+
+                    incoming = inbound.read::<ToWorker>() => {
+                        let frame = match incoming {
+                            Ok(f) => f,
+                            Err(CodecError::Closed) => {
+                                // Finish what is already under way before going
+                                // quiet. Returning here instead would drop the
+                                // tasks — and a workspace abandoned halfway through
+                                // its clone is worse than one that finishes with
+                                // nobody listening. What it says is written out as
+                                // it says it, so a control plane that reconnects
+                                // has it waiting in the log.
+                                //
+                                // Nothing is drained here any more: `writing` is
+                                // running alongside this and carries on until the
+                                // last sender is dropped, which is what returning
+                                // does.
+                                while running.join_next().await.is_some() {}
+                                tracing::info!("control plane disconnected; sessions keep running");
+                                return Ok(());
+                            }
+                            Err(CodecError::Malformed(e)) => {
+                                // One bad frame shouldn't take down a worker that
+                                // has live sessions on it — but swallowing it in a
+                                // log nobody reads is how a session sits in
+                                // `Starting` forever. Say it upward too.
+                                tracing::warn!("ignoring malformed frame: {e}");
+                                let _ = out
+                                    .send(ToServer::Error {
+                                        session_id: None,
+                                        code: "MalformedFrame".into(),
+                                        message: format!(
+                                            "this worker couldn't read a frame — it is probably \
+                                             older than the control plane: {e}"
+                                        ),
+                                    })
+                                    .await;
+                                continue;
+                            }
+                            Err(e) => return Err(e.into()),
+                        };
+
+                        // Anything that takes real time runs on its own task.
+                        //
+                        // Handling it here instead means this loop stops: for as
+                        // long as a workspace is being built, nothing is written
+                        // out and nothing is read in. A repository that takes eight
+                        // minutes to clone therefore made the worker mute and deaf
+                        // for eight minutes — every event it recorded sat in the
+                        // channel, the session looked frozen, and it could not even
+                        // be told to stop. The connection stays perfectly healthy
+                        // throughout, which is what makes it so hard to see.
+                        if takes_a_while(&frame) {
+                            let worker = self.clone();
+                            let out = out.clone();
+                            running.spawn(async move {
+                                if let Err(e) = worker.handle(frame, &out).await {
+                                    tracing::error!("{e:#}");
+                                    let _ = out.send(ToServer::Error {
+                                        session_id: None,
+                                        code: "Internal".into(),
+                                        message: format!("{e:#}"),
+                                    }).await;
+                                }
+                            });
                             continue;
                         }
-                        Err(e) => return Err(e.into()),
-                    };
 
-                    // Anything that takes real time runs on its own task.
-                    //
-                    // Handling it here instead means this loop stops: for as
-                    // long as a workspace is being built, nothing is written
-                    // out and nothing is read in. A repository that takes eight
-                    // minutes to clone therefore made the worker mute and deaf
-                    // for eight minutes — every event it recorded sat in the
-                    // channel, the session looked frozen, and it could not even
-                    // be told to stop. The connection stays perfectly healthy
-                    // throughout, which is what makes it so hard to see.
-                    if takes_a_while(&frame) {
-                        let worker = self.clone();
-                        let out = out.clone();
-                        running.spawn(async move {
-                            if let Err(e) = worker.handle(frame, &out).await {
+                        match self.handle(frame, &out).await {
+                            Ok(true) => {}
+                            Ok(false) => return Ok(()),
+                            Err(e) => {
                                 tracing::error!("{e:#}");
                                 let _ = out.send(ToServer::Error {
                                     session_id: None,
@@ -327,29 +457,20 @@ impl Worker {
                                     message: format!("{e:#}"),
                                 }).await;
                             }
-                        });
-                        continue;
-                    }
-
-                    match self.handle(frame, &out).await {
-                        Ok(true) => {}
-                        Ok(false) => return Ok(()),
-                        Err(e) => {
-                            tracing::error!("{e:#}");
-                            let _ = out.send(ToServer::Error {
-                                session_id: None,
-                                code: "Internal".into(),
-                                message: format!("{e:#}"),
-                            }).await;
                         }
                     }
                 }
             }
-        }
+        };
+
+        // Both, together, in this task. `writing` only ends once `serving` has
+        // returned and dropped the last sender, so nothing queued is lost.
+        tokio::try_join!(serving, writing)?;
+        Ok(())
     }
 
     /// Returns `false` when the worker should stop serving.
-    async fn handle(&self, frame: ToWorker, out: &mpsc::Sender<ToServer>) -> Result<bool> {
+    async fn handle(&self, frame: ToWorker, out: &Out) -> Result<bool> {
         match frame {
             ToWorker::Ping => out.send(ToServer::Pong).await?,
 
@@ -989,7 +1110,7 @@ impl Worker {
         req: &str,
         session_id: &SessionId,
         path: &str,
-        out: &mpsc::Sender<ToServer>,
+        out: &Out,
     ) -> Result<()> {
         let opened = self.open_for_reading(session_id, path).await;
 
@@ -1193,7 +1314,7 @@ impl Worker {
         position: i64,
         repo: &ft_proto::RepoSpec,
         env: &[(String, String)],
-        out: &mpsc::Sender<ToServer>,
+        out: &Out,
     ) -> Result<PathBuf> {
         self.emit(id, EventKind::StepStarted { step: Step::Fetch }, out)
             .await?;
@@ -1495,12 +1616,7 @@ You are in the directory that holds them, not inside one of them.              P
     /// A second watcher would forward every line twice. The control plane
     /// stores a line once whatever happens, so the duplicate is invisible
     /// there and arrives in a browser as every word written twice.
-    async fn watch_agent(
-        &self,
-        session_id: &SessionId,
-        since_line: u64,
-        out: &mpsc::Sender<ToServer>,
-    ) {
+    async fn watch_agent(&self, session_id: &SessionId, since_line: u64, out: &Out) {
         let mut watching = self.watching.lock().await;
 
         // Already forwarding, and the one that exists is at or ahead of this
@@ -1551,7 +1667,7 @@ You are in the directory that holds them, not inside one of them.              P
     /// to one. Shared rather than copied: the two paths differ in everything
     /// before this point and in nothing after it, and a second copy is how the
     /// two come to disagree about which status a session ends up in.
-    async fn launch_agent(&self, into: Launch<'_>, out: &mpsc::Sender<ToServer>) -> Result<()> {
+    async fn launch_agent(&self, into: Launch<'_>, out: &Out) -> Result<()> {
         let Launch {
             id,
             path,
@@ -1685,11 +1801,7 @@ You are in the directory that holds them, not inside one of them.              P
     /// The one step it reports is the launch. A second agent does not fetch,
     /// does not cut a worktree and does not run setup, and drawing those as
     /// skipped would say something happened that did not.
-    async fn start_agent(
-        &self,
-        spec: ft_proto::StartAgent,
-        out: &mpsc::Sender<ToServer>,
-    ) -> Result<()> {
+    async fn start_agent(&self, spec: ft_proto::StartAgent, out: &Out) -> Result<()> {
         let id = spec.session_id.clone();
         let path = self.git.worktree_path(&spec.workspace);
 
@@ -1807,11 +1919,7 @@ You are in the directory that holds them, not inside one of them.              P
         .await
     }
 
-    async fn create_workspace(
-        &self,
-        spec: CreateWorkspace,
-        out: &mpsc::Sender<ToServer>,
-    ) -> Result<()> {
+    async fn create_workspace(&self, spec: CreateWorkspace, out: &Out) -> Result<()> {
         let id = spec.session_id.clone();
         let title = ft_core::session::title_from(&spec.prompt);
         let first = spec.repos.first();
@@ -2150,7 +2258,7 @@ You are in the directory that holds them, not inside one of them.              P
         session_id: &SessionId,
         action: ft_proto::Action,
         credential: Option<ft_proto::Credential>,
-        out: &mpsc::Sender<ToServer>,
+        out: &Out,
     ) -> Result<String> {
         match action {
             ft_proto::Action::Stop => {
@@ -2317,6 +2425,7 @@ You are in the directory that holds them, not inside one of them.              P
                 path: String::new(),
                 slug: self.store.repo_of(session_id).await?.unwrap_or_default(),
                 summary,
+                trouble: None,
             }]);
         }
 
@@ -2332,9 +2441,27 @@ You are in the directory that holds them, not inside one of them.              P
                     path: c.path,
                     slug: c.slug,
                     summary,
+                    trouble: None,
                 }),
+                // Reported, not dropped. Left out, this row reached the
+                // control plane as nothing, and nothing became zeros — so a
+                // worktree git could not read looked like a repository with
+                // no changes in it. The sentence git gave is the one thing
+                // that would have said otherwise.
                 Err(e) => {
-                    tracing::warn!(session = %session_id, repo = %c.slug, "summarising: {e:#}")
+                    tracing::warn!(session = %session_id, repo = %c.slug, "summarising: {e:#}");
+                    out.push(ft_core::CheckoutSummary {
+                        path: c.path,
+                        slug: c.slug,
+                        summary: ft_core::WorkSummary {
+                            branch: c.branch,
+                            uncommitted: 0,
+                            ahead: 0,
+                            pushed: false,
+                            commits: None,
+                        },
+                        trouble: Some(format!("{e:#}")),
+                    });
                 }
             }
         }
@@ -2358,7 +2485,7 @@ You are in the directory that holds them, not inside one of them.              P
         pty: Pty,
         cols: u16,
         rows: u16,
-        out: &mpsc::Sender<ToServer>,
+        out: &Out,
     ) -> Result<()> {
         let tmux = Tmux::named(pty.tmux_name(session_id.as_str()));
 
@@ -2423,12 +2550,7 @@ You are in the directory that holds them, not inside one of them.              P
 
     /// Record then send. Durable before it leaves, so a crash between the two
     /// costs a replayed event rather than a lost one.
-    async fn emit(
-        &self,
-        session_id: &SessionId,
-        kind: EventKind,
-        out: &mpsc::Sender<ToServer>,
-    ) -> Result<()> {
+    async fn emit(&self, session_id: &SessionId, kind: EventKind, out: &Out) -> Result<()> {
         let stored = self.store.append(session_id, &kind).await?;
 
         // Under the cursor's lock, so the tail below cannot look between the
@@ -2470,7 +2592,7 @@ You are in the directory that holds them, not inside one of them.              P
     /// which is honest: nothing is being measured there.
     async fn report_usage(
         &self,
-        out: &mpsc::Sender<ToServer>,
+        out: &Out,
         cpu_seen: &mut std::collections::HashMap<String, (u64, std::time::Instant)>,
     ) {
         let places = match self.store.live_workspaces().await {
@@ -2538,7 +2660,7 @@ You are in the directory that holds them, not inside one of them.              P
             .await;
     }
 
-    async fn forward_new_events(&self, out: &mpsc::Sender<ToServer>) -> Result<()> {
+    async fn forward_new_events(&self, out: &Out) -> Result<()> {
         let mut forwarded = self.forwarded.lock().await;
 
         for e in self.store.events_since(*forwarded).await? {
@@ -2606,6 +2728,26 @@ fn takes_a_while(frame: &ToWorker) -> bool {
             // channel blocks the same loop that drains it, and the worker goes
             // silent for good with the connection still open.
             | ToWorker::Resume { .. }
+            // Unbounded for the same reason, and slow on top of it: a hundred
+            // megabytes leaves at a chunk a time. On the loop, once the
+            // channel is full the loop blocks inside its own send and stops
+            // reading — so nothing else on this machine is answered until the
+            // last chunk of somebody's download has been handed over.
+            | ToWorker::ReadFile { .. } // Unbounded for the same reason, and slow on top of it: a hundred
+                                        // megabytes leaves at a chunk a time. On the loop, once the
+                                        // channel is full the loop blocks inside the send and stops
+                                        // reading — so nothing else on this machine is answered until the
+                                        // last chunk of somebody's download has been handed over.
+                                        // Unbounded for the same reason, and slow on top of it: a hundred
+                                        // megabytes leaves at a chunk a time. On the loop, nothing else on
+                                        // this machine is read or answered until the last one — so a
+                                        // download made every other session's terminal stop, and the
+                                        // control plane's heartbeat go unanswered.
+                                        // Unbounded for the same reason, and slow on top of it: a hundred
+                                        // megabytes leaves at a chunk a time. On the loop, nothing else on
+                                        // this machine is read or answered until the last one — so a
+                                        // download made every other session's terminal stop, and the
+                                        // control plane's heartbeat go unanswered.
     )
 }
 
@@ -2909,7 +3051,8 @@ mod watcher_tests {
     async fn a_second_watcher_is_refused_while_the_first_is_running() {
         let dir = tempfile::tempdir().unwrap();
         let worker = Worker::open(dir.path()).await.unwrap();
-        let (out, mut heard) = mpsc::channel(8);
+        let (tx, mut heard) = mpsc::channel(8);
+        let out = Out::merged(tx);
         let id = SessionId::from_stored("s_01watch");
 
         // Something that does not finish, standing in for a live watcher.
@@ -2933,7 +3076,8 @@ mod watcher_tests {
     async fn a_watcher_that_already_died_does_not_hold_the_slot() {
         let dir = tempfile::tempdir().unwrap();
         let worker = Worker::open(dir.path()).await.unwrap();
-        let (out, mut heard) = mpsc::channel(8);
+        let (tx, mut heard) = mpsc::channel(8);
+        let out = Out::merged(tx);
         let id = SessionId::from_stored("s_01dead");
 
         let over = tokio::spawn(async {});
@@ -3266,6 +3410,379 @@ mod tests {
 
         assert!(refused.is_err(), "a frame is not a promise");
         assert!(!dir.path().join("escaped").exists());
+    }
+
+    /// A worker served over a live pipe, with both ends still open.
+    ///
+    /// [`exchange`] hands the loop a finished slice of bytes and reads what it
+    /// wrote once it has stopped. That cannot express the case that matters
+    /// here: a frame sent *while* the loop is mid-await, with another task
+    /// filling the outbound channel underneath it. This keeps both halves open
+    /// so a test can drive the connection the way a control plane does.
+    struct Served {
+        to_worker: mpsc::UnboundedSender<ToWorker>,
+        from_worker: mpsc::UnboundedReceiver<ToServer>,
+    }
+
+    impl Served {
+        fn send(&self, frame: ToWorker) {
+            self.to_worker.send(frame).expect("the worker has stopped");
+        }
+
+        /// The next frame this test cares about, or `None` if none arrives.
+        ///
+        /// Frames the worker sends on its own — `Usage` every five seconds —
+        /// are skipped rather than asserted against, so a test says what it is
+        /// about instead of restating the whole conversation.
+        async fn wait_for(
+            &mut self,
+            within: std::time::Duration,
+            mut matching: impl FnMut(&ToServer) -> bool,
+        ) -> Option<ToServer> {
+            let deadline = tokio::time::Instant::now() + within;
+            loop {
+                let left = deadline.saturating_duration_since(tokio::time::Instant::now());
+                if left.is_zero() {
+                    return None;
+                }
+                match tokio::time::timeout(left, self.from_worker.recv()).await {
+                    Ok(Some(frame)) if matching(&frame) => return Some(frame),
+                    Ok(Some(_)) => continue,
+                    Ok(None) | Err(_) => return None,
+                }
+            }
+        }
+    }
+
+    /// Serve a worker over a duplex pair and hand back both ends.
+    fn serve_over_duplex(worker: std::sync::Arc<Worker>) -> Served {
+        serve_over_duplex_at(worker, std::time::Duration::ZERO)
+    }
+
+    /// The same, over a link that reads at a limited rate.
+    ///
+    /// The pipe to a real worker is an ssh connection to another machine, and
+    /// the failures worth testing here are all failures of *queueing* — which
+    /// an in-memory duplex that drains instantly can never produce. `per_frame`
+    /// is what makes the far end slower than the worker, so the queue actually
+    /// forms.
+    fn serve_over_duplex_at(
+        worker: std::sync::Arc<Worker>,
+        per_frame: std::time::Duration,
+    ) -> Served {
+        let (ours, theirs) = tokio::io::duplex(16 * 1024);
+        let (their_read, their_write) = tokio::io::split(theirs);
+        tokio::spawn(async move {
+            let _ = worker.serve(their_read, their_write).await;
+        });
+
+        let (our_read, our_write) = tokio::io::split(ours);
+        let (to_worker, mut outgoing) = mpsc::unbounded_channel::<ToWorker>();
+        let (incoming, from_worker) = mpsc::unbounded_channel::<ToServer>();
+
+        let mut writer = ft_proto::FrameWriter::new(our_write);
+        tokio::spawn(async move {
+            while let Some(frame) = outgoing.recv().await {
+                if writer.write(&frame).await.is_err() {
+                    break;
+                }
+            }
+        });
+
+        let mut reader = ft_proto::FrameReader::new(our_read);
+        tokio::spawn(async move {
+            loop {
+                if !per_frame.is_zero() {
+                    tokio::time::sleep(per_frame).await;
+                }
+                match reader.read::<ToServer>().await {
+                    Ok(frame) => {
+                        if incoming.send(frame).is_err() {
+                            break;
+                        }
+                    }
+                    Err(_) => break,
+                }
+            }
+        });
+
+        let served = Served {
+            to_worker,
+            from_worker,
+        };
+        served.send(hello());
+        served
+    }
+
+    /// A session with enough recorded for the worker to answer about it.
+    async fn recorded(worker: &Worker, title: &str) -> SessionId {
+        let session = SessionId::new();
+        worker
+            .store
+            .create_session(
+                &session,
+                None,
+                title,
+                "do a thing",
+                None,
+                None,
+                "Shell",
+                WorkspaceSize::Small,
+            )
+            .await
+            .unwrap();
+        session
+    }
+
+    /// The serve loop must never be the only drain of a channel it also fills.
+    ///
+    /// [`a_history_longer_than_the_channel_still_replays`] pinned this for
+    /// `Resume` and only for `Resume`, so the same deadlock came back through
+    /// every other arm that sends: a worker whose outbound channel filled while
+    /// the loop was mid-await stopped draining it, and stopped for good. The
+    /// connection stayed open and perfectly healthy-looking; the control plane
+    /// heard nothing at all and gave the host up as dead fifty seconds later.
+    ///
+    /// So this asserts the property rather than the frame that happened to
+    /// expose it: whatever is in the channel, a `Ping` is still answered.
+    #[tokio::test]
+    async fn a_full_outbound_channel_never_wedges_the_serve_loop() {
+        let home = TempDir::new().unwrap();
+        let worker = std::sync::Arc::new(Worker::open(home.path()).await.unwrap());
+        let session = recorded(&worker, "A busy one").await;
+
+        // More than the channel holds, appended from underneath the loop the
+        // way a tunnel's reader task does — not through a frame the loop is
+        // handling, which is the case that was already covered.
+        for _ in 0..(OUTBOUND + 500) {
+            worker
+                .store
+                .append(
+                    &session,
+                    &EventKind::StepProgress {
+                        step: ft_core::Step::Fetch,
+                        detail: "counting objects".into(),
+                    },
+                )
+                .await
+                .unwrap();
+        }
+
+        let mut served = serve_over_duplex(worker.clone());
+
+        // Long enough for the one-second tick to have forwarded them. That is
+        // what fills the channel: `forward_new_events` sends every event it
+        // finds without returning to the loop in between, so past the
+        // channel's capacity it is waiting on a drain that only the loop it is
+        // running on can perform.
+        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+
+        served.send(ToWorker::Ping);
+
+        let pong = served
+            .wait_for(std::time::Duration::from_secs(20), |f| {
+                matches!(f, ToServer::Pong)
+            })
+            .await;
+
+        assert!(
+            pong.is_some(),
+            "a worker with a full outbound channel must still answer a heartbeat"
+        );
+    }
+
+    /// A download must not make the worker deaf until it finishes.
+    ///
+    /// `ReadFile` was not in [`takes_a_while`], so a download ran on the loop
+    /// that also reads. Past the outbound channel's capacity the loop blocks
+    /// inside its own send, and from then until the last chunk it reads
+    /// nothing at all — every other session on the machine goes unanswered.
+    ///
+    /// The file here is deliberately larger than the channel, because below
+    /// that the chunks all fit and the loop never has to wait: the bug only
+    /// shows once the queue is full, which is exactly the case a real download
+    /// spends nearly all of its time in.
+    #[tokio::test]
+    async fn a_download_does_not_make_the_worker_deaf() {
+        let home = TempDir::new().unwrap();
+        let worker = std::sync::Arc::new(Worker::open(home.path()).await.unwrap());
+        let session = recorded(&worker, "A big file").await;
+
+        let workspace = home.path().join("workspace");
+        tokio::fs::create_dir_all(&workspace).await.unwrap();
+        worker
+            .store
+            .record_workspace(&session, workspace.to_str().unwrap(), session.as_str())
+            .await
+            .unwrap();
+
+        let big = vec![b'x'; CHUNK * (OUTBOUND + 600)];
+        tokio::fs::write(workspace.join("big.bin"), &big)
+            .await
+            .unwrap();
+
+        let mut served = serve_over_duplex_at(worker.clone(), std::time::Duration::from_millis(2));
+        served.send(ToWorker::ReadFile {
+            req: "r1".into(),
+            session_id: session.clone(),
+            path: "big.bin".into(),
+        });
+
+        // Only once it is demonstrably streaming is the question worth asking.
+        assert!(
+            served
+                .wait_for(std::time::Duration::from_secs(30), |f| matches!(
+                    f,
+                    ToServer::FileChunk { .. }
+                ))
+                .await
+                .is_some(),
+            "the download should be under way"
+        );
+
+        let asked = std::time::Instant::now();
+        served.send(ToWorker::Ping);
+        let answered = served
+            .wait_for(std::time::Duration::from_secs(30), |f| {
+                matches!(f, ToServer::Pong)
+            })
+            .await;
+        let took = asked.elapsed();
+
+        assert!(answered.is_some(), "the heartbeat must be answered at all");
+        assert!(
+            took < std::time::Duration::from_millis(500),
+            "a frame arriving mid-download must be read and answered promptly, not \
+             after the download drains — took {took:?}"
+        );
+    }
+
+    /// What is being asked for must not queue behind what is being streamed.
+    ///
+    /// One pipe carries every preview, terminal and download on this machine,
+    /// strictly ordered — so a `Pong` sent behind a page load arrived a page
+    /// load later, and the control plane, which gives a host fifty seconds to
+    /// say something, could not tell a busy worker from a dead one. The same
+    /// queue sat in front of every summary and every commit, which is what
+    /// made shipping work impossible while a preview was open.
+    #[tokio::test]
+    async fn control_frames_overtake_a_saturated_bulk_lane() {
+        let home = TempDir::new().unwrap();
+        let worker = std::sync::Arc::new(Worker::open(home.path()).await.unwrap());
+        let session = recorded(&worker, "A busy one").await;
+
+        let workspace = home.path().join("workspace");
+        tokio::fs::create_dir_all(&workspace).await.unwrap();
+        worker
+            .store
+            .record_workspace(&session, workspace.to_str().unwrap(), session.as_str())
+            .await
+            .unwrap();
+
+        // Bulk, and plenty of it: a download is the same shape as a preview
+        // page as far as the pipe is concerned.
+        let big = vec![b'x'; CHUNK * 400];
+        tokio::fs::write(workspace.join("big.bin"), &big)
+            .await
+            .unwrap();
+
+        // A link slower than the worker, so a queue actually forms — which is
+        // the condition being tested, and the one an in-memory pipe that
+        // drains instantly can never produce.
+        let mut served = serve_over_duplex_at(worker.clone(), std::time::Duration::from_millis(2));
+        served.send(ToWorker::ReadFile {
+            req: "r1".into(),
+            session_id: session.clone(),
+            path: "big.bin".into(),
+        });
+
+        // Wait until it is demonstrably streaming before asking anything.
+        // Sleeping a fixed time instead would race the download's first frame
+        // and end up measuring which task was scheduled first.
+        assert!(
+            served
+                .wait_for(std::time::Duration::from_secs(20), |f| matches!(
+                    f,
+                    ToServer::FileChunk { .. }
+                ))
+                .await
+                .is_some(),
+            "the download should be under way"
+        );
+        // And then let it get well ahead.
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+
+        served.send(ToWorker::Ping);
+
+        let mut chunks_first = 0usize;
+        let answered = served
+            .wait_for(std::time::Duration::from_secs(30), |f| {
+                if matches!(f, ToServer::FileChunk { .. }) {
+                    chunks_first += 1;
+                }
+                matches!(f, ToServer::Pong | ToServer::FileChunk { last: true, .. })
+            })
+            .await;
+
+        assert!(
+            matches!(answered, Some(ToServer::Pong)),
+            "the heartbeat must arrive before the download ends"
+        );
+        assert!(
+            chunks_first < 40,
+            "it should have overtaken the queue, not waited most of it out — \
+             {chunks_first} chunks went first"
+        );
+    }
+
+    /// A checkout git cannot read is news, not silence.
+    ///
+    /// It used to be dropped from the answer with only a line in this worker's
+    /// log — `summarising: fatal: not a git repository`. The control plane then
+    /// had no row for it and filled one with zeros, and zero is exactly what a
+    /// session with nothing left to commit looks like. So the one fact that
+    /// would have explained an empty screen was the one thing never sent.
+    #[tokio::test]
+    async fn a_checkout_that_cannot_be_read_is_reported_not_dropped() {
+        let home = TempDir::new().unwrap();
+        let worker = std::sync::Arc::new(Worker::open(home.path()).await.unwrap());
+        let session = recorded(&worker, "A broken worktree").await;
+
+        let workspace = home.path().join("workspace");
+        tokio::fs::create_dir_all(workspace.join("backend"))
+            .await
+            .unwrap();
+        worker
+            .store
+            .record_workspace(&session, workspace.to_str().unwrap(), session.as_str())
+            .await
+            .unwrap();
+        // A directory, and deliberately not a repository.
+        worker
+            .store
+            .record_checkout(
+                &session,
+                0,
+                "acme/backend",
+                "https://example.invalid/acme/backend.git",
+                "main",
+                "agent/fix",
+                "backend",
+            )
+            .await
+            .unwrap();
+
+        let summaries = worker.summarize(&session).await.unwrap();
+
+        assert_eq!(summaries.len(), 1, "the checkout must still get a row");
+        let trouble = summaries[0]
+            .trouble
+            .as_deref()
+            .expect("a checkout that could not be read must say why");
+        assert!(
+            trouble.contains("not a git repository"),
+            "it should carry what git actually said, got: {trouble}"
+        );
     }
 
     /// Drive a worker over an in-memory pipe, the way the control plane does.

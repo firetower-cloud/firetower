@@ -400,7 +400,7 @@ pub mod testing {
                                 }
                                 ToWorker::Ping => { let _ = out.send(ToServer::Pong).await; }
                                 ToWorker::TunnelOpen { tunnel, session_id, port } => {
-                                    tunnels.open(tunnel, session_id, port, &out).await;
+                                    tunnels.open(tunnel, session_id, port, &ft_worker::Out::merged(out.clone())).await;
                                 }
                                 ToWorker::TunnelData { tunnel, data } => {
                                     if let Some(bytes) = data.bytes() {

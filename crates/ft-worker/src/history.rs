@@ -97,10 +97,7 @@ pub async fn recap(
     // Tool calls are dropped entirely here, where `carry` keeps them. The diff
     // is in the same prompt and says what changed far better than a list of
     // the commands that changed it.
-    let talk: Vec<&Said> = said
-        .iter()
-        .filter(|s| !matches!(s, Said::Did(_)))
-        .collect();
+    let talk: Vec<&Said> = said.iter().filter(|s| !matches!(s, Said::Did(_))).collect();
     if talk.is_empty() {
         return None;
     }

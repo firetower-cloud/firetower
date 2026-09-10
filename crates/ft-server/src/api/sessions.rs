@@ -1010,8 +1010,10 @@ pub(super) async fn destroy_session(
 
     // Before anything else, and whether or not the host answers: a port on this
     // machine pointing at a workspace that is being torn down is a link that
-    // hangs rather than one that says what happened.
+    // hangs rather than one that says what happened. A pooled preview
+    // connection into it is the same thing one layer down.
     state.forwards.stop_session(&id).await;
+    state.previews.forget(&id);
 
     // Ending is normally the worker's word: it tears the workspace down and
     // reports it, and the row follows. With nobody listening there is no such
@@ -2173,20 +2175,38 @@ pub(super) async fn session_work(
         let found = summaries
             .iter()
             .find(|s| s.path == c.path && (s.slug == c.slug || s.slug.is_empty()));
+
+        // A row the worker answered *and* could read. One it could not read
+        // comes back carrying the reason, and its numbers are meaningless —
+        // which is a different thing from a repository with nothing in it, and
+        // has to stay a different thing all the way to the screen.
+        let read = found.filter(|s| s.trouble.is_none());
+
         out.push(ft_core::CheckoutWork {
             path: c.path.clone(),
             slug: c.slug.clone(),
             branch: found.map(|s| s.summary.branch.clone()).unwrap_or(c.branch),
             base: c.base,
-            uncommitted: found.map(|s| s.summary.uncommitted).unwrap_or(0),
-            ahead: found.map(|s| s.summary.ahead).unwrap_or(0),
-            pushed: found.is_some_and(|s| s.summary.pushed),
+            // Absent, never zero. Filling these in with zeros is what drew a
+            // host that had stopped answering as a workspace with nothing left
+            // to commit.
+            uncommitted: read.map(|s| s.summary.uncommitted),
+            ahead: read.map(|s| s.summary.ahead),
+            pushed: read.map(|s| s.summary.pushed),
             // Absent, not zero, when the worker is too old to say — the
             // interface treats those differently on purpose.
-            commits: found.and_then(|s| s.summary.commits),
+            commits: read.and_then(|s| s.summary.commits),
             pull_request: c.pull_request,
             pull_state: c.pull_state,
-            trouble: c.trouble,
+            // What the checkout already knew, else what the worker said about
+            // reading it, else the fact that it said nothing at all.
+            trouble: c
+                .trouble
+                .or_else(|| found.and_then(|s| s.trouble.clone()))
+                .or_else(|| {
+                    read.is_none()
+                        .then(|| "The worker did not report on this checkout.".to_string())
+                }),
         });
     }
 
@@ -2288,6 +2308,8 @@ pub(super) async fn session_diff(
 
     let many = wanted.len() > 1;
     let mut files = Vec::new();
+    let mut refused: Vec<String> = Vec::new();
+    let asked = wanted.len();
     for c in wanted {
         let diff = match state
             .fleet
@@ -2303,8 +2325,13 @@ pub(super) async fn session_diff(
             .map_err(|e| ApiError::new(ErrorCode::HostUnreachable, format!("{e:#}")))?
         {
             Ok(diff) => diff,
-            // One unreadable checkout should not empty the sheet.
-            Err(_) => continue,
+            // One unreadable checkout should not empty the sheet — but it is
+            // written down, because if it turns out to be *every* checkout
+            // then an empty sheet is a lie and not an answer.
+            Err(why) => {
+                refused.push(format!("{}: {why}", c.slug));
+                continue;
+            }
         };
 
         for mut file in ft_core::split_diff(&diff) {
@@ -2313,6 +2340,19 @@ pub(super) async fn session_diff(
             }
             files.push(file);
         }
+    }
+
+    // Nothing could be read anywhere. Answering with an empty list would draw
+    // as "Nothing has changed", which is the one thing this is not allowed to
+    // say when it does not know.
+    if !refused.is_empty() && refused.len() == asked {
+        return Err(ApiError::new(
+            ErrorCode::ActionFailed,
+            format!(
+                "could not read this session's changes — {}",
+                refused.join("; ")
+            ),
+        ));
     }
 
     Ok(Json(files))

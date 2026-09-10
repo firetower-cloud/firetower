@@ -5,17 +5,18 @@
 //! type — so everything here is the boring, well-understood shape, and hyper
 //! does the HTTP rather than us doing it again and worse.
 //!
-//! **One tunnel per request.** A pool would save a round trip to the worker per
-//! asset, and it is the first thing to reach for if a page load feels slow over
-//! ssh. It is not here yet because a tunnel that is reused has to be proved
-//! clean between requests, and one that is not reused cannot be dirty.
+//! **Connections are pooled**, by session and port — see [`super::pool`]. It
+//! used to be one tunnel per request, which made a page load two hundred round
+//! trips through ssh and left two hundred tunnels alive on the worker at once.
+//! What proves a reused connection clean is hyper's own readiness rather than
+//! anything decided here.
 
 use super::{Names, Preview, TunnelStream};
 use crate::AppState;
 use axum::{
     body::Body,
     extract::Request,
-    http::{header, HeaderValue, StatusCode},
+    http::{header, HeaderValue, Method, StatusCode},
     response::{IntoResponse, Response},
 };
 use hyper_util::rt::TokioIo;
@@ -44,21 +45,6 @@ pub async fn serve(state: AppState, preview: Preview, mut request: Request) -> R
         return gone("That session has ended.");
     }
 
-    let tunnel = match state
-        .fleet
-        .open_tunnel(&session.host_id, &preview.session, preview.port)
-        .await
-    {
-        Ok(Ok(tunnel)) => tunnel,
-        // Almost always "nothing is listening on 3000 in this workspace",
-        // which is a sentence somebody can act on.
-        Ok(Err(refused)) => return gone(&refused),
-        Err(e) => {
-            tracing::warn!(port = preview.port, "reaching a preview: {e:#}");
-            return gone("The worker for this session isn't answering.");
-        }
-    };
-
     // The far end is a dev server on loopback that believes it is being
     // reached directly. Telling it our public hostname would have it write
     // that into its redirects and its generated links.
@@ -69,36 +55,66 @@ pub async fn serve(state: AppState, preview: Preview, mut request: Request) -> R
     );
 
     // Whether this is a websocket, decided before the request is consumed.
+    //
+    // An upgrade takes the socket away from HTTP entirely, so its connection
+    // can never go back in the pool — and a pooled one must not be spent on it
+    // either, since that would retire a connection the next asset could have
+    // used. It gets a tunnel of its own.
     let upgrading = wants_upgrade(&request);
     let upgrade_from = upgrading.then(|| hyper::upgrade::on(&mut request));
 
-    let (mut sender, connection) =
-        match hyper::client::conn::http1::Builder::new()
-            .preserve_header_case(true)
-            .title_case_headers(true)
-            .handshake(TokioIo::new(TunnelStream::new(tunnel)))
-            .await
-        {
-            Ok(pair) => pair,
-            Err(e) => {
-                tracing::warn!(port = preview.port, "starting HTTP over a tunnel: {e}");
-                return gone("Firetower could not speak HTTP to that port.");
-            }
-        };
+    // A pooled connection can still be gone by the time it is used: a keep-alive
+    // the far end closed looks ready from this side until the write fails. That
+    // costs a retry rather than a page — but only for a request this can rebuild
+    // exactly, which means one with no body to replay. Everything else opens its
+    // own tunnel, and a page load is almost entirely `GET`.
+    let replayable = !upgrading && matches!(*request.method(), Method::GET | Method::HEAD);
+    let spare = replayable.then(|| without_body(&request));
 
-    // Drives the connection while the request is in flight. `with_upgrades`
-    // because a 101 hands the socket over afterwards, and without it hyper
-    // closes the connection instead.
-    tokio::spawn(async move {
-        if let Err(e) = connection.with_upgrades().await {
-            tracing::debug!("a preview connection ended: {e}");
-        }
-    });
+    let pooled = replayable
+        .then(|| state.previews.take(&preview.session, preview.port))
+        .flatten();
+    let reused = pooled.is_some();
+
+    let mut sender = match pooled {
+        Some(sender) => sender,
+        None => match connect(&state, &session, &preview).await {
+            Ok(sender) => sender,
+            Err(refusal) => return refusal,
+        },
+    };
 
     let sent = tokio::time::timeout(HEADERS_TIMEOUT, sender.send_request(request)).await;
 
     let mut answer = match sent {
-        Ok(Ok(answer)) => answer,
+        Ok(Ok(answer)) => {
+            keep_if_reusable(&state, &preview, upgrading, sender);
+            answer
+        }
+        // A connection the pool believed in turned out to be gone. Ordinary —
+        // it is what a keep-alive expiring looks like from this end.
+        Ok(Err(e)) if reused && spare.is_some() => {
+            tracing::debug!(
+                port = preview.port,
+                "a pooled preview connection was stale: {e}"
+            );
+            let mut fresh = match connect(&state, &session, &preview).await {
+                Ok(sender) => sender,
+                Err(refusal) => return refusal,
+            };
+            let again = fresh.send_request(spare.expect("checked just above"));
+            match tokio::time::timeout(HEADERS_TIMEOUT, again).await {
+                Ok(Ok(answer)) => {
+                    keep_if_reusable(&state, &preview, upgrading, fresh);
+                    answer
+                }
+                Ok(Err(e)) => {
+                    tracing::debug!(port = preview.port, "a preview request failed: {e}");
+                    return gone("The application closed the connection.");
+                }
+                Err(_) => return gone("The application did not answer."),
+            }
+        }
         Ok(Err(e)) => {
             tracing::debug!(port = preview.port, "a preview request failed: {e}");
             return gone("The application closed the connection.");
@@ -117,8 +133,7 @@ pub async fn serve(state: AppState, preview: Preview, mut request: Request) -> R
                         let mut browser = TokioIo::new(browser);
                         let mut application = TokioIo::new(application);
                         // Neither end speaks HTTP any more, so neither do we.
-                        let _ =
-                            tokio::io::copy_bidirectional(&mut browser, &mut application).await;
+                        let _ = tokio::io::copy_bidirectional(&mut browser, &mut application).await;
                     }
                     Err(e) => tracing::debug!("a preview upgrade did not complete: {e}"),
                 }
@@ -127,6 +142,89 @@ pub async fn serve(state: AppState, preview: Preview, mut request: Request) -> R
     }
 
     answer.map(Body::new).into_response()
+}
+
+/// Open a tunnel to the port and start speaking HTTP over it.
+///
+/// The error side is a finished page rather than an error type, because every
+/// one of these is a different sentence somebody can act on and the caller has
+/// nothing to add to any of them.
+async fn connect(
+    state: &AppState,
+    session: &ft_core::Session,
+    preview: &Preview,
+) -> Result<hyper::client::conn::http1::SendRequest<Body>, Response> {
+    let tunnel = match state
+        .fleet
+        .open_tunnel(&session.host_id, &preview.session, preview.port)
+        .await
+    {
+        Ok(Ok(tunnel)) => tunnel,
+        // Almost always "nothing is listening on 3000 in this workspace",
+        // which is a sentence somebody can act on.
+        Ok(Err(refused)) => return Err(gone(&refused)),
+        Err(e) => {
+            tracing::warn!(port = preview.port, "reaching a preview: {e:#}");
+            return Err(gone("The worker for this session isn't answering."));
+        }
+    };
+
+    let (sender, connection) = match hyper::client::conn::http1::Builder::new()
+        .preserve_header_case(true)
+        .title_case_headers(true)
+        .handshake(TokioIo::new(TunnelStream::new(tunnel)))
+        .await
+    {
+        Ok(pair) => pair,
+        Err(e) => {
+            tracing::warn!(port = preview.port, "starting HTTP over a tunnel: {e}");
+            return Err(gone("Firetower could not speak HTTP to that port."));
+        }
+    };
+
+    // Drives the connection while requests are in flight. `with_upgrades`
+    // because a 101 hands the socket over afterwards, and without it hyper
+    // closes the connection instead.
+    tokio::spawn(async move {
+        if let Err(e) = connection.with_upgrades().await {
+            tracing::debug!("a preview connection ended: {e}");
+        }
+    });
+
+    Ok(sender)
+}
+
+/// Offer the connection back to the pool, unless this request took the socket.
+///
+/// An upgrade stops being HTTP the moment the 101 lands, so its connection is
+/// not a connection any more and must never be handed to the next asset.
+fn keep_if_reusable(
+    state: &AppState,
+    preview: &Preview,
+    upgrading: bool,
+    sender: hyper::client::conn::http1::SendRequest<Body>,
+) {
+    if upgrading {
+        return;
+    }
+    state
+        .previews
+        .keep(preview.session.clone(), preview.port, sender);
+}
+
+/// The same request again, for a retry.
+///
+/// Only ever called for a method with no body to replay, so this is a copy
+/// rather than an approximation of one.
+fn without_body(request: &Request) -> Request {
+    let mut copy = Request::builder()
+        .method(request.method().clone())
+        .uri(request.uri().clone());
+    for (name, value) in request.headers() {
+        copy = copy.header(name, value);
+    }
+    copy.body(Body::empty())
+        .expect("a request that was valid stays valid without its body")
 }
 
 /// Whether the client asked to stop speaking HTTP.

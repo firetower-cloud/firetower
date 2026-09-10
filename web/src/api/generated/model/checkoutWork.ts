@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.25.0
+ * OpenAPI spec version: 0.27.0
  */
 import type { PullState } from './pullState';
 
@@ -14,8 +14,12 @@ import type { PullState } from './pullState';
  * aggregated across them for the one button in the header.
  */
 export interface CheckoutWork {
-  /** @minimum 0 */
-  ahead: number;
+  /**
+     * Commits this branch has that its upstream does not. `None` as above.
+     * @minimum 0
+     * @nullable
+     */
+  ahead?: number | null;
   base: string;
   branch: string;
   /**
@@ -32,13 +36,29 @@ export interface CheckoutWork {
      */
   pullRequest?: string | null;
   pullState?: null | PullState;
-  pushed: boolean;
+  /**
+     * Whether the branch has an upstream at all. `None` as above.
+     * @nullable
+     */
+  pushed?: boolean | null;
   slug: string;
   /**
      * Why this repository is not checked out, when it is not.
      * @nullable
      */
   trouble?: string | null;
-  /** @minimum 0 */
-  uncommitted: number;
+  /**
+     * What is edited and not committed, or `None` when nobody could find out.
+     *
+     * **Absent is not zero, and the difference is the whole point of this
+     * type.** A host that had stopped answering used to arrive here as zeros,
+     * and zero is exactly what a finished session looks like — so a worker
+     * nobody could reach was drawn as a workspace with nothing left to do,
+     * and the agent's afternoon of uncommitted work was reported as "Nothing
+     * has changed." An option makes that particular lie unrepresentable:
+     * every reader has to say what it does when the answer is unknown.
+     * @minimum 0
+     * @nullable
+     */
+  uncommitted?: number | null;
 }

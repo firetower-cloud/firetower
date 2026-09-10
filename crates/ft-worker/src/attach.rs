@@ -8,6 +8,7 @@
 //! to tmux, which is what lets it survive us: detaching, restarting, or losing
 //! the network never reaches the process doing the work.
 
+use crate::Out;
 use anyhow::{Context, Result};
 use ft_core::SessionId;
 use ft_proto::{encode, ToServer};
@@ -15,7 +16,6 @@ use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
 use std::io::{Read, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use tokio::sync::mpsc;
 
 /// A live view of one session's terminal.
 pub struct Attachment {
@@ -39,7 +39,7 @@ impl Attachment {
         pty_kind: ft_proto::Pty,
         cols: u16,
         rows: u16,
-        out: mpsc::Sender<ToServer>,
+        out: Out,
     ) -> Result<Self> {
         let pty = native_pty_system()
             .openpty(PtySize {
