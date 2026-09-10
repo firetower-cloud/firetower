@@ -66,7 +66,17 @@ pub(super) async fn preview_address(
     // Asked for the ownership check, not for the host: whoever opens the
     // address is admitted by its signature, and this is where we decide
     // whether they are allowed one at all.
-    session_context(&state, &principal, &id).await?;
+    let owner = principal
+        .owner()
+        .ok_or_else(|| ApiError::new(ErrorCode::Unauthorized, "Sign in to open a preview."))?;
+    state
+        .db
+        .session_of(owner, &id)
+        .await?
+        .ok_or_else(|| ApiError::new(ErrorCode::NotFound, "no such session"))?;
+    // An address is also the annotation panel's ownership/origin check. It
+    // remains useful while the worker is offline; opening the page itself
+    // reports whether the application can be reached.
 
     let preview = crate::preview::Preview {
         session: id,

@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.27.0
+ * OpenAPI spec version: 0.28.2
  */
 import * as zod from 'zod';
 
@@ -316,6 +316,110 @@ export const RenameSessionResponse = zod.object({
   "workspaceId": zod.union([zod.null(),zod.string().describe('Identifies a workspace — the compute a session runs on.')]).optional()
 }).describe('A line of work with a conversation attached and a branch at the end.')
 
+export const ListAnnotationsParams = zod.object({
+  "id": zod.string()
+})
+
+export const ListAnnotationsResponseItem = zod.object({
+  "delivery": zod.string(),
+  "id": zod.string(),
+  "note": zod.string(),
+  "port": zod.int(),
+  "revision": zod.int(),
+  "snapshot": zod.object({
+  "ancestors": zod.array(zod.string()),
+  "bounds": zod.array(zod.number()),
+  "capturedAt": zod.string(),
+  "html": zod.string(),
+  "label": zod.string(),
+  "path": zod.string(),
+  "scroll": zod.array(zod.number()),
+  "selector": zod.string(),
+  "truncated": zod.boolean(),
+  "viewport": zod.array(zod.number())
+})
+})
+export const ListAnnotationsResponse = zod.array(ListAnnotationsResponseItem)
+
+export const KeepAnnotationParams = zod.object({
+  "id": zod.string()
+})
+
+export const keepAnnotationBodyPortMin = 0;
+
+
+
+export const KeepAnnotationBody = zod.object({
+  "id": zod.string(),
+  "note": zod.string(),
+  "port": zod.int().min(keepAnnotationBodyPortMin),
+  "revision": zod.int().describe('Zero creates a note; edits must match the revision read by the caller.'),
+  "snapshot": zod.object({
+  "ancestors": zod.array(zod.string()),
+  "bounds": zod.array(zod.number()),
+  "capturedAt": zod.string(),
+  "html": zod.string(),
+  "label": zod.string(),
+  "path": zod.string(),
+  "scroll": zod.array(zod.number()),
+  "selector": zod.string(),
+  "truncated": zod.boolean(),
+  "viewport": zod.array(zod.number())
+})
+})
+
+export const KeepAnnotationResponse = zod.object({
+  "delivery": zod.string(),
+  "id": zod.string(),
+  "note": zod.string(),
+  "port": zod.int(),
+  "revision": zod.int(),
+  "snapshot": zod.object({
+  "ancestors": zod.array(zod.string()),
+  "bounds": zod.array(zod.number()),
+  "capturedAt": zod.string(),
+  "html": zod.string(),
+  "label": zod.string(),
+  "path": zod.string(),
+  "scroll": zod.array(zod.number()),
+  "selector": zod.string(),
+  "truncated": zod.boolean(),
+  "viewport": zod.array(zod.number())
+})
+})
+
+export const DropAnnotationsParams = zod.object({
+  "id": zod.string()
+})
+
+export const DropAnnotationsBody = zod.object({
+  "notes": zod.array(zod.object({
+  "id": zod.string(),
+  "revision": zod.int()
+}))
+})
+
+export const DropAnnotationsResponse = zod.unknown()
+
+/**
+ * @summary A durable 'sending' marker is committed before contacting the worker. A
+lost acknowledgement must never turn a retry into a duplicate agent turn.
+ */
+export const SendAnnotationsParams = zod.object({
+  "id": zod.string()
+})
+
+export const SendAnnotationsBody = zod.object({
+  "notes": zod.array(zod.object({
+  "id": zod.string(),
+  "revision": zod.int()
+}))
+})
+
+export const SendAnnotationsResponse = zod.object({
+  "sent": zod.boolean()
+})
+
 /**
  * Until this arrives the agent is stopped, holding the tool call open. There
  * is no timeout anywhere on that path: somebody may be asleep, and an agent
@@ -452,6 +556,7 @@ export const GetConversationResponse = zod.object({
   "turn": zod.string().describe('One exchange: a prompt in, and everything that happened before the agent stopped.'),
   "type": zod.enum(['TurnStarted'])
 }),zod.object({
+  "detail": zod.string().nullish().describe('Why it ended that way, when the agent said.\n\nA turn that failed used to arrive as a status and nothing else, so\n\"Your workspace is out of credits. Add credits to continue.\" — a\nsentence the agent had already written, and the only one that would\nhave explained the silence — was dropped on the floor and the\nsession read as an agent that had stopped answering for no reason.'),
   "status": zod.enum(['Completed', 'Failed', 'Interrupted']).describe('How a turn ended.'),
   "turn": zod.string().describe('One exchange: a prompt in, and everything that happened before the agent stopped.'),
   "type": zod.enum(['TurnCompleted']),
@@ -503,7 +608,7 @@ export const GetConversationResponse = zod.object({
   "req": zod.string().describe('One thing the agent is blocked on and needs an answer to.'),
   "type": zod.enum(['RequestOpened'])
 }).describe('The agent is blocked and cannot continue without an answer.'),zod.object({
-  "decision": zod.union([zod.object({
+  "decision": zod.union([zod.null(),zod.union([zod.object({
   "decision": zod.enum(['Allow'])
 }),zod.object({
   "decision": zod.enum(['AllowAlways'])
@@ -513,7 +618,7 @@ export const GetConversationResponse = zod.object({
 }),zod.object({
   "answers": zod.unknown(),
   "decision": zod.enum(['Answered'])
-}).describe('The answers to a question the agent asked.\n\nNot an allow with extra: a question is answered, not permitted, and\nletting it through without the answers gives the agent a tool result\nsaying nothing. Keyed by the question\'s own text, valued by the label\nof the option chosen — the agent matches on both, so neither may be\nparaphrased on the way back.')]).describe('What the person decided, when they were asked.'),
+}).describe('The answers to a question the agent asked.\n\nNot an allow with extra: a question is answered, not permitted, and\nletting it through without the answers gives the agent a tool result\nsaying nothing. Keyed by the question\'s own text, valued by the label\nof the option chosen — the agent matches on both, so neither may be\nparaphrased on the way back.')]).describe('What was decided, when whoever reports it knows.\n\nCodex says only that its request was answered — `serverRequest\/\nresolved` carries the id and nothing else — so \"answered, and it\ndid not say how\" has to be representable. It is the difference\nbetween a card that clears and one that sits on the screen for ever\nwhile somebody presses Allow again.')]).optional(),
   "req": zod.string().describe('One thing the agent is blocked on and needs an answer to.'),
   "type": zod.enum(['RequestResolved'])
 }),zod.object({

@@ -525,3 +525,5 @@ mod tests {
         assert_eq!(names.resolve(authority), Some(preview()));
     }
 }
+
+pub mod annotations;

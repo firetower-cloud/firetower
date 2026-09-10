@@ -368,11 +368,14 @@ pub mod testing {
     /// silence.
     pub struct Worker {
         once: std::sync::Mutex<Option<Connection>>,
+        pub turns: Arc<std::sync::Mutex<Vec<serde_json::Value>>>,
     }
 
     impl Worker {
         fn new() -> Arc<Self> {
             let (ours, theirs) = tokio::io::duplex(64 * 1024);
+            let turns = Arc::new(std::sync::Mutex::new(Vec::new()));
+            let received = turns.clone();
 
             tokio::spawn(async move {
                 let tunnels = Arc::new(ft_worker::tunnel::Tunnels::new());
@@ -399,6 +402,7 @@ pub mod testing {
                                     }).await;
                                 }
                                 ToWorker::Ping => { let _ = out.send(ToServer::Pong).await; }
+                                ToWorker::SendTurn { message, .. } => { received.lock().unwrap().push(message); }
                                 ToWorker::TunnelOpen { tunnel, session_id, port } => {
                                     tunnels.open(tunnel, session_id, port, &ft_worker::Out::merged(out.clone())).await;
                                 }
@@ -427,6 +431,7 @@ pub mod testing {
             let (r, w) = tokio::io::split(ours);
             Arc::new(Self {
                 once: std::sync::Mutex::new(Some(Connection::piped(Box::new(r), Box::new(w)))),
+                turns,
             })
         }
     }
