@@ -406,7 +406,15 @@ pub enum TurnEvent {
     },
     RequestResolved {
         req: RequestId,
-        decision: Decision,
+        /// What was decided, when whoever reports it knows.
+        ///
+        /// Codex says only that its request was answered — `serverRequest/
+        /// resolved` carries the id and nothing else — so "answered, and it
+        /// did not say how" has to be representable. It is the difference
+        /// between a card that clears and one that sits on the screen for ever
+        /// while somebody presses Allow again.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        decision: Option<Decision>,
     },
     UserInputRequested {
         req: RequestId,

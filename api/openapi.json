@@ -10,7 +10,7 @@
       "name": "AGPL-3.0-only",
       "identifier": "AGPL-3.0-only"
     },
-    "version": "0.28.1"
+    "version": "0.28.2"
   },
   "paths": {
     "/api/v1/agents": {
@@ -7753,12 +7753,19 @@
             "type": "object",
             "required": [
               "req",
-              "decision",
               "type"
             ],
             "properties": {
               "decision": {
-                "$ref": "#/components/schemas/Decision"
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/components/schemas/Decision",
+                    "description": "What was decided, when whoever reports it knows.\n\nCodex says only that its request was answered — `serverRequest/\nresolved` carries the id and nothing else — so \"answered, and it\ndid not say how\" has to be representable. It is the difference\nbetween a card that clears and one that sits on the screen for ever\nwhile somebody presses Allow again."
+                  }
+                ]
               },
               "req": {
                 "$ref": "#/components/schemas/RequestId"

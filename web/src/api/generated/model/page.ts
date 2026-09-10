@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.28.1
+ * OpenAPI spec version: 0.28.2
  */
 import type { Task } from './task';
 

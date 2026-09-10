@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.28.1
+ * OpenAPI spec version: 0.28.2
  */
 import type { Decision } from './decision';
 import type { ItemId } from './itemId';
@@ -91,7 +91,7 @@ export type TurnEvent = {
   req: RequestId;
   type: 'RequestOpened';
 } | {
-  decision: Decision;
+  decision?: null | Decision;
   req: RequestId;
   type: 'RequestResolved';
 } | {
