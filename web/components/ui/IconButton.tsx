@@ -16,7 +16,11 @@ const VARIANT: Record<Variant, string> = {
   outline: "border border-line text-dim hover:border-mute/60 hover:text-bone",
 };
 
-const SIZE = { sm: "h-8 w-8", md: "h-10 w-10" } as const;
+/** The same floor `Button` takes: a thumb does not land where it is aimed. */
+const SIZE = {
+  sm: "h-8 w-8 max-md:h-11 max-md:w-11",
+  md: "h-10 w-10 max-md:h-11 max-md:w-11",
+} as const;
 
 export function IconButton({
   of,

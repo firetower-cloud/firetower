@@ -20,9 +20,17 @@ const VARIANT: Record<Variant, string> = {
     "text-brick border border-brick-deep hover:bg-brick-tint disabled:text-mute disabled:border-line",
 };
 
+/**
+ * Two heights, and a floor under both on a touch screen.
+ *
+ * 32px is right for a pointer, which lands where it is aimed, and wrong for a
+ * thumb, which does not. `max-md:min-h-[44px]` costs nothing at a desk — the
+ * button is already taller than the minimum — and makes every button in the
+ * app a real target below `md` without a second variant to remember to use.
+ */
 const SIZE = {
-  sm: "h-7 gap-1.5 px-2.5 text-meta rounded-sm",
-  md: "h-8 gap-2 px-3 text-ui rounded-md",
+  sm: "h-7 gap-1.5 px-2.5 text-meta rounded-sm max-md:min-h-[44px]",
+  md: "h-8 gap-2 px-3 text-ui rounded-md max-md:min-h-[44px]",
 } as const;
 
 export function Button({

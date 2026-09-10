@@ -261,7 +261,10 @@ function Node({
           onClick={() => (foldable ? toggle(path) : onOpen(path))}
           data-path={path}
           title={path}
-          className={`flex h-6 w-full items-center rounded-sm pr-1.5 text-left transition-colors ${
+          // 24px is a tree row on a desk and a miss on a phone. The guides
+          // are `h-full`, so growing the row grows them with it and a deep
+          // branch still reads as one trunk.
+          className={`flex h-6 w-full items-center rounded-sm pr-1.5 text-left transition-colors max-xl:h-11 ${
             active ? "bg-raise" : "hover:bg-raise/60"
           }`}
         >

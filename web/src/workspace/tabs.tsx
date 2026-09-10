@@ -39,6 +39,9 @@ import {
   type ReactNode,
 } from "react";
 
+import { useHasPanel } from "./layout";
+import { showOverlay } from "./overlay";
+
 /** Which half of a split a tab is in. There are at most two. */
 export type PaneIndex = 0 | 1;
 
@@ -411,19 +414,42 @@ export function paneTabs(set: TabSet | null, pane: PaneIndex): Tab[] {
   return set.tabs.filter((t) => (set.pane[t.id] ?? 0) === pane);
 }
 
-/** Convenience for the many places that just want to open a thing. */
+/**
+ * Convenience for the many places that just want to open a thing.
+ *
+ * ## Two answers, one call
+ *
+ * A file, a diff and a preview are tabs on a desk and pushed screens below
+ * `xl` — see `overlay.ts` for why one column cannot use tabs. The fork is here
+ * rather than at each of the dozen call sites, so the tree, the changes list
+ * and the ship panel all say `open.diff(path)` and none of them knows or cares
+ * which layout it is in.
+ *
+ * `beside` is a request about *position* in a split, and a screen with one
+ * column has no other half to put anything in, so it is ignored there.
+ *
+ * A terminal is the exception and stays a tab either way: it is not offered
+ * below `xl` at all, because an xterm with no Esc, no Tab and no Ctrl is not a
+ * terminal.
+ */
 export function useOpen() {
   const { open, set } = useTabs();
+  const pushes = !useHasPanel();
+
   return {
     file: useCallback(
       (path: string, beside?: boolean) =>
-        open({ id: addressOf.file(path), kind: "file", path }, beside),
-      [open],
+        pushes
+          ? showOverlay({ kind: "file", path })
+          : open({ id: addressOf.file(path), kind: "file", path }, beside),
+      [open, pushes],
     ),
     diff: useCallback(
       (path: string, beside?: boolean) =>
-        open({ id: addressOf.diff(path), kind: "diff", path }, beside),
-      [open],
+        pushes
+          ? showOverlay({ kind: "diff", path })
+          : open({ id: addressOf.diff(path), kind: "diff", path }, beside),
+      [open, pushes],
     ),
     terminal: useCallback(() => {
       const n = set ? nextTerminal(set) : 1;
@@ -431,8 +457,10 @@ export function useOpen() {
     }, [open, set]),
     preview: useCallback(
       (port: number, beside?: boolean) =>
-        open({ id: addressOf.preview(port), kind: "preview", port }, beside),
-      [open],
+        pushes
+          ? showOverlay({ kind: "preview", port })
+          : open({ id: addressOf.preview(port), kind: "preview", port }, beside),
+      [open, pushes],
     ),
   };
 }

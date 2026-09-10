@@ -278,14 +278,22 @@ export function Chat({
       {/* A column with a ceiling, so the composer is laid out first and the
           cards above it take whatever is left. Two vh caps that did not know
           about each other left the composer half off the bottom of a short
-          window — the thing this bar exists to keep reachable. */}
-      {/* `pb-4` because this is now the bottom of the window. The session used
-          to be a page inside a padded wrapper, which is where the composer's
-          breathing room came from; in the workbench it fills its pane, and
-          without this the composer — or the line of repositories under it —
-          sits flush against the edge of the screen. `px-4` matches the reading
-          column above so the two stay on one line. */}
-      <div className="relative mx-auto flex max-h-[85vh] w-full max-w-[860px] shrink-0 flex-col bg-ground px-4 pt-3 pb-4">
+          window — the thing this bar exists to keep reachable.
+
+          `dvh` rather than `vh`. With a soft keyboard up, `vh` is still the
+          window as it was *before* the keyboard — so 85vh of a 600px phone is
+          510px of a 280px space, the cap never engages, and the composer this
+          exists to keep reachable is under the keyboard. `dvh` is the room
+          actually left, which the viewport's `interactiveWidget` setting makes
+          shrink when the keyboard comes up. */}
+      {/* It pads for the home indicator because this is now the bottom of the
+          window, and `viewport-fit: cover` draws under it. The
+          session used to be a page inside a padded wrapper, which is where the
+          composer's breathing room came from; in the workbench it fills its
+          pane, and without this the composer — or the line of repositories
+          under it — sits flush against the edge of the screen. `px-4` matches
+          the reading column above so the two stay on one line. */}
+      <div className="relative mx-auto flex max-h-[85dvh] w-full max-w-[860px] shrink-0 flex-col bg-ground px-4 pt-3 pb-[max(1rem,env(safe-area-inset-bottom))]">
         {/* The transcript scrolls under this, so without a fade the last line
             is cut in half by the composer's top edge. */}
         <div

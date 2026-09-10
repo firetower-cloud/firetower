@@ -176,7 +176,7 @@ export function ShipPanel({ sessionId }: { sessionId: string }) {
                 href={l.url}
                 target="_blank"
                 rel="noreferrer"
-                className={`flex items-center justify-center gap-1.5 rounded-md border py-2 text-meta font-medium transition-opacity hover:opacity-80 ${
+                className={`flex min-h-[44px] items-center justify-center gap-1.5 rounded-md border py-2 text-meta font-medium transition-opacity hover:opacity-80 ${
                   ship.stage === "open"
                     ? "border-sage-deep bg-sage-tint text-sage"
                     : "border-line text-dim"
@@ -196,7 +196,7 @@ export function ShipPanel({ sessionId }: { sessionId: string }) {
                 (keeping.length === 0 && ship.stage === "uncommitted")
               }
               title={ship.blocked ?? ship.label}
-              className="w-full rounded-md bg-bone py-2 text-meta font-medium text-ground transition-colors hover:bg-white disabled:bg-line disabled:text-mute"
+              className="min-h-[44px] w-full rounded-md bg-bone py-2 text-meta font-medium text-ground transition-colors hover:bg-white disabled:bg-line disabled:text-mute"
             >
               {push.isPending ? "Working…" : ship.label}
             </button>
@@ -207,7 +207,7 @@ export function ShipPanel({ sessionId }: { sessionId: string }) {
         )}
       </div>
 
-      <div className="min-h-0 border-t border-line px-1 pt-1 pb-2">
+      <div className="min-h-0 border-t border-line px-1 pt-1 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
         <Fold
           label={done(ship) ? "Went in" : "Going in"}
           count={keeping.length}
@@ -226,6 +226,10 @@ export function ShipPanel({ sessionId }: { sessionId: string }) {
                 onClick={() => openTab.diff(f.path)}
                 title={`${f.path} — open the diff`}
                 lead={
+                  // The glyph is 13px and the target is 44. This is the one
+                  // control on the screen that decides what does and does not
+                  // go into a commit, and a near miss opens the diff instead —
+                  // which looks like the tick simply not working.
                   <button
                     onClick={() =>
                       setDropped((held) => {
@@ -237,7 +241,7 @@ export function ShipPanel({ sessionId }: { sessionId: string }) {
                     }
                     title={going ? "Leave this one out" : "Put this one back"}
                     aria-label={going ? `Leave out ${f.path}` : `Include ${f.path}`}
-                    className={`shrink-0 text-meta transition-colors ${
+                    className={`-my-2 grid h-11 w-8 shrink-0 place-items-center text-meta transition-colors xl:-my-1 xl:h-7 ${
                       going ? "text-sage" : "text-mute hover:text-dim"
                     }`}
                   >

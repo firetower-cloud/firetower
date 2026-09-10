@@ -5,17 +5,40 @@ import { LoaderCircle, X } from "lucide-react";
 import { Button, Icon } from "./ui";
 import type { PendingAuth } from "@/src/api/generated/model";
 import { ApiError } from "@/src/api/http";
+import { useDismissible } from "@/src/workspace/dismissible";
 
+/**
+ * A card on a desk, a sheet on a phone.
+ *
+ * The same component either way, because it is the same thing: one decision,
+ * asked once, over whatever you were doing. What changes below `md` is only
+ * that a 520px card floating in a 24px margin becomes the screen — which is
+ * what it nearly was already, and pretending otherwise cost the edges and left
+ * the confirm button somewhere you had to scroll to find.
+ *
+ * As a sheet it gets three things a card does not need: a floor that is above
+ * the home indicator, a header tall enough to have a real target in it, and
+ * Back as a way out.
+ */
 export function Modal({
   title,
   onClose,
   children,
   wide,
+  /**
+   * A floor pinned to the bottom of the sheet, rather than scrolling with it.
+   *
+   * For the one flow with a long body and a decision at the end of it — see
+   * `ShipSheet`. Above `md` this is drawn where it always was, at the end of
+   * the card.
+   */
+  floor,
 }: {
   title: string;
   onClose: () => void;
   children: React.ReactNode;
   wide?: boolean;
+  floor?: React.ReactNode;
 }) {
   useEffect(() => {
     const k = (e: KeyboardEvent) => e.key === "Escape" && onClose();
@@ -23,25 +46,47 @@ export function Modal({
     return () => window.removeEventListener("keydown", k);
   }, [onClose]);
 
+  useDismissible(true, onClose, "modal");
+
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto p-6 sm:p-10">
+    <div className="fixed inset-0 z-50 flex justify-center overflow-hidden sm:items-start sm:overflow-y-auto sm:p-10">
       <div className="fixed inset-0 bg-ground/80 backdrop-blur-[3px]" onClick={onClose} />
       <div
-        className={`relative my-auto w-full rounded-lg border border-line bg-panel shadow-float ${
-          wide ? "max-w-[620px]" : "max-w-[520px]"
+        className={`relative flex h-full w-full flex-col overflow-hidden border-line bg-panel sm:my-auto sm:h-auto sm:max-h-full sm:rounded-lg sm:border sm:shadow-float ${
+          wide ? "sm:max-w-[620px]" : "sm:max-w-[520px]"
         }`}
       >
-        <div className="flex items-center gap-3 border-b border-line px-5 py-3">
+        <div className="shrink-0 border-b border-line pt-[env(safe-area-inset-top)]">
+        <div className="flex items-center gap-3 px-5 py-3">
           <span className="eyebrow">{title}</span>
           <button
             onClick={onClose}
-            className="-mr-1 ml-auto rounded-sm p-1 text-mute transition-colors hover:bg-raise hover:text-bone"
+            className="-mr-3 ml-auto grid h-11 w-11 place-items-center rounded-sm text-mute transition-colors hover:bg-raise hover:text-bone sm:-mr-1 sm:h-auto sm:w-auto sm:p-1"
             aria-label="Close"
           >
             <Icon of={X} size={14} />
           </button>
         </div>
-        <div className="p-5">{children}</div>
+        </div>
+
+        {/* The body scrolls, not the page behind it. On a desk this is the
+            card's own height and the scroller never engages; on a phone it is
+            everything between the header and the floor. */}
+        {/* A floor of its own pads for the home indicator; without one, the
+            body is the bottom of the sheet and pads for it here. */}
+        <div
+          className={`min-h-0 flex-1 overflow-y-auto p-5 ${
+            floor ? "" : "pb-[max(1rem,env(safe-area-inset-bottom))] sm:pb-5"
+          }`}
+        >
+          {children}
+        </div>
+
+        {floor && (
+          <div className="shrink-0 border-t border-line bg-panel px-5 pt-3 pb-[max(1rem,env(safe-area-inset-bottom))] sm:pb-3">
+            {floor}
+          </div>
+        )}
       </div>
     </div>
   );

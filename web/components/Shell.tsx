@@ -4,15 +4,27 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useMe, useLogout } from "@/src/api/generated/auth/auth";
 import { forgetToken } from "@/src/api/http";
-import { useState } from "react";
-import { BookOpen, CircleDashed, LayoutList, ListTodo, Plus, Settings2 } from "lucide-react";
+import { useEffect, useState } from "react";
+import {
+  BookOpen,
+  CircleDashed,
+  LayoutList,
+  ListTodo,
+  Menu,
+  Plus,
+  Settings2,
+  X,
+} from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { Mark, Signal } from "./Signal";
+import { useHasRail } from "@/src/workspace/layout";
+import { useDrawer } from "@/src/workspace/drawer";
 import { NewWorkspaceModal } from "./NewWorkspace";
 import { AgentMark } from "./AgentMark";
 import { Button, GithubMark, Icon } from "./ui";
 import { useListSessions } from "@/src/api/generated/sessions/sessions";
 import { doing, group, shortRepo, type Workspace } from "@/src/api/workspaces";
+import { useDismissible } from "@/src/workspace/dismissible";
 import { elapsed, minutesSince, needsYou, unfinished } from "@/src/api/view";
 
 /**
@@ -31,6 +43,21 @@ const NAV: { href: string; label: string; icon: LucideIcon }[] = [
 
 export function Shell({ children }: { children: React.ReactNode }) {
   const path = usePathname();
+  /* Open only below `md`, where the rail is not on screen to begin with. */
+  const { open: drawer, show: openDrawer, hide: closeDrawer } = useDrawer();
+  const hasRail = useHasRail();
+
+  /* Arriving somewhere is the end of navigating to it. Without this, tapping a
+     workspace left the drawer sitting over the workspace it had just opened,
+     and the only way out was the backdrop — which reads as the tap not having
+     worked. */
+  useEffect(() => closeDrawer(), [path, closeDrawer]);
+
+  /* Back closes it rather than leaving the page.
+     The drawer is a layer over the screen, and on Android the button that
+     dismisses a layer is the system one. Every layer in the app does this the
+     same way — see `useDismissible`. */
+  useDismissible(drawer, closeDrawer, "drawer");
 
   /* Onboarding and signing in run full-bleed — no fleet to navigate yet. */
   if (path.startsWith("/setup") || path.startsWith("/login")) return <>{children}</>;
@@ -44,11 +71,23 @@ export function Shell({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="flex h-dvh overflow-hidden">
-      {/* Fixed to the window, whatever is in it. The list of running sessions
+      {/* Below `md` the rail is a drawer over the page; at `md` and above it is
+          the column it has always been. One element either way — a second
+          component would be the same list of workspaces written twice, drifting
+          apart the first time either was touched.
+
+          Fixed to the window, whatever is in it. The list of running sessions
           grows without bound, and a rail that grows with it pushes the page
           past the viewport and scrolls everything — including the session
           somebody is reading. */}
-      <aside className="hidden h-full w-[236px] shrink-0 flex-col overflow-hidden border-r border-line bg-panel md:flex">
+      <aside
+        // Hidden from the reading order when it is off-screen, or the whole
+        // fleet sits in the tab order of a page that is not showing it.
+        inert={!hasRail && !drawer ? true : undefined}
+        className={`fixed inset-y-0 left-0 z-50 flex h-full w-[300px] shrink-0 flex-col overflow-hidden border-r border-line bg-panel transition-transform duration-200 ease-swift md:static md:z-auto md:w-[236px] md:translate-x-0 md:transition-none ${
+          drawer ? "translate-x-0 shadow-float" : "-translate-x-full"
+        }`}
+      >
         <div className="flex items-center gap-2.5 px-4 pt-4 pb-5">
           <span className="text-bone">
             <Mark size={20} />
@@ -56,6 +95,16 @@ export function Shell({ children }: { children: React.ReactNode }) {
           <span className="font-narrow text-ui font-semibold tracking-[0.22em] text-bone uppercase">
             Firetower
           </span>
+          {/* A way out that is not the backdrop. The backdrop works and is not
+              discoverable, and on a wide phone the drawer's own edge is a long
+              reach from the thumb that opened it. */}
+          <button
+            onClick={closeDrawer}
+            aria-label="Close the menu"
+            className="-mr-1.5 ml-auto grid h-11 w-11 place-items-center rounded-md text-mute transition-colors hover:bg-raise hover:text-bone md:hidden"
+          >
+            <Icon of={X} size={16} />
+          </button>
         </div>
 
         <nav className="flex flex-col gap-0.5 px-2">
@@ -95,16 +144,68 @@ export function Shell({ children }: { children: React.ReactNode }) {
         <WhoAmI />
       </aside>
 
-      {/* The workbench owns its own scrolling — tabs, a transcript that follows
-          itself, a terminal. Every other page is a document and scrolls here. */}
-      <main
-        className={`min-w-0 flex-1 ${workbench ? "flex overflow-hidden" : "overflow-y-auto"}`}
-      >
-        {children}
-      </main>
+      {/* What the drawer is over. Only below `md`, and only while it is open —
+          at `md` the rail is part of the layout and there is nothing to dim. */}
+      {drawer && (
+        <button
+          onClick={closeDrawer}
+          aria-label="Close the menu"
+          tabIndex={-1}
+          className="fixed inset-0 z-40 bg-ground/70 backdrop-blur-[2px] md:hidden"
+        />
+      )}
+
+      <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+        {/* The way to the drawer, on the screens that have nowhere else to put
+            it. Not on the workbench: a workspace draws its own header, with the
+            same `☰` in the same place and a `‹` beside it, and two stacked bars
+            saying the same thing is 100px of a phone spent on furniture. */}
+        {!workbench && (
+          <header className="shrink-0 border-b border-line bg-panel pt-[env(safe-area-inset-top)] md:hidden">
+            {/* The inset pads the wrapper; the row keeps its own height. See
+                the same shape in `Pushed` and `WorkspaceHeader`. */}
+            <div className="flex h-14 items-center gap-1 px-2">
+              <button
+                onClick={openDrawer}
+                aria-label="Open the menu"
+                className="grid h-11 w-11 shrink-0 place-items-center rounded-md text-dim transition-colors hover:bg-raise hover:text-bone"
+              >
+                <Icon of={Menu} size={16} />
+              </button>
+              <span className="font-narrow text-ui font-semibold tracking-[0.22em] text-bone uppercase">
+                {TITLE[path] ?? "Firetower"}
+              </span>
+            </div>
+          </header>
+        )}
+
+        {/* The workbench owns its own scrolling — tabs, a transcript that
+            follows itself, a terminal. Every other page is a document and
+            scrolls here. */}
+        <main
+          className={`min-w-0 flex-1 ${workbench ? "flex overflow-hidden" : "overflow-y-auto"}`}
+        >
+          {children}
+        </main>
+      </div>
     </div>
   );
 }
+
+/**
+ * What the phone's bar is called, per page.
+ *
+ * Only the destinations the drawer offers. Anything else falls back to the
+ * product name, which is honest for a page reached from a link — better than
+ * deriving a title from the path and printing "Repos" in the middle of a
+ * settings screen that calls itself Configuration.
+ */
+const TITLE: Record<string, string> = {
+  "/": "Dashboard",
+  "/tasks": "Tasks",
+  "/configuration": "Configuration",
+  "/sessions": "Sessions",
+};
 
 /**
  * One destination.

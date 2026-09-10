@@ -105,6 +105,18 @@ export function CloseWorkspace({
 
       {asking && (
         <Modal title="Close this workspace?" onClose={() => setAsking(false)}>
+          {/* Which one, before what happens to it.
+              The branch was printed only in the case where nothing was at risk
+              — "`{branch}` is pushed, so the commits are safe" — so the one
+              time it mattered most, the sheet did not say which workspace it
+              was about to destroy. On a desk you can see the rail behind the
+              modal and answer that yourself; below `xl` there is no rail, and
+              this arrives from a menu two taps after the last time anything
+              named the place. */}
+          <p className="mb-3 min-w-0 truncate font-mono text-meta text-dim">
+            ⑂ {session.branch ?? "no branch"}
+          </p>
+
           <p className="text-ui leading-[1.6] text-dim">
             {founding
               ? others > 0
@@ -128,7 +140,7 @@ export function CloseWorkspace({
           ) : (
             <p className="mt-3 text-meta leading-[1.55] text-mute">
               {pushed
-                ? `${session.branch} is pushed, so the commits are safe on the remote.`
+                ? "It is pushed, so the commits are safe on the remote."
                 : "Nothing here is waiting to be saved."}
             </p>
           )}

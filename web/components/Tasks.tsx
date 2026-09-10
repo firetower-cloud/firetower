@@ -83,7 +83,7 @@ export function Tasks() {
   };
 
   return (
-    <div className="px-8 pt-6 pb-24">
+    <div className="px-4 pt-5 pb-24 md:px-8 md:pt-6">
       <PageHead eyebrow="Tasks" title={isPending ? "Looking…" : `${data?.total ?? tasks.length} to pick from.`}>
         Read from GitHub as you look. Starting one opens a workspace.
       </PageHead>

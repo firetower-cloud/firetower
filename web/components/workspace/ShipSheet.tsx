@@ -260,7 +260,74 @@ export function ShipSheet({
   const trailer = trailerFor(refs, within);
 
   return (
-    <Modal title="Commit & open pull request" onClose={onClose} wide>
+    <Modal
+      title="Commit & open pull request"
+      onClose={onClose}
+      wide
+      floor={
+        /* The decision used to be the last thing in the body, which on a desk
+           is the bottom of a card you can see all of. On a phone the body is a
+           title, a description, a list of issues and a trailer — so the button
+           that does the thing was several scrolls below the fold, under
+           whatever the keyboard was covering. It is the floor now, on both,
+           and `Modal` pins it above the home indicator.
+
+           Wrapping rather than one row: "Open as a draft", a sentence about
+           what will happen, and three buttons do not fit across 375px, and the
+           sentence is the part that should give way. */
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+          {opening && !went && (
+            <label className="flex min-h-[44px] cursor-pointer items-center gap-2 text-meta text-dim">
+              <input
+                type="checkbox"
+                checked={draft}
+                onChange={(e) => setDraft(e.target.checked)}
+                className="h-4 w-4 accent-bone"
+              />
+              Open as a draft
+            </label>
+          )}
+          {!went && sequence(ship.stage) && (
+            <p className="hidden min-w-0 flex-1 text-meta text-mute sm:block">
+              {sequence(ship.stage)}
+            </p>
+          )}
+
+          <div className="ml-auto flex items-center gap-2">
+            {writing && (
+              <button
+                onClick={() => {
+                  abandoned.current = true;
+                  describe.reset();
+                  window.setTimeout(() => first.current?.focus(), 0);
+                }}
+                className="min-h-[44px] px-1 text-meta text-mute transition-colors hover:text-bone"
+              >
+                Write it myself
+              </button>
+            )}
+            <button
+              onClick={onClose}
+              className="min-h-[44px] rounded-md px-2.5 text-meta text-mute transition-colors hover:text-bone"
+            >
+              {went?.some((s) => s.state === "failed") ? "Close" : "Cancel"}
+            </button>
+            <button
+              onClick={go}
+              disabled={
+                busy ||
+                writing ||
+                (paths.length === 0 && ship.stage === "uncommitted")
+              }
+              title={`${ship.blocked ?? ship.label} (⌘↵)`}
+              className="min-h-[44px] rounded-md bg-bone px-4 text-meta font-medium text-ground transition-colors hover:bg-white disabled:bg-line disabled:text-mute"
+            >
+              {busy ? "Working…" : went ? "Try again" : ship.label}
+            </button>
+          </div>
+        </div>
+      }
+    >
       <div
         onKeyDown={(e) => {
           // From anywhere in the sheet, including the body — a description is
@@ -442,58 +509,6 @@ export function ShipSheet({
           </p>
         )}
 
-        {/* ── the decision ────────────────────────────────────────── */}
-        <div className="mt-4 flex flex-wrap items-center gap-3 border-t border-line pt-3">
-          {opening && !went && (
-            <label className="flex cursor-pointer items-center gap-1.5 text-meta text-dim">
-              <input
-                type="checkbox"
-                checked={draft}
-                onChange={(e) => setDraft(e.target.checked)}
-                className="accent-bone"
-              />
-              Open as a draft
-            </label>
-          )}
-          {!went && sequence(ship.stage) && (
-            <p className="min-w-0 flex-1 text-meta text-mute">
-              {sequence(ship.stage)}
-            </p>
-          )}
-
-          <div className="ml-auto flex items-center gap-2">
-            {writing && (
-              <button
-                onClick={() => {
-                  abandoned.current = true;
-                  describe.reset();
-                  window.setTimeout(() => first.current?.focus(), 0);
-                }}
-                className="text-meta text-mute transition-colors hover:text-bone"
-              >
-                Write it myself
-              </button>
-            )}
-            <button
-              onClick={onClose}
-              className="rounded-md px-2.5 py-1.5 text-meta text-mute transition-colors hover:text-bone"
-            >
-              {went?.some((s) => s.state === "failed") ? "Close" : "Cancel"}
-            </button>
-            <button
-              onClick={go}
-              disabled={
-                busy ||
-                writing ||
-                (paths.length === 0 && ship.stage === "uncommitted")
-              }
-              title={`${ship.blocked ?? ship.label} (⌘↵)`}
-              className="rounded-md bg-bone px-3 py-1.5 text-meta font-medium text-ground transition-colors hover:bg-white disabled:bg-line disabled:text-mute"
-            >
-              {busy ? "Working…" : went ? "Try again" : ship.label}
-            </button>
-          </div>
-        </div>
       </div>
     </Modal>
   );

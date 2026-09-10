@@ -22,6 +22,9 @@ import {
   type Tab,
 } from "@/src/workspace/tabs";
 import { useWorkbenchKeys } from "@/src/workspace/keys";
+import { useHasPanel, useHasRail } from "@/src/workspace/layout";
+import { resetScreen } from "@/src/workspace/screen";
+import { OneColumn } from "./OneColumn";
 
 /**
  * The whole interface: sessions on the left, what you are reading in the
@@ -47,6 +50,7 @@ function Bench({ initialSession }: { initialSession?: string }) {
   const router = useRouter();
   const { enter } = useTabs();
   const current = useCurrentSession();
+  const hasPanel = useHasPanel();
   /** The repository the composer should start on, when it was opened from one. */
   // The same query the rail runs, so this costs nothing — but it is the only
   // place that can say the whole thing is unreachable rather than empty.
@@ -87,7 +91,33 @@ function Bench({ initialSession }: { initialSession?: string }) {
     if (entered.current) router.replace("/");
   }, [current, router]);
 
+  // Below `xl` a workspace shows one of four things and remembers which. A
+  // different workspace should open on its conversation rather than on
+  // whichever view the last one was left on — landing on a file tree because
+  // that is where you were an hour ago is the app losing your place, not
+  // keeping it.
+  useEffect(() => {
+    if (current) resetScreen();
+  }, [current]);
+
   if (isError) return <Unreachable />;
+
+  /* One column below `xl`, where there is no room for a panel beside the work
+     — a phone, and every iPad but the 13" in landscape. Chosen here rather
+     than with a Tailwind prefix because the two layouts are different trees,
+     not the same tree at two widths: rendering both and hiding one would mean
+     two `ShipPanel`s with two sets of ticked files, disagreeing about what is
+     about to be committed. */
+  if (!hasPanel) {
+    if (!current) {
+      return (
+        <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+          <Blank />
+        </div>
+      );
+    }
+    return <OneColumn sessionId={current} onBack={() => router.push("/")} />;
+  }
 
   return (
     <div className="flex min-w-0 flex-1 overflow-hidden">
@@ -220,11 +250,20 @@ function Unreachable() {
   );
 }
 
+/**
+ * A workspace screen with no workspace in it.
+ *
+ * "On the left" is true at a desk and a lie on a phone, where the rail is a
+ * drawer behind the `☰` and there is nothing to the left of anything.
+ */
 function Blank() {
+  const hasRail = useHasRail();
   return (
     <div className="flex h-full items-center justify-center px-8">
       <p className="max-w-[40ch] text-center text-ui text-mute">
-        Pick a session on the left, or start one.
+        {hasRail
+          ? "Pick a session on the left, or start one."
+          : "Pick a workspace from the menu, or start one."}
       </p>
     </div>
   );

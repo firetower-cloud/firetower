@@ -6,7 +6,9 @@ import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { takeDraft } from "@/src/workspace/draft";
 import { useAttachFile, useListFiles } from "@/src/api/generated/sessions/sessions";
 import type { Attached, Checkout, SlashCommand, Usage } from "@/src/api/generated/model";
-import { Picker, type Control } from "@/components/Settings.chat";
+import type { Control } from "@/components/Settings.chat";
+import { Pickers } from "@/components/Pickers.chat";
+import { useHasRail } from "@/src/workspace/layout";
 import { Context } from "@/components/Context.chat";
 import type { Limits } from "@/src/api/conversation";
 
@@ -61,6 +63,9 @@ export function ChatComposer({
   // paint an empty composer and then fill it, which reads as the page changing
   // its mind. `takeDraft` removes what it returns, so a reload does not put the
   // issue back on top of whatever has since been typed.
+  /* Whether Enter is a send or a newline — see the key handler below. */
+  const sends = useHasRail();
+
   const [draft, setDraft] = useState(() => takeDraft(sessionId) ?? "");
   const [images, setImages] = useState<Attached[]>([]);
   const [over, setOver] = useState(false);
@@ -298,9 +303,14 @@ export function ChatComposer({
                 return;
               }
             }
-            // Enter sends. This is a message box, not an editor — a newline
-            // needs a modifier.
-            if (e.key === "Enter" && !e.shiftKey) {
+            // Enter sends, on a keyboard that has a Shift to hold for the
+            // newline. A soft keyboard does not: Return is where every
+            // messaging app on the device puts a line break, there is no
+            // modifier under a thumb, and a message box that sends half a
+            // sentence every time somebody starts a second paragraph is not a
+            // message box. Below `md` the arrow is the only way to send, which
+            // is why it is a 44px target.
+            if (e.key === "Enter" && !e.shiftKey && sends) {
               e.preventDefault();
               submit();
             }
@@ -310,6 +320,15 @@ export function ChatComposer({
             live ? "Ask for follow-up changes, or attach a file" : "This session has finished."
           }
           disabled={!live}
+          // What the Return key is called on a soft keyboard. Without this it
+          // says "return" while doing something else, or "send" while
+          // inserting a newline — both of which are the keyboard lying about
+          // the app.
+          enterKeyHint={sends ? "send" : "enter"}
+          // 14px here, and 16px below `md` — see the unlayered rule at the
+          // foot of `globals.css`, which every field in the app inherits.
+          // Under 16px iOS zooms the page when a field takes focus and does
+          // not zoom back out, and this is the field everybody touches.
           className="scroll-slim min-h-[52px] w-full resize-none bg-transparent px-4.5 pt-3.5 text-body text-text placeholder:text-mute focus:outline-none disabled:opacity-50"
         />
 
@@ -338,19 +357,11 @@ export function ChatComposer({
           />
 
           {/* One per knob this agent has, in the order the server gave
-              them. A session whose agent has none — or whose agent has not
-              said what its models are yet — shows nothing here rather than
+              them — collapsed to one chip and a sheet where there is not room
+              for three. A session whose agent has none — or whose agent has
+              not said what its models are yet — shows nothing here rather than
               a picker that cannot be right. */}
-          {controls.map((control) => (
-            <Picker
-              key={control.kind}
-              choices={control.choices}
-              current={control.current ?? undefined}
-              fallback={control.fallback}
-              disabled={!live}
-              onPick={(v) => onSet(control.kind, v)}
-            />
-          ))}
+          <Pickers controls={controls} disabled={!live} onSet={onSet} />
 
           <div className="ml-auto flex items-center gap-3">
             {usage && <Context usage={usage} limits={limits} />}

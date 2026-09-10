@@ -9,16 +9,13 @@ import {
   useSessionDiff,
   useSessionWork,
 } from "@/src/api/generated/sessions/sessions";
-import { useOpen } from "@/src/workspace/tabs";
 import { usePanel, VIEWS, type View } from "@/src/workspace/panel";
 import { Signal } from "@/components/Signal";
 import { STATUS_LABEL } from "@/src/api/view";
 import { shipping } from "@/src/api/ship";
 import { useListEvents } from "@/src/api/generated/events/events";
 import { stepLines, ready } from "@/components/Steps";
-import { PathRow, Counts } from "./PathRow";
-import { Tree } from "./Tree";
-import { ShipPanel } from "./ShipPanel";
+import { WorkspaceView } from "./Views";
 import { CloseWorkspace } from "./CloseWorkspace";
 
 /**
@@ -71,11 +68,12 @@ export function Inspector({ sessionId }: { sessionId: string | null }) {
           </div>
         ) : (
           <>
-            {panel.view === "files" && (
-              <Tree sessionId={sessionId} changed={new Set(files.map((f) => f.path))} />
-            )}
-            {panel.view === "changes" && <Changes sessionId={sessionId} />}
-            {panel.view === "ship" && <ShipPanel sessionId={sessionId} />}
+            <WorkspaceView
+              view={panel.view}
+              sessionId={sessionId}
+              changed={new Set(files.map((f) => f.path))}
+              onShip={() => panel.reveal("ship")}
+            />
             <Doing sessionId={sessionId} />
           </>
         )}
@@ -236,7 +234,7 @@ function Grip() {
  * is a set of views, and one of them silently being a destructive action is a
  * thing you only mispress once.
  */
-function Doing({ sessionId }: { sessionId: string }) {
+export function Doing({ sessionId }: { sessionId: string }) {
   const { data: session } = useGetSession(sessionId);
   // The same query the session tab runs, served from one cache entry — and kept
   // current by the socket rather than by either of them polling.
@@ -297,57 +295,3 @@ const LABEL: Record<string, string> = {
   Launch: "Starting the agent",
 };
 
-/** What is in the workspace that is not safely elsewhere. */
-function Changes({ sessionId }: { sessionId: string }) {
-  const { data: files = [], isLoading } = useSessionDiff(sessionId, undefined, {
-    query: { refetchInterval: 8_000 },
-  });
-  const open = useOpen();
-  const panel = usePanel();
-
-  const added = files.reduce((n, f) => n + f.added, 0);
-  const removed = files.reduce((n, f) => n + f.removed, 0);
-
-  return (
-    <section className="flex min-h-0 flex-1 flex-col overflow-hidden">
-      <div className="flex shrink-0 items-center gap-2 border-b border-line px-3 py-1.5">
-        <span className="eyebrow">Changes</span>
-        <span className="ml-auto font-mono text-micro text-mute">
-          {isLoading ? "…" : files.length === 0 ? "none" : `${files.length} files`}
-        </span>
-      </div>
-
-      <div className="min-h-0 flex-1 overflow-y-auto px-1.5 py-1">
-        {files.map((f) => (
-          <PathRow
-            key={f.path}
-            path={f.path}
-            onClick={() => open.diff(f.path)}
-            trail={<Counts added={f.added} removed={f.removed} />}
-          />
-        ))}
-
-        {!isLoading && files.length === 0 && <Line>Nothing has changed yet.</Line>}
-      </div>
-
-      {files.length > 0 && (
-        <div className="shrink-0 border-t border-line px-3 py-2">
-          <p className="mb-2 font-mono text-micro text-mute">
-            <span className="text-sage">+{added}</span>{" "}
-            <span className="text-brick">−{removed}</span>
-          </p>
-          <button
-            onClick={() => panel.reveal("ship")}
-            className="w-full rounded-md border border-line py-1.5 text-meta text-dim transition-colors hover:border-line hover:text-bone"
-          >
-            Review &amp; ship →
-          </button>
-        </div>
-      )}
-    </section>
-  );
-}
-
-function Line({ children }: { children: React.ReactNode }) {
-  return <p className="px-1.5 py-1 text-meta text-mute">{children}</p>;
-}
