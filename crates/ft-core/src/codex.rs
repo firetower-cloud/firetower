@@ -536,17 +536,27 @@ impl CodexNormaliser {
                 })
                 .unwrap_or_default(),
             "turn/started" => self.turn_started(&params),
-            "turn/completed" => self.turn_completed(&params),
-            // Codex says why before it says that the turn is over, and the
-            // `turn/completed` that follows does not always carry the reason
-            // itself. Held so whichever of the two has it wins.
+            "turn/completed" => {
+                let mut events = self.turn_completed(&params);
+                events.extend(crate::quota::failure(&params["turn"]["error"]));
+                events
+            }
+            // Two separate things about one frame, and both are wanted. The
+            // message is what a person needs — "Your workspace is out of
+            // credits" is the whole explanation for a run that stopped — and
+            // it is held rather than emitted, because the `turn/completed`
+            // that follows does not always repeat it. The quota event is what
+            // the *account* needs, so that running dry is a state something
+            // can act on rather than a sentence somebody has to read.
             "error" => {
                 self.failure = params
                     .get("error")
                     .and_then(|e| e.get("message"))
                     .and_then(Value::as_str)
                     .map(str::to_string);
-                Vec::new()
+                crate::quota::failure(&params["error"])
+                    .into_iter()
+                    .collect()
             }
             "item/started" => self.item_started(&params),
             "item/completed" => self.item_completed(&params),
@@ -964,7 +974,7 @@ fn limits(params: &Value) -> Vec<TurnEvent> {
                 // room left, however little.
                 status: if used >= 100 { "reached" } else { "allowed" }.to_string(),
                 resets_at: window.get("resetsAt").and_then(Value::as_i64),
-                used_percent: Some(used as u8),
+                used_percent: Some(used.clamp(0, 100) as u8),
             })
         })
         .collect()

@@ -13,6 +13,97 @@
     "version": "0.28.2"
   },
   "paths": {
+    "/api/v1/agent-accounts": {
+      "get": {
+        "tags": [
+          "accounts"
+        ],
+        "operationId": "list_accounts",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Account"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "accounts"
+        ],
+        "operationId": "create_account",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateAccount"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Account"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/agent-accounts/{id}": {
+      "put": {
+        "tags": [
+          "accounts"
+        ],
+        "operationId": "update_account",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateAccount"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Account"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/agents": {
       "get": {
         "tags": [
@@ -2025,6 +2116,74 @@
         }
       }
     },
+    "/api/v1/sessions/{id}/account": {
+      "get": {
+        "tags": [
+          "accounts"
+        ],
+        "operationId": "session_account",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionAccount"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "accounts"
+        ],
+        "operationId": "switch_account",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SwitchAccount"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SwitchedAccount"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/sessions/{id}/annotations": {
       "get": {
         "tags": [
@@ -2694,6 +2853,74 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sessions/{id}/fallback": {
+      "get": {
+        "tags": [
+          "accounts"
+        ],
+        "operationId": "get_fallback",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Fallback"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "accounts"
+        ],
+        "operationId": "set_fallback",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Fallback"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Fallback"
                 }
               }
             }
@@ -4030,6 +4257,63 @@
           }
         }
       },
+      "Account": {
+        "type": "object",
+        "required": [
+          "id",
+          "kind",
+          "name",
+          "mode",
+          "isDefault",
+          "enabled",
+          "state",
+          "revision",
+          "credentialSet",
+          "limits"
+        ],
+        "properties": {
+          "credentialSet": {
+            "type": "boolean"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string"
+          },
+          "identity": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "isDefault": {
+            "type": "boolean"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "limits": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Limit"
+            }
+          },
+          "mode": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "state": {
+            "type": "string"
+          }
+        }
+      },
       "Agent": {
         "type": "string",
         "description": "Which agent runs inside a workspace.\n\nSerialised as the variant name — see the wire conventions in the brief: a\nfield takes the consumer's casing, an enum value stays the symbol it is.",
@@ -4942,6 +5226,31 @@
         ],
         "description": "One thing that happened, and where in the log it was said.\n\nThe line number travels with the event because several events can come from\none line, and a client's cursor has to be a position in the agent's log\nrather than a count of what it drew."
       },
+      "CreateAccount": {
+        "type": "object",
+        "required": [
+          "kind",
+          "name",
+          "mode"
+        ],
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/Agent"
+          },
+          "mode": {
+            "$ref": "#/components/schemas/AgentMode"
+          },
+          "name": {
+            "type": "string"
+          },
+          "secret": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
       "Credentials": {
         "type": "object",
         "required": [
@@ -5539,6 +5848,24 @@
           }
         ]
       },
+      "Fallback": {
+        "type": "object",
+        "required": [
+          "enabled",
+          "accountIds"
+        ],
+        "properties": {
+          "accountIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "enabled": {
+            "type": "boolean"
+          }
+        }
+      },
       "FileDiff": {
         "type": "object",
         "description": "One file's worth of a unified diff.",
@@ -5864,6 +6191,35 @@
           }
         }
       },
+      "Limit": {
+        "type": "object",
+        "required": [
+          "scope",
+          "status"
+        ],
+        "properties": {
+          "resetsAt": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "scope": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "usedPercent": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32"
+          }
+        }
+      },
       "Me": {
         "type": "object",
         "description": "Who the caller is, and what they belong to.",
@@ -6088,6 +6444,13 @@
         "type": "object",
         "description": "What the API accepts to launch one.",
         "properties": {
+          "accountId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Named connection to use. Omit for the default for this agent."
+          },
           "agent": {
             "$ref": "#/components/schemas/Agent"
           },
@@ -7136,6 +7499,37 @@
           }
         }
       },
+      "SessionAccount": {
+        "type": "object",
+        "required": [
+          "limits",
+          "switches"
+        ],
+        "properties": {
+          "account": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Account"
+              }
+            ]
+          },
+          "limits": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Limit"
+            }
+          },
+          "switches": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Switch"
+            }
+          }
+        }
+      },
       "SessionId": {
         "type": "string",
         "description": "Identifies a session — the unit of work you talk to."
@@ -7230,6 +7624,13 @@
         "type": "object",
         "description": "What a sign-in needs from the caller.",
         "properties": {
+          "accountId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Existing named connection to authenticate."
+          },
           "hostId": {
             "type": [
               "string",
@@ -7392,6 +7793,63 @@
           "ToolOutput",
           "ToolInput"
         ]
+      },
+      "Switch": {
+        "type": "object",
+        "required": [
+          "toAccountId",
+          "state",
+          "afterLine"
+        ],
+        "properties": {
+          "afterLine": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "detail": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "nextSessionId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "state": {
+            "type": "string"
+          },
+          "toAccountId": {
+            "type": "string"
+          }
+        }
+      },
+      "SwitchAccount": {
+        "type": "object",
+        "required": [
+          "accountId"
+        ],
+        "properties": {
+          "acceptPermissionChange": {
+            "type": "boolean"
+          },
+          "accountId": {
+            "type": "string"
+          }
+        }
+      },
+      "SwitchedAccount": {
+        "type": "object",
+        "required": [
+          "sessionId"
+        ],
+        "properties": {
+          "sessionId": {
+            "type": "string"
+          }
+        }
       },
       "Task": {
         "type": "object",
@@ -8005,6 +8463,35 @@
           "Failed",
           "Interrupted"
         ]
+      },
+      "UpdateAccount": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "isDefault": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "secret": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
       },
       "Usage": {
         "type": "object",

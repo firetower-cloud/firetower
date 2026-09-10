@@ -17,6 +17,11 @@ import type { WorkspaceSize } from './workspaceSize';
  * What the API accepts to launch one.
  */
 export interface NewSession {
+  /**
+     * Named connection to use. Omit for the default for this agent.
+     * @nullable
+     */
+  accountId?: string | null;
   agent?: Agent;
   /**
      * The branch to start from. Omit for the repository's default.

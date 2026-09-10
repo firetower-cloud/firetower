@@ -139,6 +139,7 @@ export const SignAgentInParams = zod.object({
 })
 
 export const SignAgentInBody = zod.object({
+  "accountId": zod.string().nullish().describe('Existing named connection to authenticate.'),
   "hostId": zod.string().nullish().describe('Which host should do it. Any that has the agent, by default.\n\nIt matters only in that OpenAI delivers the credential to whichever\nmachine asked for the code — and that machine hands it straight to us,\nso which one it was stops mattering the moment it lands.')
 }).describe('What a sign-in needs from the caller.')
 

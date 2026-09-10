@@ -1,5 +1,7 @@
 "use client";
 
+import { useAccounts } from "@/src/api/accounts";
+
 import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useListRepos, useRepoBranches } from "@/src/api/generated/repos/repos";
@@ -95,6 +97,8 @@ export function NewWorkspace({
   /** Once the branch has been typed in it is yours, and stops following. */
   const [branchTyped, setBranchTyped] = useState(false);
   const [checkouts, setCheckouts] = useState<{ id: string; slug: string; base?: string }[]>([]);
+  const accounts = useAccounts();
+  const [accountId, setAccountId] = useState("");
   const [agent, setAgent] = useState<Agent | "">("");
   const [hostId, setHostId] = useState("");
   const [share, setShare] = useState<Share>(Share.equal);
@@ -178,6 +182,7 @@ export function NewWorkspace({
         taskUrl: fromTask?.url,
         repos: checkouts.map((c) => ({ repoId: c.id, base: c.base })),
         agent: chosenKind,
+        accountId: accounts.data?.find((a) => a.id === accountId && a.kind === chosenKind)?.id,
         branch: checkouts.length ? shownBranch.trim() || undefined : undefined,
         hostId: host?.id,
         share,
@@ -271,6 +276,12 @@ export function NewWorkspace({
         </Row>
       </div>
 
+      <Row label="Account">
+        <select aria-label="Account" value={accounts.data?.some((a) => a.id === accountId && a.kind === chosenKind) ? accountId : ""} onChange={(e) => setAccountId(e.target.value)} className="w-full rounded-md border border-line bg-ground px-3 py-2 text-ui text-bone">
+          <option value="">Default account</option>
+          {accounts.data?.filter((a) => a.kind === chosenKind && a.enabled && a.state === "connected" && a.credentialSet).map((a) => <option key={a.id} value={a.id}>{a.name}{a.isDefault ? " · Default" : ""}</option>)}
+        </select>
+      </Row>
       <ShareRow share={share} onChange={setShare} host={host} busy={busyHere} />
 
       {create.isError && (

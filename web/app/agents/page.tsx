@@ -5,10 +5,10 @@ import { useQueryClient } from "@tanstack/react-query";
 import {
   useListAgents,
   useCheckAgents,
-  useForgetAgent,
   getListAgentsQueryKey,
 } from "@/src/api/generated/agents/agents";
 import { AgentMode, type AgentView } from "@/src/api/generated/model";
+import { AgentAccounts } from "@/components/AgentAccounts";
 import { ConnectAgent } from "@/components/ConnectAgent";
 import { Install } from "@/components/InstallAgent";
 import { KeyGlyph } from "@/components/Signal";
@@ -44,8 +44,7 @@ export default function Agents() {
               : `${waiting} still ${waiting === 1 ? "needs" : "need"} a credential.`}
         </h1>
         <p className="mt-1.5 text-ui text-dim">
-          Authenticate once here. The credential is handed to a workspace as it starts,
-          never written to a worker&apos;s disk.
+          Connect and name your accounts. Choose a default for new tasks, or switch accounts inside an existing workspace.
         </p>
       </header>
 
@@ -77,8 +76,6 @@ function AgentRow({
   agent: AgentView;
   onConfigure: () => void;
 }) {
-  const queryClient = useQueryClient();
-  const forget = useForgetAgent();
 
   const anywhere = agent.hosts.filter((h) => h.installed);
 
@@ -93,26 +90,12 @@ function AgentRow({
             yet, so nobody is being told the agent will run. */}
         {(agent.supported || agent.signsInWithACode) && agent.needsCredential && (
           <button onClick={onConfigure} className="ml-auto text-meta text-mute transition-colors hover:text-bone">
-            {agent.mode ? "Change" : "Connect"}
-          </button>
-        )}
-        {(agent.supported || agent.signsInWithACode) && agent.mode && agent.needsCredential && (
-          <button
-            onClick={() =>
-              forget.mutate(
-                { kind: agent.kind },
-                {
-                  onSuccess: () =>
-                    queryClient.invalidateQueries({ queryKey: getListAgentsQueryKey() }),
-                },
-              )
-            }
-            className="text-meta text-mute transition-colors hover:text-bone"
-          >
-            Forget
+            Connect account
           </button>
         )}
       </div>
+
+      {agent.needsCredential && <AgentAccounts agent={agent} />}
 
       {!agent.supported && (
         <p className="mt-2 max-w-[62ch] text-meta leading-[1.5] text-mute">

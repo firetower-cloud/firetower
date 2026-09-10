@@ -90,7 +90,17 @@ pub async fn wait_until_listening(session_id: &SessionId) -> Result<()> {
 /// Read from the log rather than from a socket because the log is where every
 /// line already lands, written and flushed before anybody is offered it — so
 /// there is no window in which an answer arrives and nothing sees it.
+#[cfg(test)]
 pub async fn wait_for_answer(workspace: &Path, session_id: &str, id: u64) -> Result<()> {
+    wait_for_answer_since(workspace, session_id, id, 0).await
+}
+
+pub async fn wait_for_answer_since(
+    workspace: &Path,
+    session_id: &str,
+    id: u64,
+    after_line: usize,
+) -> Result<()> {
     // This agent's own log, and only ever that one.
     //
     // Not `readable_log`: its fallback to the pre-split `agent.ndjson` is for
@@ -112,7 +122,7 @@ pub async fn wait_for_answer(workspace: &Path, session_id: &str, id: u64) -> Res
 
     loop {
         if let Ok(text) = tokio::fs::read_to_string(&log).await {
-            for line in text.lines() {
+            for line in text.lines().skip(after_line) {
                 let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
                     continue;
                 };
@@ -121,6 +131,9 @@ pub async fn wait_for_answer(workspace: &Path, session_id: &str, id: u64) -> Res
                     continue;
                 }
                 if value.get("id").and_then(serde_json::Value::as_u64) == Some(id) {
+                    if let Some(error) = value.get("error") {
+                        anyhow::bail!("agent rejected request {id}: {error}");
+                    }
                     return Ok(());
                 }
             }
@@ -357,5 +370,32 @@ mod tests {
             Err(_) => {}
             Ok(result) => assert!(result.is_err(), "a missing agent is not a success"),
         }
+    }
+    #[tokio::test]
+    async fn a_restart_waits_for_a_new_answer_and_surfaces_resume_refusal() {
+        let workspace = tempfile::tempdir().unwrap();
+        let log = crate::agentd::log_path(workspace.path(), "resume-test");
+        tokio::fs::create_dir_all(log.parent().unwrap())
+            .await
+            .unwrap();
+        tokio::fs::write(&log, "{\"id\":2,\"result\":{}}\n")
+            .await
+            .unwrap();
+        assert!(tokio::time::timeout(
+            Duration::from_millis(100),
+            wait_for_answer_since(workspace.path(), "resume-test", 2, 1)
+        )
+        .await
+        .is_err());
+        tokio::fs::write(
+            &log,
+            "{\"id\":2,\"result\":{}}\n{\"id\":2,\"error\":{\"message\":\"resume refused\"}}\n",
+        )
+        .await
+        .unwrap();
+        let error = wait_for_answer_since(workspace.path(), "resume-test", 2, 1)
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("resume refused"));
     }
 }

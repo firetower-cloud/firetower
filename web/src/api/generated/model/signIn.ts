@@ -11,6 +11,11 @@
  */
 export interface SignIn {
   /**
+     * Existing named connection to authenticate.
+     * @nullable
+     */
+  accountId?: string | null;
+  /**
      * Which host should do it. Any that has the agent, by default.
      *
      * It matters only in that OpenAI delivers the credential to whichever

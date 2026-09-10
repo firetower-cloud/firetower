@@ -148,14 +148,26 @@ impl Vault {
     /// back afterwards and pass as current.
     pub async fn put(&self, key: Key<'_>, value: &str, reason: &str) -> Result<()> {
         let mut tx = self.pool.begin().await?;
+        self.put_in(&mut tx, key, value, reason).await?;
+        tx.commit().await?;
+        Ok(())
+    }
 
+    /// Publish a credential and its connection metadata in one transaction.
+    pub(crate) async fn put_in(
+        &self,
+        tx: &mut Transaction<'_, Postgres>,
+        key: Key<'_>,
+        value: &str,
+        reason: &str,
+    ) -> Result<()> {
         let version: i32 = sqlx::query(
             "SELECT version FROM secrets WHERE scope = $1 AND name = $2 AND owner = $3",
         )
         .bind(key.scope)
         .bind(key.name)
         .bind(key.owner)
-        .fetch_optional(&mut *tx)
+        .fetch_optional(&mut **tx)
         .await?
         .map(|r| r.get::<i32, _>("version") + 1)
         .unwrap_or(1);
@@ -185,11 +197,10 @@ impl Vault {
         .bind(version)
         .bind(&sealed.wrapped_key)
         .bind(&sealed.ciphertext)
-        .execute(&mut *tx)
+        .execute(&mut **tx)
         .await?;
 
-        self.append(&mut tx, key, "Write", reason).await?;
-        tx.commit().await?;
+        self.append(tx, key, "Write", reason).await?;
         Ok(())
     }
 
@@ -419,7 +430,10 @@ impl Vault {
                 .await?
                 .map(|r| r.get("digest"));
 
-        let at = chrono::Utc::now();
+        // Postgres stores microseconds. Hash the timestamp that will actually
+        // be stored, so reading an untouched audit entry verifies on Linux too.
+        let at = chrono::DateTime::from_timestamp_micros(chrono::Utc::now().timestamp_micros())
+            .expect("the current timestamp fits in chrono");
         let entry = log::Entry {
             scope: key.scope,
             name: key.name,

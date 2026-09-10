@@ -80,6 +80,7 @@ export const ListSessionsResponseItem = zod.object({
 export const ListSessionsResponse = zod.array(ListSessionsResponseItem)
 
 export const CreateSessionBody = zod.object({
+  "accountId": zod.string().nullish().describe('Named connection to use. Omit for the default for this agent.'),
   "agent": zod.enum(['ClaudeCode', 'Codex', 'Shell']).optional().describe('Which agent runs inside a workspace.\n\nSerialised as the variant name — see the wire conventions in the brief: a\nfield takes the consumer\'s casing, an enum value stays the symbol it is.'),
   "base": zod.string().nullish().describe('The branch to start from. Omit for the repository\'s default.'),
   "branch": zod.string().nullish().describe('The branch the agent works on. Omit to derive one from the prompt.\n\nNamed by whoever starts the session, because this is what ends up on a\npull request and a machine-written slug is a poor thing to live with.'),

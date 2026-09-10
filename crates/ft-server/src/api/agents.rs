@@ -49,6 +49,7 @@ pub(super) async fn agent_env(
         &state.vault,
         kind,
         owner,
+        session,
         &format!("starting {session} with {}", kind.label()),
     )
     .await?;
@@ -73,15 +74,16 @@ pub(crate) async fn agent_credential(
     vault: &crate::vault::Vault,
     kind: Agent,
     owner: &str,
+    session: &SessionId,
     why: &str,
 ) -> anyhow::Result<Vec<(String, ft_proto::Secret)>> {
-    let Some((_, mode, _)) = db
-        .agent_modes(owner)
-        .await?
-        .into_iter()
-        .find(|(k, ..)| *k == kind)
-    else {
+    let Some(account) = super::accounts::selected(db, owner, session).await? else {
         return Ok(Vec::new());
+    };
+    let mode = if account.mode == "ApiKey" {
+        AgentMode::ApiKey
+    } else {
+        AgentMode::Subscription
     };
 
     let variable = match mode {
@@ -96,7 +98,10 @@ pub(crate) async fn agent_credential(
     };
 
     let Some(secret) = vault
-        .get(Key::of(crate::vault::AGENT, &agent_key(kind), owner), why)
+        .get(
+            Key::of(crate::vault::AGENT, &account.credential_key, owner),
+            why,
+        )
         .await?
     else {
         return Ok(Vec::new());
@@ -124,20 +129,17 @@ pub(super) async fn agent_home(
         return Ok(Vec::new());
     };
 
-    let Some((_, AgentMode::Subscription, _)) = state
-        .db
-        .agent_modes(owner)
-        .await?
-        .into_iter()
-        .find(|(k, ..)| *k == kind)
-    else {
+    let Some(account) = super::accounts::selected(&state.db, owner, session).await? else {
         return Ok(Vec::new());
     };
+    if account.mode != "Subscription" {
+        return Ok(Vec::new());
+    }
 
     let Some(secret) = state
         .vault
         .get(
-            Key::of(vault::AGENT, &agent_key(kind), owner),
+            Key::of(vault::AGENT, &account.credential_key, owner),
             &format!("starting {session} with {}", kind.label()),
         )
         .await?
@@ -252,16 +254,36 @@ pub(super) async fn list_agents(
         let configured = modes.iter().find(|(k, ..)| *k == kind);
         // The vault answers whether one is set without decrypting anything, so
         // rendering this screen never touches a credential.
+        let default = super::accounts::default_account(&state.db, owner, kind).await?;
         let credential_set = state
             .vault
-            .holds(Key::of(vault::AGENT, &agent_key(kind), owner))
+            .holds(Key::of(
+                vault::AGENT,
+                default
+                    .as_ref()
+                    .map(|a| a.credential_key.as_str())
+                    .unwrap_or(&agent_key(kind)),
+                owner,
+            ))
             .await?;
 
         views.push(AgentView {
             kind,
             label: kind.label().to_string(),
-            mode: configured.map(|(_, m, ..)| *m),
-            enabled: configured.map(|(_, _, e)| *e).unwrap_or(true),
+            mode: default
+                .as_ref()
+                .map(|a| {
+                    if a.mode == "ApiKey" {
+                        AgentMode::ApiKey
+                    } else {
+                        AgentMode::Subscription
+                    }
+                })
+                .or_else(|| configured.map(|(_, m, ..)| *m)),
+            enabled: default
+                .as_ref()
+                .map(|a| a.enabled)
+                .unwrap_or_else(|| configured.map(|(_, _, e)| *e).unwrap_or(true)),
             // Whether one is set, never the value itself.
             credential_set,
             needs_credential: kind.needs_credential(),
@@ -368,6 +390,10 @@ pub(super) async fn configure_agent(
         }
     }
 
+    if req.mode != AgentMode::NotNeeded {
+        sqlx::query("INSERT INTO agent_accounts(id,user_id,kind,name,mode,credential_key,is_default,enabled) VALUES($1,$2,$3,'Default account',$4,$3,NOT EXISTS(SELECT 1 FROM agent_accounts WHERE user_id=$2 AND kind=$3 AND is_default),$5) ON CONFLICT(id) DO UPDATE SET mode=excluded.mode,enabled=excluded.enabled,state='connected'")
+            .bind(format!("legacy:{owner}:{kind:?}")).bind(owner).bind(agent_key(kind)).bind(format!("{:?}",req.mode)).bind(req.enabled).execute(state.db.pool()).await?;
+    }
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -375,6 +401,8 @@ pub(super) async fn configure_agent(
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct SignIn {
+    /// Existing named connection to authenticate.
+    pub account_id: Option<String>,
     /// Which host should do it. Any that has the agent, by default.
     ///
     /// It matters only in that OpenAI delivers the credential to whichever
@@ -424,6 +452,21 @@ pub(super) async fn sign_agent_in(
         ));
     }
 
+    let account_id = if let Some(id) = req.account_id {
+        let account = super::accounts::find(&state.db, &owner, &id).await?;
+        if account.kind != agent_key(kind) || account.mode != "Subscription" {
+            return Err(ApiError::new(
+                ErrorCode::InvalidRequest,
+                "this account does not use device sign-in for this agent",
+            ));
+        }
+        id
+    } else {
+        let id = format!("legacy:{owner}:{kind:?}");
+        sqlx::query("INSERT INTO agent_accounts(id,user_id,kind,name,mode,credential_key,state) VALUES($1,$2,$3,'Default account','Subscription',$3,'pending') ON CONFLICT(id) DO NOTHING")
+            .bind(&id).bind(&owner).bind(agent_key(kind)).execute(state.db.pool()).await?;
+        id
+    };
     let host = choose_host(&state, kind, req.host_id.as_deref()).await?;
 
     let (pending, finished) = state
@@ -442,31 +485,25 @@ pub(super) async fn sign_agent_in(
     tokio::spawn(async move {
         match finished.await {
             Ok(Ok(credential)) => {
-                // The credential first, the mode second. A mode saying it is
-                // signed in with nothing behind it is the worse of the two
-                // half-states to be interrupted in.
-                if let Err(e) = vault
-                    .put(
-                        Key::of(vault::AGENT, &agent_key(kind), &owner),
-                        &credential,
-                        &format!("{} signed in with a device code", kind.label()),
-                    )
-                    .await
+                if let Err(e) =
+                    super::accounts::connect(&db, &vault, &owner, &account_id, &credential).await
                 {
-                    tracing::error!("storing the {} credential: {e:#}", kind.label());
+                    tracing::warn!("recording the sign-in: {e:?}");
+                    let _ = sqlx::query("UPDATE agent_accounts SET state='sign-in failed' WHERE id=$1 AND state='pending'")
+                        .bind(&account_id).execute(db.pool()).await;
                     return;
-                }
-                if let Err(e) = db
-                    .set_agent_mode(&owner, kind, AgentMode::Subscription, true)
-                    .await
-                {
-                    tracing::error!("recording that {} is signed in: {e:#}", kind.label());
                 }
                 tracing::info!("{} signed in", kind.label());
             }
             Ok(Err(why)) => tracing::warn!("the {} sign-in did not finish: {why}", kind.label()),
             Err(_) => tracing::warn!("the {} sign-in was abandoned", kind.label()),
         }
+        let _ = sqlx::query(
+            "UPDATE agent_accounts SET state='sign-in failed' WHERE id=$1 AND state='pending'",
+        )
+        .bind(&account_id)
+        .execute(db.pool())
+        .await;
     });
 
     Ok(Json(answer))
@@ -539,6 +576,8 @@ pub(super) async fn forget_agent(
     let kind = agent_from_path(&kind)?;
     let owner = owner(&principal)?;
     state.db.forget_agent(owner, kind).await?;
+    sqlx::query("UPDATE agent_accounts SET enabled=false,is_default=false WHERE user_id=$1 AND credential_key=$2")
+        .bind(owner).bind(agent_key(kind)).execute(state.db.pool()).await?;
     state
         .vault
         .forget(

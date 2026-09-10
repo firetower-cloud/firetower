@@ -192,6 +192,9 @@ pub async fn run(config: Config) -> Result<()> {
     };
     // In the background: it fetches a few hundred megabytes, and nothing else
     // start-up does should wait on somebody's connection to npm.
+    sqlx::query("UPDATE agent_account_switches SET state='failed',detail='The server restarted during the switch. Check the selected account and retry.' WHERE state='switching'")
+        .execute(state.db.pool()).await?;
+    tokio::spawn(crate::api::accounts::watch_fallbacks(state.clone()));
     tokio::spawn(seed_agents(state.clone()));
 
     announce(&policy, admin.as_ref(), &ssh_identity, &config);

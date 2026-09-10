@@ -194,7 +194,7 @@ function Turn({ usage }: { usage: Usage }) {
  */
 function Allowance({ limits }: { limits?: Limits }) {
   if (!limits) return null;
-  const blocked = limits.status !== "allowed";
+  const blocked = ["rejected", "blocked"].includes(limits.status);
   // A reset time that has already gone by says nothing: the window turned over
   // and the agent has not mentioned the next one. The status is what is still
   // true.

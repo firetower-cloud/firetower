@@ -275,6 +275,12 @@ impl Progress {
                     ..
                 } => self.said.push_str(&delta),
 
+                E::Limited { status, .. } if ft_core::quota::blocked(&status) => {
+                    moved = Some((
+                        SessionStatus::HandedBack,
+                        Some("Usage limit reached. Switch accounts or wait for the reset.".into()),
+                    ));
+                }
                 E::TurnStarted { .. } => {
                     self.said.clear();
                     moved = Some((SessionStatus::Working, None));
@@ -415,6 +421,9 @@ fn summarise(said: &str) -> Option<String> {
 /// Quiet about failing. A session that finished is finished whether or not
 /// anybody could think of a name for it, and the sheet works with an empty box.
 async fn describe(fleet: &Fleet, db: &Db, host_id: &HostId, session_id: &SessionId) {
+    if sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM agent_account_switches WHERE session_id=$1 AND state='switching')")
+        .bind(session_id.as_str()).fetch_one(db.pool()).await.unwrap_or(true) { return; }
+
     // Nothing to describe without a checkout, and nothing to open either.
     let session = match db.session(session_id).await {
         Ok(Some(session)) if session.repo.is_some() => session,
@@ -436,6 +445,7 @@ async fn describe(fleet: &Fleet, db: &Db, host_id: &HostId, session_id: &Session
             vault,
             session.agent,
             session.owner.as_str(),
+            &session.id,
             &format!("describing the work in {session_id}"),
         )
         .await
@@ -1690,6 +1700,9 @@ impl Fleet {
                                 }
                                 Ok(true) => {}
                             }
+                            if let Err(e) = crate::api::accounts::record_limits(&db, &session_id, &line).await {
+                                tracing::warn!(session = %session_id, "recording account limits: {e:#}");
+                            }
                             // What this line means for the session, before it
                             // means anything to a screen. This is the only
                             // thing that moves a structured session off
@@ -2545,6 +2558,21 @@ impl Fleet {
     /// Takes what somebody typed rather than a finished frame: which protocol
     /// a session speaks is this object's business, and a caller that built the
     /// message itself would have to know too.
+    pub async fn start_agent(&self, host: &HostId, spec: ft_proto::StartAgent) -> Result<()> {
+        let id = spec.session_id.clone();
+        self.run_action(
+            host,
+            &id,
+            ft_proto::Action::StartAgent {
+                spec: Box::new(spec),
+            },
+            None,
+        )
+        .await?
+        .map_err(anyhow::Error::msg)?;
+        Ok(())
+    }
+
     pub async fn send_turn(
         &self,
         host_id: &HostId,

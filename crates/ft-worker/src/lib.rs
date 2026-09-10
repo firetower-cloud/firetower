@@ -1721,6 +1721,25 @@ You are in the directory that holds them, not inside one of them.              P
             agent.command().to_string()
         };
 
+        let previous_log = tokio::fs::read_to_string(agentd::log_path(path, id.as_str()))
+            .await
+            .unwrap_or_default();
+        let after_line = previous_log.lines().count();
+        let mut opening = agent.opening(prompt, &path.to_string_lossy());
+        if agent == ft_core::Agent::Codex {
+            let mut reader = ft_core::codex::CodexNormaliser::default();
+            for line in previous_log.lines() {
+                reader.push(line);
+            }
+            if let Some(thread) = reader.thread() {
+                for message in &mut opening {
+                    if message.get("method").and_then(|v| v.as_str()) == Some("thread/start") {
+                        message["method"] = serde_json::json!("thread/resume");
+                        message["params"]["threadId"] = serde_json::json!(thread);
+                    }
+                }
+            }
+        }
         tmux.start(path, &command, env)
             .await
             .with_context(|| format!("starting {}", agent.label()))?;
@@ -1751,14 +1770,14 @@ You are in the directory that holds them, not inside one of them.              P
             // out. An app-server refuses everything with "Not initialized"
             // until it has finished starting, and a burst loses that race on a
             // machine that is busy — which is every machine, sometimes.
-            for message in agent.opening(prompt, &path.to_string_lossy()) {
+            for message in opening {
                 let awaiting = message.get("id").and_then(serde_json::Value::as_u64);
                 structured::tell(id, &agentd::ToAgent::Send { message })
                     .await
                     .context("opening the conversation")?;
 
                 if let Some(req) = awaiting {
-                    structured::wait_for_answer(path, id.as_str(), req)
+                    structured::wait_for_answer_since(path, id.as_str(), req, after_line)
                         .await
                         .context("opening the conversation")?;
                 }
@@ -1930,24 +1949,7 @@ You are in the directory that holds them, not inside one of them.              P
             ));
         }
 
-        // The same directory the workspace's first agent uses, deliberately.
-        // What lands there is one person's credential for one agent, so two
-        // runs of theirs write the same bytes; giving the second its own copy
-        // would be a second thing to destroy for no difference.
-        if !spec.agent_home.is_empty() {
-            let home = agentd::dir_for(&path).join("agent-home");
-            match write_agent_home(&home, &spec.agent_home).await {
-                Ok(()) => {
-                    if let Some(var) = spec.agent.home_var() {
-                        env.push((var.to_string(), home.display().to_string()));
-                    }
-                }
-                // Not fatal, for the reason the first agent's is not: one that
-                // cannot find its credential says so in words its own users
-                // know, and a run that refused to start would say less.
-                Err(e) => tracing::warn!(session = %id, "writing the agent's home: {e:#}"),
-            }
-        }
+        prepare_agent_home(&path, &id, spec.agent, &spec.agent_home, &mut env).await?;
 
         self.launch_agent(
             Launch {
@@ -2092,28 +2094,7 @@ You are in the directory that holds them, not inside one of them.              P
             ));
         }
 
-        // A directory of this session's own, for an agent that keeps its
-        // credential in a file.
-        //
-        // Per session rather than per host: what lands here is somebody's, and
-        // a directory shared between sessions is a directory the next session
-        // can read it out of. It goes inside `.firetower`, which sits beside
-        // the checkouts where git cannot see it, and is destroyed with the
-        // workspace — so the control plane's copy stays the only durable one.
-        if !spec.agent_home.is_empty() {
-            let home = agentd::dir_for(&path).join("agent-home");
-            match write_agent_home(&home, &spec.agent_home).await {
-                Ok(()) => {
-                    if let Some(var) = spec.agent.home_var() {
-                        env.push((var.to_string(), home.display().to_string()));
-                    }
-                }
-                // Not fatal. An agent that cannot find its credential says so
-                // in words its own users know, and a session that refused to
-                // start would say less.
-                Err(e) => tracing::warn!(session = %id, "writing the agent's home: {e:#}"),
-            }
-        }
+        prepare_agent_home(&path, &id, spec.agent, &spec.agent_home, &mut env).await?;
 
         // In order, and each one is allowed to fail on its own: a session that
         // came up with two repositories out of three is still a session worth
@@ -2305,11 +2286,30 @@ You are in the directory that holds them, not inside one of them.              P
         out: &Out,
     ) -> Result<String> {
         match action {
+            ft_proto::Action::StartAgent { spec } => {
+                anyhow::ensure!(
+                    &spec.session_id == session_id,
+                    "launch must name the requested session"
+                );
+                self.start_agent(*spec, out).await?;
+                Ok("agent is ready".to_string())
+            }
             ft_proto::Action::Stop => {
                 // The workspace and the branch stay; only the agent goes. What
                 // it produced is still there to look at, commit, or push.
                 self.attached.lock().await.remove(session_id.as_str());
                 Tmux::for_session(session_id.as_str()).kill().await?;
+                let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
+                while agentd::AgentClient::connect(session_id.as_str())
+                    .await
+                    .is_ok()
+                {
+                    anyhow::ensure!(
+                        tokio::time::Instant::now() < deadline,
+                        "the previous agent has not stopped; refusing to replace its credentials"
+                    );
+                    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                }
 
                 self.store
                     .set_status(session_id, SessionStatus::HandedBack)
@@ -3060,6 +3060,64 @@ fn showable(workspace: &Path, path: &Path) -> String {
 /// Relative paths only, and no climbing out: the names come from the control
 /// plane rather than from a person, but a path that escaped the directory
 /// would write a credential somewhere nothing cleans up.
+/// Separate mutable authentication and thread storage for each run. Copy the old
+/// workspace home once on upgrade so native Codex thread resume remains possible.
+async fn prepare_agent_home(
+    path: &std::path::Path,
+    id: &SessionId,
+    agent: ft_core::Agent,
+    files: &[(String, String)],
+    env: &mut Vec<(String, String)>,
+) -> Result<()> {
+    let Some(variable) = agent.home_var() else {
+        return Ok(());
+    };
+    let has_key = agent
+        .api_key_var()
+        .is_some_and(|key| env.iter().any(|(k, _)| k == key));
+    if files.is_empty() && !has_key {
+        return Ok(());
+    }
+    let home = agentd::dir_for(path).join(format!("agent-home-{}", id.as_str()));
+    if !home.exists() {
+        let old = agentd::dir_for(path).join("agent-home");
+        let dest = home.clone();
+        tokio::task::spawn_blocking(move || -> Result<()> {
+            fn copy_dir(source: &std::path::Path, dest: &std::path::Path) -> Result<()> {
+                std::fs::create_dir_all(dest)?;
+                if !source.exists() {
+                    return Ok(());
+                }
+                for entry in std::fs::read_dir(source)? {
+                    let entry = entry?;
+                    let kind = entry.file_type()?;
+                    let target = dest.join(entry.file_name());
+                    if kind.is_dir() {
+                        copy_dir(&entry.path(), &target)?;
+                    } else if kind.is_file() && entry.file_name() != "auth.json" {
+                        std::fs::copy(entry.path(), target)?;
+                    }
+                }
+                Ok(())
+            }
+            copy_dir(&old, &dest)
+        })
+        .await??;
+    }
+    if files.is_empty() {
+        match tokio::fs::remove_file(home.join("auth.json")).await {
+            Ok(()) => (),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => (),
+            Err(e) => return Err(e.into()),
+        }
+    } else {
+        write_agent_home(&home, files).await?;
+    }
+    env.retain(|(k, _)| k != variable);
+    env.push((variable.to_string(), home.display().to_string()));
+    Ok(())
+}
+
 async fn write_agent_home(home: &std::path::Path, files: &[(String, String)]) -> Result<()> {
     tokio::fs::create_dir_all(home)
         .await
@@ -4283,23 +4341,31 @@ mod tests {
             &worker,
             vec![
                 hello(),
-                ToWorker::StartAgent(Box::new(ft_proto::StartAgent {
+                ToWorker::RunAction {
+                    req: "acknowledged-launch".into(),
                     session_id: second.clone(),
-                    workspace: first.as_str().to_string(),
-                    prompt: String::new(),
-                    agent: Agent::Shell,
-                    title: "Shell".into(),
-                    repo: None,
-                    branch: None,
-                    base: None,
-                    size: WorkspaceSize::Medium,
-                    share: ft_core::Share::Equal,
-                    env: vec![],
-                    agent_home: vec![],
-                })),
+                    credential: None,
+                    action: ft_proto::Action::StartAgent {
+                        spec: Box::new(ft_proto::StartAgent {
+                            session_id: second.clone(),
+                            workspace: first.as_str().to_string(),
+                            prompt: String::new(),
+                            agent: Agent::Shell,
+                            title: "Shell".into(),
+                            repo: None,
+                            branch: None,
+                            base: None,
+                            size: WorkspaceSize::Medium,
+                            share: ft_core::Share::Equal,
+                            env: vec![],
+                            agent_home: vec![],
+                        }),
+                    },
+                },
             ],
         )
         .await;
+        assert!(out.iter().any(|frame| matches!(frame,ToServer::ActionDone { req, result } if req=="acknowledged-launch" && result.is_ok())), "launch must acknowledge readiness");
 
         let labels: Vec<&str> = out
             .iter()
@@ -4615,6 +4681,74 @@ mod tests {
         assert!(
             String::from_utf8_lossy(&output).contains("Pong"),
             "the frame after the bad one should still be served"
+        );
+    }
+}
+
+#[cfg(test)]
+mod account_home_tests {
+    use super::*;
+    #[tokio::test]
+    async fn accounts_in_one_workspace_have_independent_credentials_and_keep_legacy_threads() {
+        let dir = tempfile::tempdir().unwrap();
+        let old = agentd::dir_for(dir.path()).join("agent-home");
+        tokio::fs::create_dir_all(old.join("sessions"))
+            .await
+            .unwrap();
+        tokio::fs::write(old.join("auth.json"), "old-token")
+            .await
+            .unwrap();
+        tokio::fs::write(old.join("sessions/thread.jsonl"), "history")
+            .await
+            .unwrap();
+        let a = SessionId::new();
+        let b = SessionId::new();
+        let mut env_a = vec![];
+        let mut env_b = vec![];
+        prepare_agent_home(
+            dir.path(),
+            &a,
+            ft_core::Agent::Codex,
+            &[("auth.json".into(), "token-a".into())],
+            &mut env_a,
+        )
+        .await
+        .unwrap();
+        prepare_agent_home(
+            dir.path(),
+            &b,
+            ft_core::Agent::Codex,
+            &[("auth.json".into(), "token-b".into())],
+            &mut env_b,
+        )
+        .await
+        .unwrap();
+        let home_a = std::path::Path::new(&env_a[0].1);
+        let home_b = std::path::Path::new(&env_b[0].1);
+        assert_ne!(home_a, home_b);
+        assert_eq!(
+            tokio::fs::read_to_string(home_a.join("auth.json"))
+                .await
+                .unwrap(),
+            "token-a"
+        );
+        assert_eq!(
+            tokio::fs::read_to_string(home_b.join("auth.json"))
+                .await
+                .unwrap(),
+            "token-b"
+        );
+        assert_eq!(
+            tokio::fs::read_to_string(home_a.join("sessions/thread.jsonl"))
+                .await
+                .unwrap(),
+            "history"
+        );
+        assert_eq!(
+            tokio::fs::read_to_string(old.join("auth.json"))
+                .await
+                .unwrap(),
+            "old-token"
         );
     }
 }

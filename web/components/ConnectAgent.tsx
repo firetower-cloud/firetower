@@ -1,293 +1,76 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
-import { Modal, Choice, Command, Foot, Go, Quiet } from "./Modal";
-import {
-  useConfigureAgent,
-  useSignAgentIn,
-  useListAgents,
-  getListAgentsQueryKey,
-} from "@/src/api/generated/agents/agents";
-import { AgentMode, type AgentView, type AgentOnHost } from "@/src/api/generated/model";
-import { ApiError } from "@/src/api/http";
-import { CodeToType, Spinner } from "./Modal";
-import { Install } from "./InstallAgent";
+import { useState } from "react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { Modal, Command, Foot, Go, Quiet, CodeToType } from "./Modal";
+import { useSignAgentIn, getListAgentsQueryKey } from "@/src/api/generated/agents/agents";
+import { AgentMode, type AgentView } from "@/src/api/generated/model";
+import { accountsKey, createAccount, updateAccount, useAccounts, type Account } from "@/src/api/accounts";
 
-/**
- * How an agent authenticates.
- *
- * A subscription is the front door: it's the plan most people already pay for.
- * The browser step happens on your own machine — servers don't have one — and
- * what crosses the gap is a token every host can use.
- */
-export function ConnectAgent({
-  agent,
-  onClose,
-}: {
-  agent: AgentView;
-  onClose: () => void;
+const input = "mt-2 w-full rounded-sm border border-line bg-ground px-3 py-2 text-ui text-bone outline-none focus:border-dim/40";
+
+export function ConnectAgent({ agent, account, onClose, onConnected }: {
+  agent: AgentView; account?: Account; onClose: () => void; onConnected?: (account: Account) => void;
 }) {
-  // Two different acts wearing one word. Claude Code hands you a token to
-  // carry here; Codex has no such command, and signs a machine in directly.
-  if (agent.signsInWithACode) {
-    return <WithACode agent={agent} onClose={onClose} />;
-  }
-  return <WithAToken agent={agent} onClose={onClose} />;
-}
-
-/**
- * Signing in with a device code, for an agent that has no token to paste.
- *
- * The code is asked for by a host, because that is the machine OpenAI delivers
- * the credential to. It comes straight back to the vault, so which host asked
- * stops mattering the moment it lands — every host uses it afterwards, the
- * same as a pasted token.
- */
-function WithACode({ agent, onClose }: { agent: AgentView; onClose: () => void }) {
-  const signIn = useSignAgentIn();
-  const pending = signIn.data;
-
-  // Only while a code is on screen. Nothing else here polls, and the moment
-  // the credential lands there is nothing left to wait for.
-  const agents = useListAgents({
-    query: { refetchInterval: pending ? 3000 : false, enabled: !!pending },
-  });
-  const signedIn = agents.data?.find((a) => a.kind === agent.kind)?.credentialSet;
-
-  // Whether any host could ask for a code at all. Read from the list rather
-  // than the prop so that installing one from inside this modal turns the
-  // button on without reopening it.
-  const anywhere = (agents.data?.find((a) => a.kind === agent.kind) ?? agent).hosts.some(
-    (h) => h.installed,
-  );
-
-  const queryClient = useQueryClient();
-  useEffect(() => {
-    if (!pending || !signedIn) return;
-    queryClient.invalidateQueries({ queryKey: getListAgentsQueryKey() });
-    onClose();
-  }, [pending, signedIn, onClose, queryClient]);
-
-  const start = () =>
-    signIn.mutate(
-      { kind: agent.kind, data: {} },
-      { onSuccess: (auth) => window.open(auth.verificationUri, "_blank", "noopener") },
-    );
-
-  return (
-    <Modal title={`Connect ${agent.label}`} onClose={onClose} wide>
-      {!pending ? (
-        <>
-          <p className="max-w-[52ch] text-ui leading-[1.6] text-dim">
-            {agent.label} signs a machine in rather than handing you a token to
-            copy. One of your hosts asks for a code, you approve it in a browser,
-            and the credential comes back here.
-          </p>
-          <ul className="mt-4 flex flex-col gap-2">
-            {[
-              "No password is typed here, and none passes through your browser.",
-              "It is encrypted before it is stored, and every read of it is logged.",
-              "Signed in once — every host uses it, not one sign-in per server.",
-            ].map((line) => (
-              <li key={line} className="flex gap-2.5 text-meta text-slate">
-                <span className="mt-[7px] h-[3px] w-[3px] shrink-0 rounded-full bg-mute" />
-                {line}
-              </li>
-            ))}
-          </ul>
-
-          <Hosts agent={agent} />
-
-          {signIn.isError && <Failure error={signIn.error} />}
-
-          <Foot>
-            {/* A host has to have the binary: asking for a code means running
-                `codex app-server` on one. Refused by the server too — this
-                only means finding out before the click rather than after. */}
-            <Go onClick={start} disabled={signIn.isPending || !anywhere}>
-              {signIn.isPending
-                ? "Asking for a code…"
-                : anywhere
-                  ? `Sign in to ${agent.label}`
-                  : `Install ${agent.label} on a host first`}
-            </Go>
-            <Quiet onClick={onClose}>Cancel</Quiet>
-          </Foot>
-        </>
-      ) : (
-        <>
-          <p className="text-ui text-dim">
-            A tab opened at{" "}
-            <a
-              href={pending.verificationUri}
-              target="_blank"
-              rel="noopener"
-              className="text-dim underline underline-offset-2 transition-colors hover:text-bone"
-            >
-              {pending.verificationUri.replace(/^https?:\/\//, "")}
-            </a>
-            . Enter this code:
-          </p>
-
-          <CodeToType code={pending.userCode} />
-
-          <p className="mt-4 flex items-center gap-2 text-meta text-mute">
-            <Spinner />
-            Waiting for you to approve it…
-          </p>
-
-          <p className="mt-3 text-meta text-mute">
-            The code lasts fifteen minutes. Closing this gives up on it.
-          </p>
-        </>
-      )}
-    </Modal>
-  );
-}
-
-/** Signing in by carrying a token here, for an agent that prints one. */
-function WithAToken({ agent, onClose }: { agent: AgentView; onClose: () => void }) {
-  const [mode, setMode] = useState<AgentMode>(agent.mode ?? AgentMode.Subscription);
+  const [name, setName] = useState(account?.name ?? "");
   const [secret, setSecret] = useState("");
-
-  const queryClient = useQueryClient();
-  const configure = useConfigureAgent();
-
-  const save = () =>
-    configure.mutate(
-      { kind: agent.kind, data: { mode, secret } },
-      {
-        onSuccess: async () => {
-          await queryClient.invalidateQueries({ queryKey: getListAgentsQueryKey() });
-          onClose();
-        },
-      },
-    );
-
-  return (
-    <Modal title={`Connect ${agent.label}`} onClose={onClose} wide>
-      {/* Only the subscription. The protocol and the vault both handle an API
-          key — `AgentMode::ApiKey` is real on the server — but nothing has been
-          run end to end that way, and offering an untested path beside a
-          working one is how somebody spends an afternoon finding that out.
-          Restoring the choice is this block and nothing else.
-
-          An agent already configured with a key still reports it, and the
-          agents screen still shows it. This is about what is offered, not what
-          is understood. */}
-      <div className="flex flex-col gap-2">
-        <Choice
-          on={mode === AgentMode.Subscription}
-          title="My subscription"
-          tag="plan"
-          body="Get a token once on your own machine. Every host uses it — no signing in server by server."
-          onClick={() => setMode(AgentMode.Subscription)}
-        />
-      </div>
-
-      {mode === AgentMode.Subscription && agent.tokenCommand && (
-        <div className="mt-4">
-          <p className="text-ui leading-[1.6] text-dim">
-            Run this <span className="text-bone">on your own machine</span> — it opens a
-            browser and prints a token that lasts a year.
-          </p>
-          <div className="mt-2.5">
-            <Command text={agent.tokenCommand} />
-          </div>
-          <p className="mt-2 text-meta text-mute">
-            Your servers have no browser, so signing in happens where you are. The token is
-            what travels — obtained once, used by every host.
-          </p>
-        </div>
-      )}
-
-      <div className="mt-4">
-        <label className="eyebrow">Paste the token</label>
-        <input
-          autoFocus
-          type="password"
-          value={secret}
-          onChange={(e) => setSecret(e.target.value)}
-          placeholder={agent.credentialSet ? "•••••••• — replace it" : "paste it here"}
-          spellCheck={false}
-          onKeyDown={(e) => e.key === "Enter" && secret.trim() && save()}
-          className="mt-2 w-full rounded-sm border border-line bg-ground px-3 py-2 font-mono text-meta text-bone outline-none placeholder:text-mute focus:border-dim/40"
-        />
-      </div>
-
-      <Hosts agent={agent} />
-
-      {configure.isError && <Failure error={configure.error} />}
-
-      <Foot>
-        <Go onClick={save} disabled={!secret.trim() || configure.isPending}>
-          {configure.isPending ? "Saving…" : "Save"}
-        </Go>
-        <Quiet onClick={onClose}>Cancel</Quiet>
-      </Foot>
-    </Modal>
-  );
+  const [makeDefault, setMakeDefault] = useState(false);
+  const [created, setCreated] = useState<Account | null>(null);
+  const [saved, setReady] = useState<Account | null>(null);
+  const cache = useQueryClient();
+  const login = useSignAgentIn();
+  const accounts = useAccounts(!!created && !saved);
+  const authenticated = accounts.data?.find((a) => a.id === created?.id && a.state === "connected" && a.revision > created.revision);
+  const ready = saved ?? (login.data ? authenticated : null);
+  const device = agent.signsInWithACode && account?.mode !== "ApiKey";
+  const save = useMutation({ mutationFn: async () => {
+    let connection = created ?? account;
+    if (connection) {
+      connection = await updateAccount(connection.id, { name, ...(device ? {} : { secret }) });
+    } else {
+      connection = await createAccount({ kind: agent.kind, name, mode: account?.mode === "ApiKey" ? AgentMode.ApiKey : AgentMode.Subscription, ...(device ? {} : { secret }) });
+    }
+    setCreated(connection);
+    await cache.invalidateQueries({ queryKey: accountsKey });
+    if (device) {
+      await login.mutateAsync({ kind: agent.kind, data: { accountId: connection.id } });
+    } else {
+      setReady(connection);
+    }
+  }});
+  const finish = useMutation({ mutationFn: async () => {
+    if (!ready) return;
+    const connection = await updateAccount(ready.id, { name, ...(makeDefault ? { isDefault: true } : {}) });
+    await cache.invalidateQueries({ queryKey: accountsKey });
+    await cache.invalidateQueries({ queryKey: getListAgentsQueryKey() });
+    onConnected?.(connection);
+    onClose();
+  }});
+  const error = save.error ?? finish.error;
+  const current = accounts.data?.find((a) => a.id === created?.id);
+  return <Modal title={ready ? "Account connected" : `${account ? "Reconnect" : "Connect"} ${agent.label} account`} onClose={onClose} wide>
+    <label className="eyebrow" htmlFor="account-name">Account name</label>
+    <input id="account-name" autoFocus className={input} value={name} maxLength={80} onChange={(e) => setName(e.target.value)} placeholder="Personal Claude, Work, Client Acme…" disabled={!!login.data && !ready} />
+    <p className="mt-2 text-meta text-mute">Choose a name you’ll recognize when switching accounts.</p>
+    {ready ? <>
+      <p className="mt-4 text-ui text-dim">{agent.label} · {ready.identity ?? "Credential connected. The provider did not return an account identity."}</p>
+      <label className="mt-4 flex gap-2 text-ui text-dim"><input type="checkbox" checked={makeDefault} onChange={(e) => setMakeDefault(e.target.checked)} />Use by default for new tasks</label>
+      <Foot><Go onClick={() => finish.mutate()} disabled={!name.trim() || finish.isPending}>{finish.isPending ? "Saving…" : onConnected ? "Save and continue task" : "Done"}</Go></Foot>
+    </> : login.data ? <>
+      <p className="mt-4 text-ui text-dim">Open <a className="underline" href={login.data.verificationUri} target="_blank" rel="noopener noreferrer">the sign-in page</a> and enter this code. Check that you sign in with the intended account.</p>
+      <CodeToType code={login.data.userCode} />
+      <p className="mt-3 text-meta text-mute">{current?.state === "sign-in failed" ? "Sign-in could not be saved. This identity may already be connected; check your accounts or try again." : "Waiting for you to approve… You can close this window; the pending connection stays in your account list."}</p>
+      <Foot><Quiet onClick={() => { login.reset();  }}>Try again</Quiet><Quiet onClick={onClose}>Close</Quiet></Foot>
+    </> : <>
+      {!device && <>
+        {agent.tokenCommand && <div className="mt-4"><p className="mb-2 text-ui text-dim">Sign in with the intended account on your machine, then run:</p><Command text={agent.tokenCommand} /></div>}
+        <label className="eyebrow mt-4 block" htmlFor="account-secret">{account?.mode === "ApiKey" ? "API key" : "Subscription token"}</label>
+        <input id="account-secret" className={input} type="password" autoComplete="off" value={secret} onChange={(e) => setSecret(e.target.value)} spellCheck={false} />
+      </>}
+      {device && <p className="mt-4 text-ui text-dim">Continue to device sign-in, then approve the connection with the account you want to use.</p>}
+      <Foot><Go onClick={() => save.mutate()} disabled={!name.trim() || save.isPending || (!device && !secret.trim()) || (device && !agent.hosts.some((h) => h.installed))}>{save.isPending ? "Connecting…" : device ? "Continue to sign in" : "Connect account"}</Go><Quiet onClick={onClose}>Cancel</Quiet></Foot>
+      {device && !agent.hosts.some((h) => h.installed) && <p className="text-meta text-mute">Install {agent.label} on a host first.</p>}
+    </>}
+    {error && <p role="alert" className="mt-3 text-meta text-brick">{error instanceof Error ? error.message : "Could not connect this account."}</p>}
+  </Modal>;
 }
-
-/** Which hosts this will actually work on, and why. */
-function Hosts({ agent }: { agent: AgentView }) {
-  return (
-    <div className="mt-5 border-t border-line pt-4">
-      <div className="eyebrow mb-2">Where it will run</div>
-
-      {agent.hosts.length === 0 && (
-        <p className="text-meta text-mute">No hosts yet.</p>
-      )}
-
-      <div className="flex flex-col gap-px">
-        {agent.hosts.map((h) => (
-          <div key={h.hostId} className="flex items-center gap-2.5 rounded-sm px-2 py-2">
-            <span
-              className={`h-1.5 w-1.5 shrink-0 rounded-full ${
-                h.loggedIn ? "bg-sage" : "border border-mute"
-              }`}
-            />
-            <span className="font-mono text-meta text-dim">{h.hostName}</span>
-
-            <span className="min-w-0 flex-1 truncate text-meta text-mute">
-              {reads(h, agent)}
-            </span>
-            {!h.installed && <Install agent={agent} host={h} />}
-          </div>
-        ))}
-      </div>
-
-      {agent.hosts.some((h) => !h.installed) && (
-        <p className="mt-3 text-meta text-mute">
-          A host without {agent.label} installed needs it there first — Firetower runs the
-          real CLI rather than shipping its own. Installing takes about a minute.
-        </p>
-      )}
-    </div>
-  );
-}
-
-/**
- * A host can be usable two ways, and they are different facts: someone signed
- * in on the machine itself, or the token we hold covers it.
- */
-function reads(host: AgentOnHost, agent: AgentView) {
-  if (!host.installed) return "not installed";
-  if (host.loggedIn) return host.account ?? "signed in on the host";
-  if (host.coveredByToken || agent.credentialSet) return "will use your token";
-  return "needs a token";
-}
-
-/* ── shared ────────────────────────────────────────────────────────── */
-
-function Failure({ error }: { error: unknown }) {
-  return (
-    <div className="mt-4 rounded-md border border-line bg-raise px-3.5 py-2.5">
-      <p className="text-meta leading-[1.55] text-bone">
-        {error instanceof ApiError ? error.message : "Something went wrong. Try again."}
-      </p>
-    </div>
-  );
-}
-
