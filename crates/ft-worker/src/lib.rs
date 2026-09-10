@@ -1857,6 +1857,50 @@ You are in the directory that holds them, not inside one of them.              P
             .record_workspace(&id, path.to_str().unwrap_or_default(), tmux.name())
             .await?;
 
+        // A tmux session already under this name is one of two quite different
+        // things, and refusing both was the bug.
+        //
+        // If the agent inside it is still listening, this is a relaunch of
+        // something that never stopped — somebody typing at a session the
+        // control plane had given up on. Nothing needs starting; saying that it
+        // is ready is the entire answer.
+        //
+        // If nothing is listening, the pane outlived the process: the agent
+        // exited, or refused to go on — an account out of credit does exactly
+        // this — and tmux kept the session. Starting was then refused with "is
+        // already running" *about a corpse*, so the one route back was the one
+        // route that could never be taken, and every attempt marked the run
+        // failed again. Three sessions sat like that, each looking crashed.
+        match standing(&tmux, &id).await {
+            Standing::Fresh => {}
+            Standing::Running => {
+                tracing::info!(session = %id, "the agent is already running; nothing to start");
+                self.store.set_status(&id, SessionStatus::Ready).await?;
+                self.emit(
+                    &id,
+                    EventKind::StatusChanged {
+                        status: SessionStatus::Ready,
+                        note: None,
+                    },
+                    out,
+                )
+                .await?;
+                return Ok(());
+            }
+            Standing::Abandoned => {
+                tracing::warn!(
+                    session = %id,
+                    "a tmux session with no agent listening in it; replacing it"
+                );
+                if let Err(e) = tmux.kill().await {
+                    // Said, not fatal: the start below fails on its own if this
+                    // really did leave something in the way, and with a better
+                    // sentence than this one could give.
+                    tracing::warn!(session = %id, "could not clear the old tmux session: {e:#}");
+                }
+            }
+        }
+
         let mut env = spec.env.clone();
         env.push((ft_core::SESSION_ENV.to_string(), id.to_string()));
         env.push((
@@ -2688,6 +2732,34 @@ fn num_cpus() -> u32 {
     std::thread::available_parallelism()
         .map(|n| n.get() as u32)
         .unwrap_or(1)
+}
+
+/// What is already here under a session's name.
+#[derive(Debug, PartialEq, Eq)]
+enum Standing {
+    /// Nothing. Start it.
+    Fresh,
+    /// The agent is there and listening. There is nothing to start.
+    Running,
+    /// A tmux session with no agent in it — the pane outlived the process.
+    Abandoned,
+}
+
+/// Tell an agent that is running from the shell that outlived one.
+///
+/// `tmux has-session` answers neither question: it is true for a healthy agent
+/// and equally true for the pane left behind when one exits. Refusing on it
+/// alone meant a relaunch could never replace a dead agent, so the route back
+/// from a failed run was the route that could not be taken. The socket is what
+/// actually distinguishes them, because it is the thing the agent holds open.
+async fn standing(tmux: &Tmux, id: &SessionId) -> Standing {
+    if !tmux.exists().await {
+        return Standing::Fresh;
+    }
+    if agentd::AgentClient::connect(id.as_str()).await.is_ok() {
+        return Standing::Running;
+    }
+    Standing::Abandoned
 }
 
 /// Whether this frame does work, as opposed to answering from memory.
@@ -3791,6 +3863,38 @@ mod tests {
             "it should have overtaken the queue, not waited most of it out — \
              {chunks_first} chunks went first"
         );
+    }
+
+    /// A pane that outlived its agent must not block the way back.
+    ///
+    /// `tmux has-session` is true for a healthy agent and just as true for the
+    /// shell left behind when one exits, and `start` refused on that alone. So
+    /// a session whose agent had gone — an account out of credit does it —
+    /// could never be relaunched: every attempt was refused with "is already
+    /// running" about a corpse, and marked the run failed again. Three of them
+    /// sat like that, reading to their owner as crashed agents.
+    #[tokio::test]
+    async fn a_tmux_session_with_no_agent_in_it_is_not_mistaken_for_a_running_one() {
+        let id = SessionId::new();
+        let tmux = tmux::Tmux::for_session(id.as_str());
+
+        // Nothing yet.
+        assert_eq!(standing(&tmux, &id).await, Standing::Fresh);
+
+        // A pane with no agent in it: a shell, exactly what tmux keeps when an
+        // agent exits and nothing tears the session down.
+        let dir = TempDir::new().unwrap();
+        tmux.start(dir.path(), "sleep 30", &[]).await.unwrap();
+        assert!(tmux.exists().await, "the fixture should be there");
+
+        assert_eq!(
+            standing(&tmux, &id).await,
+            Standing::Abandoned,
+            "a session with nothing listening is one to replace, not to refuse"
+        );
+
+        cleanup(&id).await;
+        assert_eq!(standing(&tmux, &id).await, Standing::Fresh);
     }
 
     /// A checkout git cannot read is news, not silence.

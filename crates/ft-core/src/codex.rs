@@ -400,6 +400,12 @@ pub struct CodexNormaliser {
     /// turn that ends: by the time a turn completes, this is the only place
     /// the number is.
     usage: Option<Usage>,
+    /// The reason the run is about to end badly, said before it ends.
+    ///
+    /// Codex sends `error` and then `turn/completed`, and the completion does
+    /// not always repeat the message. Held here so the turn that ends carries
+    /// the sentence, rather than a bare `failed` that explains nothing.
+    failure: Option<String>,
     /// The turn now running, which is what stopping one has to name.
     ///
     /// `turn/interrupt` takes a turn as well as a thread, and there is nowhere
@@ -506,14 +512,47 @@ impl CodexNormaliser {
         }
 
         match method {
-            "error" => crate::quota::failure(&params["error"])
-                .into_iter()
-                .collect(),
+            // The answer got through and Codex has moved on. Nothing else
+            // says so: it does not acknowledge an approval, it simply carries
+            // on, and the card that asked for it stays on the screen until
+            // something takes it down. Nothing did — so every approval anybody
+            // gave left its prompt sitting there, and a replay on the next page
+            // load put it straight back. It read as an agent ignoring you.
+            "serverRequest/resolved" => params
+                .get("requestId")
+                .and_then(|v| {
+                    v.as_u64()
+                        .map(|n| n.to_string())
+                        .or_else(|| v.as_str().map(str::to_string))
+                })
+                .map(|id| {
+                    vec![TurnEvent::RequestResolved {
+                        req: RequestId::new(id),
+                        // Codex does not say which way it went, and guessing
+                        // would put a word on somebody's screen that the agent
+                        // never said.
+                        decision: None,
+                    }]
+                })
+                .unwrap_or_default(),
             "turn/started" => self.turn_started(&params),
             "turn/completed" => {
                 let mut events = self.turn_completed(&params);
                 events.extend(crate::quota::failure(&params["turn"]["error"]));
                 events
+            }
+            // Codex says why before it says that the turn is over, and the
+            // `turn/completed` that follows does not always carry the reason
+            // itself. Held so whichever of the two has it wins.
+            "error" => {
+                self.failure = params
+                    .get("error")
+                    .and_then(|e| e.get("message"))
+                    .and_then(Value::as_str)
+                    .map(str::to_string);
+                crate::quota::failure(&params["error"])
+                    .into_iter()
+                    .collect()
             }
             "item/started" => self.item_started(&params),
             "item/completed" => self.item_completed(&params),
@@ -755,10 +794,22 @@ impl CodexNormaliser {
         self.open.clear();
         self.active_turn = None;
 
+        // The agent's own sentence about why, which is the whole content of a
+        // failed turn as far as anybody reading it is concerned.
+        let detail = params
+            .get("turn")
+            .and_then(|t| t.get("error"))
+            .and_then(|e| e.get("message"))
+            .and_then(Value::as_str)
+            .map(str::to_string)
+            .or_else(|| self.failure.take());
+        self.failure = None;
+
         vec![TurnEvent::TurnCompleted {
             turn,
             status,
             usage: self.usage.take(),
+            detail,
         }]
     }
 
@@ -1029,6 +1080,114 @@ mod tests {
             }
             other => panic!("expected the session to report itself, got {other:?}"),
         }
+    }
+
+    /// An approval that was answered has to stop being asked.
+    ///
+    /// Codex never acknowledges an approval — it answers the request and
+    /// carries on, saying only `serverRequest/resolved` with the id. Nothing
+    /// read that, so `RequestOpened` had no counterpart and the card stayed on
+    /// the screen for ever; worse, a reload replayed the request and put it
+    /// straight back. Somebody pressed Allow on the same three commands over
+    /// and over while the agent, which had had its answer the first time, was
+    /// getting on with the work.
+    #[test]
+    fn an_answered_approval_stops_being_asked() {
+        let mut reader = CodexNormaliser::new();
+        let mut open: std::collections::BTreeSet<String> = Default::default();
+
+        for line in [
+            r#"{"method":"item/commandExecution/requestApproval","id":0,"params":{"command":"pnpm install","itemId":"i1","threadId":"t","turnId":"u","startedAtMs":0}}"#,
+            r#"{"method":"item/commandExecution/requestApproval","id":1,"params":{"command":"docker compose build","itemId":"i2","threadId":"t","turnId":"u","startedAtMs":0}}"#,
+            r#"{"method":"serverRequest/resolved","params":{"threadId":"t","requestId":0}}"#,
+        ] {
+            for event in reader.push(line) {
+                match event {
+                    TurnEvent::RequestOpened { req, .. } => {
+                        open.insert(req.as_str().to_string());
+                    }
+                    TurnEvent::RequestResolved { req, .. } => {
+                        open.remove(req.as_str());
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        assert_eq!(
+            open.into_iter().collect::<Vec<_>>(),
+            vec!["1".to_string()],
+            "the answered one clears and the unanswered one stays"
+        );
+    }
+
+    /// A turn that failed has to say why.
+    ///
+    /// Taken verbatim from a session where three agents looked to their owner
+    /// like they had crashed. Codex had said exactly what was wrong — the
+    /// account was out of credits — and the line was on the worker the whole
+    /// time. Nothing read it, so the transcript stopped mid-turn with no
+    /// explanation, and the only remaining reading was that the agent had died.
+    #[test]
+    fn a_failed_turn_carries_the_reason_it_failed() {
+        let seen = events(&[
+            r#"{"method":"turn/started","params":{"threadId":"t","turn":{"id":"turn_1","items":[],"status":"inProgress"}}}"#,
+            r#"{"method":"error","params":{"error":{"message":"Your workspace is out of credits. Add credits to continue.","codexErrorInfo":"usageLimitExceeded"},"willRetry":false,"threadId":"t"}}"#,
+            r#"{"method":"turn/completed","params":{"threadId":"t","turn":{"id":"turn_1","items":[],"status":"failed","error":{"message":"Your workspace is out of credits. Add credits to continue."}}}}"#,
+        ]);
+
+        assert!(
+            seen.iter().any(|event| matches!(
+                event,
+                TurnEvent::Limited { status, .. } if crate::quota::blocked(status)
+            )),
+            "quota detection must survive alongside the failure reason"
+        );
+
+        match seen.last() {
+            Some(TurnEvent::TurnCompleted {
+                status: TurnStatus::Failed,
+                detail: Some(why),
+                ..
+            }) => assert!(
+                why.contains("out of credits"),
+                "the agent's own sentence should survive, got: {why}"
+            ),
+            other => panic!("expected a failed turn with a reason, got {other:?}"),
+        }
+    }
+
+    /// The reason arrives before the ending, and the ending does not always
+    /// repeat it. Whichever of the two carries it, it has to come through.
+    #[test]
+    fn a_reason_said_before_the_end_still_reaches_the_end() {
+        let seen = events(&[
+            r#"{"method":"turn/started","params":{"threadId":"t","turn":{"id":"turn_1","items":[],"status":"inProgress"}}}"#,
+            r#"{"method":"error","params":{"error":{"message":"Your workspace is out of credits. Add credits to continue."},"threadId":"t"}}"#,
+            r#"{"method":"turn/completed","params":{"threadId":"t","turn":{"id":"turn_1","items":[],"status":"failed"}}}"#,
+        ]);
+
+        assert!(
+            matches!(
+                seen.last(),
+                Some(TurnEvent::TurnCompleted { detail: Some(why), .. }) if why.contains("out of credits")
+            ),
+            "got {:?}",
+            seen.last()
+        );
+    }
+
+    /// A turn that went fine says nothing extra.
+    #[test]
+    fn a_turn_that_worked_carries_no_reason() {
+        let seen = events(&[
+            r#"{"method":"turn/started","params":{"threadId":"t","turn":{"id":"turn_1","items":[],"status":"inProgress"}}}"#,
+            r#"{"method":"turn/completed","params":{"threadId":"t","turn":{"id":"turn_1","items":[],"status":"completed"}}}"#,
+        ]);
+        assert!(matches!(
+            seen.last(),
+            Some(TurnEvent::TurnCompleted { detail: None, .. })
+        ));
     }
 
     #[test]

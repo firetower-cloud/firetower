@@ -21,6 +21,17 @@ fn replay(name: &str) -> Vec<TurnEvent> {
         .collect()
 }
 
+/// What a fixture's finished turn reported about itself.
+fn usage_of(name: &str) -> ft_core::turn::Usage {
+    replay(name)
+        .iter()
+        .find_map(|e| match e {
+            TurnEvent::TurnCompleted { usage, .. } => usage.clone(),
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("{name} should complete and report usage"))
+}
+
 /// The text of every item, in order, joined per item.
 fn text_of(events: &[TurnEvent], want: StreamKind) -> String {
     events
@@ -103,21 +114,16 @@ fn a_turn_that_worked_says_so_and_says_what_it_cost() {
 
 #[test]
 fn a_turn_says_how_much_room_is_left() {
-    // Read from the per-model breakdown, because a turn can involve a second,
-    // smaller model and adding their tokens together describes nothing.
-    let events = replay("edit");
-    let usage = events
-        .iter()
-        .find_map(|e| match e {
-            TurnEvent::TurnCompleted { usage, .. } => usage.clone(),
-            _ => None,
-        })
-        .expect("the turn should complete");
+    // The window belongs to whichever model the last request went to, not to
+    // whichever appears first: a turn can involve a second, smaller model with
+    // a window a fifth the size, and pairing the wrong two numbers is how a
+    // roomy session reads as a full one.
+    let usage = usage_of("edit");
 
     let window = usage.context_window.expect("the agent reports its window");
     let used = usage.context_used.expect("and how much of it went");
-    assert!(window >= 200_000, "a real window, got {window}");
-    assert!(used > 0 && used < window, "{used} of {window}");
+    assert_eq!(window, 1_000_000, "Sonnet's window, not Haiku's 200k");
+    assert_eq!(used, 40_597, "the last request, to the token");
 
     let full = usage.context_fullness().expect("both halves are known");
     assert!((0.0..=1.0).contains(&full), "{full}");
@@ -128,18 +134,56 @@ fn context_counts_what_the_model_saw_not_what_was_billed() {
     // Caching means `input_tokens` can be single digits on a turn that had a
     // hundred thousand in front of it. Reporting that as the context used
     // would say a full session was empty.
-    let events = replay("edit");
-    let usage = events
-        .iter()
-        .find_map(|e| match e {
-            TurnEvent::TurnCompleted { usage, .. } => usage.clone(),
-            _ => None,
-        })
-        .expect("usage");
+    let usage = usage_of("edit");
     assert!(
         usage.context_used.unwrap() > usage.input_tokens * 100,
         "cached tokens are still tokens the model read"
     );
+}
+
+#[test]
+fn context_is_the_last_request_and_not_the_turn_added_up() {
+    // The regression this file exists to hold down. `modelUsage` accumulates
+    // over every request in the turn, so the cached prefix the model re-read
+    // on each of ten tool calls is counted ten times. Reported as occupancy it
+    // grows without the context growing, and a long turn pins the ring at full
+    // with the window nearly empty.
+    //
+    // `plan` is the long one: ten requests, and the totals come to 254,465 —
+    // several times what the model was actually carrying.
+    let usage = usage_of("plan");
+    let used = usage.context_used.expect("how much of it went");
+    assert_eq!(used, 44_044, "the last request, not the ten added together");
+
+    let summed: u64 = usage
+        .models
+        .iter()
+        .map(|m| m.input_tokens + m.output_tokens + m.cache_read_tokens + m.cache_write_tokens)
+        .sum();
+    assert!(
+        summed > used * 5,
+        "the fixture must still accumulate, or this proves nothing: {summed} vs {used}"
+    );
+
+    // And the totals stay intact, because they are what the bill is made of.
+    assert!(usage.cost_usd.unwrap_or(0.0) > 0.0, "cost survives the fix");
+}
+
+#[test]
+fn every_recording_fits_inside_its_own_window() {
+    // Every recording, not just the two picked over above: a turn that reports
+    // a window at all should report an occupancy that fits inside it.
+    for name in ["plain", "bash", "edit", "failure", "plan", "subagent"] {
+        let usage = usage_of(name);
+        let (used, window) = (usage.context_used, usage.context_window);
+        let (Some(used), Some(window)) = (used, window) else {
+            panic!("{name} reports neither");
+        };
+        assert!(
+            used < window / 10,
+            "{name}: {used} of {window} is not a turn this short"
+        );
+    }
 }
 
 #[test]

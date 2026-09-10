@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
  * "not components". Everything else stays default.
  */
 export default defineConfig({
+  test: { exclude: ["**/node_modules/**", "**/e2e/**"] },
   resolve: {
     alias: { "@": fileURLToPath(new URL(".", import.meta.url)) },
   },

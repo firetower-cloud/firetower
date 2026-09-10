@@ -11,6 +11,7 @@
 
 pub(crate) mod accounts;
 pub(crate) mod agents;
+mod annotations;
 mod auth;
 mod conversation;
 mod events;
@@ -313,6 +314,12 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(forwards::list_forwards, forwards::create_forward))
         .routes(routes!(forwards::delete_forward))
         .routes(routes!(forwards::preview_address))
+        .routes(routes!(
+            annotations::list_annotations,
+            annotations::keep_annotation,
+            annotations::drop_annotations
+        ))
+        .routes(routes!(annotations::send_annotations))
         .routes(routes!(sessions::stop_session))
         .routes(routes!(sessions::relaunch_session))
         .routes(routes!(sessions::rename_session))

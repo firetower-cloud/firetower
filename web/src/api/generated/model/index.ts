@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.28.0
+ * OpenAPI spec version: 0.29.0
  */
 
 export * from './accessEntry';
@@ -13,6 +13,8 @@ export * from './agentMode';
 export * from './agentOnHost';
 export * from './agentPresence';
 export * from './agentView';
+export * from './annotationSelection';
+export * from './annotationVersion';
 export * from './answer';
 export * from './apiError';
 export * from './attached';
@@ -47,6 +49,7 @@ export * from './dockerStatus';
 export * from './done';
 export * from './downloadFileParams';
 export * from './drain';
+export * from './elementSnapshot';
 export * from './endAll';
 export * from './endedAll';
 export * from './envVariable';
@@ -69,6 +72,7 @@ export * from './installAgent';
 export * from './itemId';
 export * from './itemKind';
 export * from './itemStatus';
+export * from './keepAnnotation';
 export * from './label';
 export * from './limit';
 export * from './listEventsParams';
@@ -97,6 +101,7 @@ export * from './planStepStatus';
 export * from './ports';
 export * from './previewAddress';
 export * from './previewAddressParams';
+export * from './previewAnnotation';
 export * from './probeRequest';
 export * from './probeResponse';
 export * from './proposal';
