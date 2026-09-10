@@ -84,7 +84,12 @@ export function Shell({ children }: { children: React.ReactNode }) {
         // Hidden from the reading order when it is off-screen, or the whole
         // fleet sits in the tab order of a page that is not showing it.
         inert={!hasRail && !drawer ? true : undefined}
-        className={`fixed inset-y-0 left-0 z-50 flex h-full w-[300px] shrink-0 flex-col overflow-hidden border-r border-line bg-panel transition-transform duration-200 ease-swift md:static md:z-auto md:w-[236px] md:translate-x-0 md:transition-none ${
+        // `md:translate-none`, not `md:translate-x-0`: a translate of zero is
+        // still a translate, and any of them makes this the containing block
+        // for `position: fixed` inside it. On a desk the rail is in flow and
+        // needs no transform at all — with one, anything fixed in here was
+        // laid out against a 236px column instead of the window.
+        className={`fixed inset-y-0 left-0 z-50 flex h-full w-[300px] shrink-0 flex-col overflow-hidden border-r border-line bg-panel transition-transform duration-200 ease-swift md:static md:z-auto md:w-[236px] md:translate-none md:transition-none ${
           drawer ? "translate-x-0 shadow-float" : "-translate-x-full"
         }`}
       >
