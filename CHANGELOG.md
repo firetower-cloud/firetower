@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.29.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.28.2...firetower-v0.29.0) (2026-09-10)
+
+
+### Features
+
+* annotate application previews and send feedback to agents ([1e56ce4](https://github.com/firetower-cloud/firetower/commit/1e56ce4a441f2b76889ca5dab493fdada524c604))
+* annotate application previews and send feedback to agents ([ab2fc2a](https://github.com/firetower-cloud/firetower/commit/ab2fc2aa7cf2d1d4935950c3dde267b86178d299))
+
+
+### Bug Fixes
+
+* take down an approval once it has been answered ([46802f0](https://github.com/firetower-cloud/firetower/commit/46802f0ecd4fa936a34e8f104b16b0c94c6dc51a))
+
 ## [0.28.2](https://github.com/firetower-cloud/firetower/compare/firetower-v0.28.1...firetower-v0.28.2) (2026-09-10)
 
 
