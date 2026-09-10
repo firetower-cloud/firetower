@@ -480,6 +480,10 @@ impl GitRoot {
     /// This is what makes ending a session a decision rather than a gamble:
     /// uncommitted files and unpushed commits are exactly what would be lost.
     pub async fn summary(&self, dest: &Path, branch: &str, base: &str) -> Result<WorkSummary> {
+        // The same stale-ref problem the diff has, and the same answer: counted
+        // against the bare name, `ahead` and `commits` included everything
+        // anyone else had merged since this mirror was made.
+        let base = &self.base_ref(dest, base).await;
         let dirty = run(dest, "git", &["status", "--porcelain"]).await?;
         let uncommitted = dirty.lines().filter(|l| !l.trim().is_empty()).count() as u32;
 
@@ -602,11 +606,43 @@ impl GitRoot {
         Ok(format!("pushed {branch}"))
     }
 
+    /// The base branch, as a ref that is actually current.
+    ///
+    /// `refs/heads/main` in the mirror is written once, by the `clone --bare`
+    /// that made it, and never again: fetches carry the refspec
+    /// `+refs/heads/*:refs/remotes/origin/*`, so what they move is
+    /// `refs/remotes/origin/main`. The bare name therefore still points at
+    /// whatever main was on the day this machine first saw the repository.
+    ///
+    /// Everything merged into main since then sits between that ref and any
+    /// branch cut afterwards — so a session was credited with every change
+    /// anyone else had landed in the meantime. It showed up as a review sheet
+    /// full of files the agent had never touched, and it got worse the longer
+    /// the mirror had been there.
+    ///
+    /// Falls back to the name as given, which is what a base that is not a
+    /// remote branch — a local test fixture, a detached ref — needs.
+    async fn base_ref(&self, dest: &Path, base: &str) -> String {
+        let tracking = format!("refs/remotes/origin/{base}");
+        if run(
+            dest,
+            "git",
+            &["rev-parse", "--verify", "--quiet", &tracking],
+        )
+        .await
+        .is_ok()
+        {
+            return tracking;
+        }
+        base.to_string()
+    }
+
     /// The unified diff of the work so far.
     ///
     /// Computed here rather than on the control plane: less traffic, and it
     /// works when the laptop has no clone of the repository at all.
     pub async fn diff(&self, dest: &Path, base: &str) -> Result<String> {
+        let base = &self.base_ref(dest, base).await;
         // One comparison, from where the branch left the base to what is on
         // disk right now.
         //
@@ -1059,6 +1095,84 @@ mod retry_tests {
 mod tests {
     use super::*;
     use tempfile::TempDir;
+
+    /// A base ref that has not moved since the mirror was made must not make
+    /// everyone else's merges look like this session's work.
+    ///
+    /// `refs/heads/main` is written by the `clone --bare` and never again —
+    /// fetches move `refs/remotes/origin/main`. Comparing against the bare name
+    /// therefore starts the diff wherever main was on the day this machine
+    /// first saw the repository, and hands the session every change that has
+    /// landed since. That is a review sheet full of files the agent never
+    /// touched, growing with the age of the mirror.
+    #[tokio::test]
+    async fn work_already_on_the_base_is_not_this_sessions() {
+        let dest = tempfile::tempdir().unwrap();
+        let git = GitRoot::new(dest.path());
+        let at = dest.path();
+
+        for args in [
+            vec!["init", "-q", "--initial-branch=main"],
+            vec!["config", "user.email", "a@b"],
+            vec!["config", "user.name", "t"],
+        ] {
+            run(at, "git", &args).await.unwrap();
+        }
+
+        // Where main was when this machine first cloned.
+        std::fs::write(at.join("README.md"), "start").unwrap();
+        run(at, "git", &["add", "."]).await.unwrap();
+        run(at, "git", &["commit", "-qm", "first"]).await.unwrap();
+        let stale = run(at, "git", &["rev-parse", "HEAD"]).await.unwrap();
+
+        // Somebody else's work, merged into main since.
+        std::fs::write(at.join("theirs.md"), "not mine").unwrap();
+        run(at, "git", &["add", "."]).await.unwrap();
+        run(at, "git", &["commit", "-qm", "theirs"]).await.unwrap();
+        let current = run(at, "git", &["rev-parse", "HEAD"]).await.unwrap();
+
+        // The session's own branch, cut from main as it is now. Made before
+        // main is moved back, so that moving it does not drag HEAD with it —
+        // which is what a worktree on `agent/…` looks like on a real host.
+        run(at, "git", &["checkout", "-q", "-b", "agent/mine"])
+            .await
+            .unwrap();
+
+        // The mirror as it actually ends up: the bare name left behind at the
+        // clone, the remote-tracking ref where fetches have moved it.
+        run(at, "git", &["update-ref", "refs/heads/main", stale.trim()])
+            .await
+            .unwrap();
+        run(
+            at,
+            "git",
+            &["update-ref", "refs/remotes/origin/main", current.trim()],
+        )
+        .await
+        .unwrap();
+
+        // This session: cut from current main, one new file of its own.
+        std::fs::write(at.join("mine.py"), "print('hi')\n").unwrap();
+
+        let diff = git.diff(at, "main").await.unwrap();
+
+        assert!(
+            diff.contains("mine.py"),
+            "the file this session added should be in the diff:\n{diff}"
+        );
+        assert!(
+            !diff.contains("theirs.md"),
+            "work already on the base is not this session's:\n{diff}"
+        );
+
+        // And the counts that sit beside it say the same thing.
+        let summary = git.summary(at, "agent/mine", "main").await.unwrap();
+        assert_eq!(
+            summary.commits,
+            Some(0),
+            "nothing is committed on this branch that the base does not have"
+        );
+    }
 
     #[tokio::test]
     async fn only_the_chosen_files_are_committed() {

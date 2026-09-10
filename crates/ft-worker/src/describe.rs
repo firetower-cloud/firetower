@@ -105,13 +105,8 @@ pub async fn propose(about: About<'_>) -> Result<Proposal> {
         "nothing changed, so there is nothing to describe"
     );
 
-    let talk = crate::history::recap(
-        about.workspace,
-        about.session_id,
-        about.agent,
-        ENOUGH_TALK,
-    )
-    .await;
+    let talk =
+        crate::history::recap(about.workspace, about.session_id, about.agent, ENOUGH_TALK).await;
 
     let prompt = ask(&about, diff, talk.as_deref());
 
@@ -317,7 +312,9 @@ fn ask(about: &About<'_>, diff: &str, talk: Option<&str>) -> String {
         ));
     }
 
-    prompt.push_str(&format!("This is what changed:\n```diff\n{diff}{more}\n```"));
+    prompt.push_str(&format!(
+        "This is what changed:\n```diff\n{diff}{more}\n```"
+    ));
     prompt
 }
 
@@ -328,7 +325,12 @@ fn issue(task: &ft_proto::Tracked) -> String {
         out.push_str(title.trim());
         out.push('\n');
     }
-    if let Some(body) = task.body.as_deref().map(str::trim).filter(|b| !b.is_empty()) {
+    if let Some(body) = task
+        .body
+        .as_deref()
+        .map(str::trim)
+        .filter(|b| !b.is_empty())
+    {
         let cut: String = body.chars().take(ENOUGH_ISSUE).collect();
         out.push_str(&cut);
         if body.chars().count() > ENOUGH_ISSUE {
@@ -455,7 +457,9 @@ fn numbers(line: &str) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
 
     for piece in line.split([',', ';', ' ']).map(str::trim) {
-        let Some(hash) = piece.find('#') else { continue };
+        let Some(hash) = piece.find('#') else {
+            continue;
+        };
         let (owner, number) = piece.split_at(hash);
         let number = number.trim_start_matches('#');
         let number: String = number.chars().take_while(char::is_ascii_digit).collect();
@@ -768,8 +772,14 @@ mod tests {
         assert!(asked.contains("make the thing faster"), "what was wanted");
         assert!(asked.contains("diff --git"), "and what happened");
         assert!(asked.contains("#32"), "the issue it came from");
-        assert!(asked.contains("the thing is slow"), "and what that issue is");
-        assert!(asked.contains("also #18"), "and what was said along the way");
+        assert!(
+            asked.contains("the thing is slow"),
+            "and what that issue is"
+        );
+        assert!(
+            asked.contains("also #18"),
+            "and what was said along the way"
+        );
     }
 
     #[test]
