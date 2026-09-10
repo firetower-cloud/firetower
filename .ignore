@@ -1,0 +1,19 @@
+# For file watchers, not for git — read by the `ignore` crate, which is what
+# `cargo watch` in `just dev` uses to decide what a change is.
+#
+# It normally gets this from `.gitignore`, and here it cannot: this checkout is
+# a git *worktree*, so `.git` is a file pointing elsewhere rather than a
+# directory, and the crate finds no repository to read ignores from. With
+# nothing ignored, two things inside the tree restart the control plane about
+# twice a second, for ever:
+#
+#   * `web/.next`, which Turbopack writes to continuously — the web half has
+#     its own watcher and the Rust one has no business reacting to it;
+#   * `.firetower/`, which is FIRETOWER_HOME in the compose stack, so the
+#     control plane's own state files restart the control plane.
+#
+# Untracked and local to this checkout.
+web/
+.firetower/
+target/
+.pnpm-store/
