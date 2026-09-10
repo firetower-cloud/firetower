@@ -232,11 +232,11 @@ impl Progress {
     ) -> Result<Option<serde_json::Value>> {
         use ft_core::controls::ControlKind as K;
 
-        // The agent that reads slash commands out of its own input. Nothing to
-        // remember: it answers with a sentence saying what it did, and that is
-        // what the picker then shows.
-        if let Some(text) = ft_core::controls::command(self.agent, kind, value) {
-            return Ok(Some(ft_core::turn::user_message(&text)));
+        // The agent that is told. Nothing to remember: it says what it is
+        // running at the start of every turn, and that is what the picker then
+        // shows.
+        if let Some(message) = ft_core::controls::put(self.agent, kind, value) {
+            return Ok(Some(message));
         }
         if self.agent != ft_core::Agent::Codex {
             anyhow::bail!("{} cannot be asked to change that", self.agent.label());
@@ -2517,9 +2517,9 @@ impl Fleet {
 
     /// Change one of them.
     ///
-    /// What that means is the agent's business: a slash command for the one
-    /// that reads them out of its own input, and a parameter on the next turn
-    /// for the one that does not. The browser knows neither.
+    /// What that means is the agent's business: something sent down the pipe
+    /// for the one that is told, and a parameter on the next turn for the one
+    /// that is not. The browser knows neither.
     pub async fn choose(
         &self,
         host_id: &HostId,
@@ -3317,6 +3317,45 @@ mod progress_tests {
             first["id"], second["id"],
             "two questions cannot share one id, or an answer names both"
         );
+    }
+
+    /// The issue: changing when the agent asks, mid-conversation, did nothing.
+    ///
+    /// Both halves of it, because the two agents are told in different ways and
+    /// only one of them was wrong. Claude Code is sent a control request, which
+    /// it takes in the middle of a turn — it used to be typed at, and what was
+    /// typed set a default the running session never read. Codex is sent
+    /// nothing, and carries the choice on the next turn instead.
+    #[test]
+    fn changing_when_the_agent_asks_reaches_the_session_that_is_running() {
+        use ft_core::controls::ControlKind as K;
+
+        let mut claude = Progress::for_agent(ft_core::Agent::ClaudeCode, String::new());
+        let told = claude
+            .choose(K::Mode, "dontAsk")
+            .unwrap()
+            .expect("Claude Code is told, and told now");
+        assert_eq!(told["type"], "control_request");
+        assert_eq!(told["request"]["mode"], "dontAsk");
+
+        let mut codex = Progress::for_agent(ft_core::Agent::Codex, String::new());
+        codex.read(r#"{"id":2,"result":{"thread":{"id":"th_9"},"model":"gpt-5.6-sol","approvalPolicy":"on-request"}}"#);
+        assert!(
+            codex.choose(K::Mode, "never").unwrap().is_none(),
+            "nothing to send: it rides on the next turn"
+        );
+        assert_eq!(
+            codex
+                .controls()
+                .iter()
+                .find(|c| c.kind == K::Mode)
+                .and_then(|c| c.current.as_deref()),
+            Some("never"),
+            "and the picker shows what was chosen, not what the thread opened with"
+        );
+
+        let next = codex.turn("ok, you can continue", &[]).unwrap();
+        assert_eq!(next["params"]["approvalPolicy"], "never");
     }
 }
 

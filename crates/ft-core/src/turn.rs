@@ -545,6 +545,30 @@ fn denial(reason: Option<&str>) -> String {
     }
 }
 
+/// Change the permission mode of the session that is running.
+///
+/// A control request rather than something typed. Claude Code's stream-json
+/// input takes these beside ordinary messages and answers them out of band, so
+/// an agent in the middle of a turn takes one immediately rather than when it
+/// next reads its input — which is what somebody moving the picker means.
+///
+/// It is also the only thing that works. `/permissions` is not available
+/// headless; `/config permissionMode=…`, which is, answers "Set Default
+/// permission mode to …" and sets the default for the *next* session. This one
+/// was given its mode as a command-line switch and goes on asking, which is
+/// exactly what picking "Never ask" mid-conversation used to do: nothing.
+pub fn permission_mode(mode: &str) -> serde_json::Value {
+    serde_json::json!({
+        "type": "control_request",
+        // The agent keeps these in a map and answers with the id it was given.
+        // Nothing here waits for the answer — the session says what mode it is
+        // in at the start of every turn, and that is what the picker shows —
+        // but two requests must not share an id.
+        "request_id": format!("firetower-{}", ulid::Ulid::new()),
+        "request": { "subtype": "set_permission_mode", "mode": mode },
+    })
+}
+
 pub fn user_message(text: &str) -> serde_json::Value {
     user_message_with(text, &[])
 }

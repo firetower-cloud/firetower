@@ -214,10 +214,12 @@ export function apply(state: Conversation, event: ConversationEvent): Conversati
   switch (event.type) {
     case "SessionConfigured":
       // Sent again at the start of every turn, so this must not reset
-      // anything — it is a restatement, not a new session.
+      // anything — it is a restatement, not a new session. And one that says
+      // only what changed — the mode, the moment somebody changed it — must
+      // not blank out the rest.
       return {
         ...state,
-        model: event.model,
+        model: event.model || state.model,
         mode: event.mode || state.mode,
         commands: event.commands.length ? event.commands : state.commands,
         lastLine,

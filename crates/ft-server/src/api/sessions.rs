@@ -2704,13 +2704,21 @@ pub(super) async fn continue_with_account(
     kind: ft_core::Agent,
 ) -> Result<SessionId, ApiError> {
     let controls = state.fleet.controls(&session.id).await;
-    let mut claude_settings = None;
+    // The last thing said about each, and not the last thing said: a session
+    // that changed its mode mid-turn restates that alone, and taking the pair
+    // from it would carry an empty model over the one that is running.
+    let (mut claude_model, mut claude_mode) = (String::new(), String::new());
     if session.agent == ft_core::Agent::ClaudeCode {
         let mut reader = ft_core::normalise::Reader::for_agent(session.agent);
         for (_, line) in state.db.agent_lines_since(&session.id, 0).await? {
             for event in reader.push(&line) {
                 if let ft_core::TurnEvent::SessionConfigured { model, mode, .. } = event {
-                    claude_settings = Some((model, mode));
+                    if !model.is_empty() {
+                        claude_model = model;
+                    }
+                    if !mode.is_empty() {
+                        claude_mode = mode;
+                    }
                 }
             }
         }
@@ -2735,17 +2743,15 @@ pub(super) async fn continue_with_account(
                     .await?;
             }
         }
-        if let Some((model, mode)) = claude_settings {
-            for (kind, value) in [
-                (ft_core::controls::ControlKind::Model, model),
-                (ft_core::controls::ControlKind::Mode, mode),
-            ] {
-                if !value.is_empty() {
-                    state
-                        .fleet
-                        .choose(&session.host_id, &session.id, kind, &value)
-                        .await?;
-                }
+        for (kind, value) in [
+            (ft_core::controls::ControlKind::Model, claude_model),
+            (ft_core::controls::ControlKind::Mode, claude_mode),
+        ] {
+            if !value.is_empty() {
+                state
+                    .fleet
+                    .choose(&session.host_id, &session.id, kind, &value)
+                    .await?;
             }
         }
         state
