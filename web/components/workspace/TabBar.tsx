@@ -4,13 +4,11 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   useGetSession,
-  useCreateSession,
   useDestroySession,
   getListSessionsQueryKey,
 } from "@/src/api/generated/sessions/sessions";
-import { useListAgents } from "@/src/api/generated/agents/agents";
-import { useListHosts } from "@/src/api/generated/hosts/hosts";
 import type { AgentView } from "@/src/api/generated/model";
+import { useAgentChoices, useStartAgent } from "./StartAgent";
 import { AgentMark, AGENT_SHORT } from "@/components/AgentMark";
 import { FileGlyph } from "@/components/FileGlyph";
 import { Signal } from "@/components/Signal";
@@ -239,7 +237,6 @@ function NewTab() {
   const [at, setAt] = useState({ top: 0, left: 0 });
   const opener = useOpen();
   const { open: openTab } = useTabs();
-  const cache = useQueryClient();
 
   // Owned here rather than in the menu below it. React Query drops a
   // component's mutation callbacks when it unmounts, and closing the menu
@@ -249,21 +246,13 @@ function NewTab() {
   //
   // This button is part of the strip and never goes away, so its callback
   // always runs.
-  // Not gated on `isPending`, and not opened from the mutation's own callback.
-  //
-  // Each agent is an independent run and several may be starting at once, so
-  // disabling the list while one was in flight left later clicks landing on a
-  // dead button. And one observer's `onSuccess` fires for the newest call —
-  // start three quickly and the first two never opened a tab, though all three
-  // runs were created. Both looked like a cap on how many a workspace takes.
-  //
-  // Awaiting the call answers per click, whatever else is in flight.
-  const start = useCreateSession();
+  // Not gated on `isPending`, and not opened from the mutation's own callback —
+  // see `useStartAgent`, which awaits per call for the reason.
+  const start = useStartAgent();
 
   const begin = async (workspaceId: string, agent: AgentView["kind"]) => {
-    const made = await start.mutateAsync({ data: { workspaceId, agent } });
-    cache.invalidateQueries({ queryKey: getListSessionsQueryKey() });
-    openTab({ id: addressOf.run(made.id), kind: "run", sessionId: made.id });
+    const id = await start(workspaceId, agent);
+    openTab({ id: addressOf.run(id), kind: "run", sessionId: id });
   };
 
   // Before paint, so it never shows for a frame in the wrong place.
@@ -382,44 +371,18 @@ function Preview({ onOpen }: { onOpen: (port: number) => void }) {
 }
 
 /**
- * Starting another agent in this workspace.
+ * Starting another agent in this workspace, as rows of this menu.
  *
- * Every agent the fleet knows about, gated on the machine *this workspace* is
- * on — a workspace is one directory on one host, so an agent anywhere else
- * could not see it, and there is no choosing.
- *
- * Unavailable ones stay listed and say why. Vanishing from a menu looks like
- * the thing does not exist and leaves nowhere to learn what is missing, which
- * is the same rule the create dialog follows.
+ * The list itself and the rule for whether an agent can run here are in
+ * `StartAgent`, shared with the `⋯` menu a workspace draws below `xl`. This is
+ * only the drawing.
  */
 function Agents({
   onStart,
 }: {
   onStart: (workspaceId: string, agent: AgentView["kind"]) => void;
 }) {
-  // The session you are in *is* the workspace: a workspace takes the id of the
-  // session it was split from, and that is what the tab set is keyed by. So the
-  // id is known without waiting for anything — which matters, because this
-  // renders the moment the menu opens and the session may not be cached yet.
-  //
-  // Depending on that query meant the whole section returned `null` while it
-  // loaded, so the menu opened with the agents simply absent and clicking where
-  // they should have been did nothing at all.
-  const workspaceId = useCurrentSession() ?? undefined;
-  const { data: session } = useGetSession(workspaceId ?? "", {
-    query: { enabled: !!workspaceId },
-  });
-  const {
-    data: agents = [],
-    isPending,
-    isError,
-    refetch,
-  } = useListAgents();
-  const { data: hosts = [] } = useListHosts();
-
-  // Only needed to say *why* one is unavailable. Absent while it loads, which
-  // reads as "we cannot tell yet" rather than hiding the row.
-  const host = hosts.find((h) => h.id === session?.hostId);
+  const { workspaceId, choices, isPending, isError, refetch } = useAgentChoices();
 
   if (!workspaceId) return null;
 
@@ -449,47 +412,25 @@ function Agents({
         </button>
       )}
 
-      {!isPending && !isError && agents.length === 0 && (
+      {!isPending && !isError && choices.length === 0 && (
         <p className="px-2 pb-1.5 text-meta text-mute">
           No agents configured. Add one on the Agents screen.
         </p>
       )}
 
-      {agents.map((a) => {
-        const why = session ? unavailable(a, host?.id, host?.name) : undefined;
-        return (
-          <Choice
-            key={a.kind}
-            glyph=""
-            mark={a.kind}
-            label={a.label}
-            hint={why ?? "In this workspace, on its branch"}
-            disabled={!!why}
-            onClick={() => onStart(workspaceId, a.kind)}
-          />
-        );
-      })}
+      {choices.map(({ agent, why }) => (
+        <Choice
+          key={agent.kind}
+          glyph=""
+          mark={agent.kind}
+          label={agent.label}
+          hint={why ?? "In this workspace, on its branch"}
+          disabled={!!why}
+          onClick={() => onStart(workspaceId, agent.kind)}
+        />
+      ))}
     </>
   );
-}
-
-/**
- * Why this agent cannot be started here, or nothing.
- *
- * The same two questions the create dialog asks, in the same order: is it on
- * the machine at all, and can it authenticate there. A subscription lives in
- * the agent's own config on the host it was signed in on, so one machine being
- * signed in says nothing about another.
- */
-function unavailable(agent: AgentView, hostId?: string, hostName?: string): string | undefined {
-  if (!agent.supported) return "Firetower has no driver for it yet";
-  if (!hostId) return "this workspace's host is gone";
-
-  const here = agent.hosts.find((h) => h.hostId === hostId);
-  if (!here?.installed) return `not installed on ${hostName ?? "that machine"}`;
-  if (!agent.needsCredential) return undefined;
-  if (here.loggedIn === true || agent.credentialSet) return undefined;
-  return "no credentials for it there";
 }
 
 function Choice({

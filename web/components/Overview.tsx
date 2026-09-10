@@ -16,6 +16,7 @@
  * that takes the whole window, because it is the only thing that needs it.
  */
 
+import Link from "next/link";
 import { useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Plus, Waypoints } from "lucide-react";
@@ -111,6 +112,7 @@ export function Overview() {
     return { groups, total: groups.reduce((n, [, places]) => n + places.length, 0) };
   }, [repos, repo, state]);
 
+
   /** Every workspace on screen, and the ticked ones among them. */
   const onScreen = useMemo(
     () => shown.groups.flatMap(([, places]) => places),
@@ -119,6 +121,29 @@ export function Overview() {
   // Intersected rather than trusted: a ticked workspace that ends somewhere
   // else disappears from the list, and its id must not stay in the count.
   const chosen = onScreen.filter((p) => picked.has(p.id));
+  /**
+   * The same fleet, flattened and sorted by whether it wants you.
+   *
+   * What a phone shows instead of the grouped table. On a desk the eye sweeps
+   * a whole screen at once and grouping by repository is the useful order —
+   * you are looking for a place. On a phone one screen is four rows, so the
+   * order has to answer the question somebody opened the app to ask, and that
+   * question is "what needs me". Grouping would bury the one waiting workspace
+   * under a repository heading three scrolls down.
+   *
+   * Waiting, then working, then everything else; within each, the one that has
+   * been going longest first, because that is the one most likely to be stuck.
+   */
+  const ranked = useMemo(() => {
+    const rank = { waiting: 0, working: 1, idle: 2 } as const;
+    return onScreen
+      .slice()
+      .sort(
+        (a, b) =>
+          rank[doing(a)] - rank[doing(b)] ||
+          Date.parse(a.runs[0].createdAt) - Date.parse(b.runs[0].createdAt),
+      );
+  }, [onScreen]);
 
   /** Changing what is on screen throws the ticks away. */
   const refilter = (change: () => void) => {
@@ -150,7 +175,7 @@ export function Overview() {
           : "Nothing here.";
 
   return (
-    <div className="px-8 pt-8 pb-24">
+    <div className="px-4 pt-6 pb-24 md:px-8 md:pt-8">
       <PageHead
         eyebrow="Workspaces"
         title={
@@ -212,7 +237,12 @@ export function Overview() {
                       ? `${repos.total} · ${waiting.length} waiting`
                       : repos.total}
                 </span>
+                {/* Not on a phone. Ending several workspaces at once is
+                    deliberate and destructive, and it belongs on a screen
+                    where you can see all of what you are about to end —
+                    which is the same reason the rows below have no ticks. */}
                 {onScreen.length > 0 && (
+                  <span className="hidden md:block">
                   <EndThese
                     label={label}
                     places={going}
@@ -231,6 +261,7 @@ export function Overview() {
                       setReport(result);
                     }}
                   />
+                  </span>
                 )}
               </div>
             }
@@ -274,6 +305,21 @@ export function Overview() {
             </div>
           ) : (
             <>
+              {/* One fleet, two drawings. Below `md` the table's four fixed
+                  columns do not fit — 92px of agent marks and an 84px badge
+                  out of 375px leaves nothing for the name — and the tick-boxes
+                  that end six workspaces at once are not something anybody
+                  should reach for on a train. So the phone gets the flat
+                  ranked list and none of the bulk controls. */}
+              <div className="md:hidden">
+                <List flush>
+                  {ranked.map((place) => (
+                    <Pocket key={place.id} place={place} />
+                  ))}
+                </List>
+              </div>
+
+              <div className="hidden md:block">
               <Columns>
                 {/* Ticks what is on screen, not the fleet: filter first, tick
                     all, end. Anything else is a button that ends work nobody
@@ -335,6 +381,7 @@ export function Overview() {
                   </div>
                 ))}
               </List>
+              </div>
             </>
           )}
         </Card>
@@ -433,6 +480,59 @@ function Place({
         </Badge>
       </div>
     </Row>
+  );
+}
+
+/**
+ * One workspace, on a screen with room for two lines and nothing else.
+ *
+ * The desk's `Place` is a row of four columns and a tick-box beside a link.
+ * None of that survives 375px, and the parts worth keeping are not the parts
+ * that shrink well: what it is called, whether it wants you, and how long it
+ * has been going.
+ *
+ * No tick-box. Ending several workspaces at once is a deliberate, destructive
+ * thing that belongs on a screen where you can see all of what you are ending.
+ */
+function Pocket({ place }: { place: Workspace }) {
+  const anyWaiting = place.runs.some(needsYou);
+  const state = doing(place);
+
+  return (
+    <Link
+      href={`/sessions/${place.id}`}
+      className="flex min-h-[64px] items-center gap-3 px-4 py-2.5 transition-colors active:bg-raise"
+    >
+      <Signal status={place.runs[0].status} size={6} />
+
+      <span className="min-w-0 flex-1">
+        <span className="flex items-center gap-2">
+          <span className="min-w-0 truncate text-title text-bone">{place.name}</span>
+          {/* The one loud thing, and the reason this list is sorted the way it
+              is. Ember means an agent stopped and cannot go on without you. */}
+          {anyWaiting && <span className="h-2 w-2 shrink-0 rounded-full bg-ember" />}
+        </span>
+        <span className="flex items-center gap-2">
+          <span className="min-w-0 flex-1 truncate font-mono text-meta text-mute">
+            {place.branch ?? "—"}
+          </span>
+          {place.runs.slice(0, 3).map((run) => (
+            <AgentMark key={run.id} agent={run.agent} size={11} className="shrink-0 text-mute" />
+          ))}
+          <span className="shrink-0 font-mono text-micro text-mute">
+            {elapsed(minutesSince(place.runs[0].createdAt))}
+          </span>
+        </span>
+      </span>
+
+      {/* The word, not a badge. A badge is a column in a table and there is no
+          table here; `waiting` beside an ember dot would say it twice. */}
+      {state !== "waiting" && (
+        <span className="shrink-0 font-narrow text-micro tracking-[0.14em] text-mute uppercase">
+          {state}
+        </span>
+      )}
+    </Link>
   );
 }
 

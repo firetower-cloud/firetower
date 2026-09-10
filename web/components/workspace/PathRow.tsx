@@ -37,7 +37,11 @@ export function PathRow({
 
   return (
     <div
-      className={`group flex items-center gap-2 rounded-sm px-1.5 py-1 transition-colors ${
+      // 25px is a fine row for a pointer and not a target for a thumb. Below
+      // `xl` these three lists *are* the screen — the tree, the changes and
+      // what is going into the commit — rather than a 320px panel beside it,
+      // so the row grows to 44 and the density goes.
+      className={`group flex items-center gap-2 rounded-sm px-1.5 py-1 transition-colors max-xl:min-h-[44px] ${
         on ? "bg-raise" : "hover:bg-raise/60"
       }`}
     >
@@ -102,7 +106,7 @@ export function Fold({
     <section className="min-h-0">
       <button
         onClick={onToggle}
-        className="flex w-full items-center gap-1.5 px-1.5 py-1.5 text-left"
+        className="flex w-full items-center gap-1.5 px-1.5 py-1.5 text-left max-xl:min-h-[44px]"
       >
         <span
           className="shrink-0 text-micro text-mute transition-transform"

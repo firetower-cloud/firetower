@@ -41,6 +41,13 @@
   --text-micro--line-height: 1.4;
   --text-code: 0.8125rem; /* 13px — what the machine said */
   --text-code--line-height: 1.6;
+  /* 16px — the floor for anything you type into, on a touch screen.
+     Not a seventh voice: it is `--text-ui` with a minimum. Under 16px iOS
+     zooms the page when a field takes focus and never zooms back out, which
+     is half of what reads as "the app zoomed by itself". Used below `md` and
+     nowhere else, so the desk keeps the 13px it was designed at. */
+  --text-input: 1rem;
+  --text-input--line-height: 1.5;
 
   /* ── Signals ────────────────────────────────────────────────
      Semantic only. Ember answers one question — is something waiting on you —
@@ -127,6 +134,16 @@
   :focus-visible {
     outline: 1px solid var(--color-bone);
     outline-offset: 2px;
+  }
+
+  /* Double-tap does not zoom, anywhere.
+     `manipulation` is `auto` minus double-tap-to-zoom, which also takes the
+     300ms wait that browsers hold every tap for in case a second one is
+     coming. Pinch is still allowed here — that is decided per surface, on
+     `.no-zoom` below, because a page of prose has no reason to fight the
+     browser and the workbench has every reason. */
+  body {
+    touch-action: manipulation;
   }
 
   /* The standard properties, not only the WebKit pseudo-elements: with
@@ -217,6 +234,43 @@
     border-radius: var(--radius-md);
     box-shadow: var(--shadow-raise);
   }
+
+  /* ── Touch: the workbench is a surface, not a document ──────
+     Chat, diff, files, ship. Scrolling, dragging and tapping surfaces, where
+     a pinch is a fumbled scroll and the page ending up at 1.4× with the
+     composer off the right edge is a bug rather than a preference.
+
+     `pan-x pan-y` allows both scroll directions and refuses the pinch, which
+     is the whole of it in every browser except Safari — Safari has ignored
+     `user-scalable=no` for pinch since iOS 10, deliberately, and honours
+     `touch-action` for scrolling but not for its own gesture recognisers.
+     The JavaScript half of this lives in `useNoZoom`; neither half works
+     alone.
+
+     Deliberately *not* on `body`. Tasks, Configuration, login and setup are
+     documents and keep pinch, because taking zoom away from a page of prose
+     is taking away an accessibility feature to solve a problem that page does
+     not have. The diff gets a size control instead — see `DiffTab`. */
+  .no-zoom {
+    touch-action: pan-x pan-y;
+  }
+
+  /* ── There is no `.safe-bottom` here, on purpose ─────────────
+     `viewport-fit: cover` draws under the notch and the home indicator, so
+     everything resting on an edge has to say how far in that edge really is.
+     The obvious way to write that is a class — and a class in this layer loses
+     to any `pb-*` sitting beside it on the same element, because a *layer*
+     beats specificity and utilities come after components. It does not warn;
+     it just silently does nothing, which it did in three places before this
+     comment replaced it.
+
+     So the insets are written as ordinary utilities at the point of use —
+     `pb-[max(1rem,env(safe-area-inset-bottom))]` — which compose with
+     `sm:pb-3` the way every other padding in the app does. The one rule that
+     genuinely cannot be a utility, because it has to reach forty fields that
+     do not know about it, is at the foot of this file and is outside every
+     layer for the same reason. */
+
 }
 
 /* ── The one loud thing: an agent waiting on you ───────────── */
@@ -377,5 +431,44 @@
     animation-duration: 0.001ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.001ms !important;
+  }
+}
+
+/* ── Anything you type into is at least 16px, on a touch screen ──
+   Under 16px, iOS zooms the page in when a field takes focus and does not
+   zoom back out. Half of what reads as "the app zoomed by itself" is this
+   rather than a pinch, and it is the composer — the field everybody touches —
+   that provokes it.
+
+   ## Why this is here rather than a class on each field
+
+   Two reasons, and the second is the one that decided it.
+
+   There are forty of them. A rule per field is forty chances to add the
+   forty-first without it, and nothing that would ever say so.
+
+   And a class would not work. Tailwind's layer order is
+   `theme, base, components, utilities`, and a *layer* beats specificity — so
+   `.type-into` in `@layer components` loses to the `text-body` sitting beside
+   it on the same element, however specific it is. Putting it in `@layer
+   utilities` would work only by being later in the file than the generated
+   utilities, which is true today and is not a thing to depend on.
+
+   Declarations outside every layer take precedence over layered ones, whatever
+   their specificity. So this element selector beats `.text-meta` without
+   fighting it, and does so by a rule the cascade guarantees rather than by
+   source order.
+
+   Above `md` none of it applies and the type scale is untouched: there is no
+   soft keyboard to provoke, and 13px is what the interface is drawn at.
+
+   `font-size` only. Line height belongs to the size the element was given —
+   a message box and a one-line field want different ones, and this knows
+   nothing about which it is looking at. */
+@media (width < 48rem) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+  textarea,
+  select {
+    font-size: var(--text-input);
   }
 }

@@ -49,7 +49,7 @@ export default function Configuration() {
   }, []);
 
   return (
-    <div className="px-8 pt-6 pb-24">
+    <div className="px-4 pt-5 pb-24 md:px-8 md:pt-6">
       {/* No heading of its own: each section brings one, and two stacked
           headings saying the same word is the page apologising for existing. */}
       <nav className="mb-2 flex gap-1 border-b border-line">

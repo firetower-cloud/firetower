@@ -41,12 +41,22 @@ import {
 import { elapsed, minutesSince } from "@/src/api/view";
 
 /** One set of widths, shared by the legend and every row under it. */
+/**
+ * The columns, and which of them a phone has room for.
+ *
+ * These add up to 464px of fixed width, which is wider than a phone. The title
+ * beside them is `flex-1 min-w-0`, and what `min-w-0` means when the row
+ * overflows is *zero*: the one thing somebody reads a task list for collapsed
+ * to nothing, and the buttons at the end of the row sat off the side of the
+ * screen. So everything that is context rather than the task itself is dropped
+ * below `md`, and the title gets the room back.
+ */
 const COL = {
   id: "w-[72px] shrink-0",
-  who: "w-[88px] shrink-0",
-  state: "w-[76px] shrink-0",
-  when: "w-[76px] shrink-0",
-  act: "w-[152px] shrink-0",
+  who: "hidden md:flex w-[88px] shrink-0",
+  state: "hidden md:block w-[76px] shrink-0",
+  when: "hidden md:block w-[76px] shrink-0",
+  act: "shrink-0 md:w-[152px]",
 };
 
 export function Tasks() {
@@ -83,7 +93,7 @@ export function Tasks() {
   };
 
   return (
-    <div className="px-8 pt-6 pb-24">
+    <div className="px-4 pt-5 pb-24 md:px-8 md:pt-6">
       <PageHead eyebrow="Tasks" title={isPending ? "Looking…" : `${data?.total ?? tasks.length} to pick from.`}>
         Read from GitHub as you look. Starting one opens a workspace.
       </PageHead>
@@ -313,7 +323,7 @@ function TaskRow({
         </div>
       </div>
 
-      <div className={`${COL.who} flex -space-x-1.5`}>
+      <div className={`${COL.who} -space-x-1.5`}>
         {task.assignees.slice(0, 3).map((who) => (
           <Avatar key={who.login} name={who.login} />
         ))}
@@ -333,12 +343,16 @@ function TaskRow({
           one and is the last thing on the row. Both are named, because an icon
           alone is a guess on first sight. */}
       <div className={`${COL.act} flex items-center justify-end gap-2`}>
+        {/* Revealed on hover on a desk, where a row full of buttons is noise
+            until you are pointing at it. A phone has no hover, so there it is
+            simply there — it used to sit at `opacity-0` for ever, which is a
+            control you can tap only by knowing where it is. */}
         <Button
           variant="quiet"
           size="sm"
           onClick={onRead}
           title="Read it"
-          className="opacity-0 transition-opacity group-hover:opacity-100"
+          className="md:opacity-0 md:transition-opacity md:group-hover:opacity-100"
         >
           View
         </Button>

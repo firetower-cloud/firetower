@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import localFont from "next/font/local";
 import "./globals.css";
 import { Shell } from "@/components/Shell";
@@ -38,6 +38,37 @@ const jetbrains = localFont({
 export const metadata: Metadata = {
   title: "Firetower",
   description: "Run any coding agent, on your own servers, from anywhere.",
+};
+
+/**
+ * How the page meets the device it is on.
+ *
+ * There was none of this, so the page took the default and a phone could
+ * pinch the workbench to 1.4× and leave the composer off the right edge.
+ *
+ * `maximumScale` and `userScalable` are the half of that fix browsers agree
+ * on; Safari has ignored them for pinch since iOS 10, on accessibility
+ * grounds, which is why there is a `.no-zoom` rule and a `useNoZoom` hook as
+ * well and why the two of them are scoped to the workbench rather than
+ * applied here. What this *does* buy on every browser is the other half of
+ * the complaint: a field under 16px no longer zooms the page when it takes
+ * focus.
+ *
+ * `viewportFit: "cover"` draws under the notch and the home indicator, which
+ * is only correct because everything resting on the floor pads itself with
+ * `env(safe-area-inset-bottom)` — see `.safe-bottom`.
+ *
+ * `interactiveWidget: "resizes-content"` makes the soft keyboard shrink the
+ * viewport rather than slide over it, so `h-dvh` is the room actually left
+ * and the composer rides up without a line of JavaScript measuring anything.
+ */
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
+  viewportFit: "cover",
+  interactiveWidget: "resizes-content",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

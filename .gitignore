@@ -1,6 +1,10 @@
 /target
 /api/openapi.json.tmp
 node_modules
+# pnpm puts its store here when it cannot use the one in $HOME — which is what
+# happens running the compose stack, where $HOME is the container's. It is a
+# cache of every package ever downloaded, so it is large, and it is not ours.
+/.pnpm-store
 .next
 # The static export. Built by `just build` and compiled into the binary, so
 # nothing in it belongs in version control. The directory has to exist for
