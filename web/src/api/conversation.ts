@@ -256,6 +256,10 @@ export function apply(state: Conversation, event: ConversationEvent): Conversati
       // composer feels immediate. The agent echoes it back a moment later —
       // that copy is the real one, and it replaces the placeholder rather than
       // appearing beneath it.
+      const typed =
+        event.kind === "UserMessage"
+          ? [...items].reverse().find((i) => i.id.startsWith(TYPED))
+          : undefined;
       const settled =
         event.kind === "UserMessage" ? items.filter((i) => !i.id.startsWith(TYPED)) : items;
 
@@ -271,6 +275,10 @@ export function apply(state: Conversation, event: ConversationEvent): Conversati
             task: event.task ?? undefined,
             text: "",
             output: "",
+            // The item start arrives before its input, which is where the
+            // server puts images. Keep the optimistic copy through that one
+            // event gap so its thumbnail does not flash away on send.
+            images: typed?.images,
           },
         ],
       };
@@ -282,7 +290,14 @@ export function apply(state: Conversation, event: ConversationEvent): Conversati
         // arrive the same way, because both are "what came with this item".
         const carried = (event.data as { images?: Attached[] } | undefined)?.images;
         return carried
-          ? { ...item, images: [...(item.images ?? []), ...carried] }
+          ? {
+              ...item,
+              // The first copy may be the optimistic one moved over in
+              // `ItemStarted`; the server then confirms the same images.
+              images: sameImages(item.images, carried)
+                ? item.images
+                : [...(item.images ?? []), ...carried],
+            }
           : { ...item, input: event.data };
       });
 
@@ -397,6 +412,17 @@ export function apply(state: Conversation, event: ConversationEvent): Conversati
       // carried but not drawn yet. Ignoring it must never lose the cursor.
       return { ...state, lastLine };
   }
+}
+
+/** Whether the server has confirmed the exact images already on the item. */
+function sameImages(existing: Attached[] | undefined, received: Attached[]) {
+  return (
+    existing?.length === received.length &&
+    existing.every(
+      (image, at) =>
+        image.mediaType === received[at].mediaType && image.data === received[at].data,
+    )
+  );
 }
 
 /**
