@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.27.1](https://github.com/firetower-cloud/firetower/compare/firetower-v0.27.0...firetower-v0.27.1) (2026-09-10)
+
+
+### Bug Fixes
+
+* compare a session against the base as it is now ([f8be170](https://github.com/firetower-cloud/firetower/commit/f8be17014b630c42dbf1d8c81e1bd276dd700f4d))
+* keep the worker answering while a session streams ([cee6646](https://github.com/firetower-cloud/firetower/commit/cee66465031073c880a7171b77e5043a62fbbe86))
+
 ## [0.27.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.26.1...firetower-v0.27.0) (2026-09-08)
 
 
