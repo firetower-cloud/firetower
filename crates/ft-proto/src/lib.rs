@@ -41,7 +41,8 @@ use serde::{Deserialize, Serialize};
 /// on can be reached without anything listening on the machine it runs on. An
 /// older worker cannot read `TunnelOpen`, and a preview against one would take
 /// the connection down rather than answering "I can't".
-pub const PROTOCOL_VERSION: u32 = 12;
+/// 13 — acknowledged agent launches and isolated per-run authentication.
+pub const PROTOCOL_VERSION: u32 = 13;
 
 mod codec;
 pub use codec::{Codec, CodecError, FrameReader, FrameWriter};
@@ -403,6 +404,8 @@ pub enum ToWorker {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "action")]
 pub enum Action {
+    /// Launch in an existing workspace and acknowledge readiness.
+    StartAgent { spec: Box<StartAgent> },
     /// Kill the agent. The workspace and its branch stay.
     Stop,
     Commit {
@@ -556,7 +559,7 @@ pub struct CreateWorkspace {
 /// It carries its own `session_id`, which is what keeps the two apart on the
 /// host: the agent's socket and its tmux session are both named from it, so two
 /// runs get two of each without anything being invented for them.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct StartAgent {
     /// The new run. Not the workspace's first session.
     pub session_id: SessionId,
@@ -594,6 +597,15 @@ pub struct StartAgent {
     pub env: Vec<(String, String)>,
     #[serde(default)]
     pub agent_home: Vec<(String, String)>,
+}
+
+impl std::fmt::Debug for StartAgent {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("StartAgent")
+            .field("session_id", &self.session_id)
+            .field("agent", &self.agent)
+            .finish_non_exhaustive()
+    }
 }
 
 /// The issue a session was cut for, as much of it as could be read.

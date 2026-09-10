@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.27.0
+ * OpenAPI spec version: 0.28.0
  */
 import type { Agent } from './agent';
 import type { HostId } from './hostId';
@@ -17,6 +17,11 @@ import type { WorkspaceSize } from './workspaceSize';
  * What the API accepts to launch one.
  */
 export interface NewSession {
+  /**
+     * Named connection to use. Omit for the default for this agent.
+     * @nullable
+     */
+  accountId?: string | null;
   agent?: Agent;
   /**
      * The branch to start from. Omit for the repository's default.

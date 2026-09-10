@@ -506,8 +506,15 @@ impl CodexNormaliser {
         }
 
         match method {
+            "error" => crate::quota::failure(&params["error"])
+                .into_iter()
+                .collect(),
             "turn/started" => self.turn_started(&params),
-            "turn/completed" => self.turn_completed(&params),
+            "turn/completed" => {
+                let mut events = self.turn_completed(&params);
+                events.extend(crate::quota::failure(&params["turn"]["error"]));
+                events
+            }
             "item/started" => self.item_started(&params),
             "item/completed" => self.item_completed(&params),
             "item/agentMessage/delta" => self.delta(&params, StreamKind::AssistantText),
@@ -912,7 +919,7 @@ fn limits(params: &Value) -> Vec<TurnEvent> {
                 // room left, however little.
                 status: if used >= 100 { "reached" } else { "allowed" }.to_string(),
                 resets_at: window.get("resetsAt").and_then(Value::as_i64),
-                used_percent: Some(used as u8),
+                used_percent: Some(used.clamp(0, 100) as u8),
             })
         })
         .collect()

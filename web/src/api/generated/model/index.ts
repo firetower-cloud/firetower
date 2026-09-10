@@ -3,10 +3,11 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.27.0
+ * OpenAPI spec version: 0.28.0
  */
 
 export * from './accessEntry';
+export * from './account';
 export * from './agent';
 export * from './agentMode';
 export * from './agentOnHost';
@@ -35,6 +36,7 @@ export * from './control';
 export * from './controlKind';
 export * from './conversation';
 export * from './conversationEvent';
+export * from './createAccount';
 export * from './credentials';
 export * from './decision';
 export * from './deleteHostParams';
@@ -51,6 +53,7 @@ export * from './envVariable';
 export * from './errorCode';
 export * from './event';
 export * from './eventKind';
+export * from './fallback';
 export * from './fileDiff';
 export * from './fileEntry';
 export * from './findFilesParams';
@@ -67,6 +70,7 @@ export * from './itemId';
 export * from './itemKind';
 export * from './itemStatus';
 export * from './label';
+export * from './limit';
 export * from './listEventsParams';
 export * from './listFilesParams';
 export * from './listSessionsParams';
@@ -118,6 +122,7 @@ export * from './rotated';
 export * from './sent';
 export * from './serverFrame';
 export * from './session';
+export * from './sessionAccount';
 export * from './sessionDiffParams';
 export * from './sessionId';
 export * from './sessionPtyParams';
@@ -133,6 +138,9 @@ export * from './sshKey';
 export * from './step';
 export * from './storedEnv';
 export * from './streamKind';
+export * from './switch';
+export * from './switchAccount';
+export * from './switchedAccount';
 export * from './task';
 export * from './taskId';
 export * from './taskKind';
@@ -142,6 +150,7 @@ export * from './turn';
 export * from './turnEvent';
 export * from './turnId';
 export * from './turnStatus';
+export * from './updateAccount';
 export * from './usage';
 export * from './user';
 export * from './userId';

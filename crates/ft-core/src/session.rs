@@ -239,6 +239,9 @@ pub struct Session {
 #[derive(Debug, Clone, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct NewSession {
+    /// Named connection to use. Omit for the default for this agent.
+    #[serde(default)]
+    pub account_id: Option<String>,
     /// Omit for a bare agent: a workspace with nothing checked out.
     ///
     /// Kept alongside `repos` so that anything holding one repository still

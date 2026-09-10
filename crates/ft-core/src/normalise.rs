@@ -226,6 +226,10 @@ impl ClaudeNormaliser {
     fn push_value(&mut self, v: &Value) -> Vec<TurnEvent> {
         let mut out = Vec::new();
         match str_at(v, "type") {
+            Some("error") => match crate::quota::failure(&v["error"]) {
+                Some(event) => out.push(event),
+                None => out.push(raw(v)),
+            },
             Some("system") => self.system(v, &mut out),
             Some("stream_event") => self.stream_event(v, &mut out),
             Some("assistant") => self.assistant(v, &mut out),

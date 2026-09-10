@@ -9,6 +9,7 @@
 //! only what every one of them needs: the error type, the document, and the
 //! router that puts them in order.
 
+pub(crate) mod accounts;
 pub(crate) mod agents;
 mod auth;
 mod conversation;
@@ -277,6 +278,11 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(repos::remove_repo_env))
         .routes(routes!(repos::repo_branches))
         .routes(routes!(repos::probe_repo))
+        .routes(routes!(accounts::list_accounts, accounts::create_account))
+        .routes(routes!(accounts::update_account))
+        .routes(routes!(accounts::session_account))
+        .routes(routes!(accounts::switch_account))
+        .routes(routes!(accounts::get_fallback, accounts::set_fallback))
         .routes(routes!(agents::list_agents))
         .routes(routes!(agents::configure_agent, agents::forget_agent))
         .routes(routes!(agents::check_agents))
@@ -409,5 +415,11 @@ mod tests {
                 "{path} is missing from the contract"
             );
         }
+    }
+}
+
+impl From<sqlx::Error> for ApiError {
+    fn from(error: sqlx::Error) -> Self {
+        Self::from(anyhow::Error::from(error))
     }
 }

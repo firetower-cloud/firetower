@@ -3,13 +3,18 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.27.0
+ * OpenAPI spec version: 0.28.0
  */
 
 /**
  * What a sign-in needs from the caller.
  */
 export interface SignIn {
+  /**
+     * Existing named connection to authenticate.
+     * @nullable
+     */
+  accountId?: string | null;
   /**
      * Which host should do it. Any that has the agent, by default.
      *

@@ -17,6 +17,7 @@ import {
   type Questionnaire,
   type Task,
 } from "@/src/api/conversation";
+import { AccountSwitcher } from "./AccountSwitcher";
 import { Markdown } from "@/components/Markdown";
 import { Copyable } from "@/components/ui";
 import { EditCard, editFrom } from "@/components/EditCard";
@@ -358,6 +359,7 @@ export function Chat({
             many cards the agent has open, the composer below them keeps its
             full height. */}
         <div className="min-h-0 overflow-y-auto">
+          <AccountSwitcher sessionId={sessionId} working={conversation.working} />
           {notice}
           {conversation.questions.map((asking) => (
             <Questions

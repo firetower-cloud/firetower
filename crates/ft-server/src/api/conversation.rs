@@ -298,6 +298,7 @@ pub(super) async fn send_turn(
         .session_of(&who, &id)
         .await?
         .ok_or_else(|| ApiError::new(ErrorCode::NotFound, "no such session"))?;
+    super::accounts::ensure_not_switching(&state.db, &id).await?;
     let host = session.host_id.clone();
 
     // Speaking to a session whose agent has gone brings it back first.
@@ -442,6 +443,7 @@ pub(super) async fn choose_control(
 ) -> ApiResult<Json<Sent>> {
     let id = SessionId::from_stored(id);
     let host = host_of(&state, &principal, &id).await?;
+    super::accounts::ensure_not_switching(&state.db, &id).await?;
 
     state
         .fleet

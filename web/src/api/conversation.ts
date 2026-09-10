@@ -284,6 +284,7 @@ export function apply(state: Conversation, event: ConversationEvent): Conversati
     case "Limited":
       return {
         ...state,
+        working: ["rejected", "blocked"].includes(event.status) ? false : state.working,
         limits: { window: event.window, status: event.status, resetsAt: event.resetsAt ?? null },
         lastLine,
       };
