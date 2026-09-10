@@ -26,6 +26,7 @@ import type { Control } from "@/components/Settings.chat";
 import { Annotatable, Drafting, Notes } from "@/components/Annotate";
 import type { Draft } from "@/components/Annotate";
 import { Bringup, ready, type Line } from "@/components/Steps";
+import { PreviewNotes } from "./PreviewNotes";
 import { useNotes, asMessage, type Note } from "@/src/api/notes";
 import { fold, summarise } from "@/src/api/steps";
 import { useReveal } from "@/src/api/reveal";
@@ -266,6 +267,15 @@ export function Chat({
               still going?", and the reason there is no spinner anywhere else. */}
           <End working={conversation.working} waiting={waiting} />
 
+          {/* The far end said it will not go on — out of credits, a limit, a
+              refusal. The agent's own sentence, because a paraphrase of it
+              would be a guess about somebody's account. */}
+          {conversation.stopped && (
+            <p className="mt-3 rounded-sm border border-brick/40 bg-ground px-2.5 py-2 text-meta leading-[1.5] text-brick">
+              {conversation.stopped}
+            </p>
+          )}
+
           {conversation.trouble && (
             <p className="mt-3 font-mono text-meta text-brick">
               Lost the stream.{live ? " Reconnecting." : ""}
@@ -325,6 +335,8 @@ export function Chat({
             }}
           />
         )}
+
+        <PreviewNotes sessionId={sessionId} live={live} />
 
         {/* Written against the transcript, waiting to go. */}
         {notes.length > 0 && (

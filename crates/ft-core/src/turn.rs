@@ -356,6 +356,15 @@ pub enum TurnEvent {
         turn: TurnId,
         status: TurnStatus,
         usage: Option<Usage>,
+        /// Why it ended that way, when the agent said.
+        ///
+        /// A turn that failed used to arrive as a status and nothing else, so
+        /// "Your workspace is out of credits. Add credits to continue." — a
+        /// sentence the agent had already written, and the only one that would
+        /// have explained the silence — was dropped on the floor and the
+        /// session read as an agent that had stopped answering for no reason.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        detail: Option<String>,
     },
 
     ItemStarted {
@@ -397,7 +406,15 @@ pub enum TurnEvent {
     },
     RequestResolved {
         req: RequestId,
-        decision: Decision,
+        /// What was decided, when whoever reports it knows.
+        ///
+        /// Codex says only that its request was answered — `serverRequest/
+        /// resolved` carries the id and nothing else — so "answered, and it
+        /// did not say how" has to be representable. It is the difference
+        /// between a card that clears and one that sits on the screen for ever
+        /// while somebody presses Allow again.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        decision: Option<Decision>,
     },
     UserInputRequested {
         req: RequestId,

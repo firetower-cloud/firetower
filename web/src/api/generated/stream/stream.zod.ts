@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.28.0
+ * OpenAPI spec version: 0.28.2
  */
 import * as zod from 'zod';
 
@@ -137,6 +137,7 @@ export const StreamResponse = zod.union([zod.object({
   "turn": zod.string().describe('One exchange: a prompt in, and everything that happened before the agent stopped.'),
   "type": zod.enum(['TurnStarted'])
 }),zod.object({
+  "detail": zod.string().nullish().describe('Why it ended that way, when the agent said.\n\nA turn that failed used to arrive as a status and nothing else, so\n\"Your workspace is out of credits. Add credits to continue.\" — a\nsentence the agent had already written, and the only one that would\nhave explained the silence — was dropped on the floor and the\nsession read as an agent that had stopped answering for no reason.'),
   "status": zod.enum(['Completed', 'Failed', 'Interrupted']).describe('How a turn ended.'),
   "turn": zod.string().describe('One exchange: a prompt in, and everything that happened before the agent stopped.'),
   "type": zod.enum(['TurnCompleted']),
@@ -188,7 +189,7 @@ export const StreamResponse = zod.union([zod.object({
   "req": zod.string().describe('One thing the agent is blocked on and needs an answer to.'),
   "type": zod.enum(['RequestOpened'])
 }).describe('The agent is blocked and cannot continue without an answer.'),zod.object({
-  "decision": zod.union([zod.object({
+  "decision": zod.union([zod.null(),zod.union([zod.object({
   "decision": zod.enum(['Allow'])
 }),zod.object({
   "decision": zod.enum(['AllowAlways'])
@@ -198,7 +199,7 @@ export const StreamResponse = zod.union([zod.object({
 }),zod.object({
   "answers": zod.unknown(),
   "decision": zod.enum(['Answered'])
-}).describe('The answers to a question the agent asked.\n\nNot an allow with extra: a question is answered, not permitted, and\nletting it through without the answers gives the agent a tool result\nsaying nothing. Keyed by the question\'s own text, valued by the label\nof the option chosen — the agent matches on both, so neither may be\nparaphrased on the way back.')]).describe('What the person decided, when they were asked.'),
+}).describe('The answers to a question the agent asked.\n\nNot an allow with extra: a question is answered, not permitted, and\nletting it through without the answers gives the agent a tool result\nsaying nothing. Keyed by the question\'s own text, valued by the label\nof the option chosen — the agent matches on both, so neither may be\nparaphrased on the way back.')]).describe('What was decided, when whoever reports it knows.\n\nCodex says only that its request was answered — `serverRequest\/\nresolved` carries the id and nothing else — so \"answered, and it\ndid not say how\" has to be representable. It is the difference\nbetween a card that clears and one that sits on the screen for ever\nwhile somebody presses Allow again.')]).optional(),
   "req": zod.string().describe('One thing the agent is blocked on and needs an answer to.'),
   "type": zod.enum(['RequestResolved'])
 }),zod.object({

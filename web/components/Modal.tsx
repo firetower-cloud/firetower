@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
+import { createPortal } from "react-dom";
 import { LoaderCircle, X } from "lucide-react";
 import { Button, Icon } from "./ui";
 import type { PendingAuth } from "@/src/api/generated/model";
@@ -19,6 +20,20 @@ import { useDismissible } from "@/src/workspace/dismissible";
  * As a sheet it gets three things a card does not need: a floor that is above
  * the home indicator, a header tall enough to have a real target in it, and
  * Back as a way out.
+ *
+ * ## Why this is drawn on `body` rather than where it is written
+ *
+ * `position: fixed` is relative to the viewport only while no ancestor has a
+ * transform, a filter or containment on it — any of those makes *it* the
+ * containing block instead. The rail is `-translate-x-full` off-screen on a
+ * phone and slides in, and a transform that animates is still a transform when
+ * it is finished, so a modal opened from the rail's own `+` was laid out inside
+ * a 236px column and clipped by its `overflow-hidden`.
+ *
+ * Portalling is the fix that keeps working. Neutralising the rail's transform
+ * fixes today's instance and leaves the next one — a filter for a disabled
+ * state, a `will-change` for a scroll — to be found the same way, by somebody
+ * looking at a dialog folded into a sidebar.
  */
 export function Modal({
   title,
@@ -48,7 +63,14 @@ export function Modal({
 
   useDismissible(true, onClose, "modal");
 
-  return (
+  // `document` does not exist while this renders on the server, so nothing is
+  // drawn until this is running in a browser. `useSyncExternalStore` is how
+  // that question is asked without writing state from an effect: the server
+  // snapshot is `false`, the client's is `true`, and nothing ever changes it.
+  const mounted = useSyncExternalStore(subscribe, here, notYet);
+  if (!mounted) return null;
+
+  return createPortal(
     <div className="fixed inset-0 z-50 flex justify-center overflow-hidden sm:items-start sm:overflow-y-auto sm:p-10">
       <div className="fixed inset-0 bg-ground/80 backdrop-blur-[3px]" onClick={onClose} />
       <div
@@ -88,9 +110,15 @@ export function Modal({
           </div>
         )}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
+
+/* Nothing to subscribe to: whether this is a browser does not change. */
+const subscribe = () => () => {};
+const here = () => true;
+const notYet = () => false;
 
 /* Shared bits used by every flow that authorizes something. */
 

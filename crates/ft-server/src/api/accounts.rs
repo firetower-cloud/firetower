@@ -808,7 +808,7 @@ mod tests {
                 .await
                 .unwrap();
         sqlx::raw_sql(include_str!(
-            "../../../../migrations/server/20260910120000_agent_accounts.sql"
+            "../../../../migrations/server/20260910130000_agent_accounts.sql"
         ))
         .execute(db.pool())
         .await

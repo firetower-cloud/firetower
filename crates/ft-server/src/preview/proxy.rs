@@ -45,6 +45,35 @@ pub async fn serve(state: AppState, preview: Preview, mut request: Request) -> R
         return gone("That session has ended.");
     }
 
+    if request.uri().path() == super::annotations::RUNTIME_PATH {
+        return super::annotations::runtime();
+    }
+    let document_request = request
+        .headers()
+        .get(header::ACCEPT)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| v.contains("text/html"))
+        || request
+            .headers()
+            .get("sec-fetch-dest")
+            .is_some_and(|v| v == "document" || v == "iframe");
+    let annotate = document_request
+        && !wants_upgrade(&request)
+        && request.method() == Method::GET
+        && !request.headers().contains_key(header::RANGE)
+        && !request
+            .uri()
+            .query()
+            .is_some_and(|q| q.split('&').any(|p| p == "__firetower_plain=1"));
+    if annotate {
+        request.headers_mut().insert(
+            header::ACCEPT_ENCODING,
+            HeaderValue::from_static("identity"),
+        );
+        request.headers_mut().remove(header::IF_NONE_MATCH);
+        request.headers_mut().remove(header::IF_MODIFIED_SINCE);
+    }
+
     // The far end is a dev server on loopback that believes it is being
     // reached directly. Telling it our public hostname would have it write
     // that into its redirects and its generated links.
@@ -141,7 +170,17 @@ pub async fn serve(state: AppState, preview: Preview, mut request: Request) -> R
         }
     }
 
-    answer.map(Body::new).into_response()
+    let response = answer.map(Body::new).into_response();
+    if annotate {
+        super::annotations::instrument(
+            response,
+            preview.session.as_str(),
+            preview.port,
+            &state.public_url,
+        )
+    } else {
+        response
+    }
 }
 
 /// Open a tunnel to the port and start speaking HTTP over it.

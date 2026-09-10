@@ -156,7 +156,8 @@ pub trait Source {
     /// disagree with the link beside it.
     ///
     /// [`bind_task`]: crate::db::Db::bind_task
-    fn one(&self, token: &str, url: &str) -> impl std::future::Future<Output = Result<Task>> + Send;
+    fn one(&self, token: &str, url: &str)
+        -> impl std::future::Future<Output = Result<Task>> + Send;
 }
 
 /// The git host, which is also a task tracker.
@@ -442,11 +443,7 @@ mod tests {
             "https://github.com/acme/web/issues/32/",
             "github.com/acme/web/issues/32",
         ] {
-            assert_eq!(
-                located(url),
-                Some(("acme/web".to_string(), 32)),
-                "{url}"
-            );
+            assert_eq!(located(url), Some(("acme/web".to_string(), 32)), "{url}");
         }
     }
 

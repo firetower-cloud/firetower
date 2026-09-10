@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.28.0
+ * OpenAPI spec version: 0.28.2
  */
 import {
   useMutation,
@@ -26,6 +26,7 @@ import type {
 } from '@tanstack/react-query';
 
 import type {
+  AnnotationSelection,
   Answer,
   ApiError,
   Attachment,
@@ -42,6 +43,7 @@ import type {
   FindFilesParams,
   Forwarded,
   GetConversationParams,
+  KeepAnnotation,
   ListFilesParams,
   ListSessionsParams,
   NewCheckout,
@@ -52,6 +54,7 @@ import type {
   Ports,
   PreviewAddress,
   PreviewAddressParams,
+  PreviewAnnotation,
   Proposal,
   PullRequest,
   RenameSession,
@@ -604,6 +607,314 @@ export const useRenameSession = <TError = ApiError,
         TContext
       > => {
       return useMutation(getRenameSessionMutationOptions(options), queryClient);
+    }
+    export const getListAnnotationsUrl = (id: string,) => {
+
+
+
+
+  return `/api/v1/sessions/${id}/annotations`
+}
+
+export const listAnnotations = async (id: string, options?: Parameters<typeof http>[1]): Promise<PreviewAnnotation[]> => {
+
+  return http<PreviewAnnotation[]>(getListAnnotationsUrl(id),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListAnnotationsQueryKey = (id: string,) => {
+    return [
+    `/api/v1/sessions/${id}/annotations`
+    ] as const;
+    }
+
+
+export const getListAnnotationsQueryOptions = <TData = Awaited<ReturnType<typeof listAnnotations>>, TError = ApiError>(id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listAnnotations>>, TError, TData>>, request?: SecondParameter<typeof http>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListAnnotationsQueryKey(id);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listAnnotations>>> = ({ signal }) => listAnnotations(id, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: id !== null && id !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listAnnotations>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListAnnotationsQueryResult = NonNullable<Awaited<ReturnType<typeof listAnnotations>>>
+export type ListAnnotationsQueryError = ApiError
+
+
+export function useListAnnotations<TData = Awaited<ReturnType<typeof listAnnotations>>, TError = ApiError>(
+ id: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listAnnotations>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listAnnotations>>,
+          TError,
+          Awaited<ReturnType<typeof listAnnotations>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListAnnotations<TData = Awaited<ReturnType<typeof listAnnotations>>, TError = ApiError>(
+ id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listAnnotations>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listAnnotations>>,
+          TError,
+          Awaited<ReturnType<typeof listAnnotations>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useListAnnotations<TData = Awaited<ReturnType<typeof listAnnotations>>, TError = ApiError>(
+ id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listAnnotations>>, TError, TData>>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+
+export function useListAnnotations<TData = Awaited<ReturnType<typeof listAnnotations>>, TError = ApiError>(
+ id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listAnnotations>>, TError, TData>>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getListAnnotationsQueryOptions(id,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+export const useSetListAnnotationsQueryData = () => {
+  const queryClient = useQueryClient();
+  return (id: string,updater: Awaited<ReturnType<typeof listAnnotations>> | undefined | ((old: Awaited<ReturnType<typeof listAnnotations>> | undefined) => Awaited<ReturnType<typeof listAnnotations>> | undefined)) => {
+    queryClient.setQueriesData<Awaited<ReturnType<typeof listAnnotations>>>({ queryKey: getListAnnotationsQueryKey(id) }, updater);
+  };
+}
+
+export const useGetListAnnotationsQueryData = () => {
+  const queryClient = useQueryClient();
+  return (id: string,) =>
+    queryClient.getQueryData<Awaited<ReturnType<typeof listAnnotations>>>(getListAnnotationsQueryKey(id));
+}
+
+
+export const getKeepAnnotationUrl = (id: string,) => {
+
+
+
+
+  return `/api/v1/sessions/${id}/annotations`
+}
+
+export const keepAnnotation = async (id: string,
+    keepAnnotationBody: KeepAnnotation, options?: Parameters<typeof http>[1]): Promise<PreviewAnnotation> => {
+
+  return http<PreviewAnnotation>(getKeepAnnotationUrl(id),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(keepAnnotationBody)
+  }
+);}
+
+
+
+
+
+export const getKeepAnnotationMutationOptions = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof keepAnnotation>>, TError,{id: string;data: KeepAnnotation}, TContext>, request?: SecondParameter<typeof http>}
+): UseMutationOptions<Awaited<ReturnType<typeof keepAnnotation>>, TError,{id: string;data: KeepAnnotation}, TContext> => {
+
+const mutationKey = ['keepAnnotation'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof keepAnnotation>>, {id: string;data: KeepAnnotation}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  keepAnnotation(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type KeepAnnotationMutationResult = NonNullable<Awaited<ReturnType<typeof keepAnnotation>>>
+    export type KeepAnnotationMutationBody = KeepAnnotation
+    export type KeepAnnotationMutationError = ApiError
+
+    export const useKeepAnnotation = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof keepAnnotation>>, TError,{id: string;data: KeepAnnotation}, TContext>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof keepAnnotation>>,
+        TError,
+        {id: string;data: KeepAnnotation},
+        TContext
+      > => {
+      return useMutation(getKeepAnnotationMutationOptions(options), queryClient);
+    }
+    export const getDropAnnotationsUrl = (id: string,) => {
+
+
+
+
+  return `/api/v1/sessions/${id}/annotations`
+}
+
+export const dropAnnotations = async (id: string,
+    annotationSelection: AnnotationSelection, options?: Parameters<typeof http>[1]): Promise<void> => {
+
+  return http<void>(getDropAnnotationsUrl(id),
+  {
+    ...options,
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(annotationSelection)
+  }
+);}
+
+
+
+
+
+export const getDropAnnotationsMutationOptions = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof dropAnnotations>>, TError,{id: string;data: AnnotationSelection}, TContext>, request?: SecondParameter<typeof http>}
+): UseMutationOptions<Awaited<ReturnType<typeof dropAnnotations>>, TError,{id: string;data: AnnotationSelection}, TContext> => {
+
+const mutationKey = ['dropAnnotations'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof dropAnnotations>>, {id: string;data: AnnotationSelection}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  dropAnnotations(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DropAnnotationsMutationResult = NonNullable<Awaited<ReturnType<typeof dropAnnotations>>>
+    export type DropAnnotationsMutationBody = AnnotationSelection
+    export type DropAnnotationsMutationError = ApiError
+
+    export const useDropAnnotations = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof dropAnnotations>>, TError,{id: string;data: AnnotationSelection}, TContext>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof dropAnnotations>>,
+        TError,
+        {id: string;data: AnnotationSelection},
+        TContext
+      > => {
+      return useMutation(getDropAnnotationsMutationOptions(options), queryClient);
+    }
+    export const getSendAnnotationsUrl = (id: string,) => {
+
+
+
+
+  return `/api/v1/sessions/${id}/annotations/send`
+}
+
+/**
+ * @summary A durable 'sending' marker is committed before contacting the worker. A
+lost acknowledgement must never turn a retry into a duplicate agent turn.
+ */
+export const sendAnnotations = async (id: string,
+    annotationSelection: AnnotationSelection, options?: Parameters<typeof http>[1]): Promise<Sent> => {
+
+  return http<Sent>(getSendAnnotationsUrl(id),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(annotationSelection)
+  }
+);}
+
+
+
+
+
+export const getSendAnnotationsMutationOptions = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof sendAnnotations>>, TError,{id: string;data: AnnotationSelection}, TContext>, request?: SecondParameter<typeof http>}
+): UseMutationOptions<Awaited<ReturnType<typeof sendAnnotations>>, TError,{id: string;data: AnnotationSelection}, TContext> => {
+
+const mutationKey = ['sendAnnotations'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof sendAnnotations>>, {id: string;data: AnnotationSelection}> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  sendAnnotations(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SendAnnotationsMutationResult = NonNullable<Awaited<ReturnType<typeof sendAnnotations>>>
+    export type SendAnnotationsMutationBody = AnnotationSelection
+    export type SendAnnotationsMutationError = ApiError
+
+    /**
+ * @summary A durable 'sending' marker is committed before contacting the worker. A
+lost acknowledgement must never turn a retry into a duplicate agent turn.
+ */
+export const useSendAnnotations = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof sendAnnotations>>, TError,{id: string;data: AnnotationSelection}, TContext>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof sendAnnotations>>,
+        TError,
+        {id: string;data: AnnotationSelection},
+        TContext
+      > => {
+      return useMutation(getSendAnnotationsMutationOptions(options), queryClient);
     }
     export const getAnswerRequestUrl = (id: string,) => {
 

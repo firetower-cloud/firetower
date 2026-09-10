@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { usePreviewAddress } from "@/src/api/generated/sessions/sessions";
 
 /**
@@ -16,7 +16,8 @@ import { usePreviewAddress } from "@/src/api/generated/sessions/sessions";
  * path prefix, no `<base>` tag, no rewritten `Location` headers, and nothing a
  * client-side router can navigate out of. Which also means it is a *different*
  * origin from Firetower and nothing here can look inside the frame. Nothing
- * needs to — when the port has nothing on it, the frame itself says so.
+ * inspects it directly: the injected picker captures element context and the
+ * trusted annotation panel owns authentication and feedback delivery.
  */
 export function PreviewTab({
   sessionId,
@@ -25,11 +26,40 @@ export function PreviewTab({
   sessionId: string;
   port: number;
 }) {
-  const { data: address, isLoading, isError } = usePreviewAddress(sessionId, {
+  const {
+    data: address,
+    isLoading,
+    isError,
+  } = usePreviewAddress(sessionId, {
     port,
   });
   /** Bumped to reload the frame without touching its address. */
   const [reloads, setReloads] = useState(0);
+
+  const frame = useRef<HTMLIFrameElement>(null);
+  const [available, setAvailable] = useState(false);
+  const [uiOrigin, setUiOrigin] = useState("");
+  useEffect(() => {
+    // The UI origin is runtime configuration, including in split-port dev mode.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setUiOrigin(window.location.origin);
+    const receive = (event: MessageEvent) => {
+      if (
+        address &&
+        event.origin === new URL(address.url).origin &&
+        event.source === frame.current?.contentWindow &&
+        event.data?.source === "firetower-picker" &&
+        event.data?.type === "available"
+      )
+        setAvailable(true);
+    };
+    window.addEventListener("message", receive);
+    return () => window.removeEventListener("message", receive);
+  }, [address]);
+  const launchUrl =
+    address && uiOrigin
+      ? `${address.url}#__firetower_ui=${encodeURIComponent(uiOrigin)}`
+      : address?.url;
 
   if (isLoading) return <Waiting />;
 
@@ -49,13 +79,42 @@ export function PreviewTab({
 
         <div className="ml-auto flex shrink-0 items-center gap-3">
           <button
-            onClick={() => setReloads((n) => n + 1)}
+            disabled={!available}
+            title={
+              available
+                ? "Select elements and send feedback"
+                : "Annotation unavailable: try Open, or use plain preview for unsupported pages"
+            }
+            onClick={() =>
+              frame.current?.contentWindow?.postMessage(
+                { source: "firetower-preview", type: "annotate" },
+                new URL(address.url).origin,
+              )
+            }
+            className="transition-colors hover:text-dim disabled:opacity-50"
+          >
+            Annotate
+          </button>
+          <button
+            onClick={() => {
+              setAvailable(false);
+              setReloads((n) => n + 1);
+            }}
             className="transition-colors hover:text-dim"
           >
             Reload
           </button>
           <a
-            href={address.url}
+            href={`${address.url}?__firetower_plain=1`}
+            target="_blank"
+            rel="noreferrer"
+            className="transition-colors hover:text-dim"
+            title="Open without annotation instrumentation"
+          >
+            Plain ↗
+          </a>
+          <a
+            href={launchUrl}
             target="_blank"
             rel="noreferrer"
             className="transition-colors hover:text-dim"
@@ -67,7 +126,8 @@ export function PreviewTab({
 
       <iframe
         key={reloads}
-        src={address.url}
+        ref={frame}
+        src={launchUrl}
         title={`Port ${port} in this session`}
         className="min-h-0 flex-1 border-0 bg-white"
       />

@@ -30,3 +30,6 @@ node_modules
 # Worktrees and whatever else the assistant keeps. Committing the first would
 # nest a git repository inside this one.
 /.claude/
+
+/web/test-results
+/web/playwright-report

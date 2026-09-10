@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.28.0
+ * OpenAPI spec version: 0.28.2
  */
 import type { Decision } from './decision';
 import type { ItemId } from './itemId';
@@ -44,6 +44,17 @@ export type TurnEvent = {
   turn: TurnId;
   type: 'TurnStarted';
 } | {
+  /**
+     * Why it ended that way, when the agent said.
+     *
+     * A turn that failed used to arrive as a status and nothing else, so
+     * "Your workspace is out of credits. Add credits to continue." — a
+     * sentence the agent had already written, and the only one that would
+     * have explained the silence — was dropped on the floor and the
+     * session read as an agent that had stopped answering for no reason.
+     * @nullable
+     */
+  detail?: string | null;
   status: TurnStatus;
   turn: TurnId;
   type: 'TurnCompleted';
@@ -80,7 +91,7 @@ export type TurnEvent = {
   req: RequestId;
   type: 'RequestOpened';
 } | {
-  decision: Decision;
+  decision?: null | Decision;
   req: RequestId;
   type: 'RequestResolved';
 } | {

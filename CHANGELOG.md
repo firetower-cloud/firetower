@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.28.2](https://github.com/firetower-cloud/firetower/compare/firetower-v0.28.1...firetower-v0.28.2) (2026-09-10)
+
+
+### Bug Fixes
+
+* let a session whose agent has gone be started again ([32c4210](https://github.com/firetower-cloud/firetower/commit/32c42101717bf10acf303f2e230b3ece4bee1056))
+* say why a turn failed ([731f21f](https://github.com/firetower-cloud/firetower/commit/731f21f3c14de04e3686755da6f68ed89120ba81))
+
+## [0.28.1](https://github.com/firetower-cloud/firetower/compare/firetower-v0.28.0...firetower-v0.28.1) (2026-09-10)
+
+
+### Bug Fixes
+
+* draw a modal over the window, not inside the rail ([3bc2aba](https://github.com/firetower-cloud/firetower/commit/3bc2aba311f0402c1cebec94522f1fbd95b17292))
+
 ## [0.28.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.27.1...firetower-v0.28.0) (2026-09-10)
 
 

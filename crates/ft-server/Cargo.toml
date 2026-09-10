@@ -42,6 +42,8 @@ tokio-stream = { version = "0.1", features = ["sync"] }
 rust-embed.workspace = true
 mime_guess.workspace = true
 
+lol_html = "=2.7.0"
+
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 tempfile.workspace = true
