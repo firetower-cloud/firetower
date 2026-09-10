@@ -299,7 +299,10 @@ const LABEL: Record<string, string> = {
 
 /** What is in the workspace that is not safely elsewhere. */
 function Changes({ sessionId }: { sessionId: string }) {
-  const { data: files = [], isLoading } = useSessionDiff(sessionId, undefined, {
+  // `isError` matters as much as the data. Without it a request that failed
+  // was the same empty array as a workspace with nothing in it, and this drew
+  // "Nothing has changed yet." over a host that had stopped answering.
+  const { data: files = [], isLoading, isError } = useSessionDiff(sessionId, undefined, {
     query: { refetchInterval: 8_000 },
   });
   const open = useOpen();
@@ -313,7 +316,7 @@ function Changes({ sessionId }: { sessionId: string }) {
       <div className="flex shrink-0 items-center gap-2 border-b border-line px-3 py-1.5">
         <span className="eyebrow">Changes</span>
         <span className="ml-auto font-mono text-micro text-mute">
-          {isLoading ? "…" : files.length === 0 ? "none" : `${files.length} files`}
+          {isLoading ? "…" : isError ? "unknown" : files.length === 0 ? "none" : `${files.length} files`}
         </span>
       </div>
 
@@ -327,7 +330,12 @@ function Changes({ sessionId }: { sessionId: string }) {
           />
         ))}
 
-        {!isLoading && files.length === 0 && <Line>Nothing has changed yet.</Line>}
+        {!isLoading && isError && (
+          <Line>Firetower can&rsquo;t reach this session&rsquo;s machine, so it can&rsquo;t say what has changed.</Line>
+        )}
+        {!isLoading && !isError && files.length === 0 && (
+          <Line>Nothing has changed yet.</Line>
+        )}
       </div>
 
       {files.length > 0 && (

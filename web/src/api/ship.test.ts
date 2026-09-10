@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { shipping, done, awaiting } from "./ship";
+import { shipping, done, awaiting, ready, atRisk } from "./ship";
 import type { CheckoutWork, Session } from "./generated/model";
 
 const session = { id: "s_1", repo: "acme/web", checkouts: [] } as unknown as Session;
@@ -86,5 +86,75 @@ describe("whether to keep asking the git host", () => {
 
   it("stops when there is no request at all", () => {
     expect(awaiting(shipping(session, [checkout({ pushed: false })]))).toBe(false);
+  });
+});
+
+/**
+ * The bug that made an afternoon of an agent's work look like no work at all.
+ *
+ * A host that stopped answering and a workspace with nothing in it arrived here
+ * as the same thing — an absent `work`, or a row of zeros — and both were drawn
+ * as "clean". The whole point of these is that not knowing is its own state.
+ */
+describe("not knowing is not the same as nothing", () => {
+  it("says so when the request failed, rather than sitting on Looking…", () => {
+    const ship = shipping(session, undefined, true);
+    expect(ship.stage).toBe("unknown");
+    expect(ship.blocked).toMatch(/can't reach/i);
+  });
+
+  it("still says Looking… while the request is in flight", () => {
+    const ship = shipping(session, undefined, false);
+    expect(ship.stage).toBe("clean");
+    expect(ship.blocked).toBe("Looking…");
+  });
+
+  /// The counts arrive absent rather than as zeros when the worker could not
+  /// read the checkout. Absent must not fall through to "nothing to commit".
+  it("does not read an unreadable checkout as a clean one", () => {
+    const ship = shipping(session, [
+      checkout({ uncommitted: undefined, ahead: undefined, pushed: undefined }),
+    ]);
+    expect(ship.stage).toBe("unknown");
+  });
+
+  it("passes on what the worker said was wrong with it", () => {
+    const ship = shipping(session, [
+      checkout({ uncommitted: undefined, trouble: "fatal: not a git repository" }),
+    ]);
+    expect(ship.blocked).toBe("fatal: not a git repository");
+  });
+
+  /// One unreadable repository out of two is not half a clean session.
+  it("does not average an unreadable checkout away", () => {
+    const ship = shipping(session, [
+      checkout({ slug: "acme/web", uncommitted: 0, ahead: 0 }),
+      checkout({ slug: "acme/api", uncommitted: undefined }),
+    ]);
+    expect(ship.stage).toBe("unknown");
+  });
+
+  /// Nothing is offered from a state nothing is known about.
+  it("offers no action while the state is unknown", () => {
+    expect(ready(shipping(session, undefined, true))).toBe(false);
+    expect(ready(shipping(session, [checkout({ uncommitted: undefined })]))).toBe(false);
+  });
+});
+
+/**
+ * What closing a workspace is allowed to promise.
+ *
+ * `atRisk` is what decides whether ending a session warns first. A checkout
+ * nobody could read may be holding anything, so it has to count as at risk —
+ * the cost of a needless warning is a sentence, the cost of the reverse is the
+ * work itself.
+ */
+describe("what would be lost", () => {
+  it("treats an unreadable checkout as work at risk", () => {
+    expect(atRisk([checkout({ uncommitted: undefined })])).toBe(true);
+  });
+
+  it("still says nothing is at risk when everything is known and pushed", () => {
+    expect(atRisk([checkout({ uncommitted: 0, ahead: 0, pushed: true })])).toBe(false);
   });
 });

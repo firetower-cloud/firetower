@@ -64,6 +64,12 @@ pub struct AppState {
     /// somebody left open, not state. Rebinding them at start-up would mean
     /// opening ports for sessions that may be long gone.
     pub forwards: Arc<forward::Forwards>,
+    /// Connections to sessions' ports, kept between requests.
+    ///
+    /// In memory, like the two above, and for the same reason: these are open
+    /// sockets on another machine, and nothing about them outlives the process
+    /// that opened them.
+    pub previews: Arc<preview::pool::Pool>,
 }
 
 pub struct Config {
@@ -178,6 +184,7 @@ pub async fn run(config: Config) -> Result<()> {
         pending: Default::default(),
         accounts: accounts.clone(),
         forwards: Default::default(),
+        previews: Default::default(),
         names,
     };
     // In the background: it fetches a few hundred megabytes, and nothing else

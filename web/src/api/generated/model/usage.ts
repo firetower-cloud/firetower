@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.25.0
+ * OpenAPI spec version: 0.27.0
  */
 import type { ModelUsage } from './modelUsage';
 

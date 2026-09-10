@@ -16,9 +16,9 @@ use anyhow::{Context, Result};
 use ft_core::SessionId;
 use ft_proto::ToServer;
 use tokio::io::{AsyncBufReadExt, BufReader};
-use tokio::sync::mpsc;
 
 use crate::agentd::{socket_path, AgentClient, FromAgent, ToAgent};
+use crate::Out;
 
 /// How long to wait for a freshly launched supervisor to start listening.
 ///
@@ -162,11 +162,7 @@ pub enum Ended {
     WatcherStopped,
 }
 
-pub async fn watch(
-    session_id: SessionId,
-    since_line: u64,
-    out: mpsc::Sender<ToServer>,
-) -> Result<Ended> {
+pub async fn watch(session_id: SessionId, since_line: u64, out: Out) -> Result<Ended> {
     let mut client = AgentClient::connect(session_id.as_str())
         .await
         .with_context(|| format!("no agent is listening for {session_id}"))?;
@@ -336,7 +332,8 @@ mod tests {
         // it exited makes the control plane drop the conversation, and every
         // reader of it stops mid-word while the answer goes on being written.
         let session = SessionId::from_stored("s_definitely-not-running-02");
-        let (out, mut heard) = mpsc::channel(8);
+        let (tx, mut heard) = tokio::sync::mpsc::channel(8);
+        let out = Out::merged(tx);
 
         let ended = watch(session, 0, out).await;
 

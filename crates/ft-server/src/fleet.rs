@@ -1645,9 +1645,20 @@ impl Fleet {
                         Ok(ToServer::RemoteProbed { req, result }) => {
                             // The receiver is gone when the request timed out
                             // or the browser navigated away.
-                            match probes.write().await.remove(&req) {
+                            //
+                            // The guard is bound to a local, here and in every
+                            // arm below that answers a probe. Written the
+                            // obvious way — `match probes.write().await.remove(..)`
+                            // with a re-insert in the fallback arm — the
+                            // scrutinee's guard lives until the end of the
+                            // match, so taking it again inside an arm waits on
+                            // a lock this task already holds. That wedges the
+                            // reader for this host permanently: no frames, no
+                            // heartbeat, every session on the machine dark.
+                            let mut held = probes.write().await;
+                            match held.remove(&req) {
                                 Some(Asked { waiting: Waiting::Remote(reply), .. }) => { let _ = reply.send(result); }
-                                Some(other) => { probes.write().await.insert(req, other); }
+                                Some(other) => { held.insert(req, other); }
                                 None => tracing::debug!("a probe answer arrived after its request gave up"),
                             }
                         }
@@ -1796,16 +1807,18 @@ impl Fleet {
                             }
                         }
                         Ok(ToServer::Listed { req, result }) => {
-                            match probes.write().await.remove(&req) {
+                            let mut held = probes.write().await;
+                            match held.remove(&req) {
                                 Some(Asked { waiting: Waiting::Listing(reply), .. }) => { let _ = reply.send(result); }
-                                Some(other) => { probes.write().await.insert(req, other); }
+                                Some(other) => { held.insert(req, other); }
                                 None => tracing::debug!("a listing arrived after its request gave up"),
                             }
                         }
                         Ok(ToServer::Found { req, result }) => {
-                            match probes.write().await.remove(&req) {
+                            let mut held = probes.write().await;
+                            match held.remove(&req) {
                                 Some(Asked { waiting: Waiting::Finding(reply), .. }) => { let _ = reply.send(result); }
-                                Some(other) => { probes.write().await.insert(req, other); }
+                                Some(other) => { held.insert(req, other); }
                                 None => tracing::debug!("a search arrived after its request gave up"),
                             }
                         }
@@ -1848,17 +1861,53 @@ impl Fleet {
                             }
                         }
                         Ok(ToServer::TunnelOpened { tunnel, result }) => {
+                            // Whether the worker actually has a socket open,
+                            // read before the result is handed on and consumed.
+                            let carries_a_socket = result.is_ok();
+
                             // The entry stays: the bytes that follow are routed
                             // by the same id, and it is removed when the far end
                             // closes or the reader goes away.
-                            let mut held = probes.write().await;
-                            if let Some(Asked { waiting: Waiting::Tunnel { opened, .. }, .. }) = held.get_mut(&tunnel) {
-                                if let Some(tell) = opened.take() {
-                                    let _ = tell.send(result);
-                                    continue;
+                            let handed_on = {
+                                let mut held = probes.write().await;
+                                match held.get_mut(&tunnel) {
+                                    Some(Asked { waiting: Waiting::Tunnel { opened, .. }, .. }) => {
+                                        match opened.take() {
+                                            Some(tell) => tell.send(result).is_ok(),
+                                            // Already answered once. A second
+                                            // `TunnelOpened` for the same id is
+                                            // not something a worker sends.
+                                            None => true,
+                                        }
+                                    }
+                                    _ => false,
+                                }
+                            };
+
+                            if !handed_on {
+                                // Nobody is waiting for it any more: the request
+                                // timed out, or the browser navigated away while
+                                // the worker was still connecting. A worker that
+                                // went on to open the socket is now holding one
+                                // nothing will ever read — with a reader task, a
+                                // writer task and a window to go with it — and
+                                // only this end knows that. Left untold, every
+                                // preview that timed out leaked one for the life
+                                // of the connection, and a page full of assets
+                                // times out in bulk.
+                                probes.write().await.remove(&tunnel);
+                                if carries_a_socket {
+                                    let closing = replying.clone();
+                                    let host = host_id.clone();
+                                    tokio::spawn(async move {
+                                        let _ = closing
+                                            .send(&host, ToWorker::TunnelClose { tunnel, half: false })
+                                            .await;
+                                    });
+                                } else {
+                                    tracing::debug!("a tunnel answered after its request gave up");
                                 }
                             }
-                            tracing::debug!("a tunnel answered after its request gave up");
                         }
                         Ok(ToServer::TunnelData { tunnel, data }) => {
                             let sender = {
@@ -1903,33 +1952,37 @@ impl Fleet {
                             }
                         }
                         Ok(ToServer::ActionDone { req, result }) => {
-                            match probes.write().await.remove(&req) {
+                            let mut held = probes.write().await;
+                            match held.remove(&req) {
                                 Some(Asked { waiting: Waiting::Action(reply), .. }) => { let _ = reply.send(result); }
                                 // A summary that failed comes back as an action
                                 // error, since there is no summary to send.
                                 Some(Asked { waiting: Waiting::Summary(_), .. }) => {}
-                                Some(other) => { probes.write().await.insert(req, other); }
+                                Some(other) => { held.insert(req, other); }
                                 None => tracing::debug!("an action finished after its request gave up"),
                             }
                         }
                         Ok(ToServer::Summarized { req, summaries }) => {
-                            match probes.write().await.remove(&req) {
+                            let mut held = probes.write().await;
+                            match held.remove(&req) {
                                 Some(Asked { waiting: Waiting::Summary(reply), .. }) => { let _ = reply.send(summaries); }
-                                Some(other) => { probes.write().await.insert(req, other); }
+                                Some(other) => { held.insert(req, other); }
                                 None => tracing::debug!("a summary arrived after its request gave up"),
                             }
                         }
                         Ok(ToServer::AgentsProbed { req, agents }) => {
-                            match probes.write().await.remove(&req) {
+                            let mut held = probes.write().await;
+                            match held.remove(&req) {
                                 Some(Asked { waiting: Waiting::Agents(reply), .. }) => { let _ = reply.send(agents); }
-                                Some(other) => { probes.write().await.insert(req, other); }
+                                Some(other) => { held.insert(req, other); }
                                 None => tracing::debug!("an agent probe answered after its request gave up"),
                             }
                         }
                         Ok(ToServer::AgentInstalled { req, result }) => {
-                            match probes.write().await.remove(&req) {
+                            let mut held = probes.write().await;
+                            match held.remove(&req) {
                                 Some(Asked { waiting: Waiting::Action(reply), .. }) => { let _ = reply.send(result); }
-                                Some(other) => { probes.write().await.insert(req, other); }
+                                Some(other) => { held.insert(req, other); }
                                 None => tracing::debug!("an install answered after its request gave up"),
                             }
                         }
@@ -1946,11 +1999,12 @@ impl Fleet {
                             tracing::debug!("a Codex sign-in answered after its request gave up");
                         }
                         Ok(ToServer::CodexLoginFinished { req, result }) => {
-                            match probes.write().await.remove(&req) {
+                            let mut held = probes.write().await;
+                            match held.remove(&req) {
                                 Some(Asked { waiting: Waiting::CodexLogin { finished, .. }, .. }) => {
                                     if let Some(tell) = finished { let _ = tell.send(result); }
                                 }
-                                Some(other) => { probes.write().await.insert(req, other); }
+                                Some(other) => { held.insert(req, other); }
                                 None => tracing::debug!("a Codex sign-in finished after its request gave up"),
                             }
                         }
@@ -2139,6 +2193,20 @@ impl Fleet {
             }
             Err(_) => {
                 self.probes.write().await.remove(&id);
+                // Giving up here says nothing to the worker, which may be
+                // connecting still and about to succeed. Its answer lands on a
+                // request that no longer exists, and the reader closes it —
+                // but only if it arrives. Saying so now covers the worker that
+                // is simply slow rather than gone, and costs one frame.
+                let _ = self
+                    .send(
+                        host_id,
+                        ToWorker::TunnelClose {
+                            tunnel: id,
+                            half: false,
+                        },
+                    )
+                    .await;
                 Err(anyhow::anyhow!("the host did not answer in time"))
             }
         }
@@ -3430,6 +3498,263 @@ mod supervisor_tests {
                 .take()
                 .context("this fake worker can only be connected to once")
         }
+    }
+
+    /// A worker that opens tunnels late, and says what it was told afterwards.
+    ///
+    /// The lateness is the point: the control plane gives up at twenty seconds
+    /// and the answer arrives after that, which is exactly the race a page
+    /// full of assets loses in bulk.
+    struct SlowToOpen {
+        once: std::sync::Mutex<Option<Connection>>,
+        heard: mpsc::UnboundedSender<ToWorker>,
+    }
+
+    impl SlowToOpen {
+        fn new(after: std::time::Duration) -> (Arc<Self>, mpsc::UnboundedReceiver<ToWorker>) {
+            let (ours, theirs) = tokio::io::duplex(4096);
+            let (heard, said) = mpsc::unbounded_channel();
+
+            let telling = heard.clone();
+            tokio::spawn(async move {
+                let (r, w) = tokio::io::split(theirs);
+                let (mut reader, writer) = Codec::new(r, w).split();
+                let writer = Arc::new(tokio::sync::Mutex::new(writer));
+                while let Ok(frame) = reader.read::<ToWorker>().await {
+                    let _ = telling.send(frame.clone());
+                    match frame {
+                        ToWorker::Hello { .. } => {
+                            let _ = writer
+                                .lock()
+                                .await
+                                .write(&ToServer::Hello {
+                                    protocol: PROTOCOL_VERSION,
+                                    worker_version: "0.1.0".to_string(),
+                                    arch: "test".to_string(),
+                                    cpus: 1,
+                                    memory_mb: 0,
+                                    docker: ft_core::DockerState::default(),
+                                })
+                                .await;
+                        }
+                        ToWorker::Ping => {
+                            let _ = writer.lock().await.write(&ToServer::Pong).await;
+                        }
+                        // Answered late, and successfully: as far as this
+                        // worker is concerned it now holds an open socket.
+                        ToWorker::TunnelOpen { tunnel, .. } => {
+                            let writer = writer.clone();
+                            tokio::spawn(async move {
+                                tokio::time::sleep(after).await;
+                                let _ = writer
+                                    .lock()
+                                    .await
+                                    .write(&ToServer::TunnelOpened {
+                                        tunnel,
+                                        result: Ok(()),
+                                    })
+                                    .await;
+                            });
+                        }
+                        _ => {}
+                    }
+                }
+            });
+
+            let (r, w) = tokio::io::split(ours);
+            (
+                Arc::new(Self {
+                    once: std::sync::Mutex::new(Some(Connection::piped(Box::new(r), Box::new(w)))),
+                    heard,
+                }),
+                said,
+            )
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl Transport for SlowToOpen {
+        fn describe(&self) -> String {
+            "a worker that opens tunnels late".to_string()
+        }
+        async fn connect(&self) -> Result<Connection> {
+            let _ = &self.heard;
+            self.once
+                .lock()
+                .unwrap()
+                .take()
+                .context("this fake worker can only be connected to once")
+        }
+    }
+
+    /// A tunnel nobody is waiting for any more has to be closed on the worker.
+    ///
+    /// Only this end knows the request went away. The worker went on to open a
+    /// socket to the dev server and to start a reader task, a writer task and a
+    /// window for it — and would hold all of that for the life of the
+    /// connection. One preview page load times out in bulk, so these
+    /// accumulated in the dozens.
+    #[tokio::test]
+    async fn a_tunnel_nobody_waited_for_is_closed_on_the_worker() {
+        let (db, _owner) = Db::open_for_test_owned().await.unwrap();
+        let host = db
+            .ensure_host("fire-01", ft_core::Compute::Local)
+            .await
+            .unwrap();
+        let fleet = Fleet::new(db);
+
+        let (worker, mut said) = SlowToOpen::new(std::time::Duration::from_millis(300));
+        fleet.supervise(host.id.clone(), worker).await;
+        assert!(
+            fleet
+                .wait_until_connected(&host.id, std::time::Duration::from_secs(5))
+                .await
+        );
+
+        // Ask, then stop waiting — which is what a browser navigating away
+        // does, and what the twenty-second timeout does more slowly.
+        let session = SessionId::new();
+        let asking = {
+            let fleet = fleet.clone();
+            let host = host.id.clone();
+            let session = session.clone();
+            tokio::spawn(async move { fleet.open_tunnel(&host, &session, 3000).await })
+        };
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        asking.abort();
+
+        let closed = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            while let Some(frame) = said.recv().await {
+                if matches!(frame, ToWorker::TunnelClose { .. }) {
+                    return true;
+                }
+            }
+            false
+        })
+        .await;
+
+        fleet.stop_supervising(&host.id).await;
+
+        assert_eq!(
+            closed.ok(),
+            Some(true),
+            "a tunnel the control plane stopped waiting for must be closed on the worker"
+        );
+    }
+
+    /// A worker that answers one probe with the wrong kind of frame.
+    ///
+    /// `ProbeAgents` comes back as an `ActionDone`, which is registered as
+    /// `Waiting::Agents` and answered by the arm for `Waiting::Action` — so it
+    /// falls to the arm that puts the entry back. Everything else it answers
+    /// normally, which is what lets a test see whether the reader survived.
+    struct Muddled {
+        once: std::sync::Mutex<Option<Connection>>,
+    }
+
+    impl Muddled {
+        fn new() -> Arc<Self> {
+            let (ours, theirs) = tokio::io::duplex(4096);
+
+            tokio::spawn(async move {
+                let (r, w) = tokio::io::split(theirs);
+                let mut codec = Codec::new(r, w);
+                while let Ok(frame) = codec.read::<ToWorker>().await {
+                    let answer = match frame {
+                        ToWorker::Hello { .. } => Some(ToServer::Hello {
+                            protocol: PROTOCOL_VERSION,
+                            worker_version: "0.1.0".to_string(),
+                            arch: "test".to_string(),
+                            cpus: 1,
+                            memory_mb: 0,
+                            docker: ft_core::DockerState::default(),
+                        }),
+                        ToWorker::Ping => Some(ToServer::Pong),
+                        // The wrong shape, on purpose.
+                        ToWorker::ProbeAgents { req } => Some(ToServer::ActionDone {
+                            req,
+                            result: Ok("not what was asked for".to_string()),
+                        }),
+                        ToWorker::Summarize { req, .. } => Some(ToServer::Summarized {
+                            req,
+                            summaries: Vec::new(),
+                        }),
+                        _ => None,
+                    };
+                    if let Some(answer) = answer {
+                        if codec.write(&answer).await.is_err() {
+                            break;
+                        }
+                    }
+                }
+            });
+
+            let (r, w) = tokio::io::split(ours);
+            Arc::new(Self {
+                once: std::sync::Mutex::new(Some(Connection::piped(Box::new(r), Box::new(w)))),
+            })
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl Transport for Muddled {
+        fn describe(&self) -> String {
+            "a worker that answers the wrong way round".to_string()
+        }
+        async fn connect(&self) -> Result<Connection> {
+            self.once
+                .lock()
+                .unwrap()
+                .take()
+                .context("this fake worker can only be connected to once")
+        }
+    }
+
+    /// One misdirected answer must not take the host down with it.
+    ///
+    /// The arms that answer a probe used to re-take the lock they were already
+    /// holding, so an answer arriving for a probe of another kind wedged the
+    /// reader for that host: no frames, no heartbeat, every session on the
+    /// machine dark until the connection was torn down. Nothing reaches that
+    /// branch in normal operation, which is exactly why it sat there.
+    #[tokio::test]
+    async fn an_answer_of_the_wrong_kind_does_not_wedge_the_reader() {
+        let (db, _owner) = Db::open_for_test_owned().await.unwrap();
+        let host = db
+            .ensure_host("fire-01", ft_core::Compute::Local)
+            .await
+            .unwrap();
+        let fleet = Fleet::new(db);
+
+        fleet.supervise(host.id.clone(), Muddled::new()).await;
+        assert!(
+            fleet
+                .wait_until_connected(&host.id, std::time::Duration::from_secs(5))
+                .await
+        );
+
+        // Waits out its own timeout either way, so it is left running rather
+        // than awaited — what matters is what happens to everything after it.
+        let asking = {
+            let fleet = fleet.clone();
+            let host = host.id.clone();
+            tokio::spawn(async move { fleet.probe_agents(&host).await })
+        };
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+
+        let after = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            fleet.summarize(&host.id, &SessionId::new()),
+        )
+        .await;
+
+        asking.abort();
+        fleet.stop_supervising(&host.id).await;
+
+        assert!(
+            after.is_ok(),
+            "the reader must still be answering after a misdirected frame"
+        );
     }
 
     /// Serving a connection happens inside `connect`, so it only returns when

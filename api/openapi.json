@@ -10,7 +10,7 @@
       "name": "AGPL-3.0-only",
       "identifier": "AGPL-3.0-only"
     },
-    "version": "0.25.0"
+    "version": "0.27.0"
   },
   "paths": {
     "/api/v1/agents": {
@@ -4270,6 +4270,13 @@
               },
               "slug": {
                 "type": "string"
+              },
+              "trouble": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Why the numbers above are not to be believed, when they are not.\n\nA checkout git refused to read — a worktree that is gone, a directory\nthat was never a repository — used to be left out of the answer\nentirely, with only a line in the worker's log. The control plane then\nhad nothing for that row and filled it with zeros, and zero is what a\nfinished session looks like. Sent instead, so the sentence git gave\nreaches whoever is looking at the workspace."
               }
             }
           }
@@ -4282,15 +4289,16 @@
         "required": [
           "slug",
           "branch",
-          "base",
-          "uncommitted",
-          "ahead",
-          "pushed"
+          "base"
         ],
         "properties": {
           "ahead": {
-            "type": "integer",
+            "type": [
+              "integer",
+              "null"
+            ],
             "format": "int32",
+            "description": "Commits this branch has that its upstream does not. `None` as above.",
             "minimum": 0
           },
           "base": {
@@ -4330,7 +4338,11 @@
             ]
           },
           "pushed": {
-            "type": "boolean"
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Whether the branch has an upstream at all. `None` as above."
           },
           "slug": {
             "type": "string"
@@ -4343,8 +4355,12 @@
             "description": "Why this repository is not checked out, when it is not."
           },
           "uncommitted": {
-            "type": "integer",
+            "type": [
+              "integer",
+              "null"
+            ],
             "format": "int32",
+            "description": "What is edited and not committed, or `None` when nobody could find out.\n\n**Absent is not zero, and the difference is the whole point of this\ntype.** A host that had stopped answering used to arrive here as zeros,\nand zero is exactly what a finished session looks like — so a worker\nnobody could reach was drawn as a workspace with nothing left to do,\nand the agent's afternoon of uncommitted work was reported as \"Nothing\nhas changed.\" An option makes that particular lie unrepresentable:\nevery reader has to say what it does when the answer is unknown.",
             "minimum": 0
           }
         }

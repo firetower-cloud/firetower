@@ -44,7 +44,7 @@ export function CloseWorkspace({
   const destroy = useDestroySession();
 
   const { data: sessions = [] } = useListSessions();
-  const { data: checkouts = [] } = useSessionWork(session.id, {
+  const { data: checkouts = [], isError: workFailed } = useSessionWork(session.id, {
     query: { enabled: asking && !!session.repo },
   });
   const { data: hosts = [] } = useListHosts();
@@ -64,9 +64,20 @@ export function CloseWorkspace({
 
   // Across every repository in the workspace, because closing takes all of
   // them and a warning about one of three is a warning that misleads.
-  const uncommitted = checkouts.reduce((n, c) => n + c.uncommitted, 0);
-  const unpushed = checkouts.reduce((n, c) => n + (c.pushed ? 0 : c.ahead), 0);
-  const pushed = checkouts.length > 0 && checkouts.every((c) => c.pushed);
+  //
+  // A checkout nobody could read counts as neither saved nor unsaved: it
+  // counts as unknown. Folded in as zero it printed "Nothing here is waiting
+  // to be saved" over a workspace about to be destroyed, which is the one
+  // sentence on this screen that must never be a guess.
+  const unknown =
+    workFailed || checkouts.some((c) => c.uncommitted == null || c.pushed == null);
+  const uncommitted = checkouts.reduce((n, c) => n + (c.uncommitted ?? 0), 0);
+  const unpushed = checkouts.reduce(
+    (n, c) => n + (c.pushed === true ? 0 : (c.ahead ?? 0)),
+    0,
+  );
+  const pushed =
+    !unknown && checkouts.length > 0 && checkouts.every((c) => c.pushed === true);
   const losing = uncommitted > 0 || unpushed > 0;
 
   const go = () =>
@@ -124,6 +135,11 @@ export function CloseWorkspace({
                 .filter(Boolean)
                 .join(" and ")}{" "}
               — closing loses that.
+            </p>
+          ) : unknown ? (
+            <p className="mt-3 rounded-sm border border-brick/40 bg-ground px-3 py-2 text-meta leading-[1.55] text-brick">
+              Firetower can&rsquo;t read this workspace, so it can&rsquo;t say what is in it.
+              Anything uncommitted there would be lost.
             </p>
           ) : (
             <p className="mt-3 text-meta leading-[1.55] text-mute">

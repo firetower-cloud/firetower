@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.25.0
+ * OpenAPI spec version: 0.27.0
  */
 import * as zod from 'zod';
 
@@ -1018,17 +1018,17 @@ export const sessionWorkResponseUncommittedMin = 0;
 
 
 export const SessionWorkResponseItem = zod.object({
-  "ahead": zod.int().min(sessionWorkResponseAheadMin),
+  "ahead": zod.int().min(sessionWorkResponseAheadMin).nullish().describe('Commits this branch has that its upstream does not. `None` as above.'),
   "base": zod.string(),
   "branch": zod.string(),
   "commits": zod.int().min(sessionWorkResponseCommitsMin).nullish().describe('Commits on this branch that its base does not have. See\n[`WorkSummary::commits`]; `None` means the worker did not say.'),
   "path": zod.string().optional(),
   "pullRequest": zod.string().nullish().describe('Where its pull request is, once it has one.'),
   "pullState": zod.union([zod.null(),zod.enum(['open', 'merged', 'closed']).describe('What became of that request, last time anybody asked.')]).optional(),
-  "pushed": zod.boolean(),
+  "pushed": zod.boolean().nullish().describe('Whether the branch has an upstream at all. `None` as above.'),
   "slug": zod.string(),
   "trouble": zod.string().nullish().describe('Why this repository is not checked out, when it is not.'),
-  "uncommitted": zod.int().min(sessionWorkResponseUncommittedMin)
+  "uncommitted": zod.int().min(sessionWorkResponseUncommittedMin).nullish().describe('What is edited and not committed, or `None` when nobody could find out.\n\n\*\*Absent is not zero, and the difference is the whole point of this\ntype.\*\* A host that had stopped answering used to arrive here as zeros,\nand zero is exactly what a finished session looks like — so a worker\nnobody could reach was drawn as a workspace with nothing left to do,\nand the agent\'s afternoon of uncommitted work was reported as \"Nothing\nhas changed.\" An option makes that particular lie unrepresentable:\nevery reader has to say what it does when the answer is unknown.')
 }).describe('A checkout, what is unsaved in it, and where its pull request went.\n\nWhat the interface reads to say the next honest thing — per repository, and\naggregated across them for the one button in the header.')
 export const SessionWorkResponse = zod.array(SessionWorkResponseItem)
 

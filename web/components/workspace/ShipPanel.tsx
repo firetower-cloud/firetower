@@ -54,7 +54,7 @@ export function ShipPanel({ sessionId }: { sessionId: string }) {
   // been merged, so it keeps its own pace: 10s while somebody is waiting on a
   // review, and nothing once every request is settled — merged does not go
   // back to open, and this unmounts with the page.
-  const { data: work } = useSessionWork(sessionId, {
+  const { data: work, isError: workFailed } = useSessionWork(sessionId, {
     query: {
       enabled: !!session?.repo,
       refetchInterval: (query) => {
@@ -66,7 +66,16 @@ export function ShipPanel({ sessionId }: { sessionId: string }) {
       },
     },
   });
-  const { data: files = [], isLoading } = useSessionDiff(sessionId, undefined, {
+  // `isError` is not decoration here. Dropped, a failed request left `files`
+  // as the same empty array a clean workspace produces, and this drew
+  // "Nothing has changed." over an unreachable host — which is how an
+  // afternoon of an agent's work came to look like no work at all.
+  const {
+    data: files = [],
+    isLoading,
+    isError: diffFailed,
+    error: diffError,
+  } = useSessionDiff(sessionId, undefined, {
     query: { refetchInterval: 8_000 },
   });
 
@@ -91,7 +100,7 @@ export function ShipPanel({ sessionId }: { sessionId: string }) {
     return <Note>Looking…</Note>;
   }
 
-  const ship = shipping(session, work);
+  const ship = shipping(session, work, workFailed);
 
   const refresh = () => {
     cache.invalidateQueries({ queryKey: getSessionWorkQueryKey(sessionId) });
@@ -215,7 +224,17 @@ export function ShipPanel({ sessionId }: { sessionId: string }) {
           onToggle={() => setListing(!listing)}
         >
           {isLoading && <Line>Reading the workspace…</Line>}
-          {!isLoading && files.length === 0 && <Line>Nothing has changed.</Line>}
+          {!isLoading && diffFailed && (
+            <Line>
+              Firetower couldn&rsquo;t read this workspace, so it can&rsquo;t say what has
+              changed. Nothing has been lost — the work is still on the machine this
+              session runs on.
+              {diffError instanceof ApiError && diffError.message ? ` (${diffError.message})` : ""}
+            </Line>
+          )}
+          {!isLoading && !diffFailed && files.length === 0 && (
+            <Line>Nothing has changed.</Line>
+          )}
 
           {files.map((f) => {
             const going = !dropped.has(f.path);

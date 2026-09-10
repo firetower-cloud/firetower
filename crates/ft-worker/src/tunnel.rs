@@ -19,6 +19,7 @@
 //! credit, the reader stops reading its socket and the dev server feels it
 //! through TCP, which is where backpressure is supposed to end up.
 
+use crate::Out;
 use ft_core::SessionId;
 use ft_proto::{Payload, ToServer, TunnelId};
 use std::collections::HashMap;
@@ -47,8 +48,6 @@ const CHUNK: usize = 32 * 1024;
 /// immediately. Anything slower is a port being filtered, and waiting on it
 /// only delays the sentence that says so.
 const CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
-
-
 
 /// Every tunnel this worker is holding open.
 #[derive(Default)]
@@ -134,7 +133,7 @@ impl Tunnels {
         tunnel: TunnelId,
         session: SessionId,
         port: u16,
-        out: &mpsc::Sender<ToServer>,
+        out: &Out,
     ) {
         // Never a host. See the module comment.
         let connecting = TcpStream::connect(("127.0.0.1", port));
@@ -195,27 +194,27 @@ impl Tunnels {
             let out = out.clone();
             let tunnel = tunnel.clone();
             async move {
-            while let Some(bytes) = arriving.recv().await {
-                let wrote = bytes.len() as u32;
-                if to_socket.write_all(&bytes).await.is_err() {
-                    return;
+                while let Some(bytes) = arriving.recv().await {
+                    let wrote = bytes.len() as u32;
+                    if to_socket.write_all(&bytes).await.is_err() {
+                        return;
+                    }
+                    // Only once the bytes are in the socket. Granting on arrival
+                    // would let the window run ahead of a far end that is not
+                    // reading, which is the thing it exists to prevent.
+                    let granted = ToServer::TunnelCredit {
+                        tunnel: tunnel.clone(),
+                        bytes: wrote,
+                    };
+                    if out.send(granted).await.is_err() {
+                        return;
+                    }
                 }
-                // Only once the bytes are in the socket. Granting on arrival
-                // would let the window run ahead of a far end that is not
-                // reading, which is the thing it exists to prevent.
-                let granted = ToServer::TunnelCredit {
-                    tunnel: tunnel.clone(),
-                    bytes: wrote,
-                };
-                if out.send(granted).await.is_err() {
-                    return;
-                }
-            }
-            // The channel closed, which is the control plane saying it has
-            // nothing more to send. Half-close rather than hang up: the far end
-            // still has an answer to finish writing, and that is exactly what
-            // the end of a request body looks like.
-            let _ = to_socket.shutdown().await;
+                // The channel closed, which is the control plane saying it has
+                // nothing more to send. Half-close rather than hang up: the far end
+                // still has an answer to finish writing, and that is exactly what
+                // the end of a request body looks like.
+                let _ = to_socket.shutdown().await;
             }
         });
 
@@ -395,11 +394,10 @@ mod tests {
     async fn a_tunnel_carries_bytes_both_ways() {
         let port = echo().await;
         let tunnels = Arc::new(Tunnels::new());
-        let (out, mut rx) = mpsc::channel(64);
+        let (tx, mut rx) = mpsc::channel(64);
+        let out = Out::merged(tx);
 
-        tunnels
-            .open("t_1".into(), session(), port, &out)
-            .await;
+        tunnels.open("t_1".into(), session(), port, &out).await;
 
         assert!(matches!(
             next(&mut rx).await,
@@ -420,7 +418,8 @@ mod tests {
     async fn writing_refunds_the_window() {
         let port = echo().await;
         let tunnels = Arc::new(Tunnels::new());
-        let (out, mut rx) = mpsc::channel(64);
+        let (tx, mut rx) = mpsc::channel(64);
+        let out = Out::merged(tx);
 
         tunnels.open("t_1".into(), session(), port, &out).await;
         let _ = next(&mut rx).await;
@@ -446,7 +445,8 @@ mod tests {
         let port = 1;
 
         let tunnels = Arc::new(Tunnels::new());
-        let (out, mut rx) = mpsc::channel(64);
+        let (tx, mut rx) = mpsc::channel(64);
+        let out = Out::merged(tx);
 
         tunnels.open("t_1".into(), session(), port, &out).await;
 
@@ -464,7 +464,8 @@ mod tests {
     async fn a_half_close_ends_the_far_ends_read_but_not_its_answer() {
         let port = echo().await;
         let tunnels = Arc::new(Tunnels::new());
-        let (out, mut rx) = mpsc::channel(64);
+        let (tx, mut rx) = mpsc::channel(64);
+        let out = Out::merged(tx);
 
         tunnels.open("t_1".into(), session(), port, &out).await;
         let _ = next(&mut rx).await;
@@ -493,7 +494,8 @@ mod tests {
     async fn destroying_a_session_takes_its_tunnels() {
         let port = echo().await;
         let tunnels = Arc::new(Tunnels::new());
-        let (out, mut rx) = mpsc::channel(64);
+        let (tx, mut rx) = mpsc::channel(64);
+        let out = Out::merged(tx);
 
         tunnels.open("t_1".into(), session(), port, &out).await;
         let _ = next(&mut rx).await;
@@ -524,7 +526,8 @@ mod tests {
         });
 
         let tunnels = Arc::new(Tunnels::new());
-        let (out, mut rx) = mpsc::channel(1024);
+        let (tx, mut rx) = mpsc::channel(1024);
+        let out = Out::merged(tx);
 
         tunnels.open("t_1".into(), session(), port, &out).await;
         let _ = next(&mut rx).await;

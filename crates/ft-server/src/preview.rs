@@ -28,6 +28,7 @@
 //! credential — which is worth saying out loud in the documentation rather than
 //! leaving somebody to work out.
 
+pub mod pool;
 pub mod proxy;
 
 use ft_core::SessionId;
@@ -74,8 +75,7 @@ impl Names {
 
     /// From the vault's root key and the environment.
     pub fn from_vault(vault: &crate::vault::Vault) -> Self {
-        let domain =
-            std::env::var(DOMAIN_ENV).unwrap_or_else(|_| DEFAULT_DOMAIN.to_string());
+        let domain = std::env::var(DOMAIN_ENV).unwrap_or_else(|_| DEFAULT_DOMAIN.to_string());
         Self::new(vault.derive(PURPOSE), domain)
     }
 
@@ -154,7 +154,10 @@ impl Names {
             .expect("HMAC accepts any key length");
         // Length-prefixed, so ("s_ab", 1) and ("s_a", 91) cannot collide into
         // one digest.
-        for part in [preview.session.as_str().as_bytes(), &preview.port.to_be_bytes()] {
+        for part in [
+            preview.session.as_str().as_bytes(),
+            &preview.port.to_be_bytes(),
+        ] {
             mac.update(&(part.len() as u64).to_be_bytes());
             mac.update(part);
         }

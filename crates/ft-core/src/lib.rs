@@ -1307,6 +1307,16 @@ pub struct CheckoutSummary {
     pub slug: String,
     #[serde(flatten)]
     pub summary: WorkSummary,
+    /// Why the numbers above are not to be believed, when they are not.
+    ///
+    /// A checkout git refused to read — a worktree that is gone, a directory
+    /// that was never a repository — used to be left out of the answer
+    /// entirely, with only a line in the worker's log. The control plane then
+    /// had nothing for that row and filled it with zeros, and zero is what a
+    /// finished session looks like. Sent instead, so the sentence git gave
+    /// reaches whoever is looking at the workspace.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trouble: Option<String>,
 }
 
 /// A checkout, what is unsaved in it, and where its pull request went.
@@ -1321,9 +1331,23 @@ pub struct CheckoutWork {
     pub slug: String,
     pub branch: String,
     pub base: String,
-    pub uncommitted: u32,
-    pub ahead: u32,
-    pub pushed: bool,
+    /// What is edited and not committed, or `None` when nobody could find out.
+    ///
+    /// **Absent is not zero, and the difference is the whole point of this
+    /// type.** A host that had stopped answering used to arrive here as zeros,
+    /// and zero is exactly what a finished session looks like — so a worker
+    /// nobody could reach was drawn as a workspace with nothing left to do,
+    /// and the agent's afternoon of uncommitted work was reported as "Nothing
+    /// has changed." An option makes that particular lie unrepresentable:
+    /// every reader has to say what it does when the answer is unknown.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub uncommitted: Option<u32>,
+    /// Commits this branch has that its upstream does not. `None` as above.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ahead: Option<u32>,
+    /// Whether the branch has an upstream at all. `None` as above.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pushed: Option<bool>,
     /// Commits on this branch that its base does not have. See
     /// [`WorkSummary::commits`]; `None` means the worker did not say.
     #[serde(default, skip_serializing_if = "Option::is_none")]
