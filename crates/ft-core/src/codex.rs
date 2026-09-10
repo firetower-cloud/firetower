@@ -400,6 +400,12 @@ pub struct CodexNormaliser {
     /// turn that ends: by the time a turn completes, this is the only place
     /// the number is.
     usage: Option<Usage>,
+    /// The reason the run is about to end badly, said before it ends.
+    ///
+    /// Codex sends `error` and then `turn/completed`, and the completion does
+    /// not always repeat the message. Held here so the turn that ends carries
+    /// the sentence, rather than a bare `failed` that explains nothing.
+    failure: Option<String>,
     /// The turn now running, which is what stopping one has to name.
     ///
     /// `turn/interrupt` takes a turn as well as a thread, and there is nowhere
@@ -508,6 +514,17 @@ impl CodexNormaliser {
         match method {
             "turn/started" => self.turn_started(&params),
             "turn/completed" => self.turn_completed(&params),
+            // Codex says why before it says that the turn is over, and the
+            // `turn/completed` that follows does not always carry the reason
+            // itself. Held so whichever of the two has it wins.
+            "error" => {
+                self.failure = params
+                    .get("error")
+                    .and_then(|e| e.get("message"))
+                    .and_then(Value::as_str)
+                    .map(str::to_string);
+                Vec::new()
+            }
             "item/started" => self.item_started(&params),
             "item/completed" => self.item_completed(&params),
             "item/agentMessage/delta" => self.delta(&params, StreamKind::AssistantText),
@@ -748,10 +765,22 @@ impl CodexNormaliser {
         self.open.clear();
         self.active_turn = None;
 
+        // The agent's own sentence about why, which is the whole content of a
+        // failed turn as far as anybody reading it is concerned.
+        let detail = params
+            .get("turn")
+            .and_then(|t| t.get("error"))
+            .and_then(|e| e.get("message"))
+            .and_then(Value::as_str)
+            .map(str::to_string)
+            .or_else(|| self.failure.take());
+        self.failure = None;
+
         vec![TurnEvent::TurnCompleted {
             turn,
             status,
             usage: self.usage.take(),
+            detail,
         }]
     }
 
@@ -1022,6 +1051,67 @@ mod tests {
             }
             other => panic!("expected the session to report itself, got {other:?}"),
         }
+    }
+
+    /// A turn that failed has to say why.
+    ///
+    /// Taken verbatim from a session where three agents looked to their owner
+    /// like they had crashed. Codex had said exactly what was wrong — the
+    /// account was out of credits — and the line was on the worker the whole
+    /// time. Nothing read it, so the transcript stopped mid-turn with no
+    /// explanation, and the only remaining reading was that the agent had died.
+    #[test]
+    fn a_failed_turn_carries_the_reason_it_failed() {
+        let seen = events(&[
+            r#"{"method":"turn/started","params":{"threadId":"t","turn":{"id":"turn_1","items":[],"status":"inProgress"}}}"#,
+            r#"{"method":"error","params":{"error":{"message":"Your workspace is out of credits. Add credits to continue.","codexErrorInfo":"usageLimitExceeded"},"willRetry":false,"threadId":"t"}}"#,
+            r#"{"method":"turn/completed","params":{"threadId":"t","turn":{"id":"turn_1","items":[],"status":"failed","error":{"message":"Your workspace is out of credits. Add credits to continue."}}}}"#,
+        ]);
+
+        match seen.last() {
+            Some(TurnEvent::TurnCompleted {
+                status: TurnStatus::Failed,
+                detail: Some(why),
+                ..
+            }) => assert!(
+                why.contains("out of credits"),
+                "the agent's own sentence should survive, got: {why}"
+            ),
+            other => panic!("expected a failed turn with a reason, got {other:?}"),
+        }
+    }
+
+    /// The reason arrives before the ending, and the ending does not always
+    /// repeat it. Whichever of the two carries it, it has to come through.
+    #[test]
+    fn a_reason_said_before_the_end_still_reaches_the_end() {
+        let seen = events(&[
+            r#"{"method":"turn/started","params":{"threadId":"t","turn":{"id":"turn_1","items":[],"status":"inProgress"}}}"#,
+            r#"{"method":"error","params":{"error":{"message":"Your workspace is out of credits. Add credits to continue."},"threadId":"t"}}"#,
+            r#"{"method":"turn/completed","params":{"threadId":"t","turn":{"id":"turn_1","items":[],"status":"failed"}}}"#,
+        ]);
+
+        assert!(
+            matches!(
+                seen.last(),
+                Some(TurnEvent::TurnCompleted { detail: Some(why), .. }) if why.contains("out of credits")
+            ),
+            "got {:?}",
+            seen.last()
+        );
+    }
+
+    /// A turn that went fine says nothing extra.
+    #[test]
+    fn a_turn_that_worked_carries_no_reason() {
+        let seen = events(&[
+            r#"{"method":"turn/started","params":{"threadId":"t","turn":{"id":"turn_1","items":[],"status":"inProgress"}}}"#,
+            r#"{"method":"turn/completed","params":{"threadId":"t","turn":{"id":"turn_1","items":[],"status":"completed"}}}"#,
+        ]);
+        assert!(matches!(
+            seen.last(),
+            Some(TurnEvent::TurnCompleted { detail: None, .. })
+        ));
     }
 
     #[test]

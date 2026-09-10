@@ -356,6 +356,15 @@ pub enum TurnEvent {
         turn: TurnId,
         status: TurnStatus,
         usage: Option<Usage>,
+        /// Why it ended that way, when the agent said.
+        ///
+        /// A turn that failed used to arrive as a status and nothing else, so
+        /// "Your workspace is out of credits. Add credits to continue." — a
+        /// sentence the agent had already written, and the only one that would
+        /// have explained the silence — was dropped on the floor and the
+        /// session read as an agent that had stopped answering for no reason.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        detail: Option<String>,
     },
 
     ItemStarted {

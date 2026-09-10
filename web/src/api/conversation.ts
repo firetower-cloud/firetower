@@ -115,6 +115,16 @@ export type Conversation = {
   questions: Questionnaire[];
   /** True between a turn starting and finishing — the agent is busy. */
   working: boolean;
+  /**
+   * Why the last turn ended badly, in the agent's own words.
+   *
+   * Distinct from `trouble`, which is this end losing the stream. This is the
+   * far end saying it will not go on: a failed turn used to leave nothing
+   * behind but `working: false`, so a run that stopped because the account was
+   * out of credits looked exactly like one that had finished — and, nothing
+   * having been said, like an agent that had died. Cleared when a turn starts.
+   */
+  stopped?: string;
   /** The model this session is running, once it has said. */
   model?: string;
   /**
@@ -214,7 +224,7 @@ export function apply(state: Conversation, event: ConversationEvent): Conversati
       };
 
     case "TurnStarted":
-      return { ...state, working: true, lastLine };
+      return { ...state, working: true, stopped: undefined, lastLine };
 
     case "TurnCompleted":
       return {
@@ -223,6 +233,16 @@ export function apply(state: Conversation, event: ConversationEvent): Conversati
         // Kept when a turn ends without saying, so the meter does not blank
         // between turns.
         usage: event.usage ?? state.usage,
+        // Only what the agent actually said. A failed turn with nothing to say
+        // still gets a line, because "it stopped and would not say why" is
+        // itself worth showing rather than leaving as silence.
+        stopped:
+          event.status === "Completed"
+            ? undefined
+            : (event.detail ??
+              (event.status === "Failed"
+                ? "The agent stopped without saying why."
+                : undefined)),
         lastLine,
       };
 

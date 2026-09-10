@@ -680,10 +680,17 @@ impl ClaudeNormaliser {
             Some(s) if s.contains("interrupt") || s.contains("abort") => TurnStatus::Interrupted,
             _ => TurnStatus::Failed,
         };
+        // Claude Code puts its reason in `result` on a failure, and says
+        // nothing there when it succeeded.
+        let detail = (status != TurnStatus::Completed)
+            .then(|| str_at(v, "result").map(str::to_string))
+            .flatten();
+
         out.push(TurnEvent::TurnCompleted {
             turn,
             status,
             usage: usage(v),
+            detail,
         });
     }
 

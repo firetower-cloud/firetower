@@ -265,6 +265,15 @@ export function Chat({
               still going?", and the reason there is no spinner anywhere else. */}
           <End working={conversation.working} waiting={waiting} />
 
+          {/* The far end said it will not go on — out of credits, a limit, a
+              refusal. The agent's own sentence, because a paraphrase of it
+              would be a guess about somebody's account. */}
+          {conversation.stopped && (
+            <p className="mt-3 rounded-sm border border-brick/40 bg-ground px-2.5 py-2 text-meta leading-[1.5] text-brick">
+              {conversation.stopped}
+            </p>
+          )}
+
           {conversation.trouble && (
             <p className="mt-3 font-mono text-meta text-brick">
               Lost the stream.{live ? " Reconnecting." : ""}

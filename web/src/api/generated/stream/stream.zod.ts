@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.27.0
+ * OpenAPI spec version: 0.28.1
  */
 import * as zod from 'zod';
 
@@ -137,6 +137,7 @@ export const StreamResponse = zod.union([zod.object({
   "turn": zod.string().describe('One exchange: a prompt in, and everything that happened before the agent stopped.'),
   "type": zod.enum(['TurnStarted'])
 }),zod.object({
+  "detail": zod.string().nullish().describe('Why it ended that way, when the agent said.\n\nA turn that failed used to arrive as a status and nothing else, so\n\"Your workspace is out of credits. Add credits to continue.\" — a\nsentence the agent had already written, and the only one that would\nhave explained the silence — was dropped on the floor and the\nsession read as an agent that had stopped answering for no reason.'),
   "status": zod.enum(['Completed', 'Failed', 'Interrupted']).describe('How a turn ended.'),
   "turn": zod.string().describe('One exchange: a prompt in, and everything that happened before the agent stopped.'),
   "type": zod.enum(['TurnCompleted']),
