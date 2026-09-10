@@ -25,6 +25,7 @@ import type { Control } from "@/components/Settings.chat";
 import { Annotatable, Drafting, Notes } from "@/components/Annotate";
 import type { Draft } from "@/components/Annotate";
 import { Bringup, ready, type Line } from "@/components/Steps";
+import { PreviewNotes } from "./PreviewNotes";
 import { useNotes, asMessage, type Note } from "@/src/api/notes";
 import { fold, summarise } from "@/src/api/steps";
 import { useReveal } from "@/src/api/reveal";
@@ -324,6 +325,8 @@ export function Chat({
             }}
           />
         )}
+
+        <PreviewNotes sessionId={sessionId} live={live} />
 
         {/* Written against the transcript, waiting to go. */}
         {notes.length > 0 && (

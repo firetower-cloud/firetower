@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.27.0
+ * OpenAPI spec version: 0.28.1
  */
 import * as zod from 'zod';
 
@@ -315,6 +315,110 @@ export const RenameSessionResponse = zod.object({
 }).describe('What this session\'s workspace is taking of its machine, right now.\n\nNot stored. Filled in from what the host last reported, so it is absent\non a session whose worker cannot measure and on one whose first report\nhas not landed — which the interface draws the same way, as no meters.')]).optional(),
   "workspaceId": zod.union([zod.null(),zod.string().describe('Identifies a workspace — the compute a session runs on.')]).optional()
 }).describe('A line of work with a conversation attached and a branch at the end.')
+
+export const ListAnnotationsParams = zod.object({
+  "id": zod.string()
+})
+
+export const ListAnnotationsResponseItem = zod.object({
+  "delivery": zod.string(),
+  "id": zod.string(),
+  "note": zod.string(),
+  "port": zod.int(),
+  "revision": zod.int(),
+  "snapshot": zod.object({
+  "ancestors": zod.array(zod.string()),
+  "bounds": zod.array(zod.number()),
+  "capturedAt": zod.string(),
+  "html": zod.string(),
+  "label": zod.string(),
+  "path": zod.string(),
+  "scroll": zod.array(zod.number()),
+  "selector": zod.string(),
+  "truncated": zod.boolean(),
+  "viewport": zod.array(zod.number())
+})
+})
+export const ListAnnotationsResponse = zod.array(ListAnnotationsResponseItem)
+
+export const KeepAnnotationParams = zod.object({
+  "id": zod.string()
+})
+
+export const keepAnnotationBodyPortMin = 0;
+
+
+
+export const KeepAnnotationBody = zod.object({
+  "id": zod.string(),
+  "note": zod.string(),
+  "port": zod.int().min(keepAnnotationBodyPortMin),
+  "revision": zod.int().describe('Zero creates a note; edits must match the revision read by the caller.'),
+  "snapshot": zod.object({
+  "ancestors": zod.array(zod.string()),
+  "bounds": zod.array(zod.number()),
+  "capturedAt": zod.string(),
+  "html": zod.string(),
+  "label": zod.string(),
+  "path": zod.string(),
+  "scroll": zod.array(zod.number()),
+  "selector": zod.string(),
+  "truncated": zod.boolean(),
+  "viewport": zod.array(zod.number())
+})
+})
+
+export const KeepAnnotationResponse = zod.object({
+  "delivery": zod.string(),
+  "id": zod.string(),
+  "note": zod.string(),
+  "port": zod.int(),
+  "revision": zod.int(),
+  "snapshot": zod.object({
+  "ancestors": zod.array(zod.string()),
+  "bounds": zod.array(zod.number()),
+  "capturedAt": zod.string(),
+  "html": zod.string(),
+  "label": zod.string(),
+  "path": zod.string(),
+  "scroll": zod.array(zod.number()),
+  "selector": zod.string(),
+  "truncated": zod.boolean(),
+  "viewport": zod.array(zod.number())
+})
+})
+
+export const DropAnnotationsParams = zod.object({
+  "id": zod.string()
+})
+
+export const DropAnnotationsBody = zod.object({
+  "notes": zod.array(zod.object({
+  "id": zod.string(),
+  "revision": zod.int()
+}))
+})
+
+export const DropAnnotationsResponse = zod.unknown()
+
+/**
+ * @summary A durable 'sending' marker is committed before contacting the worker. A
+lost acknowledgement must never turn a retry into a duplicate agent turn.
+ */
+export const SendAnnotationsParams = zod.object({
+  "id": zod.string()
+})
+
+export const SendAnnotationsBody = zod.object({
+  "notes": zod.array(zod.object({
+  "id": zod.string(),
+  "revision": zod.int()
+}))
+})
+
+export const SendAnnotationsResponse = zod.object({
+  "sent": zod.boolean()
+})
 
 /**
  * Until this arrives the agent is stopped, holding the tool call open. There
