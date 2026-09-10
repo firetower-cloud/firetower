@@ -200,6 +200,24 @@ pub struct ClaudeNormaliser {
     /// and never restate the list, so the only place the whole plan exists is
     /// here. See [`ClaudeNormaliser::plan_tool`].
     plan: Vec<PlanStep>,
+    /// What the main agent had in front of it on its most recent request.
+    ///
+    /// The only honest answer to "how full is the context", and nothing in the
+    /// `result` totals can be made to give it: those accumulate over the turn,
+    /// so a cached prefix that was read fifteen times is counted fifteen times.
+    /// A request, by contrast, states the whole window it saw in one number.
+    /// Subagents are excluded — they read a window of their own.
+    last_request: Option<Request>,
+}
+
+/// One request's view of the window, kept so the turn can report the last one.
+#[derive(Clone)]
+struct Request {
+    /// As the message spells it, to be matched against the `modelUsage` keys.
+    model: Option<String>,
+    /// Input plus both kinds of cache plus what came back.
+    used: u64,
+    output: u64,
 }
 
 impl ClaudeNormaliser {
@@ -316,6 +334,22 @@ impl ClaudeNormaliser {
                     .map(str::to_string);
                 self.open_blocks.clear();
                 self.ensure_turn(out);
+                if !inside_subagent {
+                    self.note_request(event);
+                }
+            }
+            Some("message_delta") => {
+                if !inside_subagent {
+                    if let (Some(request), Some(output)) = (
+                        self.last_request.as_mut(),
+                        event
+                            .pointer("/usage/output_tokens")
+                            .and_then(Value::as_u64),
+                    ) {
+                        request.used = request.used - request.output + output;
+                        request.output = output;
+                    }
+                }
             }
             Some("content_block_start") => {
                 let Some(block) = event.get("content_block") else {
@@ -348,8 +382,7 @@ impl ClaudeNormaliser {
                     }
                 }
             }
-            // `message_delta` carries the stop reason, which `result` says
-            // better, and `message_stop` says nothing we don't already know.
+            // `message_stop` says nothing we don't already know.
             _ => {}
         }
     }
@@ -450,6 +483,7 @@ impl ClaudeNormaliser {
     /// deliberately *not* re-emitted here — it already streamed.
     fn assistant(&mut self, v: &Value, out: &mut Vec<TurnEvent>) {
         let task = self.owning_task(v);
+        self.note_request(v);
         let Some(blocks) = v.pointer("/message/content").and_then(Value::as_array) else {
             return;
         };
@@ -683,7 +717,7 @@ impl ClaudeNormaliser {
         out.push(TurnEvent::TurnCompleted {
             turn,
             status,
-            usage: usage(v),
+            usage: usage(v, self.last_request.as_ref()),
         });
     }
 
@@ -704,6 +738,7 @@ impl ClaudeNormaliser {
         if self.active_turn.is_some() {
             return;
         }
+        self.last_request = None;
         self.turns_seen += 1;
         let turn = TurnId::new(format!("turn-{}", self.turns_seen));
         self.active_turn = Some(turn.clone());
@@ -724,6 +759,38 @@ impl ClaudeNormaliser {
     fn owning_task(&self, envelope: &Value) -> Option<TaskId> {
         let parent = str_at(envelope, "parent_tool_use_id")?;
         self.tasks.get(parent).cloned()
+    }
+
+    /// Remember how much the main agent was carrying on this request.
+    ///
+    /// Every assistant message restates it in full, so the last one to arrive
+    /// is the current occupancy — no accumulation, nothing to drift. The stream
+    /// repeats a message as its blocks settle; taking the latest makes that
+    /// harmless. A message owned by a subagent is skipped: its window is not
+    /// the one on screen.
+    fn note_request(&mut self, v: &Value) {
+        if v.get("parent_tool_use_id").is_some_and(|p| !p.is_null()) {
+            return;
+        }
+        let Some(usage) = v.pointer("/message/usage") else {
+            return;
+        };
+        let read = |key: &str| usage.get(key).and_then(Value::as_u64).unwrap_or(0);
+        let used = read("input_tokens")
+            + read("cache_read_input_tokens")
+            + read("cache_creation_input_tokens")
+            + read("output_tokens");
+        if used == 0 {
+            return;
+        }
+        self.last_request = Some(Request {
+            model: v
+                .pointer("/message/model")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+            used,
+            output: read("output_tokens"),
+        });
     }
 }
 
@@ -813,9 +880,9 @@ fn tool_result_text(result: &Value) -> Option<String> {
     }
 }
 
-fn usage(v: &Value) -> Option<Usage> {
+fn usage(v: &Value, last: Option<&Request>) -> Option<Usage> {
     let usage = v.get("usage")?;
-    let (context_used, context_window) = context(v);
+    let (context_used, context_window) = context(v, last);
     Some(Usage {
         input_tokens: usage
             .get("input_tokens")
@@ -916,40 +983,45 @@ fn limits(v: &Value) -> Option<TurnEvent> {
 
 /// How full the model's context got, and how big it is.
 ///
-/// Read from the per-model breakdown rather than the totals, because a turn can
-/// involve more than one model — a small one summarising or naming things
-/// alongside the one doing the work — and adding their tokens together
-/// describes nothing. The one that matters is whichever did the most, which is
-/// also the one whose window somebody is about to run out of.
+/// The window is read from the per-model breakdown, because a turn is often
+/// more than one model — a small one summarising or naming things alongside the
+/// one doing the work — and they do not share a window. The one that matters is
+/// whichever the last request went to.
+///
+/// What is *in* that window comes from the request itself, never from the
+/// breakdown. `modelUsage` accumulates across every request in the turn, so a
+/// cached prefix the model re-read on twenty tool calls is counted twenty
+/// times: on a long turn it reports several times the window and the ring pins
+/// at full while the session still has all its room. Those totals are what the
+/// bill is made of, and they stay that — see [`Usage::models`].
 ///
 /// Both `None` when the agent does not report a window. Better than guessing it
 /// from a model name, which changes.
-fn context(v: &Value) -> (Option<u64>, Option<u64>) {
-    let Some(per_model) = v.get("modelUsage").and_then(Value::as_object) else {
+fn context(v: &Value, last: Option<&Request>) -> (Option<u64>, Option<u64>) {
+    let per_model = v.get("modelUsage").and_then(Value::as_object);
+    let Some(last) = last else {
         return (None, None);
     };
-
-    let mut busiest: Option<(u64, u64)> = None;
-    for model in per_model.values() {
-        let read = |key: &str| model.get(key).and_then(Value::as_u64).unwrap_or(0);
-        // Everything the model had in front of it, not just what was billed as
-        // new. Input alone reads as almost nothing once caching is working,
-        // which is exactly when it is least true.
-        let used = read("inputTokens")
-            + read("cacheReadInputTokens")
-            + read("cacheCreationInputTokens")
-            + read("outputTokens");
-        let Some(window) = model.get("contextWindow").and_then(Value::as_u64) else {
-            continue;
-        };
-        if busiest.is_none_or(|(most, _)| used > most) {
-            busiest = Some((used, window));
-        }
-    }
-
-    match busiest {
-        Some((used, window)) => (Some(used), Some(window)),
-        None => (None, None),
+    let Some(name) = last.model.as_deref() else {
+        return (None, None);
+    };
+    let Some(models) = per_model else {
+        return (None, None);
+    };
+    // Prefer an exact key. Canonical aliases are safe only when unambiguous.
+    let model = models.get(name).or_else(|| {
+        let mut matches = models
+            .values()
+            .filter(|m| str_at(m, "canonicalModel") == Some(name));
+        let model = matches.next()?;
+        matches.next().is_none().then_some(model)
+    });
+    match model
+        .and_then(|m| m.get("contextWindow"))
+        .and_then(Value::as_u64)
+    {
+        Some(window) if window > 0 => (Some(last.used), Some(window)),
+        _ => (None, None),
     }
 }
 
@@ -1017,4 +1089,113 @@ pub fn questions_from_input(input: &Value) -> Option<Vec<Question>> {
             })
             .collect(),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn usage_of(lines: &[&str]) -> Usage {
+        let mut reader = ClaudeNormaliser::new();
+        lines
+            .iter()
+            .flat_map(|l| reader.push(l))
+            .find_map(|e| match e {
+                TurnEvent::TurnCompleted { usage, .. } => usage,
+                _ => None,
+            })
+            .expect("the turn should complete and report usage")
+    }
+
+    /// Hand-written rather than recorded, unlike everything in
+    /// `tests/normalise_claude.rs`, because this is a fact about our own rule
+    /// and not about Claude Code's output: the recordings happen to end on a
+    /// main-agent request, so they cannot tell a working filter from a missing
+    /// one. A subagent that spoke last must not be mistaken for the window on
+    /// screen — it reads a window of its own, and taking its number would make
+    /// the context jump and then jump back.
+    #[test]
+    fn a_subagents_request_is_not_the_context_on_screen() {
+        let usage = usage_of(&[
+            r#"{"type":"user","uuid":"u1","message":{"role":"user","content":[{"type":"text","text":"go"}]}}"#,
+            r#"{"type":"assistant","message":{"id":"m1","model":"claude-sonnet-5","content":[],"usage":{"input_tokens":2,"cache_read_input_tokens":40000,"output_tokens":10}}}"#,
+            r#"{"type":"assistant","parent_tool_use_id":"toolu_1","message":{"id":"m2","model":"claude-sonnet-5","content":[],"usage":{"input_tokens":2,"cache_creation_input_tokens":900,"output_tokens":3}}}"#,
+            r#"{"type":"result","subtype":"success","usage":{"input_tokens":4},"modelUsage":{"claude-sonnet-5":{"inputTokens":4,"outputTokens":13,"cacheReadInputTokens":40000,"cacheCreationInputTokens":900,"contextWindow":1000000}}}"#,
+        ]);
+        assert_eq!(usage.context_used, Some(40_012), "the main agent's request");
+        assert_eq!(usage.context_window, Some(1_000_000));
+    }
+
+    #[test]
+    fn result_totals_without_a_request_do_not_invent_context() {
+        let usage = usage_of(&[
+            r#"{"type":"user","uuid":"u1","message":{"role":"user","content":[{"type":"text","text":"go"}]}}"#,
+            r#"{"type":"result","subtype":"success","usage":{"input_tokens":600000},"modelUsage":{"claude-sonnet-5":{"inputTokens":600000,"contextWindow":200000}}}"#,
+        ]);
+        assert_eq!(usage.context_used, None);
+        assert_eq!(usage.context_window, None);
+    }
+
+    #[test]
+    fn streamed_output_counts_without_accumulating_requests() {
+        let usage = usage_of(&[
+            r#"{"type":"user","uuid":"u1","message":{"role":"user","content":[{"type":"text","text":"go"}]}}"#,
+            r#"{"type":"stream_event","event":{"type":"message_start","message":{"id":"m1","model":"main","usage":{"input_tokens":10,"cache_read_input_tokens":40000,"output_tokens":1}}}}"#,
+            r#"{"type":"stream_event","event":{"type":"message_delta","usage":{"output_tokens":100}}}"#,
+            r#"{"type":"stream_event","parent_tool_use_id":"child","event":{"type":"message_delta","usage":{"output_tokens":9999}}}"#,
+            r#"{"type":"result","subtype":"success","usage":{"input_tokens":500000},"modelUsage":{"main":{"inputTokens":500000,"contextWindow":200000},"helper":{"inputTokens":900000,"contextWindow":1000000}}}"#,
+        ]);
+        assert_eq!(usage.context_used, Some(40_110));
+        assert_eq!(usage.context_window, Some(200_000));
+        assert!(usage.context_fullness().unwrap() < 0.21);
+        assert_eq!(usage.input_tokens, 500_000);
+    }
+
+    #[test]
+    fn unmatched_model_does_not_borrow_another_models_window() {
+        let usage = usage_of(&[
+            r#"{"type":"user","uuid":"u1","message":{"role":"user","content":[{"type":"text","text":"go"}]}}"#,
+            r#"{"type":"assistant","message":{"id":"m1","model":"main","usage":{"input_tokens":40000}}}"#,
+            r#"{"type":"result","subtype":"success","usage":{},"modelUsage":{"helper":{"contextWindow":200000}}}"#,
+        ]);
+        assert_eq!(usage.context_window, None);
+    }
+
+    #[test]
+    fn a_new_turn_does_not_reuse_the_previous_request() {
+        let mut reader = ClaudeNormaliser::new();
+        let user = r#"{"type":"user","uuid":"u1","message":{"role":"user","content":[{"type":"text","text":"go"}]}}"#;
+        let result = r#"{"type":"result","subtype":"success","usage":{},"modelUsage":{"main":{"contextWindow":200000}}}"#;
+        reader.push(user);
+        reader.push(r#"{"type":"assistant","message":{"id":"m1","model":"main","usage":{"input_tokens":40000}}}"#);
+        reader.push(result);
+        reader.push(user);
+        let events = reader.push(result);
+        let usage = events
+            .iter()
+            .find_map(|e| match e {
+                TurnEvent::TurnCompleted { usage, .. } => usage.as_ref(),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(usage.context_used, None);
+    }
+
+    /// The small model that names and summarises has a window a fifth the size.
+    /// Pairing its window with the working model's occupancy is how a session
+    /// with all its room reads as nearly full.
+    #[test]
+    fn the_window_belongs_to_the_model_that_did_the_work() {
+        let usage = usage_of(&[
+            r#"{"type":"user","uuid":"u1","message":{"role":"user","content":[{"type":"text","text":"go"}]}}"#,
+            r#"{"type":"assistant","message":{"id":"m1","model":"claude-opus-5[1m]","content":[],"usage":{"input_tokens":2,"cache_read_input_tokens":150000,"output_tokens":8}}}"#,
+            r#"{"type":"result","subtype":"success","usage":{"input_tokens":2},"modelUsage":{"claude-haiku-4-5-20251001":{"inputTokens":900,"outputTokens":40,"cacheReadInputTokens":0,"cacheCreationInputTokens":0,"contextWindow":200000},"claude-opus-5[1m]":{"canonicalModel":"claude-opus-5[1m]","inputTokens":2,"outputTokens":8,"cacheReadInputTokens":150000,"cacheCreationInputTokens":0,"contextWindow":1000000}}}"#,
+        ]);
+        assert_eq!(
+            usage.context_window,
+            Some(1_000_000),
+            "Opus's window, not Haiku's"
+        );
+        assert_eq!(usage.context_used, Some(150_010));
+    }
 }
