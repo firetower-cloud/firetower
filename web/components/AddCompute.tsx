@@ -2,65 +2,84 @@
 
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Modal, Choice, Foot, Go, Quiet } from "./Modal";
+import { Modal, Foot, Go, Quiet } from "./Modal";
 import {
   useCreateHost,
   useProbeHost,
   useSshKey,
   getListHostsQueryKey,
 } from "@/src/api/generated/hosts/hosts";
-import type { Compute, Diagnosis, Host, Execution } from "@/src/api/generated/model";
-import { HostReadiness } from "./HostReadiness";
+import type { Compute, Diagnosis } from "@/src/api/generated/model";
+import { parseDestination } from "@/src/api/environments";
 
-export function AddCompute({
-  onClose,
-  initial,
-}: {
-  onClose: () => void;
-  initial?: { sameMachine: boolean; address?: string; execution?: Execution };
-}) {
-  const [sameMachine, setSameMachine] = useState(initial?.sameMachine ?? false);
-  const [execution, setExecution] = useState<Execution>(initial?.execution ?? "container");
-  const [address, setAddress] = useState(initial?.address ?? "");
-  const [user, setUser] = useState("");
+/**
+ * Adding a machine.
+ *
+ * ## What this stopped asking
+ *
+ * It used to ask five questions: this server or a remote one, container or
+ * directly on host, a name for the *environment*, an address, an account, and —
+ * for a container — its name. Every one of those except the address was either
+ * already answered on the form that opened this, or is not a question about a
+ * machine at all:
+ *
+ * * **Container or host** is a mode, chosen per workspace, on the machine. Both
+ *   are available on everything Firetower can reach.
+ * * **This server or remote** was only ever about ssh-ing to the machine
+ *   Firetower is already on. It does not.
+ * * **The account** belongs to the address. `Compute::Server` treats `user` as
+ *   optional and defers to your ssh config when it is absent, so a second field
+ *   could only disagree with the first — and `editor@10.0.4.7` is what people
+ *   paste anyway.
+ * * **The name** is what you call it, and if you call it nothing it is called
+ *   where it is. The server fills it in from the address.
+ *
+ * What is left is one address, an optional name, and the key the machine has to
+ * be given — which is the one part of this nothing here can do.
+ */
+export function AddCompute({ onClose }: { onClose: () => void }) {
+  const [address, setAddress] = useState("");
   const [label, setLabel] = useState("");
-  const [container, setContainer] = useState("firetower-worker");
   const [keyPath, setKeyPath] = useState("");
   const [ownKey, setOwnKey] = useState(false);
   const [told, setTold] = useState<Diagnosis | null>(null);
-  const [added, setAdded] = useState<Host | null>(null);
   const cache = useQueryClient();
   const create = useCreateHost();
   const probe = useProbeHost();
   const busy = create.isPending || probe.isPending;
-  const ready = !!address.trim() && !!label.trim() && (execution === "host" || !!container.trim());
+  const typed = parseDestination(address);
+  const ready = !!typed.host;
+
   const edit =
     <T,>(setter: (value: T) => void) =>
     (value: T) => {
       setTold(null);
       setter(value);
     };
+
+  // One environment, reached directly on the machine. A container on it is the
+  // same connection with `docker exec` in front, and is made when somebody
+  // picks that mode — not here, on a form about where the machine is.
   const body = () => ({
-    name: label.trim(),
-    sameMachine,
+    name: label.trim() || undefined,
     compute: {
       type: "Server",
       host: address.trim(),
-      user: user.trim() || undefined,
       key: ownKey && keyPath.trim() ? { type: "File", path: keyPath.trim() } : { type: "Managed" },
-      container: execution === "container" ? container.trim() : undefined,
     } as Compute,
   });
+
   const save = () =>
     create.mutate(
       { data: body() },
       {
-        onSuccess: async (host) => {
+        onSuccess: async () => {
           await cache.invalidateQueries({ queryKey: getListHostsQueryKey() });
-          setAdded(host);
+          onClose();
         },
       },
     );
+
   const add = () =>
     probe.mutate(
       { data: body() },
@@ -72,100 +91,43 @@ export function AddCompute({
       },
     );
 
-  if (added)
-    return (
-      <Modal title={`Set up ${added.name}`} onClose={onClose} wide>
-        <HostReadiness host={added} />
-        <Foot>
-          <Go onClick={onClose}>Done</Go>
-        </Foot>
-      </Modal>
-    );
-
   return (
-    <Modal title="Add execution environment" onClose={onClose} wide>
-      <div className="flex flex-col gap-2">
-        <Choice
-          on={sameMachine}
-          title="This server — alongside Firetower"
-          body="Connect to the underlying machine hosting the control plane."
-          onClick={() => edit(setSameMachine)(true)}
-        />
-        <Choice
-          on={!sameMachine}
-          title="A remote machine"
-          body="Connect to another machine over SSH."
-          onClick={() => edit(setSameMachine)(false)}
-        />
-      </div>
-      <Field
-        label="Environment name"
-        autoFocus
-        value={label}
-        onChange={edit(setLabel)}
-        placeholder="Video VM — host"
-      >
-        A name for this worker environment. You can configure both execution options on the same
-        machine.
-      </Field>
-      <fieldset className="mt-4 space-y-2">
-        <legend className="mb-2 text-meta text-dim">Run in</legend>
-        <Choice
-          on={execution === "container"}
-          title="Container"
-          body="Uses the tools and resources available inside your worker container."
-          onClick={() => edit(setExecution)("container")}
-        />
-        <Choice
-          on={execution === "host"}
-          title="Directly on host"
-          body="Uses the machine’s installed tools and services as the SSH account."
-          onClick={() => edit(setExecution)("host")}
-        />
-      </fieldset>
+    <Modal title="Add a machine" onClose={onClose} wide>
       <Field
         label="SSH address"
+        autoFocus
         value={address}
         onChange={edit(setAddress)}
-        placeholder="192.0.2.10"
+        placeholder="editor@192.0.2.10"
       >
-        {sameMachine
-          ? "Use the underlying VM’s address reachable from Firetower. When Firetower runs in Docker, localhost points inside its container."
-          : "A hostname or IP address reachable from Firetower. Add :2222 for a custom SSH port."}
+        Where it is, and who to connect as. <code className="font-mono">user@host</code>, with{" "}
+        <code className="font-mono">:2222</code> for a port that is not 22. Left off, the account is
+        whatever your ssh config says.
       </Field>
+
       <Field
-        label="SSH account"
-        value={user}
-        onChange={edit(setUser)}
+        label="Name"
         optional
-        placeholder="editor"
+        value={label}
+        onChange={edit(setLabel)}
+        placeholder={typed.host || "video-vm"}
       >
-        {execution === "host"
-          ? "The worker and its agents run as this account, with its existing permissions."
-          : "This account connects to the machine and must be able to run docker exec in the selected container."}
+        What you call it, in every list. Left blank it is called {typed.host || "where it is"}.
       </Field>
+
       <HowWeGetIn
         ownKey={ownKey}
         onOwnKey={setOwnKey}
         keyPath={keyPath}
         onKeyPath={edit(setKeyPath)}
-        user={user}
+        user={typed.user ?? ""}
       />
-      {execution === "container" && (
-        <Field
-          label="Container name"
-          value={container}
-          onChange={edit(setContainer)}
-          placeholder="firetower-worker"
-        >
-          An existing worker container on this machine. Set it up and start it yourself before
-          checking the connection.
-        </Field>
-      )}
-      <p className="mt-3 text-meta text-mute">
-        Firetower checks what is missing and shows setup instructions. You install the requirements
-        on the selected machine.
+
+      <p className="mt-3 text-meta leading-[1.5] text-mute">
+        Both ways of running are then available on it — in a worker container, or on the machine
+        itself. Firetower checks whichever you pick, when you pick it, and says what is missing.
       </p>
+
       {(create.error || probe.error) && (
         <p role="alert" className="mt-3 text-meta text-brick">
           {(create.error || probe.error)?.message}
@@ -174,7 +136,7 @@ export function AddCompute({
       {told && <NotAnswering told={told} />}
       <Foot>
         <Go onClick={add} disabled={!ready || busy}>
-          {busy ? "Checking…" : told ? "Check again" : "Check and add"}
+          {busy ? "Checking…" : told ? "Check again" : "Add"}
         </Go>
         {told && (
           <Quiet onClick={save} disabled={!ready || busy}>
@@ -208,8 +170,8 @@ function NotAnswering({ told }: { told: Diagnosis }) {
         <>
           <p className="mt-2 text-meta leading-[1.55] text-dim">
             Firetower authenticates with its own key, and that machine has not accepted it. Check
-            the username above is the account you gave it to — and if that machine manages keys
-            elsewhere, Google Cloud metadata or an SSH CA, it belongs there rather than in{" "}
+            the username in the address is the account you gave it to — and if that machine manages
+            keys elsewhere, Google Cloud metadata or an SSH CA, it belongs there rather than in{" "}
             <code className="font-mono">authorized_keys</code>.
           </p>
           <code className="mt-2 block overflow-x-auto rounded-sm bg-black/25 px-3 py-2 font-mono text-meta break-all text-bone">
@@ -236,7 +198,7 @@ function NotAnswering({ told }: { told: Diagnosis }) {
 
       {/* Hosts connect at start-up and when added; nothing retries in between. */}
       <p className="mt-2.5 text-meta leading-[1.5] text-mute">
-        Save the environment to keep its connection settings. Firetower will retry the connection
+        Save the machine to keep its connection settings. Firetower will retry the connection
         automatically.
       </p>
     </div>
@@ -275,7 +237,7 @@ function authorizedKeys(user: string, key: string) {
  * Firetower dials out with a key it made for itself, so the machine has to be
  * given the public half before it will let us in. Nothing here can do that —
  * it is a change on a machine we cannot reach yet, which is the whole reason
- * this sits above the address fields rather than below them.
+ * this sits beside the address rather than below it.
  *
  * The key is what is offered, not a command. Where it goes depends on the
  * machine: a provider's web form when the VM is being made now, instance
@@ -310,7 +272,7 @@ function HowWeGetIn({
 
   return (
     <div className="mt-5 rounded-sm border border-line bg-ground/40 p-3">
-      <p className="eyebrow">How Firetower gets in</p>
+      <p className="eyebrow">Firetower gets in with this key</p>
 
       {ownKey ? (
         <>
@@ -393,9 +355,9 @@ function HowWeGetIn({
 /**
  * One labelled input and the sentence explaining it.
  *
- * A server takes three of these. Written out three times they drift — one loses
- * its hint, another its spell-checking — and a form that looks assembled from
- * parts reads as one you can't trust with a key path.
+ * Written out separately they drift — one loses its hint, another its
+ * spell-checking — and a form that looks assembled from parts reads as one you
+ * can't trust with a key path.
  */
 function Field({
   label,

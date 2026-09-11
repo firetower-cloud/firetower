@@ -13,7 +13,7 @@ import {
 import { useListSessions } from "@/src/api/generated/sessions/sessions";
 import { useListAgents } from "@/src/api/generated/agents/agents";
 import type { Host, SshKey } from "@/src/api/generated/model";
-import { environmentLabel, executionLabel } from "@/src/api/environments";
+import { environmentLabel, executionLabel, machines } from "@/src/api/environments";
 import { SetUpHost, canBeSetUp } from "@/components/SetUpHost";
 import { AddCompute } from "@/components/AddCompute";
 import { holdsHost } from "@/src/api/view";
@@ -63,24 +63,43 @@ export default function Compute() {
         </p>
       )}
 
-      <div className="flex flex-col gap-2.5">
-        {hosts.map((h) => {
-          // Counted two ways from one pass: agents for "is it busy", and the
-          // places they sit in for "what would removing this cost you".
-          const here = sessions.filter((s) => s.hostId === h.id && holdsHost(s));
-          return (
-            <HostRow
-              key={h.id}
-              host={h}
-              running={here.length}
-              places={group(here).total}
-              agents={agents
-                .filter((a) => a.hosts.some((x) => x.hostId === h.id && x.installed))
-                .map((a) => a.label)}
-              onProblem={setProblem}
-            />
-          );
-        })}
+      {/* Grouped by machine, because that is what one of these is. An
+          environment is a way of running on a machine, and a machine with both
+          of them configured used to be two rows with two names, two capacity
+          meters and nothing saying they are the same eight cores. */}
+      <div className="flex flex-col gap-5">
+        {machines(hosts).map((machine) => (
+          <div key={machine.key} className="flex flex-col gap-2.5">
+            <div className="flex items-baseline gap-2.5">
+              <h2 className="text-ui font-semibold text-bone">{machine.label}</h2>
+              {machine.address && machine.address !== machine.label && (
+                <span className="font-mono text-meta text-mute">{machine.address}</span>
+              )}
+              {machine.hosts.length > 1 && (
+                <span className="ml-auto text-meta text-mute">
+                  {machine.hosts.length} ways of running
+                </span>
+              )}
+            </div>
+            {machine.hosts.map((h) => {
+              // Counted two ways from one pass: agents for "is it busy", and the
+              // places they sit in for "what would removing this cost you".
+              const here = sessions.filter((s) => s.hostId === h.id && holdsHost(s));
+              return (
+                <HostRow
+                  key={h.id}
+                  host={h}
+                  running={here.length}
+                  places={group(here).total}
+                  agents={agents
+                    .filter((a) => a.hosts.some((x) => x.hostId === h.id && x.installed))
+                    .map((a) => a.label)}
+                  onProblem={setProblem}
+                />
+              );
+            })}
+          </div>
+        ))}
         {!isLoading && hosts.length === 0 && !isError && (
           <p className="panel px-4 py-6 text-center text-ui text-mute">
             Nowhere to run anything yet.
@@ -90,9 +109,9 @@ export default function Compute() {
 
       <button
         onClick={() => setAdding(true)}
-        className="mt-4 w-full rounded-sm border border-dashed border-line py-3 text-ui text-mute transition-colors hover:border-line hover:text-bone"
+        className="mt-5 w-full rounded-sm border border-dashed border-line py-3 text-ui text-mute transition-colors hover:border-line hover:text-bone"
       >
-        + Add compute
+        + Add a machine
       </button>
 
       {adding && <AddCompute onClose={() => setAdding(false)} />}
@@ -137,18 +156,13 @@ function HostRow({
             host.state === "Online" ? "bg-sage" : "border border-mute"
           }`}
         />
-        <span className="font-mono text-ui text-bone">{environmentLabel(host)}</span>
-        {/* The address beside the name, for a machine that has one. The name is
-            what you call it; this is how you tell two of them apart at a
-            glance without reading the line below. */}
-        {host.compute.type === "Server" && (
-          <span className="truncate font-mono text-meta text-mute">
-            {host.compute.host}
-          </span>
+        {/* The mode, because the machine is named above this and saying it
+            twice is how the old page read as two computers. The environment's
+            own name is still what a rename changes, and it is beside it. */}
+        <span className="text-ui text-bone">{executionLabel(host)}</span>
+        {environmentLabel(host) !== executionLabel(host) && (
+          <span className="truncate font-mono text-meta text-mute">{environmentLabel(host)}</span>
         )}
-        <span className="rounded-sm border border-line px-1.5 py-0.5 font-mono text-micro text-slate">
-          {executionLabel(host)}
-        </span>
 
         {host.drained && (
           <span className="rounded-sm border border-slate-deep bg-slate-tint px-1.5 py-0.5 font-mono text-micro text-slate">

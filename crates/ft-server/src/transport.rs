@@ -249,6 +249,26 @@ impl Transport for DockerTransport {
 /// plane's own executable by absolute path.
 pub const WORKER_BINARY: &str = "firetower-worker";
 
+/// Where Firetower puts a worker it installed itself.
+///
+/// Under the worker's own state directory rather than `/usr/local/bin`, because
+/// that needs no sudo and is a directory the account already has to be able to
+/// write — it is where the worker keeps everything else. The shell expands
+/// `$HOME`, so this is a fragment of a remote command rather than a path this
+/// machine can resolve.
+pub const INSTALLED_BIN: &str = "$HOME/.firetower/worker/bin";
+
+/// The remote command, with the directory Firetower installs into on PATH.
+///
+/// Prepended rather than replacing the name: a worker the operator installed —
+/// a package, a binary in `/usr/local/bin` — is the one they meant, and an
+/// installed copy is only there because nothing else answered. ssh joins its
+/// arguments and hands the string to the account's shell, which is what makes a
+/// `VAR=value` prefix work here at all.
+pub fn worker_command() -> String {
+    format!("PATH={INSTALLED_BIN}:$PATH {WORKER_BINARY}")
+}
+
 pub struct SshTransport {
     /// `user@host`, or the host by itself. Assembled from the parts a host
     /// holds — see `Compute::ssh_destination`.
@@ -390,6 +410,90 @@ impl SshTransport {
         ssh.arg(&self.destination);
         Ok(ssh)
     }
+
+    /// Run one command on the machine and collect what it said.
+    ///
+    /// For the short questions that are not a worker session: what architecture
+    /// this is, whether a directory can be written. Bounded, because a machine
+    /// that accepts the connection and then never answers is a machine this
+    /// would otherwise wait on forever.
+    pub async fn ask(&self, command: &str) -> Result<String> {
+        let mut ssh = self.command().await?;
+        ssh.arg(command);
+        let output = tokio::time::timeout(
+            std::time::Duration::from_secs(20),
+            ssh.stdin(Stdio::null()).output(),
+        )
+        .await
+        .with_context(|| format!("{} did not answer within 20 seconds", self.destination))?
+        .with_context(|| format!("asking {} for `{command}`", self.destination))?;
+
+        if !output.status.success() {
+            let said = String::from_utf8_lossy(&output.stderr);
+            let said = said.trim();
+            anyhow::bail!(
+                "{} could not run `{command}`{}",
+                self.destination,
+                if said.is_empty() {
+                    String::new()
+                } else {
+                    format!(": {said}")
+                }
+            );
+        }
+        Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+    }
+
+    /// Send a file to a command's standard input on the machine.
+    ///
+    /// This is how a worker binary gets there: down the connection that is
+    /// already trusted, rather than through a second channel the operator would
+    /// have to open — and with no scp, which is a separate program that may not
+    /// be installed and a second dialect of the same options.
+    ///
+    /// Streamed rather than read first: a worker binary is a hundred megabytes
+    /// and holding one in the control plane's memory to hand it to a pipe is
+    /// a hundred megabytes spent on nothing. The far end prints nothing until
+    /// it is done, so writing before reading cannot fill a pipe nobody is
+    /// draining.
+    pub async fn send(&self, command: &str, file: &std::path::Path) -> Result<()> {
+        let mut source = tokio::fs::File::open(file)
+            .await
+            .with_context(|| format!("reading {}", file.display()))?;
+
+        let mut ssh = self.command().await?;
+        ssh.arg(command);
+        let mut child = ssh
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true)
+            .spawn()
+            .with_context(|| format!("connecting to {}", self.destination))?;
+
+        let mut stdin = child.stdin.take().context("ssh stdin was not piped")?;
+        tokio::io::copy(&mut source, &mut stdin)
+            .await
+            .with_context(|| format!("sending {} to {}", file.display(), self.destination))?;
+        drop(stdin);
+
+        // Generous, and bounded all the same: this is a large file over
+        // somebody's uplink, and the alternative to a limit is a request that
+        // never answers.
+        let output = tokio::time::timeout(
+            std::time::Duration::from_secs(900),
+            child.wait_with_output(),
+        )
+        .await
+        .with_context(|| format!("{} did not finish within fifteen minutes", self.destination))?
+        .with_context(|| format!("running `{command}` on {}", self.destination))?;
+
+        if !output.status.success() {
+            let said = String::from_utf8_lossy(&output.stderr);
+            anyhow::bail!("{} refused it: {}", self.destination, said.trim());
+        }
+        Ok(())
+    }
 }
 
 #[async_trait]
@@ -422,7 +526,7 @@ impl Transport for SshTransport {
             ssh.arg("docker").arg("exec").arg("-i").arg(container);
         }
 
-        ssh.arg(WORKER_BINARY).arg("--stdio");
+        ssh.arg(worker_command()).arg("--stdio");
 
         if let Some(root) = &self.root {
             ssh.arg("--root").arg(root);
@@ -667,6 +771,24 @@ mod tests {
         // between the local milestone and the remote one.
         let local = LocalTransport::new("/tmp/ft").unwrap();
         assert_eq!(local.describe(), "local child process");
+    }
+
+    /// A worker Firetower installed is found without being on anybody's PATH,
+    /// and a worker the operator installed still wins.
+    #[test]
+    fn the_remote_command_looks_where_firetower_installs() {
+        let command = worker_command();
+        assert!(
+            command.ends_with(&format!(" {WORKER_BINARY}")),
+            "the name asked for is unchanged: {command}"
+        );
+        assert!(
+            command.starts_with(&format!("PATH={INSTALLED_BIN}:$PATH ")),
+            "installed last, so an operator's own copy is the one that answers: {command}"
+        );
+        // Expanded by the account's shell, not by this process — a path
+        // resolved here would be a path inside the control plane's container.
+        assert!(command.contains("$HOME"), "{command}");
     }
 
     /// Every one of these is a mistake someone makes once, and each has to

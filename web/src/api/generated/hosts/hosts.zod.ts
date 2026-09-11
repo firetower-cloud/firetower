@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.30.1
+ * OpenAPI spec version: 0.31.0
  */
 import * as zod from 'zod';
 
@@ -428,6 +428,26 @@ export const HostReadinessResponse = zod.object({
 })),
   "user": zod.string().nullish()
 })
+
+/**
+ * The control plane and the worker are the same source at the same version,
+ * and the connection is already open — so this copies the binary Firetower is
+ * holding down the wire it is already trusted on, into the worker's own state
+ * directory. No sudo, nothing outside the account's home, and nothing touched
+ * that somebody else installed.
+ *
+ * What was here before was a `cargo build` in the interface. Asking for a Rust
+ * toolchain on the machine whose entire job is to not have things installed on
+ * it is not a setup step; it is a reason to give up.
+ * @summary Put a worker on this machine.
+ */
+export const InstallWorkerParams = zod.object({
+  "id": zod.string().describe('Host id')
+})
+
+export const InstallWorkerResponse = zod.object({
+  "version": zod.string().describe('What `firetower-worker --version` said on the machine.')
+}).describe('What answered after a worker was put there.')
 
 /**
  * Read before adding a server, because the machine has to be given this before

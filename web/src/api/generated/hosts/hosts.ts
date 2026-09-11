@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.30.1
+ * OpenAPI spec version: 0.31.0
  */
 import {
   useMutation,
@@ -31,6 +31,7 @@ import type {
   Drain,
   Host,
   HostReadinessParams,
+  Installed,
   NewHost,
   PublicIdentity,
   Reached,
@@ -757,7 +758,86 @@ export const useGetHostReadinessQueryData = () => {
 }
 
 
-export const getSshKeyUrl = () => {
+export const getInstallWorkerUrl = (id: string,) => {
+
+
+
+
+  return `/api/v1/hosts/${id}/worker`
+}
+
+/**
+ * The control plane and the worker are the same source at the same version,
+ * and the connection is already open — so this copies the binary Firetower is
+ * holding down the wire it is already trusted on, into the worker's own state
+ * directory. No sudo, nothing outside the account's home, and nothing touched
+ * that somebody else installed.
+ *
+ * What was here before was a `cargo build` in the interface. Asking for a Rust
+ * toolchain on the machine whose entire job is to not have things installed on
+ * it is not a setup step; it is a reason to give up.
+ * @summary Put a worker on this machine.
+ */
+export const installWorker = async (id: string, options?: Parameters<typeof http>[1]): Promise<Installed> => {
+
+  return http<Installed>(getInstallWorkerUrl(id),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getInstallWorkerMutationOptions = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof installWorker>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof http>}
+): UseMutationOptions<Awaited<ReturnType<typeof installWorker>>, TError,{id: string}, TContext> => {
+
+const mutationKey = ['installWorker'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof installWorker>>, {id: string}> = (props) => {
+          const {id} = props ?? {};
+
+          return  installWorker(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type InstallWorkerMutationResult = NonNullable<Awaited<ReturnType<typeof installWorker>>>
+
+    export type InstallWorkerMutationError = ApiError
+
+    /**
+ * @summary Put a worker on this machine.
+ */
+export const useInstallWorker = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof installWorker>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof installWorker>>,
+        TError,
+        {id: string},
+        TContext
+      > => {
+      return useMutation(getInstallWorkerMutationOptions(options), queryClient);
+    }
+    export const getSshKeyUrl = () => {
 
 
 

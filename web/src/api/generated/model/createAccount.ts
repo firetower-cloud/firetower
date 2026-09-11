@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.30.1
+ * OpenAPI spec version: 0.31.0
  */
 import type { Agent } from './agent';
 import type { AgentMode } from './agentMode';

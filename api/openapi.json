@@ -10,7 +10,7 @@
       "name": "AGPL-3.0-only",
       "identifier": "AGPL-3.0-only"
     },
-    "version": "0.30.1"
+    "version": "0.31.0"
   },
   "paths": {
     "/api/v1/agent-accounts": {
@@ -941,6 +941,59 @@
             }
           },
           "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/hosts/{id}/worker": {
+      "post": {
+        "tags": [
+          "hosts"
+        ],
+        "summary": "Put a worker on this machine.",
+        "description": "The control plane and the worker are the same source at the same version,\nand the connection is already open — so this copies the binary Firetower is\nholding down the wire it is already trusted on, into the worker's own state\ndirectory. No sudo, nothing outside the account's home, and nothing touched\nthat somebody else installed.\n\nWhat was here before was a `cargo build` in the interface. Asking for a Rust\ntoolchain on the machine whose entire job is to not have things installed on\nit is not a setup step; it is a reason to give up.",
+        "operationId": "install_worker",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Host id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Installed"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Not a machine Firetower installs onto, or the wrong shape for this binary",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
             "description": "",
             "content": {
               "application/json": {
@@ -6817,6 +6870,19 @@
               "null"
             ],
             "description": "Which version. The newest published one when nobody says."
+          }
+        }
+      },
+      "Installed": {
+        "type": "object",
+        "description": "What answered after a worker was put there.",
+        "required": [
+          "version"
+        ],
+        "properties": {
+          "version": {
+            "type": "string",
+            "description": "What `firetower-worker --version` said on the machine."
           }
         }
       },
