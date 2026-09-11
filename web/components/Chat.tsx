@@ -265,7 +265,11 @@ export function Chat({
 
           {/* Where the rail stops. The one place the eye goes to answer "is it
               still going?", and the reason there is no spinner anywhere else. */}
-          <End working={conversation.working} waiting={waiting} />
+          <End
+            working={conversation.working}
+            waiting={waiting}
+            heardAt={conversation.heardAt}
+          />
 
           {/* The far end said it will not go on — out of credits, a limit, a
               refusal. The agent's own sentence, because a paraphrase of it
@@ -422,19 +426,57 @@ export function Chat({
  * would have said, this says once — and when the session has handed back it
  * says nothing at all.
  */
-function End({ working, waiting }: { working: boolean; waiting: boolean }) {
+function End({
+  working,
+  waiting,
+  heardAt,
+}: {
+  working: boolean;
+  waiting: boolean;
+  heardAt?: number;
+}) {
+  // The clock is state, ticked by a timer, rather than read during the render —
+  // which would be a different answer every time this drew. The whole point is
+  // the stretches where no event arrives, so nothing else would move it.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!working) return;
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [working]);
+
   // A grey dot for a session that has handed back is a marker for the absence
   // of anything, drawn every time nothing is happening — which is most of the
   // time. Nothing is happening, so nothing is drawn.
   if (!working && !waiting) return null;
+
+  // Only once it has been quiet long enough to worry about. Under half a
+  // minute the dot says everything, and a number counting up from one is a
+  // clock somebody would start watching.
+  const quiet = working && !waiting && heardAt ? now - heardAt : 0;
+
   return (
     <div className="spine-end">
       <span
         data-state={waiting ? "you" : "working"}
         className={`tip ${working && !waiting ? "breathe" : ""}`}
       />
+      {quiet > 30_000 && (
+        <span className="ml-2 font-mono text-micro text-mute">
+          working · last heard {since(quiet)} ago
+        </span>
+      )}
     </div>
   );
+}
+
+/** A gap, in the coarsest unit that still says something. */
+function since(ms: number): string {
+  const seconds = Math.round(ms / 1000);
+  if (seconds < 90) return `${seconds}s`;
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 90) return `${minutes}m`;
+  return `${Math.round(minutes / 60)}h`;
 }
 
 /** One thing on the rail. */

@@ -52,6 +52,13 @@ const RETRY_FLOOR_HUMAN: std::time::Duration = std::time::Duration::from_secs(30
 
 use crate::transport::Transport;
 
+/// Something somebody typed that the agent has not said back yet.
+#[derive(Clone, Debug)]
+pub struct Typed {
+    pub text: String,
+    pub at: chrono::DateTime<chrono::Utc>,
+}
+
 /// A session's terminal, as it reaches a viewer.
 #[derive(Clone, Debug)]
 pub enum Terminal {
@@ -990,6 +997,18 @@ pub struct Fleet {
     /// already waiting shows an agent doing nothing, with no way to find out
     /// why.
     asked: Arc<RwLock<HashMap<String, Vec<AgentSpeech>>>>,
+    /// What somebody typed that the agent has not echoed back yet.
+    ///
+    /// A transcript is rebuilt from the agent's own output, and a message
+    /// becomes part of it when the agent repeats it back. An agent in the
+    /// middle of a ten-minute command does not get to that for ten minutes —
+    /// and until it does, the only copy of what somebody typed is in the tab
+    /// they typed it into. Reloading lost it, which reads as the session
+    /// having swallowed the message.
+    ///
+    /// In memory, like `asked` above and for the same reason: it is a thing in
+    /// flight rather than a thing to keep, and the agent's echo retires it.
+    typed: Arc<RwLock<HashMap<String, Vec<Typed>>>>,
     /// Live conversations, one broadcast per session.
     ///
     /// Carries lines as the agent wrote them. Turning them into something an
@@ -1067,6 +1086,7 @@ impl Fleet {
             terminals: Arc::new(RwLock::new(HashMap::new())),
             conversations: Arc::new(RwLock::new(HashMap::new())),
             asked: Arc::new(RwLock::new(HashMap::new())),
+            typed: Arc::new(RwLock::new(HashMap::new())),
             progress: Arc::new(RwLock::new(HashMap::new())),
             capacity: Arc::new(RwLock::new(HashMap::new())),
             usage: Arc::new(RwLock::new(HashMap::new())),
@@ -2665,6 +2685,20 @@ impl Fleet {
             progress.turn(text, images)?
         };
 
+        // Held from here rather than from the answer, because the answer *is*
+        // the agent repeating it, and that is exactly what may be minutes away.
+        if !text.trim().is_empty() {
+            self.typed
+                .write()
+                .await
+                .entry(session_id.to_string())
+                .or_default()
+                .push(Typed {
+                    text: text.to_string(),
+                    at: chrono::Utc::now(),
+                });
+        }
+
         self.send(
             host_id,
             ToWorker::SendTurn {
@@ -2673,6 +2707,34 @@ impl Fleet {
             },
         )
         .await
+    }
+
+    /// What has been typed at this session and not yet come back.
+    pub async fn typed(&self, session_id: &SessionId) -> Vec<Typed> {
+        self.typed
+            .read()
+            .await
+            .get(session_id.as_str())
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    /// Forget the messages the agent has now echoed.
+    ///
+    /// Matched on the text, because that is all the echo carries that this end
+    /// also has: the agent gives the item an id of its own making and nothing
+    /// ties it back to the send.
+    pub async fn echoed(&self, session_id: &SessionId, said: &[String]) {
+        if said.is_empty() {
+            return;
+        }
+        let mut held = self.typed.write().await;
+        if let Some(waiting) = held.get_mut(session_id.as_str()) {
+            waiting.retain(|t| !said.iter().any(|s| s == &t.text));
+            if waiting.is_empty() {
+                held.remove(session_id.as_str());
+            }
+        }
     }
 
     /// What this session is blocked on, if anything.
