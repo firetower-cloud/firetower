@@ -28,5 +28,6 @@ export const ErrorCode = {
   ActionFailed: 'ActionFailed',
   Unauthorized: 'Unauthorized',
   PasswordChangeRequired: 'PasswordChangeRequired',
+  Forbidden: 'Forbidden',
   Internal: 'Internal',
 } as const;

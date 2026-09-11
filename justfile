@@ -94,8 +94,14 @@ dev: db
     done
 
 # Rust types -> contract -> typed client. No pipeline, just this.
+#
+# Two contracts: the control plane's, which the web application is generated
+# from, and the updater's, which nothing is generated from — both sides of it
+# compile the same `ft-updater-api` crate — but which is written out so a
+# change to it is a diff somebody reviews.
 gen:
     cargo run --quiet -p ft-server --bin gen-openapi
+    cargo run --quiet -p ft-updater --bin firetower-updater -- openapi > api/updater.json
     cd web && pnpm orval && pnpm tsc --noEmit
 
 # Fails if the committed contract is stale. What a CI job would run.
@@ -110,6 +116,10 @@ build:
 # The image a container host runs. Slow the first time, cached after.
 worker-image:
     docker build -f Dockerfile.worker --build-arg VERSION=dev -t firetower/worker:dev .
+
+# The updater, for running the deployment's compose file locally.
+updater-image:
+    docker build -f Dockerfile.updater --build-arg VERSION=dev -t firetower/updater:dev .
 
 # Both architectures, the way the workflow builds them.
 #

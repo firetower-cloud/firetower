@@ -24,6 +24,7 @@ pub mod sshkey;
 pub mod tasks;
 pub mod trackers;
 pub mod transport;
+pub mod updates;
 pub mod vault;
 mod web;
 
@@ -73,6 +74,9 @@ pub struct AppState {
     /// sockets on another machine, and nothing about them outlives the process
     /// that opened them.
     pub previews: Arc<preview::pool::Pool>,
+    /// Upgrading Firetower from Firetower: the last check of the releases,
+    /// the runs, and the updater beside the control plane if there is one.
+    pub updates: updates::Updates,
 }
 
 pub struct Config {
@@ -177,6 +181,7 @@ pub async fn run(config: Config) -> Result<()> {
 
     // Before `vault` is moved into the state below.
     let names = preview::Names::from_vault(&vault);
+    let db_pool = db.pool().clone();
 
     let state = AppState {
         db,
@@ -190,6 +195,7 @@ pub async fn run(config: Config) -> Result<()> {
         previews: Default::default(),
         names,
         public_url: public_url(&config).into(),
+        updates: updates::Updates::new(db_pool),
     };
     // In the background: it fetches a few hundred megabytes, and nothing else
     // start-up does should wait on somebody's connection to npm.
@@ -197,6 +203,11 @@ pub async fn run(config: Config) -> Result<()> {
         .execute(state.db.pool()).await?;
     tokio::spawn(crate::api::accounts::watch_fallbacks(state.clone()));
     tokio::spawn(seed_agents(state.clone()));
+    // Whether a release is out, every few hours; and whatever upgrade was in
+    // progress when this process was last replaced — which, for the run that
+    // recreates the control plane, is the ordinary way it ends.
+    tokio::spawn(updates::status::watch(state.clone()));
+    tokio::spawn(updates::runs::resume(state.clone()));
 
     announce(&policy, admin.as_ref(), &ssh_identity, &config);
 

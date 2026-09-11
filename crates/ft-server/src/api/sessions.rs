@@ -351,43 +351,26 @@ pub(super) async fn create_session(
         }
     }
 
-    // The binary has to be on the machine that will run it.
-    //
-    // Asked here, where there is somewhere to say it, rather than found out at
-    // the launch step — which is what used to happen, and it arrived as the
-    // agent never becoming ready. That reads as a broken agent and is a
-    // missing one. The worker checks again before it launches, because this
-    // answer is only as fresh as the last probe.
-    let installed_here = state
-        .db
-        .presence()
-        .await?
-        .into_iter()
-        .any(|p| p.host == host.id && p.found.kind == req.agent && p.found.installed);
+    require_ready(&state, &host.id, req.agent).await?;
 
-    if !installed_here {
+    // Native workers interpret filesystem repository paths on their own host.
+    // Container users should connect by URL unless using the built-in local environment.
+    if let Some((local, _)) = repos.iter().find(|(r, _)| {
+        is_local_path(&r.remote)
+            && !matches!(
+                host.compute,
+                ft_core::Compute::Local
+                    | ft_core::Compute::Server {
+                        container: None,
+                        ..
+                    }
+            )
+    }) {
         return Err(ApiError::new(
             ErrorCode::InvalidRequest,
             format!(
-                "{} isn't installed on {}. Install it from the Agents page and try again.",
-                req.agent.label(),
-                host.name
-            ),
-        ));
-    }
-
-    // A path is a path on *this* machine. Anywhere else it is a directory that
-    // doesn't exist, and the session would fail several steps later with a git
-    // error that says nothing about why.
-    if let Some((local, _)) = repos
-        .iter()
-        .find(|(r, _)| is_local_path(&r.remote) && host.compute != ft_core::Compute::Local)
-    {
-        return Err(ApiError::new(
-            ErrorCode::InvalidRequest,
-            format!(
-                "{} is a folder on this machine, so it can only run on this machine. \
-                 Connect it by URL to use it on {}.",
+                "{} is a filesystem path. Choose direct host execution where that path exists, \
+                 or connect it by URL to use it in {}.",
                 local.remote, host.name
             ),
         ));
@@ -779,6 +762,8 @@ pub(crate) async fn relaunch(
         ));
     }
 
+    require_ready(state, &host.id, session.agent).await?;
+
     // Derived the same way it was when the workspace was built — see
     // `start_another_agent`, which reads it from the same two facts.
     let directory = match session.branch.as_deref() {
@@ -870,6 +855,15 @@ async fn start_another_agent(
         .await?
         .ok_or_else(|| ApiError::not_found("workspace"))?;
 
+    if req
+        .host_id
+        .as_ref()
+        .is_some_and(|host| host != &place.host_id)
+    {
+        return Err(ApiError::new(ErrorCode::InvalidRequest,
+            "This workspace keeps its execution environment. Create a new workspace to choose another machine or environment."));
+    }
+
     // Removed here while its host was away. The directory may or may not still
     // be on that machine, and starting an agent in one we have already given up
     // on is how a workspace comes back from the dead.
@@ -889,24 +883,6 @@ async fn start_another_agent(
         .await?
         .ok_or_else(|| ApiError::new(ErrorCode::NoCapacity, "that workspace's host is gone"))?;
 
-    let installed_here = state
-        .db
-        .presence()
-        .await?
-        .into_iter()
-        .any(|p| p.host == host.id && p.found.kind == req.agent && p.found.installed);
-
-    if !installed_here {
-        return Err(ApiError::new(
-            ErrorCode::InvalidRequest,
-            format!(
-                "{} isn't installed on {}, which is where this workspace is.",
-                req.agent.label(),
-                host.name
-            ),
-        ));
-    }
-
     // A host that has just dropped is usually seconds from being back, so wait
     // for one something is actively reconnecting. One nobody is reconnecting is
     // not coming back on its own, and waiting would be a promise rather than a
@@ -924,6 +900,8 @@ async fn start_another_agent(
             format!("{} isn't responding", host.name),
         ));
     }
+
+    require_ready(&state, &host.id, req.agent).await?;
 
     let prompt = req.prompt.as_deref().map(str::trim).unwrap_or_default();
     let id = SessionId::new();
@@ -2619,6 +2597,28 @@ pub struct NewPullRequest {
 #[serde(rename_all = "camelCase")]
 pub struct PullRequest {
     pub url: String,
+}
+
+async fn require_ready(
+    state: &AppState,
+    host: &ft_core::HostId,
+    agent: ft_core::Agent,
+) -> ApiResult<()> {
+    let readiness = state
+        .fleet
+        .check_readiness(host, Some(agent))
+        .await
+        .map_err(|e| {
+            ApiError::new(
+                ErrorCode::HostUnreachable,
+                format!("Checking requirements: {e:#}"),
+            )
+        })?;
+    if !readiness.ready() {
+        return Err(ApiError::new(ErrorCode::InvalidRequest,
+            format!("This environment is not ready: {}. Install or fix these requirements on the selected machine, then check again.", readiness.missing())));
+    }
+    Ok(())
 }
 
 #[cfg(test)]

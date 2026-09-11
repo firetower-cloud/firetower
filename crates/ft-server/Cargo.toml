@@ -11,6 +11,9 @@ description = "The Firetower control plane: API, scheduling, and worker transpor
 [dependencies]
 ft-core.workspace = true
 ft-proto.workspace = true
+ft-updater-api.workspace = true
+similar.workspace = true
+semver.workspace = true
 anyhow.workspace = true
 async-trait.workspace = true
 axum.workspace = true

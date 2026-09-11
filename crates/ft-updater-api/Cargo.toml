@@ -1,0 +1,15 @@
+[package]
+name = "ft-updater-api"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "The contract between the Firetower control plane and its updater."
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+utoipa.workspace = true

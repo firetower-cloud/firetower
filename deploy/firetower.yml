@@ -89,6 +89,12 @@ services:
       # port 80 on their own machine.
       FIRETOWER_PUBLIC_URL: ${FIRETOWER_PUBLIC_URL:-http://localhost:8080}
 
+      # The updater beside this container — see the `updater` service. With
+      # these two set, the Updates screen can recreate the control plane
+      # itself; without them it upgrades workers only and says how to add it.
+      FIRETOWER_UPDATER_URL: http://updater:4410
+      FIRETOWER_UPDATER_TOKEN: ${FIRETOWER_UPDATER_TOKEN:-}
+
       # What a session's preview hangs off.
       #
       # `localhost` needs nothing: every browser resolves anything under it to
@@ -105,6 +111,39 @@ services:
       # keeps: repository mirrors, worktrees, the event log, and the agent's
       # own directory.
       - firetower:/var/lib/firetower
+
+  # Upgrades, from the Updates screen.
+  #
+  # The control plane cannot recreate its own container, so this one does it
+  # when asked: pulls the release, rewrites the files the release changed,
+  # runs `docker compose up -d firetower` against this very file, waits for
+  # the new one to answer, and puts the old image back if it does not. It
+  # also takes a `pg_dump` into ./backups first. See crates/ft-updater.
+  #
+  # **It holds the Docker socket, which is root on this machine.** That is
+  # the one privilege it has and the reason it has nothing else: no key, no
+  # password, no database connection, no published port — the control plane
+  # reaches it on this compose network with the token below, and nothing else
+  # reaches it at all. It decides nothing on its own; every job is a person
+  # pressing a button on the Updates screen.
+  #
+  # Workers on other machines are not its business. The control plane
+  # recreates those itself, over the ssh connection it already has.
+  updater:
+    image: ghcr.io/firetower-cloud/firetower-updater:latest
+    restart: unless-stopped
+    environment:
+      # The same token the control plane carries. Refuses everything without
+      # it, and says so in its log.
+      FIRETOWER_UPDATER_TOKEN: ${FIRETOWER_UPDATER_TOKEN:-}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      # This directory: firetower.yml, .env, the Caddyfile, and backups/.
+      # Compose runs against it, and a release's changes to firetower.yml are
+      # written here — the previous copy kept as firetower.yml.backup. The
+      # `.env` is read for the names of its variables and never written.
+      - .:/deploy
+    # Do not set `hostname:` here. The updater finds its own container by it.
 
   # TLS, and only TLS.
   #

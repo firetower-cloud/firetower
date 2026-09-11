@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useGetSession } from "@/src/api/generated/sessions/sessions";
 import { useListEvents } from "@/src/api/generated/events/events";
+import { environmentLabel, executionLabel } from "@/src/api/environments";
 import { useListHosts } from "@/src/api/generated/hosts/hosts";
 import { useSessionControls } from "@/src/api/generated/conversation/conversation";
 import { Chat } from "@/components/Chat";
@@ -96,7 +97,7 @@ function Plate({ session }: { session: Session }) {
     query: { staleTime: 30_000 },
   });
 
-  const host = hosts.find((h) => h.id === session.hostId)?.name;
+  const host = hosts.find((h) => h.id === session.hostId);
   // Only what the agent has said is actually in force. A control also carries a
   // `fallback`, but that is the picker's *label* — "Model" — for the case where
   // nothing is known yet, and printing it here read as though the session were
@@ -133,7 +134,7 @@ function Plate({ session }: { session: Session }) {
           {host && (
             <span className="flex items-center gap-1.5">
               <span className="text-mute/60">·</span>
-              {host}
+              {environmentLabel(host)} · {executionLabel(host)}
             </span>
           )}
         </div>

@@ -16,7 +16,7 @@ mod auth;
 mod conversation;
 mod events;
 mod forwards;
-mod hosts;
+pub(crate) mod hosts;
 mod providers;
 mod repos;
 mod secrets;
@@ -26,6 +26,7 @@ mod stream;
 mod tasks;
 mod terminal;
 mod trackers;
+mod updates;
 
 // `providers` on its own is the module below, which is this crate's git-host
 // screen rather than the git hosts themselves.
@@ -88,6 +89,10 @@ pub enum ErrorCode {
     /// is refused until it is replaced — the interface turns this into the
     /// wizard's first step rather than an error.
     PasswordChangeRequired,
+    /// Signed in, and not allowed to do this. Not `Unauthorized`, which the
+    /// interface reads as a session that has ended — being refused one thing
+    /// must not sign somebody out of everything.
+    Forbidden,
     Internal,
 }
 
@@ -104,7 +109,7 @@ impl ErrorCode {
             Self::Unauthorized => StatusCode::UNAUTHORIZED,
             // Not 401: the credential was accepted. It is 403 because this
             // account may do exactly one thing until it does it.
-            Self::PasswordChangeRequired => StatusCode::FORBIDDEN,
+            Self::PasswordChangeRequired | Self::Forbidden => StatusCode::FORBIDDEN,
             Self::RepoUnreachable | Self::RepoUnusable => StatusCode::BAD_REQUEST,
             // Not 401 either, for the same reason, and these two used to be —
             // which meant a GitHub authorization that had never been done, or a
@@ -253,7 +258,13 @@ async fn credential_for(
         trackers::TaskScope,
         trackers::Connected,
         crate::trackers::Auth,
-        crate::trackers::ScopeKind
+        crate::trackers::ScopeKind,
+        crate::updates::RunState,
+        crate::updates::StepState,
+        crate::updates::TargetKind,
+        crate::updates::deploy::FileVerdict,
+        crate::updates::deploy::FilePlan,
+        crate::updates::store::Targets
     ))
 )]
 pub struct ApiDoc;
@@ -276,6 +287,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(hosts::delete_host))
         .routes(routes!(hosts::rename_host))
         .routes(routes!(hosts::connect_host))
+        .routes(routes!(hosts::host_readiness))
         .routes(routes!(hosts::drain_host))
         .routes(routes!(hosts::ssh_key))
         .routes(routes!(hosts::probe_host))
@@ -341,6 +353,12 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(conversation::stream_conversation))
         .routes(routes!(stream::stream))
         .routes(routes!(tasks::list_tasks))
+        .routes(routes!(updates::get_updates))
+        .routes(routes!(updates::check_updates))
+        .routes(routes!(updates::plan_update))
+        .routes(routes!(updates::list_runs, updates::create_run))
+        .routes(routes!(updates::get_run))
+        .routes(routes!(updates::cancel_run))
         .routes(routes!(tasks::get_task))
         .routes(routes!(trackers::list_trackers))
         .routes(routes!(trackers::set_tracker_key))
@@ -395,6 +413,7 @@ mod tests {
             ErrorCode::RepoInUse,
             ErrorCode::ActionFailed,
             ErrorCode::PasswordChangeRequired,
+            ErrorCode::Forbidden,
             ErrorCode::Internal,
         ] {
             assert_ne!(
@@ -440,3 +459,6 @@ impl From<sqlx::Error> for ApiError {
         Self::from(anyhow::Error::from(error))
     }
 }
+
+#[cfg(test)]
+mod execution_tests;

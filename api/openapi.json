@@ -894,6 +894,65 @@
         }
       }
     },
+    "/api/v1/hosts/{id}/readiness": {
+      "get": {
+        "tags": [
+          "hosts"
+        ],
+        "summary": "Check requirements on the selected worker. This never installs anything.",
+        "operationId": "host_readiness",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "agent",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/Agent"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Readiness"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/providers": {
       "get": {
         "tags": [
@@ -4431,6 +4490,256 @@
           }
         }
       }
+    },
+    "/api/v1/updates": {
+      "get": {
+        "tags": [
+          "updates"
+        ],
+        "summary": "Where everything stands against the newest release.",
+        "operationId": "get_updates",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateStatus"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/updates/check": {
+      "post": {
+        "tags": [
+          "updates"
+        ],
+        "summary": "Ask the releases feed now rather than waiting for the next check.",
+        "operationId": "check_updates",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateStatus"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/updates/plan": {
+      "post": {
+        "tags": [
+          "updates"
+        ],
+        "summary": "What moving the control plane to a release would do to the deployment's\nfiles. Asked before agreeing, so an edited `firetower.yml` is a diff on\nthe screen rather than a surprise on the machine.",
+        "operationId": "plan_update",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlanRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpgradePlan"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/updates/runs": {
+      "get": {
+        "tags": [
+          "updates"
+        ],
+        "summary": "Past and present runs, newest first.",
+        "operationId": "list_runs",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/UpdateRun"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "updates"
+        ],
+        "summary": "Start an upgrade.",
+        "operationId": "create_run",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewRun"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateRun"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "One is already in progress, or something is running that was not acknowledged",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/updates/runs/{id}": {
+      "get": {
+        "tags": [
+          "updates"
+        ],
+        "operationId": "get_run",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Run id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateRun"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/updates/runs/{id}/cancel": {
+      "post": {
+        "tags": [
+          "updates"
+        ],
+        "summary": "Stop a run that has not started changing anything yet.",
+        "description": "A run that is waiting for machines to be idle is cancelled and the\nmachines put back in service. One that is already recreating something is\nleft to finish that step — half a recreate is worse than a whole one.",
+        "operationId": "cancel_run",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Run id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateRun"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -5266,7 +5575,7 @@
           },
           {
             "type": "object",
-            "description": "A worker in a container here. Linux, and isolated from your machine.\n\nReached with `docker exec` rather than ssh: the same bidirectional pipe\nwithout an sshd, a key, or a host key to verify.",
+            "description": "A worker in a container on the control-plane machine.\n\nReached with `docker exec` rather than ssh: the same bidirectional pipe\nwithout an sshd, a key, or a host key to verify.",
             "required": [
               "image",
               "name",
@@ -5416,6 +5725,39 @@
           "effort",
           "sandbox"
         ]
+      },
+      "ControlPlaneTarget": {
+        "type": "object",
+        "required": [
+          "version",
+          "upgradable",
+          "sessions",
+          "updater"
+        ],
+        "properties": {
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "sessions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Sessions on this machine, by title. They end when it is recreated."
+          },
+          "updater": {
+            "$ref": "#/components/schemas/UpdaterView"
+          },
+          "upgradable": {
+            "type": "boolean"
+          },
+          "version": {
+            "type": "string"
+          }
+        }
       },
       "Conversation": {
         "type": "object",
@@ -5792,6 +6134,7 @@
           "ActionFailed",
           "Unauthorized",
           "PasswordChangeRequired",
+          "Forbidden",
           "Internal"
         ]
       },
@@ -6081,6 +6424,13 @@
           }
         ]
       },
+      "Execution": {
+        "type": "string",
+        "enum": [
+          "container",
+          "host"
+        ]
+      },
       "Fallback": {
         "type": "object",
         "required": [
@@ -6096,6 +6446,22 @@
           },
           "enabled": {
             "type": "boolean"
+          }
+        }
+      },
+      "FileChoice": {
+        "type": "object",
+        "required": [
+          "name",
+          "replace"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "replace": {
+            "type": "boolean",
+            "description": "Replace an edited file with the release's copy, keeping the edited one\nas `.backup`. Files the release changed and nobody edited are replaced\nwithout being asked."
           }
         }
       },
@@ -6162,6 +6528,46 @@
             "minimum": 0
           }
         }
+      },
+      "FilePlan": {
+        "type": "object",
+        "description": "One file, and what would happen to it.",
+        "required": [
+          "name",
+          "verdict"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "releaseChange": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Unified diff, previous release → this release."
+          },
+          "verdict": {
+            "$ref": "#/components/schemas/FileVerdict"
+          },
+          "yourEdits": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Unified diff, previous release → what is on the machine."
+          }
+        }
+      },
+      "FileVerdict": {
+        "type": "string",
+        "enum": [
+          "Unchanged",
+          "Update",
+          "Edited",
+          "New",
+          "Unshipped"
+        ]
       },
       "Forwarded": {
         "type": "object",
@@ -6283,8 +6689,26 @@
             "type": "boolean",
             "description": "Finishing what it has, taking nothing new. Separate from being\nunreachable: a draining host is still online and still working."
           },
+          "execution": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Execution",
+                "description": "Where the worker executes, resolved by the control plane."
+              }
+            ]
+          },
           "id": {
             "$ref": "#/components/schemas/HostId"
+          },
+          "machine": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Machine grouping; \"local\" means the machine hosting the control plane."
           },
           "memoryMb": {
             "type": [
@@ -6324,6 +6748,57 @@
           "Unreachable",
           "Draining"
         ]
+      },
+      "HostTarget": {
+        "type": "object",
+        "required": [
+          "hostId",
+          "name",
+          "kind",
+          "online",
+          "drained",
+          "upgradable",
+          "sessions"
+        ],
+        "properties": {
+          "drained": {
+            "type": "boolean"
+          },
+          "hostId": {
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/TargetKind"
+          },
+          "name": {
+            "type": "string"
+          },
+          "online": {
+            "type": "boolean"
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "sessions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Sessions on this machine, by title. They end when it is recreated."
+          },
+          "upgradable": {
+            "type": "boolean"
+          },
+          "version": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
       },
       "InstallAgent": {
         "type": "object",
@@ -6606,6 +7081,10 @@
               "null"
             ],
             "description": "What you'll call it. Defaults to something derived from the kind."
+          },
+          "sameMachine": {
+            "type": "boolean",
+            "description": "This SSH connection reaches the machine hosting Firetower."
           }
         }
       },
@@ -6670,6 +7149,41 @@
           "slug": {
             "type": "string",
             "description": "`acme/backend`"
+          }
+        }
+      },
+      "NewRun": {
+        "type": "object",
+        "required": [
+          "version"
+        ],
+        "properties": {
+          "controlPlane": {
+            "type": "boolean"
+          },
+          "endSessions": {
+            "type": "boolean",
+            "description": "Acknowledged: sessions on the targets are ended. Required when\n`when_idle` is off and anything is running."
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FileChoice"
+            }
+          },
+          "hostIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "version": {
+            "type": "string",
+            "description": "The release to move to. Has to be the one the last check found."
+          },
+          "whenIdle": {
+            "type": "boolean",
+            "description": "Drain every target and wait until nothing is running on it, rather\nthan ending what is."
           }
         }
       },
@@ -6875,6 +7389,17 @@
           "path": {
             "type": "string",
             "description": "Where it landed, relative to the workspace — which is what to say to the\nagent, and what it can act on."
+          }
+        }
+      },
+      "PlanRequest": {
+        "type": "object",
+        "required": [
+          "version"
+        ],
+        "properties": {
+          "version": {
+            "type": "string"
           }
         }
       },
@@ -7200,6 +7725,65 @@
           }
         }
       },
+      "Readiness": {
+        "type": "object",
+        "required": [
+          "checks"
+        ],
+        "properties": {
+          "checks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Requirement"
+            }
+          },
+          "user": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "Release": {
+        "type": "object",
+        "description": "The newest release, as far as the last check knows.",
+        "required": [
+          "version"
+        ],
+        "properties": {
+          "cliMinimum": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The least `@firetower/cli` the release wants on the operator's own\nmachine. Reported; nothing here can install it."
+          },
+          "notes": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The changelog section for the release, as markdown."
+          },
+          "notesUrl": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "publishedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "version": {
+            "type": "string"
+          }
+        }
+      },
       "RemoteRepo": {
         "type": "object",
         "description": "A repository the authorized account can see.",
@@ -7355,6 +7939,36 @@
           "Tool"
         ]
       },
+      "Requirement": {
+        "type": "object",
+        "required": [
+          "name",
+          "available",
+          "required",
+          "detail"
+        ],
+        "properties": {
+          "available": {
+            "type": "boolean"
+          },
+          "detail": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "remedy": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "required": {
+            "type": "boolean",
+            "description": "Optional tools are useful for installation, but don't prevent launch."
+          }
+        }
+      },
       "RevealedSecret": {
         "type": "object",
         "description": "A value, on its way to a person who asked for it.",
@@ -7387,6 +8001,17 @@
             "description": "A new session, because the old one went with every other. Store this\nand carry on — being signed out is not part of changing a password."
           }
         }
+      },
+      "RunState": {
+        "type": "string",
+        "enum": [
+          "planned",
+          "waitingIdle",
+          "running",
+          "succeeded",
+          "failed",
+          "cancelled"
+        ]
       },
       "ScopeKind": {
         "type": "string",
@@ -8007,6 +8632,16 @@
           "Launch"
         ]
       },
+      "StepState": {
+        "type": "string",
+        "enum": [
+          "pending",
+          "running",
+          "done",
+          "failed",
+          "skipped"
+        ]
+      },
       "StoredEnv": {
         "type": "object",
         "description": "What was stored, and what was not.",
@@ -8096,6 +8731,31 @@
         "properties": {
           "sessionId": {
             "type": "string"
+          }
+        }
+      },
+      "TargetKind": {
+        "type": "string",
+        "enum": [
+          "container",
+          "binary"
+        ]
+      },
+      "Targets": {
+        "type": "object",
+        "required": [
+          "controlPlane",
+          "hostIds"
+        ],
+        "properties": {
+          "controlPlane": {
+            "type": "boolean"
+          },
+          "hostIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           }
         }
       },
@@ -8812,6 +9472,248 @@
               "string",
               "null"
             ]
+          }
+        }
+      },
+      "UpdateRun": {
+        "type": "object",
+        "required": [
+          "id",
+          "fromVersion",
+          "toVersion",
+          "targets",
+          "whenIdle",
+          "state",
+          "createdAt",
+          "steps"
+        ],
+        "properties": {
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "finishedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "fromVersion": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "startedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "startedBy": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "state": {
+            "$ref": "#/components/schemas/RunState"
+          },
+          "steps": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UpdateStep"
+            }
+          },
+          "targets": {
+            "$ref": "#/components/schemas/Targets"
+          },
+          "toVersion": {
+            "type": "string"
+          },
+          "whenIdle": {
+            "type": "boolean"
+          }
+        }
+      },
+      "UpdateStatus": {
+        "type": "object",
+        "required": [
+          "current",
+          "updateAvailable",
+          "controlPlane",
+          "hosts"
+        ],
+        "properties": {
+          "activeRun": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "checkError": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "checkedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "controlPlane": {
+            "$ref": "#/components/schemas/ControlPlaneTarget"
+          },
+          "current": {
+            "type": "string"
+          },
+          "hosts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/HostTarget"
+            }
+          },
+          "latest": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Release"
+              }
+            ]
+          },
+          "updateAvailable": {
+            "type": "boolean",
+            "description": "Whether anything at all is behind the newest release."
+          }
+        }
+      },
+      "UpdateStep": {
+        "type": "object",
+        "required": [
+          "position",
+          "target",
+          "title",
+          "state",
+          "log"
+        ],
+        "properties": {
+          "detail": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "finishedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "log": {
+            "type": "string"
+          },
+          "position": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "startedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "state": {
+            "$ref": "#/components/schemas/StepState"
+          },
+          "target": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        }
+      },
+      "UpdaterView": {
+        "type": "object",
+        "description": "The updater beside the control plane, if there is one.",
+        "required": [
+          "configured",
+          "reachable"
+        ],
+        "properties": {
+          "apiVersion": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
+          "configured": {
+            "type": "boolean"
+          },
+          "problem": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why it cannot be used, in words, when it cannot."
+          },
+          "reachable": {
+            "type": "boolean"
+          },
+          "version": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "UpgradePlan": {
+        "type": "object",
+        "description": "What a run would do to the deployment's files, asked before agreeing.",
+        "required": [
+          "version",
+          "files",
+          "envMissing",
+          "updaterUpgrade"
+        ],
+        "properties": {
+          "envMissing": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Variables the release's `.env.example` requires that `.env` lacks."
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FilePlan"
+            }
+          },
+          "updaterUpgrade": {
+            "type": "boolean",
+            "description": "Whether the updater itself is behind and will be recreated first."
+          },
+          "version": {
+            "type": "string"
           }
         }
       },

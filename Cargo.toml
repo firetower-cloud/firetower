@@ -19,6 +19,7 @@ ft-core = { path = "crates/ft-core" }
 ft-proto = { path = "crates/ft-proto" }
 ft-server = { path = "crates/ft-server" }
 ft-worker = { path = "crates/ft-worker" }
+ft-updater-api = { path = "crates/ft-updater-api" }
 
 # runtime
 tokio = { version = "1", features = [
@@ -107,6 +108,10 @@ reqwest = { version = "0.12", default-features = false, features = [
 
 # plumbing
 anyhow = "1"
+# Line diffs, for showing what a release changed in a deployment file.
+similar = "2"
+# Release versions, compared rather than string-matched.
+semver = "1"
 dotenvy = "0.15"
 tempfile = "3"
 thiserror = "2"

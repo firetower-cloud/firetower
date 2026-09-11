@@ -301,6 +301,7 @@ function RepoRow({
 
 function PasteRemote({ onBack, onClose }: { onBack: () => void; onClose: () => void }) {
   const [remote, setRemote] = useState("");
+  const localPath = /^[/.~]/.test(remote.trim());
   const queryClient = useQueryClient();
   const probe = useProbeRepo();
   const create = useCreateRepo();
@@ -309,13 +310,13 @@ function PasteRemote({ onBack, onClose }: { onBack: () => void; onClose: () => v
   // from whichever host would do the cloning.
   useEffect(() => {
     const value = remote.trim();
-    if (!value) return;
+    if (!value || /^[/.~]/.test(value)) return;
     const t = setTimeout(() => probe.mutate({ data: { remote: value } }), 600);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [remote]);
 
-  const found = probe.data;
+  const found = localPath ? undefined : probe.data;
 
   const save = async () => {
     await create.mutateAsync({ data: { slug: found?.slug ?? "", remote: remote.trim() } });
@@ -328,6 +329,7 @@ function PasteRemote({ onBack, onClose }: { onBack: () => void; onClose: () => v
       <label className="eyebrow">Repository URL or path</label>
       <input
         autoFocus
+        aria-label="Repository URL or path"
         value={remote}
         onChange={(e) => setRemote(e.target.value)}
         placeholder="https://host/acme/backend.git"
@@ -339,14 +341,21 @@ function PasteRemote({ onBack, onClose }: { onBack: () => void; onClose: () => v
       </p>
 
       <div className="mt-4 min-h-[52px]">
-        {probe.isPending && (
+        {localPath && (
+          <p className="text-meta text-mute">
+            This path will be checked on the machine you select when launching a workspace. Choose
+            an environment with access to that directory.
+          </p>
+        )}
+        {!localPath && probe.isPending && (
           <p className="flex items-center gap-2 text-meta text-mute">
             <Spinner />
             Checking…
           </p>
         )}
 
-        {probe.isError && <Failure error={probe.error} />}
+        {!localPath && probe.isError && <Failure error={probe.error} />}
+        {create.isError && <Failure error={create.error} />}
 
         {found && !probe.isPending && (
           <div className="rounded-sm border border-sage/25 bg-sage/[0.04] px-3.5 py-2.5">
@@ -362,7 +371,7 @@ function PasteRemote({ onBack, onClose }: { onBack: () => void; onClose: () => v
       </div>
 
       <Foot>
-        <Go onClick={save} disabled={!found || create.isPending}>
+        <Go onClick={save} disabled={(!localPath && !found) || create.isPending}>
           {create.isPending ? "Connecting…" : "Connect"}
         </Go>
         <Quiet onClick={onBack}>Back</Quiet>
