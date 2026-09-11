@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.30.1](https://github.com/firetower-cloud/firetower/compare/firetower-v0.30.0...firetower-v0.30.1) (2026-09-11)
+
+
+### Bug Fixes
+
+* [#81](https://github.com/firetower-cloud/firetower/issues/81) ([1cab04f](https://github.com/firetower-cloud/firetower/commit/1cab04f34b48475b294e9d03e80c43de828dbdab))
+* apply permission mode change to running session ([1cd421d](https://github.com/firetower-cloud/firetower/commit/1cd421dd8744d8d92ea07b2976ddc1defd0d058a))
+* change the permission mode of the session that is running ([552ab29](https://github.com/firetower-cloud/firetower/commit/552ab292c1f5ba90feb7a7ca9ca6545fe00bc22a))
+* enable Codex PR generation in workspaces ([919dc35](https://github.com/firetower-cloud/firetower/commit/919dc35877b69f9da0107b3af4c2dd1588736e33))
+* enable Codex PR generation in workspaces ([ff0853a](https://github.com/firetower-cloud/firetower/commit/ff0853ac92ad819127f97fc5b8014c0b6de58928))
+* keep a Codex session's settings when its agent is restarted ([bc2e2c1](https://github.com/firetower-cloud/firetower/commit/bc2e2c19670b816f3de6e9989af8c4241c6157d7))
+
 ## [0.30.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.29.0...firetower-v0.30.0) (2026-09-10)
 
 
