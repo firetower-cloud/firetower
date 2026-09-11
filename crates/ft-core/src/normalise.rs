@@ -312,8 +312,23 @@ impl ClaudeNormaliser {
                     });
                 }
             }
+            // The mode changed, which is the one thing this says that somebody
+            // can see. `init` restates it too, but only at the start of the
+            // next turn — long after they moved the picker and are watching to
+            // see whether it took. Nothing else in here is worth a card.
+            Some("status") => match str_at(v, "permissionMode") {
+                Some(mode) => out.push(TurnEvent::SessionConfigured {
+                    // Only what it said. A restatement fills in what it leaves
+                    // out, and this one is about the mode alone.
+                    model: String::new(),
+                    mode: mode.to_string(),
+                    tools: Vec::new(),
+                    commands: Vec::new(),
+                }),
+                None => out.push(raw(v)),
+            },
             // `task_updated` repeats what `task_notification` says with less in
-            // it, and `status`/`thinking_tokens` are telemetry.
+            // it, and the rest of `status`/`thinking_tokens` is telemetry.
             _ => out.push(raw(v)),
         }
     }
@@ -1135,6 +1150,36 @@ mod tests {
         ]);
         assert_eq!(usage.context_used, Some(40_012), "the main agent's request");
         assert_eq!(usage.context_window, Some(1_000_000));
+    }
+
+    /// A mode changed mid-turn has to be readable, or the picker sits on the
+    /// old value until the next turn starts and reads as not having worked.
+    ///
+    /// The line is what a real agent answered a `set_permission_mode` control
+    /// request with. It says the mode and nothing else, which is why a
+    /// restatement has to be allowed to leave the model out.
+    #[test]
+    fn a_mode_that_changed_says_so_without_forgetting_the_model() {
+        let mut reader = ClaudeNormaliser::new();
+        reader.push(
+            r#"{"type":"system","subtype":"init","model":"claude-opus-5[1m]","permissionMode":"auto","tools":["Bash"],"slash_commands":["model"]}"#,
+        );
+
+        let events = reader.push(
+            r#"{"type":"system","subtype":"status","status":null,"permissionMode":"dontAsk","uuid":"u1","session_id":"s1"}"#,
+        );
+        match events.as_slice() {
+            [TurnEvent::SessionConfigured { model, mode, .. }] => {
+                assert_eq!(mode, "dontAsk");
+                assert!(model.is_empty(), "it said nothing about the model");
+            }
+            other => panic!("expected the new mode, got {other:?}"),
+        }
+
+        // Anything else it carries is telemetry, and telemetry is not a card.
+        let quiet = reader
+            .push(r#"{"type":"system","subtype":"status","status":null,"thinking_tokens":10}"#);
+        assert!(matches!(quiet.as_slice(), [TurnEvent::Raw { .. }]));
     }
 
     #[test]

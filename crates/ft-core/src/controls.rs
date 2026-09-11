@@ -249,19 +249,22 @@ pub fn for_agent(agent: crate::Agent, models: Vec<Choice>, efforts: Vec<Choice>)
     }
 }
 
-/// The slash command that puts one into force, for the agent that takes them
-/// that way.
+/// What to send to put one into force, for the agent that is told rather than
+/// asked.
 ///
-/// `None` for a setting this agent has no command for — Codex takes all of
-/// these as parameters on its next turn instead.
-pub fn command(agent: crate::Agent, kind: ControlKind, value: &str) -> Option<String> {
+/// `None` for a setting this agent has no way of being told about — Codex takes
+/// all of these as parameters on its next turn instead.
+///
+/// Not all one shape. `/model` and `/effort` say "for this session only" and
+/// mean it, so they are sent as input like anything else. The permission mode
+/// is not a slash command at all: see [`crate::turn::permission_mode`] for what
+/// happened to the session that was sent one.
+pub fn put(agent: crate::Agent, kind: ControlKind, value: &str) -> Option<serde_json::Value> {
     match agent {
         crate::Agent::ClaudeCode => match kind {
-            ControlKind::Model => Some(format!("/model {value}")),
-            // `/permissions` is not available headless; `/config` is, and
-            // takes it.
-            ControlKind::Mode => Some(format!("/config permissionMode={value}")),
-            ControlKind::Effort => Some(format!("/effort {value}")),
+            ControlKind::Model => Some(crate::turn::user_message(&format!("/model {value}"))),
+            ControlKind::Mode => Some(crate::turn::permission_mode(value)),
+            ControlKind::Effort => Some(crate::turn::user_message(&format!("/effort {value}"))),
             // It has no such thing.
             ControlKind::Sandbox => None,
         },
@@ -324,11 +327,61 @@ mod tests {
     /// is what it did before this existed.
     #[test]
     fn a_slash_command_is_only_ever_built_for_the_agent_that_reads_them() {
-        assert_eq!(
-            command(crate::Agent::ClaudeCode, ControlKind::Model, "opus[1m]").as_deref(),
-            Some("/model opus[1m]")
-        );
-        assert!(command(crate::Agent::Codex, ControlKind::Model, "gpt-5.6-sol").is_none());
-        assert!(command(crate::Agent::ClaudeCode, ControlKind::Sandbox, "workspace").is_none());
+        let chosen = put(crate::Agent::ClaudeCode, ControlKind::Model, "opus[1m]")
+            .expect("Claude Code is told which model to use");
+        assert_eq!(chosen["message"]["content"][0]["text"], "/model opus[1m]");
+
+        assert!(put(crate::Agent::Codex, ControlKind::Model, "gpt-5.6-sol").is_none());
+        assert!(put(crate::Agent::ClaudeCode, ControlKind::Sandbox, "workspace").is_none());
+    }
+
+    /// The bug this half exists for: picking "Never ask" mid-conversation
+    /// changed nothing at all.
+    ///
+    /// It was sent as `/config permissionMode=dontAsk`, which the agent answers
+    /// with "Set Default permission mode to dontAsk" — a default for the next
+    /// session. This one was given its mode as a command-line switch when
+    /// Firetower started it, kept it, and went on asking.
+    #[test]
+    fn the_permission_mode_is_changed_in_the_session_that_is_running() {
+        let chosen = put(crate::Agent::ClaudeCode, ControlKind::Mode, "dontAsk")
+            .expect("Claude Code is told when to ask");
+
+        assert_eq!(chosen["type"], "control_request");
+        assert_eq!(chosen["request"]["subtype"], "set_permission_mode");
+        assert_eq!(chosen["request"]["mode"], "dontAsk");
+
+        // Two of them must not collide: the agent matches its answers by id.
+        let again = put(crate::Agent::ClaudeCode, ControlKind::Mode, "dontAsk").unwrap();
+        assert_ne!(chosen["request_id"], again["request_id"]);
+
+        // And nothing about it is typed at the agent, which is what left the
+        // running session alone.
+        assert!(!chosen.to_string().contains("/config"));
+    }
+
+    /// Every mode offered is one the agent will take.
+    ///
+    /// Checked against the list it refuses an unknown one with: `acceptEdits,
+    /// auto, bypassPermissions, default, dontAsk, plan`. A picker that offers a
+    /// word the agent has never heard of is a control that silently does
+    /// nothing, which is the fault this whole file is about.
+    #[test]
+    fn every_mode_offered_is_one_the_agent_knows() {
+        const KNOWN: [&str; 6] = [
+            "acceptEdits",
+            "auto",
+            "bypassPermissions",
+            "default",
+            "dontAsk",
+            "plan",
+        ];
+        for choice in claude_modes() {
+            assert!(
+                KNOWN.contains(&choice.value.as_str()),
+                "{} is not a permission mode Claude Code takes",
+                choice.value
+            );
+        }
     }
 }
