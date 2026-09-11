@@ -12,6 +12,11 @@
 //! `~/.firetower/worker/bin` — which the worker already owns, and which
 //! [`crate::transport::worker_command`] puts last on PATH so an operator's own
 //! copy still wins.
+//!
+//! Not the small artifact `Dockerfile.worker` builds: the control-plane image
+//! carries one binary, so what goes down the wire is that binary under a
+//! two-line wrapper. Bigger than it needs to be, and the alternative is
+//! carrying a second worker build in an image that never runs it.
 
 use crate::transport::{SshTransport, INSTALLED_BIN, WORKER_BINARY};
 use anyhow::{Context, Result};
@@ -32,10 +37,12 @@ pub struct Source {
 
 /// The worker to send: the one built beside us, or failing that, ourselves.
 ///
-/// A release image carries both binaries, so the first branch is the usual one
-/// and the far end gets exactly the program it is asked for. The second is what
-/// makes this work for a control plane installed on its own — the binary
-/// running this code can do the worker's job, it is just spelled differently.
+/// A source checkout builds both binaries side by side, so the first branch is
+/// what anyone developing this hits. The release image carries only
+/// `firetower`, so the second is the one production takes — the binary running
+/// this code can do the worker's job, it is just spelled differently, and a
+/// wrapper is cheaper than a second worker build in an image that never runs
+/// it.
 pub fn source_from(exe: &Path) -> Result<Source> {
     let sibling = exe.with_file_name(WORKER_BINARY);
     if sibling.is_file() {
@@ -129,7 +136,12 @@ chmod 755 \"{INSTALLED_BIN}/{WORKER_BINARY}\"
 }
 
 /// Put the worker there, and say what version answered afterwards.
-pub async fn install(ssh: &SshTransport) -> Result<String> {
+///
+/// The version is `None` when the bytes landed and the probe did not answer.
+/// Those are two outcomes, and treating the second as a failed install threw
+/// away a worker that was sitting there working: the caller stopped short of
+/// waking the supervisor, so nothing tried the machine again.
+pub async fn install(ssh: &SshTransport) -> Result<Option<String>> {
     let uname = ssh
         .ask("uname -sm")
         .await
@@ -145,11 +157,16 @@ pub async fn install(ssh: &SshTransport) -> Result<String> {
         .await
         .context("sending the worker")?;
 
-    // Asked the way a connection will ask, so this fails here rather than at
-    // the next launch if the installed copy cannot answer.
-    ssh.ask(&format!("{} --version", crate::transport::worker_command()))
-        .await
-        .context("the worker was copied, but did not answer --version")
+    // Asked the way a connection will ask, so a probe and a session resolve to
+    // the same binary. Not fatal: the copy is what was requested, and the real
+    // verdict is the supervisor's next connection.
+    match ssh.ask(&crate::transport::worker_probe()).await {
+        Ok(version) => Ok(Some(version)),
+        Err(e) => {
+            tracing::warn!("the worker was copied, but did not answer --version: {e:#}");
+            Ok(None)
+        }
+    }
 }
 
 #[cfg(test)]

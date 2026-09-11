@@ -5,6 +5,7 @@
 //! to stderr before the stream closed. Each case below has a different fix, and
 //! a closed stream on its own distinguishes none of them.
 
+use crate::transport::WORKER_BINARY;
 use ft_core::{Cause, Compute, Diagnosis};
 
 /// What a failed connection means, given what the far end said.
@@ -56,6 +57,19 @@ pub fn from_output(
         Diagnosis::new(
             Cause::DockerMissing,
             "Docker isn't installed on that machine.",
+        )
+    } else if said.contains("oci runtime exec failed") && !said.contains(WORKER_BINARY) {
+        // The runtime was asked to exec something that is not the worker at
+        // all. That is ours to fix, not the image's — a `PATH=…` word ahead of
+        // the program name once got read as a program *called* `PATH=…`, and
+        // every container-mode host was told to pull a new image over it.
+        Diagnosis::new(
+            Cause::Unknown,
+            format!(
+                "Firetower asked {} to run the wrong thing, and the container refused it. \
+                 This is a bug in Firetower, not in that machine.",
+                container(compute)
+            ),
         )
     } else if said.contains("firetower-worker: command not found")
         || said.contains("firetower-worker: not found")
@@ -227,6 +241,49 @@ mod tests {
 
     fn in_container() -> Compute {
         server_with(Some("firetower-worker"))
+    }
+
+    fn code(n: i32) -> Option<std::process::ExitStatus> {
+        use std::os::unix::process::ExitStatusExt;
+        Some(std::process::ExitStatus::from_raw(n << 8))
+    }
+
+    /// The one that sent every container-mode host to `docker compose pull`
+    /// over a bug in the argv Firetower assembled.
+    #[test]
+    fn a_runtime_asked_to_exec_the_wrong_thing_blames_firetower() {
+        let said = vec![
+            "OCI runtime exec failed: exec failed: unable to start container process: \
+             exec: \"PATH=/root/.firetower/worker/bin:/usr/bin\": \
+             stat PATH=/root/.firetower/worker/bin:/usr/bin: no such file or directory: unknown"
+                .to_string(),
+        ];
+        let told = from_output(&said, code(126), &in_container());
+        assert!(
+            told.summary.contains("bug in Firetower"),
+            "{}",
+            told.summary
+        );
+        assert!(
+            told.remedy.is_none(),
+            "nothing on that machine is going to fix it: {told:?}"
+        );
+    }
+
+    /// A container that really is running the wrong image still says so.
+    #[test]
+    fn a_runtime_that_cannot_find_the_worker_still_blames_the_image() {
+        let said = vec![
+            "OCI runtime exec failed: exec failed: unable to start container process: \
+             exec: \"firetower-worker\": executable file not found in $PATH: unknown"
+                .to_string(),
+        ];
+        let told = from_output(&said, code(126), &in_container());
+        assert!(
+            told.summary.contains("isn't a Firetower worker"),
+            "{}",
+            told.summary
+        );
     }
 
     fn read(lines: &[&str], compute: &Compute) -> Diagnosis {

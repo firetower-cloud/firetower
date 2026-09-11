@@ -258,15 +258,64 @@ pub const WORKER_BINARY: &str = "firetower-worker";
 /// machine can resolve.
 pub const INSTALLED_BIN: &str = "$HOME/.firetower/worker/bin";
 
-/// The remote command, with the directory Firetower installs into on PATH.
+/// A worker command run through a POSIX shell, with the installed directory
+/// last on PATH.
 ///
-/// Prepended rather than replacing the name: a worker the operator installed —
-/// a package, a binary in `/usr/local/bin` — is the one they meant, and an
-/// installed copy is only there because nothing else answered. ssh joins its
-/// arguments and hands the string to the account's shell, which is what makes a
-/// `VAR=value` prefix work here at all.
-pub fn worker_command() -> String {
-    format!("PATH={INSTALLED_BIN}:$PATH {WORKER_BINARY}")
+/// Two things about this are deliberate.
+///
+/// **`sh -c` rather than a bare `VAR=value` prefix.** ssh joins its arguments
+/// and hands the string to the *account's login shell*, whatever that is. csh,
+/// tcsh and fish all reject `VAR=value cmd` outright and exit without running
+/// anything — which arrives back here as an exit status this cannot tell apart
+/// from a worker that was never installed. Naming `sh` makes the syntax
+/// somebody else's shell has to accept a syntax we chose.
+///
+/// **The installed directory goes last.** A worker the operator put on the
+/// machine — a package, a binary in `/usr/local/bin` — is the one they meant,
+/// and Firetower's copy is only there because nothing else answered. This is
+/// what `install.rs` and `docs/host-execution.md` have always said; the code
+/// prepended, so an install that had gone wrong shadowed a worker that worked.
+///
+/// The script is single-quoted, so `$PATH` and `$HOME` reach the inner `sh`
+/// unexpanded and are that machine's rather than anything resolved here. `$0`
+/// takes the word after the script, hence the repeated binary name — without
+/// it `sh` would swallow `--stdio` as its own name.
+fn through_sh(args: &str) -> String {
+    format!(
+        "sh -c 'PATH=\"$PATH:{INSTALLED_BIN}\" exec {WORKER_BINARY} \"$@\"' {WORKER_BINARY} {args}"
+    )
+}
+
+/// Single-quote a path for the remote shell.
+fn quoted(path: &std::path::Path) -> String {
+    format!("'{}'", path.display().to_string().replace('\'', r"'\''"))
+}
+
+/// The command that starts a worker on the far end.
+///
+/// Inside a container there is no shell in front of it: `docker exec` takes a
+/// program and its arguments, so a `PATH=…` word ahead of the program name is
+/// read as a program *called* `PATH=…` and nothing runs. That is what broke
+/// every container-mode worker. A container's worker comes from its image
+/// anyway — [`crate::api::hosts::install_worker`] refuses to touch one — so
+/// there is nothing for the installed directory to add there.
+pub fn worker_command(containerised: bool, root: Option<&std::path::Path>) -> String {
+    let mut args = String::from("--stdio");
+    if let Some(root) = root {
+        args.push_str(&format!(" --root {}", quoted(root)));
+    }
+
+    if containerised {
+        format!("{WORKER_BINARY} {args}")
+    } else {
+        through_sh(&args)
+    }
+}
+
+/// What to ask a freshly installed worker, so a probe and a session resolve to
+/// the same binary.
+pub fn worker_probe() -> String {
+    through_sh("--version")
 }
 
 pub struct SshTransport {
@@ -526,11 +575,13 @@ impl Transport for SshTransport {
             ssh.arg("docker").arg("exec").arg("-i").arg(container);
         }
 
-        ssh.arg(worker_command()).arg("--stdio");
-
-        if let Some(root) = &self.root {
-            ssh.arg("--root").arg(root);
-        }
+        // One argument, because ssh joins them with spaces and hands the
+        // result to a shell anyway — and the quoting inside only survives if
+        // this side does not add its own.
+        ssh.arg(worker_command(
+            self.container.is_some(),
+            self.root.as_deref(),
+        ));
 
         let mut child = ssh
             .stdin(Stdio::piped())
@@ -776,19 +827,70 @@ mod tests {
     /// A worker Firetower installed is found without being on anybody's PATH,
     /// and a worker the operator installed still wins.
     #[test]
-    fn the_remote_command_looks_where_firetower_installs() {
-        let command = worker_command();
+    fn the_remote_command_looks_where_firetower_installs_last() {
+        let command = worker_command(false, None);
         assert!(
-            command.ends_with(&format!(" {WORKER_BINARY}")),
-            "the name asked for is unchanged: {command}"
+            command.contains(&format!("PATH=\"$PATH:{INSTALLED_BIN}\"")),
+            "appended, so an operator's own copy is the one that answers: {command}"
         );
         assert!(
-            command.starts_with(&format!("PATH={INSTALLED_BIN}:$PATH ")),
-            "installed last, so an operator's own copy is the one that answers: {command}"
+            !command.contains(&format!("PATH=\"{INSTALLED_BIN}")),
+            "never prepended — that shadows a worker somebody installed themselves: {command}"
         );
-        // Expanded by the account's shell, not by this process — a path
+        // Expanded by the shell on that machine, not by this process — a path
         // resolved here would be a path inside the control plane's container.
         assert!(command.contains("$HOME"), "{command}");
+    }
+
+    /// The account's login shell may be csh or fish, which reject
+    /// `VAR=value cmd` and exit without running anything.
+    #[test]
+    fn a_direct_host_is_asked_through_a_posix_shell() {
+        let command = worker_command(false, None);
+        assert!(command.starts_with("sh -c '"), "{command}");
+        // `$0` eats the word after the script, so the name has to be repeated
+        // or `--stdio` is swallowed as the shell's own name.
+        assert!(
+            command.ends_with(&format!("' {WORKER_BINARY} --stdio")),
+            "{command}"
+        );
+    }
+
+    /// `docker exec` takes a program, not a shell line: a `PATH=…` word in
+    /// front of the name is read as a program called `PATH=…`, and every
+    /// container-mode worker stopped answering.
+    #[test]
+    fn a_container_is_asked_for_the_program_and_nothing_else() {
+        let command = worker_command(true, None);
+        assert_eq!(command, format!("{WORKER_BINARY} --stdio"));
+        assert!(!command.contains("PATH="), "{command}");
+        assert!(!command.contains("sh -c"), "{command}");
+    }
+
+    /// The root the image uses, and any root with a space in it.
+    #[test]
+    fn a_root_is_quoted_for_the_shell_on_the_other_side() {
+        let command = worker_command(
+            true,
+            Some(std::path::Path::new("/var/lib/firetower/worker")),
+        );
+        assert!(
+            command.ends_with("--stdio --root '/var/lib/firetower/worker'"),
+            "{command}"
+        );
+
+        let spaced = worker_command(false, Some(std::path::Path::new("/mnt/big disk/worker")));
+        assert!(spaced.contains("--root '/mnt/big disk/worker'"), "{spaced}");
+    }
+
+    /// Whatever answers a probe is what will answer a session.
+    #[test]
+    fn the_probe_resolves_the_same_binary_a_session_would() {
+        let probe = worker_probe();
+        let session = worker_command(false, None);
+        let script = |s: &str| s[s.find('\'').unwrap()..s.rfind('\'').unwrap()].to_string();
+        assert_eq!(script(&probe), script(&session));
+        assert!(probe.ends_with("--version"), "{probe}");
     }
 
     /// Every one of these is a mistake someone makes once, and each has to

@@ -10,7 +10,7 @@
       "name": "AGPL-3.0-only",
       "identifier": "AGPL-3.0-only"
     },
-    "version": "0.31.0"
+    "version": "0.32.0"
   },
   "paths": {
     "/api/v1/agent-accounts": {
@@ -6876,13 +6876,13 @@
       "Installed": {
         "type": "object",
         "description": "What answered after a worker was put there.",
-        "required": [
-          "version"
-        ],
         "properties": {
           "version": {
-            "type": "string",
-            "description": "What `firetower-worker --version` said on the machine."
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What `firetower-worker --version` said on the machine.\n\nAbsent when the copy succeeded and the probe did not answer. The\ninstall still happened; the supervisor's next connection is the verdict."
           }
         }
       },

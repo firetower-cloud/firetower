@@ -440,7 +440,10 @@ async fn seen(state: &AppState, mut host: Host) -> Host {
 #[serde(rename_all = "camelCase")]
 pub struct Installed {
     /// What `firetower-worker --version` said on the machine.
-    pub version: String,
+    ///
+    /// Absent when the copy succeeded and the probe did not answer. The
+    /// install still happened; the supervisor's next connection is the verdict.
+    pub version: Option<String>,
 }
 
 /// Put a worker on this machine.

@@ -90,14 +90,12 @@ export function WhereItRuns({
   const onlyMode = local
     ? (machine?.hosts.map(executionOf).find(Boolean) ?? "container")
     : undefined;
-  const has = (mode: Execution) => (machine?.hosts ?? []).some((h) => executionOf(h) === mode);
-  // Landing on a machine lands on a mode it actually runs. Only choosing the
-  // other one asks for it to be made.
-  const execution =
-    onlyMode ??
-    (where.picked || has(where.execution)
-      ? where.execution
-      : (modesOn(machine)[0] ?? where.execution));
+  // Landing on a machine lands on Container unless that machine only runs on
+  // the host. Container is the answer for almost everybody — the agent gets the
+  // image's tools rather than whatever happens to be on someone's VM — and
+  // `modesOn` returned whichever environment the list happened to hold first,
+  // so which mode you landed on depended on row order.
+  const execution = onlyMode ?? (where.picked ? where.execution : defaultMode(machine));
 
   const here = (machine?.hosts ?? []).filter((h) => executionOf(h) === execution);
   const host = where.hostId
@@ -330,6 +328,18 @@ export function nameFor(hosts: Host[], address: string, execution: Execution): s
   }
 }
 
+/**
+ * The mode a machine opens on, before anybody picks.
+ *
+ * Container, unless the machine has a host environment and no container one.
+ * A machine with neither is new, and a new machine's first environment should
+ * be a container too.
+ */
+export function defaultMode(machine: Machine | undefined): Execution {
+  const modes = modesOn(machine);
+  return modes.length === 1 && modes[0] === "host" ? "host" : "container";
+}
+
 /** Which environment the form would actually use, for the caller's own checks. */
 export function resolve(hosts: Host[], where: Where): { machine?: Machine; host?: Host } {
   const all = machines(hosts);
@@ -337,9 +347,9 @@ export function resolve(hosts: Host[], where: Where): { machine?: Machine; host?
   const modes = modesOn(machine);
   const execution = isLocal(machine)
     ? (modes[0] ?? where.execution)
-    : where.picked || modes.includes(where.execution)
+    : where.picked
       ? where.execution
-      : (modes[0] ?? where.execution);
+      : defaultMode(machine);
   const here = (machine?.hosts ?? []).filter((h) => executionOf(h) === execution);
   return {
     machine,

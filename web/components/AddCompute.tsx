@@ -15,30 +15,34 @@ import { parseDestination } from "@/src/api/environments";
 /**
  * Adding a machine.
  *
- * ## What this stopped asking
+ * ## What it asks, and what it stopped asking
  *
- * It used to ask five questions: this server or a remote one, container or
- * directly on host, a name for the *environment*, an address, an account, and —
- * for a container — its name. Every one of those except the address was either
- * already answered on the form that opened this, or is not a question about a
- * machine at all:
+ * Three fields about the machine — where it is, who to connect as, and what to
+ * call the container when one is used — plus the key it has to be given.
  *
- * * **Container or host** is a mode, chosen per workspace, on the machine. Both
- *   are available on everything Firetower can reach.
- * * **This server or remote** was only ever about ssh-ing to the machine
+ * The address and the account were briefly one box taking `editor@10.0.4.7`.
+ * They are two things: an address is where, an account is who, and a form is
+ * clearer when it says so. The single box also quietly dropped the container
+ * name, which left no way to point Firetower at a container called anything
+ * other than `firetower-worker`. Pasting a whole destination into the address
+ * still works — `parseDestination` splits it and the server prefers a field
+ * somebody filled in over one it parsed.
+ *
+ * Two questions did go, and stay gone:
+ *
+ * * **Container or directly on host** is a mode, chosen per workspace, on the
+ *   machine. Both are available on everything Firetower can reach, so asking
+ *   here meant adding the same machine twice to get both.
+ * * **This server or a remote one** was only ever about ssh-ing to the machine
  *   Firetower is already on. It does not.
- * * **The account** belongs to the address. `Compute::Server` treats `user` as
- *   optional and defers to your ssh config when it is absent, so a second field
- *   could only disagree with the first — and `editor@10.0.4.7` is what people
- *   paste anyway.
- * * **The name** is what you call it, and if you call it nothing it is called
- *   where it is. The server fills it in from the address.
- *
- * What is left is one address, an optional name, and the key the machine has to
- * be given — which is the one part of this nothing here can do.
  */
+/** The container to look for, and the only one anybody has to type. */
+const DEFAULT_CONTAINER = "firetower-worker";
+
 export function AddCompute({ onClose }: { onClose: () => void }) {
   const [address, setAddress] = useState("");
+  const [user, setUser] = useState("");
+  const [container, setContainer] = useState(DEFAULT_CONTAINER);
   const [label, setLabel] = useState("");
   const [keyPath, setKeyPath] = useState("");
   const [ownKey, setOwnKey] = useState(false);
@@ -47,7 +51,10 @@ export function AddCompute({ onClose }: { onClose: () => void }) {
   const create = useCreateHost();
   const probe = useProbeHost();
   const busy = create.isPending || probe.isPending;
+  // Only so the form can show what it made of a pasted destination. The server
+  // parses the address itself and prefers the account field when it has one.
   const typed = parseDestination(address);
+  const account = user.trim() || typed.user || "";
   const ready = !!typed.host;
 
   const edit =
@@ -57,28 +64,47 @@ export function AddCompute({ onClose }: { onClose: () => void }) {
       setter(value);
     };
 
-  // One environment, reached directly on the machine. A container on it is the
-  // same connection with `docker exec` in front, and is made when somebody
-  // picks that mode — not here, on a form about where the machine is.
+  // The environment made here is the one reached directly on the machine. The
+  // container on it is the same connection with `docker exec` in front, and is
+  // made when somebody picks that mode — but the *name* to use has to be
+  // collected now, because nothing later asks for it.
   const body = () => ({
     name: label.trim() || undefined,
     compute: {
       type: "Server",
       host: address.trim(),
+      user: user.trim() || undefined,
       key: ownKey && keyPath.trim() ? { type: "File", path: keyPath.trim() } : { type: "Managed" },
     } as Compute,
   });
 
-  const save = () =>
-    create.mutate(
-      { data: body() },
-      {
-        onSuccess: async () => {
-          await cache.invalidateQueries({ queryKey: getListHostsQueryKey() });
-          onClose();
-        },
-      },
-    );
+  // Both environments, in one go.
+  //
+  // A machine is a place and the two ways of running on it are modes, so a
+  // machine that has just been added should have both — otherwise picking
+  // Container in New workspace has to invent one, and the name typed above
+  // would have nowhere to live. The container is created rather than probed:
+  // whether it is running is a question for the moment somebody picks it, and
+  // it is the one HostReadiness already answers.
+  const save = async () => {
+    await create.mutateAsync({ data: body() });
+    const named = container.trim();
+    if (named) {
+      const base = label.trim() || typed.host;
+      await create
+        .mutateAsync({
+          data: {
+            name: `${base} · container`,
+            compute: { ...body().compute, container: named } as Compute,
+          },
+        })
+        // A machine that is added and a second environment that is not is
+        // still a machine that is added. Picking Container makes one.
+        .catch(() => {});
+    }
+    await cache.invalidateQueries({ queryKey: getListHostsQueryKey() });
+    onClose();
+  };
 
   const add = () =>
     probe.mutate(
@@ -94,15 +120,40 @@ export function AddCompute({ onClose }: { onClose: () => void }) {
   return (
     <Modal title="Add a machine" onClose={onClose} wide>
       <Field
-        label="SSH address"
+        label="IP address or hostname"
         autoFocus
         value={address}
         onChange={edit(setAddress)}
-        placeholder="editor@192.0.2.10"
+        placeholder="192.0.2.10"
       >
-        Where it is, and who to connect as. <code className="font-mono">user@host</code>, with{" "}
-        <code className="font-mono">:2222</code> for a port that is not 22. Left off, the account is
-        whatever your ssh config says.
+        Reachable from Firetower. Add <code className="font-mono">:2222</code> for a port that is
+        not 22. A whole <code className="font-mono">user@host</code> destination can be pasted here
+        and it comes apart on its own.
+      </Field>
+
+      <Field
+        label="SSH account"
+        optional
+        value={user}
+        onChange={edit(setUser)}
+        placeholder={typed.user || "editor"}
+      >
+        Who to connect as. Directly on the host, the worker and its agents run as this account with
+        its permissions; for a container, it is the account that runs{" "}
+        <code className="font-mono">docker exec</code>. Left blank, it is whatever your ssh config
+        says.
+      </Field>
+
+      <Field
+        label="Container name"
+        optional
+        value={container}
+        onChange={edit(setContainer)}
+        placeholder={DEFAULT_CONTAINER}
+      >
+        Which container to run agents in, when this machine is used in Container mode. Leave it as{" "}
+        <code className="font-mono">{DEFAULT_CONTAINER}</code> unless yours is called something
+        else.
       </Field>
 
       <Field
@@ -120,12 +171,13 @@ export function AddCompute({ onClose }: { onClose: () => void }) {
         onOwnKey={setOwnKey}
         keyPath={keyPath}
         onKeyPath={edit(setKeyPath)}
-        user={typed.user ?? ""}
+        user={account}
       />
 
       <p className="mt-3 text-meta leading-[1.5] text-mute">
-        Both ways of running are then available on it — in a worker container, or on the machine
-        itself. Firetower checks whichever you pick, when you pick it, and says what is missing.
+        Both ways of running are then available on it — in the worker container named above, or on
+        the machine itself. Firetower checks whichever you pick, when you pick it, and says what is
+        missing.
       </p>
 
       {(create.error || probe.error) && (

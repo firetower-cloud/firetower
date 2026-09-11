@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.31.0
+ * OpenAPI spec version: 0.32.0
  */
 import * as zod from 'zod';
 
@@ -446,7 +446,7 @@ export const InstallWorkerParams = zod.object({
 })
 
 export const InstallWorkerResponse = zod.object({
-  "version": zod.string().describe('What `firetower-worker --version` said on the machine.')
+  "version": zod.string().nullish().describe('What `firetower-worker --version` said on the machine.\n\nAbsent when the copy succeeded and the probe did not answer. The\ninstall still happened; the supervisor\'s next connection is the verdict.')
 }).describe('What answered after a worker was put there.')
 
 /**
