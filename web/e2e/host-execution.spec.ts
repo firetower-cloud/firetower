@@ -15,21 +15,18 @@ const fixtureHosts = [
     execution: "container",
   },
   {
-    id: "local-host",
-    name: "Local host",
+    // Added as a machine of its own, which is what an ssh connection to the
+    // box underneath is. It used to be folded into "this server" and shown as
+    // that machine's other mode.
+    id: "underneath",
+    name: "Control VM",
     compute: ssh("control-vm"),
     machine: "local",
     execution: "host",
   },
   {
-    id: "remote-container",
-    name: "Video container",
-    compute: ssh("video-vm", "worker"),
-    execution: "container",
-  },
-  {
     id: "remote-host",
-    name: "Video host",
+    name: "video-vm",
     compute: ssh("video-vm"),
     execution: "host",
   },
@@ -43,13 +40,25 @@ const fixtureHosts = [
   workerVersion: "test",
 }));
 
+type State = {
+  missing: boolean;
+  noWorker: boolean;
+  hosts: Record<string, unknown>[];
+  launches: Record<string, unknown>[];
+  added: Record<string, unknown>[];
+  installed: string[];
+  checked: string[];
+};
+
 async function fixture(page: Page) {
-  const state = {
+  const state: State = {
     missing: false,
+    noWorker: false,
     hosts: [...fixtureHosts],
-    launches: [] as Record<string, unknown>[],
-    added: [] as Record<string, unknown>[],
-    checked: [] as string[],
+    launches: [],
+    added: [],
+    installed: [],
+    checked: [],
   };
   await page.addInitScript(() => localStorage.setItem("firetower.token", "test-host-execution"));
   await page.route("**/api/v1/**", async (route) => {
@@ -58,33 +67,43 @@ async function fixture(page: Page) {
     const path = url.pathname;
     if (path.endsWith("/readiness")) {
       state.checked.push(path);
+      if (state.noWorker) {
+        return route.fulfill({
+          json: {
+            checks: [
+              {
+                name: "Worker connection",
+                available: false,
+                required: true,
+                detail: "The worker is not connected.",
+                remedy: "Install the matching firetower-worker binary.",
+              },
+            ],
+          },
+        });
+      }
       return route.fulfill({
         json: {
           user: "editor",
           checks: [
-            {
-              name: "Firetower worker",
-              available: true,
-              required: true,
-              detail: "test",
-            },
+            { name: "Firetower worker", available: true, required: true, detail: "test" },
             { name: "Git", available: true, required: true, detail: "git" },
             {
               name: "tmux",
               available: !state.missing,
               required: true,
               detail: state.missing ? "Not installed" : "tmux",
-              remedy: "Install tmux on the selected machine.",
+              remedy: "sudo apt install tmux",
             },
-            {
-              name: "npm",
-              available: false,
-              required: false,
-              detail: "Optional",
-            },
+            { name: "npm", available: false, required: false, detail: "Optional" },
           ],
         },
       });
+    }
+    if (path.endsWith("/worker") && request.method() === "POST") {
+      state.installed.push(path);
+      state.noWorker = false;
+      return route.fulfill({ json: { version: "test" } });
     }
     if (path.endsWith("/hosts/probe"))
       return route.fulfill({ json: { reached: true, diagnosis: null } });
@@ -92,10 +111,14 @@ async function fixture(page: Page) {
       if (request.method() === "POST") {
         const body = request.postDataJSON();
         state.added.push(body);
-        return route.fulfill({
-          status: 201,
-          json: { ...fixtureHosts[1], ...body, id: "new-host" },
-        });
+        const made = {
+          ...fixtureHosts[2],
+          ...body,
+          id: `made-${state.added.length}`,
+          execution: body.compute?.container ? "container" : "host",
+        };
+        state.hosts.push(made);
+        return route.fulfill({ status: 201, json: made });
       }
       return route.fulfill({ json: state.hosts });
     }
@@ -112,7 +135,9 @@ async function fixture(page: Page) {
             signsInWithACode: false,
             hosts: state.hosts.map((h) => ({
               hostId: h.id,
+              hostName: h.name,
               installed: true,
+              coveredByToken: true,
               version: "test",
             })),
           },
@@ -147,6 +172,11 @@ async function openLaunch(page: Page) {
   await page.getByRole("button", { name: "New workspace", exact: true }).first().click();
   await page.getByPlaceholder("auth refactor").fill("Host execution test");
 }
+
+const machine = (page: Page) => page.getByLabel("Machine", { exact: true });
+const mode = (page: Page, which: "Container" | "Directly on host") =>
+  page.getByRole("button", { name: which, exact: true });
+const launch = (page: Page) => page.getByRole("button", { name: /Create workspace/ });
 
 test("a host filesystem repository can be connected before choosing its machine", async ({
   page,
@@ -183,90 +213,124 @@ test("a host filesystem repository can be connected before choosing its machine"
   expect(probed).toBe(false);
 });
 
-for (const machine of ["local", "remote"] as const) {
-  for (const mode of ["container", "host"] as const) {
-    test(`launch selects ${mode} execution on the ${machine} machine`, async ({ page }) => {
-      const state = await fixture(page);
-      await openLaunch(page);
-      await page
-        .getByLabel("Machine", { exact: true })
-        .selectOption(machine === "local" ? "local" : "ssh:video-vm:22");
-      await page
-        .getByRole("radio", {
-          name: mode === "container" ? "Container" : "Directly on host",
-          exact: true,
-        })
-        .check();
-      await expect(page.getByRole("region", { name: "Environment readiness" })).toContainText(
-        "Runs as editor",
-      );
-      const launch = page.getByRole("button", { name: /Create workspace/ });
-      await expect(launch).toBeEnabled();
-      if (machine === "local" && mode === "host") {
-        await page.screenshot({ path: test.info().outputPath("native-launch.png") });
-      }
-      await launch.click();
-      await expect.poll(() => state.launches.length).toBe(1);
-      expect(state.launches[0].hostId).toBe(`${machine}-${mode}`);
-      expect(state.checked).toContain(`/api/v1/hosts/${machine}-${mode}/readiness`);
-    });
-  }
+/**
+ * The machine hosting Firetower runs agents where the control plane runs. There
+ * is no second answer, so there is no choice — and the ssh connection to the
+ * machine underneath is its own machine rather than this one's other mode.
+ */
+test("this server states its one way of running instead of offering two", async ({ page }) => {
+  const state = await fixture(page);
+  await openLaunch(page);
+  await machine(page).selectOption("local");
+
+  await expect(page.getByText("the Firetower container", { exact: true })).toBeVisible();
+  await expect(mode(page, "Directly on host")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /Add it as a machine/ })).toBeVisible();
+
+  await expect(launch(page)).toBeEnabled();
+  await launch(page).click();
+  await expect.poll(() => state.launches.length).toBe(1);
+  expect(state.launches[0].hostId).toBe("local-container");
+});
+
+test("the machine underneath is listed as a machine of its own", async ({ page }) => {
+  await fixture(page);
+  await openLaunch(page);
+  await expect(machine(page).locator("option")).toContainText([
+    "This server — alongside Firetower",
+    "Control VM · editor@control-vm",
+    "video-vm · editor@video-vm",
+    "+ Add a machine…",
+  ]);
+});
+
+for (const which of ["container", "host"] as const) {
+  test(`launch selects ${which} execution on a remote machine`, async ({ page }) => {
+    const state = await fixture(page);
+    await openLaunch(page);
+    await machine(page).selectOption("ssh:video-vm:22");
+    await mode(page, which === "container" ? "Container" : "Directly on host").click();
+
+    await expect(page.getByText("Ready — runs as editor", { exact: false })).toBeVisible();
+    await expect(launch(page)).toBeEnabled();
+    await launch(page).click();
+    await expect.poll(() => state.launches.length).toBe(1);
+
+    if (which === "host") {
+      expect(state.launches[0].hostId).toBe("remote-host");
+      expect(state.added).toHaveLength(0);
+    } else {
+      // Never used on this machine before, so it was made when it was picked —
+      // with the connection the machine already has, and no second form.
+      expect(state.added).toHaveLength(1);
+      expect(state.added[0]).toMatchObject({
+        compute: { type: "Server", host: "video-vm", user: "editor", container: "firetower-worker" },
+      });
+      expect(state.added[0].sameMachine).toBeUndefined();
+      expect(state.launches[0].hostId).toBe("made-1");
+    }
+  });
 }
 
-test("missing requirements block launch and rechecking after manual installation enables it", async ({
-  page,
-}) => {
+test("what is ready is one line, and what is missing is itemised", async ({ page }) => {
   const state = await fixture(page);
-  state.missing = true;
   await openLaunch(page);
-  await page.getByRole("radio", { name: "Directly on host", exact: true }).check();
-  const launch = page.getByRole("button", { name: /Create workspace/ });
-  await expect(page.getByRole("region", { name: "Environment readiness" })).toContainText(
-    "Install tmux on the selected machine",
-  );
-  await expect(launch).toBeDisabled();
-  await page.getByText("Setup instructions", { exact: true }).click();
-  await expect(page.getByText("Docker is optional.", { exact: false })).toBeVisible();
-  state.missing = false;
-  await page.getByRole("button", { name: "Check again", exact: true }).click();
-  await expect(launch).toBeEnabled();
+  await machine(page).selectOption("ssh:video-vm:22");
+
+  await expect(page.getByText("Ready — runs as editor", { exact: false })).toBeVisible();
+  // Not eight rows of things that are fine on a form filled in twenty times a day.
+  await expect(page.getByText("4 checks")).toBeVisible();
+  await expect(page.getByText("git", { exact: true })).toHaveCount(0);
+
+  await page.getByRole("button", { name: /4 checks/ }).click();
+  await expect(page.getByText("git", { exact: true })).toBeVisible();
   expect(state.launches).toHaveLength(0);
 });
 
-test("an unconfigured host environment offers setup without falling back to a container", async ({
-  page,
-}) => {
+test("missing requirements block launch, and the footer says which", async ({ page }) => {
   const state = await fixture(page);
-  state.hosts = state.hosts.filter((h) => h.id !== "local-host");
+  state.missing = true;
   await openLaunch(page);
-  await page.getByRole("radio", { name: "Directly on host", exact: true }).check();
-  await expect(page.getByRole("button", { name: /Create workspace/ })).toBeDisabled();
-  await page.getByRole("button", { name: "Set up an execution environment" }).click();
-  await page.getByLabel("Environment name", { exact: true }).fill("Local native");
-  await page.getByLabel("SSH address", { exact: true }).fill("control-vm");
-  await page.getByLabel("SSH account", { exact: true }).fill("editor");
-  await page.getByRole("button", { name: "Check and add" }).click();
-  await expect.poll(() => state.added.length).toBe(1);
-  expect(state.added[0]).toMatchObject({
-    sameMachine: true,
-    compute: { type: "Server", host: "control-vm", user: "editor" },
-  });
-  expect((state.added[0].compute as Record<string, unknown>).container).toBeUndefined();
+  await machine(page).selectOption("ssh:video-vm:22");
+
+  await expect(page.getByText("One thing is missing on editor@video-vm")).toBeVisible();
+  await expect(page.getByText("sudo apt install tmux")).toBeVisible();
+  // What passed, collapsed into one line rather than listed.
+  await expect(page.getByText("Firetower worker, Git — all fine.")).toBeVisible();
+  // The disabled button and the sentence beside it now say the same thing.
+  await expect(page.getByText("tmux missing above", { exact: false })).toBeVisible();
+  await expect(launch(page)).toBeDisabled();
+
+  state.missing = false;
+  await page.getByRole("button", { name: "Check again", exact: true }).click();
+  await expect(launch(page)).toBeEnabled();
   expect(state.launches).toHaveLength(0);
+});
+
+test("a machine with no worker is offered one rather than a build command", async ({ page }) => {
+  const state = await fixture(page);
+  state.noWorker = true;
+  await openLaunch(page);
+  await machine(page).selectOption("ssh:video-vm:22");
+
+  await expect(page.getByText("There is no worker on editor@video-vm yet")).toBeVisible();
+  await expect(page.getByText("cargo build", { exact: false })).toHaveCount(0);
+  await expect(launch(page)).toBeDisabled();
+
+  await page.getByRole("button", { name: "Install the worker" }).click();
+  await expect.poll(() => state.installed).toContain("/api/v1/hosts/remote-host/worker");
+  await expect(launch(page)).toBeEnabled();
 });
 
 test("losing the selected environment never switches the launch to another worker", async ({
   page,
 }) => {
   const state = await fixture(page);
-  state.hosts.push({ ...fixtureHosts[1], id: "local-backup", name: "Backup host connection" });
   await openLaunch(page);
-  await page.getByRole("radio", { name: "Directly on host", exact: true }).check();
-  await expect(page.getByRole("button", { name: /Create workspace/ })).toBeEnabled();
-  state.hosts = state.hosts.filter((h) => h.id !== "local-host");
-  await expect(page.getByRole("button", { name: /Create workspace/ })).toBeDisabled({
-    timeout: 10000,
-  });
-  await expect(page.getByRole("radio", { name: "Directly on host", exact: true })).toBeChecked();
+  await machine(page).selectOption("ssh:video-vm:22");
+  await expect(launch(page)).toBeEnabled();
+
+  state.hosts = state.hosts.filter((h) => h.id !== "remote-host");
+  await expect(launch(page)).toBeDisabled({ timeout: 10000 });
   expect(state.launches).toHaveLength(0);
 });

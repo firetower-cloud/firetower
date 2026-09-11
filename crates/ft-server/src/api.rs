@@ -240,6 +240,7 @@ async fn credential_for(
         ft_core::SshKey,
         crate::sshkey::PublicIdentity,
         hosts::Reached,
+        hosts::Installed,
         forwards::Ports,
         forwards::PreviewAddress,
         forwards::NewForward,
@@ -288,6 +289,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(hosts::rename_host))
         .routes(routes!(hosts::connect_host))
         .routes(routes!(hosts::host_readiness))
+        .routes(routes!(hosts::install_worker))
         .routes(routes!(hosts::drain_host))
         .routes(routes!(hosts::ssh_key))
         .routes(routes!(hosts::probe_host))

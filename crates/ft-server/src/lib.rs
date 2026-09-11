@@ -16,6 +16,7 @@ pub mod db;
 pub mod diagnose;
 pub mod fleet;
 pub mod forward;
+pub mod install;
 pub mod notify;
 pub mod oauth;
 pub mod preview;

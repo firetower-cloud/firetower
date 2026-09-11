@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.30.1
+ * OpenAPI spec version: 0.31.0
  */
 
 export * from './accessEntry';
@@ -78,6 +78,7 @@ export * from './hostReadinessParams';
 export * from './hostState';
 export * from './hostTarget';
 export * from './installAgent';
+export * from './installed';
 export * from './itemId';
 export * from './itemKind';
 export * from './itemStatus';

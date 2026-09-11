@@ -15,8 +15,8 @@ import {
 import { group } from "@/src/api/workspaces";
 import { holdsHost } from "@/src/api/view";
 import { Share } from "@/src/api/generated/model";
-import type { Agent, AgentView, Host, Repo } from "@/src/api/generated/model";
-import { AgentMark, AGENT_LABEL } from "@/components/AgentMark";
+import type { Agent, AgentView, Host, Readiness, Repo } from "@/src/api/generated/model";
+import { AGENT_LABEL } from "@/components/AgentMark";
 import { slugify } from "@/src/api/slug";
 import { leaveDraft } from "@/src/workspace/draft";
 import { ConnectRepo } from "@/components/ConnectRepo";
@@ -24,9 +24,9 @@ import { getListReposQueryKey } from "@/src/api/generated/repos/repos";
 import { Modal } from "@/components/Modal";
 import { useRouter } from "next/navigation";
 import { AddCompute } from "./AddCompute";
-import { HostReadiness, isReady } from "./HostReadiness";
-import { machines, executionOf, environmentLabel, executionLabel } from "@/src/api/environments";
-import type { Execution } from "@/src/api/generated/model";
+import { isReady } from "./HostReadiness";
+import { WhereItRuns, canRun, resolve, type Where } from "./WhereItRuns";
+import { environmentLabel, executionLabel } from "@/src/api/environments";
 
 /**
  * The form, in the dialog it always opens in.
@@ -103,11 +103,16 @@ export function NewWorkspace({
   const [checkouts, setCheckouts] = useState<{ id: string; slug: string; base?: string }[]>([]);
   const accounts = useAccounts();
   const [accountId, setAccountId] = useState("");
-  const [agent, setAgent] = useState<Agent | "">("");
-  const [hostId, setHostId] = useState("");
-  const [machineId, setMachineId] = useState("");
-  const [execution, setExecution] = useState<Execution | "">("");
-  const [settingUp, setSettingUp] = useState(false);
+  // Machine, mode, environment and agent are one answer to one question, so
+  // they are one value. Kept here rather than inside the block because what is
+  // launched is this screen's business, and the block is a control.
+  const [where, setWhere] = useState<Where>({
+    machine: "",
+    execution: "container",
+    hostId: "",
+    agent: "",
+  });
+  const [addingMachine, setAddingMachine] = useState(false);
   const [share, setShare] = useState<Share>(Share.equal);
   const [adding, setAdding] = useState(false);
 
@@ -134,30 +139,10 @@ export function NewWorkspace({
     if (match) setCheckouts([{ id: match.id, slug: match.slug }]);
   }
 
-  // Where first, then what: the machine decides which agents are available, so
-  // asking the other way round means the machine you picked can vanish from its
-  // own list. A host that is not answering stays — "we cannot see your compute
-  // this second" is a different thing from "you have none".
+  // A host that is not answering stays in the list — "we cannot see your
+  // compute this second" is a different thing from "you have none".
   const hosts = allHosts.filter((h) => !h.drained);
-  const machineChoices = machines(hosts);
-  const selectedMachine =
-    machineChoices.find((m) => m.key === machineId) ?? (machineId ? undefined : machineChoices[0]);
-  const selectedExecution =
-    execution ||
-    (selectedMachine?.hosts[0] ? executionOf(selectedMachine.hosts[0]) : undefined) ||
-    "container";
-  const environments =
-    selectedMachine?.hosts.filter((h) => executionOf(h) === selectedExecution) ?? [];
-  // Never fall back to another environment after an explicit selection goes away.
-  const host =
-    environments.find((h) => h.id === hostId) ??
-    (hostId ? undefined : (environments.find((h) => h.state === "Online") ?? environments[0]));
-  // Remember defaults as actual selections, so a later fleet refresh cannot
-  // move a form somebody is already filling out to a different worker.
-  if (!machineId && selectedMachine) setMachineId(selectedMachine.key);
-  if (!execution && selectedMachine) setExecution(selectedExecution);
-  if (!hostId && host) setHostId(host.id);
-  const setupAddress = selectedMachine?.hosts.find((h) => h.compute.type === "Server")?.compute;
+  const { host } = resolve(hosts, where);
 
   // What is already running where this would go, one entry per workspace —
   // two agents in one place share its cgroup and would otherwise be counted as
@@ -170,11 +155,10 @@ export function NewWorkspace({
     : [];
 
   const runsHere = (a: AgentView) => (host ? canRun(a, host.id) : false);
-  const choices = [...agents].sort((a, b) => Number(runsHere(b)) - Number(runsHere(a)));
-  const chosenKind = (agent || choices.find(runsHere)?.kind || choices[0]?.kind) as
-    | Agent
-    | undefined;
-  const chosen = choices.find((c) => c.kind === chosenKind);
+  const chosenKind = (where.agent ||
+    agents.find(runsHere)?.kind ||
+    agents[0]?.kind) as Agent | undefined;
+  const chosen = agents.find((c) => c.kind === chosenKind);
 
   const readiness = useHostReadiness(
     host?.id ?? "",
@@ -304,95 +288,14 @@ export function NewWorkspace({
         </Row>
       )}
 
-      <Row label="Machine">
-        <select
-          aria-label="Machine"
-          value={selectedMachine?.key ?? ""}
-          onChange={(e) => {
-            setMachineId(e.target.value);
-            setHostId("");
-          }}
-          className="w-full rounded-md border border-line bg-ground px-3 py-2 text-ui text-bone"
-        >
-          {!selectedMachine && <option value="">Choose a machine</option>}
-          {machineChoices.map((m) => (
-            <option key={m.key} value={m.key}>
-              {m.label}
-            </option>
-          ))}
-        </select>
-      </Row>
-      <fieldset>
-        <legend className="mb-1.5 text-meta text-dim">Run in</legend>
-        <div className="flex gap-3">
-          {(["container", "host"] as const).map((value) => (
-            <label key={value} className="flex items-center gap-2 text-meta text-dim">
-              <input
-                type="radio"
-                name="execution"
-                value={value}
-                checked={selectedExecution === value}
-                onChange={() => {
-                  setExecution(value);
-                  setHostId("");
-                }}
-              />
-              {value === "container" ? "Container" : "Directly on host"}
-            </label>
-          ))}
-        </div>
-      </fieldset>
-      {environments.length > 0 && (
-        <Row label="Environment">
-          <select
-            aria-label="Environment"
-            value={host?.id ?? ""}
-            onChange={(e) => setHostId(e.target.value)}
-            className="w-full rounded-md border border-line bg-ground px-3 py-2 text-ui text-bone"
-          >
-            {!host && <option value="">Choose an environment</option>}
-            {environments.map((h) => (
-              <option key={h.id} value={h.id}>
-                {environmentLabel(h)}
-                {h.state !== "Online" ? " — unreachable" : ""}
-              </option>
-            ))}
-          </select>
-        </Row>
-      )}
-      {!host && (
-        <p className="text-meta text-mute">
-          This execution environment is not configured or available on the selected machine.
-        </p>
-      )}
-      <button
-        type="button"
-        onClick={() => setSettingUp(true)}
-        className="self-start text-meta text-slate"
-      >
-        Set up an execution environment
-      </button>
-      <Row label="Agent">
-        <Select
-          value={chosen ? agentLabel(chosen, runsHere(chosen)) : "no agent"}
-          options={choices.length ? choices.map((c) => agentLabel(c, runsHere(c))) : ["no agent"]}
-          onChange={(v) =>
-            setAgent(choices.find((c) => agentLabel(c, runsHere(c)) === v)?.kind ?? "")
-          }
-          glyph={chosenKind ? <AgentMark agent={chosenKind} size={13} /> : undefined}
-        />
-      </Row>
-      {host && <HostReadiness key={host.id} host={host} agent={chosenKind} />}
-      {settingUp && (
-        <AddCompute
-          initial={{
-            sameMachine: selectedMachine?.key === "local",
-            address: setupAddress?.type === "Server" ? setupAddress.host : undefined,
-            execution: selectedExecution,
-          }}
-          onClose={() => setSettingUp(false)}
-        />
-      )}
+      <WhereItRuns
+        hosts={hosts}
+        agents={agents}
+        where={where}
+        onChange={setWhere}
+        onAddMachine={() => setAddingMachine(true)}
+      />
+      {addingMachine && <AddCompute onClose={() => setAddingMachine(false)} />}
 
       <Row label="Account">
         <select
@@ -452,6 +355,8 @@ export function NewWorkspace({
             chosen,
             host,
             repos: checkouts.length,
+            readiness: readiness.data,
+            checking: readiness.isFetching,
           })}
         </p>
         <button
@@ -601,38 +506,6 @@ function Row({
       </span>
       {children}
     </label>
-  );
-}
-
-/** A native select wearing the same clothes as the inputs beside it. */
-function Select({
-  value,
-  options,
-  onChange,
-  glyph,
-}: {
-  value: string;
-  options: string[];
-  onChange: (value: string) => void;
-  glyph?: React.ReactNode;
-}) {
-  return (
-    <span className="relative flex items-center gap-2 rounded-md border border-line bg-ground px-3 py-2 transition-colors hover:border-mute/60">
-      {glyph && <span className="shrink-0 text-mute">{glyph}</span>}
-      <span className="min-w-0 flex-1 truncate text-meta text-bone">{value}</span>
-      <span aria-hidden className="shrink-0 text-micro text-mute">
-        ▾
-      </span>
-      <select
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="absolute inset-0 cursor-pointer opacity-0"
-      >
-        {options.map((o) => (
-          <option key={o}>{o}</option>
-        ))}
-      </select>
-    </span>
   );
 }
 
@@ -791,28 +664,6 @@ function RepoChip({
 }
 
 /**
- * Whether this agent could run on this particular host.
- *
- * Authentication is per host, not global: a subscription lives in the agent's
- * own config on the machine it was signed in on, so one host being logged in
- * says nothing about another. Only a token we hold travels.
- */
-function canRun(agent: AgentView, hostId: string) {
-  const here = agent.hosts.find((h) => h.hostId === hostId);
-  if (!here?.installed) return false;
-  if (!agent.needsCredential) return true;
-  return here.loggedIn === true || agent.credentialSet;
-}
-
-/**
- * Marked rather than hidden: disappearing from a list looks like the thing does
- * not exist, and leaves nowhere to learn what is missing.
- */
-function agentLabel(agent: AgentView, runsHere: boolean) {
-  return runsHere ? agent.label : `${agent.label} · unavailable here`;
-}
-
-/**
  * Whether a machine can take work.
  *
  * Reconnecting counts, but only for one that has worked before: a host with
@@ -842,11 +693,15 @@ function why({
   chosen,
   host,
   repos,
+  readiness,
+  checking,
 }: {
   hosts: number;
   chosen?: AgentView;
   host?: Host;
   repos: number;
+  readiness?: Readiness;
+  checking: boolean;
 }) {
   if (hosts === 0) return "You have no compute. Add a machine first.";
   if (!chosen) return "No agent to run. Install one on a host.";
@@ -856,6 +711,23 @@ function why({
       installed
         ? "it has no credentials there. Give it a token on the Agents screen; this machine being signed in doesn't cover other hosts."
         : "it isn't installed there."
+    }`;
+  }
+  // The button is disabled while something above is missing, and a disabled
+  // button beside a sentence about something else reads as a broken form
+  // rather than a blocked one. So this says the same thing the block says.
+  if (!isReady(readiness)) {
+    const missing = (readiness?.checks ?? [])
+      .filter((c) => c.required && !c.available)
+      .map((c) => c.name);
+    if (checking && missing.length === 0) return `Checking ${where(host)}…`;
+    // The worker connection is not a requirement anybody recognises by name —
+    // it is the machine having no worker on it, which the block says plainly.
+    if (missing.length === 1 && missing[0] === "Worker connection") {
+      return `${where(host)} has no worker on it yet. Install one above.`;
+    }
+    return `${chosen.label} can't start on ${where(host)} yet${
+      missing.length ? ` — ${missing.join(", ")} missing above.` : "."
     }`;
   }
   if (repos === 0) {

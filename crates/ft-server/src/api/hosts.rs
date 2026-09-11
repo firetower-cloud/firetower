@@ -57,22 +57,7 @@ pub(super) async fn create_host(
 
     let compute = settled(req.compute)?;
 
-    let name = match req.name.as_deref().map(str::trim).filter(|n| !n.is_empty()) {
-        Some(given) => given.to_string(),
-        None => match &compute {
-            ft_core::Compute::Local => "localhost".to_string(),
-            ft_core::Compute::Container { name, .. } => name.clone(),
-            // A server has to be called something. It used to fall back to the
-            // address, which meant every screen showed an IP — and the machine
-            // you think of as the big one was 34.122.172.74 everywhere.
-            ft_core::Compute::Server { .. } => {
-                return Err(ApiError::new(
-                    ErrorCode::InvalidRequest,
-                    "a server needs a name — what you call it, not where it is",
-                ))
-            }
-        },
-    };
+    let name = called(req.name.as_deref(), &compute);
 
     if state.db.host_by_name(&name).await?.is_some() {
         return Err(ApiError::new(
@@ -195,6 +180,25 @@ fn settled(compute: ft_core::Compute) -> Result<ft_core::Compute, ApiError> {
             })
         }
         other => Ok(other),
+    }
+}
+
+/// What this machine is called.
+///
+/// A server is called what you call it, and if you called it nothing it is
+/// called where it is. Refusing the form until a name was typed made the
+/// address field a trick question: the answer most people want for `10.0.4.7`
+/// is `10.0.4.7`, and whoever wants `build-box` types it. Either way there is
+/// one label, and every screen uses it — nothing shows a bare address on its
+/// own.
+fn called(given: Option<&str>, compute: &ft_core::Compute) -> String {
+    match given.map(str::trim).filter(|n| !n.is_empty()) {
+        Some(given) => given.to_string(),
+        None => match compute {
+            ft_core::Compute::Local => "localhost".to_string(),
+            ft_core::Compute::Container { name, .. } => name.clone(),
+            ft_core::Compute::Server { host, .. } => host.clone(),
+        },
     }
 }
 
@@ -431,6 +435,82 @@ async fn seen(state: &AppState, mut host: Host) -> Host {
     host
 }
 
+/// What answered after a worker was put there.
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct Installed {
+    /// What `firetower-worker --version` said on the machine.
+    pub version: String,
+}
+
+/// Put a worker on this machine.
+///
+/// The control plane and the worker are the same source at the same version,
+/// and the connection is already open — so this copies the binary Firetower is
+/// holding down the wire it is already trusted on, into the worker's own state
+/// directory. No sudo, nothing outside the account's home, and nothing touched
+/// that somebody else installed.
+///
+/// What was here before was a `cargo build` in the interface. Asking for a Rust
+/// toolchain on the machine whose entire job is to not have things installed on
+/// it is not a setup step; it is a reason to give up.
+#[utoipa::path(
+    post, path = "/api/v1/hosts/{id}/worker", tag = "hosts",
+    params(("id" = String, Path, description = "Host id")),
+    responses(
+        (status = 200, body = Installed),
+        (status = 400, body = ApiError, description = "Not a machine Firetower installs onto, or the wrong shape for this binary"),
+        (status = 404, body = ApiError),
+    ),
+)]
+pub(super) async fn install_worker(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> ApiResult<Json<Installed>> {
+    let id = ft_core::HostId::from_stored(id);
+    let host = state
+        .db
+        .host_by_id(&id)
+        .await?
+        .ok_or_else(|| ApiError::not_found("host"))?;
+
+    // A container's worker comes from its image. Writing one into a running
+    // container would leave the image and what is running disagreeing, and the
+    // next recreate would undo it without saying so.
+    if !matches!(
+        &host.compute,
+        ft_core::Compute::Server {
+            container: None,
+            ..
+        }
+    ) {
+        return Err(ApiError::new(
+            ErrorCode::InvalidRequest,
+            "Firetower only installs a worker onto a machine it runs on directly. A container's worker comes from its image.",
+        ));
+    }
+
+    let ssh = fleet::Fleet::ssh_transport_for(&host, &state.home, Some(&state.vault))
+        .map_err(|e| ApiError::new(ErrorCode::Internal, format!("{e:#}")))?
+        .ok_or_else(|| {
+            ApiError::new(
+                ErrorCode::InvalidRequest,
+                "that host is not reached over ssh",
+            )
+        })?;
+
+    let version = crate::install::install(&ssh)
+        .await
+        .map_err(|e| ApiError::new(ErrorCode::HostUnreachable, format!("{e:#}")))?;
+
+    // There is a worker there now, and the supervisor is holding a backoff from
+    // when there was not. Nobody should have to wait it out to see the machine
+    // come up.
+    state.fleet.try_now(&id).await;
+
+    Ok(Json(Installed { version }))
+}
+
 /// Try a host again now, instead of waiting out the backoff.
 ///
 /// The supervisor would get there on its own; this is for the moment just after
@@ -477,6 +557,14 @@ mod tests {
             host_key: None,
             container: None,
         }
+    }
+
+    #[test]
+    fn a_machine_nobody_named_is_called_where_it_is() {
+        let compute = settled(server("editor@10.0.4.7:2222", None)).unwrap();
+        assert_eq!(called(None, &compute), "10.0.4.7");
+        assert_eq!(called(Some("   "), &compute), "10.0.4.7");
+        assert_eq!(called(Some(" build-box "), &compute), "build-box");
     }
 
     #[test]
