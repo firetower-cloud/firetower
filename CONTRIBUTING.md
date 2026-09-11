@@ -123,12 +123,14 @@ follow:
 
 ```sh
 just worker-image        # the worker, after a protocol change
+just updater-image       # the updater beside the control plane
 docker build -t firetower .   # the control plane, interface and all
 ```
 
-Both are published together on release: the control plane compares its version
-against each worker's on every handshake, so shipping one without the other
-tells everyone their fleet has drifted.
+All three are published together on release: the control plane compares its
+version against each worker's on every handshake, and its API version against
+the updater's on every call, so shipping one without the others tells everyone
+their fleet has drifted.
 
 ## Docker inside a session
 

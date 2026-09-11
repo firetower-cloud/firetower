@@ -1,0 +1,444 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Firetower updater",
+    "description": "The Firetower updater: recreates the control plane, and itself, on request.",
+    "contact": {
+      "name": "Westlabs LLC"
+    },
+    "license": {
+      "name": "AGPL-3.0-only",
+      "identifier": "AGPL-3.0-only"
+    },
+    "version": "0.30.1"
+  },
+  "paths": {
+    "/v1/deploy": {
+      "get": {
+        "tags": [
+          "updater"
+        ],
+        "operationId": "deploy",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeployFiles"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/jobs": {
+      "post": {
+        "tags": [
+          "updater"
+        ],
+        "operationId": "create_job",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewJob"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Job"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Another job is running",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Job"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/jobs/{id}": {
+      "get": {
+        "tags": [
+          "updater"
+        ],
+        "operationId": "get_job",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Job id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Job"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Refusal"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/status": {
+      "get": {
+        "tags": [
+          "updater"
+        ],
+        "operationId": "status",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Status"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "DeployFile": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "content": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Absent when the file is not there."
+          },
+          "name": {
+            "type": "string"
+          }
+        }
+      },
+      "DeployFiles": {
+        "type": "object",
+        "description": "The deployment's own files, as they are on the machine.\n\nContents for the files an upgrade may rewrite; only the *names* of what is\nin `.env`, whose values never leave the machine.",
+        "required": [
+          "files",
+          "envKeys"
+        ],
+        "properties": {
+          "envKeys": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DeployFile"
+            }
+          }
+        }
+      },
+      "FileWrite": {
+        "type": "object",
+        "description": "A file to write before recreating the control plane.",
+        "required": [
+          "name",
+          "content"
+        ],
+        "properties": {
+          "content": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        }
+      },
+      "Job": {
+        "type": "object",
+        "required": [
+          "id",
+          "kind",
+          "state",
+          "steps",
+          "log",
+          "createdAt"
+        ],
+        "properties": {
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "finishedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "id": {
+            "$ref": "#/components/schemas/JobId"
+          },
+          "image": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The image it is on now, by id."
+          },
+          "kind": {
+            "$ref": "#/components/schemas/JobKind"
+          },
+          "log": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "What was run and what it said, redacted, bounded."
+          },
+          "previousImage": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The image the service was on before, by id. What a rollback puts back."
+          },
+          "state": {
+            "$ref": "#/components/schemas/JobState"
+          },
+          "steps": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/JobStep"
+            }
+          }
+        }
+      },
+      "JobId": {
+        "type": "string"
+      },
+      "JobKind": {
+        "oneOf": [
+          {
+            "type": "object",
+            "description": "`pg_dump` the database into `backups/` beside the compose file.",
+            "required": [
+              "fromVersion",
+              "kind"
+            ],
+            "properties": {
+              "fromVersion": {
+                "type": "string",
+                "description": "Named into the file, so a directory of dumps says which release each\ncame from."
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "backup"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Pull the updater's own next image and have Compose recreate it.\n\nThe job outlives the process that accepted it: the recreate is done by\na helper container, so the reply the control plane gets is the new\nupdater's status rather than this job's outcome.",
+            "required": [
+              "version",
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "upgradeUpdater"
+                ]
+              },
+              "version": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Pull the control plane's next image, rewrite the files the release\nchanged, have Compose recreate the service, and wait for it to answer.\n\nPut back the previous image if it does not.",
+            "required": [
+              "version",
+              "kind"
+            ],
+            "properties": {
+              "files": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/FileWrite"
+                }
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "upgradeControlPlane"
+                ]
+              },
+              "version": {
+                "type": "string"
+              }
+            }
+          }
+        ],
+        "description": "What the updater is asked to do."
+      },
+      "JobState": {
+        "type": "string",
+        "enum": [
+          "queued",
+          "running",
+          "done",
+          "failed",
+          "rolledBack"
+        ]
+      },
+      "JobStep": {
+        "type": "object",
+        "description": "One thing a job did, in order.",
+        "required": [
+          "name",
+          "state"
+        ],
+        "properties": {
+          "detail": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "One line, for a screen."
+          },
+          "name": {
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/JobState"
+          }
+        }
+      },
+      "NewJob": {
+        "type": "object",
+        "required": [
+          "kind"
+        ],
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/JobKind"
+          }
+        }
+      },
+      "Refusal": {
+        "type": "object",
+        "description": "Every failure the updater answers with.",
+        "required": [
+          "message"
+        ],
+        "properties": {
+          "message": {
+            "type": "string"
+          }
+        }
+      },
+      "Status": {
+        "type": "object",
+        "description": "What the updater is, and what it is standing on.",
+        "required": [
+          "version",
+          "apiVersion",
+          "project",
+          "deployDir",
+          "configFiles",
+          "dockerVersion"
+        ],
+        "properties": {
+          "apiVersion": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "busy": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/JobId",
+                "description": "The job in progress, if one is."
+              }
+            ]
+          },
+          "configFiles": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The compose files, as Compose recorded them on the updater's container."
+          },
+          "deployDir": {
+            "type": "string",
+            "description": "Where that project's files live on the machine. What the helper container\nmounts to run Compose against them."
+          },
+          "dockerVersion": {
+            "type": "string"
+          },
+          "project": {
+            "type": "string",
+            "description": "The compose project the updater found itself in."
+          },
+          "version": {
+            "type": "string",
+            "description": "The updater's own release."
+          }
+        }
+      }
+    }
+  }
+}

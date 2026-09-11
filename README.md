@@ -97,7 +97,7 @@ Everything else — putting it on a domain, adding a server, connecting reposito
 | [Add a machine](https://usefiretower.com/docs/self-hosting/machines/install) | Run sessions on a server over SSH |
 | [Put it on a domain](https://usefiretower.com/docs/self-hosting/domain) | HTTPS, certificates, and what goes wrong |
 | [Daily operations](https://usefiretower.com/docs/self-hosting/operations) | Draining, backups, and version drift |
-| [Upgrading](https://usefiretower.com/docs/self-hosting/app/upgrade) | The app and [the worker](https://usefiretower.com/docs/self-hosting/machines/upgrade) |
+| [Upgrading](https://usefiretower.com/docs/self-hosting/app/upgrade) | The app and [the worker](https://usefiretower.com/docs/self-hosting/machines/upgrade) — or [from the Updates screen](docs/updates.md) |
 | [Connect repositories](https://usefiretower.com/docs/repositories) | Git URLs, paths, and authorizing GitHub |
 | [Secrets](https://usefiretower.com/docs/secrets) | How credentials are sealed, and where the root key lives |
 

@@ -8,6 +8,7 @@ import { useEffect, useState } from "react";
 import {
   BookOpen,
   CircleDashed,
+  CircleFadingArrowUp,
   LayoutList,
   ListTodo,
   Menu,
@@ -23,6 +24,8 @@ import { NewWorkspaceModal } from "./NewWorkspace";
 import { AgentMark } from "./AgentMark";
 import { Button, GithubMark, Icon } from "./ui";
 import { useListSessions } from "@/src/api/generated/sessions/sessions";
+import { useGetUpdates } from "@/src/api/generated/updates/updates";
+import { showsDot } from "@/src/api/updates";
 import { doing, group, shortRepo, type Workspace } from "@/src/api/workspaces";
 import { useDismissible } from "@/src/workspace/dismissible";
 import { elapsed, minutesSince, needsYou, unfinished } from "@/src/api/view";
@@ -132,6 +135,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
             icon={Settings2}
             on={path.startsWith("/configuration")}
           />
+          <UpdatesLink on={path.startsWith("/updates")} />
 
           {/* Off to the website rather than into the app: it is versioned with
               the release, not with what is running here. */}
@@ -209,6 +213,7 @@ const TITLE: Record<string, string> = {
   "/": "Dashboard",
   "/tasks": "Tasks",
   "/configuration": "Configuration",
+  "/updates": "Updates",
   "/sessions": "Sessions",
 };
 
@@ -224,11 +229,14 @@ function NavLink({
   label,
   icon,
   on,
+  dot,
 }: {
   href: string;
   label: string;
   icon: LucideIcon;
   on: boolean;
+  /** Something is waiting here. Quiet — not ember, which means "your move". */
+  dot?: boolean;
 }) {
   return (
     <Link
@@ -242,7 +250,30 @@ function NavLink({
       )}
       <Icon of={icon} size={14} />
       {label}
+      {dot && <span className="ml-auto h-1.5 w-1.5 shrink-0 rounded-full bg-slate" />}
     </Link>
+  );
+}
+
+/**
+ * The way to Updates, and whether there is one.
+ *
+ * Asked every ten minutes rather than on every render: the answer changes a
+ * few times a month. A refusal — somebody who is not an administrator — is
+ * not retried and leaves the link plain.
+ */
+function UpdatesLink({ on }: { on: boolean }) {
+  const { data } = useGetUpdates({
+    query: { refetchInterval: 10 * 60_000, retry: false, staleTime: 60_000 },
+  });
+  return (
+    <NavLink
+      href="/updates"
+      label="Updates"
+      icon={CircleFadingArrowUp}
+      on={on}
+      dot={showsDot(data)}
+    />
   );
 }
 

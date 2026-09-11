@@ -1,0 +1,73 @@
+# The updater: a side container with one privilege and one job.
+#
+# It holds the machine's Docker socket — which is root on that machine — and
+# uses it to recreate the control plane, and itself, when the control plane
+# asks. It holds nothing else: no key, no password, no database connection.
+# See crates/ft-updater for what a request does, and deploy/firetower.yml for
+# how it is mounted.
+#
+# Built the same way as the other two images and published beside them: the
+# control plane checks the updater's API version on every call, and the
+# updater is recreated first in every run, so the three move together.
+#
+# Cross-compiled, not emulated, for the same reason as Dockerfile.worker.
+FROM --platform=$BUILDPLATFORM rust:1-bookworm AS build
+WORKDIR /src
+
+ARG BUILDARCH
+ARG TARGETARCH
+
+RUN if [ "$BUILDARCH" != "$TARGETARCH" ]; then \
+        apt-get update && case "$TARGETARCH" in \
+            amd64) apt-get install -y --no-install-recommends \
+                       gcc-x86-64-linux-gnu libc6-dev-amd64-cross ;; \
+            arm64) apt-get install -y --no-install-recommends \
+                       gcc-aarch64-linux-gnu libc6-dev-arm64-cross ;; \
+            *) echo "no cross toolchain known for $TARGETARCH" >&2; exit 1 ;; \
+        esac && rm -rf /var/lib/apt/lists/*; \
+    fi
+
+RUN case "$TARGETARCH" in \
+        amd64) echo x86_64-unknown-linux-gnu  > /target ;; \
+        arm64) echo aarch64-unknown-linux-gnu > /target ;; \
+        *) echo "no Rust target known for $TARGETARCH" >&2; exit 1 ;; \
+    esac \
+    && rustup target add "$(cat /target)"
+
+ENV CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc \
+    CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=x86_64-linux-gnu-gcc
+ENV CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc \
+    CC_x86_64_unknown_linux_gnu=x86_64-linux-gnu-gcc
+
+COPY Cargo.toml Cargo.lock ./
+COPY crates ./crates
+COPY migrations ./migrations
+
+RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
+    --mount=type=cache,target=/src/target,sharing=locked \
+    cargo build --release -p ft-updater --bin firetower-updater --target "$(cat /target)" \
+    && cp "target/$(cat /target)/release/firetower-updater" /firetower-updater
+
+# As little as an image can be and still run a Rust binary against TLS: libc,
+# and the certificate store the releases feed is fetched over. No shell, no
+# package manager — there is nothing for anything that got in here to run.
+FROM gcr.io/distroless/cc-debian12:nonroot
+
+COPY --from=build /firetower-updater /firetower-updater
+
+# Root, deliberately, and only because the socket is. Docker's socket is owned
+# by root on the machine and mounted in as it is; a process that cannot open it
+# is an updater that cannot do anything. What this process does with it is the
+# whole of crates/ft-updater/src/docker.rs.
+USER root
+
+EXPOSE 4410
+
+ARG VERSION=0.0.0-dev
+LABEL org.opencontainers.image.version="$VERSION" \
+      org.opencontainers.image.title="Firetower updater" \
+      org.opencontainers.image.description="Recreates the Firetower control plane on request." \
+      org.opencontainers.image.source="https://github.com/firetower-cloud/firetower" \
+      org.opencontainers.image.licenses="AGPL-3.0-only"
+
+ENTRYPOINT ["/firetower-updater"]

@@ -146,14 +146,30 @@ fn settled(compute: ft_core::Compute) -> Result<ft_core::Compute, ApiError> {
                     .map_err(|e| ApiError::new(ErrorCode::InvalidRequest, format!("{e:#}")))?;
             }
 
+            // Blank means the worker runs on the machine itself.
+            let container = given(container);
+            // The one value from this form that reaches a remote shell — in
+            // `docker exec`, and in the commands an upgrade runs. Docker's
+            // own rule for a name, checked here rather than trusted there.
+            if let Some(name) = &container {
+                if !crate::updates::worker::valid_container_name(name) {
+                    return Err(ApiError::new(
+                        ErrorCode::InvalidRequest,
+                        format!(
+                            "{name} is not a name a container can have: letters, digits, \
+                             `_`, `.` and `-`, starting with a letter or digit"
+                        ),
+                    ));
+                }
+            }
+
             Ok(ft_core::Compute::Server {
                 host: typed.host,
                 user: given(user).or(typed.user),
                 port: port.or(typed.port),
                 key,
                 host_key: given(host_key),
-                // Blank means the worker runs on the machine itself.
-                container: given(container),
+                container,
             })
         }
         other => Ok(other),

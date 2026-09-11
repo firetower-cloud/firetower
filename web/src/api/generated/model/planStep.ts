@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.28.2
+ * OpenAPI spec version: 0.30.1
  */
 import type { PlanStepStatus } from './planStepStatus';
 

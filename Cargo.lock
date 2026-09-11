@@ -885,7 +885,7 @@ dependencies = [
 
 [[package]]
 name = "ft-cli"
-version = "0.30.0"
+version = "0.30.1"
 dependencies = [
  "anyhow",
  "clap",
@@ -903,7 +903,7 @@ dependencies = [
 
 [[package]]
 name = "ft-core"
-version = "0.30.0"
+version = "0.30.1"
 dependencies = [
  "chrono",
  "serde",
@@ -917,7 +917,7 @@ dependencies = [
 
 [[package]]
 name = "ft-proto"
-version = "0.30.0"
+version = "0.30.1"
 dependencies = [
  "chrono",
  "ft-core",
@@ -929,7 +929,7 @@ dependencies = [
 
 [[package]]
 name = "ft-server"
-version = "0.30.0"
+version = "0.30.1"
 dependencies = [
  "anyhow",
  "argon2",
@@ -939,6 +939,7 @@ dependencies = [
  "chrono",
  "ft-core",
  "ft-proto",
+ "ft-updater-api",
  "ft-worker",
  "futures",
  "hmac",
@@ -950,9 +951,11 @@ dependencies = [
  "password-hash",
  "reqwest",
  "rust-embed",
+ "semver",
  "serde",
  "serde_json",
  "sha2 0.10.9",
+ "similar",
  "sqlx",
  "ssh-key",
  "tempfile",
@@ -968,8 +971,41 @@ dependencies = [
 ]
 
 [[package]]
+name = "ft-updater"
+version = "0.30.1"
+dependencies = [
+ "anyhow",
+ "axum",
+ "chrono",
+ "ft-updater-api",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "ulid",
+ "utoipa",
+ "utoipa-axum",
+]
+
+[[package]]
+name = "ft-updater-api"
+version = "0.30.1"
+dependencies = [
+ "chrono",
+ "serde",
+ "serde_json",
+ "utoipa",
+]
+
+[[package]]
 name = "ft-worker"
-version = "0.30.0"
+version = "0.30.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2716,6 +2752,12 @@ name = "simdutf8"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e3a9fe34e3e7a50316060351f37187a3f546bce95496156754b601a5fa71b76e"
+
+[[package]]
+name = "similar"
+version = "2.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bbbb5d9659141646ae647b42fe094daf6c6192d1620870b449d9557f748b2daa"
 
 [[package]]
 name = "siphasher"

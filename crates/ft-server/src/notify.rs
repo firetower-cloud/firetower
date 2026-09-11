@@ -88,6 +88,37 @@ impl Notifier {
         self.to.is_some()
     }
 
+    /// Say something that is not about a session — a release being out.
+    ///
+    /// The same POST, the same fields a service reads, and no session to name.
+    pub fn say(&self, title: &str, message: &str, url: Option<String>) {
+        let Some(to) = self.to.clone() else {
+            return;
+        };
+        let body = serde_json::json!({
+            "title": title,
+            "message": message,
+            "url": url,
+        });
+        let http = self.http.clone();
+        let title = title.to_string();
+        tokio::spawn(async move {
+            match http
+                .post(&to)
+                .json(&body)
+                .timeout(std::time::Duration::from_secs(10))
+                .send()
+                .await
+            {
+                Ok(answered) if answered.status().is_success() => {}
+                Ok(answered) => {
+                    tracing::warn!(%title, status = %answered.status(), "the notification was refused")
+                }
+                Err(e) => tracing::warn!(%title, "could not send the notification: {e:#}"),
+            }
+        });
+    }
+
     /// Say that a session stopped and needs somebody.
     ///
     /// Never fails loudly and never blocks the thing that called it: an agent

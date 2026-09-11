@@ -327,30 +327,15 @@ impl SshTransport {
             }
         }
     }
-}
 
-#[async_trait]
-impl Transport for SshTransport {
-    fn describe(&self) -> String {
-        let mut described = String::from("ssh");
-        if let Some(port) = self.port {
-            described.push_str(&format!(" -p {port}"));
-        }
-        match &self.key {
-            ft_core::SshKey::File { path } => described.push_str(&format!(" -i {path}")),
-            ft_core::SshKey::Managed => described.push_str(" -i <firetower's key>"),
-            ft_core::SshKey::Held { name } => described.push_str(&format!(" -i <{name}>")),
-            ft_core::SshKey::Default => {}
-        }
-        described.push(' ');
-        described.push_str(&self.destination);
-        if let Some(container) = &self.container {
-            described.push_str(&format!(" docker exec {container}"));
-        }
-        described
-    }
-
-    async fn connect(&self) -> Result<Connection> {
+    /// `ssh`, with every option a connection uses, up to and including the
+    /// destination. What follows is the caller's: a worker to run, or a
+    /// command to run on the machine.
+    ///
+    /// One place for the options, so a command run for an upgrade reaches the
+    /// machine exactly the way a connection does — same key, same
+    /// known_hosts, same refusal to wait on a prompt nobody can answer.
+    pub async fn command(&self) -> Result<Command> {
         let mut ssh = Command::new("ssh");
 
         // Without these, adding a host that isn't there hangs instead of
@@ -403,6 +388,33 @@ impl Transport for SshTransport {
         }
 
         ssh.arg(&self.destination);
+        Ok(ssh)
+    }
+}
+
+#[async_trait]
+impl Transport for SshTransport {
+    fn describe(&self) -> String {
+        let mut described = String::from("ssh");
+        if let Some(port) = self.port {
+            described.push_str(&format!(" -p {port}"));
+        }
+        match &self.key {
+            ft_core::SshKey::File { path } => described.push_str(&format!(" -i {path}")),
+            ft_core::SshKey::Managed => described.push_str(" -i <firetower's key>"),
+            ft_core::SshKey::Held { name } => described.push_str(&format!(" -i <{name}>")),
+            ft_core::SshKey::Default => {}
+        }
+        described.push(' ');
+        described.push_str(&self.destination);
+        if let Some(container) = &self.container {
+            described.push_str(&format!(" docker exec {container}"));
+        }
+        described
+    }
+
+    async fn connect(&self) -> Result<Connection> {
+        let mut ssh = self.command().await?;
 
         // `-i` and not `-t`: frames are bytes, and a tty would translate
         // newlines and corrupt them.
