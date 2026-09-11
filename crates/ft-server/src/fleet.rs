@@ -225,19 +225,42 @@ impl Progress {
     }
 
     /// Put a choice into force, and say how.
+    ///
+    /// `None` means there was nothing to send and it was remembered instead —
+    /// which is also the signal to write it down, because this object does not
+    /// outlive the agent process it is reading.
     fn choose(
         &mut self,
         kind: ft_core::controls::ControlKind,
         value: &str,
     ) -> Result<Option<serde_json::Value>> {
-        use ft_core::controls::ControlKind as K;
-
         // The agent that is told. Nothing to remember: it says what it is
         // running at the start of every turn, and that is what the picker then
         // shows.
         if let Some(message) = ft_core::controls::put(self.agent, kind, value) {
             return Ok(Some(message));
         }
+
+        self.remember(kind, value)?;
+
+        // Nothing to send. It rides on the next turn, because there is no
+        // request that changes a thread's settings on its own.
+        Ok(None)
+    }
+
+    /// Hold a choice for the turns to come, without deciding anything about it.
+    ///
+    /// Both the moment somebody makes one and the moment a reader is rebuilt
+    /// and reads back what they chose before — the second is why the first
+    /// stopped being enough. A reader is thrown away when the agent process
+    /// ends, and a session whose agent is restarted — by an upgrade, by
+    /// somebody typing into one that had gone, by an account switch — used to
+    /// come back on the defaults with the picker still showing the choice.
+    fn remember(&mut self, kind: ft_core::controls::ControlKind, value: &str) -> Result<()> {
+        use ft_core::controls::ControlKind as K;
+
+        // The only agent with anything to hold. For the other, what is in force
+        // is what it last said it was running.
         if self.agent != ft_core::Agent::Codex {
             anyhow::bail!("{} cannot be asked to change that", self.agent.label());
         }
@@ -253,10 +276,7 @@ impl Progress {
                 )
             }
         }
-
-        // Nothing to send. It rides on the next turn, because there is no
-        // request that changes a thread's settings on its own.
-        Ok(None)
+        Ok(())
     }
 
     /// What this line means for the session, if anything.
@@ -2538,9 +2558,15 @@ impl Fleet {
         };
 
         // Nothing to send is an ordinary outcome, not a failure: it has been
-        // remembered and rides on the next turn.
+        // remembered and rides on the next turn. Written down as well as held,
+        // because what is holding it is a reader for one agent process and the
+        // choice has to outlive that — see `Db::remember_control`.
         let Some(message) = message else {
-            return Ok(());
+            return self
+                .db
+                .remember_control(session_id, kind, value)
+                .await
+                .with_context(|| format!("writing down {kind:?} for {session_id}"));
         };
 
         self.send(
@@ -2714,6 +2740,24 @@ impl Fleet {
         }
         if opened {
             progress.opening_prompt = None;
+        }
+
+        // And what somebody chose, which is not in the lines: it was never said
+        // to the agent, because this is the agent that takes it as a parameter
+        // on the next turn. Applied after the replay so that a choice wins over
+        // whatever the conversation was opened with.
+        for (kind, value) in self
+            .db
+            .chosen_controls(session_id)
+            .await
+            .unwrap_or_else(|e| {
+                tracing::warn!(session = %session_id, "reading back what was chosen: {e:#}");
+                Vec::new()
+            })
+        {
+            if let Err(e) = progress.remember(kind, &value) {
+                tracing::warn!(session = %session_id, "{value} is no longer a choice: {e:#}");
+            }
         }
 
         self.progress
@@ -3504,6 +3548,82 @@ mod tests {
         fleet.supervise(host.clone(), Arc::new(Never)).await;
         assert!(fleet.try_now(&host).await);
         fleet.stop_supervising(&host).await;
+    }
+
+    /// The other half of the issue: a choice that only the reader knew about.
+    ///
+    /// Codex is not told when to ask — it is given the answer as a parameter on
+    /// every turn, and Firetower holds it in the object reading that session's
+    /// lines. That object is thrown away when the agent process ends, and an
+    /// agent ends often: an upgrade recreates every container, typing into a
+    /// session whose agent has gone restarts it, an account switch relaunches
+    /// it. What came back opened a new conversation on `on-request` and asked
+    /// about everything again, while the picker still said "Never ask".
+    #[tokio::test]
+    async fn what_somebody_chose_outlives_the_agent_they_chose_it_for() {
+        use ft_core::controls::ControlKind as K;
+
+        let (db, owner) = Db::open_for_test_owned().await.unwrap();
+        let host = db
+            .ensure_host("fire-01", ft_core::Compute::Local)
+            .await
+            .unwrap();
+        let session = SessionId::new();
+        db.insert_session(
+            &session,
+            &host.id,
+            &owner,
+            None,
+            "A Codex session",
+            "go",
+            None,
+            None,
+            "Codex",
+            ft_core::WorkspaceSize::Medium,
+            ft_core::Share::Equal,
+            &ft_core::Step::plan(false, false),
+            None,
+        )
+        .await
+        .unwrap();
+        let fleet = Fleet::new(db);
+
+        // Nothing goes to the host: there is no request that changes a thread's
+        // settings, so this is remembered for the next turn.
+        fleet
+            .choose(&host.id, &session, K::Mode, "never")
+            .await
+            .unwrap();
+        fleet
+            .choose(&host.id, &session, K::Sandbox, "workspace")
+            .await
+            .unwrap();
+
+        // The agent ends. Its reader goes with it — see `AgentClosed`.
+        fleet.progress.write().await.remove(session.as_str());
+
+        // And the next line from whatever replaced it builds a new one.
+        fleet.ensure_reader(&session).await;
+        let current = |controls: &[ft_core::controls::Control], kind| {
+            controls
+                .iter()
+                .find(|c| c.kind == kind)
+                .and_then(|c| c.current.clone())
+        };
+        let controls = fleet.controls(&session).await;
+        assert_eq!(current(&controls, K::Mode).as_deref(), Some("never"));
+        assert_eq!(current(&controls, K::Sandbox).as_deref(), Some("workspace"));
+
+        // Not just shown — carried. The new conversation opened on whatever
+        // `thread/start` says, and this is what puts it right.
+        let mut readers = fleet.progress.write().await;
+        let progress = readers.get_mut(session.as_str()).unwrap();
+        progress.read(
+            r#"{"id":2,"result":{"thread":{"id":"th_new"},"model":"gpt-5.6-sol","approvalPolicy":"on-request"}}"#,
+        );
+        let turn = progress.turn("ok, you can continue", &[]).unwrap();
+        assert_eq!(turn["params"]["approvalPolicy"], "never");
+        assert_eq!(turn["params"]["sandboxPolicy"]["networkAccess"], false);
     }
 }
 

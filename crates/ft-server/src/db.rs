@@ -1560,6 +1560,62 @@ impl Db {
         }))
     }
 
+    /// Write down a choice somebody made about a session.
+    ///
+    /// Only for the settings nothing can be *told* — Codex takes its model,
+    /// effort, approval policy and fence as parameters on every turn, so the
+    /// choice has to be held and put on the next one. Held in the reader, it
+    /// lasted exactly as long as the agent process did: the reader is thrown
+    /// away when that ends, and the rebuilt one carried the defaults while the
+    /// picker went on showing what had been asked for.
+    ///
+    /// Claude Code is not written down here, and must not be. It is sent the
+    /// change, it answers with what it is now running, and that answer is what
+    /// the picker shows — a second record of the same thing could only disagree
+    /// with it.
+    pub async fn remember_control(
+        &self,
+        session_id: &SessionId,
+        kind: ft_core::controls::ControlKind,
+        value: &str,
+    ) -> Result<()> {
+        sqlx::query(
+            "INSERT INTO session_controls (session_id, kind, value) VALUES ($1, $2, $3) \
+             ON CONFLICT (session_id, kind) DO UPDATE SET value = $3, chosen_at = now()",
+        )
+        .bind(session_id.as_str())
+        .bind(control_kind(kind))
+        .bind(value)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Everything somebody has chosen about a session, for a reader being built.
+    ///
+    /// A kind we no longer have is skipped rather than refused: a row written by
+    /// a version that offered something this one does not is not a reason to
+    /// open the session with nothing in force.
+    pub async fn chosen_controls(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Vec<(ft_core::controls::ControlKind, String)>> {
+        let rows: Vec<(String, String)> =
+            sqlx::query_as("SELECT kind, value FROM session_controls WHERE session_id = $1")
+                .bind(session_id.as_str())
+                .fetch_all(&self.pool)
+                .await?;
+
+        Ok(rows
+            .into_iter()
+            .filter_map(|(kind, value)| {
+                serde_json::from_str(&format!("\"{kind}\""))
+                    .ok()
+                    .map(|kind| (kind, value))
+            })
+            .collect())
+    }
+
     /// Say where a session has got to, from what its agent said.
     ///
     /// The only writer of this field for an agent that speaks a protocol —
@@ -1902,6 +1958,15 @@ fn session_from_row(r: sqlx::postgres::PgRow) -> Result<Session> {
         created_at: r.get("created_at"),
         updated_at: r.get("updated_at"),
     })
+}
+
+/// Which picker a stored choice belongs to, spelled the way it goes over the
+/// wire — so a row and a request use one word for one thing.
+fn control_kind(kind: ft_core::controls::ControlKind) -> String {
+    serde_json::to_value(kind)
+        .ok()
+        .and_then(|v| v.as_str().map(str::to_string))
+        .unwrap_or_default()
 }
 
 /// A connection string without its password, for a message someone will paste.
@@ -2483,6 +2548,66 @@ mod tests {
         assert_eq!(session.repo, None);
         assert_eq!(session.branch, None);
         assert_eq!(session.base, None);
+    }
+
+    /// A choice is the person's, so it is kept against the session and not
+    /// against whatever happens to be reading its lines at the time.
+    #[tokio::test]
+    async fn a_choice_is_kept_until_it_is_changed() {
+        use ft_core::controls::ControlKind as K;
+
+        let (db, owner) = db_with_user().await;
+        let host = db.ensure_host("localhost", Compute::Local).await.unwrap();
+        let id = SessionId::new();
+        db.insert_session(
+            &id,
+            &host.id,
+            &owner,
+            None,
+            "A Codex session",
+            "go",
+            None,
+            None,
+            "Codex",
+            WorkspaceSize::Medium,
+            ft_core::Share::Equal,
+            &ft_core::Step::plan(false, false),
+            None,
+        )
+        .await
+        .unwrap();
+
+        assert!(db.chosen_controls(&id).await.unwrap().is_empty());
+
+        db.remember_control(&id, K::Mode, "never").await.unwrap();
+        db.remember_control(&id, K::Model, "gpt-5.6-sol")
+            .await
+            .unwrap();
+        // Changing one's mind replaces the choice rather than adding a second.
+        db.remember_control(&id, K::Mode, "untrusted")
+            .await
+            .unwrap();
+
+        let mut chosen = db.chosen_controls(&id).await.unwrap();
+        chosen.sort_by(|a, b| a.1.cmp(&b.1));
+        assert_eq!(
+            chosen,
+            vec![
+                (K::Model, "gpt-5.6-sol".to_string()),
+                (K::Mode, "untrusted".to_string()),
+            ]
+        );
+
+        // A row from a version that offered something this one does not is
+        // skipped, not fatal: the session still opens with the rest in force.
+        sqlx::query("INSERT INTO session_controls (session_id, kind, value) VALUES ($1, $2, $3)")
+            .bind(id.as_str())
+            .bind("telepathy")
+            .bind("on")
+            .execute(db.pool())
+            .await
+            .unwrap();
+        assert_eq!(db.chosen_controls(&id).await.unwrap().len(), 2);
     }
 
     #[tokio::test]
