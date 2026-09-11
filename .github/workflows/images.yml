@@ -1,8 +1,11 @@
-# Publish both images: the control plane, and the worker a host runs.
+# Publish the three images: the control plane, the worker a host runs, and the
+# updater that sits beside the control plane.
 #
 # Together, always. The control plane compares its version against each
 # worker's on every handshake and reports a drift, so publishing one without
 # the other would tell everybody who upgraded that their fleet is out of step.
+# The updater is recreated first in every upgrade and checked against the
+# control plane's API version on every call, for the same reason.
 #
 # Goes to the registry that comes with the repository, so the job signs in as
 # itself and there is no stored credential.
@@ -25,6 +28,7 @@ on:
       - "web/**"
       - "Dockerfile"
       - "Dockerfile.worker"
+      - "Dockerfile.updater"
       - ".github/workflows/images.yml"
 
   # How a release publishes a versioned image: a tag pushed by a workflow
@@ -67,6 +71,9 @@ jobs:
           - name: firetower-worker
             dockerfile: Dockerfile.worker
             title: worker
+          - name: firetower-updater
+            dockerfile: Dockerfile.updater
+            title: updater
 
     env:
       IMAGE: ghcr.io/${{ github.repository_owner }}/${{ matrix.name }}

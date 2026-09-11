@@ -106,6 +106,7 @@ async fn fixture() -> (
     ));
     let names = crate::preview::Names::from_vault(&vault);
     let state = AppState {
+        updates: crate::updates::Updates::new(db.pool().clone()),
         db,
         accounts,
         fleet,

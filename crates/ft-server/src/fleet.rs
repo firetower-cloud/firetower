@@ -1206,35 +1206,52 @@ impl Fleet {
                     root: std::path::PathBuf::from("/var/lib/firetower/worker"),
                 })
             }
-            ft_core::Compute::Server {
-                port,
-                key,
-                container,
-                ..
-            } => Arc::new(crate::transport::SshTransport {
-                // Assembled by the type that holds the parts, so there is one
-                // answer to what `user@host` means.
-                destination: host
-                    .compute
-                    .ssh_destination()
-                    .context("a server host has somewhere to dial")?,
-                port: *port,
-                key: key.clone(),
-                // Always: ssh records host keys under here whichever key it
-                // authenticates with.
-                home: home.to_path_buf(),
-                // Only when the key is one the vault holds. A path, or ssh's
-                // own choice, needs nothing from us.
-                vault: key.is_held().then(|| vault.cloned()).flatten(),
-                container: container.clone(),
-                // Inside a container, the path the image creates. On the
-                // machine itself, the worker's own default: that account may
-                // have no way to write under /var/lib.
-                root: container
-                    .as_ref()
-                    .map(|_| std::path::PathBuf::from("/var/lib/firetower/worker")),
-            }),
+            ft_core::Compute::Server { .. } => Arc::new(
+                Self::ssh_transport_for(host, home, vault)?
+                    .context("a server host is reached over ssh")?,
+            ),
         })
+    }
+
+    /// The ssh half of [`Self::transport_for`], for a server host — also what
+    /// an upgrade runs its commands through. `None` for any other kind.
+    pub fn ssh_transport_for(
+        host: &ft_core::Host,
+        home: &std::path::Path,
+        vault: Option<&Arc<crate::vault::Vault>>,
+    ) -> Result<Option<crate::transport::SshTransport>> {
+        let ft_core::Compute::Server {
+            port,
+            key,
+            container,
+            ..
+        } = &host.compute
+        else {
+            return Ok(None);
+        };
+        Ok(Some(crate::transport::SshTransport {
+            // Assembled by the type that holds the parts, so there is one
+            // answer to what `user@host` means.
+            destination: host
+                .compute
+                .ssh_destination()
+                .context("a server host has somewhere to dial")?,
+            port: *port,
+            key: key.clone(),
+            // Always: ssh records host keys under here whichever key it
+            // authenticates with.
+            home: home.to_path_buf(),
+            // Only when the key is one the vault holds. A path, or ssh's
+            // own choice, needs nothing from us.
+            vault: key.is_held().then(|| vault.cloned()).flatten(),
+            container: container.clone(),
+            // Inside a container, the path the image creates. On the
+            // machine itself, the worker's own default: that account may
+            // have no way to write under /var/lib.
+            root: container
+                .as_ref()
+                .map(|_| std::path::PathBuf::from("/var/lib/firetower/worker")),
+        }))
     }
 
     /// What kind of machine a host is, for wording an error about it.

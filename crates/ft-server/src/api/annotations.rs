@@ -397,6 +397,7 @@ mod database_tests {
         let names = crate::preview::Names::from_vault(&vault);
         (
             AppState {
+                updates: crate::updates::Updates::new(db.pool().clone()),
                 db,
                 accounts,
                 fleet,
