@@ -17,20 +17,28 @@ any other.
 ## Add a machine
 
 Open Compute → **Add a machine**, or pick **+ Add a machine…** at the end of the
-machine list in the new workspace form. It asks for two things:
+machine list in the new workspace form. It asks for:
 
-1. **An SSH address** reachable from the control plane, in the form ssh takes:
-   `editor@192.0.2.10`, with `:2222` for a port that is not 22. Left off, the
-   account is whatever your SSH config says.
-2. **A name**, optionally. Left blank, the machine is called where it is.
+1. **An IP address or hostname** reachable from the control plane, with `:2222`
+   for a port that is not 22. A whole `editor@192.0.2.10` destination pasted
+   here comes apart on its own.
+2. **An SSH account**, optionally. Left blank, the account is whatever your SSH
+   config says.
+3. **A container name**, for when the machine is used in Container mode.
+   `firetower-worker` unless yours is called something else.
+4. **A name**, optionally. Left blank, the machine is called where it is.
+
+Both environments are created: the machine itself, and the container named
+above.
 
 Authorize Firetower's public SSH key on that account, or select a private key
 already available to the control plane. Choose **Add**; a machine that does not
 answer is still saved, with what it said and what to do about it.
 
-Both ways of running are then available on it. Firetower checks whichever you
-pick, when you pick it, and the environment behind it is created then — there is
-nothing to set up in advance and no separate setup step.
+Both ways of running are then available on it. New workspace opens on
+**Container** unless the machine only has a host environment. Firetower checks
+whichever you pick, when you pick it; a mode a machine has never run gets its
+environment made at that point, so there is no separate setup step.
 
 For the underlying VM on the same server, use its reachable IP or hostname.
 Entering `localhost` while the control plane is in Docker connects inside that
@@ -62,6 +70,12 @@ connection it already has, into `~/.firetower/worker/bin`. No sudo, nothing
 outside the account's home, and nothing touched that you installed yourself: the
 remote command puts that directory *last* on `PATH`, so a `firetower-worker` you
 put on the machine is still the one that answers.
+
+The worker is launched through `sh -c` rather than by name alone, so the `PATH`
+it is given does not depend on what the SSH account's login shell is — `csh` and
+`fish` reject the `VAR=value command` form outright. A container is sent the
+bare program name instead: `docker exec` takes a program and its arguments, not
+a shell line, and a container's worker comes from its image.
 
 This works when the machine is the same operating system and architecture as the
 control plane, which it checks with `uname -sm` before sending anything. When

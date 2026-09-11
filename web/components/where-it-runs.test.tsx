@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { WhereItRuns, nameFor, type Where } from "./WhereItRuns";
+import { WhereItRuns, nameFor, defaultMode, type Where } from "./WhereItRuns";
 import { getHostReadinessQueryKey } from "@/src/api/generated/hosts/hosts";
 import type { AgentView, Host, Readiness } from "@/src/api/generated/model";
+import { machines } from "@/src/api/environments";
 
 const host = (id: string, compute: Host["compute"], extra: Partial<Host> = {}): Host => ({
   id,
@@ -177,5 +178,32 @@ describe("what an environment nobody names is called", () => {
     const existing = [host("c", ssh("worker", "10.0.4.7"), { name: "10.0.4.7 · container" })];
     expect(nameFor(existing, "10.0.4.7", "host")).toBe("10.0.4.7");
     expect(nameFor(existing, "10.0.4.7", "container")).toBe("10.0.4.7 · container 2");
+  });
+});
+
+describe("the mode a machine opens on", () => {
+  const machineWith = (...hosts: Host[]) => machines(hosts)[0];
+
+  it("is the container, because that is what almost everybody wants", () => {
+    expect(defaultMode(machineWith(host("a", ssh("firetower-worker"))))).toBe("container");
+  });
+
+  it("is still the container when the machine already has both", () => {
+    // It used to be whichever environment the list happened to hold first, so
+    // which mode you landed on depended on row order.
+    expect(defaultMode(machineWith(host("h", ssh()), host("c", ssh("firetower-worker"))))).toBe(
+      "container",
+    );
+    expect(defaultMode(machineWith(host("c", ssh("firetower-worker")), host("h", ssh())))).toBe(
+      "container",
+    );
+  });
+
+  it("is the host only on a machine that runs nothing else", () => {
+    expect(defaultMode(machineWith(host("h", ssh())))).toBe("host");
+  });
+
+  it("is the container on a machine with no environments at all", () => {
+    expect(defaultMode(undefined)).toBe("container");
   });
 });

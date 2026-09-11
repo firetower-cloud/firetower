@@ -12,6 +12,12 @@ use std::path::PathBuf;
 #[command(
     name = "firetower",
     version,
+    // So `firetower worker --version` answers. A machine Firetower installs
+    // onto gets this binary under a wrapper that turns `firetower-worker
+    // --version` into exactly that, and clap keeps `--version` on the root
+    // command unless told otherwise — so the install's own health check failed
+    // on a worker that had copied across perfectly well.
+    propagate_version = true,
     about = "Run coding agents on your own servers.",
     long_about = None,
 )]
