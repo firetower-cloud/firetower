@@ -110,6 +110,12 @@ pub async fn propose(about: About<'_>) -> Result<Proposal> {
 
     let prompt = ask(&about, diff, talk.as_deref());
 
+    // Somewhere for an agent that can hand its answer over as a file to put
+    // it. Read back below in preference to standard output, and removed with
+    // this call either way.
+    let sheet = tempfile::tempdir().context("making somewhere to be answered in")?;
+    let answer = sheet.path().join("answer.txt");
+
     let mut command = Command::new(about.agent.command());
     // The same PATH a session gets, so describing a change uses whichever copy
     // of the agent this machine actually runs.
@@ -121,8 +127,8 @@ pub async fn propose(about: About<'_>) -> Result<Proposal> {
     for (name, value) in about.env {
         command.env(name, value.as_str());
     }
-    authenticate(&about, &mut command).await;
-    invocation(about.agent, &mut command, &prompt);
+    let signed_in = authenticate(&about, &mut command).await;
+    invocation(about.agent, &mut command, &prompt, &answer);
 
     let output = command
         .current_dir(about.workspace)
@@ -145,30 +151,80 @@ pub async fn propose(about: About<'_>) -> Result<Proposal> {
         // its own words — "please run /login" — which sends whoever reads it to
         // the host to sign in by hand, when what is actually missing is a
         // credential on the account.
-        if about.env.is_empty() {
+        //
+        // Both halves, because there are two ways of carrying one: a variable
+        // from the vault, and the file `authenticate` found. Saying this when
+        // Codex was signed in by file would be blaming the wrong thing.
+        if about.env.is_empty() && !signed_in {
             ". Nothing was sent for it to authenticate with"
         } else {
             ""
         }
     );
 
-    read(&String::from_utf8_lossy(&output.stdout)).context("the answer had no title in it")
+    read(&said(&answer, &output.stdout).await).context("the answer had no title in it")
 }
 
 /// Point the agent at the directory its credential was written into, for the
 /// agents that keep one in a file rather than in a variable.
 ///
+/// Per session, because that is where a session's home is: a workspace can hold
+/// several, each signed in as a different account, so the credential Codex reads
+/// lives in `agent-home-<session>` and not in a directory they share. The bare
+/// name is the same thing from before accounts were plural, and is still where
+/// a session started back then keeps its own — so it is tried second rather
+/// than dropped.
+///
 /// Only when it is there. A session launched before the credential existed, or
 /// on an account that needs none, has no such directory — and pointing an agent
 /// at a home that does not exist is how a run that would have worked stops
 /// working.
-async fn authenticate(about: &About<'_>, command: &mut Command) {
+///
+/// Answers whether this found something to authenticate *with*, which is not
+/// the same question as whether it found a home: the directory also holds an
+/// agent's settings and its threads, and is worth naming either way. Only the
+/// credential file in it decides whether a failed run is worth blaming on a
+/// missing credential.
+async fn authenticate(about: &About<'_>, command: &mut Command) -> bool {
     let Some(var) = about.agent.home_var() else {
-        return;
+        return false;
     };
-    let home = crate::agentd::dir_for(about.workspace).join("agent-home");
-    if tokio::fs::metadata(&home).await.is_ok() {
+    let agentd = crate::agentd::dir_for(about.workspace);
+    let homes = [
+        agentd.join(format!("agent-home-{}", about.session_id)),
+        agentd.join("agent-home"),
+    ];
+
+    for home in homes {
+        if tokio::fs::metadata(&home).await.is_err() {
+            continue;
+        }
         command.env(var, &home);
+
+        let Some(file) = about.agent.credential_file() else {
+            return false;
+        };
+        return tokio::fs::metadata(home.join(file)).await.is_ok();
+    }
+
+    false
+}
+
+/// The answer, from wherever the run left it.
+///
+/// The file first, for an agent that was asked to write its last message into
+/// one. What it says on the way there is not merely noise: a one-shot Codex run
+/// prints its banner, then the whole question, then the answer, all down the
+/// same stream — and this question is a list of labels, `TITLE:` among them. An
+/// answer read out of that transcript is the instructions handed back rather
+/// than the sentence the model wrote.
+///
+/// Standard output when nothing was written there, which is every agent with no
+/// such flag, and every copy of one old enough not to have it.
+async fn said(answer: &std::path::Path, stdout: &[u8]) -> String {
+    match tokio::fs::read_to_string(answer).await {
+        Ok(written) if !written.trim().is_empty() => written,
+        _ => String::from_utf8_lossy(stdout).into_owned(),
     }
 }
 
@@ -210,7 +266,12 @@ fn complaint(stderr: &[u8], stdout: &[u8]) -> String {
 /// `codex -p --model haiku`, which `codex` rejects. The failure is swallowed by
 /// design, one layer up, which is why it looked like nothing: Codex sessions
 /// have simply never had a title or a body proposed for them.
-fn invocation(agent: ft_core::Agent, command: &mut Command, prompt: &str) {
+fn invocation(
+    agent: ft_core::Agent,
+    command: &mut Command,
+    prompt: &str,
+    answer: &std::path::Path,
+) {
     match agent {
         ft_core::Agent::ClaudeCode => {
             command.args([
@@ -237,7 +298,19 @@ fn invocation(agent: ft_core::Agent, command: &mut Command, prompt: &str) {
                 // asked for.
                 "--sandbox",
                 "read-only",
+                // A workspace holds the checkouts rather than being one, so the
+                // directory this runs in is usually not a git repository — and
+                // `codex exec` stops before it starts outside one, on the
+                // grounds that a run which edits files nothing is tracking has
+                // nothing to undo it. Here that reasoning does not apply and
+                // the refusal was the whole bug: describing a change never
+                // worked on a Codex session, because it never got as far as
+                // reading the diff it was handed.
+                "--skip-git-repo-check",
             ]);
+            // Where to put the answer, so it can be read on its own rather than
+            // picked out of everything else Codex prints. See [`said`].
+            command.arg("--output-last-message").arg(answer);
             // No model pinned. Codex's cheap tier is renamed often enough that
             // naming one here is a way to break this later, and its default is
             // already the sensible one for a question this size.
@@ -571,8 +644,11 @@ mod tests {
     #[tokio::test]
     async fn the_run_is_given_what_it_authenticates_with() {
         let workspace = tempfile::tempdir().expect("a temporary directory");
-        let home = crate::agentd::dir_for(workspace.path()).join("agent-home");
+        let home = crate::agentd::dir_for(workspace.path()).join("agent-home-s_test");
         tokio::fs::create_dir_all(&home).await.expect("making it");
+        tokio::fs::write(home.join("auth.json"), "{}")
+            .await
+            .expect("a credential in it");
 
         let carried = vec![("OPENAI_API_KEY".to_string(), ft_proto::Secret::from("sk"))];
         let about = About {
@@ -590,7 +666,7 @@ mod tests {
         for (name, value) in about.env {
             command.env(name, value.as_str());
         }
-        authenticate(&about, &mut command).await;
+        assert!(authenticate(&about, &mut command).await);
 
         let set: Vec<(String, String)> = command
             .as_std()
@@ -605,6 +681,97 @@ mod tests {
             set.contains(&("CODEX_HOME".to_string(), home.display().to_string())),
             "{set:?}"
         );
+    }
+
+    /// The session's own home, not the one next door. Each session is signed in
+    /// as whichever account was picked for it, and describing a change with
+    /// somebody else's credential is not a smaller mistake for being invisible.
+    #[tokio::test]
+    async fn the_home_it_is_pointed_at_is_this_session_s() {
+        let workspace = tempfile::tempdir().expect("a temporary directory");
+        let agentd = crate::agentd::dir_for(workspace.path());
+        for session in ["s_mine", "s_theirs"] {
+            let home = agentd.join(format!("agent-home-{session}"));
+            tokio::fs::create_dir_all(&home).await.expect("making it");
+            tokio::fs::write(home.join("auth.json"), "{}")
+                .await
+                .expect("a credential in it");
+        }
+
+        let about = About {
+            agent: ft_core::Agent::Codex,
+            workspace: workspace.path(),
+            session_id: "s_mine",
+            asked_for: None,
+            task: None,
+            diff: "",
+            state: std::path::Path::new("/nowhere"),
+            env: &[],
+        };
+
+        let mut command = Command::new("codex");
+        assert!(authenticate(&about, &mut command).await);
+        let home = command
+            .as_std()
+            .get_envs()
+            .find(|(k, _)| *k == "CODEX_HOME")
+            .and_then(|(_, v)| v)
+            .expect("a home")
+            .to_string_lossy()
+            .to_string();
+        assert!(home.ends_with("agent-home-s_mine"), "{home}");
+    }
+
+    /// A session started before homes were per session keeps its credential in
+    /// the one they all shared, and is still worth describing.
+    #[tokio::test]
+    async fn the_home_a_session_from_before_uses_is_still_found() {
+        let workspace = tempfile::tempdir().expect("a temporary directory");
+        let home = crate::agentd::dir_for(workspace.path()).join("agent-home");
+        tokio::fs::create_dir_all(&home).await.expect("making it");
+        tokio::fs::write(home.join("auth.json"), "{}")
+            .await
+            .expect("a credential in it");
+
+        let about = About {
+            agent: ft_core::Agent::Codex,
+            workspace: workspace.path(),
+            session_id: "s_test",
+            asked_for: None,
+            task: None,
+            diff: "",
+            state: std::path::Path::new("/nowhere"),
+            env: &[],
+        };
+
+        let mut command = Command::new("codex");
+        assert!(authenticate(&about, &mut command).await);
+        assert_eq!(command.as_std().get_envs().count(), 1);
+    }
+
+    /// A home with no credential in it is still where the agent's settings and
+    /// its threads are, so it is named — but nothing was signed in with, and
+    /// the failure that follows is worth blaming on that.
+    #[tokio::test]
+    async fn a_home_without_a_credential_is_named_but_is_not_a_sign_in() {
+        let workspace = tempfile::tempdir().expect("a temporary directory");
+        let home = crate::agentd::dir_for(workspace.path()).join("agent-home-s_test");
+        tokio::fs::create_dir_all(&home).await.expect("making it");
+
+        let about = About {
+            agent: ft_core::Agent::Codex,
+            workspace: workspace.path(),
+            session_id: "s_test",
+            asked_for: None,
+            task: None,
+            diff: "",
+            state: std::path::Path::new("/nowhere"),
+            env: &[],
+        };
+
+        let mut command = Command::new("codex");
+        assert!(!authenticate(&about, &mut command).await);
+        assert_eq!(command.as_std().get_envs().count(), 1);
     }
 
     /// And not at a directory that isn't there. An agent pointed at a home it
@@ -624,7 +791,7 @@ mod tests {
         };
 
         let mut command = Command::new("codex");
-        authenticate(&about, &mut command).await;
+        assert!(!authenticate(&about, &mut command).await);
         assert_eq!(command.as_std().get_envs().count(), 0);
     }
 
@@ -827,7 +994,12 @@ mod tests {
         // rejected, and swallowed.
         let args = |agent| {
             let mut c = Command::new("x");
-            invocation(agent, &mut c, "the prompt");
+            invocation(
+                agent,
+                &mut c,
+                "the prompt",
+                std::path::Path::new("/w/answer.txt"),
+            );
             c.as_std()
                 .get_args()
                 .map(|a| a.to_string_lossy().to_string())
@@ -844,5 +1016,88 @@ mod tests {
         assert!(!codex.contains(&"-p".to_string()), "{codex:?}");
         assert!(!codex.contains(&"haiku".to_string()), "{codex:?}");
         assert_eq!(codex.last().unwrap(), "the prompt");
+    }
+
+    /// The bug in the issue: `codex exec` refuses to start in a directory no
+    /// repository tracks, and a workspace holds the checkouts rather than being
+    /// one — so every Codex session failed here before it read a word of the
+    /// diff.
+    #[test]
+    fn codex_is_told_the_directory_is_not_a_repository_on_purpose() {
+        let mut command = Command::new("codex");
+        invocation(
+            ft_core::Agent::Codex,
+            &mut command,
+            "the prompt",
+            std::path::Path::new("/w/answer.txt"),
+        );
+        let args: Vec<String> = command
+            .as_std()
+            .get_args()
+            .map(|a| a.to_string_lossy().to_string())
+            .collect();
+
+        assert!(
+            args.contains(&"--skip-git-repo-check".to_string()),
+            "{args:?}"
+        );
+        // And still not allowed to write anything while it is there.
+        assert!(args.contains(&"read-only".to_string()), "{args:?}");
+    }
+
+    /// Asked for the answer on its own, because the run prints the question
+    /// too — and the question is full of the labels the answer is read by.
+    #[test]
+    fn codex_is_asked_to_write_its_answer_somewhere() {
+        let mut command = Command::new("codex");
+        invocation(
+            ft_core::Agent::Codex,
+            &mut command,
+            "the prompt",
+            std::path::Path::new("/w/answer.txt"),
+        );
+        let args: Vec<String> = command
+            .as_std()
+            .get_args()
+            .map(|a| a.to_string_lossy().to_string())
+            .collect();
+
+        let at = args
+            .iter()
+            .position(|a| a == "--output-last-message")
+            .unwrap_or_else(|| panic!("{args:?}"));
+        assert_eq!(args[at + 1], "/w/answer.txt", "{args:?}");
+    }
+
+    /// What the run wrote, not what it printed on the way.
+    #[tokio::test]
+    async fn the_answer_is_read_from_the_file_when_there_is_one() {
+        let dir = tempfile::tempdir().expect("a temporary directory");
+        let answer = dir.path().join("answer.txt");
+        tokio::fs::write(&answer, "TITLE: fix: stop the retry loop\n")
+            .await
+            .expect("writing it");
+
+        let got = read(&said(&answer, b"OpenAI Codex v0.42\nTITLE: a conventional commit").await)
+            .expect("an answer");
+        assert_eq!(got.title, "fix: stop the retry loop");
+    }
+
+    /// And standard output when there is not: an agent with no such flag, or a
+    /// copy of one too old to have it, still answers.
+    #[tokio::test]
+    async fn an_answer_that_was_only_printed_is_still_read() {
+        let dir = tempfile::tempdir().expect("a temporary directory");
+        let missing = dir.path().join("answer.txt");
+
+        let got = read(&said(&missing, b"TITLE: chore: bump deps\nBODY: Routine.").await)
+            .expect("an answer");
+        assert_eq!(got.title, "chore: bump deps");
+
+        tokio::fs::write(&missing, "   \n")
+            .await
+            .expect("writing it");
+        let got = read(&said(&missing, b"TITLE: chore: bump deps").await).expect("an answer");
+        assert_eq!(got.title, "chore: bump deps");
     }
 }
