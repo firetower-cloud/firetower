@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.31.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.30.1...firetower-v0.31.0) (2026-09-11)
+
+
+### Features
+
+* Add explicit container and host execution for local and remote workers ([6c3c1f0](https://github.com/firetower-cloud/firetower/commit/6c3c1f09699051081f90844480686520863d2a66))
+* Add explicit container and host execution for local and remote workers ([241e44c](https://github.com/firetower-cloud/firetower/commit/241e44ce987dfa56c1d31ada205a45043325343a))
+* add support for Linear in task management ([2623362](https://github.com/firetower-cloud/firetower/commit/2623362a73e9c53c1d2f777b7c79e333badd98fc))
+* add support for Linear in task management ([ba326d0](https://github.com/firetower-cloud/firetower/commit/ba326d0f81c7295ebc60ba4a95794fd9b9cf59ec))
+* manage updates directly from the control plane ([ba1b880](https://github.com/firetower-cloud/firetower/commit/ba1b880bc185f3f50df35acf28f68593c2e3fcd2))
+* manage updates directly from the control plane ([50ff17c](https://github.com/firetower-cloud/firetower/commit/50ff17c90a7297a0584e84cd25bc05216654c52d))
+
+
+### Bug Fixes
+
+* keep a message that has been sent but not yet echoed ([06dc5ca](https://github.com/firetower-cloud/firetower/commit/06dc5cae48cdff0bf7916b6e0b4087acd5f110ba))
+
 ## [0.30.1](https://github.com/firetower-cloud/firetower/compare/firetower-v0.30.0...firetower-v0.30.1) (2026-09-11)
 
 
