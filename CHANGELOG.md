@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.32.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.31.0...firetower-v0.32.0) (2026-09-11)
+
+
+### Features
+
+* **host-execution:** simplify machine setup and auto-install worker ([5d09949](https://github.com/firetower-cloud/firetower/commit/5d09949d063794d0a408a0987e5c390ce7a55c6f))
+* **host-execution:** simplify machine setup and auto-install worker ([03aff30](https://github.com/firetower-cloud/firetower/commit/03aff308d7f1d5dc25944b5c9143f5c00f6f1fad))
+
 ## [0.31.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.30.1...firetower-v0.31.0) (2026-09-11)
 
 
