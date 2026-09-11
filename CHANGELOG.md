@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.32.1](https://github.com/firetower-cloud/firetower/compare/firetower-v0.32.0...firetower-v0.32.1) (2026-09-11)
+
+
+### Bug Fixes
+
+* **host-execution:** reach workers again ([79886a6](https://github.com/firetower-cloud/firetower/commit/79886a64e7cb1b6a9926f536f665ed715ef46381))
+* **host-execution:** reach workers again ([62997c3](https://github.com/firetower-cloud/firetower/commit/62997c3ed247b125fd3fec1f9573585c24e1e950))
+
 ## [0.32.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.31.0...firetower-v0.32.0) (2026-09-11)
 
 
