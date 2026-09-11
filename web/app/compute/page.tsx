@@ -13,6 +13,7 @@ import {
 import { useListSessions } from "@/src/api/generated/sessions/sessions";
 import { useListAgents } from "@/src/api/generated/agents/agents";
 import type { Host, SshKey } from "@/src/api/generated/model";
+import { environmentLabel, executionLabel } from "@/src/api/environments";
 import { SetUpHost, canBeSetUp } from "@/components/SetUpHost";
 import { AddCompute } from "@/components/AddCompute";
 import { holdsHost } from "@/src/api/view";
@@ -136,7 +137,7 @@ function HostRow({
             host.state === "Online" ? "bg-sage" : "border border-mute"
           }`}
         />
-        <span className="font-mono text-ui text-bone">{host.name}</span>
+        <span className="font-mono text-ui text-bone">{environmentLabel(host)}</span>
         {/* The address beside the name, for a machine that has one. The name is
             what you call it; this is how you tell two of them apart at a
             glance without reading the line below. */}
@@ -146,7 +147,7 @@ function HostRow({
           </span>
         )}
         <span className="rounded-sm border border-line px-1.5 py-0.5 font-mono text-micro text-slate">
-          {kind === "Local" ? "this machine" : kind.toLowerCase()}
+          {executionLabel(host)}
         </span>
 
         {host.drained && (
@@ -231,12 +232,12 @@ function HostRow({
 
           {/* Reached, and not set up. One command away, so the way to it is a
               button rather than a paragraph somewhere else. */}
-          {canBeSetUp(host) && (
+          {(
             <button
               onClick={() => setSettingUp(true)}
               className="rounded-sm border border-line px-1.5 py-0.5 text-meta text-slate transition-colors hover:border-mute/60 hover:text-bone"
             >
-              See instructions
+              Check requirements
             </button>
           )}
         </span>

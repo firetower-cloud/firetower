@@ -42,7 +42,7 @@ use serde::{Deserialize, Serialize};
 /// older worker cannot read `TunnelOpen`, and a preview against one would take
 /// the connection down rather than answering "I can't".
 /// 13 — acknowledged agent launches and isolated per-run authentication.
-pub const PROTOCOL_VERSION: u32 = 13;
+pub const PROTOCOL_VERSION: u32 = 14;
 
 mod codec;
 pub use codec::{Codec, CodecError, FrameReader, FrameWriter};
@@ -348,10 +348,12 @@ pub enum ToWorker {
     Resume {
         since: i64,
     },
-    /// Which agents are on this host, and at what version?
-    ///
-    /// Asked of the worker for the same reason as everything else here: only
-    /// the machine that would run them knows what it has.
+    /// Check launch requirements in this worker environment without installing anything.
+    CheckReadiness {
+        req: ReqId,
+        agent: Option<ft_core::Agent>,
+    },
+    /// Which agents are installed in this worker environment?
     ProbeAgents {
         req: ReqId,
     },
@@ -903,6 +905,11 @@ pub enum ToServer {
         req: ReqId,
         /// One per checkout. A session holds any number of them.
         summaries: Vec<ft_core::CheckoutSummary>,
+    },
+    /// The answer to [`ToWorker::CheckReadiness`].
+    ReadinessChecked {
+        req: ReqId,
+        readiness: ft_core::Readiness,
     },
     /// The answer to [`ToWorker::ProbeAgents`].
     AgentsProbed {

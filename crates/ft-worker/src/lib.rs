@@ -68,6 +68,7 @@ pub mod first_run;
 pub mod git;
 pub mod history;
 pub mod hooks;
+pub mod readiness;
 pub mod runtime;
 pub mod store;
 pub mod structured;
@@ -492,6 +493,12 @@ impl Worker {
                     })
                     .await?;
                 }
+            }
+
+            ToWorker::CheckReadiness { req, agent } => {
+                let readiness = readiness::check(&self.root, agent).await;
+                out.send(ToServer::ReadinessChecked { req, readiness })
+                    .await?;
             }
 
             ToWorker::ProbeAgents { req } => {
@@ -2787,6 +2794,7 @@ fn takes_a_while(frame: &ToWorker) -> bool {
             | ToWorker::Summarize { .. }
             | ToWorker::ProbeRemote { .. }
             | ToWorker::ProbeAgents { .. }
+            | ToWorker::CheckReadiness { .. }
             // npm, fetching a few hundred megabytes. Minutes on a slow line,
             // and every heartbeat is due during it.
             | ToWorker::InstallAgent { .. }
@@ -4133,6 +4141,12 @@ mod tests {
         let labels: Vec<&str> = out
             .iter()
             .filter_map(|f| match f {
+                // A slower fetch emits progress updates between its start and
+                // finish. Those updates are not additional lifecycle steps.
+                ToServer::Event {
+                    kind: EventKind::StepProgress { .. },
+                    ..
+                } => None,
                 ToServer::Event { kind, .. } => Some(kind.label()),
                 _ => None,
             })
@@ -4160,6 +4174,56 @@ mod tests {
             ]
         );
 
+        cleanup(&id).await;
+    }
+
+    #[tokio::test]
+    async fn native_host_tools_and_source_survive_workspace_cleanup() {
+        use std::os::unix::fs::PermissionsExt;
+        let (origin_dir, remote) = origin().await;
+        let tools = TempDir::new().unwrap();
+        let executable = tools.path().join("video-tool");
+        tokio::fs::write(&executable, "#!/bin/sh\nprintf host-tool-ran\n")
+            .await
+            .unwrap();
+        std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let marker = tools.path().join("result");
+        let home = TempDir::new().unwrap();
+        let worker = std::sync::Arc::new(Worker::open(home.path()).await.unwrap());
+        let other = home.path().join("unrelated-application");
+        tokio::fs::write(&other, "keep").await.unwrap();
+        let id = SessionId::new();
+        let setup = format!("'{}' > '{}'", executable.display(), marker.display());
+        let created = exchange(&worker, vec![hello(), spec(&remote, &id, Some(&setup))]).await;
+        assert!(
+            created.iter().any(|frame| matches!(
+                frame,
+                ToServer::Event {
+                    kind: EventKind::AgentLaunched { .. },
+                    ..
+                }
+            )),
+            "{created:?}"
+        );
+        assert_eq!(
+            tokio::fs::read_to_string(&marker).await.unwrap(),
+            "host-tool-ran"
+        );
+        exchange(
+            &worker,
+            vec![
+                hello(),
+                ToWorker::Destroy {
+                    session_id: id.clone(),
+                    force: true,
+                },
+            ],
+        )
+        .await;
+        assert!(executable.exists());
+        assert!(origin_dir.path().join("README.md").exists());
+        assert_eq!(tokio::fs::read_to_string(&other).await.unwrap(), "keep");
+        assert!(!worker.git.worktree_path(id.as_str()).exists());
         cleanup(&id).await;
     }
 

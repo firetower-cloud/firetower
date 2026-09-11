@@ -58,11 +58,15 @@ async fn signed_in(kind: Agent, path: &std::ffi::OsStr) -> (Option<bool>, Option
         return (None, None);
     };
 
-    let Ok(output) = Command::new(kind.command())
-        .args(args)
-        .env("PATH", path)
-        .output()
-        .await
+    let Ok(Ok(output)) = tokio::time::timeout(
+        std::time::Duration::from_secs(3),
+        Command::new(kind.command())
+            .args(args)
+            .env("PATH", path)
+            .kill_on_drop(true)
+            .output(),
+    )
+    .await
     else {
         return (None, None);
     };
@@ -96,12 +100,17 @@ async fn signed_in(kind: Agent, path: &std::ffi::OsStr) -> (Option<bool>, Option
 /// these offer a non-interactive way to ask, and inferring it from their
 /// credential files means depending on a format that is theirs to change.
 async fn version_of(program: &str, path: &std::ffi::OsStr) -> Option<String> {
-    let output = Command::new(program)
-        .arg("--version")
-        .env("PATH", path)
-        .output()
-        .await
-        .ok()?;
+    let output = tokio::time::timeout(
+        std::time::Duration::from_secs(3),
+        Command::new(program)
+            .arg("--version")
+            .env("PATH", path)
+            .kill_on_drop(true)
+            .output(),
+    )
+    .await
+    .ok()?
+    .ok()?;
     if !output.status.success() {
         return None;
     }

@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.28.2
+ * OpenAPI spec version: 0.30.1
  */
 import {
   useMutation,
@@ -30,9 +30,11 @@ import type {
   DeleteHostParams,
   Drain,
   Host,
+  HostReadinessParams,
   NewHost,
   PublicIdentity,
   Reached,
+  Readiness,
   Rename
 } from '../model';
 
@@ -621,7 +623,141 @@ export const useDrainHost = <TError = ApiError,
       > => {
       return useMutation(getDrainHostMutationOptions(options), queryClient);
     }
-    export const getSshKeyUrl = () => {
+    export const getHostReadinessUrl = (id: string,
+    params?: HostReadinessParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/v1/hosts/${id}/readiness?${stringifiedParams}` : `/api/v1/hosts/${id}/readiness`
+}
+
+/**
+ * @summary Check requirements on the selected worker. This never installs anything.
+ */
+export const hostReadiness = async (id: string,
+    params?: HostReadinessParams, options?: Parameters<typeof http>[1]): Promise<Readiness> => {
+
+  return http<Readiness>(getHostReadinessUrl(id,params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getHostReadinessQueryKey = (id: string,
+    params?: HostReadinessParams,) => {
+    return [
+    `/api/v1/hosts/${id}/readiness`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getHostReadinessQueryOptions = <TData = Awaited<ReturnType<typeof hostReadiness>>, TError = ApiError>(id: string,
+    params?: HostReadinessParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof hostReadiness>>, TError, TData>>, request?: SecondParameter<typeof http>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getHostReadinessQueryKey(id,params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof hostReadiness>>> = ({ signal }) => hostReadiness(id,params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: id !== null && id !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof hostReadiness>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type HostReadinessQueryResult = NonNullable<Awaited<ReturnType<typeof hostReadiness>>>
+export type HostReadinessQueryError = ApiError
+
+
+export function useHostReadiness<TData = Awaited<ReturnType<typeof hostReadiness>>, TError = ApiError>(
+ id: string,
+    params: undefined |  HostReadinessParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof hostReadiness>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof hostReadiness>>,
+          TError,
+          Awaited<ReturnType<typeof hostReadiness>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useHostReadiness<TData = Awaited<ReturnType<typeof hostReadiness>>, TError = ApiError>(
+ id: string,
+    params?: HostReadinessParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof hostReadiness>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof hostReadiness>>,
+          TError,
+          Awaited<ReturnType<typeof hostReadiness>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useHostReadiness<TData = Awaited<ReturnType<typeof hostReadiness>>, TError = ApiError>(
+ id: string,
+    params?: HostReadinessParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof hostReadiness>>, TError, TData>>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Check requirements on the selected worker. This never installs anything.
+ */
+
+export function useHostReadiness<TData = Awaited<ReturnType<typeof hostReadiness>>, TError = ApiError>(
+ id: string,
+    params?: HostReadinessParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof hostReadiness>>, TError, TData>>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getHostReadinessQueryOptions(id,params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+/**
+ * @summary Check requirements on the selected worker. This never installs anything.
+ */
+export const useSetHostReadinessQueryData = () => {
+  const queryClient = useQueryClient();
+  return (id: string,
+    params: HostReadinessParams | undefined,updater: Awaited<ReturnType<typeof hostReadiness>> | undefined | ((old: Awaited<ReturnType<typeof hostReadiness>> | undefined) => Awaited<ReturnType<typeof hostReadiness>> | undefined)) => {
+    queryClient.setQueriesData<Awaited<ReturnType<typeof hostReadiness>>>({ queryKey: getHostReadinessQueryKey(id,params) }, updater);
+  };
+}
+
+/**
+ * @summary Check requirements on the selected worker. This never installs anything.
+ */
+export const useGetHostReadinessQueryData = () => {
+  const queryClient = useQueryClient();
+  return (id: string,
+    params?: HostReadinessParams,) =>
+    queryClient.getQueryData<Awaited<ReturnType<typeof hostReadiness>>>(getHostReadinessQueryKey(id,params));
+}
+
+
+export const getSshKeyUrl = () => {
 
 
 

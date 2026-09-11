@@ -85,7 +85,7 @@ pub fn from_output(
                 Cause::WorkerMissing,
                 "Firetower isn't installed on that machine.",
             )
-            .with_remedy("npm i -g @firetower/cli\nfiretower worker install")
+            .with_remedy(crate::api::hosts::setup_instructions(compute))
         }
     } else if said.contains("permission denied (publickey")
         || said.contains("no supported authentication methods")
@@ -245,7 +245,11 @@ mod tests {
         // the machine and working — leaving it out sent people to the docs to
         // find one line.
         let remedy = d.remedy.as_deref().unwrap_or_default();
-        assert!(remedy.contains("firetower worker install"), "{remedy}");
+        assert!(remedy.contains("firetower-worker"), "{remedy}");
+        assert!(
+            !remedy.contains("firetower worker install"),
+            "native setup must not install a container"
+        );
     }
 
     /// The case with no text at all. `docker exec` puts its reason on stdout,

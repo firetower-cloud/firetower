@@ -648,6 +648,7 @@ enum Waiting {
         chunks: mpsc::Sender<Vec<u8>>,
     },
     Agents(oneshot::Sender<Vec<AgentPresence>>),
+    Readiness(oneshot::Sender<ft_core::Readiness>),
     /// A Codex sign-in: the code to show, and then the credential.
     ///
     /// Two channels for one request, like a file, and for the same reason —
@@ -2003,6 +2004,14 @@ impl Fleet {
                                 None => tracing::debug!("a summary arrived after its request gave up"),
                             }
                         }
+                        Ok(ToServer::ReadinessChecked { req, readiness }) => {
+                            let mut held = probes.write().await;
+                            match held.remove(&req) {
+                                Some(Asked { waiting: Waiting::Readiness(reply), .. }) => { let _ = reply.send(readiness); }
+                                Some(other) => { held.insert(req, other); }
+                                None => tracing::debug!("a readiness check arrived after its request gave up"),
+                            }
+                        }
                         Ok(ToServer::AgentsProbed { req, agents }) => {
                             let mut held = probes.write().await;
                             match held.remove(&req) {
@@ -2106,7 +2115,7 @@ impl Fleet {
                     }
                     // Dropping the sender is the signal; there is no "we asked
                     // and the answer was none" for these.
-                    Waiting::Agents(_) | Waiting::Summary(_) => {}
+                    Waiting::Agents(_) | Waiting::Summary(_) | Waiting::Readiness(_) => {}
                     Waiting::Action(reply) => {
                         let _ = reply.send(Err("the host stopped answering".into()));
                     }
@@ -2358,6 +2367,47 @@ impl Fleet {
         };
 
         Ok((pending, wait_finished))
+    }
+
+    pub async fn check_readiness(
+        &self,
+        host_id: &HostId,
+        agent: Option<ft_core::Agent>,
+    ) -> Result<ft_core::Readiness> {
+        let req = ulid::Ulid::new().to_string();
+        let (tx, rx) = oneshot::channel();
+        self.probes.write().await.insert(
+            req.clone(),
+            Asked {
+                host: host_id.to_string(),
+                waiting: Waiting::Readiness(tx),
+            },
+        );
+
+        if let Err(e) = self
+            .send(
+                host_id,
+                ToWorker::CheckReadiness {
+                    req: req.clone(),
+                    agent,
+                },
+            )
+            .await
+        {
+            self.probes.write().await.remove(&req);
+            return Err(e);
+        }
+
+        match tokio::time::timeout(PROBE_TIMEOUT, rx).await {
+            Ok(Ok(agents)) => Ok(agents),
+            Ok(Err(_)) => {
+                anyhow::bail!("the worker connection dropped while checking requirements")
+            }
+            Err(_) => {
+                self.probes.write().await.remove(&req);
+                anyhow::bail!("{host_id} did not answer within {PROBE_TIMEOUT:?}")
+            }
+        }
     }
 
     pub async fn probe_agents(&self, host_id: &HostId) -> Result<Vec<AgentPresence>> {
