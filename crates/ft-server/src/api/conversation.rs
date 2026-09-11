@@ -144,14 +144,76 @@ pub(crate) async fn conversation_events(
     let mut normaliser = reader_for(&state, &id).await;
     let mut backlog = Vec::new();
     let mut replayed = 0u64;
+    let mut echoed: Vec<String> = Vec::new();
+    let mut gathering: std::collections::HashMap<String, String> = Default::default();
     for (line_no, line) in stored {
         let line_no = line_no.max(0) as u64;
         replayed = line_no;
         for event in normaliser.push(&line) {
+            // What the agent has said back, so a message still waiting to be
+            // echoed can be told from one that already has been. The text
+            // arrives as deltas against the item, so it has to be gathered
+            // rather than read off the ending.
+            match &event {
+                ft_core::TurnEvent::ItemStarted {
+                    item,
+                    kind: ft_core::turn::ItemKind::UserMessage,
+                    ..
+                } => {
+                    gathering.insert(item.as_str().to_string(), String::new());
+                }
+                ft_core::TurnEvent::ContentDelta { item, delta, .. } => {
+                    if let Some(held) = gathering.get_mut(item.as_str()) {
+                        held.push_str(delta);
+                    }
+                }
+                ft_core::TurnEvent::ItemCompleted { item, .. } => {
+                    if let Some(said) = gathering.remove(item.as_str()) {
+                        echoed.push(said);
+                    }
+                }
+                _ => {}
+            }
             if line_no > resume_from {
                 backlog.push(ConversationEvent { line_no, event });
             }
         }
+    }
+
+    // Anything typed at this session that the agent has not repeated back yet.
+    //
+    // A transcript is the agent's own output replayed, so until the echo
+    // arrives there is nothing here to draw and the message somebody sent
+    // simply was not on the screen after a reload. An agent in the middle of a
+    // long command does not echo for as long as that command runs.
+    state.fleet.echoed(&id, &echoed).await;
+    for pending in state.fleet.typed(&id).await {
+        replayed += 1;
+        let item = ft_core::turn::ItemId::new(format!("pending-{}", pending.at.timestamp_millis()));
+        backlog.push(ConversationEvent {
+            line_no: replayed,
+            event: ft_core::TurnEvent::ItemStarted {
+                item: item.clone(),
+                kind: ft_core::turn::ItemKind::UserMessage,
+                title: None,
+                task: None,
+            },
+        });
+        backlog.push(ConversationEvent {
+            line_no: replayed,
+            event: ft_core::TurnEvent::ContentDelta {
+                item: item.clone(),
+                stream: ft_core::turn::StreamKind::UserText,
+                delta: pending.text.clone(),
+            },
+        });
+        backlog.push(ConversationEvent {
+            line_no: replayed,
+            event: ft_core::TurnEvent::ItemCompleted {
+                item,
+                status: ft_core::turn::ItemStatus::Completed,
+            },
+        });
     }
 
     for question in waiting {

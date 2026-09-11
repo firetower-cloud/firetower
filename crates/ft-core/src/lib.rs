@@ -4,6 +4,9 @@
 //! pure function over values, which is what makes the state machine exhaustively
 //! testable and reusable verbatim in a hosted control plane.
 
+pub mod readiness;
+pub use readiness::{Execution, Readiness, Requirement};
+
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
@@ -382,7 +385,7 @@ pub enum Compute {
     /// A worker as a child process here. Inherits your environment, and its
     /// workspaces are directories you can open.
     Local,
-    /// A worker in a container here. Linux, and isolated from your machine.
+    /// A worker in a container on the control-plane machine.
     ///
     /// Reached with `docker exec` rather than ssh: the same bidirectional pipe
     /// without an sshd, a key, or a host key to verify.
@@ -607,6 +610,12 @@ mod destination_tests {
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Host {
+    /// Machine grouping; "local" means the machine hosting the control plane.
+    #[serde(default)]
+    pub machine: Option<String>,
+    /// Where the worker executes, resolved by the control plane.
+    #[serde(default)]
+    pub execution: Option<Execution>,
     pub id: HostId,
     /// What the user calls it. `localhost` is a real host, not a special case.
     pub name: String,

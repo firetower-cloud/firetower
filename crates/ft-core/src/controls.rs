@@ -172,7 +172,7 @@ fn codex_fences() -> Vec<Choice> {
         Choice::new(
             "Everything",
             SANDBOX_EVERYTHING,
-            "No fence. Every session on this host shares one container",
+            "No filesystem sandbox. Uses the worker’s available access",
         )
         .grave(),
     ]

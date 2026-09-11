@@ -542,7 +542,10 @@ pub(super) async fn create_repo(
     // actually matters.
     let mut trunk = None;
 
-    if let Some(host) = local_host(&state).await {
+    // A filesystem path belongs to the execution host selected at launch.
+    // The control plane may be in a container or on another machine entirely.
+    // Defer reading its default branch until that worker can check it.
+    if let Some(host) = local_host(&state).await.filter(|_| !is_local_path(remote)) {
         match state
             .fleet
             .probe(
@@ -728,6 +731,8 @@ mod tests {
 
     fn somewhere(name: &str, compute: ft_core::Compute) -> ft_core::Host {
         ft_core::Host {
+            machine: None,
+            execution: None,
             id: ft_core::HostId::new(),
             name: name.into(),
             state: ft_core::HostState::Online,

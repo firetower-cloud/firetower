@@ -166,6 +166,15 @@ export type Conversation = {
   limits?: Limits;
   /** How far we have read. The resume cursor. */
   lastLine: number;
+  /**
+   * When the agent last said anything, as a local clock reading.
+   *
+   * An agent heads-down in a ten-minute command looks exactly like a dead one:
+   * a spinner that has been spinning since you got here, and no way to tell
+   * whether it is thinking or gone. This is what lets the screen say "still
+   * going, last heard 8s ago" rather than leaving somebody to guess.
+   */
+  heardAt?: number;
   /** Set when the stream could not be opened or fell over. */
   trouble?: string;
 };
@@ -198,6 +207,9 @@ export const nothing: Conversation = {
  */
 export function apply(state: Conversation, event: ConversationEvent): Conversation {
   const lastLine = Math.max(state.lastLine, event.lineNo);
+  // Every event here came off the agent's stream, so any of them is proof it
+  // is still there. Set before the switch so no branch can forget it.
+  state = { ...state, heardAt: Date.now() };
   const items = state.items;
 
   /** Replace one item in place, leaving the rest alone. */

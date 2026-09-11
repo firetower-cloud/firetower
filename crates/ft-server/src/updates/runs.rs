@@ -934,6 +934,8 @@ mod tests {
 
     fn host(compute: ft_core::Compute) -> ft_core::Host {
         ft_core::Host {
+            machine: None,
+            execution: None,
             id: ft_core::HostId::from_stored("h_1"),
             name: "fire-01".into(),
             state: ft_core::HostState::Online,

@@ -87,6 +87,8 @@ Everything else — putting it on a domain, adding a server, connecting reposito
 
 </div>
 
+Native execution is also supported on the control-plane machine and remote machines. See [Run agents directly on a host](docs/host-execution.md) for setup, requirements and launch choices.
+
 ## Documentation
 
 | | |

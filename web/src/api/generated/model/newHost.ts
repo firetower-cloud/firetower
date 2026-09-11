@@ -14,4 +14,6 @@ export interface NewHost {
      * @nullable
      */
   name?: string | null;
+  /** This SSH connection reaches the machine hosting Firetower. */
+  sameMachine?: boolean;
 }

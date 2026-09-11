@@ -52,6 +52,13 @@ const RETRY_FLOOR_HUMAN: std::time::Duration = std::time::Duration::from_secs(30
 
 use crate::transport::Transport;
 
+/// Something somebody typed that the agent has not said back yet.
+#[derive(Clone, Debug)]
+pub struct Typed {
+    pub text: String,
+    pub at: chrono::DateTime<chrono::Utc>,
+}
+
 /// A session's terminal, as it reaches a viewer.
 #[derive(Clone, Debug)]
 pub enum Terminal {
@@ -648,6 +655,7 @@ enum Waiting {
         chunks: mpsc::Sender<Vec<u8>>,
     },
     Agents(oneshot::Sender<Vec<AgentPresence>>),
+    Readiness(oneshot::Sender<ft_core::Readiness>),
     /// A Codex sign-in: the code to show, and then the credential.
     ///
     /// Two channels for one request, like a file, and for the same reason —
@@ -989,6 +997,18 @@ pub struct Fleet {
     /// already waiting shows an agent doing nothing, with no way to find out
     /// why.
     asked: Arc<RwLock<HashMap<String, Vec<AgentSpeech>>>>,
+    /// What somebody typed that the agent has not echoed back yet.
+    ///
+    /// A transcript is rebuilt from the agent's own output, and a message
+    /// becomes part of it when the agent repeats it back. An agent in the
+    /// middle of a ten-minute command does not get to that for ten minutes —
+    /// and until it does, the only copy of what somebody typed is in the tab
+    /// they typed it into. Reloading lost it, which reads as the session
+    /// having swallowed the message.
+    ///
+    /// In memory, like `asked` above and for the same reason: it is a thing in
+    /// flight rather than a thing to keep, and the agent's echo retires it.
+    typed: Arc<RwLock<HashMap<String, Vec<Typed>>>>,
     /// Live conversations, one broadcast per session.
     ///
     /// Carries lines as the agent wrote them. Turning them into something an
@@ -1066,6 +1086,7 @@ impl Fleet {
             terminals: Arc::new(RwLock::new(HashMap::new())),
             conversations: Arc::new(RwLock::new(HashMap::new())),
             asked: Arc::new(RwLock::new(HashMap::new())),
+            typed: Arc::new(RwLock::new(HashMap::new())),
             progress: Arc::new(RwLock::new(HashMap::new())),
             capacity: Arc::new(RwLock::new(HashMap::new())),
             usage: Arc::new(RwLock::new(HashMap::new())),
@@ -2020,6 +2041,14 @@ impl Fleet {
                                 None => tracing::debug!("a summary arrived after its request gave up"),
                             }
                         }
+                        Ok(ToServer::ReadinessChecked { req, readiness }) => {
+                            let mut held = probes.write().await;
+                            match held.remove(&req) {
+                                Some(Asked { waiting: Waiting::Readiness(reply), .. }) => { let _ = reply.send(readiness); }
+                                Some(other) => { held.insert(req, other); }
+                                None => tracing::debug!("a readiness check arrived after its request gave up"),
+                            }
+                        }
                         Ok(ToServer::AgentsProbed { req, agents }) => {
                             let mut held = probes.write().await;
                             match held.remove(&req) {
@@ -2123,7 +2152,7 @@ impl Fleet {
                     }
                     // Dropping the sender is the signal; there is no "we asked
                     // and the answer was none" for these.
-                    Waiting::Agents(_) | Waiting::Summary(_) => {}
+                    Waiting::Agents(_) | Waiting::Summary(_) | Waiting::Readiness(_) => {}
                     Waiting::Action(reply) => {
                         let _ = reply.send(Err("the host stopped answering".into()));
                     }
@@ -2375,6 +2404,47 @@ impl Fleet {
         };
 
         Ok((pending, wait_finished))
+    }
+
+    pub async fn check_readiness(
+        &self,
+        host_id: &HostId,
+        agent: Option<ft_core::Agent>,
+    ) -> Result<ft_core::Readiness> {
+        let req = ulid::Ulid::new().to_string();
+        let (tx, rx) = oneshot::channel();
+        self.probes.write().await.insert(
+            req.clone(),
+            Asked {
+                host: host_id.to_string(),
+                waiting: Waiting::Readiness(tx),
+            },
+        );
+
+        if let Err(e) = self
+            .send(
+                host_id,
+                ToWorker::CheckReadiness {
+                    req: req.clone(),
+                    agent,
+                },
+            )
+            .await
+        {
+            self.probes.write().await.remove(&req);
+            return Err(e);
+        }
+
+        match tokio::time::timeout(PROBE_TIMEOUT, rx).await {
+            Ok(Ok(agents)) => Ok(agents),
+            Ok(Err(_)) => {
+                anyhow::bail!("the worker connection dropped while checking requirements")
+            }
+            Err(_) => {
+                self.probes.write().await.remove(&req);
+                anyhow::bail!("{host_id} did not answer within {PROBE_TIMEOUT:?}")
+            }
+        }
     }
 
     pub async fn probe_agents(&self, host_id: &HostId) -> Result<Vec<AgentPresence>> {
@@ -2632,6 +2702,20 @@ impl Fleet {
             progress.turn(text, images)?
         };
 
+        // Held from here rather than from the answer, because the answer *is*
+        // the agent repeating it, and that is exactly what may be minutes away.
+        if !text.trim().is_empty() {
+            self.typed
+                .write()
+                .await
+                .entry(session_id.to_string())
+                .or_default()
+                .push(Typed {
+                    text: text.to_string(),
+                    at: chrono::Utc::now(),
+                });
+        }
+
         self.send(
             host_id,
             ToWorker::SendTurn {
@@ -2640,6 +2724,34 @@ impl Fleet {
             },
         )
         .await
+    }
+
+    /// What has been typed at this session and not yet come back.
+    pub async fn typed(&self, session_id: &SessionId) -> Vec<Typed> {
+        self.typed
+            .read()
+            .await
+            .get(session_id.as_str())
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    /// Forget the messages the agent has now echoed.
+    ///
+    /// Matched on the text, because that is all the echo carries that this end
+    /// also has: the agent gives the item an id of its own making and nothing
+    /// ties it back to the send.
+    pub async fn echoed(&self, session_id: &SessionId, said: &[String]) {
+        if said.is_empty() {
+            return;
+        }
+        let mut held = self.typed.write().await;
+        if let Some(waiting) = held.get_mut(session_id.as_str()) {
+            waiting.retain(|t| !said.iter().any(|s| s == &t.text));
+            if waiting.is_empty() {
+                held.remove(session_id.as_str());
+            }
+        }
     }
 
     /// What this session is blocked on, if anything.
