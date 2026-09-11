@@ -19,7 +19,17 @@
  * is the prose and nothing else. That is only honest if the lines that will be
  * added are on screen — [`trailerFor`] is what the sheet renders, and what it
  * sends.
+ *
+ * ## Two trackers, one trailer
+ *
+ * A GitHub reference is a number and a Linear one is an identifier, and each
+ * host ignores the other's: `Closes #32` means nothing to Linear, `Fixes
+ * ENG-123` means nothing to GitHub. So both can be written into one body
+ * without either acting on the other's line.
  */
+
+/** Which tracker a reference belongs to. */
+export type Tracker = "github" | "linear";
 
 /** What a keyword does when the request merges. */
 export type Keyword = "Closes" | "Fixes" | "Resolves" | "Refs";
@@ -35,16 +45,18 @@ export function shuts(keyword: Keyword): boolean {
 /**
  * One issue, as it will be written down.
  *
- * `repo` is the slug when the issue lives somewhere other than where it is
- * being referenced from, and undefined when it is a bare `#32`. Which of those
- * a given pull request needs is decided per checkout, in [`trailerFor`] —
- * the same issue is `#32` in its own repository and `acme/web#32` everywhere
- * else, and only the pull request knows which it is.
+ * `key` is `32` for GitHub and `ENG-123` for Linear. `repo` is the slug when a
+ * GitHub issue lives somewhere other than where it is being referenced from,
+ * and undefined when it is a bare `#32`. Which of those a given pull request
+ * needs is decided per checkout, in [`trailerFor`] — the same issue is `#32` in
+ * its own repository and `acme/web#32` everywhere else, and only the pull
+ * request knows which it is. A Linear identifier is the same everywhere.
  */
 export type Reference = {
-  /** `32`. */
-  number: number;
-  /** `acme/web`, when it is known. */
+  source: Tracker;
+  /** `32`, or `ENG-123`. */
+  key: string;
+  /** `acme/web`, when it is known. GitHub only. */
   repo?: string;
   keyword: Keyword;
   /** What it is called, when anybody could read it. */
@@ -54,17 +66,17 @@ export type Reference = {
 };
 
 /** How a reference is identified, so the same issue cannot be added twice. */
-export function idOf(ref: Pick<Reference, "number" | "repo">): string {
-  return `${ref.repo ?? ""}#${ref.number}`;
+export function idOf(ref: Pick<Reference, "source" | "key" | "repo">): string {
+  return ref.source === "linear" ? `linear:${ref.key}` : `${ref.repo ?? ""}#${ref.key}`;
 }
 
 /**
  * Read what somebody typed or pasted.
  *
- * Three shapes, because all three are things people actually have in the
- * clipboard: a bare `#32`, a qualified `acme/web#32`, and the URL from the
- * address bar. Anything else is not a reference — a bare `32` most of all,
- * which is far more often a version or a count.
+ * Five shapes, because all five are things people actually have in the
+ * clipboard: a bare `#32`, a qualified `acme/web#32`, a GitHub URL, a Linear
+ * URL, and a bare `ENG-123`. Anything else is not a reference — a bare `32`
+ * most of all, which is far more often a version or a count.
  *
  * `within` is the repository the sheet is shipping to. A reference typed as
  * `#32` means "in this one", and saying so here is what lets the trailer
@@ -74,14 +86,27 @@ export function parseReference(text: string, within?: string): Reference | null 
   const trimmed = text.trim();
   if (!trimmed) return null;
 
-  // A URL, from the browser. The host is skipped rather than matched, so a
-  // self-hosted git server works without being named.
+  // A Linear link. The workspace name sits between the host and `issue`, and
+  // is not worth reading — the identifier is unique on its own.
+  const ticket = trimmed.match(/^(?:https?:\/\/)?linear\.app\/[^/\s]+\/issue\/([A-Za-z][\w]*-\d+)/);
+  if (ticket) {
+    return {
+      source: "linear",
+      key: ticket[1].toUpperCase(),
+      keyword: "Refs",
+      url: trimmed.startsWith("http") ? trimmed.split(/[?#]/)[0] : undefined,
+    };
+  }
+
+  // A GitHub URL, from the browser. The host is skipped rather than matched,
+  // so a self-hosted git server works without being named.
   const link = trimmed.match(
     /^(?:https?:\/\/)?[^/\s]+\/([^/\s]+)\/([^/\s]+)\/(?:issues|pull|pulls)\/(\d+)/,
   );
   if (link) {
     return {
-      number: Number(link[3]),
+      source: "github",
+      key: link[3],
       repo: `${link[1]}/${link[2]}`,
       keyword: "Refs",
       url: trimmed.startsWith("http") ? trimmed.split(/[?#]/)[0] : undefined,
@@ -92,8 +117,23 @@ export function parseReference(text: string, within?: string): Reference | null 
   const hash = trimmed.match(/^(?:([\w.-]+\/[\w.-]+))?#(\d+)$/);
   if (hash) {
     return {
-      number: Number(hash[2]),
+      source: "github",
+      key: hash[2],
       repo: hash[1] ?? within,
+      keyword: "Refs",
+    };
+  }
+
+  // `ENG-123`. Looser than the shapes above, and deliberately still narrow:
+  // a team prefix of letters and digits, then a number, and nothing else.
+  // Something like `UTF-8` gets through, which is survivable — a reference
+  // read this way arrives as `Refs` and has to be clicked before it is
+  // written, and nothing here closes an issue on its own.
+  const identifier = trimmed.match(/^([A-Za-z][A-Za-z0-9]{0,9})-(\d+)$/);
+  if (identifier) {
+    return {
+      source: "linear",
+      key: `${identifier[1].toUpperCase()}-${identifier[2]}`,
       keyword: "Refs",
     };
   }
@@ -101,9 +141,10 @@ export function parseReference(text: string, within?: string): Reference | null 
   return null;
 }
 
-/** `#32`, or `acme/web#32` when it is somewhere else. */
+/** `#32`, or `acme/web#32` when it is somewhere else. `ENG-123` as it is. */
 export function label(ref: Reference, within?: string): string {
-  return !ref.repo || ref.repo === within ? `#${ref.number}` : `${ref.repo}#${ref.number}`;
+  if (ref.source === "linear") return ref.key;
+  return !ref.repo || ref.repo === within ? `#${ref.key}` : `${ref.repo}#${ref.key}`;
 }
 
 /**
@@ -115,10 +156,17 @@ export function label(ref: Reference, within?: string): string {
  * changed two repositories opens two requests, and the issue it was cut for
  * can only be closed by one of them — the other references it, which is the
  * honest thing to write and the thing GitHub will actually do.
+ *
+ * Linear is not qualified by repository at all. It reads the identifier out of
+ * the body wherever the request is opened, so the only translation it needs is
+ * `Refs`, which it does not know, into `Part of`, which it does.
  */
 export function trailerFor(refs: Reference[], within?: string): string {
   return refs
     .map((ref) => {
+      if (ref.source === "linear") {
+        return `${ref.keyword === "Refs" ? "Part of" : ref.keyword} ${ref.key}`;
+      }
       const here = !ref.repo || ref.repo === within;
       // Downgraded rather than dropped. A reference that cannot close is still
       // worth having in the body — it is the link a reviewer follows.
@@ -137,11 +185,23 @@ export function withTrailer(body: string, refs: Reference[], within?: string): s
 }
 
 /**
+ * Whether any of these only work if a tracker's own git integration is on.
+ *
+ * A `Fixes ENG-123` in a pull request body does nothing at all unless Linear
+ * is connected to the repository at Linear's end. That is not something this
+ * can check or fix, so the sheet says so rather than writing a line somebody
+ * assumes is working.
+ */
+export function needsIntegration(refs: Reference[]): boolean {
+  return refs.some((ref) => ref.source === "linear");
+}
+
+/**
  * The reference a workspace was cut for, from what the session remembers.
  *
- * `taskKey` is `#32` and `taskUrl` is where to read it. The URL is the better
- * source — it names the repository, which the key does not — so the key is
- * only a fallback for a session bound before URLs were kept.
+ * `taskKey` is `#32` or `ENG-123` and `taskUrl` is where to read it. The URL is
+ * the better source — it names the repository, which a GitHub key does not —
+ * so the key is only a fallback for a session bound before URLs were kept.
  *
  * Defaults to closing, because that is what starting work on an issue means.
  * Everything added by hand defaults to referencing instead: adding a link to

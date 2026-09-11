@@ -3,13 +3,19 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.28.2
+ * OpenAPI spec version: 0.30.1
  */
 import type { Task } from './task';
 
 export interface Page {
   /** Whether asking for the next page is worth it. */
   more: boolean;
+  /**
+     * What to send as `cursor` for the next page, when the source pages that
+     * way. `None` means page numbers, which is what GitHub answers with.
+     * @nullable
+     */
+  next?: string | null;
   tasks: Task[];
   /**
      * How many there are in total, when the source will say.

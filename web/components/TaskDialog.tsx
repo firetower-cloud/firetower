@@ -21,6 +21,7 @@ import { elapsed, minutesSince } from "@/src/api/view";
 
 export function TaskDialog({
   task,
+  sourceLabel,
   at,
   of,
   onMove,
@@ -28,6 +29,8 @@ export function TaskDialog({
   onStart,
 }: {
   task: Task;
+  /** What the tracker is called, for the link out. */
+  sourceLabel: string;
   /** Which of the page you are on, one-based, for `2 of 14`. */
   at: number;
   of: number;
@@ -50,7 +53,11 @@ export function TaskDialog({
   }, [onMove, onStart]);
 
   return (
-    <Modal onClose={onClose} title={`${task.key} · ${task.repo ?? "task"}`} wide>
+    <Modal
+      onClose={onClose}
+      title={task.repo ? `${task.key} · ${task.repo}` : task.key}
+      wide
+    >
       <div className="flex items-center gap-2 pb-3">
         <IconButton
           of={ChevronLeft}
@@ -76,7 +83,7 @@ export function TaskDialog({
           rel="noreferrer"
           className="ml-auto text-meta text-mute transition-colors hover:text-bone"
         >
-          Open on GitHub ↗
+          Open on {sourceLabel} ↗
         </a>
       </div>
 

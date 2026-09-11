@@ -16,12 +16,14 @@
 import { useEffect, useState } from "react";
 import Agents from "@/app/agents/page";
 import Repos from "@/app/repos/page";
+import Trackers from "@/app/trackers/page";
 import Secrets from "@/app/secrets/page";
 import Compute from "@/app/compute/page";
 
 const SECTIONS = [
   { id: "agents", label: "Agents" },
   { id: "repositories", label: "Repositories" },
+  { id: "trackers", label: "Trackers" },
   { id: "secrets", label: "Secrets" },
   { id: "compute", label: "Compute" },
 ] as const;
@@ -77,6 +79,7 @@ export default function Configuration() {
       <div className="-mt-4">
         {showing === "agents" && <Agents />}
         {showing === "repositories" && <Repos />}
+        {showing === "trackers" && <Trackers />}
         {showing === "secrets" && <Secrets />}
         {showing === "compute" && <Compute />}
       </div>

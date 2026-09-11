@@ -10,7 +10,7 @@
       "name": "AGPL-3.0-only",
       "identifier": "AGPL-3.0-only"
     },
-    "version": "0.28.2"
+    "version": "0.30.1"
   },
   "paths": {
     "/api/v1/agent-accounts": {
@@ -4076,9 +4076,18 @@
             }
           },
           {
+            "name": "team",
+            "in": "query",
+            "description": "ENG, when the source has teams",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "name": "kind",
             "in": "query",
-            "description": "issue or pullRequest",
+            "description": "issue, pullRequest or ticket",
             "required": false,
             "schema": {
               "$ref": "#/components/schemas/TaskKind"
@@ -4120,6 +4129,15 @@
               "type": "integer",
               "format": "int32",
               "minimum": 0
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "Where the last page stopped, for a source that pages by cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
             }
           }
         ],
@@ -4208,6 +4226,201 @@
           },
           "409": {
             "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/trackers": {
+      "get": {
+        "tags": [
+          "trackers"
+        ],
+        "operationId": "list_trackers",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/TrackerStatus"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/trackers/{id}": {
+      "delete": {
+        "tags": [
+          "trackers"
+        ],
+        "summary": "Forget the key. Nothing else about the tracker is ours to remove.",
+        "operationId": "disconnect_tracker",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Tracker id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/trackers/{id}/key": {
+      "put": {
+        "tags": [
+          "trackers"
+        ],
+        "summary": "Store a key for a tracker, once it is known to work.",
+        "operationId": "set_tracker_key",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Tracker id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TrackerKey"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Connected"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The tracker refused the key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/trackers/{id}/scopes": {
+      "get": {
+        "tags": [
+          "trackers"
+        ],
+        "summary": "What the list can be narrowed to. The scope picker's data.",
+        "operationId": "list_tracker_scopes",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Tracker id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/TaskScope"
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "That tracker has not been connected",
             "content": {
               "application/json": {
                 "schema": {
@@ -4583,6 +4796,14 @@
             "description": "What it was called. Only the last part is kept, and it is scrubbed."
           }
         }
+      },
+      "Auth": {
+        "type": "string",
+        "description": "How a credential for a tracker is obtained.",
+        "enum": [
+          "gitProvider",
+          "apiKey"
+        ]
       },
       "Bootstrap": {
         "type": "object",
@@ -5140,6 +5361,18 @@
               "null"
             ],
             "description": "The token from `claude setup-token`, or a metered API key — whichever\nthe mode calls for. Required for both; ignored for an agent that needs\nno credential."
+          }
+        }
+      },
+      "Connected": {
+        "type": "object",
+        "description": "What connecting worked out to, so the screen can say whose account it is.",
+        "required": [
+          "account"
+        ],
+        "properties": {
+          "account": {
+            "type": "string"
           }
         }
       },
@@ -6574,6 +6807,13 @@
             "type": "boolean",
             "description": "Whether asking for the next page is worth it."
           },
+          "next": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What to send as `cursor` for the next page, when the source pages that\nway. `None` means page numbers, which is what GitHub answers with."
+          },
           "tasks": {
             "type": "array",
             "items": {
@@ -7147,6 +7387,14 @@
             "description": "A new session, because the old one went with every other. Store this\nand carry on — being signed out is not part of changing a password."
           }
         }
+      },
+      "ScopeKind": {
+        "type": "string",
+        "description": "What the scope picker offers for this tracker.",
+        "enum": [
+          "repos",
+          "teams"
+        ]
       },
       "Sent": {
         "type": "object",
@@ -7936,6 +8184,24 @@
           "ticket"
         ]
       },
+      "TaskScope": {
+        "type": "object",
+        "description": "One thing the list can be narrowed to: a repository, or a team.",
+        "required": [
+          "key",
+          "label"
+        ],
+        "properties": {
+          "key": {
+            "type": "string",
+            "description": "What goes on the wire: `acme/web`, or `ENG`."
+          },
+          "label": {
+            "type": "string",
+            "description": "What a person reads."
+          }
+        }
+      },
       "TaskState": {
         "type": "string",
         "enum": [
@@ -7950,6 +8216,62 @@
           "sessions",
           "conversation"
         ]
+      },
+      "TrackerKey": {
+        "type": "object",
+        "required": [
+          "key"
+        ],
+        "properties": {
+          "key": {
+            "type": "string",
+            "description": "Linear's look like `lin_api_…`."
+          }
+        }
+      },
+      "TrackerStatus": {
+        "type": "object",
+        "required": [
+          "id",
+          "label",
+          "connected",
+          "auth",
+          "scopeKind",
+          "kinds"
+        ],
+        "properties": {
+          "auth": {
+            "$ref": "#/components/schemas/Auth"
+          },
+          "connected": {
+            "type": "boolean",
+            "description": "We hold a credential for it."
+          },
+          "id": {
+            "type": "string"
+          },
+          "keyUrl": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Where somebody goes to make a key, when that is how it connects."
+          },
+          "kinds": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TaskKind"
+            },
+            "description": "What this tracker can return, so the kind toggle offers no more."
+          },
+          "label": {
+            "type": "string"
+          },
+          "scopeKind": {
+            "$ref": "#/components/schemas/ScopeKind",
+            "description": "Whether the scope picker offers repositories or teams."
+          }
+        }
       },
       "Turn": {
         "type": "object",

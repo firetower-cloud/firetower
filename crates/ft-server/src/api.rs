@@ -25,6 +25,7 @@ mod setup;
 mod stream;
 mod tasks;
 mod terminal;
+mod trackers;
 
 // `providers` on its own is the module below, which is this crate's git-host
 // screen rather than the git hosts themselves.
@@ -247,7 +248,12 @@ async fn credential_for(
         crate::tasks::TaskKind,
         crate::tasks::TaskState,
         crate::tasks::Person,
-        crate::tasks::Label
+        crate::tasks::Label,
+        trackers::TrackerStatus,
+        trackers::TaskScope,
+        trackers::Connected,
+        crate::trackers::Auth,
+        crate::trackers::ScopeKind
     ))
 )]
 pub struct ApiDoc;
@@ -336,6 +342,10 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(stream::stream))
         .routes(routes!(tasks::list_tasks))
         .routes(routes!(tasks::get_task))
+        .routes(routes!(trackers::list_trackers))
+        .routes(routes!(trackers::set_tracker_key))
+        .routes(routes!(trackers::disconnect_tracker))
+        .routes(routes!(trackers::list_tracker_scopes))
         .routes(routes!(conversation::send_turn))
         .routes(routes!(
             conversation::session_controls,

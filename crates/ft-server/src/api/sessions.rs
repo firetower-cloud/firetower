@@ -412,14 +412,19 @@ pub(super) async fn create_session(
                 // The name first: it is what somebody chose, and the prompt is
                 // only a fallback for the case where they typed a task and let
                 // everything else be worked out.
-                format!(
-                    "agent/{}",
-                    ft_core::slugify(if asked_name.is_empty() {
-                        prompt
-                    } else {
-                        asked_name
-                    })
-                )
+                let stem = ft_core::slugify(if asked_name.is_empty() {
+                    prompt
+                } else {
+                    asked_name
+                });
+                match req
+                    .task_key
+                    .as_deref()
+                    .and_then(crate::trackers::branch_tag)
+                {
+                    Some(tag) => format!("agent/{tag}-{stem}"),
+                    None => format!("agent/{stem}"),
+                }
             }),
     );
 
@@ -1993,28 +1998,31 @@ async fn tracked(state: &AppState, session: &Session) -> Option<ft_proto::Tracke
 }
 
 /// Ask the tracker what an issue says, with the session owner's own token.
+///
+/// Which tracker is read out of the link rather than out of the session's
+/// repository: a workspace cut from a Linear ticket lives in a git repository
+/// all the same, and asking that repository's host about a `linear.app` URL
+/// gets a shrug.
 async fn read_task(state: &AppState, session: &Session, url: &str) -> anyhow::Result<tasks::Task> {
-    let slug = session
-        .repo
-        .as_deref()
-        .ok_or_else(|| anyhow::anyhow!("no repository"))?;
-    let repo = state
-        .db
-        .repo_by_slug(slug)
-        .await?
-        .ok_or_else(|| anyhow::anyhow!("{slug} isn't connected"))?;
-    let provider = providers::for_remote(&repo.remote)
-        .ok_or_else(|| anyhow::anyhow!("no provider for {slug}"))?;
-    let token = state
+    let tracker =
+        crate::trackers::for_url(url).ok_or_else(|| anyhow::anyhow!("nothing tracks {url}"))?;
+    let credential = state
         .vault
         .get(
-            Key::of(vault::GIT, provider.id, session.owner.as_str()),
+            Key::of(tracker.vault_scope(), tracker.id, session.owner.as_str()),
             "reading the issue a session was started from",
         )
         .await?
-        .ok_or_else(|| anyhow::anyhow!("not authorized"))?;
+        .ok_or_else(|| anyhow::anyhow!("{} is not connected", tracker.label))?;
 
-    tasks::GitHub { provider }.one(&token, url).await
+    match tracker.id {
+        "linear" => tasks::Linear { tracker }.one(&credential, url).await,
+        _ => {
+            let provider = providers::find(tracker.id)
+                .ok_or_else(|| anyhow::anyhow!("no git host called {}", tracker.id))?;
+            tasks::GitHub { provider }.one(&credential, url).await
+        }
+    }
 }
 
 /// Check another repository into a session that is already running.

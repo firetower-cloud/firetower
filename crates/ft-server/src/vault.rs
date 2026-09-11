@@ -37,6 +37,8 @@ use zeroize::Zeroizing;
 pub const GIT: &str = "git";
 /// Tokens an agent authenticates with, keyed by agent kind.
 pub const AGENT: &str = "agent";
+/// Keys for a task tracker that is not a git host, keyed by tracker id.
+pub const TRACKER: &str = "tracker";
 
 /// Which secret, and whose.
 ///

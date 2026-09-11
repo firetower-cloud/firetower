@@ -17,13 +17,26 @@
  * other and why a second tracker can keep the controls and change dialect.
  */
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { ArrowRight, RotateCw, UserRound } from "lucide-react";
 import { useListTasks } from "@/src/api/generated/tasks/tasks";
-import { useListRepos } from "@/src/api/generated/repos/repos";
-import type { Task, TaskKind, TaskState } from "@/src/api/generated/model";
+import {
+  useListTrackerScopes,
+  useListTrackers,
+} from "@/src/api/generated/trackers/trackers";
+import type { Task, TaskKind, TaskState, TrackerStatus } from "@/src/api/generated/model";
+import {
+  START,
+  back,
+  cursorAt,
+  describeQuery,
+  everything,
+  forward,
+  queryHint,
+} from "@/src/api/tasks";
 import { TaskDialog } from "@/components/TaskDialog";
 import { NewWorkspaceModal } from "@/components/NewWorkspace";
+import { ConnectTracker } from "@/components/ConnectTracker";
 import {
   Avatar,
   Badge,
@@ -60,42 +73,92 @@ const COL = {
 };
 
 export function Tasks() {
-  const { data: repos = [] } = useListRepos();
+  const { data: trackers = [] } = useListTrackers();
+  const [source, setSource] = useState("github");
+
+  const tracker = trackers.find((t) => t.id === source);
+  /** Nothing to ask for until there is a credential to ask with. */
+  const ready = tracker?.connected !== false;
+  const scopeKind = tracker?.scopeKind ?? "repos";
+  /** What this tracker can return. A single kind is not a choice to offer. */
+  const kinds = tracker?.kinds ?? ["issue", "pullRequest"];
+
+  const { data: scopes = [] } = useListTrackerScopes(source, {
+    // Asking a tracker nobody has connected answers 409 and nothing else.
+    query: { enabled: !!tracker?.connected, staleTime: 300_000 },
+  });
 
   const [kind, setKind] = useState<TaskKind>("issue");
   const [state, setState] = useState<TaskState>("open");
   const [mine, setMine] = useState(false);
-  const [repo, setRepo] = useState<string | undefined>(undefined);
+  const [scope, setScope] = useState<string | undefined>(undefined);
   const [q, setQ] = useState("");
   const [typed, setTyped] = useState("");
   const [page, setPage] = useState(1);
+  const [trail, setTrail] = useState(START);
   const [starting, setStarting] = useState<Task | null>(null);
+  const [connecting, setConnecting] = useState<TrackerStatus | null>(null);
   /** Which row is open for reading, by position in the page. */
   const [reading, setReading] = useState<number | null>(null);
 
-  const params = useMemo(
-    () => ({ kind, state, mine, repo, q: q || undefined, page }),
-    [kind, state, mine, repo, q, page],
-  );
+  // A scope belongs to one tracker — `acme/web` means nothing to Linear — and
+  // so does the kind, so both are dropped rather than carried across. Done
+  // where the change happens rather than in an effect reacting to it, which
+  // would render one frame asking the new tracker for the old tracker's repo.
+  const pickSource = (next: string) => {
+    setSource(next);
+    setScope(undefined);
+    setKind(trackers.find((t) => t.id === next)?.kinds[0] ?? "issue");
+    setPage(1);
+    setTrail(START);
+    setReading(null);
+  };
+
+  const params = {
+    source,
+    kind,
+    state,
+    mine,
+    ...(scopeKind === "teams" ? { team: scope } : { repo: scope }),
+    q: q || undefined,
+    page,
+    cursor: cursorAt(trail),
+  };
 
   const { data, isPending, isError, error, refetch, isFetching } = useListTasks(params, {
     // Long enough that paging back and forth is instant, short enough that
     // somebody who just filed an issue and pressed refresh gets it.
-    query: { staleTime: 60_000 },
+    query: { staleTime: 60_000, enabled: ready },
   });
 
   const tasks = data?.tasks ?? [];
+  /** Page numbers or cursors, whichever this tracker answered with. */
+  const showing = trail.at > 0 ? trail.at + 1 : page;
 
-  /** Any change to what is being asked for starts again at page one. */
+  /** Any change to what is being asked for starts again at the first page. */
   const change = <T,>(set: (value: T) => void) => (value: T) => {
     set(value);
     setPage(1);
+    setTrail(START);
   };
+
 
   return (
     <div className="px-4 pt-5 pb-24 md:px-8 md:pt-6">
-      <PageHead eyebrow="Tasks" title={isPending ? "Looking…" : `${data?.total ?? tasks.length} to pick from.`}>
-        Read from GitHub as you look. Starting one opens a workspace.
+      <PageHead
+        eyebrow="Tasks"
+        title={
+          isPending
+            ? "Looking…"
+            : // Linear's connection carries no total, so counting what came
+              // back is the honest answer rather than a number that reads as
+              // "all of them".
+              data?.total != null
+              ? `${data.total} to pick from.`
+              : `${tasks.length} on this page.`
+        }
+      >
+        Read from {tracker?.label ?? "the tracker"} as you look. Starting one opens a workspace.
       </PageHead>
 
       {/* One card: what you are asking for, and what came back. The filters
@@ -105,30 +168,34 @@ export function Tasks() {
       <Card>
         <CardHead
           note={
-            /* What the chips actually sent. Shown because the box only holds
-               what somebody typed, and the request is both — seeing it is how
-               you learn the syntax well enough to type past the chips. */
+            /* What the chips actually sent, in the dialect of whatever they
+               were sent to. Shown because the box only holds what somebody
+               typed, and the request is both — seeing it is how you learn the
+               syntax well enough to type past the chips. */
             <p className="font-mono text-meta text-mute">
-              {[
-                repo ? `repo:${repo}` : "your repositories",
-                kind === "pullRequest" ? "is:pr" : "is:issue",
-                state === "closed" ? "is:closed" : "is:open",
-                mine && "assignee:@me",
-                q,
-              ]
-                .filter(Boolean)
-                .join(" ")}
+              {describeQuery(source, { scope, kind, state, mine, q })}
             </p>
           }
         >
-          <Segmented
-            options={[
-              ["issue", "Issues"],
-              ["pullRequest", "PRs"],
-            ]}
-            value={kind}
-            onChange={change<TaskKind>(setKind)}
-          />
+          {trackers.length > 1 && (
+            <Segmented
+              options={trackers.map((t) => [t.id, t.label] as [string, string])}
+              value={source}
+              onChange={pickSource}
+            />
+          )}
+
+          {/* A tracker with one kind of thing in it has nothing to toggle, and
+              a two-way control with one option is a control that lies. */}
+          {kinds.length > 1 && (
+            <Segmented
+              options={kinds.map(
+                (k) => [k, k === "pullRequest" ? "PRs" : "Issues"] as [TaskKind, string],
+              )}
+              value={kind}
+              onChange={change<TaskKind>(setKind)}
+            />
+          )}
 
           <Segmented
             options={[
@@ -148,11 +215,11 @@ export function Tasks() {
           </Button>
 
           <Select
-            value={repo ?? ""}
-            onChange={(v) => change<string | undefined>(setRepo)(v || undefined)}
+            value={scope ?? ""}
+            onChange={(v) => change<string | undefined>(setScope)(v || undefined)}
             options={[
-              ["", "All your repositories"],
-              ...repos.map((r) => [r.slug, r.slug] as [string, string]),
+              ["", everything(scopeKind)],
+              ...scopes.map((s) => [s.key, s.label] as [string, string]),
             ]}
           />
 
@@ -167,7 +234,7 @@ export function Tasks() {
               value={typed}
               onChange={setTyped}
               mono
-              placeholder="label:bug sort:updated-desc"
+              placeholder={queryHint(source)}
               className="flex-1"
             />
           </form>
@@ -180,22 +247,41 @@ export function Tasks() {
           />
         </CardHead>
 
-        {isError && <p className="px-4 py-6 text-center text-ui text-brick">{message(error)}</p>}
+        {/* Not an error, and not an empty list: there is simply nothing to ask
+            with yet, and the thing to do about it is one button. */}
+        {!ready && tracker && (
+          <div className="px-4 py-12 text-center">
+            <p className="text-ui text-dim">{tracker.label} isn&rsquo;t connected yet.</p>
+            <p className="mx-auto mt-1 max-w-[42ch] text-meta text-mute">
+              It connects with a personal API key rather than a sign-in, and reading your tasks
+              needs one.
+            </p>
+            <div className="mt-4 flex justify-center">
+              <Button onClick={() => setConnecting(tracker)}>Connect {tracker.label}</Button>
+            </div>
+          </div>
+        )}
 
-        {!isError && isPending && (
+        {ready && isError && (
+          <p className="px-4 py-6 text-center text-ui text-brick">{message(error)}</p>
+        )}
+
+        {ready && !isError && isPending && (
           <p className="px-4 py-10 text-center text-ui text-mute">Looking…</p>
         )}
 
-        {!isError && !isPending && tasks.length === 0 && (
+        {ready && !isError && !isPending && tasks.length === 0 && (
           <div className="px-4 py-12 text-center">
             <p className="text-ui text-dim">Nothing matches.</p>
             <p className="mt-1 text-meta text-mute">
-              The box takes anything GitHub search accepts.
+              {source === "linear"
+                ? "The box takes team, state, label, assignee, project and priority."
+                : "The box takes anything GitHub search accepts."}
             </p>
           </div>
         )}
 
-        {tasks.length > 0 && (
+        {ready && tasks.length > 0 && (
           <>
             <Columns>
               <span className={COL.id}>ID</span>
@@ -210,6 +296,7 @@ export function Tasks() {
                 <TaskRow
                   key={task.id}
                   task={task}
+                  sourceLabel={tracker?.label ?? "the tracker"}
                   onRead={() => setReading(i)}
                   onStart={() => setStarting(task)}
                 />
@@ -219,13 +306,26 @@ export function Tasks() {
         )}
       </Card>
 
-      {(page > 1 || data?.more) && (
+      {(showing > 1 || data?.more) && (
         <div className="mt-4 flex items-center justify-center gap-3">
-          <Button variant="quiet" size="sm" disabled={page <= 1} onClick={() => setPage((n) => n - 1)}>
+          <Button
+            variant="quiet"
+            size="sm"
+            disabled={showing <= 1}
+            onClick={() => (trail.at > 0 ? setTrail(back(trail)) : setPage((n) => n - 1))}
+          >
             ‹ Previous
           </Button>
-          <span className="font-mono text-meta text-dim">{page}</span>
-          <Button variant="quiet" size="sm" disabled={!data?.more} onClick={() => setPage((n) => n + 1)}>
+          <span className="font-mono text-meta text-dim">{showing}</span>
+          <Button
+            variant="quiet"
+            size="sm"
+            disabled={!data?.more}
+            onClick={() =>
+              // A cursor when the tracker gave one, a page number otherwise.
+              data?.next ? setTrail(forward(trail, data.next)) : setPage((n) => n + 1)
+            }
+          >
             Next ›
           </Button>
         </div>
@@ -234,6 +334,7 @@ export function Tasks() {
       {reading !== null && tasks[reading] && (
         <TaskDialog
           task={tasks[reading]}
+          sourceLabel={tracker?.label ?? "the tracker"}
           at={reading + 1}
           of={tasks.length}
           onMove={(by) =>
@@ -250,6 +351,10 @@ export function Tasks() {
             setReading(null);
           }}
         />
+      )}
+
+      {connecting && (
+        <ConnectTracker tracker={connecting} onClose={() => setConnecting(null)} />
       )}
 
       {starting && (
@@ -271,10 +376,12 @@ export function Tasks() {
 /** One task, and the button that turns it into a workspace. */
 function TaskRow({
   task,
+  sourceLabel,
   onRead,
   onStart,
 }: {
   task: Task;
+  sourceLabel: string;
   onRead: () => void;
   onStart: () => void;
 }) {
@@ -284,7 +391,7 @@ function TaskRow({
         href={task.url}
         target="_blank"
         rel="noreferrer"
-        title="Read it on GitHub"
+        title={`Read it on ${sourceLabel}`}
         onClick={(e) => e.stopPropagation()}
         className={`${COL.id} rounded-sm border border-line bg-ground px-2 py-1 text-center font-mono text-meta text-mute transition-colors hover:border-line hover:text-bone`}
       >
@@ -369,5 +476,5 @@ function message(error: unknown): string {
   if (error && typeof error === "object" && "message" in error) {
     return String((error as { message: unknown }).message);
   }
-  return "Could not reach GitHub.";
+  return "Could not reach the tracker.";
 }
