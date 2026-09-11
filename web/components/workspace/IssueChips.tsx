@@ -8,6 +8,7 @@ import {
   KEYWORDS,
   idOf,
   label,
+  needsIntegration,
   parseReference,
   type Keyword,
   type Reference,
@@ -121,6 +122,16 @@ export function IssueChips({
         </div>
       </div>
 
+      {/* A ticket's line is read by Linear, not by the git host, and only if
+          somebody has connected the two at Linear's end. That is not ours to
+          check or to fix, so it is said rather than assumed. */}
+      {needsIntegration(refs) && (
+        <p className="text-meta text-mute">
+          A ticket is linked by Linear&rsquo;s own GitHub integration. Without it the line is
+          written and nothing acts on it.
+        </p>
+      )}
+
       {/* Offered, never applied. These came out of a model reading a diff, and
           the cost of a number it invented is closing somebody else's issue on
           merge — so they sit here until somebody clicks one. */}
@@ -207,7 +218,7 @@ function Picker({
           const pick = written ?? asReference(found[0], within);
           if (pick) onPick(e.shiftKey ? { ...pick, keyword: "Closes" } : pick);
         }}
-        placeholder="#123, acme/web#123, or paste a link"
+        placeholder="#123, acme/web#123, ENG-123, or paste a link"
         autoComplete="off"
         spellCheck={false}
         className="w-full rounded-sm bg-ground px-2 py-1.5 text-meta text-bone placeholder:text-mute focus:outline-none"

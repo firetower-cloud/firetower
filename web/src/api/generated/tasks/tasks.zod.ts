@@ -22,11 +22,13 @@ export const listTasksQueryPageMin = 0;
 export const ListTasksQueryParams = zod.object({
   "source": zod.string().optional().describe('Which tracker; github by default'),
   "repo": zod.string().optional().describe('acme\/web, when the source has repositories'),
-  "kind": zod.enum(['issue', 'pullRequest', 'ticket']).optional().describe('issue or pullRequest'),
+  "team": zod.string().optional().describe('ENG, when the source has teams'),
+  "kind": zod.enum(['issue', 'pullRequest', 'ticket']).optional().describe('issue, pullRequest or ticket'),
   "state": zod.enum(['open', 'closed']).optional().describe('open or closed'),
   "mine": zod.boolean().optional().describe('Only what you are assigned'),
   "q": zod.string().optional().describe('The query box, passed to the source verbatim'),
-  "page": zod.int().min(listTasksQueryPageMin).optional().describe('One-based')
+  "page": zod.int().min(listTasksQueryPageMin).optional().describe('One-based'),
+  "cursor": zod.string().optional().describe('Where the last page stopped, for a source that pages by cursor')
 })
 
 export const listTasksResponseTotalMin = 0;
@@ -35,6 +37,7 @@ export const listTasksResponseTotalMin = 0;
 
 export const ListTasksResponse = zod.object({
   "more": zod.boolean().describe('Whether asking for the next page is worth it.'),
+  "next": zod.string().nullish().describe('What to send as `cursor` for the next page, when the source pages that\nway. `None` means page numbers, which is what GitHub answers with.'),
   "tasks": zod.array(zod.object({
   "assignees": zod.array(zod.object({
   "avatar": zod.string().nullish(),

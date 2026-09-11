@@ -18,7 +18,11 @@ source?: string;
  */
 repo?: string;
 /**
- * issue or pullRequest
+ * ENG, when the source has teams
+ */
+team?: string;
+/**
+ * issue, pullRequest or ticket
  */
 kind?: TaskKind;
 /**
@@ -38,4 +42,8 @@ q?: string;
  * @minimum 0
  */
 page?: number;
+/**
+ * Where the last page stopped, for a source that pages by cursor
+ */
+cursor?: string;
 };

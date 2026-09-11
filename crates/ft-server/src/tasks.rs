@@ -8,10 +8,12 @@
 //! the screen needs is "show me what is open and let me start one", and that is
 //! a request.
 //!
-//! It is affordable because of one detail: a conditional request that comes
-//! back `304 Not Modified` **does not count against the rate limit**. So the
-//! expensive case is somebody having filed an issue since you last looked,
-//! which is exactly the case where the new data is wanted.
+//! What it costs differs by source and neither bill is large. A conditional
+//! request to GitHub that comes back `304 Not Modified` does not count against
+//! the rate limit at all, so looking twice is free. Linear has no conditional
+//! request — it is one POST to a GraphQL endpoint — but its budget is per
+//! person and generous, and the query asks for one page of the fields a row
+//! renders and nothing deeper.
 //!
 //! The one durable fact — which task a worktree came from — is a column on the
 //! workspace, not a copy of the task.
@@ -29,6 +31,12 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
 use crate::providers::Provider;
+
+mod linear;
+pub use linear::{
+    identifier_of, split_identifier as linear_identifier, teams as linear_teams,
+    viewer as linear_viewer, Linear, Team as LinearTeam,
+};
 
 /// Where a task came from. Its own id, so the interface can group by it.
 pub type SourceId = &'static str;
@@ -109,12 +117,20 @@ pub struct Query {
     /// projects sorted by whoever typed most recently — true, useless, and not
     /// what "my tasks" means.
     pub connected: Vec<String>,
+    /// The team, for a tracker that has teams rather than repositories.
+    pub team: Option<String>,
     pub kind: Option<TaskKind>,
     pub state: Option<TaskState>,
     /// Only what this person is assigned.
     pub mine: bool,
     pub raw: Option<String>,
     pub page: u32,
+    /// Where the last page stopped, for a source that pages by cursor.
+    ///
+    /// Cursors and page numbers are not translatable into one another without
+    /// walking every page in between, so both are carried and each source
+    /// reads the one it understands.
+    pub cursor: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, ToSchema)]
@@ -125,6 +141,9 @@ pub struct Page {
     pub total: Option<u32>,
     /// Whether asking for the next page is worth it.
     pub more: bool,
+    /// What to send as `cursor` for the next page, when the source pages that
+    /// way. `None` means page numbers, which is what GitHub answers with.
+    pub next: Option<String>,
 }
 
 /// How many rows a page holds. The table shows this many; nobody reads more.
@@ -210,6 +229,7 @@ impl Source for GitHub<'_> {
             tasks: found.items.into_iter().map(Into::into).collect(),
             total: Some(found.total_count.min(DEEPEST as usize) as u32),
             more,
+            next: None,
         })
     }
 

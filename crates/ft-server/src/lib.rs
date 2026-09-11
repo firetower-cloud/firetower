@@ -22,6 +22,7 @@ pub mod preview;
 pub mod providers;
 pub mod sshkey;
 pub mod tasks;
+pub mod trackers;
 pub mod transport;
 pub mod updates;
 pub mod vault;

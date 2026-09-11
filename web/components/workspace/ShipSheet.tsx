@@ -19,6 +19,7 @@ import { Markdown } from "@/components/Markdown";
 import { sequence, type Ship } from "@/src/api/ship";
 import {
   fromTask,
+  idOf,
   suggestionsFrom,
   trailerFor,
   withTrailer,
@@ -139,8 +140,7 @@ export function ShipSheet({
           setBody(p.body);
           setSuggested((held) =>
             suggestionsFrom(p.issues, refs, within).filter(
-              (s) =>
-                !held.some((h) => h.number === s.number && h.repo === s.repo),
+              (s) => !held.some((h) => idOf(h) === idOf(s)),
             ),
           );
           window.setTimeout(() => first.current?.focus(), 0);
@@ -443,12 +443,7 @@ export function ShipSheet({
                 onChange={(next) => {
                   setRefs(next);
                   setSuggested((held) =>
-                    held.filter(
-                      (s) =>
-                        !next.some(
-                          (n) => n.number === s.number && n.repo === s.repo,
-                        ),
-                    ),
+                    held.filter((s) => !next.some((n) => idOf(n) === idOf(s))),
                   );
                 }}
                 within={within}
