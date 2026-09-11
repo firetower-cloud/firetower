@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.28.2
+ * OpenAPI spec version: 0.30.1
  */
 
 export * from './accessEntry';
@@ -56,6 +56,7 @@ export * from './envVariable';
 export * from './errorCode';
 export * from './event';
 export * from './eventKind';
+export * from './execution';
 export * from './fallback';
 export * from './fileDiff';
 export * from './fileEntry';
@@ -67,6 +68,7 @@ export * from './gitIdentity';
 export * from './heldSecret';
 export * from './host';
 export * from './hostId';
+export * from './hostReadinessParams';
 export * from './hostState';
 export * from './installAgent';
 export * from './itemId';
@@ -113,6 +115,7 @@ export * from './question';
 export * from './questionOption';
 export * from './rawSource';
 export * from './reached';
+export * from './readiness';
 export * from './remoteRepo';
 export * from './rename';
 export * from './renameSession';
@@ -122,6 +125,7 @@ export * from './repoChanges';
 export * from './repoId';
 export * from './requestId';
 export * from './requestKind';
+export * from './requirement';
 export * from './revealedSecret';
 export * from './rotated';
 export * from './sent';

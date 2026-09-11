@@ -9,313 +9,179 @@ import {
   useSshKey,
   getListHostsQueryKey,
 } from "@/src/api/generated/hosts/hosts";
-import type { Compute, Diagnosis, Host, SshKey } from "@/src/api/generated/model";
-import { SetUpHost } from "./SetUpHost";
-import { ApiError } from "@/src/api/http";
+import type { Compute, Diagnosis, Host, Execution } from "@/src/api/generated/model";
+import { HostReadiness } from "./HostReadiness";
 
-type Kind = "Container" | "Server";
-
-/** The image a worker container runs here. Built by `just worker-image`. */
-const WORKER_IMAGE = "firetower/worker:dev";
-
-/** What the compose file in the instructions calls it. */
-const DEFAULT_CONTAINER = "firetower-worker";
-
-/**
- * Adding somewhere for agents to run.
- *
- * This machine isn't offered: it is registered at start-up and always there.
- * Two kinds are worth adding — a container here, or a server you own.
- *
- * Connecting happens as part of adding, so a wrong address is a message here
- * rather than a host that silently never works.
- */
-export function AddCompute({ onClose }: { onClose: () => void }) {
-  const [kind, setKind] = useState<Kind>("Container");
-  const [address, setAddress] = useState("");
+export function AddCompute({
+  onClose,
+  initial,
+}: {
+  onClose: () => void;
+  initial?: { sameMachine: boolean; address?: string; execution?: Execution };
+}) {
+  const [sameMachine, setSameMachine] = useState(initial?.sameMachine ?? false);
+  const [execution, setExecution] = useState<Execution>(initial?.execution ?? "container");
+  const [address, setAddress] = useState(initial?.address ?? "");
   const [user, setUser] = useState("");
-  /**
-   * A path to a key on the machine running the control plane.
-   *
-   * Empty means Firetower's own key, which is what almost everyone wants and
-   * the only thing that works when the control plane is in a container: a path
-   * is read inside that container, so one naming a file on your machine names
-   * nothing.
-   */
-  const [keyPath, setKeyPath] = useState("");
-  /** Whether the path field is even on screen. */
-  const [ownKey, setOwnKey] = useState(false);
-  /**
-   * What you call it — the name shown on every screen.
-   *
-   * Separate from the container below, which is a machine's business rather
-   * than yours. They used to be one variable, which is why adding a server
-   * could not name it: the field was only ever rendered for a container.
-   */
   const [label, setLabel] = useState("");
-  /** Which container the worker runs in. Empty runs the binary on the host. */
-  const [container, setContainer] = useState(DEFAULT_CONTAINER);
-  /**
-   * What the last attempt found, when it found something.
-   *
-   * About the attempt rather than about a host: nothing has been created at this
-   * point. Cleared by any edit below, because a panel describing values that
-   * have since changed is worse than no panel.
-   */
+  const [container, setContainer] = useState("firetower-worker");
+  const [keyPath, setKeyPath] = useState("");
+  const [ownKey, setOwnKey] = useState(false);
   const [told, setTold] = useState<Diagnosis | null>(null);
-  /** Created, and not ready. Holds the panel open on what to do next. */
   const [added, setAdded] = useState<Host | null>(null);
-  const queryClient = useQueryClient();
+  const cache = useQueryClient();
   const create = useCreateHost();
   const probe = useProbeHost();
-
-  /**
-   * Every field clears the last result.
-   *
-   * The usual reason a first attempt fails is a wrong username or a typo in the
-   * address, so the fix is in the form — and a stale diagnosis sitting above a
-   * form that has been corrected says the wrong thing about it.
-   */
+  const busy = create.isPending || probe.isPending;
+  const ready = !!address.trim() && !!label.trim() && (execution === "host" || !!container.trim());
   const edit =
-    <T,>(set: (value: T) => void) =>
+    <T,>(setter: (value: T) => void) =>
     (value: T) => {
       setTold(null);
-      set(value);
+      setter(value);
     };
-
-  /**
-   * Firetower's own key unless a path was given.
-   *
-   * Not `Default`: that leaves the choice to ssh, which in a container means
-   * an agent that is not running and a `~/.ssh` that is empty. It stays
-   * reachable for a host added before this existed, and is not worth offering
-   * to somebody adding one now.
-   */
-  const sshKey = (): SshKey =>
-    ownKey && keyPath.trim() ? { type: "File", path: keyPath.trim() } : { type: "Managed" };
-
-  const compute = (): Compute => {
-    switch (kind) {
-      case "Container":
-        return {
-          type: "Container",
-          image: WORKER_IMAGE,
-          name: label.trim() || "firetower-worker",
-        };
-      case "Server":
-        return {
-          type: "Server",
-          host: address.trim(),
-          // Left empty means ssh decides, which is what lets a name from your
-          // config bring its own. A blank string would mean something else.
-          user: user.trim() || undefined,
-          key: sshKey(),
-          // And empty here means the binary runs on the machine itself.
-          container: container.trim() || undefined,
-        };
-    }
-  };
-
-  // A server needs both. Disabled until then rather than refused afterwards:
-  // the fix is right there, and an error would be telling somebody something
-  // the form could have shown.
-  const ready =
-    kind === "Server"
-      ? address.trim().length > 0 && label.trim().length > 0
-      : label.trim().length > 0;
-
-  const body = () => ({ compute: compute(), name: label.trim() || undefined });
-
-  /**
-   * Add it, and close — unless the machine was reached and has nothing on it.
-   *
-   * That case used to close silently, which threw away the one moment somebody
-   * is definitely looking at this. The host is still created — ssh worked, so
-   * the address, the account and the key are confirmed — and the panel that
-   * says what to run stays on screen instead of being something to go and find.
-   */
+  const body = () => ({
+    name: label.trim(),
+    sameMachine,
+    compute: {
+      type: "Server",
+      host: address.trim(),
+      user: user.trim() || undefined,
+      key: ownKey && keyPath.trim() ? { type: "File", path: keyPath.trim() } : { type: "Managed" },
+      container: execution === "container" ? container.trim() : undefined,
+    } as Compute,
+  });
   const save = () =>
     create.mutate(
       { data: body() },
       {
         onSuccess: async (host) => {
-          await queryClient.invalidateQueries({ queryKey: getListHostsQueryKey() });
-
-          if (host.diagnosis) {
-            setAdded(host);
-            return;
-          }
-          onClose();
+          await cache.invalidateQueries({ queryKey: getListHostsQueryKey() });
+          setAdded(host);
         },
       },
     );
-
-  /**
-   * Try the machine, and only then write it down.
-   *
-   * A container is skipped: `create_host` starts it, so there is nothing to
-   * reach until it has.
-   */
-  const add = () => {
-    if (kind === "Container") {
-      save();
-      return;
-    }
-
-    // Always the current values. A retry that replayed what just failed would
-    // be a button that cannot succeed.
+  const add = () =>
     probe.mutate(
       { data: body() },
       {
         onSuccess: (result) => {
-          // Reached is the whole test, and it is broader than "answered as a
-          // worker": a machine with no worker on it has still been reached, so
-          // the address, the account and the key are confirmed. What is left is
-          // a command to run over there, and the host's own page is where that
-          // belongs — so it gets added, diagnosis and all.
-          if (result.reached) {
-            save();
-            return;
-          }
-
-          setTold(result.diagnosis ?? null);
+          if (result.reached) save();
+          else setTold(result.diagnosis ?? null);
         },
       },
     );
-  };
 
-  const busy = probe.isPending || create.isPending;
-
-  if (added) return <SetUpHost host={added} onClose={onClose} />;
+  if (added)
+    return (
+      <Modal title={`Set up ${added.name}`} onClose={onClose} wide>
+        <HostReadiness host={added} />
+        <Foot>
+          <Go onClick={onClose}>Done</Go>
+        </Foot>
+      </Modal>
+    );
 
   return (
-    <Modal title="Add compute" onClose={onClose} wide>
+    <Modal title="Add execution environment" onClose={onClose} wide>
       <div className="flex flex-col gap-2">
         <Choice
-          on={kind === "Container"}
-          title="A container here"
-          tag="linux"
-          body="Runs on this machine but behaves like a server, and can't reach your files. Nothing to install."
-          onClick={() => setKind("Container")}
+          on={sameMachine}
+          title="This server — alongside Firetower"
+          body="Connect to the underlying machine hosting the control plane."
+          onClick={() => edit(setSameMachine)(true)}
         />
         <Choice
-          on={kind === "Server"}
-          title="A server"
-          tag="ssh"
-          body="Your own machine, over ssh. Work carries on with your laptop shut."
-          onClick={() => setKind("Server")}
+          on={!sameMachine}
+          title="A remote machine"
+          body="Connect to another machine over SSH."
+          onClick={() => edit(setSameMachine)(false)}
         />
       </div>
-
-      {kind === "Server" && (
-        <>
-          <Field label="Name" autoFocus value={label} onChange={edit(setLabel)} placeholder="fire-02">
-            What you call this machine. It is what every screen shows — the
-            session picker, the fleet, the sidebar — so make it the thing you
-            say out loud rather than where it happens to live.
-          </Field>
-
-          <Field
-            label="Where to ssh"
-            value={address}
-            onChange={edit(setAddress)}
-            placeholder="203.0.113.44"
-          >
-            A hostname, an address, or a name from your ssh config. Add{" "}
-            <code className="font-mono text-slate">:2222</code> for a port other than the
-            usual one.
-          </Field>
-
-          <Field
-            label="Username"
-            optional
-            value={user}
-            onChange={edit(setUser)}
-            placeholder="root"
-          >
-            Who to connect as, and whose{" "}
-            <code className="font-mono text-slate">authorized_keys</code> the key above has
-            to be in — those two have to agree, and when they do not, the machine simply
-            refuses and names neither half. It also has to reach Docker, which{" "}
-            <code className="font-mono text-slate">root</code> always can and anything else
-            needs the <code className="font-mono text-slate">docker</code> group for.
-          </Field>
-
-          <HowWeGetIn
-            ownKey={ownKey}
-            onOwnKey={setOwnKey}
-            keyPath={keyPath}
-            onKeyPath={edit(setKeyPath)}
-            user={user}
-          />
-
-          <Field
-            label="Container"
-            optional
-            value={container}
-            onChange={edit(setContainer)}
-            placeholder={DEFAULT_CONTAINER}
-          >
-            What the worker runs in over there, reached with{" "}
-            <code className="font-mono text-slate">docker exec</code> once ssh has got us
-            onto the machine. Empty for a machine with Firetower in its own image, which
-            runs it directly.
-          </Field>
-
-          <p className="mt-4 text-meta leading-[1.5] text-mute">
-            The worker has to be running there already. If it isn&apos;t, the host is still
-            added and says what to do about it.
-          </p>
-        </>
-      )}
-
-      {kind === "Container" && (
+      <Field
+        label="Environment name"
+        autoFocus
+        value={label}
+        onChange={edit(setLabel)}
+        placeholder="Video VM — host"
+      >
+        A name for this worker environment. You can configure both execution options on the same
+        machine.
+      </Field>
+      <fieldset className="mt-4 space-y-2">
+        <legend className="mb-2 text-meta text-dim">Run in</legend>
+        <Choice
+          on={execution === "container"}
+          title="Container"
+          body="Uses the tools and resources available inside your worker container."
+          onClick={() => edit(setExecution)("container")}
+        />
+        <Choice
+          on={execution === "host"}
+          title="Directly on host"
+          body="Uses the machine’s installed tools and services as the SSH account."
+          onClick={() => edit(setExecution)("host")}
+        />
+      </fieldset>
+      <Field
+        label="SSH address"
+        value={address}
+        onChange={edit(setAddress)}
+        placeholder="192.0.2.10"
+      >
+        {sameMachine
+          ? "Use the underlying VM’s address reachable from Firetower. When Firetower runs in Docker, localhost points inside its container."
+          : "A hostname or IP address reachable from Firetower. Add :2222 for a custom SSH port."}
+      </Field>
+      <Field
+        label="SSH account"
+        value={user}
+        onChange={edit(setUser)}
+        optional
+        placeholder="editor"
+      >
+        {execution === "host"
+          ? "The worker and its agents run as this account, with its existing permissions."
+          : "This account connects to the machine and must be able to run docker exec in the selected container."}
+      </Field>
+      <HowWeGetIn
+        ownKey={ownKey}
+        onOwnKey={setOwnKey}
+        keyPath={keyPath}
+        onKeyPath={edit(setKeyPath)}
+        user={user}
+      />
+      {execution === "container" && (
         <Field
           label="Container name"
-          autoFocus
-          value={label}
-          onChange={edit(setLabel)}
+          value={container}
+          onChange={edit(setContainer)}
           placeholder="firetower-worker"
         >
-          Started from <code className="font-mono text-slate">{WORKER_IMAGE}</code> and
-          reached with <code className="font-mono text-slate">docker exec</code> — no ssh,
-          no keys. Firetower stops and removes it with the host.
+          An existing worker container on this machine. Set it up and start it yourself before
+          checking the connection.
         </Field>
       )}
-
-      {create.isError && (
-        <div className="mt-4 rounded-md border border-brick-deep bg-brick-tint px-3.5 py-2.5">
-          <p className="text-meta leading-[1.55] text-brick">
-            {create.error instanceof ApiError
-              ? create.error.message
-              : "Couldn't add that."}
-          </p>
-        </div>
+      <p className="mt-3 text-meta text-mute">
+        Firetower checks what is missing and shows setup instructions. You install the requirements
+        on the selected machine.
+      </p>
+      {(create.error || probe.error) && (
+        <p role="alert" className="mt-3 text-meta text-brick">
+          {(create.error || probe.error)?.message}
+        </p>
       )}
-
       {told && <NotAnswering told={told} />}
-
       <Foot>
-        {/* Nothing has been created, so this is a retry rather than a second
-            attempt at the same row — and it reads the form as it is now. */}
-        {told ? (
-          <>
-            <Go onClick={add} disabled={!ready || busy}>
-              {busy ? "Trying…" : "Try again"}
-            </Go>
-            <Quiet onClick={save} disabled={busy}>
-              Add it anyway
-            </Quiet>
-            <Quiet onClick={onClose}>Cancel</Quiet>
-          </>
-        ) : (
-          <>
-            <Go onClick={add} disabled={!ready || busy}>
-              {busy ? "Connecting…" : "Add it"}
-            </Go>
-            <Quiet onClick={onClose}>Cancel</Quiet>
-          </>
+        <Go onClick={add} disabled={!ready || busy}>
+          {busy ? "Checking…" : told ? "Check again" : "Check and add"}
+        </Go>
+        {told && (
+          <Quiet onClick={save} disabled={!ready || busy}>
+            Save for later
+          </Quiet>
         )}
+        <Quiet onClick={onClose}>Cancel</Quiet>
       </Foot>
     </Modal>
   );
@@ -341,10 +207,10 @@ function NotAnswering({ told }: { told: Diagnosis }) {
       {refused && identity && (
         <>
           <p className="mt-2 text-meta leading-[1.55] text-dim">
-            Firetower authenticates with its own key, and that machine has not accepted it.
-            Check the username above is the account you gave it to — and if that machine
-            manages keys elsewhere, Google Cloud metadata or an SSH CA, it belongs there
-            rather than in <code className="font-mono">authorized_keys</code>.
+            Firetower authenticates with its own key, and that machine has not accepted it. Check
+            the username above is the account you gave it to — and if that machine manages keys
+            elsewhere, Google Cloud metadata or an SSH CA, it belongs there rather than in{" "}
+            <code className="font-mono">authorized_keys</code>.
           </p>
           <code className="mt-2 block overflow-x-auto rounded-sm bg-black/25 px-3 py-2 font-mono text-meta break-all text-bone">
             {identity.publicKey}
@@ -361,9 +227,7 @@ function NotAnswering({ told }: { told: Diagnosis }) {
       {/* What the machine said, folded away: always available, never in the way. */}
       {told.detail && (
         <details className="mt-2.5">
-          <summary className="cursor-pointer text-meta text-mute">
-            What it said
-          </summary>
+          <summary className="cursor-pointer text-meta text-mute">What it said</summary>
           <pre className="mt-1.5 overflow-x-auto whitespace-pre-wrap font-mono text-meta leading-[1.6] text-mute">
             {told.detail}
           </pre>
@@ -372,8 +236,8 @@ function NotAnswering({ told }: { told: Diagnosis }) {
 
       {/* Hosts connect at start-up and when added; nothing retries in between. */}
       <p className="mt-2.5 text-meta leading-[1.5] text-mute">
-        It&apos;s on the Compute screen either way. Firetower tries it again next
-        time it starts.
+        Save the environment to keep its connection settings. Firetower will retry the connection
+        automatically.
       </p>
     </div>
   );
@@ -457,9 +321,8 @@ function HowWeGetIn({
             onChange={onKeyPath}
             placeholder="~/.ssh/id_ed25519"
           >
-            A path on the machine running Firetower — which, if that is a container, is
-            inside the container rather than on yours. A key you can see is not
-            necessarily one it can.
+            A path on the machine running Firetower — which, if that is a container, is inside the
+            container rather than on yours. A key you can see is not necessarily one it can.
           </Field>
           <button
             type="button"
@@ -472,10 +335,9 @@ function HowWeGetIn({
       ) : (
         <>
           <p className="mt-2 text-meta leading-[1.5] text-mute">
-            Give this public key to the machine you are about to name. It is public —
-            safe to paste into a provider&apos;s web form, a cloud-init file, or
-            <code className="mx-1 font-mono text-slate">authorized_keys</code> on a
-            machine you own.
+            Give this public key to the machine you are about to name. It is public — safe to paste
+            into a provider&apos;s web form, a cloud-init file, or
+            <code className="mx-1 font-mono text-slate">authorized_keys</code> on a machine you own.
           </p>
 
           <div className="mt-2 flex items-start gap-2">
@@ -493,9 +355,9 @@ function HowWeGetIn({
           </div>
 
           <p className="mt-2 text-meta leading-[1.5] text-mute">
-            Most providers take it when you create the machine, or in its settings
-            afterwards. Some manage keys their own way — Google Cloud through instance
-            metadata or OS Login, and an SSH CA through the CA.
+            Most providers take it when you create the machine, or in its settings afterwards. Some
+            manage keys their own way — Google Cloud through instance metadata or OS Login, and an
+            SSH CA through the CA.
           </p>
 
           <button
@@ -513,9 +375,7 @@ function HowWeGetIn({
           )}
 
           <div className="mt-3 flex items-center justify-between gap-3">
-            <span className="font-mono text-meta text-mute">
-              {identity?.fingerprint ?? ""}
-            </span>
+            <span className="font-mono text-meta text-mute">{identity?.fingerprint ?? ""}</span>
             <button
               type="button"
               onClick={() => onOwnKey(true)}
@@ -563,6 +423,7 @@ function Field({
         {optional && " · optional"}
       </label>
       <input
+        aria-label={label}
         autoFocus={autoFocus}
         value={value}
         onChange={(e) => onChange(e.target.value)}

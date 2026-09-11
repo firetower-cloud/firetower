@@ -1827,6 +1827,8 @@ async fn sweep_test_schemas(pool: &PgPool) {
 fn host_from_row(r: sqlx::postgres::PgRow) -> Result<Host> {
     let raw: String = r.get("state");
     Ok(Host {
+        machine: r.get("machine"),
+        execution: None,
         id: HostId::from_stored(r.get::<String, _>("id")),
         name: r.get("name"),
         state: serde_json::from_str::<HostState>(&format!("\"{raw}\""))

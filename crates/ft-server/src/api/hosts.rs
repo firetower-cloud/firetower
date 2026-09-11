@@ -21,6 +21,9 @@ pub struct NewHost {
     /// What you'll call it. Defaults to something derived from the kind.
     pub name: Option<String>,
     pub compute: ft_core::Compute,
+    /// This SSH connection reaches the machine hosting Firetower.
+    #[serde(default)]
+    pub same_machine: bool,
 }
 
 /// Add somewhere for agents to run.
@@ -78,6 +81,19 @@ pub(super) async fn create_host(
         ));
     }
 
+    if state
+        .db
+        .hosts()
+        .await?
+        .iter()
+        .any(|host| host.compute == compute)
+    {
+        return Err(ApiError::new(
+            ErrorCode::InvalidRequest,
+            "This worker connection is already configured. Select its existing environment.",
+        ));
+    }
+
     if let ft_core::Compute::Container { image, name } = &compute {
         container::start(image, name)
             .await
@@ -85,6 +101,12 @@ pub(super) async fn create_host(
     }
 
     let host = state.db.ensure_host(&name, compute).await?;
+    if req.same_machine {
+        sqlx::query("UPDATE hosts SET machine = 'local' WHERE id = $1")
+            .bind(host.id.as_str())
+            .execute(state.db.pool())
+            .await?;
+    }
 
     // Connect now, so a bad address is a message rather than a silence.
     let transport = fleet::Fleet::transport_for(&host, &state.home, Some(&state.vault))
@@ -374,6 +396,17 @@ pub(super) async fn list_hosts(State(state): State<AppState>) -> ApiResult<Json<
 /// about this process — so it is answered here rather than stored and left to
 /// go stale across a restart.
 async fn seen(state: &AppState, mut host: Host) -> Host {
+    host.execution = Some(match &host.compute {
+        ft_core::Compute::Local => local_execution(),
+        ft_core::Compute::Container { .. } => ft_core::Execution::Container,
+        ft_core::Compute::Server { container, .. } => {
+            if container.is_some() {
+                ft_core::Execution::Container
+            } else {
+                ft_core::Execution::Host
+            }
+        }
+    });
     host.reconnecting =
         host.state != ft_core::HostState::Online && state.fleet.is_supervised(&host.id).await;
     // For the same reason, and from the same place: what a machine has is what
@@ -568,6 +601,8 @@ pub(super) async fn probe_host(
     // A probe needs a transport, and building one wants a host. This one is
     // never saved: it exists for the length of the attempt.
     let pretend = ft_core::Host {
+        machine: None,
+        execution: None,
         id: ft_core::HostId::from_stored("probe".to_string()),
         name: "probe".to_string(),
         state: ft_core::HostState::Unreachable,
@@ -596,4 +631,77 @@ pub(super) async fn probe_host(
             .is_none_or(|d| d.cause.reached_the_machine()),
         diagnosis,
     }))
+}
+
+/// `Local` shares the control plane's process environment, including Docker.
+fn local_execution() -> ft_core::Execution {
+    if std::path::Path::new("/.dockerenv").exists()
+        || std::path::Path::new("/run/.containerenv").exists()
+        || std::env::var("FIRETOWER_EXECUTION").is_ok_and(|v| v == "container")
+    {
+        ft_core::Execution::Container
+    } else {
+        ft_core::Execution::Host
+    }
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct ReadinessQuery {
+    pub agent: Option<ft_core::Agent>,
+}
+
+/// Check requirements on the selected worker. This never installs anything.
+#[utoipa::path(
+    get, path = "/api/v1/hosts/{id}/readiness", tag = "hosts",
+    params(("id" = String, Path), ("agent" = Option<ft_core::Agent>, Query)),
+    responses((status = 200, body = ft_core::Readiness), (status = 404, body = ApiError), (status = 409, body = ApiError)),
+)]
+pub(super) async fn host_readiness(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Query(query): Query<ReadinessQuery>,
+) -> ApiResult<Json<ft_core::Readiness>> {
+    let id = ft_core::HostId::from_stored(id);
+    let host = state
+        .db
+        .host_by_id(&id)
+        .await?
+        .ok_or_else(|| ApiError::not_found("host"))?;
+    if !state.fleet.is_connected(&id).await {
+        return Ok(Json(ft_core::Readiness {
+            user: None,
+            checks: vec![ft_core::Requirement {
+                name: "Worker connection".into(),
+                available: false,
+                required: true,
+                detail: host
+                    .diagnosis
+                    .as_ref()
+                    .map(|d| d.summary.clone())
+                    .unwrap_or_else(|| {
+                        "The worker is not connected. Check the connection and try again.".into()
+                    }),
+                remedy: Some(setup_instructions(&host.compute)),
+            }],
+        }));
+    }
+    let readiness = state
+        .fleet
+        .check_readiness(&id, query.agent)
+        .await
+        .map_err(|e| ApiError::new(ErrorCode::HostUnreachable, format!("{e:#}")))?;
+    if let Ok(agents) = state.fleet.probe_agents(&id).await {
+        state.db.record_presence(&id, &agents).await?;
+    }
+    Ok(Json(readiness))
+}
+
+pub(crate) fn setup_instructions(compute: &ft_core::Compute) -> String {
+    match compute {
+        ft_core::Compute::Local if local_execution() == ft_core::Execution::Host =>
+            "Install Git, tmux, a POSIX shell and your selected agent on the Firetower host. See docs/host-execution.md.".into(),
+        ft_core::Compute::Server { container: None, .. } =>
+            "Install the matching firetower-worker binary, Git, tmux and your selected agent directly on this machine. Make them available on the SSH account's PATH. See docs/host-execution.md for build and setup commands. Docker is not required.".into(),
+        _ => "Set up and start the worker container on this machine, then check again. See docs/host-execution.md.".into(),
+    }
 }

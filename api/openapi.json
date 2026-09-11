@@ -10,7 +10,7 @@
       "name": "AGPL-3.0-only",
       "identifier": "AGPL-3.0-only"
     },
-    "version": "0.28.2"
+    "version": "0.30.1"
   },
   "paths": {
     "/api/v1/agent-accounts": {
@@ -882,6 +882,65 @@
             "description": ""
           },
           "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/hosts/{id}/readiness": {
+      "get": {
+        "tags": [
+          "hosts"
+        ],
+        "summary": "Check requirements on the selected worker. This never installs anything.",
+        "operationId": "host_readiness",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "agent",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/Agent"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Readiness"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
             "description": "",
             "content": {
               "application/json": {
@@ -5045,7 +5104,7 @@
           },
           {
             "type": "object",
-            "description": "A worker in a container here. Linux, and isolated from your machine.\n\nReached with `docker exec` rather than ssh: the same bidirectional pipe\nwithout an sshd, a key, or a host key to verify.",
+            "description": "A worker in a container on the control-plane machine.\n\nReached with `docker exec` rather than ssh: the same bidirectional pipe\nwithout an sshd, a key, or a host key to verify.",
             "required": [
               "image",
               "name",
@@ -5848,6 +5907,13 @@
           }
         ]
       },
+      "Execution": {
+        "type": "string",
+        "enum": [
+          "container",
+          "host"
+        ]
+      },
       "Fallback": {
         "type": "object",
         "required": [
@@ -6050,8 +6116,26 @@
             "type": "boolean",
             "description": "Finishing what it has, taking nothing new. Separate from being\nunreachable: a draining host is still online and still working."
           },
+          "execution": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Execution",
+                "description": "Where the worker executes, resolved by the control plane."
+              }
+            ]
+          },
           "id": {
             "$ref": "#/components/schemas/HostId"
+          },
+          "machine": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Machine grouping; \"local\" means the machine hosting the control plane."
           },
           "memoryMb": {
             "type": [
@@ -6373,6 +6457,10 @@
               "null"
             ],
             "description": "What you'll call it. Defaults to something derived from the kind."
+          },
+          "sameMachine": {
+            "type": "boolean",
+            "description": "This SSH connection reaches the machine hosting Firetower."
           }
         }
       },
@@ -6960,6 +7048,26 @@
           }
         }
       },
+      "Readiness": {
+        "type": "object",
+        "required": [
+          "checks"
+        ],
+        "properties": {
+          "checks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Requirement"
+            }
+          },
+          "user": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
       "RemoteRepo": {
         "type": "object",
         "description": "A repository the authorized account can see.",
@@ -7114,6 +7222,36 @@
           "FileChange",
           "Tool"
         ]
+      },
+      "Requirement": {
+        "type": "object",
+        "required": [
+          "name",
+          "available",
+          "required",
+          "detail"
+        ],
+        "properties": {
+          "available": {
+            "type": "boolean"
+          },
+          "detail": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "remedy": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "required": {
+            "type": "boolean",
+            "description": "Optional tools are useful for installation, but don't prevent launch."
+          }
+        }
       },
       "RevealedSecret": {
         "type": "object",
