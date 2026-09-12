@@ -89,6 +89,12 @@ impl Updates {
 pub enum RunState {
     Planned,
     WaitingIdle,
+    /// Stopped part-way, waiting for somebody to say whether to carry on.
+    ///
+    /// Only the backup reaches this. An upgrade with no backup is a decision,
+    /// and it belongs to the person pressing the button rather than to a step
+    /// that failed for its own reasons.
+    WaitingDecision,
     Running,
     Succeeded,
     Failed,
@@ -100,6 +106,7 @@ impl RunState {
         match self {
             RunState::Planned => "planned",
             RunState::WaitingIdle => "waiting_idle",
+            RunState::WaitingDecision => "waiting_decision",
             RunState::Running => "running",
             RunState::Succeeded => "succeeded",
             RunState::Failed => "failed",
@@ -111,6 +118,7 @@ impl RunState {
         Some(match s {
             "planned" => RunState::Planned,
             "waiting_idle" => RunState::WaitingIdle,
+            "waiting_decision" => RunState::WaitingDecision,
             "running" => RunState::Running,
             "succeeded" => RunState::Succeeded,
             "failed" => RunState::Failed,
@@ -134,6 +142,12 @@ pub enum StepState {
     Running,
     Done,
     Failed,
+    /// Did not do what it was for, and the run goes on anyway.
+    ///
+    /// A backup that cannot be taken is worth knowing about and worth
+    /// recording — the run's history should say it went ahead without one —
+    /// but it is not a reason the upgrade cannot happen.
+    Warned,
     Skipped,
 }
 
@@ -144,6 +158,7 @@ impl StepState {
             StepState::Running => "running",
             StepState::Done => "done",
             StepState::Failed => "failed",
+            StepState::Warned => "warned",
             StepState::Skipped => "skipped",
         }
     }
@@ -154,6 +169,7 @@ impl StepState {
             "running" => StepState::Running,
             "done" => StepState::Done,
             "failed" => StepState::Failed,
+            "warned" => StepState::Warned,
             "skipped" => StepState::Skipped,
             _ => return None,
         })
@@ -352,6 +368,7 @@ mod tests {
             RunState::Succeeded,
             RunState::Failed,
             RunState::Cancelled,
+            RunState::WaitingDecision,
         ] {
             assert_eq!(RunState::from_db(s.as_db()), Some(s));
         }
@@ -360,10 +377,18 @@ mod tests {
             StepState::Running,
             StepState::Done,
             StepState::Failed,
+            StepState::Warned,
             StepState::Skipped,
         ] {
             assert_eq!(StepState::from_db(s.as_db()), Some(s));
         }
         assert!(RunState::from_db("nonsense").is_none());
+    }
+
+    /// A run stopped for an answer has not finished, and the screen has to
+    /// keep showing it — there is nowhere else to give the answer.
+    #[test]
+    fn a_run_waiting_for_an_answer_is_not_over() {
+        assert!(!RunState::WaitingDecision.is_over());
     }
 }

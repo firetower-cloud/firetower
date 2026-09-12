@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.32.0
+ * OpenAPI spec version: 0.32.1
  */
 
 export type StepState = typeof StepState[keyof typeof StepState];
@@ -14,5 +14,6 @@ export const StepState = {
   running: 'running',
   done: 'done',
   failed: 'failed',
+  warned: 'warned',
   skipped: 'skipped',
 } as const;

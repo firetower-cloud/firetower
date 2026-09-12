@@ -6,12 +6,20 @@ import {
   getGetUpdatesQueryKey,
   getListRunsQueryKey,
   useCancelRun,
+  useContinueRun,
   useGetRun,
 } from "@/src/api/generated/updates/updates";
 import type { UpdateRun, UpdateStep } from "@/src/api/generated/model";
 import { Badge, Button } from "@/components/ui";
 import { ApiError } from "@/src/api/http";
-import { duration, isActive, RUN_LABEL, runTone, stepGlyph } from "@/src/api/updates";
+import {
+  duration,
+  isActive,
+  needsAnAnswer,
+  RUN_LABEL,
+  runTone,
+  stepGlyph,
+} from "@/src/api/updates";
 
 /**
  * One upgrade, as it happens and afterwards.
@@ -36,6 +44,7 @@ export function RunView({ id, onDone }: { id: string; onDone?: () => void }) {
   });
 
   const cancel = useCancelRun();
+  const carryOn = useContinueRun();
   const refresh = () => {
     queryClient.invalidateQueries({ queryKey: getGetUpdatesQueryKey() });
     queryClient.invalidateQueries({ queryKey: getListRunsQueryKey() });
@@ -53,7 +62,11 @@ export function RunView({ id, onDone }: { id: string; onDone?: () => void }) {
   }
 
   const active = isActive(run);
-  const canCancel = run.state === "planned" || run.state === "waitingIdle";
+  const waiting = needsAnAnswer(run);
+  const canCancel = run.state === "planned" || run.state === "waitingIdle" || waiting;
+  // The step that stopped it, so the panel below can say what went wrong in
+  // its own words rather than repeating a summary.
+  const warned = run.steps.find((s) => s.state === "warned");
 
   return (
     <div className="panel">
@@ -96,6 +109,44 @@ export function RunView({ id, onDone }: { id: string; onDone?: () => void }) {
           </Button>
         )}
       </div>
+
+      {/* A run that stopped to ask. Nothing happens until somebody answers —
+          an upgrade with no backup is a decision, not a default. */}
+      {waiting && (
+        <div className="border-b border-brick-deep bg-brick-tint px-4 py-3">
+          <p className="text-ui text-bone">The backup didn&apos;t work.</p>
+          {warned?.detail && (
+            <pre className="mt-2 max-h-40 overflow-auto rounded-sm bg-black/25 px-3 py-2 font-mono text-meta leading-[1.6] whitespace-pre-wrap text-mute">
+              {warned.detail}
+            </pre>
+          )}
+          <p className="mt-2 text-meta leading-[1.5] text-mute">
+            Nothing has been upgraded yet. Carrying on means upgrading with no backup of the
+            database to go back to.
+          </p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <Button
+              size="sm"
+              disabled={carryOn.isPending}
+              onClick={() =>
+                carryOn.mutate(
+                  { id: run.id },
+                  {
+                    onSuccess: () => {
+                      setProblem(null);
+                      refresh();
+                    },
+                    onError: (e) =>
+                      setProblem(e instanceof ApiError ? e.message : "That didn't work."),
+                  },
+                )
+              }
+            >
+              Upgrade without a backup
+            </Button>
+          </div>
+        </div>
+      )}
 
       {problem && <p className="px-4 pt-3 text-meta text-brick">{problem}</p>}
       {run.error && !active && <p className="px-4 pt-3 text-meta text-brick">{run.error}</p>}

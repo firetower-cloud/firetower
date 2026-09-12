@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.32.0
+ * OpenAPI spec version: 0.32.1
  */
 
 export type RunState = typeof RunState[keyof typeof RunState];
@@ -12,6 +12,7 @@ export type RunState = typeof RunState[keyof typeof RunState];
 export const RunState = {
   planned: 'planned',
   waitingIdle: 'waitingIdle',
+  waitingDecision: 'waitingDecision',
   running: 'running',
   succeeded: 'succeeded',
   failed: 'failed',

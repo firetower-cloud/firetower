@@ -5,6 +5,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { ArrowUpRight, CircleFadingArrowUp, RefreshCw } from "lucide-react";
 import {
   getGetUpdatesQueryKey,
+  useBackUpNow,
   useCheckUpdates,
   useGetUpdates,
   useListRuns,
@@ -189,6 +190,8 @@ export function UpdatesScreen() {
         </Empty>
       )}
 
+      {status?.controlPlane.updater.reachable && !active && <BackUpRow />}
+
       {status && !active && <CliRow status={status} />}
 
       {runs.length > 0 && (
@@ -351,5 +354,42 @@ function CliRow({ status }: { status: UpdateStatus }) {
       lives on your own machine, so it is yours to run:{" "}
       <span className="font-mono text-text">npm i -g @firetower/cli</span>
     </p>
+  );
+}
+
+/**
+ * Take a backup without upgrading.
+ *
+ * A backup only ever ran inside an upgrade, so the only way to find out it was
+ * broken was to try to upgrade — which is how one got found, on a database
+ * `pg_dump` could not read.
+ */
+function BackUpRow() {
+  const backUp = useBackUpNow();
+  const [said, setSaid] = useState<string | null>(null);
+
+  return (
+    <div className="panel mt-4 flex flex-wrap items-center gap-3 px-5 py-4">
+      <div className="min-w-0 flex-1">
+        <p className="text-ui text-bone">Back up the database</p>
+        <p className="mt-1 text-meta leading-[1.5] text-mute">
+          An upgrade takes one first. This runs the same thing on its own, so a backup that
+          cannot be taken is something you find out about now.
+        </p>
+        {said && <p className="mt-2 text-meta text-dim">{said}</p>}
+      </div>
+      <Button
+        size="sm"
+        disabled={backUp.isPending}
+        onClick={() =>
+          backUp.mutate(undefined, {
+            onSuccess: (id) => setSaid(`Started. Updater job ${id}.`),
+            onError: (e) => setSaid(e instanceof ApiError ? e.message : "That didn't work."),
+          })
+        }
+      >
+        {backUp.isPending ? "Backing up…" : "Back up now"}
+      </Button>
+    </div>
   );
 }

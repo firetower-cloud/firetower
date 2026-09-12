@@ -293,6 +293,66 @@ pub(super) async fn cancel_run(
     Ok(Json(read_run(&state, &id).await?))
 }
 
+/// Carry on with a run that stopped to ask.
+///
+/// Only a run waiting on the backup reaches this, and the answer is always the
+/// same one: go ahead without a backup. Its step keeps the `Warned` state, so
+/// the history says the upgrade went ahead without one.
+#[utoipa::path(
+    post, path = "/api/v1/updates/runs/{id}/continue", tag = "updates",
+    params(("id" = String, Path, description = "Run id")),
+    responses((status = 200, body = UpdateRun), (status = 404, body = ApiError), (status = 409, body = ApiError)),
+)]
+pub(super) async fn continue_run(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Path(id): Path<String>,
+) -> ApiResult<Json<UpdateRun>> {
+    admin_only(&principal)?;
+    let run = read_run(&state, &id).await?;
+    if run.state != crate::updates::RunState::WaitingDecision {
+        return Err(ApiError::new(
+            ErrorCode::ActionFailed,
+            "this run is not waiting for an answer",
+        ));
+    }
+    state
+        .updates
+        .store
+        .set_run_state(&id, crate::updates::RunState::Running)
+        .await?;
+    crate::updates::runs::spawn(state.clone(), id.clone()).await;
+    Ok(Json(read_run(&state, &id).await?))
+}
+
+/// Take a backup now, outside an upgrade.
+///
+/// Until this existed a backup only ever ran inside an upgrade, so there was
+/// no way to find out it was broken except by trying to upgrade — which is how
+/// one got found.
+#[utoipa::path(
+    post, path = "/api/v1/updates/backup", tag = "updates",
+    responses((status = 200, body = String), (status = 409, body = ApiError)),
+)]
+pub(super) async fn back_up_now(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+) -> ApiResult<Json<String>> {
+    admin_only(&principal)?;
+    let updater = state
+        .updates
+        .updater
+        .as_ref()
+        .map_err(|absent| ApiError::new(ErrorCode::ActionFailed, absent.explain()))?;
+    let job = updater
+        .start(ft_updater_api::JobKind::Backup {
+            from_version: env!("CARGO_PKG_VERSION").to_string(),
+        })
+        .await
+        .map_err(|e| ApiError::new(ErrorCode::ActionFailed, format!("{e:#}")))?;
+    Ok(Json(job.id.0))
+}
+
 async fn read_run(state: &AppState, id: &str) -> ApiResult<UpdateRun> {
     let run = state
         .updates

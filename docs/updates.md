@@ -77,6 +77,49 @@ went, and carries on with the workers.
 Every ssh key materialisation for an upgrade is a line in the vault's access
 log, with the run and the machine as its reason.
 
+## Backups
+
+An upgrade of the control plane takes a `pg_dump` into `backups/` beside the
+compose file first. It dumps `public` — the schema every migration writes to
+and the only one a restore needs — and keeps the ten most recent, deleting
+older ones after each new dump lands.
+
+**Back up now**, on the Updates screen, runs the same thing without upgrading.
+Worth pressing once after a deployment changes: until it existed, the only way
+to find out a backup was broken was to try to upgrade.
+
+### When the backup fails
+
+The run stops and asks. Nothing has been upgraded at that point, and the screen
+offers **Upgrade without a backup** or **Cancel** — an upgrade with no way back
+is a decision, not something a failed step gets to make. The step stays in the
+run's history as a warning, so it says later that the upgrade went ahead
+without one.
+
+### Schemas Firetower did not create
+
+The backup counts the schemas in the database first and says so when there are
+any that are not `public`. The usual cause is the test suite having been
+pointed at that database: it makes a schema per test, and the sweeper that
+removes them only exists in a test build, so nothing in a release ever cleans
+one up.
+
+They are harmless to the control plane and skipped by the backup. To clear
+them, with the compose project's database container:
+
+```sh
+docker exec -i firetower-postgres-1 psql -U firetower -d firetower <<'SQL'
+SELECT format('DROP SCHEMA %I CASCADE;', schema_name)
+FROM information_schema.schemata
+WHERE schema_name LIKE 'test\_%'
+\gexec
+SQL
+```
+
+`\gexec` runs each `DROP` as its own statement. Do not wrap them in one
+transaction — a thousand drops together exhaust `max_locks_per_transaction`
+and fail having done nothing.
+
 ## Environment
 
 | Variable | Where | Meaning |

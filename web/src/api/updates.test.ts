@@ -9,7 +9,12 @@ import {
   needsChoice,
   nothingChosen,
   runSummary,
+  isActive,
+  needsAnAnswer,
+  RUN_LABEL,
+  runTone,
   showsDot,
+  stepGlyph,
   willWrite,
   wouldEnd,
 } from "./updates";
@@ -155,5 +160,33 @@ describe("a diff on screen", () => {
   it("knows which lines are which", () => {
     const lines = diffLines("--- a\n+++ a\n@@ -1 +1 @@\n-old\n+new\n same\n");
     expect(lines.map((l) => l.kind)).toEqual(["meta", "meta", "hunk", "del", "add", "same"]);
+  });
+});
+
+describe("a run that stopped to ask", () => {
+  it("is still active, so the screen keeps showing it", () => {
+    // There is nowhere else to answer. A run that vanished from the screen
+    // would be one nobody could carry on or stop.
+    expect(isActive({ state: "waitingDecision" })).toBe(true);
+    expect(needsAnAnswer({ state: "waitingDecision" })).toBe(true);
+  });
+
+  it("is not mistaken for one that is merely running", () => {
+    expect(needsAnAnswer({ state: "running" })).toBe(false);
+    expect(needsAnAnswer({ state: "failed" })).toBe(false);
+  });
+
+  it("reads as something wanting attention rather than as progress", () => {
+    expect(runTone("waitingDecision")).toBe("brick");
+    expect(RUN_LABEL.waitingDecision).toBe("waiting for you");
+  });
+});
+
+describe("a step that did not do what it was for", () => {
+  it("is neither a tick nor a cross", () => {
+    const warned = stepGlyph("warned");
+    expect(warned).not.toBe(stepGlyph("done"));
+    expect(warned).not.toBe(stepGlyph("failed"));
+    expect(warned).not.toBe(stepGlyph("pending"));
   });
 });
