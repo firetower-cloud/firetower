@@ -23,7 +23,7 @@ And yes, it works with your own subscription (Claude Code, Codex, etc.).
 ## Current stage
 
 > [!WARNING]
-> The project is in active development and still in the early stages. Expect breaking changes and bugs.
+> The project is in active development. Starring and sharing the repository is extremely helpful; however, we don't suggest using Firetower in production at the moment. Expect breaking changes and bugs.
 
 
 ## Demo
@@ -31,8 +31,11 @@ And yes, it works with your own subscription (Claude Code, Codex, etc.).
 https://github.com/user-attachments/assets/694af074-f15f-42ef-a2ad-0a7b8a43dccf
 
 
+## Why is Firetower different?
 
+Alternatives like Orca and Paseo are excellent desktop products that reach outward. Their agents run on your laptop, and remote execution is a mode bolted on afterward: a relay daemon over SSH, a headless Electron under Xvfb, a control plane that dies when you close the lid. 
 
+Firetower starts from the other end. The control plane is a server by design, it never touches the public internet, and the laptop is only a client among others. Agents run on machines that don't sleep, in isolated worktrees with real resource limits, using each developer's own subscriptions and credentials.
 
 ## How it fits together
 
@@ -121,51 +124,3 @@ Due to the early stage of the project, we don't accept contributions at the mome
 ## Licence
 
 AGPL-3.0-only. Copyright © Westlabs LLC.
-
-If you run a modified Firetower as a network service, you have to publish your changes.
-
-### Annotating application previews
-
-Open a Preview tab and choose **Annotate**, or click **Open ↗** and use the
-floating **Firetower · Annotate** toolbar in the application. Select an element,
-use **Select parent** or the ancestor picker to select its containing card or
-section, write a comment, and choose **Keep**. **Send to agent** submits the kept
-notes together to the session's conversation. The conversation also shows kept
-preview notes for review, editing, removal, and sending.
-
-Kept notes live in the control-plane database and survive browser reloads and
-closed tabs. Each includes a bounded, redacted HTML snapshot, selector, ancestor
-path, page pathname, viewport, scroll position, bounds, and capture time. These
-are rendered DOM locations, not source-file locations. Form values and editable
-content are omitted; applications can mark sensitive regions with `data-private`
-or `data-sensitive`. Query strings and fragments are omitted. Review captured
-HTML under **Element details** before sending feedback.
-
-The preview proxy injects a small element picker into HTML document responses.
-The picker runs in the application's origin; authentication and sending run in a
-separate Firetower-origin panel. A preview link alone does not grant permission
-to write to a conversation. Directly opened previews use `FIRETOWER_PUBLIC_URL`
-to find that panel (set it to the browser-facing Firetower URL in deployments).
-Opening from Firetower supplies the current UI origin, including split-port
-local development. Sign in to Firetower if the panel requests it.
-
-If an application's Content Security Policy blocks the embedded panel, or the
-browser partitions its storage, choose **Open feedback panel ↗** to use a
-separate window. CSP script/style nonces authorize the picker without removing
-the application's other restrictions. Policies that also prevent popups, service
-worker responses that bypass the proxy, non-UTF-8 documents, and servers that
-ignore the proxy's request for uncompressed HTML may require **Plain ↗**.
-Cross-origin iframe contents, closed shadow roots, and individual canvas objects
-are not selectable; annotate their containing element instead. The plain option
-opens the application without HTML instrumentation.
-
-Delivery is recorded before a message is handed to the worker. Retrying an
-acknowledged batch does not send it twice. If delivery becomes unconfirmed,
-check the conversation before recreating or removing the notes; Firetower never
-automatically retries an uncertain agent turn.
-
-Development checks: `cargo test -p ft-server --lib annotations` (with Postgres),
-`pnpm --dir web exec tsc --noEmit`, and `pnpm --dir web test:browser`.
-Install the browser once with `pnpm --dir web exec playwright install --with-deps
-chromium`. The browser tests run the actual picker and Firetower panel with an
-isolated API fixture; Rust tests exercise persistence and worker delivery.
