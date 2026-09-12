@@ -58,6 +58,21 @@
   /* Native motion is quicker than web motion. The same curve, less of it. */
   --dur-native: 140ms;
 
+  /* ── Syntax ────────────────────────────────────────────────────
+     A fourth colour namespace, and the only one that earns an exception to
+     "colour is spent". It never appears outside a file or a diff, so it
+     cannot compete with the signals at the page level — and it stays below
+     them in saturation for the same reason the file kinds do: four hundred
+     lines of code must not be able to out-shout the one thing on screen that
+     means an agent is waiting on you. */
+  --color-syn-comment: #6a6a74;
+  --color-syn-string: #8fb99a;
+  --color-syn-keyword: #9a8cc4;
+  --color-syn-type: #7d95b0;
+  --color-syn-number: #c2ab63;
+  --color-syn-fn: #b8845f;
+  --color-syn-attr: #8a8a94;
+
   /* ── Type, at desk size ────────────────────────────────────────
      The web scale is tuned for a phone that has to fit a workbench into
      390px. A window has room, and the thing people do here longest is read

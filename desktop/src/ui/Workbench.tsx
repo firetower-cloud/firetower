@@ -14,6 +14,9 @@ import { group } from "@/src/api/workspaces";
 import { STATE, talkFor, type Backend } from "~/mock/backends";
 import { useFixtures } from "~/mock/socket";
 import { Chat } from "~/ui/Chat";
+import { FileTab } from "~/ui/FileTab";
+import { QuickOpen } from "~/ui/QuickOpen";
+import { TabStrip, type Tab } from "~/ui/Tabs";
 import { Inspector } from "~/ui/Inspector";
 import { TerminalPane } from "~/ui/TerminalPane";
 import { Unreachable } from "~/ui/Unreachable";
@@ -26,6 +29,43 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
   const [open, setOpen] = useState(true);
   const [term, setTerm] = useState(false);
   const [reading, setReading] = useState<string | null>(null);
+  const [tabs, setTabs] = useState<Tab[]>([{ id: "chat" }]);
+  const [active, setActive] = useState("chat");
+  const [finding, setFinding] = useState(false);
+
+  /**
+   * Open a file, the way an editor does.
+   *
+   * A single click *previews*: the tab opens in italic and the next preview
+   * replaces it, so skimming six files while reading a diff leaves one tab
+   * rather than six. Double-clicking the tab keeps it.
+   */
+  const openFile = (path: string, keep = false) => {
+    setTabs((held) => {
+      const already = held.find((t) => "path" in t && t.path === path);
+      if (already) {
+        return keep ? held.map((t) => (t.id === already.id ? { ...t, preview: false } : t)) : held;
+      }
+      const tab: Tab = { id: `f:${path}`, path, preview: !keep };
+      const slot = held.findIndex((t) => "preview" in t && t.preview);
+      if (!keep && slot !== -1) {
+        const next = [...held];
+        next[slot] = tab;
+        return next;
+      }
+      return [...held, tab];
+    });
+    setActive(`f:${path}`);
+  };
+
+  const closeTab = (id: string) => {
+    setTabs((held) => {
+      const at = held.findIndex((t) => t.id === id);
+      const next = held.filter((t) => t.id !== id);
+      if (active === id) setActive((next[at] ?? next[at - 1] ?? next[0]).id);
+      return next;
+    });
+  };
 
   const live = STATE[backend.id].filter((s) => s.status !== "Ended");
   const place = group(live).groups.flatMap(([, ps]) => ps).find((p) => p.id === workspace);
@@ -46,6 +86,15 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
       if (e.key.toLowerCase() === "j") {
         e.preventDefault();
         setTerm((t) => !t);
+      }
+      // The editor gesture for "go to a file", on the key editors use for it.
+      if (e.key.toLowerCase() === "p") {
+        e.preventDefault();
+        setFinding(true);
+      }
+      if (e.key.toLowerCase() === "w") {
+        e.preventDefault();
+        if (active !== "chat") closeTab(active);
       }
     };
     window.addEventListener("keydown", onKey);
@@ -117,16 +166,33 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
 
       <div className="flex min-h-0 flex-1">
         <div className="flex min-w-0 flex-1 flex-col">
-          <div className="min-h-0 flex-1">
-            <Chat
-              place={place}
-              run={run}
-              talk={talk}
-              onOpenDiff={() => {
-                setSide("diff");
-                setOpen(true);
-              }}
+          {tabs.length > 1 && (
+            <TabStrip
+              tabs={tabs}
+              active={active}
+              onPick={setActive}
+              onClose={closeTab}
+              onKeep={(id) =>
+                setTabs((held) => held.map((t) => (t.id === id ? { ...t, preview: false } : t)))
+              }
             />
+          )}
+
+          <div className="min-h-0 flex-1">
+            {active === "chat" ? (
+              <Chat
+                place={place}
+                run={run}
+                talk={talk}
+                onOpenFile={openFile}
+                onOpenDiff={() => {
+                  setSide("diff");
+                  setOpen(true);
+                }}
+              />
+            ) : (
+              <FileTab path={(tabs.find((t) => t.id === active) as { path: string }).path} />
+            )}
           </div>
 
           {term && (
@@ -155,10 +221,13 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
             diffs={talk.diffs}
             tab={side}
             onTab={setSide}
+            onOpenFile={openFile}
             onClose={() => setOpen(false)}
           />
         )}
       </div>
+
+      <QuickOpen open={finding} onClose={() => setFinding(false)} onPick={(p) => openFile(p, true)} />
     </div>
   );
 }

@@ -206,3 +206,61 @@ this client did all three:
 - **A rounded card around everything.** One radius on every object flattens the
   hierarchy it was supposed to express. The conversation has no card; the
   composer does.
+
+
+---
+
+# Files
+
+## Syntax is the one allowed exception to "colour is spent"
+
+A fourth namespace, `--color-syn-*`, and it earns the exception for one reason:
+**it never appears outside a file or a diff.** It cannot compete with the
+signals at the page level because it is never on the page level.
+
+| | | |
+|---|---|---|
+| comment | `#6a6a74` | below everything; it is the thing you skip |
+| string | `#8fb99a` | |
+| keyword | `#9a8cc4` | |
+| type | `#7d95b0` | |
+| number | `#c2ab63` | |
+| fn | `#b8845f` | |
+| attr | `#8a8a94` | |
+
+All of it sits below the signals in saturation, for the same reason the file
+kinds do: four hundred lines of code must not out-shout the one thing on screen
+that means an agent is waiting on you.
+
+The highlighter is ordered regexes, not a parser. A parser is right for an
+editor and wrong for a viewer — what a reader needs is for strings, comments and
+keywords to stop looking like identifiers.
+
+## Tabs behave like an editor's
+
+- **The conversation is pinned first and cannot be closed.** It is what a
+  workspace *is*, and a strip you can empty is one you can get lost in.
+- **Single click previews** — the tab opens in italic and the next preview
+  replaces it. Skimming six files while reading a diff should leave one tab, not
+  six. **Double click keeps it.**
+- The active tab is marked **along its top edge**, where an editor marks it.
+- A tab's dot takes the file-kind colour the tree already uses.
+
+## The gutter carries the diff
+
+A line this session wrote gets a sage number cell and a tinted row, so "what did
+it change in here" is answered without leaving for the diff. The count in the
+header is clamped to the file — a header reading "33 lines, 40 touched" is the
+kind of small lie that makes a reader stop trusting the rest of the screen.
+
+## Selecting code starts a note
+
+A quote and the line it began on, pinned, then sent back as an ordinary message.
+The same shape the conversation's annotations use, so a note against a file and
+a note against a message go back the same way.
+
+## Ways into a file
+
+Four, because wanting the file under discussion is the commonest thing anybody
+does here: the tree, the diff list's open-file control, a `read` in the
+transcript, and `⌘P`.

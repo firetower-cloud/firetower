@@ -10,7 +10,7 @@
  */
 import { useState } from "react";
 import {
-  ChevronRight, FileDiff, FolderTree, GitBranch, GitPullRequest,
+  ChevronRight, FileCode2, FileDiff, FolderTree, GitBranch, GitPullRequest,
   MessageSquarePlus, PanelRightClose, Ship as ShipIcon,
 } from "lucide-react";
 import { filesFor, shipFor, type Diff, type Node } from "~/mock/backends";
@@ -29,6 +29,7 @@ export function Inspector({
   diffs,
   tab,
   onTab,
+  onOpenFile,
   onClose,
 }: {
   workspace: string;
@@ -36,6 +37,7 @@ export function Inspector({
   diffs: Diff[];
   tab: TabId;
   onTab: (t: TabId) => void;
+  onOpenFile: (path: string, keep?: boolean) => void;
   onClose: () => void;
 }) {
   return (
@@ -64,15 +66,15 @@ export function Inspector({
       </div>
 
       <div className="scroll-slim min-h-0 flex-1 overflow-y-auto">
-        {tab === "diff" && <DiffList diffs={diffs} />}
-        {tab === "files" && <Files nodes={filesFor(workspace)} />}
+        {tab === "diff" && <DiffList diffs={diffs} onOpenFile={onOpenFile} />}
+        {tab === "files" && <Files nodes={filesFor(workspace)} onOpenFile={onOpenFile} />}
         {tab === "ship" && <Commit workspace={workspace} branch={branch} />}
       </div>
     </aside>
   );
 }
 
-function DiffList({ diffs }: { diffs: Diff[] }) {
+function DiffList({ diffs, onOpenFile }: { diffs: Diff[]; onOpenFile: (p: string, keep?: boolean) => void }) {
   const [open, setOpen] = useState<string | null>(diffs[0]?.path ?? null);
   const [note, setNote] = useState<string | null>(null);
 
@@ -88,7 +90,7 @@ function DiffList({ diffs }: { diffs: Diff[] }) {
           <div key={d.path}>
             <button
               onClick={() => setOpen(on ? null : d.path)}
-              className="flex w-full items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-raise/60"
+              className="group/file flex w-full items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-raise/60"
             >
               <ChevronRight
                 className={`h-3.5 w-3.5 shrink-0 text-mute transition-transform duration-150 ${on ? "rotate-90" : ""}`}
@@ -105,6 +107,18 @@ function DiffList({ diffs }: { diffs: Diff[] }) {
               <span className="shrink-0 font-mono text-micro">
                 <span className="text-sage">+{d.added}</span>{" "}
                 <span className="text-brick">−{d.removed}</span>
+              </span>
+              <span
+                role="button"
+                tabIndex={0}
+                title="Open the whole file"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onOpenFile(d.path, true);
+                }}
+                className="grid h-5 w-5 shrink-0 place-items-center rounded text-mute opacity-0 transition-opacity hover:bg-overlay hover:text-bone group-hover/file:opacity-100"
+              >
+                <FileCode2 className="h-3.5 w-3.5" strokeWidth={1.75} />
               </span>
             </button>
 
@@ -170,25 +184,38 @@ function DiffList({ diffs }: { diffs: Diff[] }) {
   );
 }
 
-function Files({ nodes }: { nodes: Node[] }) {
+function Files({ nodes, onOpenFile }: { nodes: Node[]; onOpenFile: (p: string, keep?: boolean) => void }) {
   if (nodes.length === 0) return <Empty line="No workspace yet." hint="It appears once the repository is checked out." />;
   return (
     <div className="py-1.5">
       {nodes.map((n) => (
-        <Branch key={n.name} node={n} depth={0} />
+        <Branch key={n.name} node={n} depth={0} trail="" onOpenFile={onOpenFile} />
       ))}
     </div>
   );
 }
 
-function Branch({ node, depth }: { node: Node; depth: number }) {
+function Branch({
+  node,
+  depth,
+  trail,
+  onOpenFile,
+}: {
+  node: Node;
+  depth: number;
+  /** The path so far, so a leaf knows its own address. */
+  trail: string;
+  onOpenFile: (p: string, keep?: boolean) => void;
+}) {
   const [open, setOpen] = useState(depth < 2);
   const dir = !!node.dir;
+  const path = trail ? `${trail}/${node.name}` : node.name;
 
   return (
     <>
       <button
-        onClick={() => dir && setOpen(!open)}
+        onClick={() => (dir ? setOpen(!open) : onOpenFile(path))}
+        onDoubleClick={() => !dir && onOpenFile(path, true)}
         style={{ paddingLeft: `${0.75 + depth * 0.85}rem` }}
         className="flex h-7 w-full items-center gap-1.5 pr-3 text-left transition-colors hover:bg-raise/60"
       >
@@ -211,7 +238,11 @@ function Branch({ node, depth }: { node: Node; depth: number }) {
         {node.changed && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-slate" />}
       </button>
 
-      {dir && open && node.dir!.map((c) => <Branch key={c.name} node={c} depth={depth + 1} />)}
+      {dir &&
+        open &&
+        node.dir!.map((c) => (
+          <Branch key={c.name} node={c} depth={depth + 1} trail={path} onOpenFile={onOpenFile} />
+        ))}
     </>
   );
 }

@@ -35,12 +35,14 @@ export function Chat({
   run,
   talk,
   onOpenDiff,
+  onOpenFile,
 }: {
   place: Workspace;
   /** Which agent in this workspace you are reading. */
   run: Workspace["runs"][number];
   talk: { turns: Turn[]; ask?: Ask; diffs: Diff[] };
   onOpenDiff: () => void;
+  onOpenFile: (path: string, keep?: boolean) => void;
 }) {
   const lead = run;
 
@@ -59,7 +61,7 @@ export function Chat({
 
           <div className="mt-9 space-y-8">
             {talk.turns.map((turn, i) => (
-              <Said key={i} turn={turn} onOpenDiff={onOpenDiff} />
+              <Said key={i} turn={turn} onOpenDiff={onOpenDiff} onOpenFile={onOpenFile} />
             ))}
           </div>
 
@@ -72,7 +74,15 @@ export function Chat({
   );
 }
 
-function Said({ turn, onOpenDiff }: { turn: Turn; onOpenDiff: () => void }) {
+function Said({
+  turn,
+  onOpenDiff,
+  onOpenFile,
+}: {
+  turn: Turn;
+  onOpenDiff: () => void;
+  onOpenFile: (path: string, keep?: boolean) => void;
+}) {
   if (turn.who === "you") {
     return (
       <div className="flex justify-end">
@@ -98,7 +108,7 @@ function Said({ turn, onOpenDiff }: { turn: Turn; onOpenDiff: () => void }) {
       {turn.tools && (
         <div className="mt-4 ml-px border-l border-line pl-4">
           {turn.tools.map((t, i) => (
-            <ToolCall key={i} tool={t} onOpenDiff={onOpenDiff} />
+            <ToolCall key={i} tool={t} onOpenDiff={onOpenDiff} onOpenFile={onOpenFile} />
           ))}
         </div>
       )}
@@ -138,15 +148,26 @@ function Thinking({ text }: { text: string }) {
   );
 }
 
-function ToolCall({ tool, onOpenDiff }: { tool: Tool; onOpenDiff: () => void }) {
+function ToolCall({
+  tool,
+  onOpenDiff,
+  onOpenFile,
+}: {
+  tool: Tool;
+  onOpenDiff: () => void;
+  onOpenFile: (path: string, keep?: boolean) => void;
+}) {
   const Icon = GLYPH[tool.name] ?? Terminal;
-  const edit = tool.name === "edit";
+  /* A call that names a file is a way into it: `read` opens the file, `edit`
+     opens what changed. Reading a transcript and wanting the file it is talking
+     about is the commonest thing anybody does here. */
+  const file = (tool.name === "read" || tool.name === "edit") && /\.[a-z]+$/.test(tool.arg);
 
   return (
     <button
-      onClick={edit ? onOpenDiff : undefined}
+      onClick={file ? () => (tool.name === "edit" ? onOpenDiff() : onOpenFile(tool.arg)) : undefined}
       className={`flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left font-mono text-code transition-colors ${
-        edit ? "hover:bg-raise" : "cursor-default"
+        file ? "hover:bg-raise" : "cursor-default"
       }`}
     >
       <Icon
@@ -154,7 +175,9 @@ function ToolCall({ tool, onOpenDiff }: { tool: Tool; onOpenDiff: () => void }) 
         strokeWidth={1.75}
       />
       <span className="shrink-0 text-dim">{tool.name}</span>
-      <span className="min-w-0 flex-1 truncate text-mute">{tool.arg}</span>
+      <span className={`min-w-0 flex-1 truncate ${file ? "text-mute underline decoration-line underline-offset-2" : "text-mute"}`}>
+        {tool.arg}
+      </span>
       {tool.result && (
         <span className={`shrink-0 ${tool.ok === false ? "text-brick" : "text-mute"}`}>
           {tool.result}

@@ -12,9 +12,11 @@ pnpm app        # the Mac app (Tauri)
 pnpm dev        # or just the renderer, in a browser tab
 ```
 
-`⌘K` for the palette. `⌘1`–`⌘4` for tabs in a workspace. The style guide is in
-the rail, and doubles as the remote control: drop a server, fire an ember, stall
-a request.
+`⌘K` palette · `⌘P` go to a file · `⌘\` inspector · `⌘1`–`⌘3` its tabs ·
+`⌘J` terminal · `⌘W` close a file.
+
+The style guide is in the rail, and doubles as the remote control: drop a
+server, fire an ember, stall a request.
 
 ## What is shared with `web/`, and what is not
 
@@ -61,9 +63,11 @@ src/
   shims/      next/link, next/navigation, next/font — the whole Next coupling,
               plus the history patch that makes the shell own addresses
   mock/       three backends, fixtures, a scripted timeline
-  ui/         Rail, Dashboard, TasksPage, Workbench (+ Conversation, DiffPane,
-              TerminalPane), Configuration, Fleet, ServerStrip, Titlebar,
+  ui/         Rail, Dashboard, TasksPage, Workbench (+ Chat, Composer,
+              Inspector, FileTab, Tabs, QuickOpen, TerminalPane),
+              NewWorkspace, Configuration, Fleet, ServerStrip, Titlebar,
               Palette, StylePage
+  syntax.ts   ordered regexes, not a parser — enough to read code by
   overrides/  a component copied here wins over the one in ../web
 src-tauri/    the shell: window, vibrancy, dock badge, notifications
 ```
