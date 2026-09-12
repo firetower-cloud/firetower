@@ -2,4 +2,5 @@
 dist
 node_modules
 src-tauri/target
-gen/schemas
+# Regenerated on every build from capabilities/ and the plugin set.
+src-tauri/gen/schemas

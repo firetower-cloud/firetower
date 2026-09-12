@@ -48,9 +48,10 @@
   --color-panel-vibrant: rgb(17 17 19 / 0.72);
   --color-strip: rgb(11 11 12 / 0.82);
 
-  /* Chrome. Both are fixed by AppKit, not by taste: 38px is where the traffic
-     lights sit comfortably, and 78px is how much room they need before content
-     may start. */
+  /* Chrome. The width is fixed by AppKit, not by taste: 78px is how much room
+     the traffic lights need before content may start.
+
+     38px is where the traffic lights sit comfortably. */
   --chrome-title: 38px;
   --chrome-lights: 78px;
   --chrome-strip: 48px;

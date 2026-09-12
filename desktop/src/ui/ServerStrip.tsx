@@ -12,6 +12,7 @@
  */
 import { BACKENDS, type BackendId } from "~/mock/backends";
 import { useFixtures } from "~/mock/socket";
+import { drag } from "~/drag";
 import { STATE } from "~/mock/backends";
 import { NEEDS_YOU } from "@/src/api/view";
 
@@ -25,7 +26,8 @@ export function ServerStrip({ scope, onScope }: { scope: Scope; onScope: (s: Sco
 
   return (
     <div
-      className="drag flex h-full w-(--chrome-strip) shrink-0 flex-col items-center gap-1 border-r border-line bg-(--color-strip) pt-2 pb-2"
+      {...drag}
+      className="flex h-full w-(--chrome-strip) shrink-0 flex-col items-center gap-1 border-r border-line bg-(--color-strip) pt-2 pb-2"
     >
       <Mark
         label="All servers"

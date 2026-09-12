@@ -12,6 +12,7 @@
  */
 import { Command } from "lucide-react";
 import { bridge } from "~/bridge";
+import { drag } from "~/drag";
 import { BACKENDS } from "~/mock/backends";
 import type { Scope } from "~/ui/ServerStrip";
 
@@ -28,7 +29,8 @@ export function Titlebar({
 
   return (
     <div
-      className="drag flex h-(--chrome-title) shrink-0 items-center gap-2 border-b border-line bg-(--color-strip)"
+      {...drag}
+      className="flex h-(--chrome-title) shrink-0 items-center gap-2 border-b border-line bg-(--color-strip)"
       style={{ paddingLeft: bridge.native ? "var(--chrome-lights)" : "0.75rem" }}
     >
       <span className="text-ui text-dim">
@@ -50,9 +52,11 @@ export function Titlebar({
         </span>
       )}
 
+      <span className="flex-1 self-stretch" />
+
       <button
         onClick={onPalette}
-        className="no-drag ml-auto mr-2 flex h-6 items-center gap-1 rounded-sm px-2 text-meta text-mute transition-colors hover:bg-raise hover:text-dim"
+        className="no-drag mr-2 flex h-6 items-center gap-1 rounded-sm px-2 text-meta text-mute transition-colors hover:bg-raise hover:text-dim"
       >
         <Command className="h-3 w-3" strokeWidth={2} />K
       </button>

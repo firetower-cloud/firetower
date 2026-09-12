@@ -12,6 +12,7 @@
 import { BACKENDS, STATE, setReach, emit, type BackendId } from "~/mock/backends";
 import { useFixtures } from "~/mock/socket";
 import { navigate } from "~/shims/next-navigation";
+import { drag } from "~/drag";
 
 const GROUND = ["ground", "panel", "raise", "overlay", "line", "line-soft"];
 const TEXT = [
@@ -41,7 +42,7 @@ export function StylePage() {
 
   return (
     <div className="scroll-slim h-full overflow-y-auto bg-ground">
-      <header className="drag sticky top-0 z-10 flex h-(--chrome-title) items-center gap-3 border-b border-line bg-panel px-4">
+      <header {...drag} className="sticky top-0 z-10 flex h-(--chrome-title) items-center gap-3 border-b border-line bg-panel px-4">
         <span className="eyebrow">Firetower — style</span>
         <button
           onClick={() => navigate("/")}

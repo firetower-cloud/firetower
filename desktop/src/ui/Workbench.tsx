@@ -20,6 +20,7 @@ import { TabStrip, type Tab } from "~/ui/Tabs";
 import { Inspector } from "~/ui/Inspector";
 import { TerminalPane } from "~/ui/TerminalPane";
 import { Unreachable } from "~/ui/Unreachable";
+import { drag } from "~/drag";
 
 type Side = "diff" | "files" | "ship";
 
@@ -123,7 +124,7 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
     <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-ground">
       {/* A toolbar, not a tab bar: what this workspace is, who is in it, and
           the two things you toggle. */}
-      <div className="flex h-11 shrink-0 items-center gap-3 border-b border-line px-3">
+      <div {...drag} className="flex h-11 shrink-0 items-center gap-3 border-b border-line px-3">
         <span className="min-w-0 truncate text-ui text-bone">{place.name}</span>
 
         {/* Which agent you are reading. A count would not do: two of one and
