@@ -46,8 +46,9 @@ export function useSocket(): Socket {
 /** A beat in the demo. Seconds from when the window opened. */
 type Beat = { at: number; do: () => void };
 
-function bump(b: BackendId, n: number, status: string, note?: string) {
-  const s = STATE[b].find((x) => x.number === n);
+/** Move one agent in one workspace. Addressed by workspace, like a person would. */
+function bump(b: BackendId, ws: string, status: string, note?: string) {
+  const s = STATE[b].find((x) => x.workspaceId === ws);
   if (!s) return;
   s.status = status as typeof s.status;
   s.note = note ?? null;
@@ -61,12 +62,12 @@ function bump(b: BackendId, n: number, status: string, note?: string) {
  * when things arrive out of step, which is the only way they ever arrive.
  */
 const TIMELINE: Beat[] = [
-  { at: 9, do: () => bump("e2", 11, "NeedsYou", "The edge config has two limits for the same tenant. Keep the stricter one?") },
-  { at: 17, do: () => bump("e1", 40, "Ready") },
-  { at: 23, do: () => setReach("e2", "unreachable") },
-  { at: 34, do: () => bump("me", 6, "NeedsYou", "Six tokens are unused. Delete them, or leave them and note it?") },
-  { at: 46, do: () => setReach("e2", "live") },
-  { at: 58, do: () => bump("e1", 40, "NeedsYou", "The scoped token needs a TTL. Fifteen minutes, or the session's lifetime?") },
+  { at: 12, do: () => bump("e2", "w_e2_limits", "NeedsYou", "The edge config has two limits for the same tenant. Keep the stricter one?") },
+  { at: 22, do: () => bump("e1", "w_e1_pricing", "Ready") },
+  { at: 30, do: () => setReach("e2", "unreachable") },
+  { at: 44, do: () => bump("me", "w_me_tokens", "NeedsYou", "Six tokens are unused. Delete them, or leave them and note it?") },
+  { at: 58, do: () => setReach("e2", "live") },
+  { at: 72, do: () => bump("e1", "w_e1_tokens", "NeedsYou", "The scoped token needs a TTL. Fifteen minutes, or the session's lifetime?") },
 ];
 
 let started = false;

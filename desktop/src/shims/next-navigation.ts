@@ -10,6 +10,35 @@ import { useCallback, useEffect, useState } from "react";
 
 const listeners = new Set<() => void>();
 
+/**
+ * The shell owns history.
+ *
+ * `Workspace.tsx` keeps the address bar in step with the open workspace by
+ * calling `history.replaceState(null, "", "/sessions/<id>")`. That is right for
+ * a page served by a control plane and wrong for a window loaded from a file:
+ * there is no path to write, and writing one strands the router — the app goes
+ * blank and a reload 404s.
+ *
+ * Rather than fork the component for it, bare-path writes are folded into the
+ * hash here. The component stays honest about its intent and the shell decides
+ * what an address means, which is the right division for any desktop build.
+ */
+function ownHistory() {
+  for (const name of ["pushState", "replaceState"] as const) {
+    const original = window.history[name].bind(window.history);
+    window.history[name] = (data: unknown, unused: string, url?: string | URL | null) => {
+      if (typeof url === "string" && url.startsWith("/")) {
+        original(data, unused, `#${url}`);
+        listeners.forEach((l) => l());
+        return;
+      }
+      original(data, unused, url as string);
+    };
+  }
+}
+
+if (typeof window !== "undefined") ownHistory();
+
 function currentPath(): string {
   const h = window.location.hash.replace(/^#/, "");
   return h || "/";

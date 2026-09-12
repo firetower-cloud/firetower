@@ -12,15 +12,15 @@
  */
 import { BACKENDS, type BackendId } from "~/mock/backends";
 import { useFixtures } from "~/mock/socket";
-import { NEEDS_YOU } from "~/backend";
 import { STATE } from "~/mock/backends";
+import { NEEDS_YOU } from "@/src/api/view";
 
 export type Scope = "all" | BackendId;
 
 export function ServerStrip({ scope, onScope }: { scope: Scope; onScope: (s: Scope) => void }) {
   useFixtures();
 
-  const waitingIn = (id: BackendId) => STATE[id].filter((s) => NEEDS_YOU.has(s.status)).length;
+  const waitingIn = (id: BackendId) => STATE[id].filter((s) => NEEDS_YOU.includes(s.status)).length;
   const total = BACKENDS.reduce((n, b) => n + waitingIn(b.id), 0);
 
   return (
@@ -29,7 +29,7 @@ export function ServerStrip({ scope, onScope }: { scope: Scope; onScope: (s: Sco
     >
       <Mark
         label="All servers"
-        mark="⌂"
+        mark={"\u2302"}
         on={scope === "all"}
         reach="live"
         count={total}

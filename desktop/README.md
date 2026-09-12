@@ -1,9 +1,8 @@
 # Firetower for macOS — prototype
 
-A native window around the real interface, on fixtures. No backend, no Rust
-sidecar, no Keychain, no signing. It exists to answer two questions: what kind of
-client can we get quickly, and what is the style guideline that makes it feel
-native.
+A native window over fixtures. No backend, no Rust sidecar, no Keychain, no
+signing. It exists to answer what kind of client we can get quickly, and what
+the style guideline is once the window is native and holds more than one server.
 
 ## Run it
 
@@ -13,43 +12,63 @@ pnpm app        # the Mac app (Tauri)
 pnpm dev        # or just the renderer, in a browser tab
 ```
 
-Then `#/style` for the design system, which doubles as the remote control.
+`⌘K` for the palette. `⌘1`–`⌘4` for tabs in a workspace. The style guide is in
+the rail, and doubles as the remote control: drop a server, fire an ember, stall
+a request.
 
-## How it works
+## What is shared with `web/`, and what is not
 
-**The components are the real ones.** `vite.config.ts` resolves `@/components/*`
-into `../web`, so this renders the same files the web app renders. When one
-genuinely fights the native shell it is copied into `src/overrides/` and the
-resolver prefers it — which makes that directory the honest list of what did not
-survive the move off the web. It is currently empty.
+**Shared: the vocabulary.** `group()`, `doing()`, `shortRepo()`, `elapsed()`,
+`Signal`, `AgentMark`, the `ui/` primitives, and every token in
+`globals.css` — resolved out of `../web`, not copied. So both clients group by
+repository the same way, decide what a workspace is *doing* the same way, and
+mean the same thing by ember.
 
-**The API is mocked by replacing one module.** `web/orval.config.ts` points all 86
-generated operations at a single mutator, so aliasing `@/src/api/http` is the
-entire mock. There is no interceptor and no server.
+**Not shared: the screens.** A window is not a page. It wants 34px rows instead
+of a 44px touch floor, a title bar that is part of the app, tabs with ⌘-numbers,
+and no drawer. Rendering `web/`'s own route components in a window was tried
+first and is the wrong trade: it inherits Next's routing and mobile breakpoints
+to save work on layouts that have to change anyway.
 
-**Three backends, not one.** `src/mock/backends.ts` holds a personal box and two
-companies, each with its own fixtures, latency and reachability. The inbox merges
-across them; ember aggregates; one going dark does not affect the others.
+The line is: **patterns and vocabulary are shared, layout is not.**
 
-**One QueryClient per backend** (`src/backend.tsx`). Generated query keys are
-`[url, ...params]` with no server dimension, so two backends answering
-`/api/v1/sessions` would collide in one cache. A client each avoids the question
-instead of overriding the generator 86 times.
+## The mock
 
-## What is Tauri-specific
+`web/orval.config.ts` points all 86 generated operations at one mutator, so
+swapping that single module is the whole fake — `vite.config.ts` does it by
+resolved path, because orval writes `import { http } from '../../http'` and an
+alias on the specifier never sees it. That was a silent failure once: every
+request 404s and the screens render empty rather than wrong.
 
-`src/bridge.ts` — eight calls. Everything else is shell-agnostic, which is what
-keeps a swap to Electron a day's work rather than a week's.
+Conversations are fixtures, not a fake event log. The control plane models a
+transcript as `SessionConfigured` / `TurnStarted` / `ItemStarted` / deltas;
+reproducing that faithfully teaches us nothing about how a window feels.
+
+## Three servers, not one
+
+`src/mock/backends.ts` holds a personal box and two companies, each with its own
+fleet, latency and reachability. The strip switches between them, ember sums
+across all of them onto the dock badge, and `#/fleet` merges them into one
+screen — the only surface here that `web/` could not have.
+
+One is knocked offline 30 seconds in and comes back at 58, because the memo
+expects unreachable to be the common state and it has to look deliberate.
 
 ## Layout
 
 ```
 src/
-  shims/      next/link, next/navigation, next/font — 108 lines, the whole
-              Next.js coupling
+  shims/      next/link, next/navigation, next/font — the whole Next coupling,
+              plus the history patch that makes the shell own addresses
   mock/       three backends, fixtures, a scripted timeline
-  ui/         the surfaces that do not exist in web/: server strip, unified
-              inbox, title bar, command palette, style page
-  overrides/  empty, and that is the finding
+  ui/         Rail, Dashboard, TasksPage, Workbench (+ Conversation, DiffPane,
+              TerminalPane), Configuration, Fleet, ServerStrip, Titlebar,
+              Palette, StylePage
+  overrides/  a component copied here wins over the one in ../web
 src-tauri/    the shell: window, vibrancy, dock badge, notifications
 ```
+
+## What is Tauri-specific
+
+`src/bridge.ts` — eight calls. Everything else is shell-agnostic, which is what
+keeps a swap to Electron a day rather than a week.

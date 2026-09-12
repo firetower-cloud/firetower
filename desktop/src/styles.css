@@ -6,7 +6,28 @@
  * *extension* — a translucent surface, a title bar that is part of the app, and
  * a way to say which server a row came from.
  */
-@import url("https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=Archivo+Narrow:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap");
+/* The faces `next/font/local` would have loaded, declared by hand. They are
+   checked into `web/public/fonts` for the same reason the web build uses them
+   rather than a CDN: a build that needs the network to render text fails for
+   reasons that have nothing to do with the change being made. */
+@font-face {
+  font-family: "Archivo";
+  src: url("../../web/public/fonts/archivo.woff2") format("woff2");
+  font-weight: 100 900;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Archivo Narrow";
+  src: url("../../web/public/fonts/archivo-narrow.woff2") format("woff2");
+  font-weight: 100 900;
+  font-display: swap;
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("../../web/public/fonts/jetbrains-mono.woff2") format("woff2");
+  font-weight: 100 800;
+  font-display: swap;
+}
 
 @import "../../web/app/globals.css";
 
@@ -36,6 +57,14 @@
 
   /* Native motion is quicker than web motion. The same curve, less of it. */
   --dur-native: 140ms;
+}
+
+@theme {
+  /* `next/font` sets these on <html>; here the faces are declared above and
+     these point at them, so `--font-sans` and friends resolve unchanged. */
+  --font-archivo: "Archivo";
+  --font-archivo-narrow: "Archivo Narrow";
+  --font-jetbrains: "JetBrains Mono";
 }
 
 @layer base {

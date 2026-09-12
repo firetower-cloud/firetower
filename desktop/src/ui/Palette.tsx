@@ -11,8 +11,9 @@
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { CornerDownLeft, Search } from "lucide-react";
-import { BACKENDS, setReach } from "~/mock/backends";
-import { useInbox, NEEDS_YOU, type Row } from "~/backend";
+import { BACKENDS, STATE, setReach } from "~/mock/backends";
+import { useFixtures } from "~/mock/socket";
+import { group, shortRepo } from "@/src/api/workspaces";
 import { navigate } from "~/shims/next-navigation";
 
 type Item = {
@@ -24,16 +25,8 @@ type Item = {
   run: () => void;
 };
 
-export function Palette({
-  open,
-  onClose,
-  onSelect,
-}: {
-  open: boolean;
-  onClose: () => void;
-  onSelect: (id: string) => void;
-}) {
-  const { rows } = useInbox();
+export function Palette({ open, onClose }: { open: boolean; onClose: () => void }) {
+  useFixtures();
   const [q, setQ] = useState("");
   const [at, setAt] = useState(0);
   const input = useRef<HTMLInputElement>(null);
@@ -48,16 +41,25 @@ export function Palette({
   }, [open]);
 
   const items = useMemo<Item[]>(() => {
-    const sessions: Item[] = rows.map((r: Row) => ({
-      id: r.id,
-      label: r.name,
-      hint: `${r.repo ?? ""} · ${r.branch ?? ""}`,
-      mark: r.backend.mark,
-      kind: "session",
-      run: () => onSelect(r.id),
-    }));
+    // Workspaces, not raw sessions: it is the place you want to go to, and
+    // three agents in one worktree should not be three results.
+    const sessions: Item[] = BACKENDS.flatMap((b) =>
+      group(STATE[b.id].filter((s) => s.status !== "Ended")).groups.flatMap(([repo, places]) =>
+        places.map((p) => ({
+          id: `${b.id}:${p.id}`,
+          label: p.name,
+          hint: `${shortRepo(repo)} · ${p.branch ?? "—"}`,
+          mark: b.mark,
+          kind: "session" as const,
+          run: () => navigate(`/sessions/${p.id}`),
+        })),
+      ),
+    );
 
     const commands: Item[] = [
+      { id: "c:fleet", label: "Everything, across servers", kind: "command", run: () => navigate("/fleet") },
+      { id: "c:tasks", label: "Tasks", kind: "command", run: () => navigate("/tasks") },
+      { id: "c:config", label: "Configuration", kind: "command", run: () => navigate("/configuration") },
       { id: "c:style", label: "Open the style guide", kind: "command", run: () => navigate("/style") },
       ...BACKENDS.map((b) => ({
         id: `c:drop:${b.id}`,
@@ -78,7 +80,7 @@ export function Palette({
       .filter((x) => x.s > 0)
       .sort((a, b) => b.s - a.s);
     return scored.slice(0, 9).map((x) => x.i);
-  }, [rows, q, onSelect]);
+  }, [q]);
 
   useEffect(() => setAt(0), [q]);
 

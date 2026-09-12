@@ -1,7 +1,11 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "lib": [
+      "ES2023",
+      "DOM",
+      "DOM.Iterable"
+    ],
     "module": "ESNext",
     "moduleResolution": "bundler",
     "jsx": "react-jsx",
@@ -13,11 +17,40 @@
     "isolatedModules": true,
     "baseUrl": ".",
     "paths": {
-      "@/components/*": ["../web/components/*"],
-      "@/src/*": ["../web/src/*"],
-      "@/app/*": ["../web/app/*"],
-      "~/*": ["src/*"]
+      "@/components/*": [
+        "../web/components/*"
+      ],
+      "@/src/*": [
+        "../web/src/*"
+      ],
+      "@/app/*": [
+        "../web/app/*"
+      ],
+      "~/*": [
+        "src/*"
+      ],
+      "lucide-react": [
+        "./node_modules/lucide-react"
+      ],
+      "lucide-react/*": [
+        "./node_modules/lucide-react/*"
+      ],
+      "@tanstack/react-query": [
+        "./node_modules/@tanstack/react-query"
+      ],
+      "@tanstack/react-query/*": [
+        "./node_modules/@tanstack/react-query/*"
+      ],
+      "zod": [
+        "./node_modules/zod"
+      ],
+      "zod/*": [
+        "./node_modules/zod/*"
+      ]
     }
   },
-  "include": ["src", "vite.config.ts"]
+  "include": [
+    "src",
+    "vite.config.ts"
+  ]
 }

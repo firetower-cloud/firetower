@@ -93,3 +93,23 @@ Use it for section labels and nothing else.
 
 The style page is also the prototype's remote — drop a server, fire an ember,
 stall a request — because these states are otherwise only reachable by waiting.
+
+## What this client shares with the web build
+
+Patterns and vocabulary, not layout.
+
+**Shared, and resolved out of `../web` rather than copied:** `group()` for
+repositories and workspaces, `doing()` for what a place is up to, `Signal`,
+`AgentMark`, `elapsed()`, the `ui/` primitives, every token.
+
+**Not shared:** the screens. A window gets 34px rows, a title bar that is part
+of the app, ⌘-numbered tabs and no drawer.
+
+Two rules fall out of the shared half and are worth stating, because both were
+violated on the first pass:
+
+- **`Icon` takes 12, 14, 16 or 20.** Not 11, not 13. The scale is deliberate and
+  the type enforces it.
+- **A workspace row is two lines:** name, ember dot and elapsed on the first;
+  branch in mono and the agent marks on the second. The branch is not optional
+  decoration — it is how you tell two workspaces on one repository apart.

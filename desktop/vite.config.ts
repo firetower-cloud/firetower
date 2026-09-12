@@ -34,11 +34,53 @@ function overrideFirst() {
   };
 }
 
+/**
+ * Swap the two modules the mock replaces, however they are reached.
+ *
+ * Orval writes `import { http } from '../../http'` into all 86 generated files
+ * — a **relative** path, which a `resolve.alias` entry on `@/src/api/http`
+ * never sees. Without this the generated client quietly keeps using the real
+ * mutator, every request 404s against the dev server, and the screens render
+ * empty rather than wrong. That is a silent failure, so it is caught here by
+ * resolved path rather than by specifier.
+ */
+const SWAPS: Record<string, string> = {
+  [path.join(web, "src/api/http.ts")]: path.resolve(here, "src/mock/http.ts"),
+  [path.join(web, "src/api/socket.tsx")]: path.resolve(here, "src/mock/socket.tsx"),
+};
+
+function swapMocks() {
+  return {
+    name: "firetower:swap-mocks",
+    enforce: "pre" as const,
+    resolveId(source: string, importer?: string) {
+      if (!importer || !source.startsWith(".")) return null;
+      const from = path.resolve(path.dirname(importer), source);
+      for (const ext of ["", ".ts", ".tsx"]) {
+        const hit = SWAPS[from + ext];
+        if (hit) return hit;
+      }
+      return null;
+    },
+  };
+}
+
 export default defineConfig({
-  plugins: [overrideFirst(), react(), tailwindcss()],
+  plugins: [swapMocks(), overrideFirst(), react(), tailwindcss()],
   clearScreen: false,
-  server: { port: 5273, strictPort: true },
+  server: {
+    port: 5273,
+    strictPort: true,
+    // The components, and the font files they are designed in, live outside
+    // this package's root. Dev refuses to serve those without being told.
+    fs: { allow: [here, web, path.resolve(here, "..")] },
+  },
   resolve: {
+    /* One copy of each, or there are two Reacts and two `lucide-react`s — the
+       components come from `../web`, which has its own `node_modules`. Vite
+       picks one on its own; saying so keeps the type-checker and the bundler
+       agreeing about which. */
+    dedupe: ["react", "react-dom", "lucide-react", "@tanstack/react-query", "zod"],
     alias: [
       // Next.js coupling. Three shims, ~80 lines, and everything else ports.
       { find: /^next\/link$/, replacement: path.resolve(here, "src/shims/next-link.tsx") },
