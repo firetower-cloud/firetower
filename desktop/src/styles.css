@@ -57,6 +57,39 @@
 
   /* Native motion is quicker than web motion. The same curve, less of it. */
   --dur-native: 140ms;
+
+  /* ── Type, at desk size ────────────────────────────────────────
+     The web scale is tuned for a phone that has to fit a workbench into
+     390px. A window has room, and the thing people do here longest is read
+     a conversation — so reading gets its own size and a line-height that
+     suits prose, while the chrome around it stays small and quiet. Raising
+     everything uniformly would just make a dense screen bigger; this widens
+     the gap between what you read and what you operate. */
+  --text-read: 0.9375rem;          /* 15px - the conversation */
+  --text-read--line-height: 1.7;
+  --text-lede: 1.0625rem;          /* 17px - a first line worth slowing for */
+  --text-lede--line-height: 1.5;
+
+  /* Desk density. Rows are taller than the web build's 34px because a mouse
+     is precise and a window is not short of vertical space; what a tight row
+     buys on a phone is nothing here. */
+  --row: 40px;
+  --row-tight: 32px;
+  --control: 30px;
+}
+
+@theme {
+  /* Widened from the web scale. Same names, same roles, one step up, so
+     nothing has to be re-annotated at the point of use. */
+  --text-ui: 0.84375rem;           /* 13.5px, was 13 */
+  --text-meta: 0.75rem;            /* 12px, was 11.5 */
+  --text-micro: 0.6875rem;         /* 11px, was 10.5 */
+  --text-code: 0.8125rem;          /* 13px */
+  --text-code--line-height: 1.65;
+  --text-body--line-height: 1.7;
+  --text-display: 1.75rem;         /* 28px, was 24 */
+  --text-display--line-height: 1.25;
+  --text-title: 1.0625rem;         /* 17px, was 16 */
 }
 
 @theme {
@@ -143,23 +176,82 @@
   }
 
   /* ── Rows ──────────────────────────────────────────────────────
-     Desktop density. The web build is tuned for touch below `md`, which puts a
-     44px floor on anything tappable. A Mac app is mouse-only and can be
-     tighter — this is the one measurement the whole inbox is built on. */
+     A sidebar row on this platform is a full-width rounded rect that fills on
+     selection — not a strip with a coloured edge. The edge marker is a web
+     convention; matching the platform is most of what "native" means here. */
   .row {
-    display: grid;
-    grid-template-columns: var(--chrome-strip) 1fr auto;
+    display: flex;
     align-items: center;
     gap: 0.5rem;
-    height: 34px;
-    padding-inline: 0.5rem;
-    border-radius: var(--radius-sm);
-    transition: background var(--dur-native) var(--ease-swift);
+    min-height: var(--row-tight);
+    padding-inline: 0.625rem;
+    border-radius: var(--radius-md);
+    transition:
+      background var(--dur-native) var(--ease-swift),
+      color var(--dur-native) var(--ease-swift);
   }
   .row:hover {
-    background: var(--color-raise);
+    background: color-mix(in srgb, var(--color-raise) 70%, transparent);
   }
   .row[data-on="true"] {
     background: var(--color-overlay);
+    box-shadow: var(--shadow-raise);
+  }
+
+  /* ── Controls ──────────────────────────────────────────────────
+     One height, so a toolbar reads as a row of instruments rather than as
+     whatever each control happened to need. */
+  .control {
+    height: var(--control);
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    padding-inline: 0.625rem;
+    border-radius: var(--radius-md);
+    font-size: var(--text-ui);
+    transition: background var(--dur-native) var(--ease-swift);
+  }
+
+  /* A segmented control, the way the platform draws one: a recessed track and
+     a raised knob, rather than two flat buttons that change colour. */
+  .track {
+    display: inline-flex;
+    gap: 2px;
+    padding: 2px;
+    border-radius: var(--radius-md);
+    background: var(--color-ground);
+    box-shadow: inset 0 1px 2px rgb(0 0 0 / 0.35);
+  }
+  .track > button {
+    padding: 0.25rem 0.625rem;
+    border-radius: 6px;
+    font-size: var(--text-ui);
+    color: var(--color-mute);
+    transition:
+      background var(--dur-native) var(--ease-swift),
+      color var(--dur-native) var(--ease-swift);
+  }
+  .track > button:hover {
+    color: var(--color-dim);
+  }
+  .track > button[data-on="true"] {
+    background: var(--color-overlay);
+    color: var(--color-bone);
+    box-shadow: var(--shadow-raise);
+  }
+
+  /* A keyboard hint, inline. Desk software tells you its shortcuts where you
+     use them rather than hiding them in a menu. */
+  .keycap {
+    display: inline-grid;
+    place-items: center;
+    min-width: 1.125rem;
+    height: 1.125rem;
+    padding-inline: 0.25rem;
+    border: 1px solid var(--color-line);
+    border-radius: 4px;
+    background: var(--color-ground);
+    font-size: var(--text-micro);
+    color: var(--color-mute);
   }
 }

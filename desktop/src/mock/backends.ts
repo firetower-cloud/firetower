@@ -321,3 +321,82 @@ export const TALK: Record<string, { turns: Turn[]; ask?: Ask; diffs: Diff[] }> =
 export function talkFor(ws: string) {
   return TALK[ws] ?? { turns: [], diffs: [] };
 }
+
+/* ── The workspace, as the inspector sees it ────────────────────────────── */
+
+export type Node = { name: string; dir?: Node[]; changed?: boolean; added?: boolean };
+
+export type Ship = {
+  stage: "uncommitted" | "unpushed" | "pushed" | "open";
+  label: string;
+  files: { path: string; added: number; removed: number }[];
+  issue?: { key: string; title: string; url: string };
+};
+
+const TREE: Node[] = [
+  {
+    name: "crates",
+    dir: [
+      {
+        name: "ft-server",
+        dir: [
+          {
+            name: "src",
+            dir: [
+              { name: "api", dir: [{ name: "auth.rs", changed: true }, { name: "sessions.rs" }] },
+              { name: "auth.rs" },
+              { name: "accounts.rs" },
+              { name: "lib.rs" },
+            ],
+          },
+        ],
+      },
+      { name: "ft-core", dir: [{ name: "src", dir: [{ name: "lib.rs" }] }] },
+    ],
+  },
+  {
+    name: "migrations",
+    dir: [{ name: "server", dir: [{ name: "20260912160000_device_codes.sql", added: true }] }],
+  },
+  { name: "Cargo.toml" },
+  { name: "justfile" },
+];
+
+export const FILES: Record<string, Node[]> = {
+  w_e1_device: TREE,
+  w_e1_tokens: TREE,
+  w_e1_flake: TREE,
+  w_e2_ledger: [
+    { name: "src", dir: [{ name: "ledger", dir: [{ name: "reconcile.ts", changed: true }, { name: "rounding.ts" }] }] },
+    { name: "package.json" },
+  ],
+  w_me_parser: [
+    { name: "src", dir: [{ name: "feed", dir: [{ name: "parse.ts", changed: true }, { name: "dates.ts", added: true }] }] },
+    { name: "package.json" },
+  ],
+};
+
+export const SHIP: Record<string, Ship> = {
+  w_e1_device: {
+    stage: "uncommitted",
+    label: "Commit and push",
+    files: [
+      { path: "crates/ft-server/src/api/auth.rs", added: 64, removed: 2 },
+      { path: "migrations/server/20260912160000_device_codes.sql", added: 18, removed: 0 },
+    ],
+    issue: {
+      key: "firetower#112",
+      title: "Device flow: rate-limit the polling endpoint",
+      url: "https://github.com/firetower-cloud/firetower/issues/112",
+    },
+  },
+  w_e1_tokens: { stage: "uncommitted", label: "Commit and push", files: [{ path: "crates/ft-server/src/vault.rs", added: 22, removed: 6 }] },
+  w_e1_flake: { stage: "unpushed", label: "Push", files: [{ path: "crates/ft-server/src/updates/runs.rs", added: 9, removed: 3 }] },
+  w_e1_boot: { stage: "open", label: "Open on GitHub", files: [] },
+  w_e2_ledger: { stage: "uncommitted", label: "Commit and push", files: [{ path: "src/ledger/reconcile.ts", added: 31, removed: 12 }] },
+  w_me_parser: { stage: "uncommitted", label: "Commit and push", files: [{ path: "src/feed/parse.ts", added: 44, removed: 20 }] },
+};
+
+export const filesFor = (ws: string): Node[] => FILES[ws] ?? [];
+export const shipFor = (ws: string): Ship =>
+  SHIP[ws] ?? { stage: "uncommitted", label: "Commit and push", files: [] };

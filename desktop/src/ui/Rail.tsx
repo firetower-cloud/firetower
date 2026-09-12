@@ -19,6 +19,7 @@ import { elapsed, minutesSince, needsYou } from "@/src/api/view";
 import { STATE, type Backend } from "~/mock/backends";
 import { useFixtures } from "~/mock/socket";
 import { navigate, usePathname } from "~/shims/next-navigation";
+import { useStart } from "~/start";
 
 const NAV: { href: string; label: string; icon: LucideIcon }[] = [
   { href: "/", label: "Dashboard", icon: LayoutList },
@@ -28,13 +29,14 @@ const NAV: { href: string; label: string; icon: LucideIcon }[] = [
 export function Rail({ backend }: { backend: Backend }) {
   useFixtures();
   const path = usePathname();
+  const start = useStart();
 
   const live = STATE[backend.id].filter((s) => s.status !== "Ended");
   const repos = group(live);
   const dark = backend.reach === "unreachable";
 
   return (
-    <aside className="flex w-[236px] shrink-0 flex-col overflow-hidden border-r border-line bg-(--color-panel-vibrant)">
+    <aside className="flex w-[16rem] shrink-0 flex-col overflow-hidden border-r border-line bg-(--color-panel-vibrant)">
       <nav className="flex shrink-0 flex-col gap-0.5 px-2 pt-2">
         {NAV.map((n) => (
           <NavLink
@@ -49,8 +51,9 @@ export function Rail({ backend }: { backend: Backend }) {
         <div className="flex shrink-0 items-center gap-2 px-4 pb-1">
           <span className="eyebrow">Workspaces</span>
           <button
-            title="New workspace"
-            className="-mr-1 ml-auto grid h-6 w-6 place-items-center rounded-sm text-mute transition-colors hover:bg-raise hover:text-bone"
+            onClick={() => start()}
+            title="New workspace  ⌘N"
+            className="-mr-1 ml-auto grid h-7 w-7 place-items-center rounded-md text-mute transition-colors hover:bg-raise hover:text-bone"
           >
             <Icon of={Plus} size={12} />
           </button>
@@ -98,11 +101,10 @@ function NavLink({ href, label, icon, on }: { href: string; label: string; icon:
   return (
     <button
       onClick={() => navigate(href)}
-      className={`relative flex h-7 items-center gap-2.5 rounded-md px-2.5 text-ui transition-colors duration-150 ${
-        on ? "bg-raise text-bone" : "text-dim hover:bg-raise/60 hover:text-text"
+      className={`flex h-8 items-center gap-2.5 rounded-md px-2.5 text-ui transition-colors duration-150 ${
+        on ? "bg-overlay text-bone shadow-(--shadow-raise)" : "text-dim hover:bg-raise/60 hover:text-text"
       }`}
     >
-      {on && <span className="absolute top-1.5 bottom-1.5 -left-2 w-[2px] rounded-full bg-bone" />}
       <Icon of={icon} size={14} />
       {label}
     </button>
@@ -116,8 +118,8 @@ function Row({ place, on }: { place: Workspace; on: boolean }) {
   return (
     <button
       onClick={() => navigate(`/sessions/${place.id}`)}
-      className={`block w-full rounded-md px-2 py-1 text-left transition-colors duration-150 ${
-        on ? "bg-raise" : "hover:bg-raise/60"
+      className={`block w-full rounded-md px-2.5 py-1.5 text-left transition-colors duration-150 ${
+        on ? "bg-overlay shadow-(--shadow-raise)" : "hover:bg-raise/60"
       }`}
     >
       <div className="flex items-center gap-2">

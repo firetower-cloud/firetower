@@ -12,10 +12,12 @@ import { ArrowRight, CircleDot, GitPullRequest, RotateCw, Ticket, User } from "l
 import { Icon } from "@/components/ui";
 import { elapsed, minutesSince } from "@/src/api/view";
 import { TASKS, type Backend } from "~/mock/backends";
+import { useStart } from "~/start";
 
 const KIND = { issue: CircleDot, pullRequest: GitPullRequest, ticket: Ticket };
 
 export function TasksPage({ backend }: { backend: Backend }) {
+  const start = useStart();
   const [kind, setKind] = useState<"issue" | "pullRequest">("issue");
   const [state, setState] = useState<"open" | "closed">("open");
   const [mine, setMine] = useState(false);
@@ -31,8 +33,7 @@ export function TasksPage({ backend }: { backend: Backend }) {
   return (
     <div className="scroll-slim h-full overflow-y-auto">
       <div className="mx-auto max-w-[1000px] px-6 py-6">
-        <span className="eyebrow">Tasks</span>
-        <h1 className="mt-1 text-display text-bone">{shown.length} to pick from.</h1>
+        <h1 className="text-display text-bone">{shown.length} to pick from.</h1>
         <p className="mt-1 text-body text-dim">
           Read from your trackers as you look. Starting one opens a workspace.
         </p>
@@ -131,7 +132,10 @@ export function TasksPage({ backend }: { backend: Backend }) {
                   {elapsed(minutesSince(t.updatedAt))}
                 </span>
 
-                <button className="flex w-[72px] shrink-0 items-center justify-center gap-1 rounded-md border border-line bg-raise px-2 py-1 text-ui text-text transition-colors hover:bg-overlay">
+                <button
+                  onClick={() => start({ title: t.title, repo: t.repo ?? undefined, issue: short })}
+                  className="control w-[5rem] shrink-0 justify-center border border-line bg-raise text-text transition-colors hover:bg-overlay hover:text-bone"
+                >
                   Start
                   <Icon of={ArrowRight} size={12} />
                 </button>

@@ -16,6 +16,7 @@ import { elapsed, minutesSince, needsYou } from "@/src/api/view";
 import { STATE, type Backend } from "~/mock/backends";
 import { useFixtures } from "~/mock/socket";
 import { navigate } from "~/shims/next-navigation";
+import { useStart } from "~/start";
 
 type Filter = "all" | "waiting" | "working" | "idle";
 const FILTERS: [Filter, string][] = [
@@ -27,6 +28,7 @@ const FILTERS: [Filter, string][] = [
 
 export function Dashboard({ backend }: { backend: Backend }) {
   useFixtures();
+  const start = useStart();
   const [filter, setFilter] = useState<Filter>("all");
   const [repo, setRepo] = useState("all");
 
@@ -49,8 +51,7 @@ export function Dashboard({ backend }: { backend: Backend }) {
       <div className="mx-auto max-w-[1000px] px-6 py-6">
         <div className="flex items-start justify-between">
           <div>
-            <span className="eyebrow">Workspaces</span>
-            <h1 className="mt-1 text-display text-bone">
+            <h1 className="text-display text-bone">
               {waiting > 0 ? `${waiting} waiting on you.` : `${total} running.`}
             </h1>
             <p className="mt-1 max-w-[440px] text-body text-dim">
@@ -58,23 +59,20 @@ export function Dashboard({ backend }: { backend: Backend }) {
               agents in it.
             </p>
           </div>
-          <button className="flex h-8 items-center gap-1.5 rounded-md border border-line bg-raise px-3 text-ui text-bone transition-colors hover:bg-overlay">
-            <Icon of={Plus} size={12} />
+          <button
+            onClick={() => start()}
+            className="control border border-line bg-raise text-bone transition-colors hover:bg-overlay"
+          >
+            <Icon of={Plus} size={14} />
             New workspace
           </button>
         </div>
 
         <div className="mt-5 overflow-hidden rounded-lg border border-line bg-panel">
           <div className="flex items-center gap-2 border-b border-line px-2.5 py-2">
-            <div className="flex gap-0.5 rounded-md bg-ground p-0.5">
+            <div className="track">
               {FILTERS.map(([f, label]) => (
-                <button
-                  key={f}
-                  onClick={() => setFilter(f)}
-                  className={`rounded-sm px-2.5 py-1 text-ui transition-colors ${
-                    filter === f ? "bg-overlay text-bone" : "text-mute hover:text-dim"
-                  }`}
-                >
+                <button key={f} data-on={filter === f} onClick={() => setFilter(f)}>
                   {label}
                 </button>
               ))}
@@ -144,7 +142,7 @@ function Line({ place }: { place: Workspace }) {
   return (
     <button
       onClick={() => navigate(`/sessions/${place.id}`)}
-      className="flex h-[42px] w-full items-center gap-3 px-3 text-left transition-colors hover:bg-raise/60"
+      className="flex h-[var(--row)] w-full items-center gap-3 px-3 text-left transition-colors hover:bg-raise/60"
     >
       <span className="w-[15px] shrink-0">
         <Signal status={lead.status} size={5} />

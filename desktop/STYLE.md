@@ -113,3 +113,96 @@ violated on the first pass:
 - **A workspace row is two lines:** name, ember dot and elapsed on the first;
   branch in mono and the agent marks on the second. The branch is not optional
   decoration — it is how you tell two workspaces on one repository apart.
+
+
+---
+
+# Making it read as a Mac app, not a web page
+
+Six things account for almost all of the difference. They are listed in the
+order they pay off.
+
+## 1. Reading gets its own size
+
+The web scale is tuned for a phone that has to fit a workbench into 390px. The
+thing people do here longest is read a conversation, so reading is sized for
+prose and the chrome around it stays small:
+
+| | value | where |
+|---|---|---|
+| `--text-lede` | 17px / 1.5 | the question an agent is asking |
+| `--text-read` | **15px / 1.7** | the conversation |
+| `--text-ui` | 13.5px | controls, rows, labels |
+| `--text-meta` | 12px | secondary facts |
+| `--text-micro` | 11px | counts, keycaps |
+| `--text-code` | 13px / 1.65 | diffs, paths, branches |
+
+Raising everything uniformly just makes a dense screen bigger. What works is
+*widening the gap* between what you read and what you operate.
+
+## 2. Rows and controls get room
+
+`--row: 40px`, `--row-tight: 32px`, `--control: 30px`. One control height
+everywhere, so a toolbar reads as a row of instruments rather than as whatever
+each control happened to need.
+
+## 3. Selection fills; it does not mark an edge
+
+A sidebar row on this platform is a **full-width rounded rect that fills**
+(`.row[data-on]` → `--color-overlay` plus the raise shadow). The 2px coloured
+bar in the left margin is a web convention and is the single clearest tell.
+
+## 4. Segmented controls are recessed, not flat
+
+`.track` is an inset track with a raised knob — the platform's shape. Two flat
+buttons that swap colour is a web tab bar wearing a different hat.
+
+## 5. The window says what it can do
+
+`.keycap` renders a shortcut inline, next to the thing it operates: `⏎ send`,
+`⇧⏎ new line`, `⌘\` on the inspector, `⌘1`–`⌘3` on its tabs, `⌘J` on the
+terminal. Desk software tells you its shortcuts where you use them. A web app
+hides them in a help page.
+
+## 6. Code scrolls; it never wraps
+
+A line broken mid-identifier is harder to read than one you scroll to. Every
+diff and every path is `whitespace-pre` inside its own `overflow-x-auto`.
+
+---
+
+## The chat surface
+
+- **One column, ~46rem.** Under 80 characters at 15px.
+- **The agent speaks onto the ground.** No container, no avatar, no bubble — its
+  turn is long and it is the thing you came to read. **You** get a raised card,
+  right-aligned. Two facing bubbles is a messaging app; this is not one.
+- **Tool calls hang off a hairline** to the left of the text, so a turn that
+  touched fourteen files still reads as one paragraph with work attached.
+- **Thinking is collapsed** to a single line. It is context, not the answer.
+- **The composer is the second-heaviest object on the screen** — rounded 2xl,
+  floating shadow, attachments as chips, model and mode as menus that open
+  upward, and a context meter that answers *am I near the edge* with a shape
+  rather than a token count.
+
+## What the boldness is spent on
+
+One thing: **an agent is waiting on you.** It gets the ember, the pulse, the
+only saturated surface in the window, and a `--text-lede` question. Everything
+else on screen is built to stay quiet so that this reads from across the room.
+
+Nothing else may use ember. Not a badge, not a hover, not a chart.
+
+## Three habits to avoid
+
+These are what make a generated interface look generated, and the first draft of
+this client did all three:
+
+- **An ALL-CAPS eyebrow above every heading.** `.eyebrow` is the map-legend
+  voice — column headers and section legends. It is not a decoration to put
+  above every title.
+- **Meta strings joined with middle dots** (`repo · branch · 4m`). Use real
+  layout: separate spans, honest spacing, or a labelled row.
+- **A rounded card around everything.** One radius on every object flattens the
+  hierarchy it was supposed to express. The conversation has no card; the
+  composer does.

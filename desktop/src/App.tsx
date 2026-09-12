@@ -9,6 +9,8 @@ import { StylePage } from "~/ui/StylePage";
 import { runTimeline, useFixtures } from "~/mock/socket";
 import { backend as backendFor, type BackendId } from "~/mock/backends";
 import { bridge } from "~/bridge";
+import { StartProvider } from "~/start";
+import { NewWorkspace } from "~/ui/NewWorkspace";
 import { navigate, usePathname } from "~/shims/next-navigation";
 
 export function App() {
@@ -47,27 +49,33 @@ export function App() {
   const here = scope === "all" ? null : backendFor(scope as BackendId);
 
   return (
-    <div className="flex h-full w-full flex-col overflow-hidden bg-ground text-text">
-      <Titlebar scope={scope} waiting={waiting} onPalette={() => setPalette(true)} />
+    <StartProvider
+      render={(seed, close) =>
+        here ? <NewWorkspace backend={here} seed={seed} onClose={close} /> : null
+      }
+    >
+      <div className="flex h-full w-full flex-col overflow-hidden bg-ground text-text">
+        <Titlebar scope={scope} waiting={waiting} onPalette={() => setPalette(true)} />
 
-      <div className="flex min-h-0 flex-1">
-        <ServerStrip scope={scope} onScope={pick} />
+        <div className="flex min-h-0 flex-1">
+          <ServerStrip scope={scope} onScope={pick} />
 
-        {style ? (
-          <StylePage />
-        ) : all || !here ? (
-          <Fleet />
-        ) : (
-          <>
-            <Rail backend={here} />
-            <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-              <Routes backend={here} />
-            </div>
-          </>
-        )}
+          {style ? (
+            <StylePage />
+          ) : all || !here ? (
+            <Fleet />
+          ) : (
+            <>
+              <Rail backend={here} />
+              <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+                <Routes backend={here} />
+              </div>
+            </>
+          )}
+        </div>
+
+        <Palette open={palette} onClose={() => setPalette(false)} />
       </div>
-
-      <Palette open={palette} onClose={() => setPalette(false)} />
-    </div>
+    </StartProvider>
   );
 }

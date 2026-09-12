@@ -18,8 +18,7 @@ export function Configuration({ backend }: { backend: Backend }) {
   return (
     <div className="scroll-slim h-full overflow-y-auto">
       <div className="mx-auto max-w-[820px] px-6 py-6">
-        <span className="eyebrow">Configuration</span>
-        <h1 className="mt-1 text-display text-bone">{backend.org}</h1>
+        <h1 className="text-display text-bone">{backend.org}</h1>
         <p className="mt-1 text-body text-dim">
           Signed in as <span className="text-text">{backend.user}</span>. This account exists on
           this server only.
