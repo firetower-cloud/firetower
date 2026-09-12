@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.32.2](https://github.com/firetower-cloud/firetower/compare/firetower-v0.32.1...firetower-v0.32.2) (2026-09-12)
+
+
+### Bug Fixes
+
+* **updates:** upgrade from the control plane again ([195242a](https://github.com/firetower-cloud/firetower/commit/195242a65a50f19256bcbdf05beb0cc6e729e38c))
+* **updates:** upgrade from the control plane again ([d04af2c](https://github.com/firetower-cloud/firetower/commit/d04af2cad7d1f401ffcba88de1582b0594e4029b))
+
 ## [0.32.1](https://github.com/firetower-cloud/firetower/compare/firetower-v0.32.0...firetower-v0.32.1) (2026-09-11)
 
 
