@@ -253,11 +253,26 @@ it change in here" is answered without leaving for the diff. The count in the
 header is clamped to the file — a header reading "33 lines, 40 touched" is the
 kind of small lie that makes a reader stop trusting the rest of the screen.
 
-## Selecting code starts a note
+## Selecting code starts a note, **where you selected**
 
-A quote and the line it began on, pinned, then sent back as an ordinary message.
-The same shape the conversation's annotations use, so a note against a file and
-a note against a message go back the same way.
+The popover opens on top of the selection, anchored to its bounding rect and
+clamped to the window — below it by default, above when there is no room. The
+whole point of annotating rather than typing into the composer is that the note
+is attached to a specific piece of text, and a panel at the foot of the window
+loses the connection the gesture just made.
+
+A kept note becomes a marker in the gutter, and the only summary is a floating
+pill with the count and one way to send. Listing the notes again in a tray would
+repeat what the markers already say.
+
+## The flexbox rule that broke scrolling once
+
+A flex child defaults to `min-height: auto` and **refuses to shrink below its
+content**, so a column without `min-h-0` grows past the window and the scroller
+inside it never scrolls — while reporting a perfectly healthy `overflow: auto`.
+
+Every flex column between the window and a scroll container needs `min-h-0`.
+Two were missing and the file viewer simply would not scroll.
 
 ## Ways into a file
 

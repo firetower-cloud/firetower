@@ -120,7 +120,7 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
   if (backend.reach === "unreachable") return <Unreachable org={backend.org} />;
 
   return (
-    <div className="flex min-w-0 flex-1 flex-col bg-ground">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-ground">
       {/* A toolbar, not a tab bar: what this workspace is, who is in it, and
           the two things you toggle. */}
       <div className="flex h-11 shrink-0 items-center gap-3 border-b border-line px-3">
@@ -165,7 +165,10 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
       </div>
 
       <div className="flex min-h-0 flex-1">
-        <div className="flex min-w-0 flex-1 flex-col">
+        {/* `min-h-0` on both columns: a flex child defaults to
+            `min-height: auto` and refuses to shrink below its content, so without
+            it this grows past the window and the pane below never scrolls. */}
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           {tabs.length > 1 && (
             <TabStrip
               tabs={tabs}

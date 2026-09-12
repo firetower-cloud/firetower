@@ -11,16 +11,18 @@
  * is answered without leaving for the diff.
  */
 import { useMemo, useRef, useState } from "react";
-import { Check, Copy, MessageSquarePlus, Send, X } from "lucide-react";
+import { Check, Copy, Send, X } from "lucide-react";
 import { fileAt } from "~/mock/files";
 import { highlight, langOf, TONE } from "~/syntax";
+import { Annotate, type Anchor } from "~/ui/Annotate";
 
 type Note = { id: number; quote: string; line: number; text: string };
 
 export function FileTab({ path }: { path: string }) {
   const file = fileAt(path);
   const [notes, setNotes] = useState<Note[]>([]);
-  const [drafting, setDrafting] = useState<{ quote: string; line: number } | null>(null);
+  const [drafting, setDrafting] = useState<Anchor | null>(null);
+  const [reading, setReading] = useState<Note | null>(null);
   const [copied, setCopied] = useState(false);
   const [sent, setSent] = useState(false);
   const body = useRef<HTMLDivElement>(null);
@@ -54,12 +56,21 @@ export function FileTab({ path }: { path: string }) {
   const takeSelection = () => {
     const sel = window.getSelection();
     const quote = sel?.toString().trim();
-    if (!quote || !body.current || !sel?.anchorNode) return;
+    if (!quote || !body.current || !sel?.anchorNode || sel.rangeCount === 0) return;
     if (!body.current.contains(sel.anchorNode)) return;
 
     const row = (sel.anchorNode.parentElement as HTMLElement | null)?.closest("[data-line]");
     const line = Number(row?.getAttribute("data-line") ?? 0);
-    setDrafting({ quote: quote.length > 240 ? `${quote.slice(0, 240)}…` : quote, line });
+
+    // Where the selection actually is, so the note opens on top of it.
+    const rect = sel.getRangeAt(0).getBoundingClientRect();
+
+    setDrafting({
+      quote: quote.length > 400 ? `${quote.slice(0, 400)}…` : quote,
+      line,
+      x: rect.left + rect.width / 2,
+      y: rect.bottom,
+    });
   };
 
   const copy = () => {
@@ -69,7 +80,7 @@ export function FileTab({ path }: { path: string }) {
   };
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-ground">
+    <div className="relative flex h-full min-h-0 flex-col bg-ground">
       <header className="flex h-9 shrink-0 items-center gap-2 border-b border-line bg-panel px-3">
         <span className="min-w-0 flex-1 truncate font-mono text-meta text-slate" title={path}>
           {path}
@@ -101,6 +112,7 @@ export function FileTab({ path }: { path: string }) {
             {lines.map((line, i) => {
               const n = i + 1;
               const touched = changed.has(n);
+              const noted = notes.filter((x) => x.line === n);
               return (
                 <tr key={n} data-line={n} className="group/row">
                   <td
@@ -110,7 +122,17 @@ export function FileTab({ path }: { path: string }) {
                         : "border-line-soft bg-ground text-mute"
                     }`}
                   >
-                    {n}
+                    {noted.length > 0 ? (
+                      <button
+                        onClick={() => setReading(noted[0])}
+                        title={noted.map((x) => x.text).join("\n")}
+                        className="text-slate hover:text-bone"
+                      >
+                        ●
+                      </button>
+                    ) : (
+                      n
+                    )}
                   </td>
                   <td className={`px-3 whitespace-pre ${touched ? "bg-sage-tint/25" : ""}`}>
                     {line === "" ? (
@@ -130,64 +152,61 @@ export function FileTab({ path }: { path: string }) {
         </table>
       </div>
 
-      {(drafting || notes.length > 0) && (
-        <div className="shrink-0 border-t border-line bg-panel">
-          {drafting && (
-            <Drafting
-              quote={drafting.quote}
-              onCancel={() => setDrafting(null)}
-              onKeep={(text) => {
-                setNotes((held) => [
-                  ...held,
-                  { id: Date.now(), quote: drafting.quote, line: drafting.line, text },
-                ]);
-                setDrafting(null);
-                window.getSelection()?.removeAllRanges();
+      {drafting && (
+        <Annotate
+          at={drafting}
+          onCancel={() => setDrafting(null)}
+          onKeep={(text) => {
+            setNotes((held) => [
+              ...held,
+              { id: Date.now(), quote: drafting.quote, line: drafting.line, text },
+            ]);
+            setDrafting(null);
+            window.getSelection()?.removeAllRanges();
+          }}
+        />
+      )}
+
+      {/* Kept notes live in the gutter. This is only the count and the way to
+          send them — a panel listing them again would repeat what the markers
+          already say. */}
+      {notes.length > 0 && !drafting && (
+        <div className="pointer-events-none absolute right-5 bottom-5 z-30 flex justify-end">
+          <div className="pointer-events-auto flex items-center gap-2 rounded-full border border-line bg-overlay py-1.5 pr-1.5 pl-3.5 shadow-(--shadow-float)">
+            <span className="text-ui text-dim">
+              {notes.length} note{notes.length > 1 ? "s" : ""}
+            </span>
+            <button
+              onClick={() => setNotes([])}
+              title="Discard them"
+              className="grid h-6 w-6 place-items-center rounded-full text-mute transition-colors hover:bg-raise hover:text-bone"
+            >
+              <X className="h-3.5 w-3.5" strokeWidth={2} />
+            </button>
+            <button
+              onClick={() => {
+                setNotes([]);
+                setSent(true);
+                setTimeout(() => setSent(false), 1600);
               }}
-            />
-          )}
-
-          {notes.length > 0 && !drafting && (
-            <div className="px-3 py-2.5">
-              <div className="flex items-center gap-2">
-                <span className="text-ui text-dim">
-                  {notes.length} note{notes.length > 1 ? "s" : ""} on this file
-                </span>
-                <button
-                  onClick={() => {
-                    setNotes([]);
-                    setSent(true);
-                    setTimeout(() => setSent(false), 1600);
-                  }}
-                  className="control ml-auto border border-line bg-raise text-bone hover:bg-overlay"
-                >
-                  <Send className="h-3.5 w-3.5" strokeWidth={1.75} />
-                  Send to the agent
-                </button>
-              </div>
-
-              <div className="mt-2 space-y-1.5">
-                {notes.map((note) => (
-                  <div key={note.id} className="flex items-start gap-2 rounded-md bg-ground px-2.5 py-2">
-                    <span className="shrink-0 font-mono text-micro text-mute">L{note.line}</span>
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate font-mono text-micro text-mute">
-                        {note.quote}
-                      </span>
-                      <span className="block text-meta text-text">{note.text}</span>
-                    </span>
-                    <button
-                      onClick={() => setNotes((h) => h.filter((x) => x.id !== note.id))}
-                      className="grid h-5 w-5 shrink-0 place-items-center rounded text-mute hover:bg-raise hover:text-bone"
-                    >
-                      <X className="h-3 w-3" strokeWidth={2} />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
+              className="control rounded-full bg-bone font-medium text-ground transition-opacity hover:opacity-90"
+            >
+              <Send className="h-3.5 w-3.5" strokeWidth={2} />
+              Send to the agent
+            </button>
+          </div>
         </div>
+      )}
+
+      {reading && (
+        <Annotate
+          at={{ ...reading, x: window.innerWidth / 2, y: 160 }}
+          onCancel={() => setReading(null)}
+          onKeep={(text) => {
+            setNotes((held) => held.map((x) => (x.id === reading.id ? { ...x, text } : x)));
+            setReading(null);
+          }}
+        />
       )}
 
       {sent && (
@@ -196,51 +215,6 @@ export function FileTab({ path }: { path: string }) {
           Sent. The agent has the notes and the lines they were on.
         </div>
       )}
-    </div>
-  );
-}
-
-function Drafting({
-  quote,
-  onKeep,
-  onCancel,
-}: {
-  quote: string;
-  onKeep: (text: string) => void;
-  onCancel: () => void;
-}) {
-  const [text, setText] = useState("");
-  return (
-    <div className="px-3 py-2.5">
-      <div className="flex items-start gap-2">
-        <MessageSquarePlus className="mt-0.5 h-3.5 w-3.5 shrink-0 text-slate" strokeWidth={1.75} />
-        <span className="min-w-0 flex-1 truncate border-l-2 border-slate-deep pl-2 font-mono text-micro text-mute">
-          {quote}
-        </span>
-      </div>
-      <div className="mt-2 flex items-center gap-2">
-        <input
-          autoFocus
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && text.trim()) onKeep(text.trim());
-            if (e.key === "Escape") onCancel();
-          }}
-          placeholder="What about it?"
-          className="min-w-0 flex-1 rounded-lg border border-line bg-ground px-3 py-1.5 text-ui text-bone placeholder:text-mute focus:border-slate-deep focus:outline-none"
-        />
-        <button
-          disabled={!text.trim()}
-          onClick={() => text.trim() && onKeep(text.trim())}
-          className="control border border-line bg-raise text-bone hover:bg-overlay disabled:text-mute"
-        >
-          Keep
-        </button>
-        <button onClick={onCancel} className="control text-mute hover:text-dim">
-          Cancel
-        </button>
-      </div>
     </div>
   );
 }
