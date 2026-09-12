@@ -16,8 +16,8 @@ import { AgentMark } from "@/components/AgentMark";
 import { GithubMark, Icon } from "@/components/ui";
 import { doing, group, shortRepo, type Workspace } from "@/src/api/workspaces";
 import { elapsed, minutesSince, needsYou } from "@/src/api/view";
-import { STATE, type Backend } from "~/mock/backends";
-import { useFixtures } from "~/mock/socket";
+import type { Backend } from "~/mock/backends";
+import { useSessions } from "~/data";
 import { navigate, usePathname } from "~/shims/next-navigation";
 import { useStart } from "~/start";
 
@@ -27,12 +27,12 @@ const NAV: { href: string; label: string; icon: LucideIcon }[] = [
 ];
 
 export function Rail({ backend }: { backend: Backend }) {
-  useFixtures();
   const path = usePathname();
   const start = useStart();
+  const { data: sessions, loading, error } = useSessions();
 
-  const live = STATE[backend.id].filter((s) => s.status !== "Ended");
-  const repos = group(live);
+  const running = sessions.filter((s) => s.status !== "Ended");
+  const repos = group(running);
   const dark = backend.reach === "unreachable";
 
   return (
@@ -60,7 +60,11 @@ export function Rail({ backend }: { backend: Backend }) {
         </div>
 
         <div className={`scroll-slim min-h-0 flex-1 overflow-y-auto px-2 pb-3 ${dark ? "stale" : ""}`}>
-          {repos.groups.length === 0 && <p className="px-2.5 py-1 text-ui text-mute">Nothing running.</p>}
+          {loading && <p className="px-2.5 py-1 text-ui text-mute">Loading…</p>}
+          {error && <p className="px-2.5 py-1 text-meta text-brick">{error}</p>}
+          {!loading && !error && repos.groups.length === 0 && (
+            <p className="px-2.5 py-1 text-ui text-mute">Nothing running.</p>
+          )}
 
           {repos.groups.map(([repo, places]) => (
             <div key={repo} className="mb-2.5">

@@ -13,6 +13,8 @@
 import { BACKENDS, type BackendId } from "~/mock/backends";
 import { useFixtures } from "~/mock/socket";
 import { drag } from "~/drag";
+import { navigate } from "~/shims/next-navigation";
+import { servers } from "~/servers";
 import { STATE } from "~/mock/backends";
 import { NEEDS_YOU } from "@/src/api/view";
 
@@ -51,6 +53,31 @@ export function ServerStrip({ scope, onScope }: { scope: Scope; onScope: (s: Sco
           onPick={() => onScope(b.id)}
         />
       ))}
+
+      {/* Servers this Mac has actually connected to. Marked the same way as
+          the fixtures, because to the person looking they are the same kind of
+          thing — one of them just happens to be real. */}
+      {servers().map((s) => (
+        <Mark
+          key={s.serverId}
+          label={`${s.org} — ${s.user}`}
+          mark={s.org.slice(0, 1).toUpperCase()}
+          on={scope === s.serverId}
+          reach="live"
+          count={0}
+          onPick={() => onScope(s.serverId as Scope)}
+        />
+      ))}
+
+      <button
+        onClick={() => navigate("/connect")}
+        title="Connect to a Firetower"
+        className="no-drag mt-1 grid h-9 w-9 place-items-center text-mute transition-colors hover:text-bone"
+      >
+        <span className="grid h-8 w-8 place-items-center rounded-md border border-dashed border-line-soft text-title leading-none">
+          +
+        </span>
+      </button>
     </div>
   );
 }

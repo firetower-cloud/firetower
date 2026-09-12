@@ -13,8 +13,8 @@ import { AgentMark } from "@/components/AgentMark";
 import { GithubMark, Icon } from "@/components/ui";
 import { doing, group, shortRepo, type Workspace } from "@/src/api/workspaces";
 import { elapsed, minutesSince, needsYou } from "@/src/api/view";
-import { STATE, type Backend } from "~/mock/backends";
-import { useFixtures } from "~/mock/socket";
+import type { Backend } from "~/mock/backends";
+import { useSessions } from "~/data";
 import { navigate } from "~/shims/next-navigation";
 import { useStart } from "~/start";
 
@@ -27,12 +27,12 @@ const FILTERS: [Filter, string][] = [
 ];
 
 export function Dashboard({ backend }: { backend: Backend }) {
-  useFixtures();
   const start = useStart();
+  const { data: sessions, loading, error } = useSessions();
   const [filter, setFilter] = useState<Filter>("all");
   const [repo, setRepo] = useState("all");
 
-  const live = STATE[backend.id].filter((s) => s.status !== "Ended");
+  const live = sessions.filter((s) => s.status !== "Ended");
   const repos = useMemo(() => group(live), [live.map((s) => s.status + s.updatedAt).join()]);
 
   const shown = repos.groups
@@ -109,7 +109,9 @@ export function Dashboard({ backend }: { backend: Backend }) {
             <span className="eyebrow w-[84px] shrink-0">State</span>
           </div>
 
-          {shown.length === 0 && (
+          {loading && <p className="px-3 py-6 text-center text-ui text-mute">Loading…</p>}
+          {error && <p className="px-3 py-6 text-center text-ui text-brick">{error}</p>}
+          {!loading && !error && shown.length === 0 && (
             <p className="px-3 py-6 text-center text-ui text-mute">Nothing matches.</p>
           )}
 

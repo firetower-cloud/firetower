@@ -57,6 +57,7 @@ export function Palette({ open, onClose }: { open: boolean; onClose: () => void 
     );
 
     const commands: Item[] = [
+      { id: "c:connect", label: "Connect to a Firetower…", kind: "command", run: () => navigate("/connect") },
       { id: "c:fleet", label: "Everything, across servers", kind: "command", run: () => navigate("/fleet") },
       { id: "c:tasks", label: "Tasks", kind: "command", run: () => navigate("/tasks") },
       { id: "c:config", label: "Configuration", kind: "command", run: () => navigate("/configuration") },

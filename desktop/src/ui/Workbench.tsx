@@ -11,8 +11,8 @@ import { PanelRight, SquareTerminal, X } from "lucide-react";
 import { Signal } from "@/components/Signal";
 import { AgentMark } from "@/components/AgentMark";
 import { group } from "@/src/api/workspaces";
-import { STATE, talkFor, type Backend } from "~/mock/backends";
-import { useFixtures } from "~/mock/socket";
+import { talkFor, type Backend } from "~/mock/backends";
+import { useSessions } from "~/data";
 import { Chat } from "~/ui/Chat";
 import { FileTab } from "~/ui/FileTab";
 import { QuickOpen } from "~/ui/QuickOpen";
@@ -25,7 +25,7 @@ import { drag } from "~/drag";
 type Side = "diff" | "files" | "ship";
 
 export function Workbench({ backend, workspace }: { backend: Backend; workspace: string }) {
-  useFixtures();
+  const { data: sessions } = useSessions();
   const [side, setSide] = useState<Side>("diff");
   const [open, setOpen] = useState(true);
   const [term, setTerm] = useState(false);
@@ -68,7 +68,7 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
     });
   };
 
-  const live = STATE[backend.id].filter((s) => s.status !== "Ended");
+  const live = sessions.filter((s) => s.status !== "Ended");
   const place = group(live).groups.flatMap(([, ps]) => ps).find((p) => p.id === workspace);
 
   useEffect(() => {
@@ -211,7 +211,7 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
                   <X className="h-3.5 w-3.5" strokeWidth={2} />
                 </button>
               </div>
-              <div className="h-[calc(100%-2rem)] overflow-auto">
+              <div className="h-[calc(100%-2rem)]">
                 <TerminalPane place={place} />
               </div>
             </div>

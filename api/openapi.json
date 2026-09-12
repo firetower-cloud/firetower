@@ -10,7 +10,7 @@
       "name": "AGPL-3.0-only",
       "identifier": "AGPL-3.0-only"
     },
-    "version": "0.32.1"
+    "version": "0.32.2"
   },
   "paths": {
     "/api/v1/agent-accounts": {
@@ -5257,12 +5257,34 @@
         "description": "What the web application needs before it can do anything else.",
         "required": [
           "version",
-          "eventsPath"
+          "eventsPath",
+          "authModes"
         ],
         "properties": {
+          "authModes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "How to sign in here: `password`, `proxy`, or `open`.\n\nA native client cannot see the deployment's configuration and must not\nguess: a password form shown to an SSO deployment is a dead end, and a\nbrowser round trip demanded of a laptop install is rude."
+          },
           "eventsPath": {
             "type": "string",
             "description": "Where the event stream lives. Config, never assumed same-origin — which\nis what lets one bundle serve localhost and a hosted deployment alike."
+          },
+          "organization": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What the people who run it call it. For a client that is about to ask\nsomebody to hand over a password, and should say whose."
+          },
+          "serverId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Which Firetower this is, independent of the address it answers on.\n\nThe installation's organisation id, which already exists, is already\nunique and is already stable. A client pins its token to this rather\nthan to a URL, so the same server on a new address is still the same\nserver — and a different server on a familiar address is not, which is\nthe case worth catching.\n\n`None` before the setup wizard has been finished, because until then\nthere is nothing here to be trusted yet."
           },
           "version": {
             "type": "string"

@@ -10,6 +10,7 @@
  * that has to change for N servers.
  */
 import { BACKENDS, STATE, TASKS, backend, type BackendId } from "./backends";
+import { servers } from "~/servers";
 
 export class ApiError extends Error {
   constructor(
@@ -22,15 +23,29 @@ export class ApiError extends Error {
   }
 }
 
-let current: BackendId = "e1";
-export function useBackendId(id: BackendId) {
+/**
+ * Which server the generated client is talking to.
+ *
+ * Either one of the three fixtures, or the `serverId` of a Firetower this Mac
+ * has actually connected to. One mutator serves both, so every screen is
+ * written once: on a fixture it reads a fixture, on a real server it makes a
+ * real request, and nothing above this file knows which.
+ */
+let current: string = "e1";
+export function useBackendId(id: string) {
   current = id;
 }
 export const currentBackend = () => current;
 
-export const apiBase = () => backend(current).url;
+/** The connected server this id names, if it names one. */
+function live(id: string = current) {
+  return servers().find((s) => s.serverId === id);
+}
+export const isLive = (id: string = current) => !!live(id);
+
+export const apiBase = () => live()?.url ?? backend(current as BackendId).url;
 export const wsBase = () => apiBase().replace(/^http/, "ws");
-export const token = () => `tok_${current}`;
+export const token = () => live()?.token ?? `tok_${current}`;
 export function rememberToken(_: string) {}
 export function forgetToken() {}
 export const meansSignedOut = (code: string) => code === "Unauthorized";
@@ -175,14 +190,45 @@ function route(id: BackendId, url: string, init: RequestInit): unknown {
 /** Called by every generated operation as `http(url, init)`. */
 export const http = async <T>(url: string, init: RequestInit = {}): Promise<T> => {
   const id = current;
-  await latency(id);
+  const real = live(id);
+
+  // A server this Mac has connected to: an ordinary request, with the token
+  // that server minted. Nothing is faked, including the failures.
+  if (real) {
+    const headers = new Headers(init.headers);
+    if (!headers.has("content-type")) headers.set("content-type", "application/json");
+    headers.set("authorization", `Bearer ${real.token}`);
+
+    const res = await fetch(`${real.url}${url}`, { ...init, headers });
+
+    if (!res.ok) {
+      let code = "Internal";
+      let message = res.statusText;
+      try {
+        const body = await res.json();
+        code = body.code ?? code;
+        message = body.message ?? message;
+      } catch {
+        /* a refusal without a body is still a refusal */
+      }
+      throw new ApiError(code, message, res.status);
+    }
+
+    if (res.status === 204 || res.headers.get("content-length") === "0") {
+      return undefined as T;
+    }
+    const text = await res.text();
+    return (text ? JSON.parse(text) : undefined) as T;
+  }
+
+  await latency(id as BackendId);
 
   const method = (init.method ?? "GET").toUpperCase();
-  // Writes are acknowledged and not modelled: the prototype is about what the
-  // client looks like while work happens, not about running the work.
+  // On a fixture, writes are acknowledged and not modelled: the prototype is
+  // about what the client looks like while work happens, not about running it.
   if (method !== "GET") return undefined as T;
 
-  return route(id, url, init) as T;
+  return route(id as BackendId, url, init) as T;
 };
 
 export const ALL: BackendId[] = BACKENDS.map((b) => b.id);

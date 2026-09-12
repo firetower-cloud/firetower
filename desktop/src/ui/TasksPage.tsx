@@ -11,7 +11,8 @@ import { useState } from "react";
 import { ArrowRight, CircleDot, GitPullRequest, RotateCw, Ticket, User } from "lucide-react";
 import { Icon } from "@/components/ui";
 import { elapsed, minutesSince } from "@/src/api/view";
-import { TASKS, type Backend } from "~/mock/backends";
+import type { Backend } from "~/mock/backends";
+import { useTasks, useTrackers } from "~/data";
 import { useStart } from "~/start";
 
 const KIND = { issue: CircleDot, pullRequest: GitPullRequest, ticket: Ticket };
@@ -22,7 +23,8 @@ export function TasksPage({ backend }: { backend: Backend }) {
   const [state, setState] = useState<"open" | "closed">("open");
   const [mine, setMine] = useState(false);
 
-  const all = TASKS[backend.id];
+  const { data: all, loading, error } = useTasks();
+  const { data: trackers } = useTrackers();
   const shown = all.filter(
     (t) =>
       (kind === "issue" ? t.kind !== "pullRequest" : t.kind === "pullRequest") &&
@@ -82,7 +84,18 @@ export function TasksPage({ backend }: { backend: Backend }) {
             <span className="w-[72px] shrink-0" />
           </div>
 
-          {shown.length === 0 && (
+          {loading && <p className="px-3 py-6 text-center text-ui text-mute">Reading your trackers…</p>}
+          {error && (
+            <div className="px-3 py-6 text-center">
+              <p className="text-ui text-brick">{error}</p>
+              {trackers.length === 0 && (
+                <p className="mt-1 text-meta text-mute">
+                  No tracker is connected on this server yet.
+                </p>
+              )}
+            </div>
+          )}
+          {!loading && !error && shown.length === 0 && (
             <p className="px-3 py-6 text-center text-ui text-mute">Nothing open here.</p>
           )}
 

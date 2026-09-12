@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.32.1
+ * OpenAPI spec version: 0.32.2
  */
 
 /**
@@ -11,9 +11,37 @@
  */
 export interface Bootstrap {
   /**
+     * How to sign in here: `password`, `proxy`, or `open`.
+     *
+     * A native client cannot see the deployment's configuration and must not
+     * guess: a password form shown to an SSO deployment is a dead end, and a
+     * browser round trip demanded of a laptop install is rude.
+     */
+  authModes: string[];
+  /**
      * Where the event stream lives. Config, never assumed same-origin — which
      * is what lets one bundle serve localhost and a hosted deployment alike.
      */
   eventsPath: string;
+  /**
+     * What the people who run it call it. For a client that is about to ask
+     * somebody to hand over a password, and should say whose.
+     * @nullable
+     */
+  organization?: string | null;
+  /**
+     * Which Firetower this is, independent of the address it answers on.
+     *
+     * The installation's organisation id, which already exists, is already
+     * unique and is already stable. A client pins its token to this rather
+     * than to a URL, so the same server on a new address is still the same
+     * server — and a different server on a familiar address is not, which is
+     * the case worth catching.
+     *
+     * `None` before the setup wizard has been finished, because until then
+     * there is nothing here to be trusted yet.
+     * @nullable
+     */
+  serverId?: string | null;
   version: string;
 }

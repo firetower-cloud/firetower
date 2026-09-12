@@ -126,6 +126,26 @@ impl Policy {
         self.disabled && self.header.is_none()
     }
 
+    /// How a client may sign in here, for `/bootstrap`.
+    ///
+    /// Said out loud so a native client can choose its path without guessing:
+    /// a password form in the app when that is all there is, and a browser
+    /// round trip when identity comes from something in front of us. The
+    /// client asks before it asks *you* for anything.
+    pub fn modes(&self) -> Vec<&'static str> {
+        let mut modes = Vec::new();
+        if !self.disabled {
+            modes.push("password");
+        }
+        if self.header.is_some() {
+            modes.push("proxy");
+        }
+        if modes.is_empty() {
+            modes.push("open");
+        }
+        modes
+    }
+
     /// In words, for the log line at start-up.
     pub fn describe(&self) -> String {
         match (self.disabled, &self.header) {
@@ -200,9 +220,23 @@ pub async fn require(State(gate): State<Gate>, mut request: Request, next: Next)
         .map(|ConnectInfo(a)| a.ip())
         .unwrap_or(IpAddr::from([0, 0, 0, 0]));
 
-    // Signing in cannot require being signed in. This is the only hole in the
-    // gate, it is one exact path, and what is behind it checks a password.
-    if request.uri().path() == "/api/v1/auth/login" {
+    // Two holes in the gate, both exact paths, both deliberate.
+    //
+    // `login` because signing in cannot require being signed in, and what is
+    // behind it checks a password.
+    //
+    // `bootstrap` because a client has to be able to tell one Firetower from
+    // another *before* it has a credential for either. A native client is given
+    // an address and nothing else; without this it would have to send a
+    // password to find out whose server it just typed the name of, which is
+    // exactly backwards. What it discloses is a version, an organisation name,
+    // and which of three ways to sign in — to somebody who can already reach a
+    // port that is never on the public internet. That is a real disclosure and
+    // it is the price of being able to check whose server this is first.
+    if matches!(
+        request.uri().path(),
+        "/api/v1/auth/login" | "/api/v1/bootstrap"
+    ) {
         return next.run(request).await;
     }
 

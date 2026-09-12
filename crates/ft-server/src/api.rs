@@ -35,6 +35,7 @@ use crate::providers::{PendingAuth, ProviderStatus};
 use crate::vault;
 use crate::AppState;
 use axum::{
+    extract::State,
     http::StatusCode,
     response::{IntoResponse, Response},
     Json,
@@ -165,16 +166,45 @@ pub struct Bootstrap {
     /// Where the event stream lives. Config, never assumed same-origin — which
     /// is what lets one bundle serve localhost and a hosted deployment alike.
     pub events_path: String,
+    /// Which Firetower this is, independent of the address it answers on.
+    ///
+    /// The installation's organisation id, which already exists, is already
+    /// unique and is already stable. A client pins its token to this rather
+    /// than to a URL, so the same server on a new address is still the same
+    /// server — and a different server on a familiar address is not, which is
+    /// the case worth catching.
+    ///
+    /// `None` before the setup wizard has been finished, because until then
+    /// there is nothing here to be trusted yet.
+    pub server_id: Option<String>,
+    /// What the people who run it call it. For a client that is about to ask
+    /// somebody to hand over a password, and should say whose.
+    pub organization: Option<String>,
+    /// How to sign in here: `password`, `proxy`, or `open`.
+    ///
+    /// A native client cannot see the deployment's configuration and must not
+    /// guess: a password form shown to an SSO deployment is a dead end, and a
+    /// browser round trip demanded of a laptop install is rude.
+    pub auth_modes: Vec<&'static str>,
 }
 
 #[utoipa::path(
     get, path = "/api/v1/bootstrap", tag = "meta",
     responses((status = 200, body = Bootstrap)),
 )]
-async fn bootstrap() -> Json<Bootstrap> {
+async fn bootstrap(State(state): State<AppState>) -> Json<Bootstrap> {
+    // Unauthenticated, and deliberately says almost nothing: a name, a version
+    // and how to knock. Enough for a client to tell one Firetower from another
+    // before it hands anything over, and nothing that is worth reading if you
+    // are not meant to be here.
+    let org = state.accounts.organization().await.ok().flatten();
+
     Json(Bootstrap {
         version: env!("CARGO_PKG_VERSION").to_string(),
         events_path: "/api/v1/events".to_string(),
+        server_id: org.as_ref().map(|o| o.id.as_str().to_string()),
+        organization: org.map(|o| o.name),
+        auth_modes: state.policy.modes(),
     })
 }
 

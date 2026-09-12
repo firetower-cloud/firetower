@@ -7,14 +7,22 @@ import { Routes } from "~/Routes";
 import { Fleet, waitingAcross } from "~/ui/Fleet";
 import { StylePage } from "~/ui/StylePage";
 import { runTimeline, useFixtures } from "~/mock/socket";
-import { backend as backendFor, type BackendId } from "~/mock/backends";
+import { BACKENDS, type Backend, type BackendId } from "~/mock/backends";
+import { BackendProvider } from "~/backend";
 import { bridge } from "~/bridge";
 import { StartProvider } from "~/start";
+import { Connect } from "~/ui/Connect";
+import { servers, onServers } from "~/servers";
 import { NewWorkspace } from "~/ui/NewWorkspace";
 import { navigate, usePathname } from "~/shims/next-navigation";
 
 export function App() {
   const [scope, setScope] = useState<Scope>("e1");
+  /* Real servers this Mac has connected to, alongside the three fixtures.
+     The prototype keeps working with no server at all — that is what makes the
+     design reviewable — and shows the real one the moment there is one. */
+  const [real$, setReal] = useState(servers);
+  useEffect(() => onServers(() => setReal(servers())), []);
   const [palette, setPalette] = useState(false);
   const path = usePathname();
   useFixtures();
@@ -45,8 +53,28 @@ export function App() {
   };
 
   const style = path.startsWith("/style");
+  const connecting = path.startsWith("/connect");
+
+  /* A connected server wears the same clothes as a fixture: the screens take a
+     `Backend` and do not care which kind it is, which is what let the real
+     wiring land without rewriting any of them. */
+  const asBackend = (id: string): Backend | null => {
+    const fixture = BACKENDS.find((b) => b.id === id);
+    if (fixture) return fixture;
+    const real = real$.find((s) => s.serverId === id);
+    if (!real) return null;
+    return {
+      id: real.serverId as BackendId,
+      org: real.org,
+      user: real.user,
+      mark: real.org.slice(0, 1).toUpperCase(),
+      url: real.url,
+      latency: [0, 0],
+      reach: "live",
+    };
+  };
   const all = scope === "all" || path.startsWith("/fleet");
-  const here = scope === "all" ? null : backendFor(scope as BackendId);
+  const here = scope === "all" ? null : asBackend(scope);
 
   return (
     <StartProvider
@@ -60,17 +88,25 @@ export function App() {
         <div className="flex min-h-0 flex-1">
           <ServerStrip scope={scope} onScope={pick} />
 
-          {style ? (
+          {connecting ? (
+            <Connect
+              onDone={(serverId) => {
+                setScope(serverId as Scope);
+                navigate("/");
+              }}
+              onCancel={() => navigate("/")}
+            />
+          ) : style ? (
             <StylePage />
           ) : all || !here ? (
             <Fleet />
           ) : (
-            <>
+            <BackendProvider id={here.id} key={here.id}>
               <Rail backend={here} />
               <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
                 <Routes backend={here} />
               </div>
-            </>
+            </BackendProvider>
           )}
         </div>
 

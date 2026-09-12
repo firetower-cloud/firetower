@@ -56,6 +56,12 @@ pub struct AppState {
     pub pending: Arc<tokio::sync::RwLock<std::collections::HashMap<String, api::Pending>>>,
     /// Organisations, users, sessions and settings.
     pub accounts: accounts::Accounts,
+    /// What this deployment will accept, so `/bootstrap` can say so.
+    ///
+    /// A copy rather than a reference to the gate's: the gate enforces it and
+    /// this only reports it, and a client that has to guess how to sign in
+    /// guesses wrong on exactly the deployments that are hardest to debug.
+    pub policy: auth::Policy,
     /// Signs and checks the hostnames a preview is reached at.
     ///
     /// Derived from the vault's root key, so a name survives a restart and an
@@ -188,6 +194,7 @@ pub async fn run(config: Config) -> Result<()> {
         db,
         fleet,
         vault,
+        policy: policy.clone(),
         key_source,
         home: config.home.clone(),
         pending: Default::default(),

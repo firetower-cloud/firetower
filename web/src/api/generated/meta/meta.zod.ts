@@ -3,13 +3,16 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.32.1
+ * OpenAPI spec version: 0.32.2
  */
 import * as zod from 'zod';
 
 
 export const BootstrapResponse = zod.object({
+  "authModes": zod.array(zod.string()).describe('How to sign in here: `password`, `proxy`, or `open`.\n\nA native client cannot see the deployment\'s configuration and must not\nguess: a password form shown to an SSO deployment is a dead end, and a\nbrowser round trip demanded of a laptop install is rude.'),
   "eventsPath": zod.string().describe('Where the event stream lives. Config, never assumed same-origin — which\nis what lets one bundle serve localhost and a hosted deployment alike.'),
+  "organization": zod.string().nullish().describe('What the people who run it call it. For a client that is about to ask\nsomebody to hand over a password, and should say whose.'),
+  "serverId": zod.string().nullish().describe('Which Firetower this is, independent of the address it answers on.\n\nThe installation\'s organisation id, which already exists, is already\nunique and is already stable. A client pins its token to this rather\nthan to a URL, so the same server on a new address is still the same\nserver — and a different server on a familiar address is not, which is\nthe case worth catching.\n\n`None` before the setup wizard has been finished, because until then\nthere is nothing here to be trusted yet.'),
   "version": zod.string()
 }).describe('What the web application needs before it can do anything else.')
 
