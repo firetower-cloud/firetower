@@ -1,0 +1,136 @@
+/**
+ * The web application's design system, plus the layer that only exists on a Mac.
+ *
+ * Nothing here redefines a token that `globals.css` already owns. The system is
+ * good and it is enforced (`just check-style`); what a native window needs is an
+ * *extension* — a translucent surface, a title bar that is part of the app, and
+ * a way to say which server a row came from.
+ */
+@import url("https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=Archivo+Narrow:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap");
+
+@import "../../web/app/globals.css";
+
+/* Tailwind v4 finds classes through the module graph, and the components live
+   outside this package. Say so explicitly rather than relying on it. */
+@source "../../web/components";
+@source "../../web/app";
+@source "../../web/src";
+@source "./";
+
+@theme {
+  /* ── The native layer ──────────────────────────────────────────
+     A macOS sidebar is translucent, and `--color-panel` is not — it is
+     #111113 and the system is built on it being exactly that. So the rail
+     gets a *variant* rather than a redefinition: the same value at reduced
+     alpha, over which the window's own vibrancy shows through. The web build
+     never sees this and stays opaque. */
+  --color-panel-vibrant: rgb(17 17 19 / 0.72);
+  --color-strip: rgb(11 11 12 / 0.82);
+
+  /* Chrome. Both are fixed by AppKit, not by taste: 38px is where the traffic
+     lights sit comfortably, and 78px is how much room they need before content
+     may start. */
+  --chrome-title: 38px;
+  --chrome-lights: 78px;
+  --chrome-strip: 48px;
+
+  /* Native motion is quicker than web motion. The same curve, less of it. */
+  --dur-native: 140ms;
+}
+
+@layer base {
+  /* The window is the app. Nothing scrolls but the panes inside it. */
+  html,
+  body,
+  #root {
+    height: 100%;
+    overflow: hidden;
+  }
+
+  /* Chrome renders Archivo; WKWebView may not have it yet when the first frame
+     paints. Both fall back to the system face rather than to Times. */
+  body {
+    font-family: var(--font-archivo, Archivo), ui-sans-serif, -apple-system, system-ui, sans-serif;
+  }
+}
+
+@layer components {
+  /* ── Drag ──────────────────────────────────────────────────────
+     The title bar is hidden, so the app has to say which parts of itself are
+     the window. Anything pressable inside a drag region must opt back out, or
+     it becomes furniture you cannot click. */
+  .drag {
+    -webkit-app-region: drag;
+  }
+  .no-drag {
+    -webkit-app-region: no-drag;
+  }
+
+  /* ── Server identity ───────────────────────────────────────────
+     A mark, never a hue.
+
+     The system already spends colour twice: semantic signals (ember, sage,
+     brick, slate) and the deliberately-desaturated file kinds. A third colour
+     namespace would compete with ember, and the rule holding the whole design
+     together is that ember is the only loud thing on screen. So which server a
+     row belongs to is carried by *shape* — a monogram — in the greys that are
+     already there. */
+  .server-mark {
+    font-family: var(--font-narrow, Archivo Narrow), ui-sans-serif, system-ui, sans-serif;
+    font-size: var(--text-meta);
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    color: var(--color-dim);
+    background: var(--color-raise);
+    border: 1px solid var(--color-line);
+    border-radius: var(--radius-sm);
+    box-shadow: var(--shadow-raise);
+    transition:
+      color var(--dur-native) var(--ease-swift),
+      background var(--dur-native) var(--ease-swift),
+      border-color var(--dur-native) var(--ease-swift);
+  }
+  .server-mark[data-on="true"] {
+    color: var(--color-bone);
+    background: var(--color-overlay);
+    border-color: var(--color-line);
+  }
+  /* Unreachable is dimmed, not hidden, and not red. Red is `brick` and means
+     something failed; a server you cannot reach has not failed, it is simply
+     not there — usually because the VPN is off, which the memo expects to be
+     the common case. */
+  .server-mark[data-reach="unreachable"] {
+    color: var(--color-mute);
+    background: transparent;
+    border-style: dashed;
+    border-color: var(--color-line-soft);
+    box-shadow: none;
+  }
+
+  /* Rows from a server that is not answering. Readable, obviously stale. */
+  .stale {
+    opacity: 0.45;
+    filter: saturate(0.4);
+  }
+
+  /* ── Rows ──────────────────────────────────────────────────────
+     Desktop density. The web build is tuned for touch below `md`, which puts a
+     44px floor on anything tappable. A Mac app is mouse-only and can be
+     tighter — this is the one measurement the whole inbox is built on. */
+  .row {
+    display: grid;
+    grid-template-columns: var(--chrome-strip) 1fr auto;
+    align-items: center;
+    gap: 0.5rem;
+    height: 34px;
+    padding-inline: 0.5rem;
+    border-radius: var(--radius-sm);
+    transition: background var(--dur-native) var(--ease-swift);
+  }
+  .row:hover {
+    background: var(--color-raise);
+  }
+  .row[data-on="true"] {
+    background: var(--color-overlay);
+  }
+}
