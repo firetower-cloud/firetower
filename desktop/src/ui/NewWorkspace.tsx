@@ -10,7 +10,8 @@ import { useEffect, useState } from "react";
 import { Check, ChevronDown, Cpu, GitBranch, X } from "lucide-react";
 import { GithubMark } from "@/components/ui";
 import { AgentMark } from "@/components/AgentMark";
-import { STATE, type Backend } from "~/mock/backends";
+import type { Backend } from "~/mock/backends";
+import { useRepos } from "~/data";
 
 export type Seed = { title?: string; repo?: string; issue?: string };
 
@@ -29,10 +30,19 @@ export function NewWorkspace({
   seed?: Seed;
   onClose: () => void;
 }) {
-  const repos = [...new Set(STATE[backend.id].map((s) => s.repo).filter(Boolean))] as string[];
+  /* Off the server when there is one. Reading the fixture table by id was a
+     crash the moment a real server was selected: there is no fixture under that
+     key, and `undefined.map` takes the whole window with it. */
+  const { data: repos, loading: findingRepos } = useRepos();
+  const slugs = repos.map((r) => r.slug);
 
   const [name, setName] = useState(seed?.title ?? "");
-  const [repo, setRepo] = useState(seed?.repo ?? repos[0] ?? "");
+  const [repo, setRepo] = useState(seed?.repo ?? "");
+
+  // The first repository is only knowable once the server has answered.
+  useEffect(() => {
+    if (!repo && slugs.length > 0) setRepo(slugs[0]);
+  }, [repo, slugs]);
   const [branch, setBranch] = useState("");
   const [touched, setTouched] = useState(false);
   const [agent, setAgent] = useState<(typeof AGENTS)[number]>("ClaudeCode");
@@ -91,9 +101,15 @@ export function NewWorkspace({
               <select
                 value={repo}
                 onChange={(e) => setRepo(e.target.value)}
-                className="w-full appearance-none rounded-lg border border-line bg-ground py-2 pr-8 pl-8 font-mono text-ui text-bone focus:border-slate-deep focus:outline-none"
+                disabled={slugs.length === 0}
+                className="w-full appearance-none rounded-lg border border-line bg-ground py-2 pr-8 pl-8 font-mono text-ui text-bone focus:border-slate-deep focus:outline-none disabled:text-mute"
               >
-                {repos.map((r) => (
+                {slugs.length === 0 && (
+                  <option value="">
+                    {findingRepos ? "Reading your repositories…" : "No repository is connected"}
+                  </option>
+                )}
+                {slugs.map((r) => (
                   <option key={r} value={r}>
                     {r}
                   </option>

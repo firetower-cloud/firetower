@@ -14,6 +14,7 @@ import { StartProvider } from "~/start";
 import { Connect } from "~/ui/Connect";
 import { servers, onServers } from "~/servers";
 import { NewWorkspace } from "~/ui/NewWorkspace";
+import { Boundary } from "~/ui/Boundary";
 import { navigate, usePathname } from "~/shims/next-navigation";
 
 export function App() {
@@ -77,11 +78,7 @@ export function App() {
   const here = scope === "all" ? null : asBackend(scope);
 
   return (
-    <StartProvider
-      render={(seed, close) =>
-        here ? <NewWorkspace backend={here} seed={seed} onClose={close} /> : null
-      }
-    >
+    <>
       <div className="flex h-full w-full flex-col overflow-hidden bg-ground text-text">
         <Titlebar scope={scope} waiting={waiting} onPalette={() => setPalette(true)} />
 
@@ -102,16 +99,33 @@ export function App() {
             <Fleet />
           ) : (
             <BackendProvider id={here.id} key={here.id}>
-              <Rail backend={here} />
-              <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-                <Routes backend={here} />
-              </div>
+              {/* Inside the provider, not around it: the new-workspace form
+                  reads this server's repositories, so it needs the same
+                  QueryClient as the screen that opened it. It was outside, and
+                  "start a task" therefore threw `No QueryClient set` the moment
+                  the backend was real rather than a fixture. */}
+              <StartProvider
+                render={(seed, close) => (
+                  <Boundary onReset={close}>
+                    <NewWorkspace backend={here} seed={seed} onClose={close} />
+                  </Boundary>
+                )}
+              >
+                <Rail backend={here} />
+                {/* Keyed on the path so leaving a broken screen clears the
+                    error rather than sticking on it. */}
+                <Boundary key={path} onReset={() => navigate("/")}>
+                  <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+                    <Routes backend={here} />
+                  </div>
+                </Boundary>
+              </StartProvider>
             </BackendProvider>
           )}
         </div>
 
         <Palette open={palette} onClose={() => setPalette(false)} />
       </div>
-    </StartProvider>
+    </>
   );
 }
