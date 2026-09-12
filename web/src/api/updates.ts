@@ -84,7 +84,7 @@ export function willWrite(file: FilePlan, replace: boolean): boolean {
   }
 }
 
-export const ACTIVE: RunState[] = ["planned", "waitingIdle", "running"];
+export const ACTIVE: RunState[] = ["planned", "waitingIdle", "waitingDecision", "running"];
 
 export const isActive = (run: { state: RunState }) => ACTIVE.includes(run.state);
 
@@ -92,6 +92,7 @@ export const isActive = (run: { state: RunState }) => ACTIVE.includes(run.state)
 export const RUN_LABEL: Record<RunState, string> = {
   planned: "starting",
   waitingIdle: "waiting for idle",
+  waitingDecision: "waiting for you",
   running: "running",
   succeeded: "succeeded",
   failed: "failed",
@@ -104,6 +105,8 @@ export function runTone(state: RunState): "sage" | "brick" | "slate" | "neutral"
       return "sage";
     case "failed":
       return "brick";
+    case "waitingDecision":
+      return "brick";
     case "running":
     case "waitingIdle":
     case "planned":
@@ -112,6 +115,9 @@ export function runTone(state: RunState): "sage" | "brick" | "slate" | "neutral"
       return "neutral";
   }
 }
+
+/** Whether this run is stopped waiting for somebody to answer. */
+export const needsAnAnswer = (run: { state: RunState }) => run.state === "waitingDecision";
 
 /** The glyph in front of a step. */
 export function stepGlyph(state: StepState): string {
@@ -122,6 +128,8 @@ export function stepGlyph(state: StepState): string {
       return "✗";
     case "running":
       return "●";
+    case "warned":
+      return "!";
     case "skipped":
       return "–";
     default:

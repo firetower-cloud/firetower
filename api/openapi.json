@@ -10,7 +10,7 @@
       "name": "AGPL-3.0-only",
       "identifier": "AGPL-3.0-only"
     },
-    "version": "0.32.0"
+    "version": "0.32.1"
   },
   "paths": {
     "/api/v1/agent-accounts": {
@@ -4565,6 +4565,38 @@
         }
       }
     },
+    "/api/v1/updates/backup": {
+      "post": {
+        "tags": [
+          "updates"
+        ],
+        "summary": "Take a backup now, outside an upgrade.",
+        "description": "Until this existed a backup only ever ran inside an upgrade, so there was\nno way to find out it was broken except by trying to upgrade — which is how\none got found.",
+        "operationId": "back_up_now",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/updates/check": {
       "post": {
         "tags": [
@@ -4749,6 +4781,59 @@
         "summary": "Stop a run that has not started changing anything yet.",
         "description": "A run that is waiting for machines to be idle is cancelled and the\nmachines put back in service. One that is already recreating something is\nleft to finish that step — half a recreate is worse than a whole one.",
         "operationId": "cancel_run",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Run id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateRun"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/updates/runs/{id}/continue": {
+      "post": {
+        "tags": [
+          "updates"
+        ],
+        "summary": "Carry on with a run that stopped to ask.",
+        "description": "Only a run waiting on the backup reaches this, and the answer is always the\nsame one: go ahead without a backup. Its step keeps the `Warned` state, so\nthe history says the upgrade went ahead without one.",
+        "operationId": "continue_run",
         "parameters": [
           {
             "name": "id",
@@ -8073,6 +8158,7 @@
         "enum": [
           "planned",
           "waitingIdle",
+          "waitingDecision",
           "running",
           "succeeded",
           "failed",
@@ -8705,6 +8791,7 @@
           "running",
           "done",
           "failed",
+          "warned",
           "skipped"
         ]
       },

@@ -203,7 +203,11 @@ impl Store {
     /// Runs that are not over. Normally none or one.
     pub async fn active_runs(&self) -> Result<Vec<Run>> {
         sqlx::query(
-            "SELECT * FROM update_runs WHERE state IN ('planned', 'waiting_idle', 'running')
+            // `waiting_decision` among them: a run stopped for an answer is
+            // still this deployment's upgrade, and the screen has to show it
+            // or there is nowhere to give the answer.
+            "SELECT * FROM update_runs
+              WHERE state IN ('planned', 'waiting_idle', 'running', 'waiting_decision')
              ORDER BY created_at",
         )
         .fetch_all(&self.pool)

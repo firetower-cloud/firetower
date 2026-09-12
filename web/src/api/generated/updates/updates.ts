@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.32.0
+ * OpenAPI spec version: 0.32.1
  */
 import {
   useMutation,
@@ -173,7 +173,80 @@ export const useGetGetUpdatesQueryData = () => {
 }
 
 
-export const getCheckUpdatesUrl = () => {
+export const getBackUpNowUrl = () => {
+
+
+
+
+  return `/api/v1/updates/backup`
+}
+
+/**
+ * Until this existed a backup only ever ran inside an upgrade, so there was
+ * no way to find out it was broken except by trying to upgrade — which is how
+ * one got found.
+ * @summary Take a backup now, outside an upgrade.
+ */
+export const backUpNow = async ( options?: Parameters<typeof http>[1]): Promise<string> => {
+
+  return http<string>(getBackUpNowUrl(),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getBackUpNowMutationOptions = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof backUpNow>>, TError,void, TContext>, request?: SecondParameter<typeof http>}
+): UseMutationOptions<Awaited<ReturnType<typeof backUpNow>>, TError,void, TContext> => {
+
+const mutationKey = ['backUpNow'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof backUpNow>>, void> = () => {
+
+
+          return  backUpNow(requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type BackUpNowMutationResult = NonNullable<Awaited<ReturnType<typeof backUpNow>>>
+
+    export type BackUpNowMutationError = ApiError
+
+    /**
+ * @summary Take a backup now, outside an upgrade.
+ */
+export const useBackUpNow = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof backUpNow>>, TError,void, TContext>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof backUpNow>>,
+        TError,
+        void,
+        TContext
+      > => {
+      return useMutation(getBackUpNowMutationOptions(options), queryClient);
+    }
+    export const getCheckUpdatesUrl = () => {
 
 
 
@@ -681,4 +754,77 @@ export const useCancelRun = <TError = ApiError,
         TContext
       > => {
       return useMutation(getCancelRunMutationOptions(options), queryClient);
+    }
+    export const getContinueRunUrl = (id: string,) => {
+
+
+
+
+  return `/api/v1/updates/runs/${id}/continue`
+}
+
+/**
+ * Only a run waiting on the backup reaches this, and the answer is always the
+ * same one: go ahead without a backup. Its step keeps the `Warned` state, so
+ * the history says the upgrade went ahead without one.
+ * @summary Carry on with a run that stopped to ask.
+ */
+export const continueRun = async (id: string, options?: Parameters<typeof http>[1]): Promise<UpdateRun> => {
+
+  return http<UpdateRun>(getContinueRunUrl(id),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getContinueRunMutationOptions = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof continueRun>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof http>}
+): UseMutationOptions<Awaited<ReturnType<typeof continueRun>>, TError,{id: string}, TContext> => {
+
+const mutationKey = ['continueRun'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof continueRun>>, {id: string}> = (props) => {
+          const {id} = props ?? {};
+
+          return  continueRun(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ContinueRunMutationResult = NonNullable<Awaited<ReturnType<typeof continueRun>>>
+
+    export type ContinueRunMutationError = ApiError
+
+    /**
+ * @summary Carry on with a run that stopped to ask.
+ */
+export const useContinueRun = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof continueRun>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof continueRun>>,
+        TError,
+        {id: string},
+        TContext
+      > => {
+      return useMutation(getContinueRunMutationOptions(options), queryClient);
     }

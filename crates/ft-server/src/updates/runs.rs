@@ -94,6 +94,11 @@ async fn drive(state: &AppState, store: &Store, run_id: &str) -> Result<()> {
     if run.state.is_over() {
         return Ok(());
     }
+    // Somebody has to say whether to go on without a backup. Nothing decides
+    // that on its own, including a restart of this process.
+    if run.state == RunState::WaitingDecision {
+        return Ok(());
+    }
 
     if run.when_idle && matches!(run.state, RunState::Planned | RunState::WaitingIdle) {
         store.set_run_state(run_id, RunState::WaitingIdle).await?;
@@ -116,7 +121,10 @@ async fn drive(state: &AppState, store: &Store, run_id: &str) -> Result<()> {
     }
 
     for step in store.steps(run_id).await? {
-        if matches!(step.state, StepState::Done | StepState::Skipped) {
+        if matches!(
+            step.state,
+            StepState::Done | StepState::Skipped | StepState::Warned
+        ) {
             continue;
         }
         if is_cancelled(store, run_id).await? {
@@ -151,6 +159,26 @@ async fn drive(state: &AppState, store: &Store, run_id: &str) -> Result<()> {
                 store
                     .end_step(run_id, step.position, StepState::Done, Some(detail))
                     .await?
+            }
+            // A backup is a precaution, not the upgrade. When it cannot be
+            // taken the run stops and asks, rather than ending — which is what
+            // left the Updates screen with no way past a database `pg_dump`
+            // could not read, and the CLI as the only route.
+            Err(e) if step.target == BACKUP => {
+                let said = format!("{e:#}");
+                log.say(&said).await;
+                log.say("the upgrade is waiting: carry on without a backup, or stop")
+                    .await;
+                store
+                    .end_step(run_id, step.position, StepState::Warned, Some(said))
+                    .await?;
+                store
+                    .set_run_state(run_id, RunState::WaitingDecision)
+                    .await?;
+                // Deliberately no `put_back`: the run has not finished, and
+                // undraining now would let work onto a machine that is about
+                // to be upgraded.
+                return Ok(());
             }
             Err(e) => {
                 let said = format!("{e:#}");
@@ -614,6 +642,9 @@ pub async fn resume(state: AppState) {
         }
     };
     for run in runs {
+        if run.state == RunState::WaitingDecision {
+            continue;
+        }
         let steps = match store.steps(&run.id).await {
             Ok(s) => s,
             Err(e) => {

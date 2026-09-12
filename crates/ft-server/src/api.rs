@@ -361,6 +361,8 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(updates::list_runs, updates::create_run))
         .routes(routes!(updates::get_run))
         .routes(routes!(updates::cancel_run))
+        .routes(routes!(updates::continue_run))
+        .routes(routes!(updates::back_up_now))
         .routes(routes!(tasks::get_task))
         .routes(routes!(trackers::list_trackers))
         .routes(routes!(trackers::set_tracker_key))

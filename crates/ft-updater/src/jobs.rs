@@ -30,6 +30,7 @@ use crate::site::Site;
 use anyhow::{anyhow, Context, Result};
 use ft_updater_api::{FileWrite, Job, JobId, JobKind, JobState, JobStep};
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -39,6 +40,11 @@ const HEALTH_TIMEOUT: Duration = Duration::from_secs(180);
 /// How many log lines a job keeps. Enough for a pull and a compose run; bounded
 /// so a helper that prints in a loop cannot grow it without limit.
 const LOG_LINES: usize = 400;
+
+/// How many dumps to keep. A dump of this database is small, and ten upgrades
+/// back is further than anybody has ever restored from. Nothing pruned them
+/// before, so `backups/` grew until the disk did not.
+const KEEP_DUMPS: usize = 10;
 
 /// A label on every helper container, so a leftover one is recognisably ours.
 pub const HELPER_LABEL: &str = "com.firetower.updater";
@@ -228,6 +234,22 @@ impl Jobs {
             .context("no database container in this project")?;
         say.done(db.name.clone());
 
+        // What else is in there. A database somebody has run the test suite
+        // against carries a `test_*` schema per test, forever — the sweeper
+        // that removes them is `#[cfg(test)]`, so no release build has ever
+        // cleaned one up. The dump below skips them; this is so the screen
+        // says why the database is the size it is, before it gets bad enough
+        // to matter again.
+        match self.foreign_schemas(&db.id).await {
+            Ok(0) => {}
+            Ok(n) => say.say(format!(
+                "{n} schemas in this database that Firetower did not create. \
+                 The backup skips them. See docs/updates.md#schemas-firetower-did-not-create to clear them."
+            )),
+            // Never fatal. This is a remark, not a check.
+            Err(e) => tracing::debug!("could not count schemas: {e:#}"),
+        }
+
         say.step("pg_dump");
         let dir = self.site.backups_dir()?;
         let stamp = chrono::Utc::now().format("%Y%m%dT%H%M%SZ");
@@ -247,7 +269,21 @@ impl Jobs {
                 &[
                     "sh",
                     "-c",
-                    "pg_dump -U \"${POSTGRES_USER:-firetower}\" -d \"${POSTGRES_DB:-firetower}\" -Fc",
+                    // `-n public`, not the whole database. Everything every
+                    // migration makes is in `public`, and it is the only
+                    // schema a restore needs — while a database that has had
+                    // the test suite pointed at it holds thousands more.
+                    //
+                    // `pg_dump` takes `ACCESS SHARE` on everything it will
+                    // dump in one statement, so the whole-database form put
+                    // every table in the database into a single `LOCK TABLE`
+                    // and fell over `max_locks_per_transaction`; before that
+                    // it ran out of memory building the object graph. Both
+                    // scale with what is dumped, and this is what decides it.
+                    //
+                    // `-n` carries no roles or database-level grants. Neither
+                    // did the old command — only `pg_dumpall` emits those.
+                    "pg_dump -U \"${POSTGRES_USER:-firetower}\" -d \"${POSTGRES_DB:-firetower}\" -n public -Fc",
                 ],
                 &mut file,
             )
@@ -256,7 +292,7 @@ impl Jobs {
 
         if code != 0 {
             let _ = tokio::fs::remove_file(&temporary).await;
-            return Err(anyhow!("pg_dump exited {code}: {}", stderr.trim()));
+            return Err(anyhow!("{}", dump_failure(code, &stderr)));
         }
         tokio::fs::rename(&temporary, &path)
             .await
@@ -267,7 +303,40 @@ impl Jobs {
             .unwrap_or(0);
         say.done(format!("backups/{name} ({})", human(size)));
         say.say(format!("wrote backups/{name}"));
+
+        // After the rename, never before: a prune that runs first and then
+        // fails to dump has traded a backup for nothing.
+        for line in prune(&dir, KEEP_DUMPS).await {
+            say.say(line);
+        }
         Ok(JobState::Done)
+    }
+
+    /// How many schemas are in there that Firetower did not make.
+    ///
+    /// Everything of ours is in `public`. `pg_catalog`, `information_schema`
+    /// and `pg_toast*` are the server's own.
+    async fn foreign_schemas(&self, container: &str) -> Result<i64> {
+        let mut out = Vec::new();
+        let (code, stderr) = self
+            .docker
+            .exec(
+                container,
+                &[
+                    "sh",
+                    "-c",
+                    "psql -U \"${POSTGRES_USER:-firetower}\" -d \"${POSTGRES_DB:-firetower}\" -tAc \
+                     \"SELECT count(*) FROM information_schema.schemata \
+                       WHERE schema_name NOT IN ('public','information_schema') \
+                         AND schema_name NOT LIKE 'pg\\_%'\"",
+                ],
+                &mut out,
+            )
+            .await?;
+        if code != 0 {
+            return Err(anyhow!("psql exited {code}: {}", clip(&stderr, 400)));
+        }
+        Ok(String::from_utf8_lossy(&out).trim().parse().unwrap_or(0))
     }
 
     // ── the updater itself ─────────────────────────────────────────────
@@ -629,6 +698,125 @@ pub fn is_pinned(tag: &str) -> bool {
             .all(|p| !p.is_empty() && p.chars().all(|c| c.is_ascii_digit()))
 }
 
+/// Keep the newest `keep` dumps, and sweep the remains of killed ones.
+///
+/// Only `firetower-*.dump` and `*.writing` are ever candidates: this is a
+/// bind-mounted directory on somebody's server and nothing else in it is ours.
+///
+/// A `.writing` file is what a dump that was *killed* leaves — the failure
+/// path deletes its own temporary, but an out-of-memory `pg_dump` never
+/// reaches it. A day is long enough that no dump in progress is caught.
+async fn prune(dir: &std::path::Path, keep: usize) -> Vec<String> {
+    let mut said = Vec::new();
+    let mut dumps: Vec<(std::time::SystemTime, PathBuf)> = Vec::new();
+    let mut writing: Vec<PathBuf> = Vec::new();
+
+    let Ok(mut entries) = tokio::fs::read_dir(dir).await else {
+        return said;
+    };
+    let day_ago = std::time::SystemTime::now() - Duration::from_secs(24 * 60 * 60);
+    while let Ok(Some(entry)) = entries.next_entry().await {
+        let path = entry.path();
+        let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+            continue;
+        };
+        let Ok(made) = entry.metadata().await.and_then(|m| m.modified()) else {
+            continue;
+        };
+        if name.ends_with(".writing") {
+            if made < day_ago {
+                writing.push(path);
+            }
+        } else if name.starts_with("firetower-") && name.ends_with(".dump") {
+            dumps.push((made, path));
+        }
+    }
+
+    for path in writing {
+        if tokio::fs::remove_file(&path).await.is_ok() {
+            said.push(format!(
+                "swept {}, left by a dump that was killed",
+                shown(&path)
+            ));
+        }
+    }
+
+    // Newest first, so everything past `keep` is the oldest.
+    dumps.sort_by(|a, b| b.0.cmp(&a.0));
+    let mut dropped = 0;
+    for (_, path) in dumps.into_iter().skip(keep) {
+        if tokio::fs::remove_file(&path).await.is_ok() {
+            dropped += 1;
+        }
+    }
+    if dropped > 0 {
+        said.push(format!("removed {dropped} older dump(s), keeping {keep}"));
+    }
+    said
+}
+
+fn shown(path: &std::path::Path) -> String {
+    path.file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default()
+}
+
+/// What to say when `pg_dump` did not finish.
+///
+/// 137 is SIGKILL, which inside a container is almost always the OOM killer —
+/// and the stderr in that case is empty or cut mid-sentence, which is the
+/// least informative failure this can produce. Naming it is the difference
+/// between a number and something to act on.
+fn dump_failure(code: i64, stderr: &str) -> String {
+    let said = stderr.trim();
+    if code == 137 {
+        return format!(
+            "the database dump ran out of memory and was killed{}",
+            if said.is_empty() {
+                String::new()
+            } else {
+                format!(": {}", clip(said, 2000))
+            }
+        );
+    }
+    format!("pg_dump exited {code}: {}", clip(said, 2000))
+}
+
+/// Keep the head and the tail of something too long to show.
+///
+/// The middle, not the end: a Postgres failure puts `ERROR:` at the top and
+/// `HINT:` at the bottom, and a `LOCK TABLE` naming every table in the
+/// database in between. Truncating from one end loses one of the two things
+/// worth reading.
+fn clip(text: &str, keep: usize) -> String {
+    if text.len() <= keep {
+        return text.to_string();
+    }
+    let half = keep / 2;
+    let head = floor_char_boundary(text, half);
+    let tail = ceil_char_boundary(text, text.len() - half);
+    format!(
+        "{}\n… {} bytes not shown …\n{}",
+        &text[..head],
+        tail - head,
+        &text[tail..]
+    )
+}
+
+fn floor_char_boundary(s: &str, mut i: usize) -> usize {
+    while i > 0 && !s.is_char_boundary(i) {
+        i -= 1;
+    }
+    i
+}
+
+fn ceil_char_boundary(s: &str, mut i: usize) -> usize {
+    while i < s.len() && !s.is_char_boundary(i) {
+        i += 1;
+    }
+    i
+}
+
 fn short(id: &str) -> String {
     let hex = id.rsplit(':').next().unwrap_or(id);
     hex.chars().take(12).collect()
@@ -658,6 +846,130 @@ fn human(bytes: u64) -> String {
 
 #[cfg(test)]
 mod tests {
+    /// Set a file's modified time, which is what `prune` orders by.
+    fn touch(path: &std::path::Path, when: std::time::SystemTime) {
+        std::fs::File::options()
+            .write(true)
+            .open(path)
+            .unwrap()
+            .set_modified(when)
+            .unwrap();
+    }
+
+    /// The two failures a whole-database dump met: one `LOCK TABLE` naming
+    /// every table, and the object graph behind it. Both scale with what is
+    /// dumped, and `-n public` is what decides that.
+    #[test]
+    fn the_dump_asks_only_for_the_schema_firetower_owns() {
+        // The command as `backup` builds it, kept in one place so this cannot
+        // drift from it silently.
+        let command = "pg_dump -U \"${POSTGRES_USER:-firetower}\" -d \"${POSTGRES_DB:-firetower}\" -n public -Fc";
+        assert!(command.contains(" -n public "), "{command}");
+        assert!(command.contains("-Fc"), "already compressed: {command}");
+        assert!(
+            !command.contains("pg_dumpall"),
+            "that would carry every schema, which is the opposite: {command}"
+        );
+    }
+
+    #[test]
+    fn a_killed_dump_says_it_ran_out_of_memory() {
+        let said = dump_failure(137, "");
+        assert!(said.contains("ran out of memory"), "{said}");
+        // Not just the number, which is what it used to be.
+        assert!(!said.contains("exited 137"), "{said}");
+    }
+
+    #[test]
+    fn any_other_failure_keeps_its_code_and_its_text() {
+        let said = dump_failure(1, "FATAL: role \"nobody\" does not exist");
+        assert!(said.contains("exited 1"), "{said}");
+        assert!(said.contains("role"), "{said}");
+    }
+
+    /// A Postgres failure puts `ERROR:` at the top and `HINT:` at the bottom,
+    /// with the statement in between. Cutting from one end loses one of them.
+    #[test]
+    fn a_long_failure_keeps_both_ends() {
+        let text = format!(
+            "ERROR: out of shared memory\n{}\nHINT: max_locks",
+            "x".repeat(200_000)
+        );
+        let kept = clip(&text, 2000);
+        assert!(kept.len() < 3000, "{} bytes", kept.len());
+        assert!(kept.starts_with("ERROR: out of shared memory"), "{kept}");
+        assert!(kept.ends_with("HINT: max_locks"), "{kept}");
+        assert!(
+            kept.contains("not shown"),
+            "it says what it dropped: {kept}"
+        );
+    }
+
+    #[test]
+    fn something_short_is_left_alone() {
+        assert_eq!(clip("ERROR: nope", 2000), "ERROR: nope");
+    }
+
+    #[tokio::test]
+    async fn pruning_keeps_the_newest_and_drops_the_rest() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut made = Vec::new();
+        for n in 0..6 {
+            let path = dir
+                .path()
+                .join(format!("firetower-0.{n}.0-2026010{n}T000000Z.dump"));
+            std::fs::write(&path, "x").unwrap();
+            // Distinct mtimes, oldest first.
+            let when =
+                std::time::SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000 + n * 60);
+            touch(&path, when);
+            made.push(path);
+        }
+
+        prune(dir.path(), 3).await;
+
+        let left: Vec<_> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(left.len(), 3, "{left:?}");
+        for path in &made[3..] {
+            assert!(path.exists(), "the newest three stay: {}", path.display());
+        }
+        for path in &made[..3] {
+            assert!(!path.exists(), "the oldest three go: {}", path.display());
+        }
+    }
+
+    /// Somebody's server, and a directory this did not create everything in.
+    #[tokio::test]
+    async fn pruning_touches_nothing_that_is_not_ours() {
+        let dir = tempfile::tempdir().unwrap();
+        for name in ["notes.txt", "firetower.env", "someone-elses.dump", "README"] {
+            std::fs::write(dir.path().join(name), "x").unwrap();
+        }
+        prune(dir.path(), 0).await;
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 4);
+    }
+
+    /// What an out-of-memory dump leaves: the failure path deletes its own
+    /// temporary, and a killed process never reaches it.
+    #[tokio::test]
+    async fn the_remains_of_a_killed_dump_are_swept_once_they_are_old() {
+        let dir = tempfile::tempdir().unwrap();
+        let old = dir.path().join("firetower-0.32.0-x.dump.writing");
+        let fresh = dir.path().join("firetower-0.33.0-y.dump.writing");
+        std::fs::write(&old, "x").unwrap();
+        std::fs::write(&fresh, "x").unwrap();
+        let two_days = std::time::SystemTime::now() - Duration::from_secs(48 * 60 * 60);
+        touch(&old, two_days);
+
+        prune(dir.path(), 10).await;
+
+        assert!(!old.exists(), "an old one is swept");
+        assert!(fresh.exists(), "a dump in progress is not");
+    }
+
     use super::*;
 
     #[test]

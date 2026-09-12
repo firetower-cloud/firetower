@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.32.0
+ * OpenAPI spec version: 0.32.1
  */
 import * as zod from 'zod';
 
@@ -53,6 +53,14 @@ export const GetUpdatesResponse = zod.object({
 }).describe('The newest release, as far as the last check knows.')]).optional(),
   "updateAvailable": zod.boolean().describe('Whether anything at all is behind the newest release.')
 })
+
+/**
+ * Until this existed a backup only ever ran inside an upgrade, so there was
+ * no way to find out it was broken except by trying to upgrade — which is how
+ * one got found.
+ * @summary Take a backup now, outside an upgrade.
+ */
+export const BackUpNowResponse = zod.string()
 
 /**
  * @summary Ask the releases feed now rather than waiting for the next check.
@@ -132,14 +140,14 @@ export const ListRunsResponseItem = zod.object({
   "id": zod.string(),
   "startedAt": zod.iso.datetime({"offset":true}).nullish(),
   "startedBy": zod.string().nullish(),
-  "state": zod.enum(['planned', 'waitingIdle', 'running', 'succeeded', 'failed', 'cancelled']),
+  "state": zod.enum(['planned', 'waitingIdle', 'waitingDecision', 'running', 'succeeded', 'failed', 'cancelled']),
   "steps": zod.array(zod.object({
   "detail": zod.string().nullish(),
   "finishedAt": zod.iso.datetime({"offset":true}).nullish(),
   "log": zod.string(),
   "position": zod.int(),
   "startedAt": zod.iso.datetime({"offset":true}).nullish(),
-  "state": zod.enum(['pending', 'running', 'done', 'failed', 'skipped']),
+  "state": zod.enum(['pending', 'running', 'done', 'failed', 'warned', 'skipped']),
   "target": zod.string(),
   "title": zod.string()
 })),
@@ -175,14 +183,14 @@ export const CreateRunResponse = zod.object({
   "id": zod.string(),
   "startedAt": zod.iso.datetime({"offset":true}).nullish(),
   "startedBy": zod.string().nullish(),
-  "state": zod.enum(['planned', 'waitingIdle', 'running', 'succeeded', 'failed', 'cancelled']),
+  "state": zod.enum(['planned', 'waitingIdle', 'waitingDecision', 'running', 'succeeded', 'failed', 'cancelled']),
   "steps": zod.array(zod.object({
   "detail": zod.string().nullish(),
   "finishedAt": zod.iso.datetime({"offset":true}).nullish(),
   "log": zod.string(),
   "position": zod.int(),
   "startedAt": zod.iso.datetime({"offset":true}).nullish(),
-  "state": zod.enum(['pending', 'running', 'done', 'failed', 'skipped']),
+  "state": zod.enum(['pending', 'running', 'done', 'failed', 'warned', 'skipped']),
   "target": zod.string(),
   "title": zod.string()
 })),
@@ -206,14 +214,14 @@ export const GetRunResponse = zod.object({
   "id": zod.string(),
   "startedAt": zod.iso.datetime({"offset":true}).nullish(),
   "startedBy": zod.string().nullish(),
-  "state": zod.enum(['planned', 'waitingIdle', 'running', 'succeeded', 'failed', 'cancelled']),
+  "state": zod.enum(['planned', 'waitingIdle', 'waitingDecision', 'running', 'succeeded', 'failed', 'cancelled']),
   "steps": zod.array(zod.object({
   "detail": zod.string().nullish(),
   "finishedAt": zod.iso.datetime({"offset":true}).nullish(),
   "log": zod.string(),
   "position": zod.int(),
   "startedAt": zod.iso.datetime({"offset":true}).nullish(),
-  "state": zod.enum(['pending', 'running', 'done', 'failed', 'skipped']),
+  "state": zod.enum(['pending', 'running', 'done', 'failed', 'warned', 'skipped']),
   "target": zod.string(),
   "title": zod.string()
 })),
@@ -243,14 +251,51 @@ export const CancelRunResponse = zod.object({
   "id": zod.string(),
   "startedAt": zod.iso.datetime({"offset":true}).nullish(),
   "startedBy": zod.string().nullish(),
-  "state": zod.enum(['planned', 'waitingIdle', 'running', 'succeeded', 'failed', 'cancelled']),
+  "state": zod.enum(['planned', 'waitingIdle', 'waitingDecision', 'running', 'succeeded', 'failed', 'cancelled']),
   "steps": zod.array(zod.object({
   "detail": zod.string().nullish(),
   "finishedAt": zod.iso.datetime({"offset":true}).nullish(),
   "log": zod.string(),
   "position": zod.int(),
   "startedAt": zod.iso.datetime({"offset":true}).nullish(),
-  "state": zod.enum(['pending', 'running', 'done', 'failed', 'skipped']),
+  "state": zod.enum(['pending', 'running', 'done', 'failed', 'warned', 'skipped']),
+  "target": zod.string(),
+  "title": zod.string()
+})),
+  "targets": zod.object({
+  "controlPlane": zod.boolean(),
+  "hostIds": zod.array(zod.string())
+}),
+  "toVersion": zod.string(),
+  "whenIdle": zod.boolean()
+})
+
+/**
+ * Only a run waiting on the backup reaches this, and the answer is always the
+ * same one: go ahead without a backup. Its step keeps the `Warned` state, so
+ * the history says the upgrade went ahead without one.
+ * @summary Carry on with a run that stopped to ask.
+ */
+export const ContinueRunParams = zod.object({
+  "id": zod.string().describe('Run id')
+})
+
+export const ContinueRunResponse = zod.object({
+  "createdAt": zod.iso.datetime({"offset":true}),
+  "error": zod.string().nullish(),
+  "finishedAt": zod.iso.datetime({"offset":true}).nullish(),
+  "fromVersion": zod.string(),
+  "id": zod.string(),
+  "startedAt": zod.iso.datetime({"offset":true}).nullish(),
+  "startedBy": zod.string().nullish(),
+  "state": zod.enum(['planned', 'waitingIdle', 'waitingDecision', 'running', 'succeeded', 'failed', 'cancelled']),
+  "steps": zod.array(zod.object({
+  "detail": zod.string().nullish(),
+  "finishedAt": zod.iso.datetime({"offset":true}).nullish(),
+  "log": zod.string(),
+  "position": zod.int(),
+  "startedAt": zod.iso.datetime({"offset":true}).nullish(),
+  "state": zod.enum(['pending', 'running', 'done', 'failed', 'warned', 'skipped']),
   "target": zod.string(),
   "title": zod.string()
 })),

@@ -35,6 +35,10 @@ const HEADERS_TIMEOUT: Duration = Duration::from_secs(120);
 /// pull that has stalled, an exec that hung.
 const IDLE_TIMEOUT: Duration = Duration::from_secs(180);
 
+/// The most of a command's stderr worth keeping. Enough for any real error and
+/// its context; far less than one statement naming every table in a database.
+pub const STDERR_KEPT: usize = 64 * 1024;
+
 #[derive(Clone)]
 pub struct Docker {
     socket: std::path::PathBuf,
@@ -374,6 +378,7 @@ impl Docker {
         let mut body = response.into_body();
         let mut pending: Vec<u8> = Vec::new();
         let mut stderr: Vec<u8> = Vec::new();
+        let mut dropped: usize = 0;
         loop {
             let next = tokio::time::timeout(IDLE_TIMEOUT, body.frame())
                 .await
@@ -396,7 +401,20 @@ impl Docker {
                 pending.drain(..8 + size);
                 match kind {
                     1 => sink.write_all(&payload).await?,
-                    _ => stderr.extend_from_slice(&payload),
+                    // Bounded. `pg_dump` failing on a database full of
+                    // schemas writes one line naming every table in it, and
+                    // this used to be kept whole — through the job's error,
+                    // the run log, the database and onto the screen. The tail
+                    // is the half worth keeping: that is where `ERROR:` and
+                    // `HINT:` end up.
+                    _ => {
+                        stderr.extend_from_slice(&payload);
+                        if stderr.len() > STDERR_KEPT {
+                            let cut = stderr.len() - STDERR_KEPT;
+                            stderr.drain(..cut);
+                            dropped += cut;
+                        }
+                    }
                 }
             }
         }
@@ -410,7 +428,15 @@ impl Docker {
             .get("ExitCode")
             .and_then(Value::as_i64)
             .unwrap_or(-1);
-        Ok((code, String::from_utf8_lossy(&stderr).into_owned()))
+        let said = String::from_utf8_lossy(&stderr).into_owned();
+        Ok((
+            code,
+            if dropped > 0 {
+                format!("… {dropped} earlier bytes not shown …\n{said}")
+            } else {
+                said
+            },
+        ))
     }
 
     // ── plumbing ───────────────────────────────────────────────────────
