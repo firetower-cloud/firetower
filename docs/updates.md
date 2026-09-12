@@ -99,13 +99,17 @@ without one.
 ### Schemas Firetower did not create
 
 The backup counts the schemas in the database first and says so when there are
-any that are not `public`. The usual cause is the test suite having been
-pointed at that database: it makes a schema per test, and the sweeper that
-removes them only exists in a test build, so nothing in a release ever cleans
-one up.
+any that are not `public`. Everything Firetower has is in `public`, so the
+usual cause is something else sharing the Postgres instance — which is fine,
+and which the backup skips.
 
-They are harmless to the control plane and skipped by the backup. To clear
-them, with the compose project's database container:
+They are harmless to the control plane. What they do affect is `pg_dump`: it
+locks everything it dumps in one statement, so a database with enough of them
+in it could not be dumped at all before the backup was narrowed to `public`.
+
+To clear schemas that should not be there, with the compose project's database
+container — the pattern below matches the ones a Firetower checkout's test
+suite leaves, so change it to match yours:
 
 ```sh
 docker exec -i firetower-postgres-1 psql -U firetower -d firetower <<'SQL'
