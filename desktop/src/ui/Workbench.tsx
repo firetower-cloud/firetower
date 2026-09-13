@@ -7,7 +7,7 @@
  * diff hid the conversation that explained it. They are two halves of one job.
  */
 import { useEffect, useRef, useState } from "react";
-import { Cpu, Globe, PanelRight, Pencil, SquareTerminal, Trash2, X } from "lucide-react";
+import { Globe, PanelRight, Pencil, SquareTerminal, Trash2, X } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { getListSessionsQueryKey, useRenameSession } from "@/src/api/generated/sessions/sessions";
 import { Signal } from "@/components/Signal";
@@ -25,6 +25,7 @@ import { QuickOpen } from "~/ui/QuickOpen";
 import { TabStrip, type Tab } from "~/ui/Tabs";
 import { Inspector } from "~/ui/Inspector";
 import { Shell } from "~/ui/Shell";
+import { StatusBar } from "~/ui/StatusBar";
 import { Unreachable } from "~/ui/Unreachable";
 import { ContextMenu, useMenu, type MenuItem } from "~/ui/ContextMenu";
 import { useEndAgent, useEndWorkspace } from "~/ui/end";
@@ -312,12 +313,6 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
             <Pencil className="h-3 w-3 shrink-0 text-mute opacity-0 transition-opacity hover:opacity-100" strokeWidth={1.75} />
           </button>
         )}
-        {run.usage && (
-          <span className="flex shrink-0 items-center gap-1.5 text-micro text-mute" title="What this workspace is using on its machine">
-            <Cpu className="h-3 w-3" strokeWidth={1.75} />
-            {Math.round(run.usage.cpu * 10) / 10} cores · {Math.round(run.usage.memoryMb)} MB
-          </span>
-        )}
 
         {/* Which agent you are reading. A count would not do: two of one and
             one of another is a different place from three of one. */}
@@ -461,6 +456,15 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
               </div>
             </div>
           )}
+
+          <StatusBar
+            session={run}
+            branch={place.branch}
+            onCommit={() => {
+              setSide("ship");
+              setOpen(true);
+            }}
+          />
         </div>
 
         {open && (
