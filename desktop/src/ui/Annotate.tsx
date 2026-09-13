@@ -11,7 +11,7 @@
  * Escape, on a click outside, or on keeping the note.
  */
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { CornerDownLeft, MessageSquarePlus } from "lucide-react";
+import { ArrowUp, CornerDownLeft, MessageSquarePlus } from "lucide-react";
 
 /** Where a note goes: a line of a file, or something the agent said (`line` 0, named by `label`). */
 export type Anchor = { quote: string; line: number; label?: string; x: number; y: number };
@@ -22,10 +22,13 @@ export function Annotate({
   at,
   onKeep,
   onCancel,
+  onParent,
 }: {
   at: Anchor;
   onKeep: (text: string) => void;
   onCancel: () => void;
+  /** Offered when the note is on an element and its parent might be the better one. */
+  onParent?: () => void;
 }) {
   const [text, setText] = useState("");
   const [box, setBox] = useState({ left: at.x, top: at.y });
@@ -60,7 +63,12 @@ export function Annotate({
       >
         <div className="flex items-center gap-2 px-3.5 pt-3">
           <MessageSquarePlus className="h-3.5 w-3.5 shrink-0 text-slate" strokeWidth={1.75} />
-          <span className="text-meta text-dim">{at.label ?? `Note on line ${at.line}`}</span>
+          <span className="min-w-0 flex-1 truncate text-meta text-dim">{at.label ?? `Note on line ${at.line}`}</span>
+          {onParent && (
+            <button onClick={onParent} title="Pick the element around this one" className="grid h-6 w-6 shrink-0 place-items-center rounded text-mute hover:bg-raise hover:text-bone">
+              <ArrowUp className="h-3.5 w-3.5" strokeWidth={2} />
+            </button>
+          )}
         </div>
 
         <p className="scroll-slim mx-3.5 mt-2 max-h-16 overflow-y-auto border-l-2 border-slate-deep pl-2.5 font-mono text-micro whitespace-pre-wrap text-mute">

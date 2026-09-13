@@ -11,10 +11,10 @@
  * replacing the pane's content: skimming six files while reading a diff should
  * not leave six tabs behind.
  */
-import { MessageSquare, X } from "lucide-react";
+import { Globe, MessageSquare, X } from "lucide-react";
 import { langOf } from "~/syntax";
 
-export type Tab = { id: "chat" } | { id: string; path: string; preview?: boolean };
+export type Tab = { id: "chat" } | { id: string; path: string; preview?: boolean } | { id: string; port: number };
 
 /** Files get the kind colours the tree already uses. Nine categories, not ninety. */
 function tone(path: string): string {
@@ -52,6 +52,7 @@ export function TabStrip({
       {tabs.map((tab) => {
         const on = tab.id === active;
         const chat = tab.id === "chat";
+        const port = "port" in tab ? tab.port : null;
         const preview = !chat && "preview" in tab && tab.preview;
 
         return (
@@ -67,6 +68,8 @@ export function TabStrip({
             {on && <span className="absolute inset-x-0 top-0 h-[2px] bg-bone/70" />}
             {chat ? (
               <MessageSquare className="h-3.5 w-3.5 shrink-0" strokeWidth={1.75} />
+            ) : port !== null ? (
+              <Globe className="h-3.5 w-3.5 shrink-0" strokeWidth={1.75} />
             ) : (
               <span className={`shrink-0 text-micro ${on ? tone((tab as { path: string }).path) : ""}`}>
                 ●
@@ -75,9 +78,9 @@ export function TabStrip({
 
             <span
               className={`min-w-0 truncate text-ui ${chat ? "" : "font-mono"} ${preview ? "italic" : ""}`}
-              title={chat ? "Conversation" : (tab as { path: string }).path}
+              title={chat ? "Conversation" : port !== null ? `Port ${port} in this session` : (tab as { path: string }).path}
             >
-              {chat ? "Conversation" : (tab as { path: string }).path.split("/").pop()}
+              {chat ? "Conversation" : port !== null ? `:${port}` : (tab as { path: string }).path.split("/").pop()}
             </span>
 
             {!chat && (

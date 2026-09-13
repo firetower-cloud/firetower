@@ -76,3 +76,13 @@ src-tauri/    the shell: window, vibrancy, dock badge, notifications
 
 `src/bridge.ts` — eight calls. Everything else is shell-agnostic, which is what
 keeps a swap to Electron a day rather than a week.
+
+## Previews
+
+A session's port opens in a tab (the globe in the toolbar, or ⌘-less: the
+port picker reads addresses out of the conversation). The frame points at the
+session's preview hostname, served by the control plane; the app is the
+picker's *panel* — the picker the control plane injects into the page accepts
+the window that embeds it as the panel when that window is the configured
+interface (`#__firetower_ui=`), so notes are written here and kept through the
+annotations API. The webview's CSP allows `frame-src http: https:` for this.

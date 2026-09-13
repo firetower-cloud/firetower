@@ -21,6 +21,16 @@ export class ApiError extends Error {
     super(message);
     this.name = "ApiError";
   }
+
+  /** From a refusal, the way the web's client reads one. */
+  static async from(res: Response): Promise<ApiError> {
+    try {
+      const body = (await res.json()) as { code?: string; message?: string };
+      return new ApiError(body.code ?? "Internal", body.message ?? res.statusText, res.status);
+    } catch {
+      return new ApiError("Internal", res.statusText || "request failed", res.status);
+    }
+  }
 }
 
 /**

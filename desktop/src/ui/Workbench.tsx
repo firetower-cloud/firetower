@@ -7,7 +7,7 @@
  * diff hid the conversation that explained it. They are two halves of one job.
  */
 import { useEffect, useState } from "react";
-import { Cpu, PanelRight, Pencil, SquareTerminal, Trash2, X } from "lucide-react";
+import { Cpu, Globe, PanelRight, Pencil, SquareTerminal, Trash2, X } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { getListSessionsQueryKey, useDestroySession, useRenameSession } from "@/src/api/generated/sessions/sessions";
 import { isLive } from "~/mock/http";
@@ -20,6 +20,8 @@ import { useStart } from "~/start";
 import { navigate } from "~/shims/next-navigation";
 import { Chat } from "~/ui/Chat";
 import { FileTab } from "~/ui/FileTab";
+import { PreviewTab } from "~/ui/PreviewTab";
+import { PortPicker } from "~/ui/PortPicker";
 import { QuickOpen } from "~/ui/QuickOpen";
 import { TabStrip, type Tab } from "~/ui/Tabs";
 import { Inspector } from "~/ui/Inspector";
@@ -107,6 +109,15 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
       return [...held, tab];
     });
     setActive(`f:${path}`);
+  };
+
+  /* A preview is a kept tab from the start: nobody skims ports. */
+  const [picking, setPicking] = useState(false);
+  const openPreview = (port: number) => {
+    const id = `p:${port}`;
+    setTabs((held) => (held.some((t) => t.id === id) ? held : [...held, { id, port }]));
+    setActive(id);
+    setPicking(false);
   };
 
   const closeTab = (id: string) => {
@@ -273,6 +284,16 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
               <Trash2 className="h-4 w-4" strokeWidth={1.75} />
             </button>
           )}
+          <div className="relative">
+            <button
+              onClick={() => setPicking((p) => !p)}
+              title="Preview a port"
+              className={`control ${picking ? "bg-overlay text-bone" : "text-mute hover:bg-raise hover:text-bone"}`}
+            >
+              <Globe className="h-4 w-4" strokeWidth={1.75} />
+            </button>
+            {picking && <PortPicker sessionId={run.id} open={tabs.flatMap((t) => ("port" in t ? [t.port] : []))} onPick={openPreview} onClose={() => setPicking(false)} />}
+          </div>
           <button
             onClick={() => setOpen(!open)}
             title="Inspector  ⌘\"
@@ -311,6 +332,8 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
                   setOpen(true);
                 }}
               />
+            ) : "port" in (tabs.find((t) => t.id === active) ?? {}) ? (
+              <PreviewTab session={run} port={(tabs.find((t) => t.id === active) as { port: number }).port} />
             ) : (
               <FileTab session={run} path={(tabs.find((t) => t.id === active) as { path: string }).path} />
             )}

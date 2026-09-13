@@ -17,11 +17,17 @@
     const candidate = new URL(
       supplied || remembered || script.dataset.ui || "",
     );
+    // A desktop client embeds the preview from an origin of its own scheme,
+    // whose `origin` the URL parser reports as "null" — so it is rebuilt.
+    const origin =
+      candidate.protocol === "tauri:"
+        ? "tauri://" + candidate.host
+        : candidate.origin;
     if (
-      ["http:", "https:"].includes(candidate.protocol) &&
-      candidate.origin !== location.origin
+      ["http:", "https:", "tauri:"].includes(candidate.protocol) &&
+      origin !== location.origin
     ) {
-      uiOrigin = candidate.origin;
+      uiOrigin = origin;
       localStorage.setItem(connectionKey, uiOrigin);
     }
     if (supplied)
@@ -121,6 +127,9 @@
   }
   function openPanel() {
     expanded = true;
+    // The window this preview sits in is the panel — a desktop client draws
+    // its own — so there is nothing to embed here.
+    if (panelWindow && panelWindow === window.parent) return;
     collapse.hidden = false;
     if (!uiOrigin) {
       status.hidden = false;
@@ -476,9 +485,15 @@
       setMode(true);
       return;
     }
+    // The panel is the iframe this script opened, a popup it opened, or the
+    // window the preview is embedded in — when that window is the configured
+    // interface, which is how a desktop client takes the panel's place.
+    const embedder = window.parent !== window && event.source === window.parent;
     if (
       event.origin !== uiOrigin ||
-      (event.source !== frame.contentWindow && event.source !== panelWindow) ||
+      (event.source !== frame.contentWindow &&
+        event.source !== panelWindow &&
+        !embedder) ||
       data.source !== "firetower-panel"
     )
       return;
@@ -490,6 +505,14 @@
         event.source === frame.contentWindow
       )
         return;
+      if (embedder) {
+        // Nothing of the script's own panel is wanted any more, and the
+        // toolbar's toggle is drawn by the window around the preview.
+        frame.hidden = true;
+        fallback.hidden = true;
+        collapse.hidden = true;
+        toolbar.hidden = true;
+      }
       const newConnection =
         panelWindow !== event.source || channel !== data.channel;
       panelWindow = event.source;
