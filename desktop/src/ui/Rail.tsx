@@ -25,6 +25,10 @@ import { getListSessionsQueryKey, renameSession } from "@/src/api/generated/sess
 import { ContextMenu, useMenu } from "~/ui/ContextMenu";
 import { usePrompt } from "~/ui/Confirm";
 import { useEndWorkspace } from "~/ui/end";
+import { HostCard, whereItRuns } from "~/ui/StatusBar";
+import { useHosts } from "~/data";
+import { Monitor, Server } from "lucide-react";
+import { useRef, useState } from "react";
 
 const NAV: { href: string; label: string; icon: LucideIcon }[] = [
   { href: "/", label: "Dashboard", icon: LayoutList },
@@ -171,8 +175,43 @@ function Row({ place, on }: { place: Workspace; on: boolean }) {
           place.runs.slice(0, 3).map((run) => (
             <AgentMark key={run.id} agent={run.agent} size={10} className="shrink-0 text-mute" />
           ))}
+        <Where place={place} />
       </div>
     </button>
     </>
+  );
+}
+
+/**
+ * Where the workspace runs, as one icon at the end of the row: a screen for
+ * Firetower's own machine, a server for any other computer. Hovering it
+ * opens the machine's card — the name and the facts live there, not in a
+ * row that is already full.
+ */
+function Where({ place }: { place: Workspace }) {
+  const hosts = useHosts();
+  const host = hosts.data.find((h) => h.id === place.runs[0].hostId);
+  const where = whereItRuns(host, hosts.data);
+  const [card, setCard] = useState<{ x: number; y: number } | null>(null);
+  const hover = useRef<ReturnType<typeof setTimeout>>(undefined);
+  if (!host || !where) return null;
+  const local = where.name === "Firetower's machine";
+  const Icon = local ? Monitor : Server;
+  return (
+    <span
+      onMouseEnter={(e) => {
+        const r = e.currentTarget.getBoundingClientRect();
+        hover.current = setTimeout(() => setCard({ x: r.left, y: r.bottom }), 350);
+      }}
+      onMouseLeave={() => {
+        clearTimeout(hover.current);
+        setCard(null);
+      }}
+      className={`relative ml-0.5 shrink-0 ${where.quiet ? "stale" : ""}`}
+      aria-label={`Runs on ${where.name}`}
+    >
+      <Icon className={`h-3 w-3 ${where.quiet ? "text-brick" : "text-mute"}`} strokeWidth={1.75} />
+      {card && <HostCard host={host} where={where} at={card} />}
+    </span>
   );
 }

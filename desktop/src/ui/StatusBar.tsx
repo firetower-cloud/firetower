@@ -89,13 +89,16 @@ export function StatusBar({ session, branch, onCommit }: { session: Session; bra
   );
 }
 
-/** The facts that do not fit a line. Nothing on it is a button but the last line. */
-function HostCard({ host, where }: { host: Host; where: NonNullable<ReturnType<typeof whereItRuns>> }) {
+/** The facts that do not fit a line. Anchored above the bar, or at a point on screen when told one. */
+export function HostCard({ host, where, at }: { host: Host; where: NonNullable<ReturnType<typeof whereItRuns>>; at?: { x: number; y: number } }) {
   const sessions = useSessions();
   const on = sessions.data.filter((s) => s.hostId === host.id && s.status !== "Ended").length;
   const docker = host.docker?.status === "Running" ? `Docker ${host.docker.detail ?? ""}`.trim() : host.docker?.status === "Absent" ? "no Docker" : host.docker?.status === "Stopped" ? "Docker stopped" : null;
   return (
-    <div className="absolute bottom-7 left-3 z-40 w-[22rem] rounded-xl border border-line bg-overlay px-4 py-3 font-sans shadow-(--shadow-float)">
+    <div
+      style={at ? { left: Math.min(at.x, window.innerWidth - 22 * 16 - 12), top: at.y + 8 } : undefined}
+      className={`${at ? "fixed" : "absolute bottom-7 left-3"} z-40 w-[22rem] rounded-xl border border-line bg-overlay px-4 py-3 font-sans text-left shadow-(--shadow-float)`}
+    >
       <div className="flex items-center gap-2">
         <where.Mark className="h-3.5 w-3.5 text-slate" strokeWidth={1.75} />
         <span className="text-ui text-bone">{where.name}</span>
