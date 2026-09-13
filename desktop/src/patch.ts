@@ -45,3 +45,36 @@ export function addedLines(patch: string): Set<number> {
 
 /** Whether the patch creates the file rather than changing one that was there. */
 export const isNew = (patch: string) => /^new file mode/m.test(patch);
+
+/**
+ * The lines the patch removed, keyed by the line in the new file they sat
+ * before — so a file can show what was there, in place, the way the diff
+ * does. Lines removed at the very end key to one past the last line.
+ */
+export function removedLines(patch: string): Map<number, string[]> {
+  const out = new Map<number, string[]>();
+  let at = 0;
+  let pending: string[] = [];
+  const flush = () => {
+    if (pending.length === 0) return;
+    out.set(at, [...(out.get(at) ?? []), ...pending]);
+    pending = [];
+  };
+  for (const l of patch.split("\n")) {
+    const hunk = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(l);
+    if (hunk) {
+      flush();
+      at = Number(hunk[1]);
+      continue;
+    }
+    if (at === 0) continue;
+    if (l.startsWith("-")) pending.push(l.slice(1));
+    else if (l.startsWith("\\")) continue;
+    else {
+      flush();
+      at++;
+    }
+  }
+  flush();
+  return out;
+}

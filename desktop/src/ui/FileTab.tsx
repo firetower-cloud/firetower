@@ -9,7 +9,7 @@
  * Selecting code starts a note, pinned to the line it came from, sent back as
  * an ordinary message. The same shape the conversation's annotations use.
  */
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { Check, Copy, Send, X } from "lucide-react";
 import { Markdown } from "@/components/Markdown";
@@ -20,7 +20,7 @@ import { fileAt } from "~/mock/files";
 import { highlight, langOf, TONE } from "~/syntax";
 import { isLive } from "~/mock/http";
 import { Annotate, type Anchor } from "~/ui/Annotate";
-import { addedLines } from "~/patch";
+import { addedLines, removedLines } from "~/patch";
 import { useDiff } from "~/data";
 
 type Note = { id: number; quote: string; line: number; text: string };
@@ -43,6 +43,10 @@ export function FileTab({ session, path, line }: { session: Session; path: strin
     const from = live ? (mine ? [...addedLines(mine.patch)] : []) : (fixture?.changed ?? []);
     return new Set(from.filter((n) => n >= 1 && n <= lines.length));
   }, [live, mine, fixture, lines.length]);
+  /* And what those edits replaced, drawn where it was — the file reads like
+     the diff does, rather than only showing what survived. */
+  const gone = useMemo(() => (live && mine ? removedLines(mine.patch) : new Map<number, string[]>()), [live, mine]);
+  const goneCount = useMemo(() => [...gone.values()].reduce((n, g) => n + g.length, 0), [gone]);
   const lang = fixture?.lang ?? langOf(path);
 
   const [notes, setNotes] = useState<Note[]>([]);
@@ -106,7 +110,9 @@ export function FileTab({ session, path, line }: { session: Session; path: strin
         <span className="min-w-0 flex-1 truncate font-mono text-meta text-slate" title={path}>{path}</span>
         <span className="shrink-0 font-mono text-micro text-mute">
           {lines.length} lines
-          {touched.size > 0 ? <span className="ml-2 text-sage">{touched.size} added here</span> : mine ? <span className="ml-2 text-sage">changed in this session</span> : null}
+          {touched.size > 0 && <span className="ml-2 text-sage">+{touched.size}</span>}
+          {goneCount > 0 && <span className="ml-1.5 text-brick">−{goneCount}</span>}
+          {touched.size === 0 && goneCount === 0 && mine ? <span className="ml-2 text-sage">changed in this session</span> : null}
         </span>
         {md && (
           <button onClick={() => setRendered(!rendered)} className="control h-6 text-micro text-mute hover:bg-raise hover:text-bone">{rendered ? "source" : "rendered"}</button>
@@ -127,7 +133,9 @@ export function FileTab({ session, path, line }: { session: Session; path: strin
                 const hot = touched.has(n);
                 const noted = notes.filter((x) => x.line === n);
                 return (
-                  <tr key={n} data-line={n}>
+                  <Fragment key={n}>
+                  <Removed lines={gone.get(n)} lang={lang} at={n} />
+                  <tr data-line={n}>
                     <td className={`sticky left-0 w-12 min-w-12 border-r px-2 text-right align-top tabular-nums select-none ${hot ? "border-sage-deep bg-sage-tint text-sage" : "border-line-soft bg-ground text-mute"}`}>
                       {noted.length > 0 ? <button onClick={() => setReading(noted[0])} title={noted.map((x) => x.text).join("\n")} className="text-slate hover:text-bone">●</button> : n}
                     </td>
@@ -135,8 +143,10 @@ export function FileTab({ session, path, line }: { session: Session; path: strin
                       {line === "" ? " " : highlight(line, lang).map((p, k) => <span key={k} className={TONE[p.kind]}>{p.text}</span>)}
                     </td>
                   </tr>
+                  </Fragment>
                 );
               })}
+              <Removed lines={gone.get(lines.length + 1)} lang={lang} at={lines.length + 1} />
             </tbody>
           </table>
         )}
@@ -160,6 +170,23 @@ export function FileTab({ session, path, line }: { session: Session; path: strin
 
       {reading && <Annotate at={{ ...reading, x: window.innerWidth / 2, y: 160 }} onCancel={() => setReading(null)} onKeep={(t) => { setNotes((h) => h.map((x) => (x.id === reading.id ? { ...x, text: t } : x))); setReading(null); }} />}
     </div>
+  );
+}
+
+/** Lines the session took out, where they were. No number: they are not in the file any more. */
+function Removed({ lines, lang, at }: { lines?: string[]; lang: string; at: number }) {
+  if (!lines || lines.length === 0) return null;
+  return (
+    <>
+      {lines.map((line, i) => (
+        <tr key={`${at}-${i}`} className="select-none">
+          <td className="sticky left-0 w-12 min-w-12 border-r border-brick-deep bg-brick-tint px-2 text-right align-top text-brick">−</td>
+          <td className="bg-brick-tint/40 px-3 whitespace-pre">
+            {line === "" ? " " : highlight(line, lang).map((p, k) => <span key={k} className={TONE[p.kind]}>{p.text}</span>)}
+          </td>
+        </tr>
+      ))}
+    </>
   );
 }
 
