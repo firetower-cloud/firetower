@@ -17,8 +17,8 @@
  * waits; what you want doing is said in the conversation, where it can be
  * answered. A task seeds the composer instead, unsent.
  */
-import { useEffect, useMemo, useState } from "react";
-import { Box, Check, ChevronDown, Cpu, GitBranch, Server, Terminal, X } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Box, Check, ChevronDown, Cpu, GitBranch, Plus, Search, Server, Terminal, X } from "lucide-react";
 import { GithubMark, Icon } from "@/components/ui";
 import { AgentMark } from "@/components/AgentMark";
 import {
@@ -155,6 +155,24 @@ export function NewWorkspace({
   };
 
   const unpicked = repos.filter((r) => !checkouts.some((c) => c.id === r.id));
+  /* The list of repositories: fixed to the window rather than to the sheet,
+     because the sheet clips what leaves it, and a list of ten repositories
+     leaves it. Filtered as you type; ↵ takes the first match. */
+  const [wanted, setWanted] = useState("");
+  const addAt = useRef<HTMLButtonElement>(null);
+  const [listAt, setListAt] = useState<{ left: number; top: number } | null>(null);
+  const openList = () => {
+    const r = addAt.current?.getBoundingClientRect();
+    if (r) setListAt({ left: Math.min(r.left, window.innerWidth - 22 * 16 - 12), top: r.bottom + 6 });
+    setWanted("");
+    setAdding(!adding);
+  };
+  const needle = wanted.trim().toLowerCase();
+  const offered = needle ? unpicked.filter((r) => r.slug.toLowerCase().includes(needle)) : unpicked;
+  const take = (r: (typeof repos)[number]) => {
+    setCheckouts((held) => [...held, { id: r.id, slug: r.slug }]);
+    setAdding(false);
+  };
 
   return (
     <div
@@ -209,38 +227,62 @@ export function NewWorkspace({
 
               <div className="relative">
                 <button
-                  onClick={() => setAdding(!adding)}
+                  ref={addAt}
+                  onClick={openList}
                   className="control border border-dashed border-line-soft text-mute hover:bg-raise hover:text-bone"
                 >
                   {checkouts.length === 0 ? "Choose a repository" : "+ another"}
                 </button>
 
-                {adding && (
+                {adding && listAt && (
                   <>
-                    <button className="fixed inset-0 z-10 cursor-default" onClick={() => setAdding(false)} />
-                    <div className="scroll-slim absolute top-full left-0 z-20 mt-1.5 max-h-56 w-[22rem] overflow-y-auto rounded-lg border border-line bg-overlay p-1 shadow-(--shadow-float)">
-                      {unpicked.length === 0 && (
-                        <p className="px-2.5 py-2 text-meta text-mute">
-                          {findingRepos
-                            ? "Reading your repositories…"
-                            : repos.length === 0
-                              ? "Nothing connected yet."
-                              : "All of them are in."}
-                        </p>
-                      )}
-                      {unpicked.map((r) => (
-                        <button
-                          key={r.id}
-                          onClick={() => {
-                            setCheckouts((held) => [...held, { id: r.id, slug: r.slug }]);
-                            setAdding(false);
+                    <button className="fixed inset-0 z-[60] cursor-default" onClick={() => setAdding(false)} />
+                    <div style={listAt} className="fixed z-[70] w-[22rem] overflow-hidden rounded-lg border border-line bg-overlay shadow-(--shadow-float)">
+                      <div className="flex items-center gap-2 border-b border-line px-2.5">
+                        <Search className="h-3.5 w-3.5 shrink-0 text-mute" strokeWidth={1.75} />
+                        <input
+                          autoFocus
+                          value={wanted}
+                          onChange={(e) => setWanted(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Escape") setAdding(false);
+                            if (e.key === "Enter" && offered[0]) take(offered[0]);
                           }}
-                          className="row w-full"
-                        >
-                          <GithubMark size={12} className="shrink-0 text-mute" />
-                          <span className="truncate font-mono text-ui text-text">{r.slug}</span>
-                        </button>
-                      ))}
+                          placeholder="Find a repository"
+                          className="w-full bg-transparent py-2 text-ui text-bone placeholder:text-mute focus:outline-none"
+                        />
+                      </div>
+                      <div className="scroll-slim max-h-56 overflow-y-auto p-1">
+                        {offered.length === 0 && (
+                          <p className="px-2.5 py-2 text-meta text-mute">
+                            {findingRepos
+                              ? "Reading your repositories…"
+                              : repos.length === 0
+                                ? "Nothing connected yet."
+                                : needle
+                                  ? "No repository matches."
+                                  : "All of them are in."}
+                          </p>
+                        )}
+                        {offered.map((r) => (
+                          <button key={r.id} onClick={() => take(r)} className="row w-full">
+                            <GithubMark size={12} className="shrink-0 text-mute" />
+                            <span className="truncate font-mono text-ui text-text">{r.slug}</span>
+                          </button>
+                        ))}
+                      </div>
+                      {/* Connecting one lives in Configuration; this is the door. */}
+                      <button
+                        onClick={() => {
+                          setAdding(false);
+                          onClose();
+                          navigate("/configuration#repositories");
+                        }}
+                        className="flex w-full items-center gap-2 border-t border-line px-3 py-2 text-left text-ui text-dim transition-colors hover:bg-raise hover:text-bone"
+                      >
+                        <Plus className="h-3.5 w-3.5 shrink-0" strokeWidth={1.75} />
+                        Connect another repository…
+                      </button>
                     </div>
                   </>
                 )}

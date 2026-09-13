@@ -237,7 +237,7 @@ export function Chat({
             {conversation.model && <span className="font-mono">{conversation.model}</span>}
           </div>
 
-          {steps.some((s) => s.state !== "done") && <BringUp steps={steps} />}
+          {steps.length > 0 && <BringUp steps={steps} />}
 
           {conversation.plan.length > 0 && <Plan steps={conversation.plan} />}
 
@@ -611,9 +611,27 @@ function Plan({ steps }: { steps: PlanStep[] }) {
 }
 
 /** Fetch → Worktree → Workspace → Setup → Launch, while it is happening. */
+/**
+ * The bring-up — fetch, worktree, workspace, setup, launch — drawn while it
+ * happens and kept once it has: a record of how the place was made, folded
+ * to one line so it stops taking the room the conversation needs.
+ */
 function BringUp({ steps }: { steps: ReturnType<typeof stepLines> }) {
+  const done = steps.every((s) => s.state === "done");
+  const failed = steps.some((s) => s.state === "failed");
+  const [open, setOpen] = useState(false);
+  if (done && !open) {
+    return (
+      <button onClick={() => setOpen(true)} className="mt-6 flex items-center gap-2.5 rounded-xl border border-line bg-panel px-4 py-2.5 text-left text-ui transition-colors hover:bg-raise/60">
+        <Check className="h-3.5 w-3.5 shrink-0 text-sage" strokeWidth={2} />
+        <span className="text-text">Workspace ready</span>
+        <span className="text-micro text-mute">{steps.length} steps</span>
+        <ChevronRight className="ml-auto h-3.5 w-3.5 text-mute" strokeWidth={2} />
+      </button>
+    );
+  }
   return (
-    <ol className="mt-6 space-y-1 rounded-xl border border-line bg-panel px-4 py-3">
+    <ol onClick={() => done && setOpen(false)} className={`mt-6 space-y-1 rounded-xl border bg-panel px-4 py-3 ${failed ? "border-brick-deep" : "border-line"} ${done ? "cursor-pointer" : ""}`}>
       {steps.map((s) => (
         <li key={s.step} className="flex items-center gap-2.5 text-ui">
           <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${s.state === "done" ? "bg-sage" : s.state === "running" ? "animate-pulse bg-slate" : s.state === "failed" ? "bg-brick" : "bg-line"}`} />
