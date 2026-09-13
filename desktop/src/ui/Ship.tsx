@@ -32,6 +32,7 @@ import { shipFor } from "~/mock/backends";
 import type { Changed } from "~/ui/Inspector";
 
 import { why } from "~/data";
+import { openExternal } from "~/open";
 
 export function Ship({ session, branch, files }: { session: Session; branch?: string; files: Changed[] }) {
   const live = isLive();
@@ -80,6 +81,8 @@ export function Ship({ session, branch, files }: { session: Session; branch?: st
       cache.invalidateQueries({ queryKey: getSessionWorkQueryKey(session.id) }),
       cache.invalidateQueries({ queryKey: getGetSessionQueryKey(session.id) }),
       cache.invalidateQueries({ queryKey: getListSessionsQueryKey() }),
+      // Committing empties the working-tree diff; the tree's marks follow.
+      cache.invalidateQueries({ queryKey: [`/api/v1/sessions/${session.id}/diff`] }),
     ]);
 
   const opening = ship.stage === "uncommitted" || ship.stage === "unpushed" || ship.stage === "pushed";
@@ -99,7 +102,7 @@ export function Ship({ session, branch, files }: { session: Session; branch?: st
       if (opening) {
         setStep("Opening the pull request");
         const made = await open.mutateAsync({ id: session.id, data: { title: title.trim() || null, body: withTrailer(body, refs, within), draft } });
-        window.open(made.url, "_blank", "noreferrer");
+        void openExternal(made.url);
       }
       await refresh();
     } catch (e) {

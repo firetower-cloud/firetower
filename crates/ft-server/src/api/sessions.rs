@@ -2290,6 +2290,7 @@ struct Held {
     params(
         ("id" = String, Path, description = "Session id"),
         ("checkout" = Option<String>, Query, description = "Which checkout, by its path in the workspace. Every one when omitted."),
+        ("since" = Option<ft_core::DiffSince>, Query, description = "Measured from the base of the branch (the default) or from the last commit."),
     ),
     responses((status = 200, body = Vec<ft_core::FileDiff>), (status = 404, body = ApiError)),
 )]
@@ -2326,6 +2327,7 @@ pub(super) async fn session_diff(
                 &id,
                 ft_proto::Action::Diff {
                     checkout: c.path.clone(),
+                    since: which.since.unwrap_or_default(),
                 },
                 None,
             )
@@ -2366,12 +2368,15 @@ pub(super) async fn session_diff(
     Ok(Json(files))
 }
 
-/// Which checkout an action means.
-#[derive(Debug, Default, Deserialize, utoipa::IntoParams)]
+/// Which checkout a diff means, and where it is measured from.
+#[derive(Debug, Default, Deserialize)]
 pub(super) struct Which {
     /// The checkout's path inside the workspace. Absent means all of them.
     #[serde(default)]
     pub checkout: Option<String>,
+    /// From the base of the branch unless said otherwise.
+    #[serde(default)]
+    pub since: Option<ft_core::DiffSince>,
 }
 
 /// Open a pull request for this session's branch.

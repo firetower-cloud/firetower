@@ -30,7 +30,7 @@ import {
 } from "@/src/api/generated/sessions/sessions";
 import { useMemo } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import type { FileDiff, Repo, Session, Task, TaskKind, TaskState } from "@/src/api/generated/model";
+import type { DiffSince, FileDiff, Repo, Session, Task, TaskKind, TaskState } from "@/src/api/generated/model";
 import { isLive } from "~/mock/http";
 import { STATE, TASKS, type BackendId } from "~/mock/backends";
 import { useFixtures } from "~/mock/socket";
@@ -210,10 +210,10 @@ export type ChangedFile = FileDiff & { at: string };
  * front. The tree and the tabs are workspace-relative either way, so `at` is
  * the path with the directory always in front.
  */
-export function useDiff(session: Pick<Session, "id" | "checkouts"> | null) {
+export function useDiff(session: Pick<Session, "id" | "checkouts"> | null, since: DiffSince = "Base") {
   const live = isLive(useBackendKey());
   const on = live && !!session;
-  const q = useSessionDiff(session?.id ?? "", undefined, { query: { enabled: on, refetchInterval: 8000 } });
+  const q = useSessionDiff(session?.id ?? "", { since }, { query: { enabled: on, refetchInterval: 8000 } });
   const data = useMemo<ChangedFile[]>(() => {
     const files = (q.data ?? []) as FileDiff[];
     const dirs = (session?.checkouts ?? []).map((c) => c.path).filter((p): p is string => !!p);

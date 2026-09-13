@@ -716,7 +716,8 @@ export const SessionDiffParams = zod.object({
 })
 
 export const SessionDiffQueryParams = zod.object({
-  "checkout": zod.string().optional().describe('Which checkout, by its path in the workspace. Every one when omitted.')
+  "checkout": zod.string().optional().describe('Which checkout, by its path in the workspace. Every one when omitted.'),
+  "since": zod.enum(['Base', 'Head']).optional().describe('Measured from the base of the branch (the default) or from the last commit.')
 })
 
 export const sessionDiffResponseAddedMin = 0;

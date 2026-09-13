@@ -266,6 +266,7 @@ async fn credential_for(
         ft_core::session::Checkout,
         ft_core::session::NewCheckout,
         ft_core::FileDiff,
+        ft_core::DiffSince,
         ft_core::Compute,
         ft_core::SshKey,
         crate::sshkey::PublicIdentity,

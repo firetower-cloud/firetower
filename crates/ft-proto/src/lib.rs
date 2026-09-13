@@ -443,6 +443,10 @@ pub enum Action {
     Diff {
         #[serde(default)]
         checkout: String,
+        /// Since the base (the default, and what an older control plane
+        /// means) or since the last commit.
+        #[serde(default)]
+        since: ft_core::DiffSince,
     },
     /// Put a file somebody handed over into the workspace, and say where it
     /// landed.

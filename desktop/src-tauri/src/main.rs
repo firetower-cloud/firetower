@@ -57,6 +57,8 @@ fn zoom<R: Runtime>(window: WebviewWindow<R>) {
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
+        // Links leave the app: a pull request opens in the browser, not in here.
+        .plugin(tauri_plugin_opener::init())
         // Apps remember where they were; pages do not.
         .plugin(tauri_plugin_window_state::Builder::default().build())
         .setup(|app| {

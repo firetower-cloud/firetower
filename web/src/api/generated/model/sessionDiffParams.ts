@@ -5,10 +5,15 @@
  * The Firetower control plane: API, scheduling, and worker transports.
  * OpenAPI spec version: 0.32.2
  */
+import type { DiffSince } from './diffSince';
 
 export type SessionDiffParams = {
 /**
  * Which checkout, by its path in the workspace. Every one when omitted.
  */
 checkout?: string;
+/**
+ * Measured from the base of the branch (the default) or from the last commit.
+ */
+since?: DiffSince;
 };

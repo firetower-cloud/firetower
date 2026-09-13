@@ -2414,9 +2414,9 @@ You are in the directory that holds them, not inside one of them.              P
                 })?)
             }
 
-            ft_proto::Action::Diff { checkout } => {
+            ft_proto::Action::Diff { checkout, since } => {
                 let (dest, base) = self.checkout_diff_refs(session_id, &checkout).await?;
-                self.git.diff(&dest, &base).await
+                self.git.diff_since(&dest, &base, since).await
             }
 
             ft_proto::Action::AddRepo { repo, mut env } => {

@@ -642,6 +642,23 @@ impl GitRoot {
     /// Computed here rather than on the control plane: less traffic, and it
     /// works when the laptop has no clone of the repository at all.
     pub async fn diff(&self, dest: &Path, base: &str) -> Result<String> {
+        self.diff_since(dest, base, ft_core::DiffSince::Base).await
+    }
+
+    /// The diff from the base, or only what the last commit does not hold.
+    pub async fn diff_since(
+        &self,
+        dest: &Path,
+        base: &str,
+        since: ft_core::DiffSince,
+    ) -> Result<String> {
+        if since == ft_core::DiffSince::Head {
+            // What is not committed yet: the working tree against HEAD, plus
+            // the files git does not know about at all.
+            let out = run(dest, "git", &["diff", "HEAD"]).await?;
+            let untracked = self.untracked_diff(dest).await.unwrap_or_default();
+            return Ok(format!("{out}{untracked}"));
+        }
         let base = &self.base_ref(dest, base).await;
         // One comparison, from where the branch left the base to what is on
         // disk right now.
@@ -1808,6 +1825,49 @@ mod tests {
             .unwrap();
         let diff = git.diff(&tree, "main").await.unwrap();
         assert!(diff.contains("+edited"), "{diff}");
+    }
+
+    #[tokio::test]
+    async fn a_commit_leaves_the_branch_diff_and_empties_the_working_tree_diff() {
+        let (_origin, remote) = origin().await;
+        let home = TempDir::new().unwrap();
+        let git = GitRoot::new(home.path());
+        let (mirror, _) = git
+            .ensure_mirror(&remote, "acme/backend", None, None)
+            .await
+            .unwrap();
+        let (tree, _) = git
+            .add_worktree(&mirror, "agent/commit", "main", "s_since")
+            .await
+            .unwrap();
+
+        tokio::fs::write(tree.join("NOTES.md"), "written by the agent\n")
+            .await
+            .unwrap();
+        for since in [ft_core::DiffSince::Base, ft_core::DiffSince::Head] {
+            let diff = git.diff_since(&tree, "main", since).await.unwrap();
+            assert!(diff.contains("+written by the agent"), "{since:?}: {diff}");
+        }
+
+        run(&tree, "git", &["add", "NOTES.md"]).await.unwrap();
+        run(
+            &tree,
+            "git",
+            &["-c", "user.name=t", "-c", "user.email=t@x", "commit", "-qm", "notes"],
+        )
+        .await
+        .unwrap();
+
+        let branch = git
+            .diff_since(&tree, "main", ft_core::DiffSince::Base)
+            .await
+            .unwrap();
+        assert!(branch.contains("+written by the agent"), "{branch}");
+        let pending = git
+            .diff_since(&tree, "main", ft_core::DiffSince::Head)
+            .await
+            .unwrap();
+        assert_eq!(pending, "", "committed, so nothing is pending");
     }
 
     #[tokio::test]

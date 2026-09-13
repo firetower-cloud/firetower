@@ -160,6 +160,22 @@ export function Chat({
 
   const rows = useMemo(() => fold(items), [items]);
 
+  /* Edits are not on the event stream, only the tool calls that make them
+     are. So every finished edit or command is the cue to read the diff, the
+     tree and any open file again — before the poll would have. */
+  const cache = useQueryClient();
+  const settled = useMemo(
+    () => items.filter((i) => (i.kind === "FileChange" || i.kind === "CommandExecution") && i.status !== undefined).length,
+    [items],
+  );
+  useEffect(() => {
+    if (!live || settled === 0) return;
+    const id = session.id;
+    void cache.invalidateQueries({ queryKey: [`/api/v1/sessions/${id}/diff`] });
+    void cache.invalidateQueries({ queryKey: [`/api/v1/sessions/${id}/files`] });
+    void cache.invalidateQueries({ queryKey: ["file-text", id] });
+  }, [settled, working, live, session.id, cache]);
+
   /* Opens at the end and stays there while the transcript grows — unless you
      scrolled up to read something, in which case it leaves you alone. Growth
      is watched rather than counted: markdown and images settle after the item

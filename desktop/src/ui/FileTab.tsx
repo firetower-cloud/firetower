@@ -30,7 +30,7 @@ import { why } from "~/data";
 export function FileTab({ session, path }: { session: Session; path: string }) {
   const sessionId = session.id;
   const live = isLive();
-  const diff = useDiff(live ? session : null);
+  const diff = useDiff(live ? session : null, "Head");
   const mine = useMemo(() => diff.data.find((d) => d.at === path), [diff.data, path]);
   const remote = useFileText(live ? sessionId : "", path);
   const fixture = live ? null : fileAt(path);

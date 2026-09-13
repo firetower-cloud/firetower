@@ -27,6 +27,10 @@ import { TerminalPane } from "~/ui/TerminalPane";
 import { Unreachable } from "~/ui/Unreachable";
 import { drag } from "~/drag";
 
+/** The rail can be dragged between these. */
+const RAIL_MIN = 288;
+const RAIL_DEFAULT = 368;
+
 type Side = "diff" | "files" | "ship";
 
 export function Workbench({ backend, workspace }: { backend: Backend; workspace: string }) {
@@ -35,6 +39,45 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
   const start = useStart();
   const [side, setSide] = useState<Side>("diff");
   const [open, setOpen] = useState(true);
+  const [width, setWidth] = useState(() => {
+    try {
+      const held = Number(localStorage.getItem("firetower.inspector.width"));
+      return held >= RAIL_MIN ? held : RAIL_DEFAULT;
+    } catch {
+      return RAIL_DEFAULT;
+    }
+  });
+  /* Dragging the rail's edge. Pointer capture on the handle keeps the drag
+     alive when the pointer outruns it, and the width is clamped so the rail
+     can neither vanish nor push the conversation off the screen. */
+  const startResize = (e: React.PointerEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    const handle = e.currentTarget;
+    const from = { x: e.clientX, width };
+    handle.setPointerCapture(e.pointerId);
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    const move = (ev: PointerEvent) => {
+      const next = Math.round(Math.min(window.innerWidth * 0.6, Math.max(RAIL_MIN, from.width + (from.x - ev.clientX))));
+      setWidth(next);
+    };
+    const up = () => {
+      handle.removeEventListener("pointermove", move);
+      handle.removeEventListener("pointerup", up);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      setWidth((w) => {
+        try {
+          localStorage.setItem("firetower.inspector.width", String(w));
+        } catch {
+          // A browser told to keep nothing; the width lasts the session.
+        }
+        return w;
+      });
+    };
+    handle.addEventListener("pointermove", move);
+    handle.addEventListener("pointerup", up);
+  };
   const [term, setTerm] = useState(false);
   const [reading, setReading] = useState<string | null>(null);
   const [tabs, setTabs] = useState<Tab[]>([{ id: "chat" }]);
@@ -293,7 +336,13 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
         </div>
 
         {open && (
+          <div onPointerDown={startResize} title="Drag to resize" className="group/handle relative z-10 -mr-px w-1 shrink-0 cursor-col-resize">
+            <div className="absolute inset-y-0 left-0 w-px bg-transparent transition-colors duration-150 group-hover/handle:bg-slate group-active/handle:bg-slate" />
+          </div>
+        )}
+        {open && (
           <Inspector
+            width={width}
             session={run}
             workspace={place.id}
             branch={place.branch}

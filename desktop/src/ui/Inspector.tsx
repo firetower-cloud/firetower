@@ -23,6 +23,7 @@ import { useDiff } from "~/data";
 import { fromPatch, isNew } from "~/patch";
 import { why } from "~/data";
 import { Ship } from "~/ui/Ship";
+import { FileGlyph } from "~/ui/FileGlyph";
 
 const TABS = [
   { id: "diff", label: "Diff", icon: FileDiff },
@@ -41,6 +42,7 @@ export function Inspector({
   onTab,
   onOpenFile,
   onClose,
+  width,
 }: {
   session: Session;
   workspace: string;
@@ -50,9 +52,11 @@ export function Inspector({
   onTab: (t: TabId) => void;
   onOpenFile: (path: string, keep?: boolean) => void;
   onClose: () => void;
+  width?: number;
 }) {
   const live = isLive();
   const diff = useDiff(live ? session : null);
+  const pending = useDiff(live ? session : null, "Head");
   /* One shape for both: a real `FileDiff` carries a unified patch, a fixture
      carries hunk lines. Both become lines here. */
   const files: Changed[] = useMemo(
@@ -62,10 +66,15 @@ export function Inspector({
         : fixtureDiffs.map((d) => ({ path: d.path, at: d.path, added: d.added, removed: d.removed, lines: d.hunk })),
     [live, diff.data, fixtureDiffs],
   );
-  const changed = useMemo(() => new Map(files.map((f) => [f.at, !!f.fresh])), [files]);
+  /* The tree marks what is not committed yet — the editor's sense of "changed".
+     A fixture has no commits, so there everything in the diff counts. */
+  const changed = useMemo(
+    () => (live ? new Map(pending.data.map((d) => [d.at, isNew(d.patch)])) : new Map(files.map((f) => [f.at, !!f.fresh]))),
+    [live, pending.data, files],
+  );
 
   return (
-    <aside className="flex w-[23rem] shrink-0 flex-col border-l border-line bg-panel">
+    <aside style={{ width: width ?? 368 }} className="flex shrink-0 flex-col border-l border-line bg-panel">
       <div className="flex h-11 shrink-0 items-center gap-1 border-b border-line px-2">
         <div className="track">
           {TABS.map((t) => (
@@ -138,7 +147,7 @@ function DiffList({
             <button onClick={() => setOpen(on ? "" : d.path)} className="group/file flex w-full items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-raise/60">
               <ChevronRight className={`h-3.5 w-3.5 shrink-0 text-mute transition-transform duration-150 ${on ? "rotate-90" : ""}`} strokeWidth={1.75} />
               <span className="min-w-0 flex-1">
-                <span className="block truncate font-mono text-ui text-bone">{d.path.split("/").pop()}</span>
+                <span className="flex items-center gap-1.5 truncate font-mono text-ui text-bone"><FileGlyph name={d.path.split("/").pop() ?? d.path} />{d.path.split("/").pop()}</span>
                 <span className="block truncate font-mono text-micro text-mute">{d.path.split("/").slice(0, -1).join("/")}</span>
               </span>
               <span className="shrink-0 font-mono text-micro"><span className="text-sage">+{d.added}</span> <span className="text-brick">−{d.removed}</span></span>
@@ -242,7 +251,8 @@ function Entry({ sessionId, entry, path, depth, changed, marked, onOpenFile }: {
         className="flex h-7 w-full items-center gap-1.5 pr-3 text-left transition-colors hover:bg-raise/60"
       >
         {entry.directory ? <ChevronRight className={`h-3 w-3 shrink-0 text-mute transition-transform duration-150 ${open ? "rotate-90" : ""}`} strokeWidth={2} /> : <span className="w-3 shrink-0" />}
-        <span className={`min-w-0 flex-1 truncate font-mono text-ui ${entry.directory ? "text-dim" : touched ? "text-sage" : "text-mute"}`}>{entry.name}{entry.link ? " →" : ""}</span>
+        <FileGlyph name={entry.name} directory={entry.directory} open={open} tone={touched && !entry.directory ? "text-sage" : undefined} />
+        <span className={`min-w-0 flex-1 truncate font-mono text-ui ${entry.directory ? "text-dim" : touched ? "text-sage" : "text-text"}`}>{entry.name}{entry.link ? " →" : ""}</span>
         {touched && <span className={`shrink-0 font-mono text-micro ${entry.directory ? "text-mute" : "text-sage"}`}>{entry.directory ? "•" : fresh ? "A" : "M"}</span>}
       </button>
       {entry.directory && open && <Directory sessionId={sessionId} path={path} depth={depth + 1} changed={changed} marked={marked} onOpenFile={onOpenFile} />}
@@ -265,7 +275,8 @@ function Branch({ node, depth, trail, onOpenFile }: { node: Node; depth: number;
     <>
       <button onClick={() => (dir ? setOpen(!open) : onOpenFile(path))} onDoubleClick={() => !dir && onOpenFile(path, true)} style={{ paddingLeft: `${0.75 + depth * 0.85}rem` }} className="flex h-7 w-full items-center gap-1.5 pr-3 text-left transition-colors hover:bg-raise/60">
         {dir ? <ChevronRight className={`h-3 w-3 shrink-0 text-mute transition-transform duration-150 ${open ? "rotate-90" : ""}`} strokeWidth={2} /> : <span className="w-3 shrink-0" />}
-        <span className={`min-w-0 flex-1 truncate font-mono text-ui ${dir ? "text-dim" : node.added ? "text-sage" : node.changed ? "text-bone" : "text-mute"}`}>{node.name}</span>
+        <FileGlyph name={node.name} directory={dir} open={open} tone={node.added || node.changed ? "text-sage" : undefined} />
+        <span className={`min-w-0 flex-1 truncate font-mono text-ui ${dir ? "text-dim" : node.added || node.changed ? "text-sage" : "text-text"}`}>{node.name}</span>
         {node.added && <span className="shrink-0 font-mono text-micro text-sage">new</span>}
         {node.changed && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-slate" />}
       </button>

@@ -2943,6 +2943,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "since",
+            "in": "query",
+            "description": "Measured from the base of the branch (the default) or from the last commit.",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/DiffSince"
+            }
           }
         ],
         "responses": {
@@ -6108,6 +6117,14 @@
             "description": "One sentence, written for whoever is looking at the screen."
           }
         }
+      },
+      "DiffSince": {
+        "type": "string",
+        "description": "Where a session's diff is measured from.\n\n`Base` is the branch: everything since it left the base, committed or not\n— what a pull request would carry. `Head` is the working tree: only what\nis not committed yet — what an editor marks in its file tree.",
+        "enum": [
+          "Base",
+          "Head"
+        ]
       },
       "DockerState": {
         "type": "object",

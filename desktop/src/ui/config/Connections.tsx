@@ -29,6 +29,7 @@ import {
 import { getListTrackersQueryKey, useDisconnectTracker, useListTrackerScopes, useSetTrackerKey } from "@/src/api/generated/trackers/trackers";
 import { useProviders, useTrackers } from "~/data";
 import { why } from "~/data";
+import { openExternal } from "~/open";
 import { DeviceCode, Rows, Section, sleep } from "~/ui/config/bits";
 
 export function Connections({ live }: { live: boolean }) {
@@ -67,7 +68,7 @@ function Provider({ p, live }: { p: ProviderStatus; live: boolean }) {
       { id: p.id },
       {
         onSuccess: async (auth) => {
-          window.open(auth.verificationUri, "_blank", "noopener");
+          void openExternal(auth.verificationUri);
           setWaiting(auth);
           for (let asked = 0; asked < 600; asked++) {
             await sleep(2000);

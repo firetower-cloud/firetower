@@ -47,6 +47,7 @@ export * from './decision';
 export * from './deleteHostParams';
 export * from './destroySessionParams';
 export * from './diagnosis';
+export * from './diffSince';
 export * from './dockerState';
 export * from './dockerStatus';
 export * from './done';

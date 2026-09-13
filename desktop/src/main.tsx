@@ -3,6 +3,9 @@ import { createRoot } from "react-dom/client";
 import "./styles.css";
 import { App } from "./App";
 import { Boundary } from "./ui/Boundary";
+import { catchExternalLinks } from "./open";
+
+catchExternalLinks();
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
