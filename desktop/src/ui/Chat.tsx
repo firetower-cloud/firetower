@@ -193,6 +193,23 @@ export function Chat({
     if (el && following.current) el.scrollTop = el.scrollHeight;
   }, [rows.length, working, asked.length, questions.length]);
 
+  /* While the agent is talking, the end is checked every frame. A resize
+     observer reports after layout and can trail a fast stream by a few
+     frames, which reads as the page lagging behind the words and then
+     catching up; a frame-by-frame check costs one comparison and keeps the
+     last line pinned. Nothing runs while the agent is idle. */
+  useEffect(() => {
+    if (!working) return;
+    let raf = 0;
+    const loop = () => {
+      const el = scroller.current;
+      if (el && following.current && el.scrollHeight - el.scrollTop - el.clientHeight > 1) el.scrollTop = el.scrollHeight;
+      raf = requestAnimationFrame(loop);
+    };
+    raf = requestAnimationFrame(loop);
+    return () => cancelAnimationFrame(raf);
+  }, [working]);
+
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="relative flex min-h-0 flex-1 flex-col">
