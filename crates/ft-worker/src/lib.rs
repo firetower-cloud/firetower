@@ -1829,7 +1829,17 @@ You are in the directory that holds them, not inside one of them.              P
     /// skipped would say something happened that did not.
     async fn start_agent(&self, spec: ft_proto::StartAgent, out: &Out) -> Result<()> {
         let id = spec.session_id.clone();
-        let path = self.git.worktree_path(&spec.workspace);
+        // Where the workspace was recorded when it was made, when the control
+        // plane says which record; the derived name otherwise. The record wins
+        // because the name can drift — see `StartAgent::workspace_session`.
+        let recorded = match &spec.workspace_session {
+            Some(first) => self.store.workspace_path(first).await?.map(PathBuf::from),
+            None => None,
+        };
+        let path = match recorded {
+            Some(recorded) if tokio::fs::metadata(&recorded).await.is_ok() => recorded,
+            _ => self.git.worktree_path(&spec.workspace),
+        };
 
         anyhow::ensure!(
             tokio::fs::metadata(&path).await.is_ok(),

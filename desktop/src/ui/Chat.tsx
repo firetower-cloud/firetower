@@ -22,6 +22,7 @@
 import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
+  Bot,
   Check,
   ChevronRight,
   Copy,
@@ -51,6 +52,7 @@ import { Composer } from "~/ui/Composer";
 import { AccountSwitcher } from "~/ui/AccountSwitcher";
 import { Annotate, type Anchor } from "~/ui/Annotate";
 import { markPaths, resolvePath } from "~/paths";
+import { AddAgent } from "~/ui/AddAgent";
 import { isLive } from "~/mock/http";
 import { talkFor, type Ask, type Turn } from "~/mock/backends";
 
@@ -119,6 +121,8 @@ export function Chat({
      reload and go out as one ordinary message. */
   const { notes, add, drop, clear } = useNotes(session.id);
   const [drafting, setDrafting] = useState<Anchor & { item: string } | null>(null);
+  /* Or to a second agent, started here on the notes. */
+  const [handing, setHanding] = useState(false);
   const post = useMutation({
     mutationFn: () => sendTurn(session.id, { text: asMessage(notes), images: [] }),
     onSuccess: () => {
@@ -284,12 +288,16 @@ export function Chat({
           <div className="pointer-events-auto flex items-center gap-2 rounded-full border border-line bg-overlay py-1.5 pr-1.5 pl-3.5 shadow-(--shadow-float)">
             <span className="text-ui text-dim">{notes.length} note{notes.length > 1 ? "s" : ""}</span>
             <button onClick={clear} title="Discard them" className="grid h-6 w-6 place-items-center rounded-full text-mute transition-colors hover:bg-raise hover:text-bone"><X className="h-3.5 w-3.5" strokeWidth={2} /></button>
+            <button disabled={!live} onClick={() => setHanding(true)} title="Start another agent in this workspace, on these notes" className="control rounded-full text-dim hover:bg-raise hover:text-bone disabled:text-mute">
+              <Bot className="h-3.5 w-3.5" strokeWidth={1.75} />Another agent…
+            </button>
             <button disabled={!live || !answerable || post.isPending} onClick={() => post.mutate()} className="control rounded-full bg-bone font-medium text-ground transition-opacity hover:opacity-90 disabled:bg-raise disabled:text-mute">
               <Send className="h-3.5 w-3.5" strokeWidth={2} />{post.isPending ? "Sending…" : "Send to the agent"}
             </button>
           </div>
         </div>
       )}
+      {handing && <AddAgent session={session} workspaceId={session.workspaceId ?? session.id} prompt={asMessage(notes)} onClose={() => setHanding(false)} onStarted={clear} />}
       </div>
 
       <Composer

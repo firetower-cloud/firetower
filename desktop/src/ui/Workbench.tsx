@@ -22,6 +22,7 @@ import { Chat } from "~/ui/Chat";
 import { FileTab } from "~/ui/FileTab";
 import { PreviewTab } from "~/ui/PreviewTab";
 import { PortPicker } from "~/ui/PortPicker";
+import { AddAgent } from "~/ui/AddAgent";
 import { QuickOpen } from "~/ui/QuickOpen";
 import { TabStrip, type Tab } from "~/ui/Tabs";
 import { Inspector } from "~/ui/Inspector";
@@ -154,6 +155,9 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
     setActive(`f:${path}`);
   };
 
+  /* Another agent in this same workspace. */
+  const [adding, setAdding] = useState(false);
+
   /* A preview is a kept tab from the start: nobody skims ports. */
   const [picking, setPicking] = useState(false);
   const openPreview = (port: number) => {
@@ -176,7 +180,11 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
      id is the header's truth even before the list has caught up — the moment
      after "Start it" the list may not hold it yet, but `get_session` does. */
   const running = sessions.filter((s) => s.status !== "Ended");
-  const found = group(running).groups.flatMap(([, ps]) => ps).find((p) => p.id === workspace);
+  /* By the workspace's id, or by any run in it: a second agent is opened by
+     its own id and belongs to the place its sibling made. */
+  const found = group(running)
+    .groups.flatMap(([, ps]) => ps)
+    .find((p) => p.id === workspace || p.runs.some((r) => r.id === workspace));
   const place =
     found ??
     (opened.data
@@ -304,8 +312,8 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
             </button>
           ))}
           <button
-            onClick={() => start({ workspaceId: place.id, title: place.name, repo: run.repo ?? undefined })}
-            title="Another agent in this workspace"
+            onClick={() => (live ? setAdding(true) : start({ workspaceId: place.id, title: place.name, repo: run.repo ?? undefined }))}
+            title="Add an agent to this workspace"
             className="grid h-7 w-7 place-items-center rounded-md text-mute transition-colors hover:bg-raise hover:text-bone"
           >
             +
@@ -450,6 +458,7 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
         )}
       </div>
 
+      {adding && <AddAgent session={run} workspaceId={place.id} onClose={() => setAdding(false)} />}
       <QuickOpen sessionId={run.id} open={finding} onClose={() => setFinding(false)} onPick={(p) => openFile(p, true)} />
     </div>
   );

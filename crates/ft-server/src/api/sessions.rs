@@ -800,6 +800,10 @@ pub(crate) async fn relaunch(
             ft_proto::StartAgent {
                 session_id: session.id.clone(),
                 workspace: directory,
+                workspace_session: Some(match &session.workspace_id {
+                    Some(w) => SessionId::from_stored(w.as_str().to_string()),
+                    None => session.id.clone(),
+                }),
                 // Nothing to ask for. The conversation is being picked up, not
                 // opened, and a prompt here would be a turn nobody typed.
                 prompt: String::new(),
@@ -964,6 +968,7 @@ async fn start_another_agent(
             ft_proto::StartAgent {
                 session_id: id.clone(),
                 workspace: directory,
+                workspace_session: Some(SessionId::from_stored(place.id.as_str().to_string())),
                 prompt: prompt.to_string(),
                 agent: req.agent,
                 title: title.clone(),

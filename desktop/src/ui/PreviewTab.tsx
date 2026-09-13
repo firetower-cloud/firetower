@@ -13,7 +13,7 @@
  * a draft.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ChevronLeft, ChevronRight, ExternalLink, Monitor, RotateCw, Send, Smartphone, Tablet, Trash2 } from "lucide-react";
+import { Bot, ChevronLeft, ChevronRight, ExternalLink, Monitor, RotateCw, Send, Smartphone, Tablet, Trash2 } from "lucide-react";
 import { usePreviewAddress } from "@/src/api/generated/sessions/sessions";
 import type { PreviewAnnotation, Session } from "@/src/api/generated/model";
 import { elapsed, minutesSince } from "@/src/api/view";
@@ -23,6 +23,7 @@ import { openExternal } from "~/open";
 import { Annotate, type Anchor } from "~/ui/Annotate";
 import { usePickerBridge, type Selection } from "~/preview/bridge";
 import { usePreviewNotes } from "~/preview/notes";
+import { AddAgent } from "~/ui/AddAgent";
 
 const WIDTHS = [
   { id: "full", label: "Full width", icon: Monitor, px: 0 },
@@ -63,6 +64,7 @@ export function PreviewTab({ session, port, path: initialPath = "/", onPath }: {
   const [drafting, setDrafting] = useState<(Anchor & Selection) | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [focused, setFocused] = useState<string | null>(null);
+  const [handing, setHanding] = useState(false);
 
   const notes = usePreviewNotes(session.id, port, live && !ended);
 
@@ -222,7 +224,10 @@ export function PreviewTab({ session, port, path: initialPath = "/", onPath }: {
             )}
           </div>
           {drafts.length > 0 && (
-            <div className="shrink-0 border-t border-line p-2.5">
+            <div className="shrink-0 space-y-1.5 border-t border-line p-2.5">
+              <button onClick={() => setHanding(true)} title="Start another agent in this workspace, on these notes" className="control w-full justify-center text-dim hover:bg-raise hover:text-bone">
+                <Bot className="h-3.5 w-3.5" strokeWidth={1.75} />Another agent…
+              </button>
               <button
                 disabled={notes.send.isPending}
                 onClick={() => notes.send.mutate(drafts, { onError: (e) => setNotice(why(e) ?? "Could not send those notes.") })}
@@ -235,6 +240,15 @@ export function PreviewTab({ session, port, path: initialPath = "/", onPath }: {
           )}
         </aside>
       </div>
+
+      {handing && (
+        <AddAgent
+          session={session}
+          workspaceId={session.workspaceId ?? session.id}
+          prompt={`${drafts.length === 1 ? "A note" : `${drafts.length} notes`} on the app at port ${port}:\n\n${drafts.map((n, i) => `${i + 1}. ${n.snapshot.path} · ${nameOf(n.snapshot.label, n.snapshot.html)}\n> ${n.snapshot.html.replace(/\s+/g, " ").slice(0, 300)}\n\n${n.note}`).join("\n\n")}`}
+          onClose={() => setHanding(false)}
+        />
+      )}
 
       {notice && (
         <div className="pointer-events-none absolute bottom-4 left-1/2 z-30 -translate-x-1/2 rounded-full border border-line bg-overlay px-3.5 py-1.5 text-meta text-dim shadow-(--shadow-float)">{notice}</div>

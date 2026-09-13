@@ -11,7 +11,7 @@
  */
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
-import { Check, Copy, Send, X } from "lucide-react";
+import { Bot, Check, Copy, Send, X } from "lucide-react";
 import { Markdown } from "@/components/Markdown";
 import { isMarkdown, useFileText } from "@/src/api/text";
 import { sendTurn } from "@/src/api/generated/sessions/sessions";
@@ -22,6 +22,7 @@ import { isLive } from "~/mock/http";
 import { Annotate, type Anchor } from "~/ui/Annotate";
 import { addedLines, removedLines } from "~/patch";
 import { useDiff } from "~/data";
+import { AddAgent } from "~/ui/AddAgent";
 
 type Note = { id: number; quote: string; line: number; text: string };
 
@@ -53,6 +54,8 @@ export function FileTab({ session, path, line }: { session: Session; path: strin
   const [drafting, setDrafting] = useState<Anchor | null>(null);
   const [reading, setReading] = useState<Note | null>(null);
   const [copied, setCopied] = useState(false);
+  const [handing, setHanding] = useState(false);
+  const message = () => `On \`${path}\`:\n\n${notes.map((n, i) => `${i + 1}. Line ${n.line}:\n> ${n.quote.split("\n").join("\n> ")}\n\n${n.text}`).join("\n\n")}`;
   /* Markdown reads rendered — unless you came for a line, which only the source has. */
   const [rendered, setRendered] = useState(!line);
   const body = useRef<HTMLDivElement>(null);
@@ -72,10 +75,7 @@ export function FileTab({ session, path, line }: { session: Session; path: strin
 
   const send = useMutation({
     mutationFn: () =>
-      sendTurn(sessionId, {
-        text: `On \`${path}\`:\n\n${notes.map((n, i) => `${i + 1}. Line ${n.line}:\n> ${n.quote.split("\n").join("\n> ")}\n\n${n.text}`).join("\n\n")}`,
-        images: [],
-      }),
+      sendTurn(sessionId, { text: message(), images: [] }),
     onSuccess: () => setNotes([]),
   });
 
@@ -161,12 +161,16 @@ export function FileTab({ session, path, line }: { session: Session; path: strin
           <div className="pointer-events-auto flex items-center gap-2 rounded-full border border-line bg-overlay py-1.5 pr-1.5 pl-3.5 shadow-(--shadow-float)">
             <span className="text-ui text-dim">{notes.length} note{notes.length > 1 ? "s" : ""}</span>
             <button onClick={() => setNotes([])} title="Discard them" className="grid h-6 w-6 place-items-center rounded-full text-mute transition-colors hover:bg-raise hover:text-bone"><X className="h-3.5 w-3.5" strokeWidth={2} /></button>
+            <button disabled={!live} onClick={() => setHanding(true)} title="Start another agent in this workspace, on these notes" className="control rounded-full text-dim hover:bg-raise hover:text-bone disabled:text-mute">
+              <Bot className="h-3.5 w-3.5" strokeWidth={1.75} />Another agent…
+            </button>
             <button disabled={!live || send.isPending} onClick={() => send.mutate()} className="control rounded-full bg-bone font-medium text-ground transition-opacity hover:opacity-90 disabled:bg-raise disabled:text-mute">
               <Send className="h-3.5 w-3.5" strokeWidth={2} />{send.isPending ? "Sending…" : "Send to the agent"}
             </button>
           </div>
         </div>
       )}
+      {handing && <AddAgent session={session} workspaceId={session.workspaceId ?? session.id} prompt={message()} onClose={() => setHanding(false)} onStarted={() => setNotes([])} />}
 
       {reading && <Annotate at={{ ...reading, x: window.innerWidth / 2, y: 160 }} onCancel={() => setReading(null)} onKeep={(t) => { setNotes((h) => h.map((x) => (x.id === reading.id ? { ...x, text: t } : x))); setReading(null); }} />}
     </div>
