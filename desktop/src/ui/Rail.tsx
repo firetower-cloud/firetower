@@ -17,7 +17,7 @@ import { GithubMark, Icon } from "@/components/ui";
 import { doing, group, shortRepo, type Workspace } from "@/src/api/workspaces";
 import { elapsed, minutesSince, needsYou } from "@/src/api/view";
 import type { Backend } from "~/mock/backends";
-import { useSessions } from "~/data";
+import { useSessions, useUpdatesDot } from "~/data";
 import { navigate, usePathname } from "~/shims/next-navigation";
 import { useStart } from "~/start";
 
@@ -30,6 +30,7 @@ export function Rail({ backend }: { backend: Backend }) {
   const path = usePathname();
   const start = useStart();
   const { data: sessions, loading, error } = useSessions();
+  const updates = useUpdatesDot();
 
   const running = sessions.filter((s) => s.status !== "Ended");
   const repos = group(running);
@@ -87,21 +88,21 @@ export function Rail({ backend }: { backend: Backend }) {
 
       <div className="shrink-0 border-t border-line px-2 py-1.5">
         <NavLink href="/configuration" label="Configuration" icon={Settings2} on={path.startsWith("/configuration")} />
-        <NavLink href="/updates" label="Updates" icon={CircleFadingArrowUp} on={path.startsWith("/updates")} />
+        <NavLink href="/updates" label="Updates" icon={CircleFadingArrowUp} on={path.startsWith("/updates")} dot={updates} />
         <NavLink href="/style" label="Style guide" icon={BookOpen} on={path.startsWith("/style")} />
       </div>
 
       {/* Who you are *here*. Two servers means two accounts, so this is not
           furniture — it answers whose credentials a session would use. */}
-      <div className="shrink-0 border-t border-line px-4 py-2.5">
+      <button onClick={() => navigate("/account")} className={`shrink-0 border-t border-line px-4 py-2.5 text-left transition-colors hover:bg-raise/60 ${path.startsWith("/account") ? "bg-raise" : ""}`}>
         <div className="truncate text-ui text-text">{backend.user}</div>
         <div className="truncate text-meta text-mute">{backend.org}</div>
-      </div>
+      </button>
     </aside>
   );
 }
 
-function NavLink({ href, label, icon, on }: { href: string; label: string; icon: LucideIcon; on: boolean }) {
+function NavLink({ href, label, icon, on, dot }: { href: string; label: string; icon: LucideIcon; on: boolean; dot?: boolean }) {
   return (
     <button
       onClick={() => navigate(href)}
@@ -111,6 +112,7 @@ function NavLink({ href, label, icon, on }: { href: string; label: string; icon:
     >
       <Icon of={icon} size={14} />
       {label}
+      {dot && <span className="ml-auto h-1.5 w-1.5 shrink-0 rounded-full bg-slate" />}
     </button>
   );
 }

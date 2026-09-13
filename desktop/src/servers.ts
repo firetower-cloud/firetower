@@ -49,6 +49,15 @@ export function remember(server: Connected) {
   changed();
 }
 
+/** A changed password answers with a new token; keep it, drop the old. */
+export function updateToken(serverId: string, token: string) {
+  window.localStorage.setItem(
+    KEY,
+    JSON.stringify(servers().map((s) => (s.serverId === serverId ? { ...s, token } : s))),
+  );
+  changed();
+}
+
 export function forget(serverId: string) {
   window.localStorage.setItem(
     KEY,

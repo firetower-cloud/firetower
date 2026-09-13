@@ -16,6 +16,7 @@ import { Connect } from "~/ui/Connect";
 import { servers, onServers } from "~/servers";
 import { NewWorkspace } from "~/ui/NewWorkspace";
 import { Boundary } from "~/ui/Boundary";
+import { Gate } from "~/ui/Gate";
 import { navigate, usePathname } from "~/shims/next-navigation";
 
 export function App() {
@@ -129,7 +130,16 @@ export function App() {
                     error rather than sticking on it. */}
                 <Boundary key={path} onReset={() => navigate("/")}>
                   <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-                    <Routes backend={here} />
+                    <Gate>
+                      <Routes
+                        backend={here}
+                        onForgot={() => {
+                          setReal(servers());
+                          setScope("e1");
+                          navigate("/");
+                        }}
+                      />
+                    </Gate>
                   </div>
                 </Boundary>
               </StartProvider>

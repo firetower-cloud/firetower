@@ -271,3 +271,45 @@
     color: var(--color-mute);
   }
 }
+
+@layer components {
+  /* ── Markdown, at reading size ───────────────────────────────────
+     `components/Markdown.tsx` sets its own paragraph and list rhythm at the
+     web's 14px. Reading here is 15px, and a `#` inside a reply must not
+     compete with the page title — so headings step down one size each and
+     the whole thing inherits `--text-read`. Code blocks take the same ground
+     and mono as the file viewer. */
+  .prose-desk .ft-md {
+    font-size: var(--text-read);
+    line-height: var(--text-read--line-height);
+    color: var(--color-text);
+  }
+  .prose-desk .ft-md h1 { font-size: var(--text-lede); line-height: 1.4; color: var(--color-bone); font-weight: 600; margin: 1.25rem 0 0.5rem; }
+  .prose-desk .ft-md h2 { font-size: var(--text-read); color: var(--color-bone); font-weight: 600; margin: 1.1rem 0 0.4rem; }
+  .prose-desk .ft-md h3, .prose-desk .ft-md h4 { font-size: var(--text-ui); color: var(--color-bone); font-weight: 600; margin: 1rem 0 0.3rem; }
+  .prose-desk .ft-md pre {
+    margin: 0.75rem 0;
+    padding: 0.75rem 0.9rem;
+    border-radius: var(--radius-md);
+    background: var(--color-panel);
+    border: 1px solid var(--color-line-soft);
+    font-family: var(--font-mono);
+    font-size: var(--text-code);
+    line-height: var(--text-code--line-height);
+    overflow-x: auto;
+  }
+  .prose-desk .ft-md :not(pre) > code {
+    font-family: var(--font-mono);
+    font-size: var(--text-code);
+    color: var(--color-bone);
+    background: color-mix(in srgb, var(--color-ground) 80%, transparent);
+    padding: 0.05rem 0.35rem;
+    border-radius: 4px;
+  }
+  .prose-desk .ft-md table { border-collapse: collapse; margin: 0.75rem 0; font-size: var(--text-ui); }
+  .prose-desk .ft-md th, .prose-desk .ft-md td { border: 1px solid var(--color-line); padding: 0.3rem 0.6rem; text-align: left; }
+  .prose-desk .ft-md th { color: var(--color-bone); background: var(--color-panel); }
+  .prose-desk .ft-md blockquote { border-left: 2px solid var(--color-line); padding-left: 0.85rem; color: var(--color-dim); margin: 0.75rem 0; }
+  .prose-desk .ft-md hr { border: 0; border-top: 1px solid var(--color-line); margin: 1rem 0; }
+  .prose-desk .ft-md input[type="checkbox"] { margin-right: 0.4rem; }
+}

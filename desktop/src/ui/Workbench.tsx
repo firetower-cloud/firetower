@@ -7,13 +7,18 @@
  * diff hid the conversation that explained it. They are two halves of one job.
  */
 import { useEffect, useState } from "react";
-import { PanelRight, SquareTerminal, X } from "lucide-react";
+import { Cpu, PanelRight, Pencil, SquareTerminal, Trash2, X } from "lucide-react";
+import { useQueryClient } from "@tanstack/react-query";
+import { getListSessionsQueryKey, useDestroySession, useRenameSession } from "@/src/api/generated/sessions/sessions";
+import { isLive } from "~/mock/http";
+import { useDiff } from "~/data";
 import { Signal } from "@/components/Signal";
 import { AgentMark } from "@/components/AgentMark";
 import { group } from "@/src/api/workspaces";
 import { talkFor, type Backend } from "~/mock/backends";
 import { useSession, useSessions } from "~/data";
 import { useStart } from "~/start";
+import { navigate } from "~/shims/next-navigation";
 import { Chat } from "~/ui/Chat";
 import { FileTab } from "~/ui/FileTab";
 import { QuickOpen } from "~/ui/QuickOpen";
@@ -137,6 +142,13 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
     primary;
 
   const talk = talkFor(place.id);
+  const live = isLive();
+  const cache = useQueryClient();
+  const rename = useRenameSession();
+  const destroy = useDestroySession();
+  const diff = useDiff(live ? run.id : null);
+  const changed = new Set(live ? (diff.data as { path: string }[]).map((d) => d.path) : talk.diffs.map((d) => d.path));
+  const [renaming, setRenaming] = useState<string | null>(null);
 
   if (backend.reach === "unreachable") return <Unreachable org={backend.org} />;
 
@@ -145,7 +157,33 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
       {/* A toolbar, not a tab bar: what this workspace is, who is in it, and
           the two things you toggle. */}
       <div {...drag} className="flex h-11 shrink-0 items-center gap-3 border-b border-line px-3">
-        <span className="min-w-0 truncate text-ui text-bone">{place.name}</span>
+        {renaming !== null ? (
+          <input
+            autoFocus
+            value={renaming}
+            onChange={(e) => setRenaming(e.target.value)}
+            onBlur={() => setRenaming(null)}
+            onKeyDown={(e) => {
+              if (e.key === "Escape") setRenaming(null);
+              if (e.key === "Enter" && renaming.trim() && live) {
+                rename.mutate({ id: run.id, data: { name: renaming.trim() } }, { onSuccess: () => cache.invalidateQueries({ queryKey: getListSessionsQueryKey() }) });
+                setRenaming(null);
+              }
+            }}
+            className="w-56 rounded-md border border-line bg-ground px-2 py-1 text-ui text-bone focus:outline-none"
+          />
+        ) : (
+          <button onDoubleClick={() => setRenaming(place.name)} title="Double-click to rename" className="flex min-w-0 items-center gap-1.5 truncate text-ui text-bone">
+            {place.name}
+            <Pencil className="h-3 w-3 shrink-0 text-mute opacity-0 transition-opacity hover:opacity-100" strokeWidth={1.75} />
+          </button>
+        )}
+        {run.usage && (
+          <span className="flex shrink-0 items-center gap-1.5 text-micro text-mute" title="What this workspace is using on its machine">
+            <Cpu className="h-3 w-3" strokeWidth={1.75} />
+            {Math.round(run.usage.cpu * 10) / 10} cores · {Math.round(run.usage.memoryMb)} MB
+          </span>
+        )}
 
         {/* Which agent you are reading. A count would not do: two of one and
             one of another is a different place from three of one. */}
@@ -182,6 +220,18 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
           >
             <SquareTerminal className="h-4 w-4" strokeWidth={1.75} />
           </button>
+          {live && (
+            <button
+              onClick={() => {
+                if (!window.confirm(`End "${place.name}"? Its branch stays on the machine; the agents stop.`)) return;
+                destroy.mutate({ id: run.id, params: undefined as never }, { onSuccess: () => { cache.invalidateQueries({ queryKey: getListSessionsQueryKey() }); navigate("/"); } });
+              }}
+              title="End this session"
+              className="control text-mute hover:bg-raise hover:text-brick"
+            >
+              <Trash2 className="h-4 w-4" strokeWidth={1.75} />
+            </button>
+          )}
           <button
             onClick={() => setOpen(!open)}
             title="Inspector  ⌘\"
@@ -221,7 +271,7 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
                 }}
               />
             ) : (
-              <FileTab path={(tabs.find((t) => t.id === active) as { path: string }).path} />
+              <FileTab sessionId={run.id} path={(tabs.find((t) => t.id === active) as { path: string }).path} changed={changed} />
             )}
           </div>
 
@@ -246,9 +296,10 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
 
         {open && (
           <Inspector
+            session={run}
             workspace={place.id}
             branch={place.branch}
-            diffs={talk.diffs}
+            fixtureDiffs={talk.diffs}
             tab={side}
             onTab={setSide}
             onOpenFile={openFile}
@@ -257,7 +308,7 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
         )}
       </div>
 
-      <QuickOpen open={finding} onClose={() => setFinding(false)} onPick={(p) => openFile(p, true)} />
+      <QuickOpen sessionId={run.id} open={finding} onClose={() => setFinding(false)} onPick={(p) => openFile(p, true)} />
     </div>
   );
 }

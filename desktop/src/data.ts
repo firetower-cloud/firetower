@@ -16,6 +16,10 @@ import { useListHosts } from "@/src/api/generated/hosts/hosts";
 import { useListAgents } from "@/src/api/generated/agents/agents";
 import { useListProviders } from "@/src/api/generated/providers/providers";
 import { useListAccounts } from "@/src/api/generated/accounts/accounts";
+import { useMe } from "@/src/api/generated/auth/auth";
+import { useSetupState } from "@/src/api/generated/setup/setup";
+import { useGetUpdates } from "@/src/api/generated/updates/updates";
+import { showsDot } from "@/src/api/updates";
 import { useListTrackers } from "@/src/api/generated/trackers/trackers";
 import {
   getListSessionsQueryKey,
@@ -34,7 +38,12 @@ import { useBackendKey } from "~/backend";
 /** Everything a screen needs to know about where its data came from. */
 export type Feed<T> = { data: T; live: boolean; loading: boolean; error: string | null };
 
-function why(e: unknown): string | null {
+/** What the server said, off any thrown thing. */
+export function why(e: unknown): string {
+  return (e as { message?: string })?.message ?? "That didn't work.";
+}
+
+function whyOrNull(e: unknown): string | null {
   if (!e) return null;
   const m = (e as { message?: string })?.message;
   return m ?? "that request did not work";
@@ -48,7 +57,7 @@ export function useSessions(): Feed<Session[]> {
   const q = useListSessions(undefined, { query: { enabled: live } });
 
   return live
-    ? { data: q.data ?? [], live: true, loading: q.isPending, error: why(q.error) }
+    ? { data: q.data ?? [], live: true, loading: q.isPending, error: q.error ? why(q.error) : null }
     : { data: STATE[id as BackendId] ?? [], live: false, loading: false, error: null };
 }
 
@@ -67,7 +76,7 @@ export function useSession(id: string | null): Feed<Session | null> {
   const q = useGetSession(id ?? "", { query: { enabled: live && !!id } });
 
   if (live) {
-    return { data: q.data ?? null, live: true, loading: !!id && q.isPending, error: why(q.error) };
+    return { data: q.data ?? null, live: true, loading: !!id && q.isPending, error: q.error ? why(q.error) : null };
   }
   const found = (STATE[key as BackendId] ?? []).find((s) => s.id === id || s.workspaceId === id) ?? null;
   return { data: found, live: false, loading: false, error: null };
@@ -102,7 +111,7 @@ export function useTasks(): Feed<Task[]> {
         data: (q.data as { tasks?: Task[] } | undefined)?.tasks ?? [],
         live: true,
         loading: q.isPending,
-        error: why(q.error),
+        error: q.error ? why(q.error) : null,
       }
     : { data: TASKS[id as BackendId] ?? [], live: false, loading: false, error: null };
 }
@@ -122,41 +131,62 @@ export function useRepos() {
   }));
 
   return live
-    ? { data: q.data ?? [], live: true, loading: q.isPending, error: why(q.error) }
+    ? { data: q.data ?? [], live: true, loading: q.isPending, error: q.error ? why(q.error) : null }
     : { data: fallback, live: false, loading: false, error: null };
 }
 
 export function useHosts() {
   const live = isLive(useBackendKey());
   const q = useListHosts({ query: { enabled: live } });
-  return { data: q.data ?? [], live, loading: live && q.isPending, error: why(q.error) };
+  return { data: q.data ?? [], live, loading: live && q.isPending, error: q.error ? why(q.error) : null };
 }
 
 export function useAgents() {
   const live = isLive(useBackendKey());
   const q = useListAgents({ query: { enabled: live } });
-  return { data: q.data ?? [], live, loading: live && q.isPending, error: why(q.error) };
+  return { data: q.data ?? [], live, loading: live && q.isPending, error: q.error ? why(q.error) : null };
 }
 
 /** GitHub and the rest: whether they are connected, and as whom. */
 export function useProviders() {
   const live = isLive(useBackendKey());
   const q = useListProviders({ query: { enabled: live } });
-  return { data: q.data ?? [], live, loading: live && q.isPending, error: why(q.error) };
+  return { data: q.data ?? [], live, loading: live && q.isPending, error: q.error ? why(q.error) : null };
+}
+
+/**
+ * Whether this server still needs something before it is usable: a password
+ * that came from a file, or an organisation with no name. Asked on every visit,
+ * because both are facts about the server rather than about this Mac.
+ */
+export function useGate(): { setup: boolean; ready: boolean } {
+  const live = isLive(useBackendKey());
+  const me = useMe({ query: { enabled: live, staleTime: 60_000 } });
+  const setup = useSetupState({ query: { enabled: live, staleTime: 60_000 } });
+  if (!live) return { setup: false, ready: true };
+  const needs = !!me.data?.user?.mustChangePassword || (!!setup.data && !setup.data.completed);
+  return { setup: needs, ready: !me.isPending && !setup.isPending };
+}
+
+/** The dot on Updates in the rail. Asked rarely: the answer changes monthly. */
+export function useUpdatesDot(): boolean {
+  const live = isLive(useBackendKey());
+  const q = useGetUpdates({ query: { enabled: live, refetchInterval: 10 * 60_000, retry: false, staleTime: 60_000 } });
+  return live && showsDot(q.data);
 }
 
 /** Named agent connections — whose subscription a session runs on. */
 export function useAccounts() {
   const live = isLive(useBackendKey());
   const q = useListAccounts({ query: { enabled: live } });
-  return { data: q.data ?? [], live, loading: live && q.isPending, error: why(q.error) };
+  return { data: q.data ?? [], live, loading: live && q.isPending, error: q.error ? why(q.error) : null };
 }
 
 /** Where issues come from. */
 export function useTrackers() {
   const live = isLive(useBackendKey());
   const q = useListTrackers({ query: { enabled: live } });
-  return { data: q.data ?? [], live, loading: live && q.isPending, error: why(q.error) };
+  return { data: q.data ?? [], live, loading: live && q.isPending, error: q.error ? why(q.error) : null };
 }
 
 /** One directory of a session's workspace, off the worker. */
@@ -164,7 +194,7 @@ export function useWorkspaceFiles(sessionId: string | null, path: string) {
   const live = isLive(useBackendKey());
   const on = live && !!sessionId;
   const q = useListFiles(sessionId ?? "", { path } as never, { query: { enabled: on } });
-  return { data: q.data ?? [], live: on, loading: on && q.isPending, error: why(q.error) };
+  return { data: q.data ?? [], live: on, loading: on && q.isPending, error: q.error ? why(q.error) : null };
 }
 
 /** What a session has changed, as the control plane sees it. */
@@ -172,5 +202,5 @@ export function useDiff(sessionId: string | null) {
   const live = isLive(useBackendKey());
   const on = live && !!sessionId;
   const q = useSessionDiff(sessionId ?? "", undefined, { query: { enabled: on } });
-  return { data: q.data ?? [], live: on, loading: on && q.isPending, error: why(q.error) };
+  return { data: q.data ?? [], live: on, loading: on && q.isPending, error: q.error ? why(q.error) : null };
 }

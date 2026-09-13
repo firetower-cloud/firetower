@@ -19,7 +19,7 @@ import { useEffect, useRef, useState } from "react";
 import { ArrowUp, Check, ChevronDown, FileUp, ImageIcon, Paperclip, Square, X } from "lucide-react";
 import type { Conversation } from "@/src/api/conversation";
 import type { Attached, Control, ControlKind, Session } from "@/src/api/generated/model";
-import { useAttachFile, useInterruptSession, useSendTurn } from "@/src/api/generated/sessions/sessions";
+import { useAttachFile, useInterruptSession, useListFiles, useSendTurn } from "@/src/api/generated/sessions/sessions";
 import { useChooseControl, useSessionControls } from "@/src/api/generated/conversation/conversation";
 import { takeDraft } from "@/src/workspace/draft";
 import { isLive } from "~/mock/http";
@@ -43,6 +43,15 @@ function base64(file: File): Promise<string> {
 }
 
 const size = (n: number) => (n > 1e6 ? `${(n / 1e6).toFixed(1)} MB` : `${Math.ceil(n / 1024)} KB`);
+
+/** What is being typed after a trigger character, if anything. The web's rule. */
+type Token = { kind: "@" | "/"; at: number; query: string };
+function triggerAt(draft: string): Token | undefined {
+  const match = /(^|\s)([@/])([^\s]*)$/.exec(draft);
+  if (!match) return undefined;
+  return { kind: match[2] as "@" | "/", at: match.index + match[1].length, query: match[3] };
+}
+const directoryOf = (q: string) => (q.includes("/") ? q.slice(0, q.lastIndexOf("/")) : "");
 
 export function Composer({
   session,
@@ -83,6 +92,35 @@ export function Composer({
   /** Clicked, and not yet confirmed by the server or by the agent. */
   const [chosen, setChosen] = useState<Partial<Record<ControlKind, string>>>({});
   const box = useRef<HTMLTextAreaElement>(null);
+
+  /* `/` offers the commands this install actually has, as the agent reported
+     them at startup; `@` offers files off the worker, one directory at a time,
+     relative to the workspace root. Both are the web build's affordances. */
+  const token = triggerAt(text);
+  const wantFiles = token?.kind === "@" && live;
+  const listing = useListFiles(session.id, { path: directoryOf(token?.query ?? "") }, { query: { enabled: !!wantFiles, staleTime: 30_000 } });
+  const [pick, setPick] = useState(0);
+  const suggestions: { value: string; hint?: string }[] = !token
+    ? []
+    : token.kind === "/"
+      ? conversation.commands.filter((c) => c.name.toLowerCase().startsWith(token.query.toLowerCase())).slice(0, 8).map((c) => ({ value: `/${c.name}`, hint: c.description ?? undefined }))
+      : ((listing.data ?? []) as { name: string; directory: boolean }[])
+          .filter((f) => f.name.toLowerCase().startsWith((token.query.split("/").pop() ?? "").toLowerCase()))
+          .slice(0, 8)
+          .map((f) => {
+            const dir = directoryOf(token.query);
+            const full = (dir ? `${dir}/` : "") + f.name + (f.directory ? "/" : "");
+            return { value: `@${full}`, hint: f.directory ? "directory" : undefined };
+          });
+  useEffect(() => setPick(0), [token?.query, token?.kind]);
+
+  const accept = (value: string) => {
+    if (!token) return;
+    const before = text.slice(0, token.at);
+    const after = text.slice(token.at + 1 + token.query.length);
+    setText(`${before}${value}${value.endsWith("/") ? "" : " "}${after}`);
+    box.current?.focus();
+  };
 
   useEffect(() => {
     const el = box.current;
@@ -213,6 +251,17 @@ export function Composer({
             </div>
           )}
 
+          {suggestions.length > 0 && (
+            <div className="mx-3 mt-3 overflow-hidden rounded-lg border border-line bg-overlay">
+              {suggestions.map((sug, n) => (
+                <button key={sug.value} onMouseEnter={() => setPick(n)} onMouseDown={(e) => { e.preventDefault(); accept(sug.value); }} data-on={n === pick} className="row w-full rounded-none">
+                  <span className={`font-mono text-ui ${n === pick ? "text-bone" : "text-text"}`}>{sug.value}</span>
+                  {sug.hint && <span className="truncate text-meta text-mute">{sug.hint}</span>}
+                </button>
+              ))}
+            </div>
+          )}
+
           <textarea
             ref={box}
             rows={1}
@@ -221,6 +270,12 @@ export function Composer({
             onChange={(e) => setText(e.target.value)}
             onPaste={(e) => e.clipboardData.files.length && take(e.clipboardData.files)}
             onKeyDown={(e) => {
+              if (suggestions.length > 0) {
+                if (e.key === "ArrowDown") { e.preventDefault(); setPick((n) => Math.min(n + 1, suggestions.length - 1)); return; }
+                if (e.key === "ArrowUp") { e.preventDefault(); setPick((n) => Math.max(n - 1, 0)); return; }
+                if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey)) { e.preventDefault(); accept(suggestions[pick].value); return; }
+                if (e.key === "Escape") { setText(text + " "); return; }
+              }
               if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();
                 submit();
