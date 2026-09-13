@@ -346,3 +346,11 @@
 @media (prefers-reduced-motion: reduce) {
   .text-sheen { animation: none; color: var(--color-dim); background: none; }
 }
+
+/* Off macOS there is no vibrancy to show through and no traffic lights to
+   leave room for: the panels are solid and the title bar starts at the edge. */
+html:not([data-platform="macos"]) {
+  --color-panel-vibrant: var(--color-panel);
+  --color-strip: var(--color-panel);
+  --chrome-lights: 0.75rem;
+}

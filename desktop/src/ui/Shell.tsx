@@ -21,6 +21,7 @@ import "@xterm/xterm/css/xterm.css";
 import { Search as SearchIcon, X } from "lucide-react";
 import { token, wsBase } from "~/client/http";
 import { findPaths, resolvePath } from "~/paths";
+import { isMac } from "~/platform";
 
 type State = "connecting" | "live" | "closed";
 
@@ -91,7 +92,11 @@ export function Shell({
          (xterm turns a paste event into input); the rest are handled here and
          swallowed so the workbench never sees them either. */
       term.attachCustomKeyEventHandler((e) => {
-        if (!e.metaKey || e.type !== "keydown") return true;
+        /* On macOS ⌘ is the app's and Ctrl is the pty's. Elsewhere Ctrl is
+           the pty's too (Ctrl-C has to interrupt), so the app's keys there
+           are Ctrl+Shift, as terminals on those platforms have them. */
+        const ours = isMac ? e.metaKey : e.ctrlKey && e.shiftKey;
+        if (!ours || e.type !== "keydown") return true;
         const k = e.key.toLowerCase();
         // Copy and paste: the browser's, and nobody else's business.
         if (k === "c" || k === "v") return false;

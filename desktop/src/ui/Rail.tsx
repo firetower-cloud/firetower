@@ -29,6 +29,7 @@ import { HostCard, whereItRuns } from "~/ui/StatusBar";
 import { useHosts } from "~/data";
 import { Monitor, Server } from "lucide-react";
 import { useRef, useState } from "react";
+import { key } from "~/platform";
 
 const NAV: { href: string; label: string; icon: LucideIcon }[] = [
   { href: "/", label: "Dashboard", icon: LayoutList },
@@ -62,7 +63,7 @@ export function Rail({ backend }: { backend: Backend }) {
           <span className="eyebrow">Workspaces</span>
           <button
             onClick={() => start()}
-            title="New workspace  ⌘N"
+            title={`New workspace  ${key("N")}`}
             className="-mr-1 ml-auto grid h-7 w-7 place-items-center rounded-md text-mute transition-colors hover:bg-raise hover:text-bone"
           >
             <Icon of={Plus} size={12} />

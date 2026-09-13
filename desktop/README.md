@@ -96,3 +96,22 @@ viewer detaches, so hiding the panel keeps the terminal mounted; only closing
 it lets go. Paths the agent writes in the conversation open the same way
 (`src/paths.ts`): found in the text, checked against the workspace with
 `find_files`, then opened.
+
+## Installers
+
+`scripts/build-mac.sh` builds the `.dmg` on this Mac (`--universal` for one
+file that runs on Apple Silicon and Intel). A Windows installer can only be
+built on Windows: `gh workflow run desktop-build.yml`, then `gh run download`,
+gives the `.exe` (per-user, what people install) and the `.msi` (for deploying
+by policy) from a Windows runner, unsigned. Signing and notarization are the
+release workflow's job and happen behind a protected environment; nothing
+signing-related is in the tree but the public half of the updater's key.
+
+## Windows
+
+The same app: Tauri on WebView2. The window has no frame there, so the title
+bar draws its own buttons; the modifier reads `Ctrl` wherever a shortcut is
+written (`src/platform.ts`); in the shell, `Ctrl` is the pty's and the app's
+keys are `Ctrl+Shift`; the panels are solid, there being no vibrancy to show
+through (`tauri.macos.conf.json` holds what is macOS-only). Tokens are in the
+OS keychain on every platform (`bridge.secrets`).

@@ -21,6 +21,13 @@ export interface Bridge {
   notify(title: string, body: string): void;
   minimize(): void;
   zoom(): void;
+  close(): void;
+  /** The OS keychain, for tokens. A browser tab has none and keeps them beside the registry. */
+  secrets: {
+    get(key: string): Promise<string | null>;
+    set(key: string, value: string): Promise<void>;
+    delete(key: string): Promise<void>;
+  } | null;
 }
 
 const browser: Bridge = {
@@ -30,6 +37,8 @@ const browser: Bridge = {
   notify: () => {},
   minimize: () => {},
   zoom: () => {},
+  close: () => {},
+  secrets: null,
 };
 
 function tauri(): Bridge | null {
@@ -49,6 +58,12 @@ function tauri(): Bridge | null {
     notify: (title, body) => void invoke("notify", { title, body }),
     minimize: () => void invoke("minimize"),
     zoom: () => void invoke("zoom"),
+    close: () => void invoke("close"),
+    secrets: {
+      get: (key) => invoke("secret_get", { key }) as Promise<string | null>,
+      set: (key, value) => invoke("secret_set", { key, value }) as Promise<void>,
+      delete: (key) => invoke("secret_delete", { key }) as Promise<void>,
+    },
   };
 }
 

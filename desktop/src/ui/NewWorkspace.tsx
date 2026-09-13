@@ -34,6 +34,7 @@ import { useAccounts, useAgents, useHosts, useRepos } from "~/data";
 import type { Backend } from "~/fleet";
 import { navigate } from "~/shims/next-navigation";
 import { leaveDraft } from "@/src/workspace/draft";
+import { isMac } from "~/platform";
 
 export type Seed = {
   title?: string;
@@ -451,7 +452,7 @@ export function NewWorkspace({
             className="control border border-line bg-bone font-medium text-ground transition-opacity hover:opacity-90 disabled:bg-raise disabled:text-mute"
           >
             {create.isPending ? "Starting…" : "Start it"}
-            <span className="keycap ml-1">⌘⏎</span>
+            <span className="keycap ml-1">{isMac ? "⌘⏎" : "Ctrl+⏎"}</span>
           </button>
         </div>
       </div>

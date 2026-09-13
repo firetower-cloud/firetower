@@ -72,6 +72,9 @@ function swapMutator() {
 }
 
 export default defineConfig({
+  // The renderer awaits the keychain before it draws, which needs top-level await.
+  build: { target: "es2022" },
+  esbuild: { target: "es2022" },
   plugins: [swapMutator(), overrideFirst(), react(), tailwindcss()],
   clearScreen: false,
   server: {

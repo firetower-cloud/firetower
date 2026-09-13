@@ -10,7 +10,8 @@
  * everything below starts at a clean edge, and the whole bar drags the window
  * except the controls in it.
  */
-import { Command } from "lucide-react";
+import { Command, Minus, Square, X } from "lucide-react";
+import { isMac, mod } from "~/platform";
 import { bridge } from "~/bridge";
 import { drag } from "~/drag";
 import { useFleet } from "~/fleet";
@@ -32,7 +33,7 @@ export function Titlebar({
     <div
       {...drag}
       className="flex h-(--chrome-title) shrink-0 items-center gap-2 border-b border-line bg-(--color-strip)"
-      style={{ paddingLeft: bridge.native ? "var(--chrome-lights)" : "0.75rem" }}
+      style={{ paddingLeft: bridge.native && isMac ? "var(--chrome-lights)" : "0.75rem" }}
     >
       <span className="text-ui text-dim">
         {here ? (
@@ -59,8 +60,19 @@ export function Titlebar({
         onClick={onPalette}
         className="no-drag mr-2 flex h-6 items-center gap-1 rounded-sm px-2 text-meta text-mute transition-colors hover:bg-raise hover:text-dim"
       >
-        <Command className="h-3 w-3" strokeWidth={2} />K
+        {isMac ? <Command className="h-3 w-3" strokeWidth={2} /> : <span>{mod}+</span>}K
       </button>
+
+      {/* macOS draws its own lights at the left; everywhere else the window
+          has no frame and these are the buttons, at the right, in the order
+          and size the platform's own windows use. */}
+      {!isMac && bridge.native && (
+        <span className="no-drag flex h-full items-stretch">
+          <button onClick={bridge.minimize} title="Minimize" className="grid w-11 place-items-center text-dim transition-colors hover:bg-raise hover:text-bone"><Minus className="h-3.5 w-3.5" strokeWidth={1.75} /></button>
+          <button onClick={bridge.zoom} title="Maximize" className="grid w-11 place-items-center text-dim transition-colors hover:bg-raise hover:text-bone"><Square className="h-3 w-3" strokeWidth={1.75} /></button>
+          <button onClick={bridge.close} title="Close" className="grid w-11 place-items-center text-dim transition-colors hover:bg-brick hover:text-ground"><X className="h-3.5 w-3.5" strokeWidth={1.75} /></button>
+        </span>
+      )}
     </div>
   );
 }

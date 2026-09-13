@@ -31,6 +31,7 @@ import { ContextMenu, useMenu, type MenuItem } from "~/ui/ContextMenu";
 import { useEndAgent, useEndWorkspace } from "~/ui/end";
 import { useConfirm } from "~/ui/Confirm";
 import { drag } from "~/drag";
+import { key } from "~/platform";
 
 /** The rail can be dragged between these. */
 const RAIL_MIN = 288;
@@ -183,7 +184,7 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
     const left = tabs.slice(1, at).filter((t) => t.id !== "chat").map((t) => t.id);
     const all = tabs.filter((t) => t.id !== "chat").map((t) => t.id);
     return [
-      { label: "Close", shortcut: "⌘W", disabled: id === "chat", onPick: () => closeTab(id) },
+      { label: "Close", shortcut: key("W"), disabled: id === "chat", onPick: () => closeTab(id) },
       { label: "Close others", disabled: others.length === 0, onPick: () => closeTabs(others) },
       { label: "Close to the right", disabled: right.length === 0, onPick: () => closeTabs(right) },
       { label: "Close to the left", disabled: left.length === 0, onPick: () => closeTabs(left) },
@@ -348,7 +349,7 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
               setShell(true);
               setTerm(!term);
             }}
-            title="Terminal  ⌘J"
+            title={`Terminal  ${key("J")}`}
             className={`control ${term ? "bg-overlay text-bone" : "text-mute hover:bg-raise hover:text-bone"}`}
           >
             <SquareTerminal className="h-4 w-4" strokeWidth={1.75} />
@@ -374,7 +375,7 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
           </div>
           <button
             onClick={() => setOpen(!open)}
-            title="Inspector  ⌘\"
+            title={`Inspector  ${key("\\")}`}
             className={`control ${open ? "bg-overlay text-bone" : "text-mute hover:bg-raise hover:text-bone"}`}
           >
             <PanelRight className="h-4 w-4" strokeWidth={1.75} />
@@ -439,7 +440,7 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
               <div className="flex h-8 shrink-0 items-center gap-2 border-b border-line bg-panel px-3">
                 <span className="text-meta text-dim">Shell</span>
                 <span className="font-mono text-micro text-mute">{place.branch}</span>
-                <span className="ml-auto text-micro text-mute">⌘J hides</span>
+                <span className="ml-auto text-micro text-mute">{key("J")} hides</span>
                 <button
                   onClick={() => {
                     setShell(false);
