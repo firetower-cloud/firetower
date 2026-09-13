@@ -16,7 +16,7 @@ import { AgentMark } from "@/components/AgentMark";
 import { GithubMark, Icon, PageHead } from "@/components/ui";
 import { doing, group, shortRepo, type Workspace } from "@/src/api/workspaces";
 import { elapsed, minutesSince, needsYou } from "@/src/api/view";
-import type { Backend } from "~/mock/backends";
+import type { Backend } from "~/fleet";
 import { useFleet, waitingIn } from "~/fleet";
 import { navigate } from "~/shims/next-navigation";
 

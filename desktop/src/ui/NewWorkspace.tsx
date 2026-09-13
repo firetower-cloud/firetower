@@ -31,7 +31,7 @@ import { machineLabel, machines, modesOn, isLocal } from "@/src/api/environments
 import type { Agent, Execution, Share } from "@/src/api/generated/model";
 import { useCreateSession } from "@/src/api/generated/sessions/sessions";
 import { useAccounts, useAgents, useHosts, useRepos } from "~/data";
-import type { Backend } from "~/mock/backends";
+import type { Backend } from "~/fleet";
 import { navigate } from "~/shims/next-navigation";
 import { leaveDraft } from "@/src/workspace/draft";
 

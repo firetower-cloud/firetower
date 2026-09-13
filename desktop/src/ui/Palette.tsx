@@ -11,7 +11,6 @@
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { CornerDownLeft, Search } from "lucide-react";
-import { BACKENDS, setReach } from "~/mock/backends";
 import { useFleet } from "~/fleet";
 import { group, shortRepo } from "@/src/api/workspaces";
 import { navigate } from "~/shims/next-navigation";
@@ -62,12 +61,6 @@ export function Palette({ open, onClose }: { open: boolean; onClose: () => void 
       { id: "c:tasks", label: "Tasks", kind: "command", run: () => navigate("/tasks") },
       { id: "c:config", label: "Configuration", kind: "command", run: () => navigate("/configuration") },
       { id: "c:style", label: "Open the style guide", kind: "command", run: () => navigate("/style") },
-      ...BACKENDS.map((b) => ({
-        id: `c:drop:${b.id}`,
-        label: `${b.reach === "unreachable" ? "Reconnect" : "Disconnect"} ${b.org}`,
-        kind: "command" as const,
-        run: () => setReach(b.id, b.reach === "unreachable" ? "live" : "unreachable"),
-      })),
     ];
 
     const all = [...sessions, ...commands];

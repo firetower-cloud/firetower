@@ -37,7 +37,7 @@ function overrideFirst() {
 }
 
 /**
- * Swap the two modules the mock replaces, however they are reached.
+ * Swap the mutator for the desktop's, however it is reached.
  *
  * Orval writes `import { http } from '../../http'` into all 86 generated files
  * — a **relative** path, which a `resolve.alias` entry on `@/src/api/http`
@@ -47,19 +47,15 @@ function overrideFirst() {
  * resolved path rather than by specifier.
  */
 const SWAPS: Record<string, string> = {
-  [path.join(web, "src/api/http.ts")]: path.resolve(here, "src/mock/http.ts"),
-  [path.join(web, "src/api/socket.tsx")]: path.resolve(here, "src/mock/socket.tsx"),
+  [path.join(web, "src/api/http.ts")]: path.resolve(here, "src/client/http.ts"),
 };
 
-function swapMocks() {
+function swapMutator() {
   return {
-    name: "firetower:swap-mocks",
+    name: "firetower:swap-mutator",
     enforce: "pre" as const,
     async resolveId(this: any, source: string, importer?: string) {
       if (!importer || !source.startsWith(".")) return null;
-      // The mock socket is the one module allowed to reach the real one: it
-      // hands live servers to it and keeps the scripted stream for fixtures.
-      if (importer.endsWith("/desktop/src/mock/socket.tsx")) return null;
       const from = path.resolve(path.dirname(importer), source);
       for (const ext of ["", ".ts", ".tsx"]) {
         const hit = SWAPS[from + ext];
@@ -76,7 +72,7 @@ function swapMocks() {
 }
 
 export default defineConfig({
-  plugins: [swapMocks(), overrideFirst(), react(), tailwindcss()],
+  plugins: [swapMutator(), overrideFirst(), react(), tailwindcss()],
   clearScreen: false,
   server: {
     port: 5273,
@@ -97,10 +93,9 @@ export default defineConfig({
       { find: /^next\/navigation$/, replacement: path.resolve(here, "src/shims/next-navigation.ts") },
       { find: /^next\/font\/google$/, replacement: path.resolve(here, "src/shims/next-font.ts") },
 
-      // The whole API surface, mocked by replacing one module. `orval.config.ts`
-      // points all 86 endpoints at this mutator, so there is nothing else to fake.
-      { find: /^@\/src\/api\/http$/, replacement: path.resolve(here, "src/mock/http.ts") },
-      { find: /^@\/src\/api\/socket$/, replacement: path.resolve(here, "src/mock/socket.tsx") },
+      // The whole API surface goes through one mutator (`orval.config.ts`
+      // points all 86 endpoints at it), and the desktop's knows which server.
+      { find: /^@\/src\/api\/http$/, replacement: path.resolve(here, "src/client/http.ts") },
 
       // Everything else resolves into the real web application.
       { find: /^@\/components\/(.*)$/, replacement: `${web}/components/$1` },

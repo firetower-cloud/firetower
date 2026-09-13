@@ -13,7 +13,7 @@
 import { Command } from "lucide-react";
 import { bridge } from "~/bridge";
 import { drag } from "~/drag";
-import { BACKENDS } from "~/mock/backends";
+import { useFleet } from "~/fleet";
 import type { Scope } from "~/ui/ServerStrip";
 
 export function Titlebar({
@@ -25,7 +25,8 @@ export function Titlebar({
   waiting: number;
   onPalette: () => void;
 }) {
-  const here = scope === "all" ? null : BACKENDS.find((b) => b.id === scope);
+  const fleet = useFleet();
+  const here = scope === "all" ? null : fleet.find((f) => f.backend.id === scope)?.backend;
 
   return (
     <div

@@ -11,16 +11,13 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Eye, EyeOff, Plus, Trash2 } from "lucide-react";
 import { Icon } from "@/components/ui";
 import { getListSecretsQueryKey, useListSecrets, useRemoveSecret, useReplaceSecret, useRevealSecret } from "@/src/api/generated/secrets/secrets";
-import { isLive } from "~/mock/http";
-import { useBackendKey } from "~/backend";
 import { Section } from "~/ui/config/bits";
 
 import { why } from "~/data";
 
 export function Secrets() {
-  const live = isLive(useBackendKey());
   const cache = useQueryClient();
-  const { data, isPending, error } = useListSecrets({ query: { enabled: live } });
+  const { data, isPending, error } = useListSecrets();
   const replace = useReplaceSecret();
   const remove = useRemoveSecret();
   const [adding, setAdding] = useState(false);
@@ -35,12 +32,11 @@ export function Secrets() {
     <Section
       title="Secrets"
       note="Held encrypted, revealed only by asking, and every read is logged."
-      action={live && <button onClick={() => setAdding(!adding)} className="control border border-line bg-raise text-ui text-bone hover:bg-overlay"><Icon of={Plus} size={12} />Add</button>}
+      action={<button onClick={() => setAdding(!adding)} className="control border border-line bg-raise text-ui text-bone hover:bg-overlay"><Icon of={Plus} size={12} />Add</button>}
     >
-      {!live && <p className="px-3.5 py-4 text-ui text-mute">A fixture holds no secrets.</p>}
-      {live && isPending && <p className="px-3.5 py-4 text-ui text-mute">Reading the vault…</p>}
-      {live && error ? <p className="px-3.5 py-4 text-ui text-brick">{why(error)}</p> : null}
-      {live && !isPending && !error && held.length === 0 && !adding && <p className="px-3.5 py-4 text-ui text-mute">Nothing held yet.</p>}
+      {isPending && <p className="px-3.5 py-4 text-ui text-mute">Reading the vault…</p>}
+      {error ? <p className="px-3.5 py-4 text-ui text-brick">{why(error)}</p> : null}
+      {!isPending && !error && held.length === 0 && !adding && <p className="px-3.5 py-4 text-ui text-mute">Nothing held yet.</p>}
 
       {adding && (
         <div className="flex items-center gap-2 px-3.5 py-2.5">

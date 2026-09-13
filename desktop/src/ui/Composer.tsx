@@ -22,7 +22,6 @@ import type { Attached, Control, ControlKind, Session } from "@/src/api/generate
 import { useAttachFile, useInterruptSession, useListFiles, useSendTurn } from "@/src/api/generated/sessions/sessions";
 import { useChooseControl, useSessionControls } from "@/src/api/generated/conversation/conversation";
 import { takeDraft } from "@/src/workspace/draft";
-import { isLive } from "~/mock/http";
 
 type Chip = { name: string; kind: "image" | "file"; size: string; url?: string; path?: string };
 
@@ -68,12 +67,11 @@ export function Composer({
   disabled: boolean;
   asking: boolean;
 }) {
-  const live = isLive();
   const send = useSendTurn();
   const attach = useAttachFile();
   const interrupt = useInterruptSession();
   const choose = useChooseControl();
-  const controls = useSessionControls(session.id, { query: { enabled: live } });
+  const controls = useSessionControls(session.id);
 
   // What a session can be asked to change is not known when it opens: an
   // agent that lists its own models answers a moment later. Saying which model
@@ -81,8 +79,8 @@ export function Composer({
   const model = conversation.model;
   const askAgain = controls.refetch;
   useEffect(() => {
-    if (live) askAgain();
-  }, [model, live, askAgain]);
+    askAgain();
+  }, [model, askAgain]);
 
   const [text, setText] = useState(() => takeDraft(session.id) ?? "");
   const [images, setImages] = useState<Attached[]>([]);
@@ -97,7 +95,7 @@ export function Composer({
      them at startup; `@` offers files off the worker, one directory at a time,
      relative to the workspace root. Both are the web build's affordances. */
   const token = triggerAt(text);
-  const wantFiles = token?.kind === "@" && live;
+  const wantFiles = token?.kind === "@";
   const listing = useListFiles(session.id, { path: directoryOf(token?.query ?? "") }, { query: { enabled: !!wantFiles, staleTime: 30_000 } });
   const [pick, setPick] = useState(0);
   const suggestions: { value: string; hint?: string }[] = !token
@@ -150,10 +148,6 @@ export function Composer({
         complaints.push(`${file.name} is over 10 MB.`);
         continue;
       }
-      if (!live) {
-        setChips((held) => [...held, { name: file.name, kind: "file", size: size(file.size), path: file.name }]);
-        continue;
-      }
       try {
         const { path } = await attach.mutateAsync({ id: session.id, data: { name: file.name, data: await base64(file) } });
         setChips((held) => [...held, { name: file.name, kind: "file", size: size(file.size), path }]);
@@ -180,7 +174,7 @@ export function Composer({
     if (!message && images.length === 0) return;
 
     onEcho(message, images);
-    if (live) send.mutate({ id: session.id, data: { text: message, images } });
+    send.mutate({ id: session.id, data: { text: message, images } });
     setText("");
     setImages([]);
     setChips([]);
@@ -189,10 +183,10 @@ export function Composer({
   const set = (kind: ControlKind, value: string) => {
     if (kind === "model" || kind === "mode" || kind === "effort") onRemember(kind, value);
     setChosen((was) => ({ ...was, [kind]: value }));
-    if (live) choose.mutate({ id: session.id, data: { kind, value } }, { onSuccess: () => controls.refetch() });
+    choose.mutate({ id: session.id, data: { kind, value } }, { onSuccess: () => controls.refetch() });
   };
 
-  const offered: Control[] = live ? (controls.data ?? []) : FIXTURE_CONTROLS;
+  const offered: Control[] = controls.data ?? [];
   const usage = conversation.usage;
   const full = usage?.contextUsed && usage?.contextWindow ? usage.contextUsed / usage.contextWindow : null;
 
@@ -313,7 +307,7 @@ export function Composer({
 
             {conversation.working ? (
               <button
-                onClick={() => live && interrupt.mutate({ id: session.id })}
+                onClick={() => interrupt.mutate({ id: session.id })}
                 title="Interrupt the agent"
                 className="ml-auto grid h-8 w-8 place-items-center rounded-full border border-line bg-raise text-bone transition-colors hover:bg-overlay"
               >
@@ -383,26 +377,3 @@ function Picker({ control, value, onPick }: { control: Control; value?: string; 
     </div>
   );
 }
-
-/** What the demo offers, in the real shape. */
-const FIXTURE_CONTROLS: Control[] = [
-  {
-    kind: "model",
-    fallback: "Model",
-    current: "opus-5",
-    choices: [
-      { label: "Opus 5", value: "opus-5", note: "Slowest, and the one that gets it right", grave: false },
-      { label: "Sonnet 5", value: "sonnet-5", note: "The everyday choice", grave: false },
-    ],
-  },
-  {
-    kind: "mode",
-    fallback: "Mode",
-    current: "auto",
-    choices: [
-      { label: "Auto", value: "auto", note: "Stops only for things it can't take back", grave: false },
-      { label: "Ask first", value: "ask", note: "Stops before every write", grave: false },
-      { label: "Full access", value: "full", note: "Never stops", grave: true },
-    ],
-  },
-];

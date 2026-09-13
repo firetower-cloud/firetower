@@ -7,8 +7,7 @@
  *
  * On a connected server every tab reads the worker: the tree one directory at
  * a time off `list_files`, the diff off `session_diff`, the commit off
- * `session_work`. A fixture keeps the scripted tree and hunks, through the same
- * components.
+ * `session_work`.
  */
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
@@ -17,8 +16,6 @@ import { useListFiles } from "@/src/api/generated/sessions/sessions";
 import type { FileEntry, Session } from "@/src/api/generated/model";
 import { sendTurn } from "@/src/api/generated/sessions/sessions";
 import { asMessage } from "@/src/api/notes";
-import { isLive } from "~/mock/http";
-import { filesFor, type Diff, type Node } from "~/mock/backends";
 import { useDiff } from "~/data";
 import { fromPatch, isNew } from "~/patch";
 import { why } from "~/data";
@@ -37,7 +34,6 @@ export function Inspector({
   session,
   workspace,
   branch,
-  fixtureDiffs,
   tab,
   onTab,
   onOpenFile,
@@ -47,31 +43,20 @@ export function Inspector({
   session: Session;
   workspace: string;
   branch?: string;
-  fixtureDiffs: Diff[];
   tab: TabId;
   onTab: (t: TabId) => void;
   onOpenFile: (path: string, keep?: boolean) => void;
   onClose: () => void;
   width?: number;
 }) {
-  const live = isLive();
-  const diff = useDiff(live ? session : null);
-  const pending = useDiff(live ? session : null, "Head");
-  /* One shape for both: a real `FileDiff` carries a unified patch, a fixture
-     carries hunk lines. Both become lines here. */
+  const diff = useDiff(session);
+  const pending = useDiff(session, "Head");
   const files: Changed[] = useMemo(
-    () =>
-      live
-        ? diff.data.map((d) => ({ path: d.path, at: d.at, added: d.added, removed: d.removed, lines: fromPatch(d.patch), fresh: isNew(d.patch) }))
-        : fixtureDiffs.map((d) => ({ path: d.path, at: d.path, added: d.added, removed: d.removed, lines: d.hunk })),
-    [live, diff.data, fixtureDiffs],
+    () => diff.data.map((d) => ({ path: d.path, at: d.at, added: d.added, removed: d.removed, lines: fromPatch(d.patch), fresh: isNew(d.patch) })),
+    [diff.data],
   );
-  /* The tree marks what is not committed yet — the editor's sense of "changed".
-     A fixture has no commits, so there everything in the diff counts. */
-  const changed = useMemo(
-    () => (live ? new Map(pending.data.map((d) => [d.at, isNew(d.patch)])) : new Map(files.map((f) => [f.at, !!f.fresh]))),
-    [live, pending.data, files],
-  );
+  /* The tree marks what is not committed yet — the editor's sense of "changed". */
+  const changed = useMemo(() => new Map(pending.data.map((d) => [d.at, isNew(d.patch)])), [pending.data]);
 
   return (
     <aside style={{ width: width ?? 368 }} className="flex shrink-0 flex-col border-l border-line bg-panel">
@@ -94,7 +79,7 @@ export function Inspector({
 
       <div className="scroll-slim min-h-0 flex-1 overflow-y-auto">
         {tab === "diff" && <DiffList session={session} files={files} loading={diff.loading} error={diff.error} onOpenFile={onOpenFile} />}
-        {tab === "files" && (live ? <LiveTree sessionId={session.id} changed={changed} onOpenFile={onOpenFile} /> : <FixtureTree nodes={filesFor(workspace)} onOpenFile={onOpenFile} />)}
+        {tab === "files" && <LiveTree sessionId={session.id} changed={changed} onOpenFile={onOpenFile} />}
         {tab === "ship" && <Ship session={session} branch={branch} files={files} />}
       </div>
     </aside>
@@ -121,7 +106,6 @@ function DiffList({
 }) {
   const [open, setOpen] = useState<string | null>(null);
   const [note, setNote] = useState<{ id: string; path: string; quote: string; text: string } | null>(null);
-  const live = isLive();
 
   const send = useMutation({
     mutationFn: (n: { id: string; path: string; quote: string; text: string }) =>
@@ -173,9 +157,9 @@ function DiffList({
                       </div>
                       {note?.id === id && (
                         <div className="border-y border-line bg-panel px-3 py-2.5">
-                          <input autoFocus value={note.text} onChange={(e) => setNote({ ...note, text: e.target.value })} onKeyDown={(e) => { if (e.key === "Enter" && note.text.trim() && live) send.mutate(note); if (e.key === "Escape") setNote(null); }} placeholder="What should change here?" className="w-full bg-transparent font-sans text-ui text-bone placeholder:text-mute focus:outline-none" />
+                          <input autoFocus value={note.text} onChange={(e) => setNote({ ...note, text: e.target.value })} onKeyDown={(e) => { if (e.key === "Enter" && note.text.trim()) send.mutate(note); if (e.key === "Escape") setNote(null); }} placeholder="What should change here?" className="w-full bg-transparent font-sans text-ui text-bone placeholder:text-mute focus:outline-none" />
                           <div className="mt-2 flex items-center gap-1.5">
-                            <button disabled={!note.text.trim() || send.isPending || !live} onClick={() => send.mutate(note)} className="control bg-raise text-ui text-bone hover:bg-overlay disabled:text-mute">{send.isPending ? "Sending…" : "Send to the agent"}</button>
+                            <button disabled={!note.text.trim() || send.isPending} onClick={() => send.mutate(note)} className="control bg-raise text-ui text-bone hover:bg-overlay disabled:text-mute">{send.isPending ? "Sending…" : "Send to the agent"}</button>
                             <button onClick={() => setNote(null)} className="control text-mute hover:text-dim">Cancel</button>
                             {send.error && <span className="text-meta text-brick">{why(send.error)}</span>}
                           </div>
@@ -256,31 +240,6 @@ function Entry({ sessionId, entry, path, depth, changed, marked, onOpenFile }: {
         {touched && <span className={`shrink-0 font-mono text-micro ${entry.directory ? "text-mute" : "text-sage"}`}>{entry.directory ? "•" : fresh ? "A" : "M"}</span>}
       </button>
       {entry.directory && open && <Directory sessionId={sessionId} path={path} depth={depth + 1} changed={changed} marked={marked} onOpenFile={onOpenFile} />}
-    </>
-  );
-}
-
-/* ── Files, from a fixture ─────────────────────────────────────────────── */
-
-function FixtureTree({ nodes, onOpenFile }: { nodes: Node[]; onOpenFile: (p: string, keep?: boolean) => void }) {
-  if (nodes.length === 0) return <Empty line="No workspace yet." hint="It appears once the repository is checked out." />;
-  return <div className="py-1.5">{nodes.map((n) => <Branch key={n.name} node={n} depth={0} trail="" onOpenFile={onOpenFile} />)}</div>;
-}
-
-function Branch({ node, depth, trail, onOpenFile }: { node: Node; depth: number; trail: string; onOpenFile: (p: string, keep?: boolean) => void }) {
-  const [open, setOpen] = useState(depth < 2);
-  const dir = !!node.dir;
-  const path = trail ? `${trail}/${node.name}` : node.name;
-  return (
-    <>
-      <button onClick={() => (dir ? setOpen(!open) : onOpenFile(path))} onDoubleClick={() => !dir && onOpenFile(path, true)} style={{ paddingLeft: `${0.75 + depth * 0.85}rem` }} className="flex h-7 w-full items-center gap-1.5 pr-3 text-left transition-colors hover:bg-raise/60">
-        {dir ? <ChevronRight className={`h-3 w-3 shrink-0 text-mute transition-transform duration-150 ${open ? "rotate-90" : ""}`} strokeWidth={2} /> : <span className="w-3 shrink-0" />}
-        <FileGlyph name={node.name} directory={dir} open={open} tone={node.added || node.changed ? "text-sage" : undefined} />
-        <span className={`min-w-0 flex-1 truncate font-mono text-ui ${dir ? "text-dim" : node.added || node.changed ? "text-sage" : "text-text"}`}>{node.name}</span>
-        {node.added && <span className="shrink-0 font-mono text-micro text-sage">new</span>}
-        {node.changed && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-slate" />}
-      </button>
-      {dir && open && node.dir!.map((c) => <Branch key={c.name} node={c} depth={depth + 1} trail={path} onOpenFile={onOpenFile} />)}
     </>
   );
 }

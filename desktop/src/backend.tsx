@@ -16,7 +16,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createContext, useContext, useEffect, useRef, type ReactNode } from "react";
 import { applyEvent } from "@/src/api/events";
 import { SocketProvider, useSocket } from "@/src/api/socket";
-import { isLive, useBackendId } from "~/mock/http";
+import { useBackendId } from "~/client/http";
 
 const clients = new Map<string, QueryClient>();
 
@@ -52,7 +52,7 @@ export function BackendProvider({ id, children }: { id: string; children: ReactN
     <Ctx.Provider value={id}>
       <QueryClientProvider client={client}>
         <SocketProvider>
-          {isLive(id) && <Sessions cache={client} />}
+          <Sessions cache={client} />
           {children}
         </SocketProvider>
       </QueryClientProvider>

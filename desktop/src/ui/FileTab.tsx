@@ -16,9 +16,7 @@ import { Markdown } from "@/components/Markdown";
 import { isMarkdown, useFileText } from "@/src/api/text";
 import { sendTurn } from "@/src/api/generated/sessions/sessions";
 import type { Session } from "@/src/api/generated/model";
-import { fileAt } from "~/mock/files";
 import { highlight, langOf, TONE } from "~/syntax";
-import { isLive } from "~/mock/http";
 import { Annotate, type Anchor } from "~/ui/Annotate";
 import { addedLines, removedLines } from "~/patch";
 import { useDiff } from "~/data";
@@ -30,25 +28,22 @@ import { why } from "~/data";
 
 export function FileTab({ session, path, line }: { session: Session; path: string; line?: number }) {
   const sessionId = session.id;
-  const live = isLive();
-  const diff = useDiff(live ? session : null, "Head");
+  const diff = useDiff(session, "Head");
   const mine = useMemo(() => diff.data.find((d) => d.at === path), [diff.data, path]);
-  const remote = useFileText(live ? sessionId : "", path);
-  const fixture = live ? null : fileAt(path);
+  const remote = useFileText(sessionId, path);
 
-  const text = live ? (remote.data?.kind === "text" ? remote.data.text : null) : (fixture?.text ?? null);
+  const text = remote.data?.kind === "text" ? remote.data.text : null;
   const lines = useMemo(() => (text ? text.replace(/\n$/, "").split("\n") : []), [text]);
-  /* The lines this session added, so the file shows its own edits. A fixture
-     says so outright; a real file says it through the session's patch. */
+  /* The lines this session added, so the file shows its own edits. */
   const touched = useMemo(() => {
-    const from = live ? (mine ? [...addedLines(mine.patch)] : []) : (fixture?.changed ?? []);
+    const from = mine ? [...addedLines(mine.patch)] : [];
     return new Set(from.filter((n) => n >= 1 && n <= lines.length));
-  }, [live, mine, fixture, lines.length]);
+  }, [mine, lines.length]);
   /* And what those edits replaced, drawn where it was — the file reads like
      the diff does, rather than only showing what survived. */
-  const gone = useMemo(() => (live && mine ? removedLines(mine.patch) : new Map<number, string[]>()), [live, mine]);
+  const gone = useMemo(() => (mine ? removedLines(mine.patch) : new Map<number, string[]>()), [mine]);
   const goneCount = useMemo(() => [...gone.values()].reduce((n, g) => n + g.length, 0), [gone]);
-  const lang = fixture?.lang ?? langOf(path);
+  const lang = langOf(path);
 
   const [notes, setNotes] = useState<Note[]>([]);
   const [drafting, setDrafting] = useState<Anchor | null>(null);
@@ -96,11 +91,10 @@ export function FileTab({ session, path, line }: { session: Session; path: strin
   };
 
   /* The states a file can be in that are not "here it is". */
-  if (live && remote.isPending) return <Plain path={path}>Reading it off the worker…</Plain>;
-  if (live && remote.error) return <Plain path={path}>{why(remote.error)}</Plain>;
-  if (live && remote.data?.kind === "binary") return <Plain path={path}>A binary file, {size(remote.data.bytes)}. Nothing to draw.</Plain>;
-  if (live && remote.data?.kind === "huge") return <Plain path={path}>{size(remote.data.bytes)} — too much to put on a screen.</Plain>;
-  if (!live && !fixture) return <Plain path={path}>Not in the fixtures. The real client reads it off the worker.</Plain>;
+  if (remote.isPending) return <Plain path={path}>Reading it off the worker…</Plain>;
+  if (remote.error) return <Plain path={path}>{why(remote.error)}</Plain>;
+  if (remote.data?.kind === "binary") return <Plain path={path}>A binary file, {size(remote.data.bytes)}. Nothing to draw.</Plain>;
+  if (remote.data?.kind === "huge") return <Plain path={path}>{size(remote.data.bytes)} — too much to put on a screen.</Plain>;
 
   const md = isMarkdown(path);
 
@@ -161,10 +155,10 @@ export function FileTab({ session, path, line }: { session: Session; path: strin
           <div className="pointer-events-auto flex items-center gap-2 rounded-full border border-line bg-overlay py-1.5 pr-1.5 pl-3.5 shadow-(--shadow-float)">
             <span className="text-ui text-dim">{notes.length} note{notes.length > 1 ? "s" : ""}</span>
             <button onClick={() => setNotes([])} title="Discard them" className="grid h-6 w-6 place-items-center rounded-full text-mute transition-colors hover:bg-raise hover:text-bone"><X className="h-3.5 w-3.5" strokeWidth={2} /></button>
-            <button disabled={!live} onClick={() => setHanding(true)} title="Start another agent in this workspace, on these notes" className="control rounded-full text-dim hover:bg-raise hover:text-bone disabled:text-mute">
+            <button onClick={() => setHanding(true)} title="Start another agent in this workspace, on these notes" className="control rounded-full text-dim hover:bg-raise hover:text-bone disabled:text-mute">
               <Bot className="h-3.5 w-3.5" strokeWidth={1.75} />Another agent…
             </button>
-            <button disabled={!live || send.isPending} onClick={() => send.mutate()} className="control rounded-full bg-bone font-medium text-ground transition-opacity hover:opacity-90 disabled:bg-raise disabled:text-mute">
+            <button disabled={send.isPending} onClick={() => send.mutate()} className="control rounded-full bg-bone font-medium text-ground transition-opacity hover:opacity-90 disabled:bg-raise disabled:text-mute">
               <Send className="h-3.5 w-3.5" strokeWidth={2} />{send.isPending ? "Sending…" : "Send to the agent"}
             </button>
           </div>

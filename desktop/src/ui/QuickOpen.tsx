@@ -11,8 +11,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { CornerDownLeft } from "lucide-react";
 import { useFindFiles } from "@/src/api/generated/sessions/sessions";
-import { PATHS } from "~/mock/files";
-import { isLive } from "~/mock/http";
 import { langOf } from "~/syntax";
 
 const TONE: Record<string, string> = { rust: "text-kind-native", ts: "text-kind-source", sql: "text-kind-store", toml: "text-kind-data", make: "text-kind-style", text: "text-kind-prose" };
@@ -27,29 +25,23 @@ function useDebounced(value: string, ms: number) {
 }
 
 export function QuickOpen({ sessionId, open, onClose, onPick }: { sessionId: string; open: boolean; onClose: () => void; onPick: (path: string) => void }) {
-  const live = isLive();
   const [q, setQ] = useState("");
   const [at, setAt] = useState(0);
   const query = useDebounced(q.trim(), 150);
 
-  const remote = useFindFiles(sessionId, { q: query, limit: 200 }, { query: { enabled: live && open && query.length > 0, staleTime: 10_000 } });
+  const remote = useFindFiles(sessionId, { q: query, limit: 200 }, { query: { enabled: open && query.length > 0, staleTime: 10_000 } });
 
   useEffect(() => {
     if (open) { setQ(""); setAt(0); }
   }, [open]);
 
-  const hits = useMemo(() => {
-    if (live) return ((remote.data ?? []) as string[]).slice(0, 12);
-    if (!q.trim()) return PATHS.slice(0, 10);
-    const needle = q.toLowerCase().replace(/\s+/g, "");
-    return PATHS.map((p) => ({ p, s: score(needle, p.toLowerCase()) })).filter((x) => x.s > 0).sort((a, b) => b.s - a.s).slice(0, 10).map((x) => x.p);
-  }, [live, remote.data, q]);
+  const hits = useMemo(() => ((remote.data ?? []) as string[]).slice(0, 12), [remote.data]);
 
   useEffect(() => setAt(0), [q]);
   if (!open) return null;
 
   const choose = (path?: string) => { if (!path) return; onPick(path); onClose(); };
-  const waiting = live && (remote.isFetching || query !== q.trim());
+  const waiting = remote.isFetching || query !== q.trim();
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center bg-ground/50 pt-[12vh] backdrop-blur-[2px]" onMouseDown={onClose}>
@@ -66,8 +58,8 @@ export function QuickOpen({ sessionId, open, onClose, onPick }: { sessionId: str
           className="w-full border-b border-line bg-transparent px-4 py-3.5 text-read text-bone placeholder:text-mute focus:outline-none"
         />
         <div className="p-1.5">
-          {live && !query && <p className="px-2.5 py-3 text-ui text-mute">Type part of a path.</p>}
-          {!waiting && hits.length === 0 && (live ? !!query : true) && <p className="px-2.5 py-3 text-ui text-mute">No file matches.</p>}
+          {!query && <p className="px-2.5 py-3 text-ui text-mute">Type part of a path.</p>}
+          {!waiting && hits.length === 0 && !!query && <p className="px-2.5 py-3 text-ui text-mute">No file matches.</p>}
           {hits.map((path, n) => (
             <button key={path} onMouseEnter={() => setAt(n)} onClick={() => choose(path)} data-on={n === at} className="row w-full">
               <span className={`shrink-0 text-micro ${TONE[langOf(path)]}`}>●</span>
@@ -84,14 +76,3 @@ export function QuickOpen({ sessionId, open, onClose, onPick }: { sessionId: str
   );
 }
 
-function score(needle: string, hay: string): number {
-  let s = 0, at = -1, run = 0;
-  for (const ch of needle) {
-    const found = hay.indexOf(ch, at + 1);
-    if (found === -1) return 0;
-    run = found === at + 1 ? run + 1 : 0;
-    s += 1 + run * 2 + (hay[found - 1] === "/" ? 4 : 0);
-    at = found;
-  }
-  return s;
-}

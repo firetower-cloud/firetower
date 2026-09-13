@@ -7,7 +7,7 @@
  * a retry after a lost acknowledgement never becomes a second turn.
  */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { http } from "~/mock/http";
+import { http } from "~/client/http";
 import type { KeepAnnotation, PreviewAnnotation } from "@/src/api/generated/model";
 
 const at = (session: string) => `/api/v1/sessions/${encodeURIComponent(session)}/annotations`;

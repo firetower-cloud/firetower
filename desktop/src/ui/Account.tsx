@@ -14,17 +14,15 @@ import { useMutation } from "@tanstack/react-query";
 import { KeyRound, LogOut, Trash2 } from "lucide-react";
 import { useChangePassword, useLogout, useMe } from "@/src/api/generated/auth/auth";
 import { useBackendKey, dropCache } from "~/backend";
-import { isLive } from "~/mock/http";
 import { forget, servers, updateToken } from "~/servers";
 import { navigate } from "~/shims/next-navigation";
-import type { Backend } from "~/mock/backends";
+import type { Backend } from "~/fleet";
 
 import { why } from "~/data";
 
 export function Account({ backend, onForgot }: { backend: Backend; onForgot: () => void }) {
   const key = useBackendKey();
-  const live = isLive(key);
-  const me = useMe({ query: { enabled: live } });
+  const me = useMe();
   const logout = useLogout();
   const change = useChangePassword();
   const [current, setCurrent] = useState("");
@@ -71,7 +69,6 @@ export function Account({ backend, onForgot }: { backend: Backend; onForgot: () 
           {user?.role ?? "member"} at <span className="text-text">{org?.name ?? backend.org}</span>
           {stored && <span className="text-mute"> · {stored.url.replace(/^https?:\/\//, "")}</span>}
         </p>
-        {!live && <p className="mt-2 text-meta text-mute">A fixture. Nothing here can be changed.</p>}
         {me.error ? <p className="mt-2 text-meta text-brick">{why(me.error)}</p> : null}
 
         {user?.mustChangePassword && (
@@ -89,7 +86,7 @@ export function Account({ backend, onForgot }: { backend: Backend; onForgot: () 
             <input type="password" value={again} onChange={(e) => setAgain(e.target.value)} onKeyDown={(e) => e.key === "Enter" && rotate()} placeholder="Again" autoComplete="new-password" className="w-full rounded-lg border border-line bg-ground px-3 py-2 text-ui text-bone placeholder:text-mute focus:border-slate-deep focus:outline-none" />
             {trouble && <p className="text-meta text-brick">{trouble}</p>}
             {rotated && <p className="text-meta text-sage">Changed. This Mac carries the new token.</p>}
-            <button disabled={!live || !current || !next || change.isPending} onClick={rotate} className="control bg-bone font-medium text-ground hover:opacity-90 disabled:bg-raise disabled:text-mute">{change.isPending ? "Changing…" : "Change it"}</button>
+            <button disabled={!current || !next || change.isPending} onClick={rotate} className="control bg-bone font-medium text-ground hover:opacity-90 disabled:bg-raise disabled:text-mute">{change.isPending ? "Changing…" : "Change it"}</button>
           </div>
         </section>
 

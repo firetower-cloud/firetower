@@ -11,7 +11,7 @@ import { useState } from "react";
 import { ArrowRight, CircleDot, GitPullRequest, RotateCw, Ticket, User } from "lucide-react";
 import { Icon } from "@/components/ui";
 import { elapsed, minutesSince } from "@/src/api/view";
-import type { Backend } from "~/mock/backends";
+import type { Backend } from "~/fleet";
 import { useTasks, useTrackers } from "~/data";
 import { useStart } from "~/start";
 

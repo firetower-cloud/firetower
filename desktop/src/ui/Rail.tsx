@@ -16,7 +16,7 @@ import { AgentMark } from "@/components/AgentMark";
 import { GithubMark, Icon } from "@/components/ui";
 import { doing, group, shortRepo, type Workspace } from "@/src/api/workspaces";
 import { elapsed, minutesSince, needsYou } from "@/src/api/view";
-import type { Backend } from "~/mock/backends";
+import type { Backend } from "~/fleet";
 import { useSessions, useUpdatesDot } from "~/data";
 import { navigate, usePathname } from "~/shims/next-navigation";
 import { useStart } from "~/start";

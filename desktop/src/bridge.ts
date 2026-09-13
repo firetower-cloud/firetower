@@ -1,7 +1,7 @@
 /**
  * The entire surface that differs between Tauri and Electron.
  *
- * Everything above this line — components, mocks, the style page — is the same
+ * Everything above this line — components, the style page — is the same
  * either way. Keeping the surface this small is what makes the shell decision
  * reversible in a day rather than a week, so it should stay small: if something
  * wants to be added here, that is worth an argument.

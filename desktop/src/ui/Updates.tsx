@@ -27,23 +27,20 @@ import {
   usePlanUpdate,
 } from "@/src/api/generated/updates/updates";
 import { ACTIVE, countEnded, everythingUpgradable, needsChoice, willWrite, wouldEnd } from "@/src/api/updates";
-import { isLive } from "~/mock/http";
 import { useBackendKey } from "~/backend";
 
 import { why } from "~/data";
 
 export function Updates() {
-  const live = isLive(useBackendKey());
   const cache = useQueryClient();
-  const status = useGetUpdates({ query: { enabled: live, refetchInterval: 60_000 } });
-  const runs = useListRuns({ query: { enabled: live, refetchInterval: 30_000 } });
+  const status = useGetUpdates({ query: { refetchInterval: 60_000 } });
+  const runs = useListRuns({ query: { refetchInterval: 30_000 } });
   const check = useCheckUpdates();
   const backUp = useBackUpNow();
   const [planning, setPlanning] = useState(false);
   const [opened, setOpened] = useState<string | null>(null);
   const refresh = () => Promise.all([cache.invalidateQueries({ queryKey: getGetUpdatesQueryKey() }), cache.invalidateQueries({ queryKey: getListRunsQueryKey() })]);
 
-  if (!live) return <Page><p className="text-read text-mute">A fixture does not upgrade.</p></Page>;
   if (status.isPending) return <Page><p className="flex items-center gap-2 text-read text-mute"><Loader2 className="h-4 w-4 animate-spin" strokeWidth={2} />Asking what is running…</p></Page>;
   if (status.error) return <Page><p className="text-read text-brick">{why(status.error)}</p></Page>;
 

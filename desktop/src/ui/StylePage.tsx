@@ -9,8 +9,6 @@
  * It is also the prototype's remote control: knock a server offline, fire an
  * ember, and watch the inbox react.
  */
-import { BACKENDS, STATE, setReach, emit, type BackendId } from "~/mock/backends";
-import { useFixtures } from "~/mock/socket";
 import { navigate } from "~/shims/next-navigation";
 import { drag } from "~/drag";
 
@@ -36,10 +34,14 @@ const SIGNALS = [
   ["slate", "In flight, informational"],
 ];
 const KINDS = ["source", "native", "data", "style", "media", "store", "prose"];
+/** Three marks, for the sake of the drawing: selected, plain, and one that cannot be reached. */
+const SERVERS = [
+  { mark: "W", org: "Westlabs", user: "kevin", on: true, reach: "live" },
+  { mark: "N", org: "Northwind", user: "kevin", on: false, reach: "live" },
+  { mark: "P", org: "Parallax", user: "kp", on: false, reach: "unreachable" },
+] as const;
 
 export function StylePage() {
-  useFixtures();
-
   return (
     <div className="scroll-slim h-full overflow-y-auto bg-ground">
       <header {...drag} className="sticky top-0 z-10 flex h-(--chrome-title) items-center gap-3 border-b border-line bg-panel px-4">
@@ -53,8 +55,6 @@ export function StylePage() {
       </header>
 
       <div className="mx-auto max-w-[900px] space-y-10 p-8">
-        <Remote />
-
         <Section name="Ground" note="Six surfaces. Elevation is a colour change and a top highlight, never a box drawn around everything.">
           <div className="flex flex-wrap gap-3">
             {GROUND.map((g) => (
@@ -117,9 +117,9 @@ export function StylePage() {
           note="NEW. Identity is a shape, never a hue — the system already spends colour on signals and on file kinds, and a third namespace would compete with ember."
         >
           <div className="flex items-center gap-3 rounded-md border border-line bg-panel p-4">
-            {BACKENDS.map((b) => (
-              <div key={b.id} className="text-center">
-                <span className="server-mark mx-auto grid h-8 w-8 place-items-center" data-on={b.id === "e1"} data-reach={b.reach}>
+            {SERVERS.map((b) => (
+              <div key={b.mark} className="text-center">
+                <span className="server-mark mx-auto grid h-8 w-8 place-items-center" data-on={b.on} data-reach={b.reach}>
                   {b.mark}
                 </span>
                 <div className="mt-1.5 text-meta text-dim">{b.org}</div>
@@ -176,37 +176,6 @@ export function StylePage() {
             <span>--dur-native 140ms</span>
           </div>
         </Section>
-      </div>
-    </div>
-  );
-}
-
-/** The prototype's remote: drive the states that are hard to catch by waiting. */
-function Remote() {
-  const fire = (id: BackendId) => {
-    const s = STATE[id].find((x) => x.status === "Working") ?? STATE[id][0];
-    s.status = "NeedsYou";
-    s.note = "Fired from the style page. Does this land calmly?";
-    s.updatedAt = new Date().toISOString();
-    emit();
-  };
-
-  return (
-    <div className="rounded-lg border border-line bg-raise p-4 shadow-(--shadow-raise)">
-      <div className="eyebrow mb-2">Remote</div>
-      <div className="flex flex-wrap gap-2">
-        {BACKENDS.map((b) => (
-          <div key={b.id} className="flex items-center gap-1 rounded-md border border-line bg-panel px-2 py-1">
-            <span className="mr-1 text-meta text-dim">{b.org}</span>
-            <Btn onClick={() => fire(b.id)}>ember</Btn>
-            <Btn onClick={() => setReach(b.id, b.reach === "unreachable" ? "live" : "unreachable")}>
-              {b.reach === "unreachable" ? "reconnect" : "drop"}
-            </Btn>
-            <Btn onClick={() => setReach(b.id, b.reach === "slow" ? "live" : "slow")}>
-              {b.reach === "slow" ? "speed up" : "stall"}
-            </Btn>
-          </div>
-        ))}
       </div>
     </div>
   );

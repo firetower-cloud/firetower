@@ -4,9 +4,9 @@
  * The fleet view, the palette, the strip's counts and the dock badge are the
  * only things that look at more than one server at once, and they are outside
  * any one server's provider — so they cannot use that server's cache. This is
- * the deliberate fan-out the design called for: fixtures come from `STATE`,
- * connected servers are asked directly with their own token, and the answer
- * is merged here rather than in a cache that has no server dimension.
+ * the deliberate fan-out the design called for: each connected server is asked
+ * directly with its own token, and the answers are merged here rather than in
+ * a cache that has no server dimension.
  *
  * Polled, not streamed, and that is acceptable *here* and nowhere else: the
  * merged inbox is a glance, and each server's own screen is on its stream.
@@ -14,44 +14,52 @@
 import { useEffect, useState } from "react";
 import type { Session } from "@/src/api/generated/model";
 import { NEEDS_YOU } from "@/src/api/view";
-import { BACKENDS, STATE, type Backend } from "~/mock/backends";
-import { useFixtures } from "~/mock/socket";
-import { onServers, servers } from "~/servers";
+import { onServers, servers, type Connected } from "~/servers";
+
+export type Reach = "live" | "unreachable";
+
+/** A connected server, as the screens see it. */
+export type Backend = {
+  /** The `serverId` from `/bootstrap`. */
+  id: string;
+  org: string;
+  user: string;
+  /** The monogram in the strip. Identity is a shape here, never a hue. */
+  mark: string;
+  url: string;
+  reach: Reach;
+};
 
 export type Fleet = { backend: Backend; sessions: Session[]; error: string | null };
 
-const live: Map<string, { sessions: Session[]; error: string | null }> = new Map();
+const known: Map<string, { sessions: Session[]; error: string | null }> = new Map();
 const watchers = new Set<() => void>();
 const changed = () => watchers.forEach((w) => w());
 
-/** A connected server, wearing the same clothes as a fixture. */
-export function asBackend(s: ReturnType<typeof servers>[number]): Backend {
+export function asBackend(s: Connected): Backend {
   return {
-    id: s.serverId as Backend["id"],
+    id: s.serverId,
     org: s.org,
     user: s.user,
     mark: s.org.slice(0, 1).toUpperCase(),
     url: s.url,
-    latency: [0, 0],
-    reach: live.get(s.serverId)?.error ? "unreachable" : "live",
+    reach: known.get(s.serverId)?.error ? "unreachable" : "live",
   };
 }
 
-async function ask(s: ReturnType<typeof servers>[number]) {
+async function ask(s: Connected) {
   try {
-    const res = await fetch(`${s.url}/api/v1/sessions`, {
-      headers: { authorization: `Bearer ${s.token}` },
-    });
+    const res = await fetch(`${s.url}/api/v1/sessions`, { headers: { authorization: `Bearer ${s.token}` } });
     if (!res.ok) {
       const body = await res.json().catch(() => null);
-      live.set(s.serverId, { sessions: live.get(s.serverId)?.sessions ?? [], error: body?.message ?? `answered ${res.status}` });
+      known.set(s.serverId, { sessions: known.get(s.serverId)?.sessions ?? [], error: body?.message ?? `answered ${res.status}` });
     } else {
-      live.set(s.serverId, { sessions: (await res.json()) as Session[], error: null });
+      known.set(s.serverId, { sessions: (await res.json()) as Session[], error: null });
     }
   } catch (e) {
     // Keep what was last known; a list that empties itself when the VPN drops
     // reads as work being lost rather than as a network that is not there.
-    live.set(s.serverId, { sessions: live.get(s.serverId)?.sessions ?? [], error: String((e as Error)?.message ?? e) });
+    known.set(s.serverId, { sessions: known.get(s.serverId)?.sessions ?? [], error: String((e as Error)?.message ?? e) });
   }
   changed();
 }
@@ -65,9 +73,8 @@ function ensureTicking() {
   onServers(sweep);
 }
 
-/** All of it: fixtures, then every connected server. */
+/** Every connected server, with what it last said. */
 export function useFleet(): Fleet[] {
-  useFixtures();
   const [, tick] = useState(0);
   useEffect(() => {
     ensureTicking();
@@ -76,14 +83,17 @@ export function useFleet(): Fleet[] {
     return () => void watchers.delete(w);
   }, []);
 
-  return [
-    ...BACKENDS.map((b) => ({ backend: b, sessions: STATE[b.id], error: null })),
-    ...servers().map((s) => ({
-      backend: asBackend(s),
-      sessions: live.get(s.serverId)?.sessions ?? [],
-      error: live.get(s.serverId)?.error ?? null,
-    })),
-  ];
+  return servers().map((s) => ({
+    backend: asBackend(s),
+    sessions: known.get(s.serverId)?.sessions ?? [],
+    error: known.get(s.serverId)?.error ?? null,
+  }));
+}
+
+/** Forget what a server said, once it is gone from this Mac. */
+export function dropFleet(serverId: string) {
+  known.delete(serverId);
+  changed();
 }
 
 /** Ember, summed over every server. What goes on the dock. */

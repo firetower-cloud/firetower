@@ -10,16 +10,15 @@
  * the phone does not care whose server it came from. So the inbox is home and a
  * server is context you drop into, not the other way round.
  */
-import { BACKENDS, type BackendId } from "~/mock/backends";
 import { drag } from "~/drag";
 import { navigate } from "~/shims/next-navigation";
 import { useFleet, waitingIn } from "~/fleet";
 
-export type Scope = "all" | BackendId;
+/** Everything, or one server by its id. */
+export type Scope = "all" | (string & {});
 
 export function ServerStrip({ scope, onScope }: { scope: Scope; onScope: (s: Scope) => void }) {
   const fleet = useFleet();
-  const countIn = (id: string) => waitingIn(fleet.find((f) => f.backend.id === id)?.sessions ?? []);
   const total = fleet.reduce((n, f) => n + waitingIn(f.sessions), 0);
 
   return (
@@ -38,22 +37,8 @@ export function ServerStrip({ scope, onScope }: { scope: Scope; onScope: (s: Sco
 
       <div className="my-1 h-px w-5 bg-line-soft" />
 
-      {BACKENDS.map((b) => (
-        <Mark
-          key={b.id}
-          label={`${b.org} — ${b.user}`}
-          mark={b.mark}
-          on={scope === b.id}
-          reach={b.reach}
-          count={countIn(b.id)}
-          onPick={() => onScope(b.id)}
-        />
-      ))}
-
-      {/* Servers this Mac has actually connected to. Marked the same way as
-          the fixtures, because to the person looking they are the same kind of
-          thing — one of them just happens to be real. */}
-      {fleet.filter((f) => !BACKENDS.some((b) => b.id === f.backend.id)).map(({ backend: b, sessions }) => (
+      {/* Every server this Mac has connected to. */}
+      {fleet.map(({ backend: b, sessions }) => (
         <Mark
           key={b.id}
           label={`${b.org} — ${b.user}`}
@@ -89,7 +74,7 @@ function Mark({
   label: string;
   mark: string;
   on: boolean;
-  reach: "live" | "slow" | "unreachable";
+  reach: "live" | "unreachable";
   count: number;
   onPick: () => void;
 }) {

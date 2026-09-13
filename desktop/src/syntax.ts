@@ -100,7 +100,7 @@ export const TONE: Record<Kind, string> = {
   plain: "text-text",
 };
 
-/** From a path, since fixtures do not always carry a language. */
+/** The language a path is in, by its extension. */
 export function langOf(path: string): string {
   if (path.endsWith(".rs")) return "rust";
   if (path.endsWith(".sql")) return "sql";

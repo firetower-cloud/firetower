@@ -10,13 +10,11 @@ import { useEffect, useRef, useState } from "react";
 import { Cpu, Globe, PanelRight, Pencil, SquareTerminal, Trash2, X } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { getListSessionsQueryKey, useDestroySession, useRenameSession } from "@/src/api/generated/sessions/sessions";
-import { isLive } from "~/mock/http";
 import { Signal } from "@/components/Signal";
 import { AgentMark } from "@/components/AgentMark";
 import { group } from "@/src/api/workspaces";
-import { talkFor, type Backend } from "~/mock/backends";
+import type { Backend } from "~/fleet";
 import { useSession, useSessions } from "~/data";
-import { useStart } from "~/start";
 import { navigate } from "~/shims/next-navigation";
 import { Chat } from "~/ui/Chat";
 import { FileTab } from "~/ui/FileTab";
@@ -26,7 +24,6 @@ import { AddAgent } from "~/ui/AddAgent";
 import { QuickOpen } from "~/ui/QuickOpen";
 import { TabStrip, type Tab } from "~/ui/Tabs";
 import { Inspector } from "~/ui/Inspector";
-import { TerminalPane } from "~/ui/TerminalPane";
 import { Shell } from "~/ui/Shell";
 import { Unreachable } from "~/ui/Unreachable";
 import { drag } from "~/drag";
@@ -43,7 +40,6 @@ type Side = "diff" | "files" | "ship";
 export function Workbench({ backend, workspace }: { backend: Backend; workspace: string }) {
   const { data: sessions } = useSessions();
   const opened = useSession(workspace);
-  const start = useStart();
   const [side, setSide] = useState<Side>("diff");
   const [open, setOpen] = useState(true);
   const [width, setWidth] = useState(() => {
@@ -255,8 +251,6 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
     place.runs.find((r) => r.id === workspace) ??
     primary;
 
-  const talk = talkFor(place.id);
-  const live = isLive();
 
   if (backend.reach === "unreachable") return <Unreachable org={backend.org} />;
 
@@ -273,7 +267,7 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
             onBlur={() => setRenaming(null)}
             onKeyDown={(e) => {
               if (e.key === "Escape") setRenaming(null);
-              if (e.key === "Enter" && renaming.trim() && live) {
+              if (e.key === "Enter" && renaming.trim()) {
                 rename.mutate({ id: run.id, data: { name: renaming.trim() } }, { onSuccess: () => cache.invalidateQueries({ queryKey: getListSessionsQueryKey() }) });
                 setRenaming(null);
               }
@@ -312,7 +306,7 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
             </button>
           ))}
           <button
-            onClick={() => (live ? setAdding(true) : start({ workspaceId: place.id, title: place.name, repo: run.repo ?? undefined }))}
+            onClick={() => setAdding(true)}
             title="Add an agent to this workspace"
             className="grid h-7 w-7 place-items-center rounded-md text-mute transition-colors hover:bg-raise hover:text-bone"
           >
@@ -331,7 +325,7 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
           >
             <SquareTerminal className="h-4 w-4" strokeWidth={1.75} />
           </button>
-          {live && (
+          {(
             <button
               onClick={() => {
                 if (!window.confirm(`End "${place.name}"? Its branch stays on the machine; the agents stop.`)) return;
@@ -432,7 +426,7 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
                 </button>
               </div>
               <div className="min-h-0 flex-1">
-                {live ? <Shell sessionId={run.id} ended={run.status === "Ended"} showing={term} onOpenPath={(p, line) => openFile(p, true, line)} /> : <TerminalPane place={place} />}
+                <Shell sessionId={run.id} ended={run.status === "Ended"} showing={term} onOpenPath={(p, line) => openFile(p, true, line)} />
               </div>
             </div>
           )}
@@ -449,7 +443,6 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
             session={run}
             workspace={place.id}
             branch={place.branch}
-            fixtureDiffs={talk.diffs}
             tab={side}
             onTab={setSide}
             onOpenFile={openFile}

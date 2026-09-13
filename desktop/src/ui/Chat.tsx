@@ -53,8 +53,6 @@ import { AccountSwitcher } from "~/ui/AccountSwitcher";
 import { Annotate, type Anchor } from "~/ui/Annotate";
 import { markPaths, resolvePath } from "~/paths";
 import { AddAgent } from "~/ui/AddAgent";
-import { isLive } from "~/mock/http";
-import { talkFor, type Ask, type Turn } from "~/mock/backends";
 
 const DID: Partial<Record<ItemKind, string>> = {
   CommandExecution: "ran",
@@ -111,7 +109,6 @@ export function Chat({
   session: Session;
   branch?: string;
 } & Open) {
-  const live = isLive();
   const { conversation, echo, settle, remember } = useConversation(session.id);
   const scroller = useRef<HTMLDivElement>(null);
   const body = useRef<HTMLDivElement>(null);
@@ -146,21 +143,13 @@ export function Chat({
      workspace is not a blank screen for the forty seconds before the agent
      says anything. Read from this session's events, folded by the web's own
      `stepLines`. */
-  const events = useListEvents({ sessionId: session.id } as Parameters<typeof useListEvents>[0], { query: { enabled: live } });
+  const events = useListEvents({ sessionId: session.id } as Parameters<typeof useListEvents>[0]);
   const steps = useMemo(
-    () => (live ? stepLines(session, (events.data ?? []) as Event[]) : []),
-    [live, session, events.data],
+    () => stepLines(session, (events.data ?? []) as Event[]),
+    [session, events.data],
   );
 
-  const fixture = useMemo(
-    () => (live ? null : fromTalk(talkFor(session.workspaceId ?? session.id))),
-    [live, session.id, session.workspaceId],
-  );
-  const items = live ? conversation.items : fixture!.items;
-  const asked = live ? conversation.asked : fixture!.asked;
-  const questions = live ? conversation.questions : [];
-  const working = live ? conversation.working : false;
-  const stopped = live ? conversation.stopped : undefined;
+  const { items, asked, questions, working, stopped } = conversation;
   const answerable = session.status !== "Ended";
 
   const rows = useMemo(() => fold(items), [items]);
@@ -174,12 +163,12 @@ export function Chat({
     [items],
   );
   useEffect(() => {
-    if (!live || settled === 0) return;
+    if (settled === 0) return;
     const id = session.id;
     void cache.invalidateQueries({ queryKey: [`/api/v1/sessions/${id}/diff`] });
     void cache.invalidateQueries({ queryKey: [`/api/v1/sessions/${id}/files`] });
     void cache.invalidateQueries({ queryKey: ["file-text", id] });
-  }, [settled, working, live, session.id, cache]);
+  }, [settled, working, session.id, cache]);
 
   /* Opens at the end and stays there while the transcript grows — unless you
      scrolled up to read something, in which case it leaves you alone. Growth
@@ -216,7 +205,7 @@ export function Chat({
           following.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
         }}
       >
-        <SessionContext.Provider value={{ session: live ? session.id : null }}>
+        <SessionContext.Provider value={{ session: session.id }}>
         <NotesContext.Provider value={{ notes, drop }}>
         <div ref={body} className="mx-auto w-full max-w-[46rem] px-8 pt-8 pb-4">
           <h1 className="text-display text-bone">{session.title}</h1>
@@ -237,9 +226,7 @@ export function Chat({
 
           {items.length === 0 && !working && steps.every((s) => s.state === "done") && (
             <p className="mt-10 text-read text-mute">
-              {live && conversation.trouble
-                ? conversation.trouble
-                : "Nothing said yet. The agent is here and waiting for you."}
+              {conversation.trouble ?? "Nothing said yet. The agent is here and waiting for you."}
             </p>
           )}
 
@@ -257,13 +244,13 @@ export function Chat({
           {stopped && <Stopped why={stopped} />}
           {session.status === "Failed" && <Relaunch session={session} />}
 
-          {live && <AccountSwitcher session={session} working={working} />}
+          <AccountSwitcher session={session} working={working} />
 
           {questions.map((q) => (
             <Questions key={q.req} sessionId={session.id} asking={q} onAnswered={() => settle(q.req)} />
           ))}
           {asked.map((a) => (
-            <Approval key={a.req} sessionId={session.id} asked={a} onAnswered={() => settle(a.req)} live={live} />
+            <Approval key={a.req} sessionId={session.id} asked={a} onAnswered={() => settle(a.req)} />
           ))}
 
         </div>
@@ -288,10 +275,10 @@ export function Chat({
           <div className="pointer-events-auto flex items-center gap-2 rounded-full border border-line bg-overlay py-1.5 pr-1.5 pl-3.5 shadow-(--shadow-float)">
             <span className="text-ui text-dim">{notes.length} note{notes.length > 1 ? "s" : ""}</span>
             <button onClick={clear} title="Discard them" className="grid h-6 w-6 place-items-center rounded-full text-mute transition-colors hover:bg-raise hover:text-bone"><X className="h-3.5 w-3.5" strokeWidth={2} /></button>
-            <button disabled={!live} onClick={() => setHanding(true)} title="Start another agent in this workspace, on these notes" className="control rounded-full text-dim hover:bg-raise hover:text-bone disabled:text-mute">
+            <button onClick={() => setHanding(true)} title="Start another agent in this workspace, on these notes" className="control rounded-full text-dim hover:bg-raise hover:text-bone disabled:text-mute">
               <Bot className="h-3.5 w-3.5" strokeWidth={1.75} />Another agent…
             </button>
-            <button disabled={!live || !answerable || post.isPending} onClick={() => post.mutate()} className="control rounded-full bg-bone font-medium text-ground transition-opacity hover:opacity-90 disabled:bg-raise disabled:text-mute">
+            <button disabled={!answerable || post.isPending} onClick={() => post.mutate()} className="control rounded-full bg-bone font-medium text-ground transition-opacity hover:opacity-90 disabled:bg-raise disabled:text-mute">
               <Send className="h-3.5 w-3.5" strokeWidth={2} />{post.isPending ? "Sending…" : "Send to the agent"}
             </button>
           </div>
@@ -666,7 +653,7 @@ function Relaunch({ session }: { session: Session }) {
 
 /* ── Requests ──────────────────────────────────────────────────────────── */
 
-function Approval({ sessionId, asked, onAnswered, live }: { sessionId: string; asked: Asked; onAnswered: () => void; live: boolean }) {
+function Approval({ sessionId, asked, onAnswered }: { sessionId: string; asked: Asked; onAnswered: () => void }) {
   const answer = useAnswerRequest();
   const [reason, setReason] = useState("");
   const [explaining, setExplaining] = useState(false);
@@ -675,7 +662,7 @@ function Approval({ sessionId, asked, onAnswered, live }: { sessionId: string; a
   const decide = (decision: Decision) => {
     setDone(decision.decision);
     onAnswered();
-    if (live) answer.mutate({ id: sessionId, data: { req: asked.req, decision } });
+    answer.mutate({ id: sessionId, data: { req: asked.req, decision } });
   };
 
   if (done) {
@@ -781,24 +768,4 @@ function Questions({ sessionId, asking, onAnswered }: { sessionId: string; askin
       </div>
     </div>
   );
-}
-
-/* ── Fixtures, in the real shape ───────────────────────────────────────── */
-
-function fromTalk(talk: { turns: Turn[]; ask?: Ask }): { items: Item[]; asked: Asked[] } {
-  const items: Item[] = [];
-  talk.turns.forEach((turn, i) => {
-    if (turn.who === "you") {
-      items.push({ id: `t${i}`, kind: "UserMessage", text: turn.text, output: "" });
-      return;
-    }
-    if (turn.thinking) items.push({ id: `t${i}r`, kind: "Reasoning", text: turn.thinking, output: "" });
-    items.push({ id: `t${i}a`, kind: "AssistantMessage", text: turn.text, output: "" });
-    turn.tools?.forEach((tool, k) => {
-      const kind: ItemKind = tool.name === "bash" ? "CommandExecution" : tool.name === "edit" ? "FileChange" : tool.name === "grep" ? "WebSearch" : "FileRead";
-      items.push({ id: `t${i}c${k}`, kind, title: tool.name, status: tool.ok === false ? "Failed" : "Completed", text: "", output: tool.result ?? "", input: tool.name === "bash" ? { command: tool.arg } : tool.name === "grep" ? { pattern: tool.arg } : { file_path: tool.arg } });
-    });
-  });
-  const asked: Asked[] = talk.ask ? [{ req: "fixture", kind: "Tool", detail: "AskUserQuestion", args: { question: talk.ask.question } }] : [];
-  return { items, asked };
 }

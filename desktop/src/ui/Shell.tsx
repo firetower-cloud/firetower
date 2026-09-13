@@ -19,7 +19,7 @@ import type { Terminal as Xterm } from "@xterm/xterm";
 import type { SearchAddon as Search } from "@xterm/addon-search";
 import "@xterm/xterm/css/xterm.css";
 import { Search as SearchIcon, X } from "lucide-react";
-import { token, wsBase } from "~/mock/http";
+import { token, wsBase } from "~/client/http";
 import { findPaths, resolvePath } from "~/paths";
 
 type State = "connecting" | "live" | "closed";

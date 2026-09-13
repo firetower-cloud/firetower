@@ -13,7 +13,8 @@
  * architecture exists to avoid.
  */
 import { useEffect, useState } from "react";
-import { ArrowRight, CircleSlash2, Loader2, Lock, ServerIcon } from "lucide-react";
+import { ArrowRight, CircleSlash2, Loader2, Lock } from "lucide-react";
+import { Mark } from "~/ui/Mark";
 import { reach, signIn, type Bootstrap } from "~/probe";
 import { remember } from "~/servers";
 
@@ -111,8 +112,8 @@ function Where({
   return (
     <>
       <div className="mb-7 text-center">
-        <span className="mx-auto grid h-11 w-11 place-items-center rounded-xl border border-line bg-raise text-ember shadow-(--shadow-raise)">
-          <ServerIcon className="h-5 w-5" strokeWidth={1.75} />
+        <span className="mx-auto grid h-12 w-12 place-items-center rounded-xl border border-line bg-raise text-bone shadow-(--shadow-raise)">
+          <Mark size={26} />
         </span>
         <h1 className="mt-4 text-display text-bone">Connect to a Firetower</h1>
         <p className="mt-2 text-read text-dim">

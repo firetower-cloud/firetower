@@ -27,25 +27,21 @@ import {
 } from "@/src/api/generated/sessions/sessions";
 import { awaiting, done, shipping } from "@/src/api/ship";
 import { idOf, label as refLabel, parseReference, withTrailer, type Reference } from "@/src/api/issues";
-import { isLive } from "~/mock/http";
-import { shipFor } from "~/mock/backends";
 import type { Changed } from "~/ui/Inspector";
 
 import { why } from "~/data";
 import { openExternal } from "~/open";
 
 export function Ship({ session, branch, files }: { session: Session; branch?: string; files: Changed[] }) {
-  const live = isLive();
   const cache = useQueryClient();
 
   const { data: work, isError: workFailed } = useSessionWork(session.id, {
     query: {
-      enabled: live,
       // Faster while a request is open and its merge is what changes next.
       refetchInterval: (q) => (q.state.data && awaiting(shipping(session, q.state.data)) ? 5_000 : 30_000),
     },
   });
-  const ship = live ? shipping(session, work, workFailed) : fixtureShip(session);
+  const ship = shipping(session, work, workFailed);
 
   const describe = useDescribeSession();
   const commit = useCommitSession();
@@ -71,10 +67,10 @@ export function Ship({ session, branch, files }: { session: Session; branch?: st
 
   /* Asked once when there is something to describe and nothing written yet. */
   useEffect(() => {
-    if (!live || title || describe.isPending || describe.isSuccess || files.length === 0) return;
+    if (title || describe.isPending || describe.isSuccess || files.length === 0) return;
     describe.mutate({ id: session.id }, { onSuccess: (p) => { setTitle(p.title); setBody(p.body); } });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [live, files.length]);
+  }, [files.length]);
 
   const refresh = () =>
     Promise.all([
@@ -88,7 +84,6 @@ export function Ship({ session, branch, files }: { session: Session; branch?: st
   const opening = ship.stage === "uncommitted" || ship.stage === "unpushed" || ship.stage === "pushed";
 
   const go = async () => {
-    if (!live) return;
     setTrouble(null);
     try {
       if (ship.stage === "uncommitted") {
@@ -138,7 +133,7 @@ export function Ship({ session, branch, files }: { session: Session; branch?: st
             <>
               <div className="mt-3.5 flex items-center gap-2">
                 <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder={describe.isPending ? "Describing the change…" : "Title"} className="min-w-0 flex-1 rounded-lg border border-line bg-ground px-3 py-2 text-ui text-bone placeholder:text-mute focus:border-slate-deep focus:outline-none" />
-                <button disabled={describe.isPending || !live} onClick={() => describe.mutate({ id: session.id }, { onSuccess: (p) => { setTitle(p.title); setBody(p.body); } })} title="Ask the run to describe itself again" className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-line bg-ground text-mute hover:text-bone disabled:opacity-50">
+                <button disabled={describe.isPending} onClick={() => describe.mutate({ id: session.id }, { onSuccess: (p) => { setTitle(p.title); setBody(p.body); } })} title="Ask the run to describe itself again" className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-line bg-ground text-mute hover:text-bone disabled:opacity-50">
                   {describe.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" strokeWidth={2} /> : <RefreshCw className="h-3.5 w-3.5" strokeWidth={1.75} />}
                 </button>
               </div>
@@ -200,14 +195,13 @@ export function Ship({ session, branch, files }: { session: Session; branch?: st
           {trouble && <p className="mt-3 rounded-lg border border-brick-deep bg-brick-tint px-3 py-2 font-mono text-meta text-brick">{trouble}</p>}
 
           <button
-            disabled={busy || !live || !!ship.blocked || (ship.stage === "uncommitted" && keeping.length === 0)}
+            disabled={busy || !!ship.blocked || (ship.stage === "uncommitted" && keeping.length === 0)}
             onClick={go}
             title={ship.blocked ?? undefined}
             className="control mt-3.5 w-full justify-center border border-sage-deep bg-sage-tint font-medium text-sage transition-colors hover:bg-sage-deep/40 disabled:border-line disabled:bg-raise disabled:text-mute"
           >
             {step ? <><Loader2 className="h-3.5 w-3.5 animate-spin" strokeWidth={2} />{step}</> : ship.label}
           </button>
-          {!live && <p className="mt-2 text-center text-micro text-mute">A fixture: nothing is committed.</p>}
         </>
       )}
     </div>
@@ -215,8 +209,3 @@ export function Ship({ session, branch, files }: { session: Session; branch?: st
 }
 
 /** The demo's stage, in the real shape. */
-function fixtureShip(session: Session): ReturnType<typeof shipping> {
-  const s = shipFor(session.workspaceId ?? session.id);
-  const stage = s.stage === "open" ? "open" : s.stage;
-  return { stage, label: s.label, links: s.stage === "open" ? [{ slug: session.repo ?? "", url: session.pullRequest ?? "#" }] : [], count: s.files.length } as ReturnType<typeof shipping>;
-}

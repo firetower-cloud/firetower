@@ -4,7 +4,7 @@
  * A render error unmounts the tree, and an unmounted tree in a window with no
  * browser chrome is a black rectangle — no message, no console anybody is
  * looking at, no way back. That is how a one-line mistake in the new-workspace
- * form (reading a fixture table by a real server's id) turned into "the app
+ * form turned into "the app
  * went blank", which is unreportable as a bug.
  *
  * So: keep the shell, say what broke, and offer the way out. Deliberately not

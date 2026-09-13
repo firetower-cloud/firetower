@@ -1,8 +1,8 @@
-# Firetower for macOS — prototype
+# Firetower for macOS
 
-A native window over fixtures. No backend, no Rust sidecar, no Keychain, no
-signing. It exists to answer what kind of client we can get quickly, and what
-the style guideline is once the window is native and holds more than one server.
+A native window onto one or more Firetowers. It connects to a control plane
+over the mesh VPN, keeps a token per server, and talks to every server
+through the same generated client the web application uses.
 
 ## Run it
 
@@ -13,10 +13,9 @@ pnpm dev        # or just the renderer, in a browser tab
 ```
 
 `⌘K` palette · `⌘P` go to a file · `⌘\` inspector · `⌘1`–`⌘3` its tabs ·
-`⌘J` terminal · `⌘W` close a file.
+`⌘J` shell · `⌘W` close a tab.
 
-The style guide is in the rail, and doubles as the remote control: drop a
-server, fire an ember, stall a request.
+The style guide is in the rail while developing.
 
 ## What is shared with `web/`, and what is not
 
@@ -34,27 +33,25 @@ to save work on layouts that have to change anyway.
 
 The line is: **patterns and vocabulary are shared, layout is not.**
 
-## The mock
+## The one module the desktop replaces
 
 `web/orval.config.ts` points all 86 generated operations at one mutator, so
-swapping that single module is the whole fake — `vite.config.ts` does it by
-resolved path, because orval writes `import { http } from '../../http'` and an
-alias on the specifier never sees it. That was a silent failure once: every
-request 404s and the screens render empty rather than wrong.
+swapping that single module (`src/client/http.ts`) is how the desktop gets a
+*current server*: the web's mutator reads one base URL and one token from
+module scope, and a Mac that has connected to several needs one per server.
+`vite.config.ts` swaps it by resolved path, because orval writes
+`import { http } from '../../http'` and an alias on the specifier never sees
+it. That was a silent failure once: every request 404s and the screens render
+empty rather than wrong.
 
-Conversations are fixtures, not a fake event log. The control plane models a
-transcript as `SessionConfigured` / `TurnStarted` / `ItemStarted` / deltas;
-reproducing that faithfully teaches us nothing about how a window feels.
+## Several servers, not one
 
-## Three servers, not one
-
-`src/mock/backends.ts` holds a personal box and two companies, each with its own
-fleet, latency and reachability. The strip switches between them, ember sums
-across all of them onto the dock badge, and `#/fleet` merges them into one
-screen — the only surface here that `web/` could not have.
-
-One is knocked offline 30 seconds in and comes back at 58, because the memo
-expects unreachable to be the common state and it has to look deliberate.
+`src/servers.ts` is the registry — url, `serverId` from `/bootstrap`,
+organisation, user, token — and `src/fleet.ts` asks each one for its sessions
+so the strip's counts, the palette, `#/fleet` and the dock badge can read
+across all of them; each server's own screens are on its event stream. A
+server is forgotten from Configuration or the Account page; nothing on the
+server changes.
 
 ## Layout
 
@@ -62,11 +59,13 @@ expects unreachable to be the common state and it has to look deliberate.
 src/
   shims/      next/link, next/navigation, next/font — the whole Next coupling,
               plus the history patch that makes the shell own addresses
-  mock/       three backends, fixtures, a scripted timeline
+  client/     the mutator, with a current server
+  servers.ts  the registry of connected servers; fleet.ts reads across them
+  preview/    the picker bridge, notes, port suggestions
   ui/         Rail, Dashboard, TasksPage, Workbench (+ Chat, Composer,
-              Inspector, FileTab, Tabs, QuickOpen, TerminalPane),
-              NewWorkspace, Configuration, Fleet, ServerStrip, Titlebar,
-              Palette, StylePage
+              Inspector, FileTab, Tabs, QuickOpen, Shell, PreviewTab),
+              NewWorkspace, Configuration (+ config/), Connect, Fleet,
+              ServerStrip, Titlebar, Palette, StylePage
   syntax.ts   ordered regexes, not a parser — enough to read code by
   overrides/  a component copied here wins over the one in ../web
 src-tauri/    the shell: window, vibrancy, dock badge, notifications

@@ -17,7 +17,6 @@ import { Bot, ChevronLeft, ChevronRight, ExternalLink, Monitor, RotateCw, Send, 
 import { usePreviewAddress } from "@/src/api/generated/sessions/sessions";
 import type { PreviewAnnotation, Session } from "@/src/api/generated/model";
 import { elapsed, minutesSince } from "@/src/api/view";
-import { isLive } from "~/mock/http";
 import { why } from "~/data";
 import { openExternal } from "~/open";
 import { Annotate, type Anchor } from "~/ui/Annotate";
@@ -41,9 +40,8 @@ function nameOf(label: string, html: string): string {
 const self = () => (location.origin && location.origin !== "null" ? location.origin : `${location.protocol}//${location.host}`);
 
 export function PreviewTab({ session, port, path: initialPath = "/", onPath }: { session: Session; port: number; path?: string; onPath?: (path: string) => void }) {
-  const live = isLive();
   const ended = session.status === "Ended";
-  const address = usePreviewAddress(session.id, { port }, { query: { enabled: live && !ended, retry: false } });
+  const address = usePreviewAddress(session.id, { port }, { query: { enabled: !ended, retry: false } });
   const url = address.data?.url ?? null;
   const origin = useMemo(() => (url ? new URL(url).origin : null), [url]);
   /* Where the page is. The frame is another origin, so this is what the page
@@ -66,7 +64,7 @@ export function PreviewTab({ session, port, path: initialPath = "/", onPath }: {
   const [focused, setFocused] = useState<string | null>(null);
   const [handing, setHanding] = useState(false);
 
-  const notes = usePreviewNotes(session.id, port, live && !ended);
+  const notes = usePreviewNotes(session.id, port, !ended);
 
   const bridge = usePickerBridge(frame, origin, session.id, port, {
     onPath: (p) => {
@@ -122,7 +120,6 @@ export function PreviewTab({ session, port, path: initialPath = "/", onPath }: {
     setDrafting(null);
   };
 
-  if (!live) return <Plain title="Previews need a connected server.">A fixture has nothing running in it.</Plain>;
   if (ended) return <Plain title="This session has ended.">There is nothing running on port {port} any more.</Plain>;
   if (address.isPending) return <Plain title={`Finding port ${port}…`}>Asking the server where this session can be reached.</Plain>;
   if (address.error || !url) return <Plain title="No address for this port.">{address.error ? why(address.error) : "The server could not say where to reach it."}</Plain>;

@@ -15,14 +15,14 @@ import { Updates } from "~/ui/Updates";
 import { Account } from "~/ui/Account";
 import { Setup } from "~/ui/Setup";
 import { navigate } from "~/shims/next-navigation";
-import type { Backend } from "~/mock/backends";
+import type { Backend } from "~/fleet";
 import { usePathname } from "~/shims/next-navigation";
 
 export function Routes({ backend, onForgot }: { backend: Backend; onForgot: () => void }) {
   const path = usePathname();
 
   if (path.startsWith("/tasks")) return <TasksPage backend={backend} />;
-  if (path.startsWith("/configuration")) return <Configuration backend={backend} />;
+  if (path.startsWith("/configuration")) return <Configuration backend={backend} onForgot={onForgot} />;
   if (path.startsWith("/updates")) return <Updates />;
   if (path.startsWith("/account")) return <Account backend={backend} onForgot={onForgot} />;
   if (path.startsWith("/setup")) return <Setup onDone={() => navigate("/")} />;

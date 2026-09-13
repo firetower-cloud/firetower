@@ -7,8 +7,7 @@ import { Routes } from "~/Routes";
 import { Fleet } from "~/ui/Fleet";
 import { useFleet, waitingIn, asBackend as liveBackend } from "~/fleet";
 import { StylePage } from "~/ui/StylePage";
-import { runTimeline, useFixtures } from "~/mock/socket";
-import { BACKENDS, type Backend } from "~/mock/backends";
+import type { Backend } from "~/fleet";
 import { BackendProvider } from "~/backend";
 import { bridge } from "~/bridge";
 import { StartProvider } from "~/start";
@@ -20,14 +19,12 @@ import { Gate } from "~/ui/Gate";
 import { navigate, usePathname } from "~/shims/next-navigation";
 
 export function App() {
-  /* Remembered, so a reload lands where you were. It used to reset to the
-     first fixture, which after connecting a real server read as the app
-     forgetting it. */
+  /* Remembered, so a reload lands where you were. */
   const [scope, setScopeState] = useState<Scope>(() => {
     try {
-      return (window.localStorage.getItem("firetower.scope") as Scope) || "e1";
+      return (window.localStorage.getItem("firetower.scope") as Scope) || servers()[0]?.serverId || "all";
     } catch {
-      return "e1";
+      return "all";
     }
   });
   const setScope = (next: Scope) => {
@@ -38,16 +35,11 @@ export function App() {
       /* private window; the choice just does not survive a reload */
     }
   };
-  /* Real servers this Mac has connected to, alongside the three fixtures.
-     The prototype keeps working with no server at all — that is what makes the
-     design reviewable — and shows the real one the moment there is one. */
+  /* The servers this Mac has connected to. */
   const [real$, setReal] = useState(servers);
   useEffect(() => onServers(() => setReal(servers())), []);
   const [palette, setPalette] = useState(false);
   const path = usePathname();
-  useFixtures();
-
-  useEffect(() => runTimeline(), []);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -76,20 +68,18 @@ export function App() {
   const style = path.startsWith("/style");
   const connecting = path.startsWith("/connect");
 
-  /* A connected server wears the same clothes as a fixture: the screens take a
-     `Backend` and do not care which kind it is, which is what let the real
-     wiring land without rewriting any of them. */
   const asBackend = (id: string): Backend | null => {
-    const fixture = BACKENDS.find((b) => b.id === id);
-    if (fixture) return fixture;
     const real = real$.find((s) => s.serverId === id);
     return real ? liveBackend(real) : null;
   };
   const all = scope === "all" || path.startsWith("/fleet");
   const here = scope === "all" ? null : asBackend(scope);
+  /* A scope naming a server this Mac no longer has falls back to the next
+     one, or to everything; with no server at all there is only connecting. */
   useEffect(() => {
-    if (scope !== "all" && !here) setScope("e1");
-  }, [scope, here]);
+    if (scope !== "all" && !here) setScope(real$[0]?.serverId ?? "all");
+  }, [scope, here, real$]);
+  const none = real$.length === 0;
 
   return (
     <>
@@ -99,13 +89,13 @@ export function App() {
         <div className="flex min-h-0 flex-1">
           <ServerStrip scope={scope} onScope={pick} />
 
-          {connecting ? (
+          {connecting || none ? (
             <Connect
               onDone={(serverId) => {
                 setScope(serverId as Scope);
                 navigate("/");
               }}
-              onCancel={() => navigate("/")}
+              onCancel={none ? undefined : () => navigate("/")}
             />
           ) : style ? (
             <StylePage />
@@ -115,9 +105,7 @@ export function App() {
             <BackendProvider id={here.id} key={here.id}>
               {/* Inside the provider, not around it: the new-workspace form
                   reads this server's repositories, so it needs the same
-                  QueryClient as the screen that opened it. It was outside, and
-                  "start a task" therefore threw `No QueryClient set` the moment
-                  the backend was real rather than a fixture. */}
+                  QueryClient as the screen that opened it. */}
               <StartProvider
                 render={(seed, close) => (
                   <Boundary onReset={close}>
@@ -134,9 +122,10 @@ export function App() {
                       <Routes
                         backend={here}
                         onForgot={() => {
-                          setReal(servers());
-                          setScope("e1");
-                          navigate("/");
+                          const left = servers();
+                          setReal(left);
+                          setScope(left[0]?.serverId ?? "all");
+                          navigate(left.length ? "/" : "/connect");
                         }}
                       />
                     </Gate>
