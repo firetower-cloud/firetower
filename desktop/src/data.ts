@@ -16,7 +16,6 @@ import { showsDot } from "@/src/api/updates";
 import { useListTrackers } from "@/src/api/generated/trackers/trackers";
 import {
   getListSessionsQueryKey,
-  useEndAllSessions,
   useGetSession,
   useListFiles,
   useSessionDiff,
@@ -54,19 +53,6 @@ export function useSessions(): Feed<Session[]> {
 export function useSession(id: string | null): Feed<Session | null> {
   const q = useGetSession(id ?? "", { query: { enabled: !!id } });
   return { data: q.data ?? null, loading: !!id && q.isPending, error: q.error ? why(q.error) : null };
-}
-
-/** End every workspace on this server. */
-export function useEndAll() {
-  const cache = useQueryClient();
-  const end = useEndAllSessions();
-  return {
-    pending: end.isPending,
-    go: () =>
-      end.mutate({ data: {} }, {
-        onSuccess: () => cache.invalidateQueries({ queryKey: getListSessionsQueryKey() }),
-      }),
-  };
 }
 
 export function useTasks(): Feed<Task[]> {

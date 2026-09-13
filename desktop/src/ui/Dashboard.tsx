@@ -17,6 +17,10 @@ import type { Backend } from "~/fleet";
 import { useSessions } from "~/data";
 import { navigate } from "~/shims/next-navigation";
 import { useStart } from "~/start";
+import { useQueryClient } from "@tanstack/react-query";
+import { endAllSessions, getListSessionsQueryKey } from "@/src/api/generated/sessions/sessions";
+import { useConfirm } from "~/ui/Confirm";
+import { why } from "~/data";
 
 type Filter = "all" | "waiting" | "working" | "idle";
 const FILTERS: [Filter, string][] = [
@@ -45,6 +49,55 @@ export function Dashboard({ backend }: { backend: Backend }) {
 
   const waiting = live.filter(needsYou).length;
   const total = repos.total;
+
+  /* Ending what is on screen: every workspace the filters leave, and every
+     agent in them — the web's rule, with its wording. Their worktrees go;
+     branches already pushed stay on the remote. */
+  const confirm = useConfirm();
+  const cache = useQueryClient();
+  const [ending, setEnding] = useState(false);
+  const listed = shown.flatMap(([, places]) => places);
+  const everything = repo === "all" && filter === "all";
+  const endAll = async () => {
+    const agents = listed.reduce((n, p) => n + p.runs.length, 0);
+    const scope = everything ? "everything on this server" : repo !== "all" ? `in ${shortRepo(repo)}${filter !== "all" ? `, ${filter}` : ""}` : filter;
+    const ok = await confirm({
+      title: listed.length === 1 ? `End "${listed[0].name}"?` : `End all ${listed.length} workspaces?`,
+      body: (
+        <>
+          <p>
+            {listed.length === 1 ? "One workspace" : `${listed.length} workspaces`} — {scope} — and {agents === 1 ? "the agent" : `the ${agents} agents`} in them. Their worktrees go, and anything not pushed goes with them.
+          </p>
+          {listed.length <= 8 && (
+            <ul className="mt-2.5 space-y-0.5">
+              {listed.map((p) => (
+                <li key={p.id} className="flex items-baseline gap-2 text-meta">
+                  <span className="truncate text-text">{p.name}</span>
+                  <span className="truncate font-mono text-mute">{p.branch ?? "—"}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+          <p className="mt-2.5 text-meta text-mute">Branches already pushed stay on the remote. A machine that is not answering keeps its workspaces until it comes back.</p>
+        </>
+      ),
+      action: listed.length === 1 ? "End workspace" : `End all ${listed.length}`,
+      tone: "danger",
+    });
+    if (!ok) return;
+    setEnding(true);
+    try {
+      const result = await endAllSessions({ workspaces: everything ? null : listed.map((p) => p.id) });
+      await cache.invalidateQueries({ queryKey: getListSessionsQueryKey() });
+      if (result.unreachable > 0) {
+        await confirm({ title: `${result.ended} ended.`, body: `${result.unreachable} could not be reached and keep their workspaces until the machine answers.`, action: "OK" });
+      }
+    } catch (e) {
+      await confirm({ title: "That did not work.", body: why(e), action: "OK" });
+    } finally {
+      setEnding(false);
+    }
+  };
 
   return (
     <div className="scroll-slim h-full overflow-y-auto">
@@ -94,9 +147,9 @@ export function Dashboard({ backend }: { backend: Backend }) {
             <span className="ml-auto text-meta text-mute">
               {total} · {waiting} waiting
             </span>
-            {total > 0 && (
-              <button className="rounded-md border border-brick-deep bg-brick-tint px-2.5 py-1 text-ui text-brick transition-colors hover:bg-brick-deep/40">
-                End all {total}
+            {listed.length > 0 && (
+              <button disabled={ending} onClick={() => void endAll()} className="rounded-md border border-brick-deep bg-brick-tint px-2.5 py-1 text-ui text-brick transition-colors hover:bg-brick-deep/40 disabled:opacity-50">
+                {ending ? "Ending…" : `End all ${listed.length}`}
               </button>
             )}
           </div>
