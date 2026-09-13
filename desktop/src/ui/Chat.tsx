@@ -615,11 +615,14 @@ function Working({ heardAt }: { heardAt?: number }) {
     return () => clearInterval(t);
   }, []);
   const ago = heardAt ? Math.round((Date.now() - heardAt) / 1000) : null;
+  /* Lit text rather than a dot: a band of light crossing "Working". When the
+     agent has gone quiet the words change, and stop moving — a sheen over
+     "nothing heard for a minute" would be a lie. */
+  const quiet = ago !== null && ago > 5;
   return (
-    <div className="mt-6 flex items-center gap-2.5 text-meta text-mute">
-      <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-slate" />
-      Working{ago !== null && ago > 5 ? ` — last heard ${ago}s ago` : "…"}
-    </div>
+    <p className="mt-6 text-ui">
+      {quiet ? <span className="text-mute">Working — nothing heard for {ago}s</span> : <span className="text-sheen">Working</span>}
+    </p>
   );
 }
 

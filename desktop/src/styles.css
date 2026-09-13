@@ -326,3 +326,23 @@
   color: var(--color-bone);
   text-decoration-color: var(--color-slate);
 }
+
+/* Something is happening, said in text: a band of light crossing the words,
+   the way the agents people already use say it. Colour stays the text's own —
+   mute, brightening to bone as the band passes — so it reads as the text
+   itself being lit, not a spinner beside it. */
+@keyframes text-sheen {
+  from { background-position: 130% 0; }
+  to { background-position: -30% 0; }
+}
+.text-sheen {
+  color: transparent;
+  background: linear-gradient(90deg, var(--color-mute) 0%, var(--color-mute) 30%, var(--color-bone) 50%, var(--color-mute) 70%, var(--color-mute) 100%);
+  background-size: 200% 100%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  animation: text-sheen 1.6s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .text-sheen { animation: none; color: var(--color-dim); background: none; }
+}
