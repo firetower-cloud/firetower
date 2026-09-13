@@ -15,23 +15,34 @@ import { Check, Copy, Send, X } from "lucide-react";
 import { Markdown } from "@/components/Markdown";
 import { isMarkdown, useFileText } from "@/src/api/text";
 import { sendTurn } from "@/src/api/generated/sessions/sessions";
+import type { Session } from "@/src/api/generated/model";
 import { fileAt } from "~/mock/files";
 import { highlight, langOf, TONE } from "~/syntax";
 import { isLive } from "~/mock/http";
 import { Annotate, type Anchor } from "~/ui/Annotate";
+import { addedLines } from "~/patch";
+import { useDiff } from "~/data";
 
 type Note = { id: number; quote: string; line: number; text: string };
 
 import { why } from "~/data";
 
-export function FileTab({ sessionId, path, changed }: { sessionId: string; path: string; changed?: Set<string> }) {
+export function FileTab({ session, path }: { session: Session; path: string }) {
+  const sessionId = session.id;
   const live = isLive();
+  const diff = useDiff(live ? session : null);
+  const mine = useMemo(() => diff.data.find((d) => d.at === path), [diff.data, path]);
   const remote = useFileText(live ? sessionId : "", path);
   const fixture = live ? null : fileAt(path);
 
   const text = live ? (remote.data?.kind === "text" ? remote.data.text : null) : (fixture?.text ?? null);
   const lines = useMemo(() => (text ? text.replace(/\n$/, "").split("\n") : []), [text]);
-  const touched = useMemo(() => new Set((fixture?.changed ?? []).filter((n) => n >= 1 && n <= lines.length)), [fixture, lines.length]);
+  /* The lines this session added, so the file shows its own edits. A fixture
+     says so outright; a real file says it through the session's patch. */
+  const touched = useMemo(() => {
+    const from = live ? (mine ? [...addedLines(mine.patch)] : []) : (fixture?.changed ?? []);
+    return new Set(from.filter((n) => n >= 1 && n <= lines.length));
+  }, [live, mine, fixture, lines.length]);
   const lang = fixture?.lang ?? langOf(path);
 
   const [notes, setNotes] = useState<Note[]>([]);
@@ -81,8 +92,7 @@ export function FileTab({ sessionId, path, changed }: { sessionId: string; path:
         <span className="min-w-0 flex-1 truncate font-mono text-meta text-slate" title={path}>{path}</span>
         <span className="shrink-0 font-mono text-micro text-mute">
           {lines.length} lines
-          {touched.size > 0 && <span className="ml-2 text-sage">{touched.size} touched</span>}
-          {changed?.has(path) && <span className="ml-2 text-sage">changed in this session</span>}
+          {touched.size > 0 ? <span className="ml-2 text-sage">{touched.size} added here</span> : mine ? <span className="ml-2 text-sage">changed in this session</span> : null}
         </span>
         {md && (
           <button onClick={() => setRendered(!rendered)} className="control h-6 text-micro text-mute hover:bg-raise hover:text-bone">{rendered ? "source" : "rendered"}</button>

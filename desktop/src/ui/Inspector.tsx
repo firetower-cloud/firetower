@@ -10,16 +10,17 @@
  * `session_work`. A fixture keeps the scripted tree and hunks, through the same
  * components.
  */
-import { useMemo, useState } from "react";
-import { useMutation } from "@tanstack/react-query";
+import { useEffect, useMemo, useState } from "react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { ChevronRight, FileCode2, FileDiff, FolderTree, MessageSquarePlus, PanelRightClose, Ship as ShipIcon } from "lucide-react";
 import { useListFiles } from "@/src/api/generated/sessions/sessions";
-import type { FileDiff as FileDiffModel, FileEntry, Session } from "@/src/api/generated/model";
+import type { FileEntry, Session } from "@/src/api/generated/model";
 import { sendTurn } from "@/src/api/generated/sessions/sessions";
 import { asMessage } from "@/src/api/notes";
 import { isLive } from "~/mock/http";
 import { filesFor, type Diff, type Node } from "~/mock/backends";
 import { useDiff } from "~/data";
+import { fromPatch, isNew } from "~/patch";
 import { why } from "~/data";
 import { Ship } from "~/ui/Ship";
 
@@ -51,17 +52,17 @@ export function Inspector({
   onClose: () => void;
 }) {
   const live = isLive();
-  const diff = useDiff(live ? session.id : null);
+  const diff = useDiff(live ? session : null);
   /* One shape for both: a real `FileDiff` carries a unified patch, a fixture
      carries hunk lines. Both become lines here. */
   const files: Changed[] = useMemo(
     () =>
       live
-        ? (diff.data as FileDiffModel[]).map((d) => ({ path: d.path, added: d.added, removed: d.removed, lines: fromPatch(d.patch) }))
-        : fixtureDiffs.map((d) => ({ path: d.path, added: d.added, removed: d.removed, lines: d.hunk })),
+        ? diff.data.map((d) => ({ path: d.path, at: d.at, added: d.added, removed: d.removed, lines: fromPatch(d.patch), fresh: isNew(d.patch) }))
+        : fixtureDiffs.map((d) => ({ path: d.path, at: d.path, added: d.added, removed: d.removed, lines: d.hunk })),
     [live, diff.data, fixtureDiffs],
   );
-  const changed = useMemo(() => new Set(files.map((f) => f.path)), [files]);
+  const changed = useMemo(() => new Map(files.map((f) => [f.at, !!f.fresh])), [files]);
 
   return (
     <aside className="flex w-[23rem] shrink-0 flex-col border-l border-line bg-panel">
@@ -93,21 +94,8 @@ export function Inspector({
 
 /* ── Diff ──────────────────────────────────────────────────────────────── */
 
-export type Changed = { path: string; added: number; removed: number; lines: [string, string][] };
-
-/** A unified patch, as lines with a kind. Headers become context so they still read. */
-export function fromPatch(patch: string): [string, string][] {
-  return patch
-    .replace(/\n$/, "")
-    .split("\n")
-    .filter((l) => !/^(diff --git|index |--- |\+\+\+ )/.test(l))
-    .map((l): [string, string] => {
-      if (l.startsWith("@@")) return ["hunk", l];
-      if (l.startsWith("+")) return ["add", l.slice(1)];
-      if (l.startsWith("-")) return ["del", l.slice(1)];
-      return ["ctx", l.replace(/^ /, "")];
-    });
-}
+/** `path` as the server names it (what the ship flow sends back); `at` where the file sits in the workspace tree. */
+export type Changed = { path: string; at: string; added: number; removed: number; lines: [string, string][]; fresh?: boolean };
 
 function DiffList({
   session,
@@ -154,7 +142,7 @@ function DiffList({
                 <span className="block truncate font-mono text-micro text-mute">{d.path.split("/").slice(0, -1).join("/")}</span>
               </span>
               <span className="shrink-0 font-mono text-micro"><span className="text-sage">+{d.added}</span> <span className="text-brick">−{d.removed}</span></span>
-              <span role="button" tabIndex={0} title="Open the whole file" onClick={(e) => { e.stopPropagation(); onOpenFile(d.path, true); }} className="grid h-5 w-5 shrink-0 place-items-center rounded text-mute opacity-0 transition-opacity group-hover/file:opacity-100 hover:bg-overlay hover:text-bone">
+              <span role="button" tabIndex={0} title="Open the whole file" onClick={(e) => { e.stopPropagation(); onOpenFile(d.at, true); }} className="grid h-5 w-5 shrink-0 place-items-center rounded text-mute opacity-0 transition-opacity group-hover/file:opacity-100 hover:bg-overlay hover:text-bone">
                 <FileCode2 className="h-3.5 w-3.5" strokeWidth={1.75} />
               </span>
             </button>
@@ -198,17 +186,24 @@ function DiffList({
 
 /* ── Files, off the worker ─────────────────────────────────────────────── */
 
-function LiveTree({ sessionId, changed, onOpenFile }: { sessionId: string; changed: Set<string>; onOpenFile: (p: string, keep?: boolean) => void }) {
+function LiveTree({ sessionId, changed, onOpenFile }: { sessionId: string; changed: Map<string, boolean>; onOpenFile: (p: string, keep?: boolean) => void }) {
+  const cache = useQueryClient();
   /* A directory carries the mark of anything changed inside it, so a folded
      tree still says where the work is. */
   const marked = useMemo(() => {
     const dirs = new Set<string>();
-    for (const path of changed) {
+    for (const path of changed.keys()) {
       const parts = path.split("/");
       for (let i = 1; i < parts.length; i++) dirs.add(parts.slice(0, i).join("/"));
     }
     return dirs;
   }, [changed]);
+  /* A file the agent just created is not in any listing already read, so the
+     set of changed paths moving is the cue to read the tree again. */
+  const key = useMemo(() => [...changed.keys()].sort().join("\n"), [changed]);
+  useEffect(() => {
+    if (key) cache.invalidateQueries({ queryKey: [`/api/v1/sessions/${sessionId}/files`] });
+  }, [key, sessionId, cache]);
   return (
     <div className="py-1.5">
       <Directory sessionId={sessionId} path="" depth={0} changed={changed} marked={marked} onOpenFile={onOpenFile} />
@@ -216,7 +211,7 @@ function LiveTree({ sessionId, changed, onOpenFile }: { sessionId: string; chang
   );
 }
 
-function Directory({ sessionId, path, depth, changed, marked, onOpenFile }: { sessionId: string; path: string; depth: number; changed: Set<string>; marked: Set<string>; onOpenFile: (p: string, keep?: boolean) => void }) {
+function Directory({ sessionId, path, depth, changed, marked, onOpenFile }: { sessionId: string; path: string; depth: number; changed: Map<string, boolean>; marked: Set<string>; onOpenFile: (p: string, keep?: boolean) => void }) {
   const { data, isPending, error } = useListFiles(sessionId, { path }, { query: { staleTime: 30_000 } });
   const entries = useMemo(
     () => [...((data ?? []) as FileEntry[])].sort((a, b) => Number(b.directory) - Number(a.directory) || a.name.localeCompare(b.name)),
@@ -234,9 +229,10 @@ function Directory({ sessionId, path, depth, changed, marked, onOpenFile }: { se
   );
 }
 
-function Entry({ sessionId, entry, path, depth, changed, marked, onOpenFile }: { sessionId: string; entry: FileEntry; path: string; depth: number; changed: Set<string>; marked: Set<string>; onOpenFile: (p: string, keep?: boolean) => void }) {
+function Entry({ sessionId, entry, path, depth, changed, marked, onOpenFile }: { sessionId: string; entry: FileEntry; path: string; depth: number; changed: Map<string, boolean>; marked: Set<string>; onOpenFile: (p: string, keep?: boolean) => void }) {
   const [open, setOpen] = useState(false);
   const touched = entry.directory ? marked.has(path) : changed.has(path);
+  const fresh = !entry.directory && changed.get(path) === true;
   return (
     <>
       <button
@@ -246,8 +242,8 @@ function Entry({ sessionId, entry, path, depth, changed, marked, onOpenFile }: {
         className="flex h-7 w-full items-center gap-1.5 pr-3 text-left transition-colors hover:bg-raise/60"
       >
         {entry.directory ? <ChevronRight className={`h-3 w-3 shrink-0 text-mute transition-transform duration-150 ${open ? "rotate-90" : ""}`} strokeWidth={2} /> : <span className="w-3 shrink-0" />}
-        <span className={`min-w-0 flex-1 truncate font-mono text-ui ${entry.directory ? "text-dim" : touched ? "text-bone" : "text-mute"}`}>{entry.name}{entry.link ? " →" : ""}</span>
-        {touched && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-slate" />}
+        <span className={`min-w-0 flex-1 truncate font-mono text-ui ${entry.directory ? "text-dim" : touched ? "text-sage" : "text-mute"}`}>{entry.name}{entry.link ? " →" : ""}</span>
+        {touched && <span className={`shrink-0 font-mono text-micro ${entry.directory ? "text-mute" : "text-sage"}`}>{entry.directory ? "•" : fresh ? "A" : "M"}</span>}
       </button>
       {entry.directory && open && <Directory sessionId={sessionId} path={path} depth={depth + 1} changed={changed} marked={marked} onOpenFile={onOpenFile} />}
     </>

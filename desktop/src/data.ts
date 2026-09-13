@@ -28,8 +28,9 @@ import {
   useListFiles,
   useSessionDiff,
 } from "@/src/api/generated/sessions/sessions";
+import { useMemo } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import type { Repo, Session, Task, TaskKind, TaskState } from "@/src/api/generated/model";
+import type { FileDiff, Repo, Session, Task, TaskKind, TaskState } from "@/src/api/generated/model";
 import { isLive } from "~/mock/http";
 import { STATE, TASKS, type BackendId } from "~/mock/backends";
 import { useFixtures } from "~/mock/socket";
@@ -197,10 +198,27 @@ export function useWorkspaceFiles(sessionId: string | null, path: string) {
   return { data: q.data ?? [], live: on, loading: on && q.isPending, error: q.error ? why(q.error) : null };
 }
 
-/** What a session has changed, as the control plane sees it. */
-export function useDiff(sessionId: string | null) {
+/** A changed file: `path` as the server names it, `at` where it sits in the workspace. */
+export type ChangedFile = FileDiff & { at: string };
+
+/**
+ * What a session has changed, as the control plane sees it — polled the way
+ * the web does, since edits are not on the event stream.
+ *
+ * With one checkout the server leaves paths repository-relative (the ship
+ * flow wants them that way); with several it puts the checkout's directory in
+ * front. The tree and the tabs are workspace-relative either way, so `at` is
+ * the path with the directory always in front.
+ */
+export function useDiff(session: Pick<Session, "id" | "checkouts"> | null) {
   const live = isLive(useBackendKey());
-  const on = live && !!sessionId;
-  const q = useSessionDiff(sessionId ?? "", undefined, { query: { enabled: on } });
-  return { data: q.data ?? [], live: on, loading: on && q.isPending, error: q.error ? why(q.error) : null };
+  const on = live && !!session;
+  const q = useSessionDiff(session?.id ?? "", undefined, { query: { enabled: on, refetchInterval: 8000 } });
+  const data = useMemo<ChangedFile[]>(() => {
+    const files = (q.data ?? []) as FileDiff[];
+    const dirs = (session?.checkouts ?? []).map((c) => c.path).filter((p): p is string => !!p);
+    const only = dirs.length === 1 ? dirs[0] : null;
+    return files.map((d) => ({ ...d, at: only && !d.path.startsWith(`${only}/`) ? `${only}/${d.path}` : d.path }));
+  }, [q.data, session?.checkouts]);
+  return { data, live: on, loading: on && q.isPending, error: q.error ? why(q.error) : null };
 }

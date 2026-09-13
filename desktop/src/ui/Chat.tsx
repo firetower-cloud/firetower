@@ -19,7 +19,7 @@
  * it is up — the tool call is held open on the host — and it can sit there for
  * hours; the session picks up where it was.
  */
-import { useEffect, useMemo, useRef, useState } from "react";
+import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
   Check,
@@ -30,10 +30,12 @@ import {
   Pencil,
   RotateCcw,
   Search,
+  Send,
   Terminal,
   Users,
+  X,
 } from "lucide-react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Icon } from "@/components/ui";
 import { Markdown } from "@/components/Markdown";
 import { editFrom } from "@/components/EditCard";
@@ -41,11 +43,13 @@ import { stepLines } from "@/components/Steps";
 import { useConversation, type Asked, type Item, type Questionnaire, type Task } from "@/src/api/conversation";
 import { fold, summarise } from "@/src/api/steps";
 import type { Decision, Event, ItemKind, PlanStep, RequestKind, Session } from "@/src/api/generated/model";
-import { useAnswerRequest, useRelaunchSession, getGetSessionQueryKey } from "@/src/api/generated/sessions/sessions";
+import { useAnswerRequest, useRelaunchSession, getGetSessionQueryKey, sendTurn } from "@/src/api/generated/sessions/sessions";
+import { asMessage, useNotes, type Note } from "@/src/api/notes";
 import { useListEvents } from "@/src/api/generated/events/events";
 import { elapsed, minutesSince } from "@/src/api/view";
 import { Composer } from "~/ui/Composer";
 import { AccountSwitcher } from "~/ui/AccountSwitcher";
+import { Annotate, type Anchor } from "~/ui/Annotate";
 import { isLive } from "~/mock/http";
 import { talkFor, type Ask, type Turn } from "~/mock/backends";
 
@@ -106,8 +110,32 @@ export function Chat({
 } & Open) {
   const live = isLive();
   const { conversation, echo, settle, remember } = useConversation(session.id);
-  const foot = useRef<HTMLDivElement>(null);
+  const scroller = useRef<HTMLDivElement>(null);
+  const body = useRef<HTMLDivElement>(null);
   const following = useRef(true);
+
+  /* Notes on what the agent said — the web's own store, so they survive a
+     reload and go out as one ordinary message. */
+  const { notes, add, drop, clear } = useNotes(session.id);
+  const [drafting, setDrafting] = useState<Anchor & { item: string } | null>(null);
+  const post = useMutation({
+    mutationFn: () => sendTurn(session.id, { text: asMessage(notes), images: [] }),
+    onSuccess: () => {
+      echo(asMessage(notes));
+      clear();
+    },
+  });
+  /* Only what the agent said can be annotated; the selection has to start
+     inside one of its turns, marked `data-said`. */
+  const takeSelection = () => {
+    const sel = window.getSelection();
+    const quote = sel?.toString().trim();
+    if (!quote || quote.length < 2 || !sel?.anchorNode || sel.rangeCount === 0 || !body.current?.contains(sel.anchorNode)) return;
+    const said = (sel.anchorNode.parentElement as HTMLElement | null)?.closest<HTMLElement>("[data-said]");
+    if (!said) return;
+    const rect = sel.getRangeAt(0).getBoundingClientRect();
+    setDrafting({ quote: quote.length > 400 ? `${quote.slice(0, 400)}…` : quote, line: 0, label: "Note on what the agent said", item: said.dataset.said ?? "", x: rect.left + rect.width / 2, y: rect.bottom });
+  };
 
   /* The bring-up — Fetch → Worktree → Workspace → Setup → Launch — so a fresh
      workspace is not a blank screen for the forty seconds before the agent
@@ -132,20 +160,43 @@ export function Chat({
 
   const rows = useMemo(() => fold(items), [items]);
 
-  useEffect(() => {
-    if (following.current) foot.current?.scrollIntoView({ block: "end" });
-  }, [items.length, working, asked.length, questions.length]);
+  /* Opens at the end and stays there while the transcript grows — unless you
+     scrolled up to read something, in which case it leaves you alone. Growth
+     is watched rather than counted: markdown and images settle after the item
+     count has stopped changing. */
+  useLayoutEffect(() => {
+    const el = scroller.current;
+    const inner = body.current;
+    if (!el || !inner) return;
+    const toEnd = () => {
+      if (following.current) el.scrollTop = el.scrollHeight;
+    };
+    toEnd();
+    const watch = new ResizeObserver(toEnd);
+    watch.observe(inner);
+    return () => watch.disconnect();
+  }, []);
+  /* Resize callbacks need a painted frame; a webview that is not being drawn
+     gets none, so the count moving is a second cue for the same thing. */
+  useLayoutEffect(() => {
+    const el = scroller.current;
+    if (el && following.current) el.scrollTop = el.scrollHeight;
+  }, [rows.length, working, asked.length, questions.length]);
 
   return (
     <div className="flex h-full min-h-0 flex-col">
+      <div className="relative flex min-h-0 flex-1 flex-col">
       <div
+        ref={scroller}
+        onMouseUp={takeSelection}
         className="scroll-slim min-h-0 flex-1 overflow-y-auto"
         onScroll={(e) => {
           const el = e.currentTarget;
           following.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
         }}
       >
-        <div className="mx-auto w-full max-w-[46rem] px-8 pt-8 pb-4">
+        <NotesContext.Provider value={{ notes, drop }}>
+        <div ref={body} className="mx-auto w-full max-w-[46rem] px-8 pt-8 pb-4">
           <h1 className="text-display text-bone">{session.title}</h1>
           <div className="mt-2 flex items-center gap-4 text-meta text-mute">
             {branch && (
@@ -193,8 +244,33 @@ export function Chat({
             <Approval key={a.req} sessionId={session.id} asked={a} onAnswered={() => settle(a.req)} live={live} />
           ))}
 
-          <div ref={foot} />
         </div>
+        </NotesContext.Provider>
+      </div>
+
+      {drafting && (
+        <Annotate
+          at={drafting}
+          onCancel={() => setDrafting(null)}
+          onKeep={(t) => {
+            add(drafting.item, drafting.quote, t);
+            setDrafting(null);
+            window.getSelection()?.removeAllRanges();
+          }}
+        />
+      )}
+
+      {notes.length > 0 && !drafting && (
+        <div className="pointer-events-none absolute right-5 bottom-4 z-30 flex justify-end">
+          <div className="pointer-events-auto flex items-center gap-2 rounded-full border border-line bg-overlay py-1.5 pr-1.5 pl-3.5 shadow-(--shadow-float)">
+            <span className="text-ui text-dim">{notes.length} note{notes.length > 1 ? "s" : ""}</span>
+            <button onClick={clear} title="Discard them" className="grid h-6 w-6 place-items-center rounded-full text-mute transition-colors hover:bg-raise hover:text-bone"><X className="h-3.5 w-3.5" strokeWidth={2} /></button>
+            <button disabled={!live || !answerable || post.isPending} onClick={() => post.mutate()} className="control rounded-full bg-bone font-medium text-ground transition-opacity hover:opacity-90 disabled:bg-raise disabled:text-mute">
+              <Send className="h-3.5 w-3.5" strokeWidth={2} />{post.isPending ? "Sending…" : "Send to the agent"}
+            </button>
+          </div>
+        </div>
+      )}
       </div>
 
       <Composer
@@ -235,18 +311,7 @@ function Node({
     );
   }
 
-  if (item.kind === "AssistantMessage") {
-    return (
-      <li className="group/turn">
-        <div className="prose-desk">
-          <Markdown>{item.text}</Markdown>
-        </div>
-        <div className="mt-2 flex gap-1 opacity-0 transition-opacity duration-150 group-hover/turn:opacity-100">
-          <Action icon={Copy} label="Copy" onClick={() => navigator.clipboard?.writeText(item.text)} />
-        </div>
-      </li>
-    );
-  }
+  if (item.kind === "AssistantMessage") return <Said item={item} />;
 
   if (item.kind === "Reasoning") return <Thought item={item} />;
   if (item.kind === "Question") return <Answered item={item} />;
@@ -254,6 +319,42 @@ function Node({
   if (item.kind === "FileChange" && editFrom(item.input)) return <Edited item={item} onOpenDiff={onOpenDiff} />;
 
   return <ToolRow item={item} onOpenDiff={onOpenDiff} onOpenFile={onOpenFile} />;
+}
+
+/** The notes so far, and how to take one back — read by the turn it is on. */
+const NotesContext = createContext<{ notes: Note[]; drop: (id: string) => void }>({ notes: [], drop: () => {} });
+
+/**
+ * What the agent said. Selecting any of it starts a note (see `takeSelection`
+ * on the scroller); the notes already taken against this turn are drawn under
+ * it, so the draft reads in place rather than in a list somewhere else.
+ */
+function Said({ item }: { item: Item }) {
+  const { notes, drop } = useContext(NotesContext);
+  const mine = notes.filter((n) => n.item === item.id);
+  return (
+    <li className="group/turn">
+      <div className="prose-desk" data-said={item.id}>
+        <Markdown>{item.text}</Markdown>
+      </div>
+      {mine.length > 0 && (
+        <ul className="mt-3 space-y-2">
+          {mine.map((n) => (
+            <li key={n.id} className="flex items-start gap-2.5 rounded-lg border border-line-soft bg-panel/70 px-3 py-2">
+              <span className="min-w-0 flex-1">
+                <span className="block truncate border-l-2 border-slate-deep pl-2 font-mono text-micro text-mute">{n.quote}</span>
+                <span className="mt-1 block text-ui text-text">{n.note}</span>
+              </span>
+              <button onClick={() => drop(n.id)} title="Take it back" className="grid h-6 w-6 shrink-0 place-items-center rounded text-mute hover:bg-raise hover:text-bone"><X className="h-3.5 w-3.5" strokeWidth={2} /></button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <div className="mt-2 flex gap-1 opacity-0 transition-opacity duration-150 group-hover/turn:opacity-100">
+        <Action icon={Copy} label="Copy" onClick={() => navigator.clipboard?.writeText(item.text)} />
+      </div>
+    </li>
+  );
 }
 
 /**

@@ -11,7 +11,6 @@ import { Cpu, PanelRight, Pencil, SquareTerminal, Trash2, X } from "lucide-react
 import { useQueryClient } from "@tanstack/react-query";
 import { getListSessionsQueryKey, useDestroySession, useRenameSession } from "@/src/api/generated/sessions/sessions";
 import { isLive } from "~/mock/http";
-import { useDiff } from "~/data";
 import { Signal } from "@/components/Signal";
 import { AgentMark } from "@/components/AgentMark";
 import { group } from "@/src/api/workspaces";
@@ -118,6 +117,11 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
+  const cache = useQueryClient();
+  const rename = useRenameSession();
+  const destroy = useDestroySession();
+  const [renaming, setRenaming] = useState<string | null>(null);
+
   if (!place) {
     return (
       <div className="grid flex-1 place-items-center text-ui text-mute">
@@ -143,12 +147,6 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
 
   const talk = talkFor(place.id);
   const live = isLive();
-  const cache = useQueryClient();
-  const rename = useRenameSession();
-  const destroy = useDestroySession();
-  const diff = useDiff(live ? run.id : null);
-  const changed = new Set(live ? (diff.data as { path: string }[]).map((d) => d.path) : talk.diffs.map((d) => d.path));
-  const [renaming, setRenaming] = useState<string | null>(null);
 
   if (backend.reach === "unreachable") return <Unreachable org={backend.org} />;
 
@@ -271,7 +269,7 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
                 }}
               />
             ) : (
-              <FileTab sessionId={run.id} path={(tabs.find((t) => t.id === active) as { path: string }).path} changed={changed} />
+              <FileTab session={run} path={(tabs.find((t) => t.id === active) as { path: string }).path} />
             )}
           </div>
 

@@ -13,7 +13,8 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { CornerDownLeft, MessageSquarePlus } from "lucide-react";
 
-export type Anchor = { quote: string; line: number; x: number; y: number };
+/** Where a note goes: a line of a file, or something the agent said (`line` 0, named by `label`). */
+export type Anchor = { quote: string; line: number; label?: string; x: number; y: number };
 
 const W = 360;
 
@@ -59,7 +60,7 @@ export function Annotate({
       >
         <div className="flex items-center gap-2 px-3.5 pt-3">
           <MessageSquarePlus className="h-3.5 w-3.5 shrink-0 text-slate" strokeWidth={1.75} />
-          <span className="text-meta text-dim">Note on line {at.line}</span>
+          <span className="text-meta text-dim">{at.label ?? `Note on line ${at.line}`}</span>
         </div>
 
         <p className="scroll-slim mx-3.5 mt-2 max-h-16 overflow-y-auto border-l-2 border-slate-deep pl-2.5 font-mono text-micro whitespace-pre-wrap text-mute">
