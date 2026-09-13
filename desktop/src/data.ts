@@ -15,6 +15,7 @@ import { useListTasks } from "@/src/api/generated/tasks/tasks";
 import { useListHosts } from "@/src/api/generated/hosts/hosts";
 import { useListAgents } from "@/src/api/generated/agents/agents";
 import { useListProviders } from "@/src/api/generated/providers/providers";
+import { useListAccounts } from "@/src/api/generated/accounts/accounts";
 import { useListTrackers } from "@/src/api/generated/trackers/trackers";
 import { useListFiles, useSessionDiff } from "@/src/api/generated/sessions/sessions";
 import type { Repo, Session, Task, TaskKind, TaskState } from "@/src/api/generated/model";
@@ -100,6 +101,13 @@ export function useAgents() {
 export function useProviders() {
   const live = isLive(useBackendKey());
   const q = useListProviders({ query: { enabled: live } });
+  return { data: q.data ?? [], live, loading: live && q.isPending, error: why(q.error) };
+}
+
+/** Named agent connections — whose subscription a session runs on. */
+export function useAccounts() {
+  const live = isLive(useBackendKey());
+  const q = useListAccounts({ query: { enabled: live } });
   return { data: q.data ?? [], live, loading: live && q.isPending, error: why(q.error) };
 }
 

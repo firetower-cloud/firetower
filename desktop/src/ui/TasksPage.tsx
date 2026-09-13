@@ -146,7 +146,15 @@ export function TasksPage({ backend }: { backend: Backend }) {
                 </span>
 
                 <button
-                  onClick={() => start({ title: t.title, repo: t.repo ?? undefined, issue: short })}
+                  onClick={() =>
+                    start({
+                      title: t.title,
+                      repo: t.repo ?? undefined,
+                      issue: short,
+                      taskKey: t.key,
+                      taskUrl: t.url,
+                    })
+                  }
                   className="control w-[5rem] shrink-0 justify-center border border-line bg-raise text-text transition-colors hover:bg-overlay hover:text-bone"
                 >
                   Start
