@@ -13,7 +13,7 @@
  * a draft.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ExternalLink, Monitor, RotateCw, Send, Smartphone, Tablet, Trash2 } from "lucide-react";
+import { ChevronLeft, ChevronRight, ExternalLink, Monitor, RotateCw, Send, Smartphone, Tablet, Trash2 } from "lucide-react";
 import { usePreviewAddress } from "@/src/api/generated/sessions/sessions";
 import type { PreviewAnnotation, Session } from "@/src/api/generated/model";
 import { elapsed, minutesSince } from "@/src/api/view";
@@ -39,16 +39,26 @@ function nameOf(label: string, html: string): string {
 /** Where this app is, as an origin the picker will accept. A custom scheme's `origin` reads "null". */
 const self = () => (location.origin && location.origin !== "null" ? location.origin : `${location.protocol}//${location.host}`);
 
-export function PreviewTab({ session, port }: { session: Session; port: number }) {
+export function PreviewTab({ session, port, path: initialPath = "/", onPath }: { session: Session; port: number; path?: string; onPath?: (path: string) => void }) {
   const live = isLive();
   const ended = session.status === "Ended";
   const address = usePreviewAddress(session.id, { port }, { query: { enabled: live && !ended, retry: false } });
   const url = address.data?.url ?? null;
   const origin = useMemo(() => (url ? new URL(url).origin : null), [url]);
-  const launch = url ? `${url}#__firetower_ui=${encodeURIComponent(self())}` : null;
+  /* Where the page is. The frame is another origin, so this is what the page
+     says through the picker; a reload goes back to it rather than to `/`. */
+  const [path, setPath] = useState(initialPath);
+  const [typed, setTyped] = useState<string | null>(null);
+  const at = (p: string) => `${origin}${p}${p.includes("#") ? "&" : "#"}__firetower_ui=${encodeURIComponent(self())}`;
 
   const frame = useRef<HTMLIFrameElement>(null);
   const [reloads, setReloads] = useState(0);
+  /* What the frame is pointed at. Set on open and on reload only — never
+     from the path the page reports, or reporting it would move the frame,
+     which would report it again. */
+  const pathRef = useRef(path);
+  pathRef.current = path;
+  const launch = useMemo(() => (origin ? at(pathRef.current) : null), [origin, reloads]); // eslint-disable-line react-hooks/exhaustive-deps
   const [width, setWidth] = useState<(typeof WIDTHS)[number]["id"]>("full");
   const [drafting, setDrafting] = useState<(Anchor & Selection) | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -57,6 +67,10 @@ export function PreviewTab({ session, port }: { session: Session; port: number }
   const notes = usePreviewNotes(session.id, port, live && !ended);
 
   const bridge = usePickerBridge(frame, origin, session.id, port, {
+    onPath: (p) => {
+      setPath(p);
+      onPath?.(p);
+    },
     onSelection: (picked) => {
       const box = frame.current?.getBoundingClientRect();
       const [x, y, w, h] = picked.snapshot.bounds;
@@ -116,11 +130,41 @@ export function PreviewTab({ session, port }: { session: Session; port: number }
 
   return (
     <div className="relative flex h-full min-h-0 flex-col bg-ground">
-      <header className="flex h-9 shrink-0 items-center gap-1.5 border-b border-line bg-panel px-2">
-        <button onClick={() => setReloads((n) => n + 1)} title="Reload" className="grid h-7 w-7 shrink-0 place-items-center rounded-md text-mute hover:bg-raise hover:text-bone">
+      <header className="flex h-9 shrink-0 items-center gap-1 border-b border-line bg-panel px-2">
+        <button disabled={!bridge.ready} onClick={() => bridge.tell({ type: "go", delta: -1 })} title="Back" className="grid h-7 w-7 shrink-0 place-items-center rounded-md text-mute hover:bg-raise hover:text-bone disabled:opacity-40">
+          <ChevronLeft className="h-4 w-4" strokeWidth={1.75} />
+        </button>
+        <button disabled={!bridge.ready} onClick={() => bridge.tell({ type: "go", delta: 1 })} title="Forward" className="grid h-7 w-7 shrink-0 place-items-center rounded-md text-mute hover:bg-raise hover:text-bone disabled:opacity-40">
+          <ChevronRight className="h-4 w-4" strokeWidth={1.75} />
+        </button>
+        {/* In place when the page can hear us — its history survives. A page
+            without the picker (or one that has not connected) is remounted. */}
+        <button onClick={() => (bridge.ready ? bridge.tell({ type: "reload" }) : setReloads((n) => n + 1))} title="Reload" className="grid h-7 w-7 shrink-0 place-items-center rounded-md text-mute hover:bg-raise hover:text-bone">
           <RotateCw className="h-3.5 w-3.5" strokeWidth={1.75} />
         </button>
-        <span className="min-w-0 flex-1 truncate font-mono text-meta text-dim" title={url}>{url.replace(/^https?:\/\//, "")}</span>
+        {/* The host is fixed and long (a session id, a port, a signature), so
+            only the port is shown for it; the path is yours to change. */}
+        <div className="ml-1 flex min-w-0 flex-1 items-center gap-1 rounded-md border border-line bg-ground px-2 font-mono text-meta focus-within:border-mute">
+          <span className="shrink-0 text-mute" title={url}>:{port}</span>
+          <input
+            value={typed ?? path}
+            onChange={(e) => setTyped(e.target.value)}
+            onBlur={() => setTyped(null)}
+            onKeyDown={(e) => {
+              if (e.key === "Escape") setTyped(null);
+              if (e.key === "Enter" && typed !== null) {
+                const next = typed.startsWith("/") ? typed : `/${typed}`;
+                setPath(next);
+                onPath?.(next);
+                setTyped(null);
+                if (bridge.ready) bridge.tell({ type: "navigate", path: next });
+                else setReloads((n) => n + 1);
+              }
+            }}
+            spellCheck={false}
+            className="min-w-0 flex-1 bg-transparent py-1 text-dim focus:text-bone focus:outline-none"
+          />
+        </div>
 
         <div className="track ml-2 shrink-0">
           {WIDTHS.map((w) => (

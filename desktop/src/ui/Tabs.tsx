@@ -14,7 +14,7 @@
 import { Globe, MessageSquare, X } from "lucide-react";
 import { langOf } from "~/syntax";
 
-export type Tab = { id: "chat" } | { id: string; path: string; preview?: boolean } | { id: string; port: number };
+export type Tab = { id: "chat" } | { id: string; path: string; preview?: boolean } | { id: string; port: number; path?: string };
 
 /** Files get the kind colours the tree already uses. Nine categories, not ninety. */
 function tone(path: string): string {

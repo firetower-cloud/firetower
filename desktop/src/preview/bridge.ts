@@ -18,6 +18,8 @@ export type Selection = { snapshot: ElementSnapshot; parents: string[] };
 export type Pin = { id: string; path: string; selector: string; label: string; html: string };
 
 type Handlers = {
+  /** Where the page is now — pathname, search and hash. */
+  onPath: (path: string) => void;
   onSelection: (s: Selection) => void;
   onLocated: (id: string, found: boolean) => void;
   onFocusNote: (id: string) => void;
@@ -29,7 +31,13 @@ export type Outgoing =
   | { type: "parent"; steps: number }
   | { type: "clear" }
   | { type: "pins"; pins: Pin[] }
-  | { type: "locate"; id: string };
+  | { type: "locate"; id: string }
+  | { type: "go"; delta: number }
+  | { type: "reload" }
+  | { type: "navigate"; path: string };
+
+/** A path the page may claim to be at: absolute, one line, not a URL in disguise. */
+const isPath = (p: unknown): p is string => typeof p === "string" && p.startsWith("/") && !p.startsWith("//") && p.length <= 2048 && !/[\r\n]/.test(p);
 
 export function usePickerBridge(
   frame: RefObject<HTMLIFrameElement | null>,
@@ -75,7 +83,9 @@ export function usePickerBridge(
       if (d.type === "ready" && d.session === session && d.port === port) {
         setReady(true);
         setAnnotating(d.enabled === true);
+        if (isPath(d.path)) held.current.onPath(d.path);
       }
+      if (d.type === "navigated" && isPath(d.path)) held.current.onPath(d.path);
       if (d.type === "mode") setAnnotating(d.enabled === true);
       if (d.type === "selection") {
         const parsed = snapshotSchema.safeParse(d.snapshot);

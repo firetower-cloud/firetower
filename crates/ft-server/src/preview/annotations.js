@@ -98,6 +98,30 @@
   fallback.hidden = true;
   toolbar.append(fallback);
   document.documentElement.append(host);
+  // Where the page is, for the panel's address bar — a frame's location is
+  // not readable from outside its origin, so the page says. Client-side
+  // routers move without loading, so history is watched as well as popstate.
+  function here() {
+    // Without the fragment that named the interface — that is ours, not the page's.
+    const fragment = new URLSearchParams(location.hash.slice(1));
+    fragment.delete("__firetower_ui");
+    const hash = fragment.toString();
+    return (location.pathname + location.search + (hash ? "#" + hash : "")).slice(0, 2048);
+  }
+  function moved() {
+    tell("navigated", { path: here() });
+  }
+  for (const method of ["pushState", "replaceState"]) {
+    const original = history[method];
+    history[method] = function (...args) {
+      const result = original.apply(this, args);
+      queueMicrotask(moved);
+      return result;
+    };
+  }
+  window.addEventListener("popstate", moved);
+  window.addEventListener("hashchange", moved);
+
   let panelWindow = null,
     channel = null,
     annotating = false,
@@ -519,7 +543,7 @@
       channel = data.channel;
       clearTimeout(handshakeTimer);
       status.hidden = true;
-      tell("ready", { session, port, enabled: annotating });
+      tell("ready", { session, port, enabled: annotating, path: here() });
       if (newConnection && selected?.isConnected)
         tell("selection", {
           snapshot: snapshot(selected),
@@ -529,6 +553,15 @@
     }
     if (data.channel !== channel) return;
     if (data.type === "mode") setMode(data.enabled === true);
+    if (data.type === "go") history.go(Math.max(-10, Math.min(10, Number(data.delta) || 0)));
+    if (data.type === "reload") location.reload();
+    if (
+      data.type === "navigate" &&
+      typeof data.path === "string" &&
+      data.path.startsWith("/") &&
+      !data.path.startsWith("//")
+    )
+      location.assign(data.path);
     if (data.type === "parent" && selected) {
       let p = selected;
       const steps = Math.min(10, Math.max(1, Number(data.steps) || 1));

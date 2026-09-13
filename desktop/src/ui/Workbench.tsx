@@ -332,10 +332,23 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
                   setOpen(true);
                 }}
               />
-            ) : "port" in (tabs.find((t) => t.id === active) ?? {}) ? (
-              <PreviewTab session={run} port={(tabs.find((t) => t.id === active) as { port: number }).port} />
-            ) : (
+            ) : "port" in (tabs.find((t) => t.id === active) ?? {}) ? null : (
               <FileTab session={run} path={(tabs.find((t) => t.id === active) as { path: string }).path} />
+            )}
+            {/* Previews stay mounted while another tab is up: a frame that is
+                unmounted is a page reloaded, and the scroll and state you left
+                it with are gone. Hidden, it keeps everything. */}
+            {tabs.map((t) =>
+              "port" in t ? (
+                <div key={t.id} hidden={active !== t.id} className="h-full">
+                  <PreviewTab
+                    session={run}
+                    port={t.port}
+                    path={t.path}
+                    onPath={(path) => setTabs((held) => held.map((x) => (x.id === t.id ? { ...x, path } : x)))}
+                  />
+                </div>
+              ) : null,
             )}
           </div>
 
