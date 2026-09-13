@@ -240,7 +240,7 @@ export function Chat({
             )}
           </ol>
 
-          {working && <Working heardAt={conversation.heardAt} />}
+          {working && <Working heardAt={conversation.heardAt} items={items} />}
           {stopped && <Stopped why={stopped} />}
           {session.status === "Failed" && <Relaunch session={session} />}
 
@@ -608,20 +608,61 @@ function BringUp({ steps }: { steps: ReturnType<typeof stepLines> }) {
   );
 }
 
-function Working({ heardAt }: { heardAt?: number }) {
+/**
+ * What the agent is doing right now, from the tail of the transcript.
+ *
+ * An item is open until `ItemCompleted` gives it a status, so the last item
+ * says the phase: thinking, running commands, reading, editing, searching,
+ * handing off — or streaming an answer, which needs no line at all because
+ * the words are arriving on screen. Between items, plainly "Working".
+ */
+function phase(items: Item[]): string | null {
+  const last = items[items.length - 1];
+  if (!last || last.status || last.kind === "UserMessage") return "Working";
+  switch (last.kind) {
+    case "AssistantMessage":
+      return null;
+    case "Reasoning":
+      return "Planning next moves";
+    case "CommandExecution": {
+      let n = 0;
+      for (let i = items.length - 1; i >= 0 && items[i].kind === "CommandExecution" && !items[i].status; i--) n++;
+      return n > 1 ? `Running ${n} commands` : "Running a command";
+    }
+    case "FileRead":
+      return "Reading files";
+    case "FileChange":
+      return "Editing files";
+    case "WebSearch":
+      return "Searching the web";
+    case "McpToolCall":
+      return "Calling a tool";
+    case "SubagentCall":
+      return "Handing off to a subagent";
+    case "Question":
+      return null;
+    default:
+      return "Working";
+  }
+}
+
+function Working({ heardAt, items }: { heardAt?: number; items: Item[] }) {
   const [, tick] = useState(0);
   useEffect(() => {
     const t = setInterval(() => tick((n) => n + 1), 1000);
     return () => clearInterval(t);
   }, []);
   const ago = heardAt ? Math.round((Date.now() - heardAt) / 1000) : null;
-  /* Lit text rather than a dot: a band of light crossing "Working". When the
+  const doing = phase(items);
+  /* Lit text rather than a dot: a band of light crossing the words. When the
      agent has gone quiet the words change, and stop moving — a sheen over
-     "nothing heard for a minute" would be a lie. */
+     "nothing heard for a minute" would be a lie. Nothing at all while an
+     answer streams: the answer is the indicator. */
   const quiet = ago !== null && ago > 5;
+  if (doing === null && !quiet) return null;
   return (
     <p className="mt-6 text-ui">
-      {quiet ? <span className="text-mute">Working — nothing heard for {ago}s</span> : <span className="text-sheen">Working</span>}
+      {quiet ? <span className="text-mute">{doing ?? "Working"} — nothing heard for {ago}s</span> : <span className="text-sheen">{doing}</span>}
     </p>
   );
 }
