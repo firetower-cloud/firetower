@@ -21,13 +21,15 @@ const overrides = path.resolve(here, "src/overrides");
 function overrideFirst() {
   return {
     name: "firetower:override-first",
-    resolveId(source: string) {
+    async resolveId(this: any, source: string, importer?: string) {
       const m = source.match(/^@\/(components|src)\/(.+)$/);
       if (!m) return null;
       const tail = m[2].replace(/\.(tsx?|jsx?)$/, "");
       for (const ext of [".tsx", ".ts"]) {
         const hit = path.join(overrides, `${m[1]}/${tail}${ext}`);
-        if (existsSync(hit)) return hit;
+        // Through Vite's own resolver, so the id is the same one every other
+        // route to this file gets. A raw path here is a second module instance.
+        if (existsSync(hit)) return this.resolve(hit, importer, { skipSelf: true });
       }
       return null;
     },
@@ -53,12 +55,20 @@ function swapMocks() {
   return {
     name: "firetower:swap-mocks",
     enforce: "pre" as const,
-    resolveId(source: string, importer?: string) {
+    async resolveId(this: any, source: string, importer?: string) {
       if (!importer || !source.startsWith(".")) return null;
+      // The mock socket is the one module allowed to reach the real one: it
+      // hands live servers to it and keeps the scripted stream for fixtures.
+      if (importer.endsWith("/desktop/src/mock/socket.tsx")) return null;
       const from = path.resolve(path.dirname(importer), source);
       for (const ext of ["", ".ts", ".tsx"]) {
         const hit = SWAPS[from + ext];
-        if (hit) return hit;
+        // Resolved by Vite rather than returned as a path: a raw absolute path
+        // becomes an `/@fs/` id, which is a *different module* from the
+        // `/src/…` id the app's own imports get. That split is how the real
+        // socket ended up with a copy of the mutator that never learned which
+        // server was current, and so never opened a socket to it.
+        if (hit) return this.resolve(hit, importer, { skipSelf: true });
       }
       return null;
     },

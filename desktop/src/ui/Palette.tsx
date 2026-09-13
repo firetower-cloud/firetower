@@ -11,8 +11,8 @@
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { CornerDownLeft, Search } from "lucide-react";
-import { BACKENDS, STATE, setReach } from "~/mock/backends";
-import { useFixtures } from "~/mock/socket";
+import { BACKENDS, setReach } from "~/mock/backends";
+import { useFleet } from "~/fleet";
 import { group, shortRepo } from "@/src/api/workspaces";
 import { navigate } from "~/shims/next-navigation";
 
@@ -26,7 +26,7 @@ type Item = {
 };
 
 export function Palette({ open, onClose }: { open: boolean; onClose: () => void }) {
-  useFixtures();
+  const fleet = useFleet();
   const [q, setQ] = useState("");
   const [at, setAt] = useState(0);
   const input = useRef<HTMLInputElement>(null);
@@ -43,8 +43,8 @@ export function Palette({ open, onClose }: { open: boolean; onClose: () => void 
   const items = useMemo<Item[]>(() => {
     // Workspaces, not raw sessions: it is the place you want to go to, and
     // three agents in one worktree should not be three results.
-    const sessions: Item[] = BACKENDS.flatMap((b) =>
-      group(STATE[b.id].filter((s) => s.status !== "Ended")).groups.flatMap(([repo, places]) =>
+    const sessions: Item[] = fleet.flatMap(({ backend: b, sessions: all }) =>
+      group(all.filter((s) => s.status !== "Ended")).groups.flatMap(([repo, places]) =>
         places.map((p) => ({
           id: `${b.id}:${p.id}`,
           label: p.name,
@@ -81,7 +81,7 @@ export function Palette({ open, onClose }: { open: boolean; onClose: () => void 
       .filter((x) => x.s > 0)
       .sort((a, b) => b.s - a.s);
     return scored.slice(0, 9).map((x) => x.i);
-  }, [q]);
+  }, [q, fleet]);
 
   useEffect(() => setAt(0), [q]);
 

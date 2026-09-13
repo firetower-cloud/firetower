@@ -4,10 +4,11 @@ import { Titlebar } from "~/ui/Titlebar";
 import { Palette } from "~/ui/Palette";
 import { Rail } from "~/ui/Rail";
 import { Routes } from "~/Routes";
-import { Fleet, waitingAcross } from "~/ui/Fleet";
+import { Fleet } from "~/ui/Fleet";
+import { useFleet, waitingIn, asBackend as liveBackend } from "~/fleet";
 import { StylePage } from "~/ui/StylePage";
 import { runTimeline, useFixtures } from "~/mock/socket";
-import { BACKENDS, type Backend, type BackendId } from "~/mock/backends";
+import { BACKENDS, type Backend } from "~/mock/backends";
 import { BackendProvider } from "~/backend";
 import { bridge } from "~/bridge";
 import { StartProvider } from "~/start";
@@ -18,7 +19,24 @@ import { Boundary } from "~/ui/Boundary";
 import { navigate, usePathname } from "~/shims/next-navigation";
 
 export function App() {
-  const [scope, setScope] = useState<Scope>("e1");
+  /* Remembered, so a reload lands where you were. It used to reset to the
+     first fixture, which after connecting a real server read as the app
+     forgetting it. */
+  const [scope, setScopeState] = useState<Scope>(() => {
+    try {
+      return (window.localStorage.getItem("firetower.scope") as Scope) || "e1";
+    } catch {
+      return "e1";
+    }
+  });
+  const setScope = (next: Scope) => {
+    setScopeState(next);
+    try {
+      window.localStorage.setItem("firetower.scope", next);
+    } catch {
+      /* private window; the choice just does not survive a reload */
+    }
+  };
   /* Real servers this Mac has connected to, alongside the three fixtures.
      The prototype keeps working with no server at all — that is what makes the
      design reviewable — and shows the real one the moment there is one. */
@@ -43,7 +61,8 @@ export function App() {
 
   /* Ember, on the dock: summed across every server, because the person glancing
      at it does not care whose machine stopped. */
-  const waiting = waitingAcross();
+  const fleet = useFleet();
+  const waiting = fleet.reduce((n, f) => n + waitingIn(f.sessions), 0);
   useEffect(() => bridge.setBadge(waiting || null), [waiting]);
 
   const pick = (next: Scope) => {
@@ -63,19 +82,13 @@ export function App() {
     const fixture = BACKENDS.find((b) => b.id === id);
     if (fixture) return fixture;
     const real = real$.find((s) => s.serverId === id);
-    if (!real) return null;
-    return {
-      id: real.serverId as BackendId,
-      org: real.org,
-      user: real.user,
-      mark: real.org.slice(0, 1).toUpperCase(),
-      url: real.url,
-      latency: [0, 0],
-      reach: "live",
-    };
+    return real ? liveBackend(real) : null;
   };
   const all = scope === "all" || path.startsWith("/fleet");
   const here = scope === "all" ? null : asBackend(scope);
+  useEffect(() => {
+    if (scope !== "all" && !here) setScope("e1");
+  }, [scope, here]);
 
   return (
     <>

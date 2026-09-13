@@ -11,20 +11,16 @@
  * server is context you drop into, not the other way round.
  */
 import { BACKENDS, type BackendId } from "~/mock/backends";
-import { useFixtures } from "~/mock/socket";
 import { drag } from "~/drag";
 import { navigate } from "~/shims/next-navigation";
-import { servers } from "~/servers";
-import { STATE } from "~/mock/backends";
-import { NEEDS_YOU } from "@/src/api/view";
+import { useFleet, waitingIn } from "~/fleet";
 
 export type Scope = "all" | BackendId;
 
 export function ServerStrip({ scope, onScope }: { scope: Scope; onScope: (s: Scope) => void }) {
-  useFixtures();
-
-  const waitingIn = (id: BackendId) => STATE[id].filter((s) => NEEDS_YOU.includes(s.status)).length;
-  const total = BACKENDS.reduce((n, b) => n + waitingIn(b.id), 0);
+  const fleet = useFleet();
+  const countIn = (id: string) => waitingIn(fleet.find((f) => f.backend.id === id)?.sessions ?? []);
+  const total = fleet.reduce((n, f) => n + waitingIn(f.sessions), 0);
 
   return (
     <div
@@ -49,7 +45,7 @@ export function ServerStrip({ scope, onScope }: { scope: Scope; onScope: (s: Sco
           mark={b.mark}
           on={scope === b.id}
           reach={b.reach}
-          count={waitingIn(b.id)}
+          count={countIn(b.id)}
           onPick={() => onScope(b.id)}
         />
       ))}
@@ -57,15 +53,15 @@ export function ServerStrip({ scope, onScope }: { scope: Scope; onScope: (s: Sco
       {/* Servers this Mac has actually connected to. Marked the same way as
           the fixtures, because to the person looking they are the same kind of
           thing — one of them just happens to be real. */}
-      {servers().map((s) => (
+      {fleet.filter((f) => !BACKENDS.some((b) => b.id === f.backend.id)).map(({ backend: b, sessions }) => (
         <Mark
-          key={s.serverId}
-          label={`${s.org} — ${s.user}`}
-          mark={s.org.slice(0, 1).toUpperCase()}
-          on={scope === s.serverId}
-          reach="live"
-          count={0}
-          onPick={() => onScope(s.serverId as Scope)}
+          key={b.id}
+          label={`${b.org} — ${b.user}`}
+          mark={b.mark}
+          on={scope === b.id}
+          reach={b.reach}
+          count={waitingIn(sessions)}
+          onPick={() => onScope(b.id as Scope)}
         />
       ))}
 

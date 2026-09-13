@@ -1,43 +1,89 @@
 /**
- * Saying something to the agent.
+ * Saying something to the agent — for real.
  *
- * A message is not keystrokes, which is the whole reason this exists rather
- * than a prompt in a terminal: a picture of the bug, a log file dropped in, a
- * model chosen for this turn, and a read on how much room is left in the
- * context window before the answer gets worse.
+ * A message is not keystrokes: pictures go inside it, because the model looks
+ * at them; every other file goes into the workspace with `attach_file` and is
+ * only *named* in the message, because the agent has its own tools for reading
+ * one and sending the bytes twice is waste. Both rules are the web build's.
  *
- * Images go in the message. Other files are put into the workspace and only
- * *named* in the message — the agent has its own tools for reading a file, so
- * sending the bytes twice is waste.
+ * The pickers are drawn from what the agent reports it can change
+ * (`session_controls`), not from a list kept here — a Codex session must not be
+ * offered Opus. Choosing shows as chosen straight away (`remember`) because
+ * Claude Code restates the model only at the start of the next turn, and the
+ * server's answer overwrites it, so a refused request corrects itself.
+ *
+ * The meter is the agent's own report of its context window, off the last
+ * finished turn. Adding up deltas here would drift.
  */
 import { useEffect, useRef, useState } from "react";
 import { ArrowUp, Check, ChevronDown, FileUp, ImageIcon, Paperclip, Square, X } from "lucide-react";
+import type { Conversation } from "@/src/api/conversation";
+import type { Attached, Control, ControlKind, Session } from "@/src/api/generated/model";
+import { useAttachFile, useInterruptSession, useSendTurn } from "@/src/api/generated/sessions/sessions";
+import { useChooseControl, useSessionControls } from "@/src/api/generated/conversation/conversation";
+import { takeDraft } from "@/src/workspace/draft";
+import { isLive } from "~/mock/http";
 
-type Attached = { name: string; kind: "image" | "file"; size: string; url?: string };
+type Chip = { name: string; kind: "image" | "file"; size: string; url?: string; path?: string };
 
-const MODELS = [
-  ["opus-5", "Opus 5", "Slowest, and the one that gets it right"],
-  ["sonnet-5", "Sonnet 5", "The everyday choice"],
-  ["haiku-4.5", "Haiku 4.5", "Fast, for small edits"],
-] as const;
+const BIGGEST_IMAGE = 5 * 1024 * 1024;
+const BIGGEST_FILE = 10 * 1024 * 1024;
 
-const MODES = [
-  ["auto", "Auto", "Stops only for things it can't take back"],
-  ["ask", "Ask first", "Stops before every write"],
-  ["full", "Full access", "Never stops"],
-] as const;
+/** A file's bytes, base64, without the data-url prefix. */
+function base64(file: File): Promise<string> {
+  return new Promise((done, fail) => {
+    const reader = new FileReader();
+    reader.onerror = () => fail(reader.error);
+    reader.onload = () => {
+      const url = String(reader.result);
+      done(url.slice(url.indexOf(",") + 1));
+    };
+    reader.readAsDataURL(file);
+  });
+}
 
-export function Composer({ asking }: { asking: boolean }) {
-  const [text, setText] = useState("");
-  const [files, setFiles] = useState<Attached[]>([]);
+const size = (n: number) => (n > 1e6 ? `${(n / 1e6).toFixed(1)} MB` : `${Math.ceil(n / 1024)} KB`);
+
+export function Composer({
+  session,
+  conversation,
+  onEcho,
+  onRemember,
+  disabled,
+  asking,
+}: {
+  session: Session;
+  conversation: Conversation;
+  onEcho: (text: string, images: Attached[]) => void;
+  onRemember: (of: "model" | "mode" | "effort", value: string) => void;
+  disabled: boolean;
+  asking: boolean;
+}) {
+  const live = isLive();
+  const send = useSendTurn();
+  const attach = useAttachFile();
+  const interrupt = useInterruptSession();
+  const choose = useChooseControl();
+  const controls = useSessionControls(session.id, { query: { enabled: live } });
+
+  // What a session can be asked to change is not known when it opens: an
+  // agent that lists its own models answers a moment later. Saying which model
+  // it is running is that moment, so it is the signal to ask again.
+  const model = conversation.model;
+  const askAgain = controls.refetch;
+  useEffect(() => {
+    if (live) askAgain();
+  }, [model, live, askAgain]);
+
+  const [text, setText] = useState(() => takeDraft(session.id) ?? "");
+  const [images, setImages] = useState<Attached[]>([]);
+  const [chips, setChips] = useState<Chip[]>([]);
+  const [refused, setRefused] = useState<string | null>(null);
   const [over, setOver] = useState(false);
-  const [model, setModel] = useState("opus-5");
-  const [mode, setMode] = useState("auto");
-  const [sent, setSent] = useState(false);
+  /** Clicked, and not yet confirmed by the server or by the agent. */
+  const [chosen, setChosen] = useState<Partial<Record<ControlKind, string>>>({});
   const box = useRef<HTMLTextAreaElement>(null);
 
-  /* Grow to fit, to a ceiling. A composer that scrolls at three lines makes
-     people write somewhere else and paste it in. */
   useEffect(() => {
     const el = box.current;
     if (!el) return;
@@ -45,34 +91,80 @@ export function Composer({ asking }: { asking: boolean }) {
     el.style.height = `${Math.min(el.scrollHeight, 220)}px`;
   }, [text]);
 
-  const take = (list: FileList | null) => {
+  const take = async (list: FileList | File[] | null) => {
     if (!list) return;
-    setFiles((held) => [
-      ...held,
-      ...[...list].map((f) => ({
-        name: f.name,
-        kind: f.type.startsWith("image/") ? ("image" as const) : ("file" as const),
-        size: f.size > 1e6 ? `${(f.size / 1e6).toFixed(1)} MB` : `${Math.ceil(f.size / 1024)} KB`,
-        url: f.type.startsWith("image/") ? URL.createObjectURL(f) : undefined,
-      })),
-    ]);
+    setRefused(null);
+    const files = [...list];
+    const complaints: string[] = [];
+
+    for (const file of files) {
+      if (file.type.startsWith("image/")) {
+        if (file.size > BIGGEST_IMAGE) {
+          complaints.push(`${file.name} is over 5 MB.`);
+          continue;
+        }
+        const data = await base64(file);
+        setImages((held) => [...held, { mediaType: file.type, data }]);
+        setChips((held) => [...held, { name: file.name, kind: "image", size: size(file.size), url: URL.createObjectURL(file) }]);
+        continue;
+      }
+      if (file.size > BIGGEST_FILE) {
+        complaints.push(`${file.name} is over 10 MB.`);
+        continue;
+      }
+      if (!live) {
+        setChips((held) => [...held, { name: file.name, kind: "file", size: size(file.size), path: file.name }]);
+        continue;
+      }
+      try {
+        const { path } = await attach.mutateAsync({ id: session.id, data: { name: file.name, data: await base64(file) } });
+        setChips((held) => [...held, { name: file.name, kind: "file", size: size(file.size), path }]);
+      } catch {
+        complaints.push(`${file.name} could not be put in the workspace.`);
+      }
+    }
+    if (complaints.length) setRefused(complaints.join(" "));
   };
 
-  const send = () => {
-    if (!text.trim() && files.length === 0) return;
-    setText("");
-    setFiles([]);
-    setSent(true);
-    setTimeout(() => setSent(false), 1600);
+  const drop = (i: number) => {
+    const chip = chips[i];
+    setChips((h) => h.filter((_, n) => n !== i));
+    if (chip?.kind === "image") {
+      const at = chips.slice(0, i).filter((c) => c.kind === "image").length;
+      setImages((h) => h.filter((_, n) => n !== at));
+    }
   };
+
+  const submit = () => {
+    if (send.isPending || disabled) return;
+    const named = chips.filter((c) => c.path).map((c) => c.path).join("\n");
+    const message = [text.trim(), named].filter(Boolean).join("\n\n");
+    if (!message && images.length === 0) return;
+
+    onEcho(message, images);
+    if (live) send.mutate({ id: session.id, data: { text: message, images } });
+    setText("");
+    setImages([]);
+    setChips([]);
+  };
+
+  const set = (kind: ControlKind, value: string) => {
+    if (kind === "model" || kind === "mode" || kind === "effort") onRemember(kind, value);
+    setChosen((was) => ({ ...was, [kind]: value }));
+    if (live) choose.mutate({ id: session.id, data: { kind, value } }, { onSuccess: () => controls.refetch() });
+  };
+
+  const offered: Control[] = live ? (controls.data ?? []) : FIXTURE_CONTROLS;
+  const usage = conversation.usage;
+  const full = usage?.contextUsed && usage?.contextWindow ? usage.contextUsed / usage.contextWindow : null;
 
   return (
     <div className="shrink-0 px-8 pb-6">
       <div className="mx-auto w-full max-w-[46rem]">
-        {sent && (
-          <div className="mb-2 flex items-center gap-2 text-meta text-sage">
-            <Check className="h-3.5 w-3.5" strokeWidth={2} />
-            Sent.
+        {refused && (
+          <div className="mb-2 flex items-center gap-2 text-meta text-brick">
+            <X className="h-3.5 w-3.5" strokeWidth={2} />
+            {refused}
           </div>
         )}
 
@@ -89,7 +181,7 @@ export function Composer({ asking }: { asking: boolean }) {
           }}
           className={`relative rounded-2xl border bg-panel shadow-(--shadow-float) transition-colors duration-150 ${
             over ? "border-slate" : "border-line focus-within:border-line-soft"
-          }`}
+          } ${disabled ? "opacity-60" : ""}`}
         >
           {over && (
             <div className="pointer-events-none absolute inset-0 z-10 grid place-items-center rounded-2xl bg-ground/80">
@@ -100,10 +192,23 @@ export function Composer({ asking }: { asking: boolean }) {
             </div>
           )}
 
-          {files.length > 0 && (
+          {chips.length > 0 && (
             <div className="flex flex-wrap gap-2 px-3 pt-3">
-              {files.map((f, i) => (
-                <Chip key={i} file={f} onDrop={() => setFiles((h) => h.filter((_, n) => n !== i))} />
+              {chips.map((c, i) => (
+                <span key={i} className="flex items-center gap-2 rounded-lg border border-line bg-raise py-1 pr-1 pl-2">
+                  {c.url ? (
+                    <img src={c.url} alt="" className="h-7 w-7 rounded object-cover" />
+                  ) : (
+                    <span className="grid h-7 w-7 place-items-center rounded bg-ground text-mute">
+                      <ImageIcon className="h-3.5 w-3.5" strokeWidth={1.75} />
+                    </span>
+                  )}
+                  <span className="max-w-[11rem] truncate font-mono text-meta text-text">{c.path ?? c.name}</span>
+                  <span className="text-micro text-mute">{c.size}</span>
+                  <button onClick={() => drop(i)} className="grid h-5 w-5 place-items-center rounded text-mute hover:bg-overlay hover:text-bone">
+                    <X className="h-3 w-3" strokeWidth={2} />
+                  </button>
+                </span>
               ))}
             </div>
           )}
@@ -112,15 +217,18 @@ export function Composer({ asking }: { asking: boolean }) {
             ref={box}
             rows={1}
             value={text}
+            disabled={disabled}
             onChange={(e) => setText(e.target.value)}
-            onPaste={(e) => take(e.clipboardData.files)}
+            onPaste={(e) => e.clipboardData.files.length && take(e.clipboardData.files)}
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();
-                send();
+                submit();
               }
             }}
-            placeholder={asking ? "Answer above, or say something else" : "Say something to the agent"}
+            placeholder={
+              disabled ? "This session has ended." : asking ? "Answer above, or say something else" : "Say something to the agent"
+            }
             className="scroll-slim block w-full resize-none bg-transparent px-4 py-3.5 text-read text-text placeholder:text-mute focus:outline-none"
           />
 
@@ -130,19 +238,42 @@ export function Composer({ asking }: { asking: boolean }) {
               <input type="file" multiple className="hidden" onChange={(e) => take(e.target.files)} />
             </label>
 
-            <Menu value={model} onPick={setModel} options={MODELS} />
-            <Menu value={mode} onPick={setMode} options={MODES} />
+            {offered.map((c) => (
+              <Picker
+                key={c.kind}
+                control={c}
+                value={chosen[c.kind] ?? c.current ?? (c.kind === "model" ? conversation.model : c.kind === "mode" ? conversation.mode : undefined)}
+                onPick={(v) => set(c.kind, v)}
+              />
+            ))}
 
-            <Context used={62_400} window={200_000} />
+            {full !== null && (
+              <span className="control gap-2 text-mute" title={`${Math.round(full * 100)}% of the context window used`}>
+                <span className="h-1 w-14 overflow-hidden rounded-full bg-ground">
+                  <span className={`block h-full rounded-full ${full > 0.75 ? "bg-ember" : "bg-slate"}`} style={{ width: `${Math.min(100, full * 100)}%` }} />
+                </span>
+                <span className="text-micro tabular-nums">{Math.round(full * 100)}%</span>
+              </span>
+            )}
 
-            <button
-              onClick={send}
-              disabled={!text.trim() && files.length === 0}
-              title="Send"
-              className="ml-auto grid h-8 w-8 place-items-center rounded-full bg-bone text-ground transition-opacity duration-150 hover:opacity-90 disabled:bg-raise disabled:text-mute"
-            >
-              <ArrowUp className="h-4 w-4" strokeWidth={2.5} />
-            </button>
+            {conversation.working ? (
+              <button
+                onClick={() => live && interrupt.mutate({ id: session.id })}
+                title="Interrupt the agent"
+                className="ml-auto grid h-8 w-8 place-items-center rounded-full border border-line bg-raise text-bone transition-colors hover:bg-overlay"
+              >
+                <Square className="h-3.5 w-3.5" strokeWidth={2.5} />
+              </button>
+            ) : (
+              <button
+                onClick={submit}
+                disabled={disabled || (!text.trim() && images.length === 0 && chips.length === 0)}
+                title="Send"
+                className="ml-auto grid h-8 w-8 place-items-center rounded-full bg-bone text-ground transition-opacity duration-150 hover:opacity-90 disabled:bg-raise disabled:text-mute"
+              >
+                <ArrowUp className="h-4 w-4" strokeWidth={2.5} />
+              </button>
+            )}
           </div>
         </div>
 
@@ -153,79 +284,41 @@ export function Composer({ asking }: { asking: boolean }) {
           <span className="flex items-center gap-1">
             <span className="keycap">⇧⏎</span> new line
           </span>
-          <span className="ml-auto flex items-center gap-1">
-            <Square className="h-3 w-3" strokeWidth={2} /> stop
-          </span>
+          {conversation.limits && conversation.limits.status !== "allowed" && (
+            <span className="ml-auto text-ember-soft">{conversation.limits.window}: {conversation.limits.status}</span>
+          )}
         </div>
       </div>
     </div>
   );
 }
 
-function Chip({ file, onDrop }: { file: Attached; onDrop: () => void }) {
-  return (
-    <span className="group/chip flex items-center gap-2 rounded-lg border border-line bg-raise py-1 pr-1 pl-2">
-      {file.url ? (
-        <img src={file.url} alt="" className="h-7 w-7 rounded object-cover" />
-      ) : (
-        <span className="grid h-7 w-7 place-items-center rounded bg-ground text-mute">
-          <ImageIcon className="h-3.5 w-3.5" strokeWidth={1.75} />
-        </span>
-      )}
-      <span className="max-w-[11rem] truncate text-meta text-text">{file.name}</span>
-      <span className="text-micro text-mute">{file.size}</span>
-      <button
-        onClick={onDrop}
-        className="grid h-5 w-5 place-items-center rounded text-mute transition-colors hover:bg-overlay hover:text-bone"
-      >
-        <X className="h-3 w-3" strokeWidth={2} />
-      </button>
-    </span>
-  );
-}
-
-function Menu<T extends string>({
-  value,
-  onPick,
-  options,
-}: {
-  value: T;
-  onPick: (v: T) => void;
-  options: readonly (readonly [T, string, string])[];
-}) {
+function Picker({ control, value, onPick }: { control: Control; value?: string; onPick: (v: string) => void }) {
   const [open, setOpen] = useState(false);
-  const here = options.find((o) => o[0] === value);
-
+  const here = control.choices.find((c) => c.value === value);
   return (
     <div className="relative">
-      <button
-        onClick={() => setOpen(!open)}
-        className="control text-mute hover:bg-raise hover:text-bone"
-      >
-        {here?.[1]}
+      <button onClick={() => setOpen(!open)} className="control text-mute hover:bg-raise hover:text-bone">
+        {here?.label ?? control.fallback}
         <ChevronDown className="h-3 w-3" strokeWidth={2} />
       </button>
-
       {open && (
         <>
           <button className="fixed inset-0 z-20 cursor-default" onClick={() => setOpen(false)} />
           <div className="absolute bottom-full left-0 z-30 mb-1.5 w-[16rem] overflow-hidden rounded-lg border border-line bg-overlay p-1 shadow-(--shadow-float)">
-            {options.map(([v, label, why]) => (
+            {control.choices.map((c) => (
               <button
-                key={v}
+                key={c.value}
                 onClick={() => {
-                  onPick(v);
+                  onPick(c.value);
                   setOpen(false);
                 }}
                 className="flex w-full items-start gap-2.5 rounded-md px-2.5 py-2 text-left transition-colors hover:bg-raise"
               >
-                <Check
-                  className={`mt-0.5 h-3.5 w-3.5 shrink-0 ${v === value ? "text-bone" : "text-transparent"}`}
-                  strokeWidth={2}
-                />
+                <Check className={`mt-0.5 h-3.5 w-3.5 shrink-0 ${c.value === value ? "text-bone" : "text-transparent"}`} strokeWidth={2} />
                 <span>
-                  <span className="block text-ui text-bone">{label}</span>
-                  <span className="block text-meta text-mute">{why}</span>
+                  <span className={`block text-ui ${c.grave ? "text-brick" : "text-bone"}`}>{c.label}</span>
+                  {c.note && <span className="block text-meta text-mute">{c.note}</span>}
                 </span>
               </button>
             ))}
@@ -236,25 +329,25 @@ function Menu<T extends string>({
   );
 }
 
-/**
- * How much room is left before the answer gets worse.
- *
- * A bar rather than a number, because the question is never "how many tokens"
- * — it is "am I near the edge", and the honest answer to that is a shape.
- */
-function Context({ used, window: total }: { used: number; window: number }) {
-  const full = used / total;
-  const tight = full > 0.75;
-
-  return (
-    <span className="control gap-2 text-mute" title={`${Math.round(full * 100)}% of the context window used`}>
-      <span className="h-1 w-14 overflow-hidden rounded-full bg-ground">
-        <span
-          className={`block h-full rounded-full ${tight ? "bg-ember" : "bg-slate"}`}
-          style={{ width: `${Math.min(100, full * 100)}%` }}
-        />
-      </span>
-      <span className="text-micro tabular-nums">{Math.round(full * 100)}%</span>
-    </span>
-  );
-}
+/** What the demo offers, in the real shape. */
+const FIXTURE_CONTROLS: Control[] = [
+  {
+    kind: "model",
+    fallback: "Model",
+    current: "opus-5",
+    choices: [
+      { label: "Opus 5", value: "opus-5", note: "Slowest, and the one that gets it right", grave: false },
+      { label: "Sonnet 5", value: "sonnet-5", note: "The everyday choice", grave: false },
+    ],
+  },
+  {
+    kind: "mode",
+    fallback: "Mode",
+    current: "auto",
+    choices: [
+      { label: "Auto", value: "auto", note: "Stops only for things it can't take back", grave: false },
+      { label: "Ask first", value: "ask", note: "Stops before every write", grave: false },
+      { label: "Full access", value: "full", note: "Never stops", grave: true },
+    ],
+  },
+];

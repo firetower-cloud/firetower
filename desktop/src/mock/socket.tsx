@@ -1,18 +1,25 @@
 /**
- * The event stream, scripted.
+ * The event stream — real for a connected server, scripted for a fixture.
  *
- * The product claim is *an agent needs you and you find out*, so a prototype in
- * which nothing ever moves cannot show the thing it exists to show. This replays
- * a timeline per backend: work progresses, an agent stops and asks, ember
- * arrives, and one server drops off the network while the others carry on.
+ * `web/src/api/socket.tsx` is the whole protocol: one WebSocket per page,
+ * `sessions` and `conversation` topics, per-subscription cursors, reconnect
+ * with backoff. It reads its address and token from `./http`, which here is
+ * the real-aware mutator — so for a live server it simply works, unchanged.
  *
- * Same interface as `web/src/api/socket.tsx` — `SocketProvider` and `useSocket`
- * — so every component that follows a topic is unchanged.
+ * Fixtures have no socket to open. They get a provider with the same shape
+ * whose `follow` never delivers, and a scripted timeline that moves the
+ * fixtures so the demo still shows an agent stopping and asking.
  */
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import {
+  SocketProvider as RealSocketProvider,
+  useSocket as useRealSocket,
+} from "../../../web/src/api/socket";
+import type { Topic } from "../../../web/src/api/frames";
+import { isLive } from "./http";
 import { STATE, emit, setReach, watch, type BackendId } from "./backends";
 
-export type Topic = "sessions" | "conversation";
+export type { Topic };
 
 type Listener = {
   topic: Topic;
@@ -20,33 +27,31 @@ type Listener = {
   cursor: () => number | undefined;
   onFrame: (frame: unknown) => void;
 };
-
 type Socket = { follow: (l: Listener) => () => void; live: boolean };
 
-const Ctx = createContext<Socket | null>(null);
+const Quiet = createContext<Socket | null>(null);
 
+function QuietProvider({ children }: { children: ReactNode }) {
+  const socket = useMemo<Socket>(() => ({ live: true, follow: () => () => {} }), []);
+  return <Quiet.Provider value={socket}>{children}</Quiet.Provider>;
+}
+
+/** Real for a live backend, quiet for a fixture. Decided once, at mount. */
 export function SocketProvider({ children }: { children: ReactNode }) {
-  const [live] = useState(true);
-  const socket = useMemo<Socket>(
-    () => ({
-      live,
-      follow: () => () => {},
-    }),
-    [live],
-  );
-  return <Ctx.Provider value={socket}>{children}</Ctx.Provider>;
+  return isLive() ? <RealSocketProvider>{children}</RealSocketProvider> : <QuietProvider>{children}</QuietProvider>;
 }
 
 export function useSocket(): Socket {
-  const held = useContext(Ctx);
-  if (!held) throw new Error("useSocket outside the api provider");
-  return held;
+  const quiet = useContext(Quiet);
+  // Inside a real provider the quiet context is absent, and vice versa.
+  if (quiet) return quiet;
+  return useRealSocket() as Socket;
 }
 
-/** A beat in the demo. Seconds from when the window opened. */
+/* ── The scripted demo ─────────────────────────────────────────────────── */
+
 type Beat = { at: number; do: () => void };
 
-/** Move one agent in one workspace. Addressed by workspace, like a person would. */
 function bump(b: BackendId, ws: string, status: string, note?: string) {
   const s = STATE[b].find((x) => x.workspaceId === ws);
   if (!s) return;
@@ -56,11 +61,6 @@ function bump(b: BackendId, ws: string, status: string, note?: string) {
   emit();
 }
 
-/**
- * Staggered on purpose. Three servers all lighting up at the same instant would
- * flatter the design; the real question is whether a merged inbox stays calm
- * when things arrive out of step, which is the only way they ever arrive.
- */
 const TIMELINE: Beat[] = [
   { at: 12, do: () => bump("e2", "w_e2_limits", "NeedsYou", "The edge config has two limits for the same tenant. Keep the stricter one?") },
   { at: 22, do: () => bump("e1", "w_e1_pricing", "Ready") },

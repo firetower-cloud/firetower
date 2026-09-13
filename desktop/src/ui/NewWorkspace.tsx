@@ -33,8 +33,17 @@ import { useCreateSession } from "@/src/api/generated/sessions/sessions";
 import { useAccounts, useAgents, useHosts, useRepos } from "~/data";
 import type { Backend } from "~/mock/backends";
 import { navigate } from "~/shims/next-navigation";
+import { leaveDraft } from "@/src/workspace/draft";
 
-export type Seed = { title?: string; repo?: string; issue?: string; taskKey?: string; taskUrl?: string };
+export type Seed = {
+  title?: string;
+  repo?: string;
+  issue?: string;
+  taskKey?: string;
+  taskUrl?: string;
+  /** Another agent in an existing workspace rather than a new one. */
+  workspaceId?: string;
+};
 
 type Checkout = { id: string; slug: string; base?: string };
 
@@ -123,6 +132,7 @@ export function NewWorkspace({
           name: name.trim(),
           taskKey: seed?.taskKey,
           taskUrl: seed?.taskUrl,
+          workspaceId: seed?.workspaceId as never,
           repos: checkouts.map((c) => ({ repoId: c.id, base: c.base })),
           agent: kind,
           accountId: mine.find((a) => a.id === accountId)?.id,
@@ -134,9 +144,11 @@ export function NewWorkspace({
       {
         onSuccess: (made) => {
           onClose();
-          const id = (made as { workspaceId?: string; id?: string })?.workspaceId ??
-            (made as { id?: string })?.id;
-          if (id) navigate(`/sessions/${id}`);
+          const session = made as { id: string; workspaceId?: string | null };
+          // The issue lands in the composer, unsent. Add "let's plan this
+          // before touching anything", delete half of it, or send it unchanged.
+          if (seed?.taskUrl) leaveDraft(session.id, `${seed.title ?? ""}\n${seed.taskUrl}`.trim());
+          navigate(`/sessions/${session.workspaceId ?? session.id}`);
         },
       },
     );
@@ -154,7 +166,7 @@ export function NewWorkspace({
         className="w-[38rem] overflow-hidden rounded-2xl border border-line bg-panel shadow-(--shadow-float)"
       >
         <div className="flex items-center gap-3 border-b border-line px-5 py-3.5">
-          <h2 className="text-title text-bone">New workspace</h2>
+          <h2 className="text-title text-bone">{seed?.workspaceId ? "Another agent" : "New workspace"}</h2>
           {seed?.issue && (
             <span className="rounded-md border border-line bg-raise px-2 py-0.5 font-mono text-micro text-dim">
               {seed.issue}

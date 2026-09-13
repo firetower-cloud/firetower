@@ -12,7 +12,8 @@ import { Signal } from "@/components/Signal";
 import { AgentMark } from "@/components/AgentMark";
 import { group } from "@/src/api/workspaces";
 import { talkFor, type Backend } from "~/mock/backends";
-import { useSessions } from "~/data";
+import { useSession, useSessions } from "~/data";
+import { useStart } from "~/start";
 import { Chat } from "~/ui/Chat";
 import { FileTab } from "~/ui/FileTab";
 import { QuickOpen } from "~/ui/QuickOpen";
@@ -26,6 +27,8 @@ type Side = "diff" | "files" | "ship";
 
 export function Workbench({ backend, workspace }: { backend: Backend; workspace: string }) {
   const { data: sessions } = useSessions();
+  const opened = useSession(workspace);
+  const start = useStart();
   const [side, setSide] = useState<Side>("diff");
   const [open, setOpen] = useState(true);
   const [term, setTerm] = useState(false);
@@ -68,8 +71,16 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
     });
   };
 
-  const live = sessions.filter((s) => s.status !== "Ended");
-  const place = group(live).groups.flatMap(([, ps]) => ps).find((p) => p.id === workspace);
+  /* The workspace is the group of sessions sharing this id; the one opened by
+     id is the header's truth even before the list has caught up — the moment
+     after "Start it" the list may not hold it yet, but `get_session` does. */
+  const running = sessions.filter((s) => s.status !== "Ended");
+  const found = group(running).groups.flatMap(([, ps]) => ps).find((p) => p.id === workspace);
+  const place =
+    found ??
+    (opened.data
+      ? { id: workspace, name: opened.data.name, branch: opened.data.branch ?? undefined, runs: [opened.data] }
+      : undefined);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -103,7 +114,11 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
   }, []);
 
   if (!place) {
-    return <div className="grid flex-1 place-items-center text-ui text-mute">That workspace isn’t here.</div>;
+    return (
+      <div className="grid flex-1 place-items-center text-ui text-mute">
+        {opened.loading ? "Opening…" : (opened.error ?? "That workspace isn’t here.")}
+      </div>
+    );
   }
 
   /* A workspace is a checkout with several agents in it, so the conversation
@@ -114,7 +129,12 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
     place.runs.find((r) => r.status === "NeedsYou" || r.status === "HandedBack") ??
     place.runs.find((r) => r.agent !== "Shell") ??
     place.runs[0];
-  const run = place.runs.find((r) => r.id === reading) ?? primary;
+  /* Opened by a session id, that session is what you came to read — before any
+     guess about which agent "matters". The guess is only for a workspace id. */
+  const run =
+    place.runs.find((r) => r.id === reading) ??
+    place.runs.find((r) => r.id === workspace) ??
+    primary;
 
   const talk = talkFor(place.id);
 
@@ -145,6 +165,13 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
               <Signal status={r.status} size={4} />
             </button>
           ))}
+          <button
+            onClick={() => start({ workspaceId: place.id, title: place.name, repo: run.repo ?? undefined })}
+            title="Another agent in this workspace"
+            className="grid h-7 w-7 place-items-center rounded-md text-mute transition-colors hover:bg-raise hover:text-bone"
+          >
+            +
+          </button>
         </span>
 
         <div className="ml-auto flex items-center gap-1">
@@ -185,9 +212,8 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
           <div className="min-h-0 flex-1">
             {active === "chat" ? (
               <Chat
-                place={place}
-                run={run}
-                talk={talk}
+                session={run}
+                branch={place.branch}
                 onOpenFile={openFile}
                 onOpenDiff={() => {
                   setSide("diff");

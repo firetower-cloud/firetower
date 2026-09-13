@@ -17,7 +17,14 @@ import { useListAgents } from "@/src/api/generated/agents/agents";
 import { useListProviders } from "@/src/api/generated/providers/providers";
 import { useListAccounts } from "@/src/api/generated/accounts/accounts";
 import { useListTrackers } from "@/src/api/generated/trackers/trackers";
-import { useListFiles, useSessionDiff } from "@/src/api/generated/sessions/sessions";
+import {
+  getListSessionsQueryKey,
+  useEndAllSessions,
+  useGetSession,
+  useListFiles,
+  useSessionDiff,
+} from "@/src/api/generated/sessions/sessions";
+import { useQueryClient } from "@tanstack/react-query";
 import type { Repo, Session, Task, TaskKind, TaskState } from "@/src/api/generated/model";
 import { isLive } from "~/mock/http";
 import { STATE, TASKS, type BackendId } from "~/mock/backends";
@@ -43,6 +50,40 @@ export function useSessions(): Feed<Session[]> {
   return live
     ? { data: q.data ?? [], live: true, loading: q.isPending, error: why(q.error) }
     : { data: STATE[id as BackendId] ?? [], live: false, loading: false, error: null };
+}
+
+/**
+ * One session, by id — the one a workspace is opened on.
+ *
+ * Its own query rather than a lookup in the list, because the header and the
+ * verbs on offer follow it, and `applyEvent` keeps this key fresh from the
+ * stream independently of the list.
+ */
+export function useSession(id: string | null): Feed<Session | null> {
+  const key = useBackendKey();
+  const live = isLive(key);
+  useFixtures();
+
+  const q = useGetSession(id ?? "", { query: { enabled: live && !!id } });
+
+  if (live) {
+    return { data: q.data ?? null, live: true, loading: !!id && q.isPending, error: why(q.error) };
+  }
+  const found = (STATE[key as BackendId] ?? []).find((s) => s.id === id || s.workspaceId === id) ?? null;
+  return { data: found, live: false, loading: false, error: null };
+}
+
+/** End every workspace on this server. */
+export function useEndAll() {
+  const cache = useQueryClient();
+  const end = useEndAllSessions();
+  return {
+    pending: end.isPending,
+    go: () =>
+      end.mutate({ data: {} }, {
+        onSuccess: () => cache.invalidateQueries({ queryKey: getListSessionsQueryKey() }),
+      }),
+  };
 }
 
 export function useTasks(): Feed<Task[]> {

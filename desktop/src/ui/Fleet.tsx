@@ -15,33 +15,19 @@ import { Signal } from "@/components/Signal";
 import { AgentMark } from "@/components/AgentMark";
 import { GithubMark, Icon, PageHead } from "@/components/ui";
 import { doing, group, shortRepo, type Workspace } from "@/src/api/workspaces";
-import { elapsed, minutesSince, needsYou, NEEDS_YOU } from "@/src/api/view";
-import { BACKENDS, STATE, type Backend } from "~/mock/backends";
-import { useFixtures } from "~/mock/socket";
+import { elapsed, minutesSince, needsYou } from "@/src/api/view";
+import type { Backend } from "~/mock/backends";
+import { useFleet, waitingIn } from "~/fleet";
 import { navigate } from "~/shims/next-navigation";
 
-/** Ember, summed over every server. What goes on the dock. */
-export function waitingAcross(): number {
-  return BACKENDS.reduce(
-    (n, b) => n + STATE[b.id].filter((s) => NEEDS_YOU.includes(s.status)).length,
-    0,
-  );
-}
 
 export function Fleet() {
-  useFixtures();
-
+  const fleet = useFleet();
   const fleets = useMemo(
-    () =>
-      BACKENDS.map((b) => {
-        const live = STATE[b.id].filter((s) => s.status !== "Ended");
-        return { backend: b, repos: group(live) };
-      }),
-    // Recomputed whenever the fixtures change; `useFixtures` is what re-renders.
-    [],
+    () => fleet.map(({ backend, sessions }) => ({ backend, repos: group(sessions.filter((s) => s.status !== "Ended")) })),
+    [fleet],
   );
-
-  const waiting = waitingAcross();
+  const waiting = fleet.reduce((n, f) => n + waitingIn(f.sessions), 0);
 
   return (
     <div className="mx-auto w-full max-w-[1100px] px-6 py-6">
@@ -49,8 +35,8 @@ export function Fleet() {
         eyebrow="Everything"
         title={
           waiting > 0
-            ? `${waiting} waiting on you, across ${BACKENDS.length} servers.`
-            : `Nothing waiting, across ${BACKENDS.length} servers.`
+            ? `${waiting} waiting on you, across ${fleet.length} servers.`
+            : `Nothing waiting, across ${fleet.length} servers.`
         }
       />
 
