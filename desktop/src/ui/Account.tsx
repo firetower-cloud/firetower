@@ -19,8 +19,10 @@ import { navigate } from "~/shims/next-navigation";
 import type { Backend } from "~/fleet";
 
 import { why } from "~/data";
+import { useConfirm } from "~/ui/Confirm";
 
 export function Account({ backend, onForgot }: { backend: Backend; onForgot: () => void }) {
+  const confirm = useConfirm();
   const key = useBackendKey();
   const me = useMe();
   const logout = useLogout();
@@ -95,7 +97,7 @@ export function Account({ backend, onForgot }: { backend: Backend; onForgot: () 
           <div className="mt-2.5 flex flex-wrap items-center gap-2 rounded-xl border border-line bg-panel p-4">
             <button disabled={leave.isPending} onClick={() => leave.mutate(true)} className="control border border-line bg-raise text-bone hover:bg-overlay disabled:text-mute"><LogOut className="h-3.5 w-3.5" strokeWidth={1.75} />Sign out</button>
             <span className="text-meta text-mute">revokes this Mac's token on the server</span>
-            <button disabled={leave.isPending} onClick={() => { if (window.confirm(`Forget ${backend.org} on this Mac? The token is dropped here; the server is not told.`)) leave.mutate(false); }} className="control ml-auto text-mute hover:text-brick"><Trash2 className="h-3.5 w-3.5" strokeWidth={1.75} />Forget this server</button>
+            <button disabled={leave.isPending} onClick={() => void confirm({ title: `Forget ${backend.org} on this Mac?`, body: "The token is dropped here; the server is not told, and its sessions carry on.", action: "Forget this server", tone: "danger" }).then((ok) => ok && leave.mutate(false))} className="control ml-auto text-mute hover:text-brick"><Trash2 className="h-3.5 w-3.5" strokeWidth={1.75} />Forget this server</button>
           </div>
         </section>
       </div>

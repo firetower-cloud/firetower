@@ -16,13 +16,21 @@ import { Repos } from "~/ui/config/Repos";
 import { Connections } from "~/ui/config/Connections";
 import { Agents } from "~/ui/config/Agents";
 import { Secrets } from "~/ui/config/Secrets";
+import { useConfirm } from "~/ui/Confirm";
 
 export function Configuration({ backend, onForgot }: { backend: Backend; onForgot: () => void }) {
+  const confirm = useConfirm();
   const key = useBackendKey();
   /* Forgets the server on this Mac only: the token is dropped here, the
      server is not told, and nothing on it changes. Sessions carry on. */
-  const disconnect = () => {
-    if (!window.confirm(`Disconnect ${backend.org} from this Mac?\n\nThe connection and its token are forgotten here. Nothing on the server changes — the sessions keep running, and you can connect again with the address and a password.`)) return;
+  const disconnect = async () => {
+    const ok = await confirm({
+      title: `Disconnect ${backend.org} from this Mac?`,
+      body: "The connection and its token are forgotten here. Nothing on the server changes — the sessions keep running, and you can connect again with the address and a password.",
+      action: "Disconnect",
+      tone: "danger",
+    });
+    if (!ok) return;
     forget(key);
     dropCache(key);
     dropFleet(key);

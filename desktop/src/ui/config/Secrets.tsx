@@ -14,6 +14,7 @@ import { getListSecretsQueryKey, useListSecrets, useRemoveSecret, useReplaceSecr
 import { Section } from "~/ui/config/bits";
 
 import { why } from "~/data";
+import { useConfirm } from "~/ui/Confirm";
 
 export function Secrets() {
   const cache = useQueryClient();
@@ -55,6 +56,7 @@ export function Secrets() {
 }
 
 function Row({ scope, name, mine, onGone }: { scope: string; name: string; mine: boolean; onGone: () => void }) {
+  const confirm = useConfirm();
   const reveal = useRevealSecret();
   const remove = useRemoveSecret();
   const replace = useReplaceSecret();
@@ -75,7 +77,7 @@ function Row({ scope, name, mine, onGone }: { scope: string; name: string; mine:
           <code className="font-mono text-micro text-mute">{shown ?? "••••••••"}</code>
           <button onClick={() => (shown ? setShown(null) : reveal.mutate({ scope, name }, { onSuccess: (r) => setShown(r.value) }))} title={shown ? "Hide" : "Reveal — this is logged"} className="grid h-6 w-6 place-items-center rounded text-mute hover:bg-raise hover:text-bone">{shown ? <EyeOff className="h-3.5 w-3.5" strokeWidth={1.75} /> : <Eye className="h-3.5 w-3.5" strokeWidth={1.75} />}</button>
           <button onClick={() => setEditing("")} className="text-micro text-mute hover:text-bone">replace</button>
-          <button onClick={() => { if (window.confirm(`Remove ${scope}/${name}?`)) remove.mutate({ scope, name }, { onSuccess: onGone }); }} className="grid h-6 w-6 place-items-center rounded text-mute hover:text-brick"><Trash2 className="h-3.5 w-3.5" strokeWidth={1.75} /></button>
+          <button onClick={() => void confirm({ title: `Remove ${scope}/${name}?`, body: "Sessions that were given it keep what they have.", action: "Remove", tone: "danger" }).then((ok) => ok && remove.mutate({ scope, name }, { onSuccess: onGone }))} className="grid h-6 w-6 place-items-center rounded text-mute hover:text-brick"><Trash2 className="h-3.5 w-3.5" strokeWidth={1.75} /></button>
         </>
       )}
     </div>

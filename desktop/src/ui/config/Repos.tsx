@@ -26,6 +26,7 @@ import { useListProviderRepos } from "@/src/api/generated/providers/providers";
 import { useProviders, useRepos } from "~/data";
 import { why } from "~/data";
 import { Rows, Section } from "~/ui/config/bits";
+import { useConfirm } from "~/ui/Confirm";
 
 export function Repos({ live }: { live: boolean }) {
   const repos = useRepos();
@@ -59,6 +60,7 @@ export function Repos({ live }: { live: boolean }) {
 /* ── Settings for one ──────────────────────────────────────────────────── */
 
 function Settings({ repo, onGone }: { repo: Repo; onGone: () => void }) {
+  const confirm = useConfirm();
   const cache = useQueryClient();
   const save = useUpdateRepo();
   const remove = useDeleteRepo();
@@ -87,7 +89,7 @@ function Settings({ repo, onGone }: { repo: Repo; onGone: () => void }) {
         <button disabled={save.isPending} onClick={() => save.mutate({ id: repo.id, data: { setup: setup || null, envFile: envFile || null } }, { onSuccess: () => { refresh(); setSaved(true); setTimeout(() => setSaved(false), 1400); } })} className="control bg-bone font-medium text-ground hover:opacity-90 disabled:bg-raise disabled:text-mute">
           {save.isPending ? "Saving…" : saved ? <><Check className="h-3.5 w-3.5" strokeWidth={2} />Saved</> : "Save"}
         </button>
-        <button onClick={() => { if (window.confirm(`Remove ${repo.slug}? Workspaces already cut from it are untouched.`)) remove.mutate({ id: repo.id }, { onSuccess: () => { refresh(); onGone(); } }); }} className="control ml-auto text-mute hover:text-brick"><Trash2 className="h-3.5 w-3.5" strokeWidth={1.75} />Remove</button>
+        <button onClick={() => { void confirm({ title: `Remove ${repo.slug}?`, body: "Workspaces already cut from it are untouched.", action: "Remove", tone: "danger" }).then((ok) => ok && remove.mutate({ id: repo.id }, { onSuccess: () => { refresh(); onGone(); } })); }} className="control ml-auto text-mute hover:text-brick"><Trash2 className="h-3.5 w-3.5" strokeWidth={1.75} />Remove</button>
       </div>
 
       <div>

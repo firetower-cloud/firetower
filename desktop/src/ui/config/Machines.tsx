@@ -31,6 +31,7 @@ import {
 import { parseDestination } from "@/src/api/environments";
 import { useHosts } from "~/data";
 import { Rows, Section } from "~/ui/config/bits";
+import { useConfirm } from "~/ui/Confirm";
 
 const DEFAULT_CONTAINER = "firetower-worker";
 
@@ -77,6 +78,7 @@ function describe(c: Compute): string {
 /* ── One machine ───────────────────────────────────────────────────────── */
 
 function Detail({ host, onGone }: { host: Host; onGone: () => void }) {
+  const confirm = useConfirm();
   const cache = useQueryClient();
   const readiness = useHostReadiness(host.id, undefined, { query: { staleTime: 10_000 } });
   const connect = useConnectHost();
@@ -123,7 +125,7 @@ function Detail({ host, onGone }: { host: Host; onGone: () => void }) {
         <button disabled={connect.isPending} onClick={() => connect.mutate({ id: host.id }, { onSuccess: refresh })} className="control border border-line bg-raise text-bone hover:bg-overlay disabled:text-mute">{connect.isPending ? "Connecting…" : "Connect"}</button>
         <button disabled={install.isPending} onClick={() => install.mutate({ id: host.id }, { onSuccess: refresh })} className="control border border-line bg-raise text-bone hover:bg-overlay disabled:text-mute">{install.isPending ? "Installing…" : host.workerVersion ? "Reinstall the worker" : "Install the worker"}</button>
         <button disabled={drain.isPending} onClick={() => drain.mutate({ id: host.id, data: { drained: !host.drained } }, { onSuccess: refresh })} className="control border border-line bg-raise text-dim hover:bg-overlay disabled:text-mute">{host.drained ? "Take new work" : "Drain"}</button>
-        <button onClick={() => { if (window.confirm(`Remove ${host.name}? Nothing on the machine is touched.`)) remove.mutate({ id: host.id, params: undefined as never }, { onSuccess: () => { refresh(); onGone(); } }); }} className="control ml-auto text-mute hover:text-brick"><Trash2 className="h-3.5 w-3.5" strokeWidth={1.75} />Remove</button>
+        <button onClick={() => void confirm({ title: `Remove ${host.name}?`, body: "Nothing on the machine is touched.", action: "Remove", tone: "danger" }).then((ok) => ok && remove.mutate({ id: host.id, params: undefined as never }, { onSuccess: () => { refresh(); onGone(); } }))} className="control ml-auto text-mute hover:text-brick"><Trash2 className="h-3.5 w-3.5" strokeWidth={1.75} />Remove</button>
       </div>
 
       <div className="flex items-center gap-2">

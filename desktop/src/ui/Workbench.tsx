@@ -9,7 +9,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Cpu, Globe, PanelRight, Pencil, SquareTerminal, Trash2, X } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
-import { getListSessionsQueryKey, useDestroySession, useRenameSession } from "@/src/api/generated/sessions/sessions";
+import { getListSessionsQueryKey, useRenameSession } from "@/src/api/generated/sessions/sessions";
 import { Signal } from "@/components/Signal";
 import { AgentMark } from "@/components/AgentMark";
 import { group } from "@/src/api/workspaces";
@@ -26,6 +26,9 @@ import { TabStrip, type Tab } from "~/ui/Tabs";
 import { Inspector } from "~/ui/Inspector";
 import { Shell } from "~/ui/Shell";
 import { Unreachable } from "~/ui/Unreachable";
+import { ContextMenu, useMenu, type MenuItem } from "~/ui/ContextMenu";
+import { useEndAgent, useEndWorkspace } from "~/ui/end";
+import { useConfirm } from "~/ui/Confirm";
 import { drag } from "~/drag";
 
 /** The rail can be dragged between these. */
@@ -163,6 +166,31 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
     setPicking(false);
   };
 
+  /* Everything but the conversation, in one gesture. */
+  const closeTabs = (ids: string[]) => {
+    if (ids.length === 0) return;
+    setTabs((held) => {
+      const next = held.filter((t) => t.id === "chat" || !ids.includes(t.id));
+      if (ids.includes(activeRef.current)) setActive(next.find((t) => t.id === activeRef.current)?.id ?? "chat");
+      return next;
+    });
+  };
+  const tabItems = (id: string): MenuItem[] => {
+    const at = tabs.findIndex((t) => t.id === id);
+    const others = tabs.filter((t) => t.id !== "chat" && t.id !== id).map((t) => t.id);
+    const right = tabs.slice(at + 1).filter((t) => t.id !== "chat").map((t) => t.id);
+    const left = tabs.slice(1, at).filter((t) => t.id !== "chat").map((t) => t.id);
+    const all = tabs.filter((t) => t.id !== "chat").map((t) => t.id);
+    return [
+      { label: "Close", shortcut: "⌘W", disabled: id === "chat", onPick: () => closeTab(id) },
+      { label: "Close others", disabled: others.length === 0, onPick: () => closeTabs(others) },
+      { label: "Close to the right", disabled: right.length === 0, onPick: () => closeTabs(right) },
+      { label: "Close to the left", disabled: left.length === 0, onPick: () => closeTabs(left) },
+      "-",
+      { label: "Close all", disabled: all.length === 0, onPick: () => closeTabs(all) },
+    ];
+  };
+
   const closeTab = (id: string) => {
     setTabs((held) => {
       const at = held.findIndex((t) => t.id === id);
@@ -225,7 +253,11 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
 
   const cache = useQueryClient();
   const rename = useRenameSession();
-  const destroy = useDestroySession();
+  const endWorkspace = useEndWorkspace();
+  const confirm = useConfirm();
+  const endAgent = useEndAgent();
+  const tabMenu = useMenu<string>();
+  const chipMenu = useMenu<string>();
   const [renaming, setRenaming] = useState<string | null>(null);
 
   if (!place) {
@@ -294,6 +326,7 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
             <button
               key={r.id}
               onClick={() => setReading(r.id)}
+              onContextMenu={(e) => chipMenu.show(e, r.id)}
               title={`${r.agent === "ClaudeCode" ? "Claude Code" : r.agent} — ${r.title}`}
               className={`flex items-center gap-1.5 rounded-md px-2 py-1 transition-colors ${
                 r.id === run.id
@@ -327,11 +360,8 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
           </button>
           {(
             <button
-              onClick={() => {
-                if (!window.confirm(`End "${place.name}"? Its branch stays on the machine; the agents stop.`)) return;
-                destroy.mutate({ id: run.id, params: undefined as never }, { onSuccess: () => { cache.invalidateQueries({ queryKey: getListSessionsQueryKey() }); navigate("/"); } });
-              }}
-              title="End this session"
+              onClick={() => void endWorkspace(place).then(({ ended, trouble }) => (ended ? navigate("/") : trouble && void confirm({ title: "It did not end.", body: trouble, action: "OK" })))}
+              title="End workspace — every agent in it stops"
               className="control text-mute hover:bg-raise hover:text-brick"
             >
               <Trash2 className="h-4 w-4" strokeWidth={1.75} />
@@ -368,6 +398,7 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
               active={active}
               onPick={setActive}
               onClose={closeTab}
+              onMenu={tabMenu.show}
               onKeep={(id) =>
                 setTabs((held) => held.map((t) => (t.id === id ? { ...t, preview: false } : t)))
               }
@@ -451,6 +482,28 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
         )}
       </div>
 
+      {tabMenu.open && <ContextMenu at={tabMenu.open.at} items={tabItems(tabMenu.open.on)} onClose={tabMenu.close} />}
+      {chipMenu.open && (
+        <ContextMenu
+          at={chipMenu.open.at}
+          onClose={chipMenu.close}
+          items={[
+            { label: "Read this conversation", onPick: () => setReading(chipMenu.open!.on) },
+            "-",
+            {
+              label: place.runs.length > 1 ? "End this agent" : "End workspace",
+              tone: "danger",
+              onPick: () => {
+                const id = chipMenu.open!.on;
+                const r = place.runs.find((x) => x.id === id);
+                if (place.runs.length > 1 && r) {
+                  void endAgent(id, `${r.agent === "ClaudeCode" ? "Claude Code" : r.agent} — ${r.title}`, place.runs.length - 1).then((ended) => ended && id === run.id && setReading(place.runs.find((x) => x.id !== id)?.id ?? null));
+                } else void endWorkspace(place).then(({ ended }) => ended && navigate("/"));
+              },
+            },
+          ]}
+        />
+      )}
       {adding && <AddAgent session={run} workspaceId={place.id} onClose={() => setAdding(false)} />}
       <QuickOpen sessionId={run.id} open={finding} onClose={() => setFinding(false)} onPick={(p) => openFile(p, true)} />
     </div>

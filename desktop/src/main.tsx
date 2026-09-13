@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import "./styles.css";
 import { App } from "./App";
 import { Boundary } from "./ui/Boundary";
+import { ConfirmProvider } from "./ui/Confirm";
 import { catchExternalLinks } from "./open";
 
 catchExternalLinks();
@@ -12,7 +13,9 @@ createRoot(document.getElementById("root")!).render(
     {/* The last line of defence. A window with no browser chrome has nowhere
         to show an uncaught error but a black rectangle. */}
     <Boundary onReset={() => window.location.reload()}>
-      <App />
+      <ConfirmProvider>
+        <App />
+      </ConfirmProvider>
     </Boundary>
   </StrictMode>,
 );

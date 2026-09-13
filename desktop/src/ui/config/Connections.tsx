@@ -31,6 +31,7 @@ import { useProviders, useTrackers } from "~/data";
 import { why } from "~/data";
 import { openExternal } from "~/open";
 import { DeviceCode, Rows, Section, sleep } from "~/ui/config/bits";
+import { useConfirm } from "~/ui/Confirm";
 
 export function Connections({ live }: { live: boolean }) {
   const providers = useProviders();
@@ -54,6 +55,7 @@ export function Connections({ live }: { live: boolean }) {
 /* ── One provider ──────────────────────────────────────────────────────── */
 
 function Provider({ p, live }: { p: ProviderStatus; live: boolean }) {
+  const confirm = useConfirm();
   const cache = useQueryClient();
   const authorize = useAuthorizeProvider();
   const disconnect = useDisconnectProvider();
@@ -93,7 +95,7 @@ function Provider({ p, live }: { p: ProviderStatus; live: boolean }) {
           <>
             <span className="flex items-center gap-1.5 text-meta text-sage"><Icon of={Check} size={12} />connected</span>
             <button onClick={() => setOpen(!open)} className="control text-mute hover:bg-raise hover:text-bone">identity</button>
-            <button disabled={!live || disconnect.isPending} onClick={() => { if (window.confirm(`Disconnect ${p.label}? Sessions already running keep the token they were given.`)) disconnect.mutate({ id: p.id }, { onSuccess: refresh }); }} className="control text-mute hover:text-brick disabled:opacity-50"><Icon of={Unlink} size={12} /></button>
+            <button disabled={!live || disconnect.isPending} onClick={() => void confirm({ title: `Disconnect ${p.label}?`, body: "Sessions already running keep the token they were given.", action: "Disconnect", tone: "danger" }).then((ok) => ok && disconnect.mutate({ id: p.id }, { onSuccess: refresh }))} className="control text-mute hover:text-brick disabled:opacity-50"><Icon of={Unlink} size={12} /></button>
           </>
         ) : p.configured ? (
           <button disabled={!live || authorize.isPending} onClick={start} className="control border border-line bg-raise text-ui text-text hover:bg-overlay disabled:opacity-50"><Icon of={Link2} size={12} />Connect</button>

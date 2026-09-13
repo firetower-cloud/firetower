@@ -6,7 +6,7 @@ import { Rail } from "~/ui/Rail";
 import { Routes } from "~/Routes";
 import { Fleet } from "~/ui/Fleet";
 import { useFleet, waitingIn, asBackend as liveBackend } from "~/fleet";
-import { StylePage } from "~/ui/StylePage";
+import { lazy, Suspense } from "react";
 import type { Backend } from "~/fleet";
 import { BackendProvider } from "~/backend";
 import { bridge } from "~/bridge";
@@ -17,6 +17,8 @@ import { NewWorkspace } from "~/ui/NewWorkspace";
 import { Boundary } from "~/ui/Boundary";
 import { Gate } from "~/ui/Gate";
 import { navigate, usePathname } from "~/shims/next-navigation";
+
+const StylePage = import.meta.env.DEV ? lazy(() => import("~/ui/StylePage").then((m) => ({ default: m.StylePage }))) : () => null;
 
 export function App() {
   /* Remembered, so a reload lands where you were. */
@@ -65,7 +67,8 @@ export function App() {
     navigate(next === "all" ? "/fleet" : "/");
   };
 
-  const style = path.startsWith("/style");
+  /* The style guide is for developing the app: it is not in a production build. */
+  const style = import.meta.env.DEV && path.startsWith("/style");
   const connecting = path.startsWith("/connect");
 
   const asBackend = (id: string): Backend | null => {
@@ -98,7 +101,9 @@ export function App() {
               onCancel={none ? undefined : () => navigate("/")}
             />
           ) : style ? (
-            <StylePage />
+            <Suspense fallback={null}>
+              <StylePage />
+            </Suspense>
           ) : all || !here ? (
             <Fleet />
           ) : (

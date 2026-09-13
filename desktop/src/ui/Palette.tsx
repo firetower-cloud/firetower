@@ -60,7 +60,7 @@ export function Palette({ open, onClose }: { open: boolean; onClose: () => void 
       { id: "c:fleet", label: "Everything, across servers", kind: "command", run: () => navigate("/fleet") },
       { id: "c:tasks", label: "Tasks", kind: "command", run: () => navigate("/tasks") },
       { id: "c:config", label: "Configuration", kind: "command", run: () => navigate("/configuration") },
-      { id: "c:style", label: "Open the style guide", kind: "command", run: () => navigate("/style") },
+      ...(import.meta.env.DEV ? [{ id: "c:style", label: "Open the style guide", kind: "command" as const, run: () => navigate("/style") }] : []),
     ];
 
     const all = [...sessions, ...commands];

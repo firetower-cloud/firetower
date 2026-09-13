@@ -40,12 +40,14 @@ export function TabStrip({
   onPick,
   onClose,
   onKeep,
+  onMenu,
 }: {
   tabs: Tab[];
   active: string;
   onPick: (id: string) => void;
   onClose: (id: string) => void;
   onKeep: (id: string) => void;
+  onMenu: (e: React.MouseEvent, id: string) => void;
 }) {
   return (
     <div className="scroll-slim flex h-10 shrink-0 items-stretch overflow-x-auto border-b border-line bg-panel">
@@ -60,7 +62,9 @@ export function TabStrip({
             key={tab.id}
             onClick={() => onPick(tab.id)}
             onDoubleClick={() => onKeep(tab.id)}
-            className={`group/tab relative flex max-w-[15rem] min-w-0 shrink-0 cursor-default items-center gap-2 border-r border-line px-3 transition-colors duration-150 ${
+            onAuxClick={(e) => e.button === 1 && !chat && onClose(tab.id)}
+            onContextMenu={(e) => onMenu(e, tab.id)}
+            className={`group/tab relative flex max-w-[15rem] min-w-0 shrink-0 cursor-default items-center gap-2 border-r border-line px-3 transition-colors duration-150 select-none ${
               on ? "bg-ground text-bone" : "text-mute hover:bg-raise/60 hover:text-dim"
             }`}
           >

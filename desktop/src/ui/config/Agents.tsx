@@ -19,6 +19,7 @@ import { getListAccountsQueryKey, useCreateAccount, useListAccounts, useUpdateAc
 import { useAccounts, useAgents, useHosts } from "~/data";
 import { why } from "~/data";
 import { DeviceCode, Rows, Section } from "~/ui/config/bits";
+import { useConfirm } from "~/ui/Confirm";
 
 export function Agents({ live }: { live: boolean }) {
   const cache = useQueryClient();
@@ -58,6 +59,7 @@ export function Agents({ live }: { live: boolean }) {
 }
 
 function AgentDetail({ agent, accounts, onConnect }: { agent: AgentView; accounts: Account[]; onConnect: () => void }) {
+  const confirm = useConfirm();
   const cache = useQueryClient();
   const hosts = useHosts();
   const install = useInstallAgent();
@@ -115,7 +117,7 @@ function AgentDetail({ agent, accounts, onConnect }: { agent: AgentView; account
           <input type="checkbox" checked={agent.enabled} onChange={(e) => configure.mutate({ kind: agent.kind, data: { enabled: e.target.checked, mode: (agent.mode ?? "Subscription") as never } }, { onSuccess: refresh })} />
           Offered when starting work
         </label>
-        <button onClick={() => { if (window.confirm(`Forget ${agent.label}'s configuration on this server?`)) forget.mutate({ kind: agent.kind }, { onSuccess: refresh }); }} className="control ml-auto text-mute hover:text-brick"><Trash2 className="h-3.5 w-3.5" strokeWidth={1.75} />Forget</button>
+        <button onClick={() => void confirm({ title: `Forget ${agent.label}'s configuration on this server?`, action: "Forget", tone: "danger" }).then((ok) => ok && forget.mutate({ kind: agent.kind }, { onSuccess: refresh }))} className="control ml-auto text-mute hover:text-brick"><Trash2 className="h-3.5 w-3.5" strokeWidth={1.75} />Forget</button>
       </div>
     </div>
   );

@@ -20,6 +20,11 @@ import type { Backend } from "~/fleet";
 import { useSessions, useUpdatesDot } from "~/data";
 import { navigate, usePathname } from "~/shims/next-navigation";
 import { useStart } from "~/start";
+import { useQueryClient } from "@tanstack/react-query";
+import { getListSessionsQueryKey, renameSession } from "@/src/api/generated/sessions/sessions";
+import { ContextMenu, useMenu } from "~/ui/ContextMenu";
+import { usePrompt } from "~/ui/Confirm";
+import { useEndWorkspace } from "~/ui/end";
 
 const NAV: { href: string; label: string; icon: LucideIcon }[] = [
   { href: "/", label: "Dashboard", icon: LayoutList },
@@ -89,7 +94,7 @@ export function Rail({ backend }: { backend: Backend }) {
       <div className="shrink-0 border-t border-line px-2 py-1.5">
         <NavLink href="/configuration" label="Configuration" icon={Settings2} on={path.startsWith("/configuration")} />
         <NavLink href="/updates" label="Updates" icon={CircleFadingArrowUp} on={path.startsWith("/updates")} dot={updates} />
-        <NavLink href="/style" label="Style guide" icon={BookOpen} on={path.startsWith("/style")} />
+        {import.meta.env.DEV && <NavLink href="/style" label="Style guide" icon={BookOpen} on={path.startsWith("/style")} />}
       </div>
 
       {/* Who you are *here*. Two servers means two accounts, so this is not
@@ -120,11 +125,35 @@ function NavLink({ href, label, icon, on, dot }: { href: string; label: string; 
 /** One workspace: its branch, and what is happening in it. */
 function Row({ place, on }: { place: Workspace; on: boolean }) {
   const state = doing(place);
+  const menu = useMenu<null>();
+  const prompt = usePrompt();
+  const endWorkspace = useEndWorkspace();
+  const cache = useQueryClient();
+  const rename = async () => {
+    const name = await prompt({ title: "Rename this workspace", initial: place.name, placeholder: "A name", action: "Rename" });
+    if (!name || name === place.name) return;
+    await renameSession(place.id, { name });
+    await cache.invalidateQueries({ queryKey: getListSessionsQueryKey() });
+  };
 
   return (
+    <>
+    {menu.open && (
+      <ContextMenu
+        at={menu.open.at}
+        onClose={menu.close}
+        items={[
+          { label: "Open", onPick: () => navigate(`/sessions/${place.id}`) },
+          { label: "Rename…", onPick: () => void rename() },
+          "-",
+          { label: "End workspace", tone: "danger", onPick: () => void endWorkspace(place).then(({ ended }) => ended && on && navigate("/")) },
+        ]}
+      />
+    )}
     <button
       onClick={() => navigate(`/sessions/${place.id}`)}
-      className={`block w-full rounded-md px-2.5 py-1.5 text-left transition-colors duration-150 ${
+      onContextMenu={(e) => menu.show(e, null)}
+      className={`block w-full rounded-md px-2.5 py-1.5 text-left transition-colors duration-150 select-none ${
         on ? "bg-overlay shadow-(--shadow-raise)" : "hover:bg-raise/60"
       }`}
     >
@@ -144,5 +173,6 @@ function Row({ place, on }: { place: Workspace; on: boolean }) {
           ))}
       </div>
     </button>
+    </>
   );
 }
