@@ -18,7 +18,7 @@ fi
 
 pnpm install --frozen-lockfile
 (cd ../web && pnpm install --frozen-lockfile)
-pnpm tauri build --bundles dmg ${target[@]+"${target[@]}"}
+pnpm tauri build --bundles app,dmg ${target[@]+"${target[@]}"}
 
 echo
 find src-tauri/target -path '*/release/bundle/dmg/*.dmg' -newer package.json -print
