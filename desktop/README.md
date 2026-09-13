@@ -86,3 +86,14 @@ picker's *panel* — the picker the control plane injects into the page accepts
 the window that embeds it as the panel when that window is the configured
 interface (`#__firetower_ui=`), so notes are written here and kept through the
 annotations API. The webview's CSP allows `frame-src http: https:` for this.
+
+## The shell
+
+`⌘J` opens a shell in the session's workspace — the web's protocol (a
+WebSocket to `sessions/{id}/pty`, bytes both ways) in `src/ui/Shell.tsx`, with
+what an editor's terminal adds: paths in the output open the file at the line,
+`⌘F` searches the scrollback, `⌘K` clears. The worker ends the shell when its
+viewer detaches, so hiding the panel keeps the terminal mounted; only closing
+it lets go. Paths the agent writes in the conversation open the same way
+(`src/paths.ts`): found in the text, checked against the workspace with
+`find_files`, then opened.

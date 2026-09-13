@@ -9,7 +9,7 @@
  * Selecting code starts a note, pinned to the line it came from, sent back as
  * an ordinary message. The same shape the conversation's annotations use.
  */
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { Check, Copy, Send, X } from "lucide-react";
 import { Markdown } from "@/components/Markdown";
@@ -27,7 +27,7 @@ type Note = { id: number; quote: string; line: number; text: string };
 
 import { why } from "~/data";
 
-export function FileTab({ session, path }: { session: Session; path: string }) {
+export function FileTab({ session, path, line }: { session: Session; path: string; line?: number }) {
   const sessionId = session.id;
   const live = isLive();
   const diff = useDiff(live ? session : null, "Head");
@@ -49,8 +49,22 @@ export function FileTab({ session, path }: { session: Session; path: string }) {
   const [drafting, setDrafting] = useState<Anchor | null>(null);
   const [reading, setReading] = useState<Note | null>(null);
   const [copied, setCopied] = useState(false);
-  const [rendered, setRendered] = useState(true);
+  /* Markdown reads rendered — unless you came for a line, which only the source has. */
+  const [rendered, setRendered] = useState(!line);
   const body = useRef<HTMLDivElement>(null);
+
+  /* Opened at a line — from a path in the conversation or the shell — the
+     row is scrolled to the middle and lit for a moment, so the eye lands. */
+  const [lit, setLit] = useState<number | null>(null);
+  useEffect(() => {
+    if (!line || lines.length === 0) return;
+    setRendered(false);
+    const row = body.current?.querySelector<HTMLElement>(`tr[data-line="${line}"]`);
+    row?.scrollIntoView({ block: "center" });
+    setLit(line);
+    const t = setTimeout(() => setLit(null), 1600);
+    return () => clearTimeout(t);
+  }, [line, lines.length]);
 
   const send = useMutation({
     mutationFn: () =>
@@ -117,7 +131,7 @@ export function FileTab({ session, path }: { session: Session; path: string }) {
                     <td className={`sticky left-0 w-12 min-w-12 border-r px-2 text-right align-top tabular-nums select-none ${hot ? "border-sage-deep bg-sage-tint text-sage" : "border-line-soft bg-ground text-mute"}`}>
                       {noted.length > 0 ? <button onClick={() => setReading(noted[0])} title={noted.map((x) => x.text).join("\n")} className="text-slate hover:text-bone">●</button> : n}
                     </td>
-                    <td className={`px-3 whitespace-pre ${hot ? "bg-sage-tint/25" : ""}`}>
+                    <td className={`px-3 whitespace-pre transition-colors duration-700 ${lit === n ? "bg-ember-tint" : hot ? "bg-sage-tint/25" : ""}`}>
                       {line === "" ? " " : highlight(line, lang).map((p, k) => <span key={k} className={TONE[p.kind]}>{p.text}</span>)}
                     </td>
                   </tr>

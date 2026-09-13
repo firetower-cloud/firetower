@@ -313,3 +313,16 @@
   .prose-desk .ft-md hr { border: 0; border-top: 1px solid var(--color-line); margin: 1rem 0; }
   .prose-desk .ft-md input[type="checkbox"] { margin-right: 0.4rem; }
 }
+
+/* A path the agent or a tool printed, which opens the file. Underlined the
+   way an editor underlines them: only enough to say it is live. */
+.path-link {
+  cursor: pointer;
+  text-decoration: underline dotted;
+  text-decoration-color: var(--color-mute);
+  text-underline-offset: 3px;
+}
+.path-link:hover {
+  color: var(--color-bone);
+  text-decoration-color: var(--color-slate);
+}

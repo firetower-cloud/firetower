@@ -50,6 +50,7 @@ import { elapsed, minutesSince } from "@/src/api/view";
 import { Composer } from "~/ui/Composer";
 import { AccountSwitcher } from "~/ui/AccountSwitcher";
 import { Annotate, type Anchor } from "~/ui/Annotate";
+import { markPaths, resolvePath } from "~/paths";
 import { isLive } from "~/mock/http";
 import { talkFor, type Ask, type Turn } from "~/mock/backends";
 
@@ -97,7 +98,7 @@ function what(asked: Asked): string {
   return JSON.stringify(asked.args ?? {}, null, 2);
 }
 
-type Open = { onOpenDiff: () => void; onOpenFile: (path: string, keep?: boolean) => void };
+type Open = { onOpenDiff: () => void; onOpenFile: (path: string, keep?: boolean, line?: number) => void };
 
 export function Chat({
   session,
@@ -211,6 +212,7 @@ export function Chat({
           following.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
         }}
       >
+        <SessionContext.Provider value={{ session: live ? session.id : null }}>
         <NotesContext.Provider value={{ notes, drop }}>
         <div ref={body} className="mx-auto w-full max-w-[46rem] px-8 pt-8 pb-4">
           <h1 className="text-display text-bone">{session.title}</h1>
@@ -262,6 +264,7 @@ export function Chat({
 
         </div>
         </NotesContext.Provider>
+        </SessionContext.Provider>
       </div>
 
       {drafting && (
@@ -327,7 +330,7 @@ function Node({
     );
   }
 
-  if (item.kind === "AssistantMessage") return <Said item={item} />;
+  if (item.kind === "AssistantMessage") return <Said item={item} onOpenFile={onOpenFile} />;
 
   if (item.kind === "Reasoning") return <Thought item={item} />;
   if (item.kind === "Question") return <Answered item={item} />;
@@ -337,6 +340,9 @@ function Node({
   return <ToolRow item={item} onOpenDiff={onOpenDiff} onOpenFile={onOpenFile} />;
 }
 
+/** Which session the turns belong to — for the paths in them. */
+const SessionContext = createContext<{ session: string | null }>({ session: null });
+
 /** The notes so far, and how to take one back — read by the turn it is on. */
 const NotesContext = createContext<{ notes: Note[]; drop: (id: string) => void }>({ notes: [], drop: () => {} });
 
@@ -345,14 +351,41 @@ const NotesContext = createContext<{ notes: Note[]; drop: (id: string) => void }
  * on the scroller); the notes already taken against this turn are drawn under
  * it, so the draft reads in place rather than in a list somewhere else.
  */
-function Said({ item }: { item: Item }) {
+function Said({ item, onOpenFile }: { item: Item; onOpenFile: Open["onOpenFile"] }) {
   const { notes, drop } = useContext(NotesContext);
   const mine = notes.filter((n) => n.item === item.id);
+  const prose = useRef<HTMLDivElement>(null);
+  const { session } = useContext(SessionContext);
+  /* After every render, paths in the markdown become clickable — every
+     render, because a re-render replaces the DOM the marks were put on, and
+     marking is cheap: nodes already marked are skipped. The check that a path
+     is real happens on the click, not here — a turn can name a hundred files
+     while streaming. */
+  useEffect(() => {
+    if (prose.current) markPaths(prose.current);
+  });
+  const [notice, setNotice] = useState<string | null>(null);
+  /* The markdown is rebuilt only when the text changes: a re-render of this
+     turn for any other reason (a note kept, a notice) keeps the DOM, and with
+     it the marks — and the element somebody is about to click. */
+  const rendered = useMemo(() => <Markdown>{item.text}</Markdown>, [item.text]);
+  const onClick = async (e: React.MouseEvent) => {
+    const hit = (e.target as HTMLElement).closest<HTMLElement>("[data-path]");
+    if (!hit || !session) return;
+    e.preventDefault();
+    const real = await resolvePath(session, hit.dataset.path ?? "");
+    if (real) onOpenFile(real, true, hit.dataset.line ? Number(hit.dataset.line) : undefined);
+    else {
+      setNotice(`${hit.dataset.path} is not in this workspace.`);
+      setTimeout(() => setNotice(null), 2500);
+    }
+  };
   return (
     <li className="group/turn">
-      <div className="prose-desk" data-said={item.id}>
-        <Markdown>{item.text}</Markdown>
+      <div ref={prose} onClick={onClick} className="prose-desk" data-said={item.id}>
+        {rendered}
       </div>
+      {notice && <p className="mt-1 text-meta text-mute">{notice}</p>}
       {mine.length > 0 && (
         <ul className="mt-3 space-y-2">
           {mine.map((n) => (

@@ -6,7 +6,7 @@
  * away. The earlier arrangement made both of them tabs, which meant reviewing a
  * diff hid the conversation that explained it. They are two halves of one job.
  */
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Cpu, Globe, PanelRight, Pencil, SquareTerminal, Trash2, X } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { getListSessionsQueryKey, useDestroySession, useRenameSession } from "@/src/api/generated/sessions/sessions";
@@ -26,12 +26,16 @@ import { QuickOpen } from "~/ui/QuickOpen";
 import { TabStrip, type Tab } from "~/ui/Tabs";
 import { Inspector } from "~/ui/Inspector";
 import { TerminalPane } from "~/ui/TerminalPane";
+import { Shell } from "~/ui/Shell";
 import { Unreachable } from "~/ui/Unreachable";
 import { drag } from "~/drag";
 
 /** The rail can be dragged between these. */
 const RAIL_MIN = 288;
 const RAIL_DEFAULT = 368;
+/** And the shell panel, top to bottom. */
+const TERM_MIN = 120;
+const TERM_DEFAULT = 256;
 
 type Side = "diff" | "files" | "ship";
 
@@ -80,10 +84,49 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
     handle.addEventListener("pointermove", move);
     handle.addEventListener("pointerup", up);
   };
+  /* The shell panel: `shown` is what you see, `opened` is whether a shell is
+     attached at all. The worker ends a shell when its viewer detaches, so
+     hiding the panel must keep the terminal mounted — only closing lets go. */
   const [term, setTerm] = useState(false);
+  const [shell, setShell] = useState(false);
+  const [termHeight, setTermHeight] = useState(() => {
+    try {
+      const held = Number(localStorage.getItem("firetower.terminal.height"));
+      return held >= TERM_MIN ? held : TERM_DEFAULT;
+    } catch {
+      return TERM_DEFAULT;
+    }
+  });
+  const startTermResize = (e: React.PointerEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    const handle = e.currentTarget;
+    const from = { y: e.clientY, height: termHeight };
+    handle.setPointerCapture(e.pointerId);
+    document.body.style.cursor = "row-resize";
+    document.body.style.userSelect = "none";
+    const move = (ev: PointerEvent) => setTermHeight(Math.round(Math.min(window.innerHeight * 0.7, Math.max(TERM_MIN, from.height + (from.y - ev.clientY)))));
+    const up = () => {
+      handle.removeEventListener("pointermove", move);
+      handle.removeEventListener("pointerup", up);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      setTermHeight((h) => {
+        try {
+          localStorage.setItem("firetower.terminal.height", String(h));
+        } catch {
+          // Kept for the session only.
+        }
+        return h;
+      });
+    };
+    handle.addEventListener("pointermove", move);
+    handle.addEventListener("pointerup", up);
+  };
   const [reading, setReading] = useState<string | null>(null);
   const [tabs, setTabs] = useState<Tab[]>([{ id: "chat" }]);
   const [active, setActive] = useState("chat");
+  const activeRef = useRef(active);
+  activeRef.current = active;
   const [finding, setFinding] = useState(false);
 
   /**
@@ -93,13 +136,13 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
    * replaces it, so skimming six files while reading a diff leaves one tab
    * rather than six. Double-clicking the tab keeps it.
    */
-  const openFile = (path: string, keep = false) => {
+  const openFile = (path: string, keep = false, line?: number) => {
     setTabs((held) => {
-      const already = held.find((t) => "path" in t && t.path === path);
+      const already = held.find((t) => "path" in t && !("port" in t) && t.path === path);
       if (already) {
-        return keep ? held.map((t) => (t.id === already.id ? { ...t, preview: false } : t)) : held;
+        return held.map((t) => (t.id === already.id ? { ...t, preview: keep ? false : (t as { preview?: boolean }).preview, line } : t));
       }
-      const tab: Tab = { id: `f:${path}`, path, preview: !keep };
+      const tab: Tab = { id: `f:${path}`, path, preview: !keep, line };
       const slot = held.findIndex((t) => "preview" in t && t.preview);
       if (!keep && slot !== -1) {
         const next = [...held];
@@ -143,6 +186,10 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!(e.metaKey || e.ctrlKey)) return;
+      /* A focused terminal owns the keyboard. `⌘J` is the one gesture that
+         is about the panel rather than what is in it. */
+      const inTerminal = !!(document.activeElement as HTMLElement | null)?.closest(".xterm");
+      if (inTerminal && e.key.toLowerCase() !== "j") return;
       if (e.key === "\\") {
         e.preventDefault();
         setOpen((o) => !o);
@@ -155,6 +202,7 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
       }
       if (e.key.toLowerCase() === "j") {
         e.preventDefault();
+        setShell(true);
         setTerm((t) => !t);
       }
       // The editor gesture for "go to a file", on the key editors use for it.
@@ -164,7 +212,7 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
       }
       if (e.key.toLowerCase() === "w") {
         e.preventDefault();
-        if (active !== "chat") closeTab(active);
+        if (activeRef.current !== "chat") closeTab(activeRef.current);
       }
     };
     window.addEventListener("keydown", onKey);
@@ -266,7 +314,10 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
 
         <div className="ml-auto flex items-center gap-1">
           <button
-            onClick={() => setTerm(!term)}
+            onClick={() => {
+              setShell(true);
+              setTerm(!term);
+            }}
             title="Terminal  ⌘J"
             className={`control ${term ? "bg-overlay text-bone" : "text-mute hover:bg-raise hover:text-bone"}`}
           >
@@ -333,7 +384,7 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
                 }}
               />
             ) : "port" in (tabs.find((t) => t.id === active) ?? {}) ? null : (
-              <FileTab session={run} path={(tabs.find((t) => t.id === active) as { path: string }).path} />
+              <FileTab session={run} path={(tabs.find((t) => t.id === active) as { path: string }).path} line={(tabs.find((t) => t.id === active) as { line?: number }).line} />
             )}
             {/* Previews stay mounted while another tab is up: a frame that is
                 unmounted is a page reloaded, and the scroll and state you left
@@ -352,20 +403,28 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
             )}
           </div>
 
-          {term && (
-            <div className="h-64 shrink-0 border-t border-line">
-              <div className="flex h-8 items-center gap-2 border-b border-line bg-panel px-3">
-                <span className="text-meta text-dim">Terminal</span>
+          {shell && (
+            <div hidden={!term} style={{ height: termHeight }} className="relative flex shrink-0 flex-col border-t border-line">
+              <div onPointerDown={startTermResize} title="Drag to resize" className="group/vhandle absolute inset-x-0 -top-1 z-10 h-2 cursor-row-resize">
+                <div className="absolute inset-x-0 top-1 h-px bg-transparent transition-colors duration-150 group-hover/vhandle:bg-slate group-active/vhandle:bg-slate" />
+              </div>
+              <div className="flex h-8 shrink-0 items-center gap-2 border-b border-line bg-panel px-3">
+                <span className="text-meta text-dim">Shell</span>
                 <span className="font-mono text-micro text-mute">{place.branch}</span>
+                <span className="ml-auto text-micro text-mute">⌘J hides</span>
                 <button
-                  onClick={() => setTerm(false)}
-                  className="ml-auto grid h-6 w-6 place-items-center rounded text-mute hover:bg-raise hover:text-bone"
+                  onClick={() => {
+                    setShell(false);
+                    setTerm(false);
+                  }}
+                  title="Close — this ends the shell and whatever it is running"
+                  className="grid h-6 w-6 place-items-center rounded text-mute hover:bg-raise hover:text-bone"
                 >
                   <X className="h-3.5 w-3.5" strokeWidth={2} />
                 </button>
               </div>
-              <div className="h-[calc(100%-2rem)]">
-                <TerminalPane place={place} />
+              <div className="min-h-0 flex-1">
+                {live ? <Shell sessionId={run.id} ended={run.status === "Ended"} showing={term} onOpenPath={(p, line) => openFile(p, true, line)} /> : <TerminalPane place={place} />}
               </div>
             </div>
           )}
