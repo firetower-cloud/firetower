@@ -47,6 +47,12 @@ jobs:
 
       - run: cargo fmt --check
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
-      - run: cargo test --workspace --locked
+      - run: cargo test --workspace --locked --no-fail-fast
         env:
           DATABASE_URL: postgres://firetower:firetower@localhost:5433/firetower
+          # The worker's tests commit in throwaway repositories; a runner has
+          # no identity of its own.
+          GIT_AUTHOR_NAME: firetower
+          GIT_AUTHOR_EMAIL: ci@firetower.cloud
+          GIT_COMMITTER_NAME: firetower
+          GIT_COMMITTER_EMAIL: ci@firetower.cloud

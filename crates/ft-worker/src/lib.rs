@@ -3876,8 +3876,12 @@ mod tests {
             matches!(answered, Some(ToServer::Pong)),
             "the heartbeat must arrive before the download ends"
         );
+        // A quarter of the download is the line: without overtaking, all four
+        // hundred chunks go first. How many are already committed to the pipe
+        // when the ping lands varies with the machine (a dozen here, near
+        // fifty on a shared runner), so the bound is loose on purpose.
         assert!(
-            chunks_first < 40,
+            chunks_first < 100,
             "it should have overtaken the queue, not waited most of it out — \
              {chunks_first} chunks went first"
         );
