@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.1](https://github.com/firetower-cloud/firetower/compare/desktop-v0.3.0...desktop-v0.3.1) (2026-09-14)
+
+
+### Bug Fixes
+
+* **desktop:** a server that refused the app is not called unreachable ([3930337](https://github.com/firetower-cloud/firetower/commit/393033728aefca26e61a8a60f95c5db12631b8e0))
+
 ## [0.3.0](https://github.com/firetower-cloud/firetower/compare/desktop-v0.2.0...desktop-v0.3.0) (2026-09-14)
 
 
