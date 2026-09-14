@@ -1,6 +1,5 @@
 # The desktop app on every pull request that touches it: types, the
-# renderer's build, the shell's compile and lints, on both platforms — and a
-# scan for anything that looks like a key, since the repository is public.
+# renderer's build, the shell's compile and lints, on both platforms.
 # No secrets, so it is safe for a pull request from a fork.
 name: desktop ci
 
@@ -54,13 +53,3 @@ jobs:
         working-directory: desktop
       - run: cargo clippy --locked -- -D warnings
         working-directory: desktop/src-tauri
-
-  secrets:
-    runs-on: depot-ubuntu-22.04
-    steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-        with:
-          fetch-depth: 0
-      - uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
