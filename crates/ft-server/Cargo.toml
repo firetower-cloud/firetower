@@ -49,6 +49,8 @@ lol_html = "=2.7.0"
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+# `oneshot`, to ask the router a request in a test.
+tower = { version = "0.5", features = ["util"] }
 tempfile.workspace = true
 # The real worker, so the tunnel tests exercise the code that actually runs
 # rather than a fake that agrees with them.

@@ -538,15 +538,7 @@ fn build_router(
         app = app.fallback(web::serve);
     }
 
-    if dev {
-        // The web application is on its own port while developing.
-        app = app.layer(
-            tower_http::cors::CorsLayer::new()
-                .allow_origin(tower_http::cors::Any)
-                .allow_methods(tower_http::cors::Any)
-                .allow_headers(tower_http::cors::Any),
-        );
-    }
+    app = app.layer(cors(dev));
 
     // Outermost, so it is asked before the authentication gate and before any
     // route matching. A preview is a whole hostname rather than a path: it
@@ -558,6 +550,49 @@ fn build_router(
         preview_first,
     ))
 }
+
+/// Which origins may call the API from a browser engine.
+///
+/// The web interface never needs this: the control plane serves it from its
+/// own origin. The desktop app does. It is a webview, its pages have the
+/// origin `tauri://localhost` (`http://tauri.localhost` on Windows), and
+/// every request it makes is cross-origin — so without these headers the
+/// engine hides the answer from it and the app reports a server it did reach
+/// as unreachable. The three origins below are every one a Firetower client
+/// can have.
+///
+/// An allowlist rather than `Any`: the API is bearer-token, so nothing is
+/// exposed either way, but there is no reason to answer a page somebody
+/// happens to have open while on the VPN. In development the interface runs
+/// on a port of its own and the list would be wrong, so there it is `Any`.
+///
+/// Wrapping the whole router, this answers preflights itself, before the
+/// authentication gate — a preflight carries no token and must not be
+/// refused for lacking one.
+fn cors(dev: bool) -> tower_http::cors::CorsLayer {
+    use tower_http::cors::{AllowOrigin, Any, CorsLayer};
+
+    let origin = if dev {
+        AllowOrigin::any()
+    } else {
+        AllowOrigin::list(
+            CLIENT_ORIGINS
+                .iter()
+                .map(|o| o.parse().expect("a client origin is a valid header value")),
+        )
+    };
+    CorsLayer::new()
+        .allow_origin(origin)
+        .allow_methods(Any)
+        .allow_headers(Any)
+}
+
+/// The origins the native clients run under, on every platform they ship on.
+pub const CLIENT_ORIGINS: &[&str] = &[
+    "tauri://localhost",
+    "http://tauri.localhost",
+    "https://tauri.localhost",
+];
 
 /// Anything addressed to a preview hostname belongs to that preview.
 async fn preview_first(
@@ -611,6 +646,56 @@ mod tests {
     async fn the_contract_is_generated_from_the_handlers() {
         let doc = serde_json::to_string(&ApiDoc::openapi()).unwrap();
         assert!(doc.contains("Firetower"));
+    }
+
+    /// A router of one route under the production CORS layer, asked a
+    /// preflight from `origin`; returns what it would let that origin see.
+    async fn allowed_for(dev: bool, origin: &str) -> Option<String> {
+        use tower::ServiceExt as _;
+
+        let app = axum::Router::new()
+            .route("/api/v1/bootstrap", axum::routing::get(|| async { "{}" }))
+            .layer(cors(dev));
+        let request = axum::http::Request::builder()
+            .method("OPTIONS")
+            .uri("/api/v1/bootstrap")
+            .header("origin", origin)
+            .header("access-control-request-method", "GET")
+            .header("access-control-request-headers", "authorization")
+            .body(axum::body::Body::empty())
+            .unwrap();
+        let response = app.oneshot(request).await.unwrap();
+        response
+            .headers()
+            .get("access-control-allow-origin")
+            .map(|v| v.to_str().unwrap().to_string())
+    }
+
+    #[tokio::test]
+    async fn the_desktop_app_is_answered_in_production() {
+        assert_eq!(
+            allowed_for(false, "tauri://localhost").await.as_deref(),
+            Some("tauri://localhost")
+        );
+        assert_eq!(
+            allowed_for(false, "http://tauri.localhost")
+                .await
+                .as_deref(),
+            Some("http://tauri.localhost")
+        );
+    }
+
+    #[tokio::test]
+    async fn a_stranger_is_not() {
+        assert_eq!(allowed_for(false, "https://example.com").await, None);
+    }
+
+    #[tokio::test]
+    async fn development_answers_everybody() {
+        assert_eq!(
+            allowed_for(true, "http://localhost:3000").await.as_deref(),
+            Some("*")
+        );
     }
 
     #[tokio::test]
