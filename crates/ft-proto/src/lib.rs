@@ -443,6 +443,10 @@ pub enum Action {
     Diff {
         #[serde(default)]
         checkout: String,
+        /// Since the base (the default, and what an older control plane
+        /// means) or since the last commit.
+        #[serde(default)]
+        since: ft_core::DiffSince,
     },
     /// Put a file somebody handed over into the workspace, and say where it
     /// landed.
@@ -572,6 +576,17 @@ pub struct StartAgent {
     /// records for "some other session in the same place" could find one that
     /// has since been torn down.
     pub workspace: String,
+    /// The session the workspace was made for, whose recorded path is where
+    /// the directory actually is.
+    ///
+    /// `workspace` is derived from the branch, and git may have numbered the
+    /// branch after the directory was named — `agent/hello` became
+    /// `agent/hello-8`, the directory stayed `agent-hello-…` — so a name
+    /// derived again later can point at nothing. The worker wrote down where
+    /// it put the workspace; this says which record to read. Absent from a
+    /// control plane older than this, which means the name is all there is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_session: Option<SessionId>,
     /// What to ask for first. Empty means the agent comes up idle.
     #[serde(default)]
     pub prompt: String,
@@ -1002,6 +1017,7 @@ mod tests {
             share: Default::default(),
             env: vec![("KEY".into(), "value".into())],
             agent_home: Vec::new(),
+            workspace_session: None,
         }));
 
         let wire = serde_json::to_string(&frame).expect("encoding");

@@ -1,0 +1,351 @@
+/**
+ * The web application's design system, plus the layer that only exists on a Mac.
+ *
+ * Nothing here redefines a token that `globals.css` already owns. The system is
+ * good and it is enforced (`just check-style`); what a native window needs is an
+ * *extension* — a translucent surface, a title bar that is part of the app, and
+ * a way to say which server a row came from.
+ */
+/* The faces `next/font/local` would have loaded, declared by hand. They are
+   checked into `web/public/fonts` for the same reason the web build uses them
+   rather than a CDN: a build that needs the network to render text fails for
+   reasons that have nothing to do with the change being made. */
+@font-face {
+  font-family: "Archivo";
+  src: url("./fonts/archivo.woff2") format("woff2");
+  font-weight: 100 900;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Archivo Narrow";
+  src: url("./fonts/archivo-narrow.woff2") format("woff2");
+  font-weight: 100 900;
+  font-display: swap;
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("./fonts/jetbrains-mono.woff2") format("woff2");
+  font-weight: 100 800;
+  font-display: swap;
+}
+
+@import "./globals.css";
+
+@source "./";
+
+@theme {
+  /* ── The native layer ──────────────────────────────────────────
+     A macOS sidebar is translucent, and `--color-panel` is not — it is
+     #111113 and the system is built on it being exactly that. So the rail
+     gets a *variant* rather than a redefinition: the same value at reduced
+     alpha, over which the window's own vibrancy shows through. The web build
+     never sees this and stays opaque. */
+  --color-panel-vibrant: rgb(17 17 19 / 0.72);
+  --color-strip: rgb(11 11 12 / 0.82);
+
+  /* Chrome. The width is fixed by AppKit, not by taste: 78px is how much room
+     the traffic lights need before content may start.
+
+     38px is where the traffic lights sit comfortably. */
+  --chrome-title: 38px;
+  --chrome-lights: 78px;
+  --chrome-strip: 48px;
+
+  /* Native motion is quicker than web motion. The same curve, less of it. */
+  --dur-native: 140ms;
+
+  /* ── Syntax ────────────────────────────────────────────────────
+     A fourth colour namespace, and the only one that earns an exception to
+     "colour is spent". It never appears outside a file or a diff, so it
+     cannot compete with the signals at the page level — and it stays below
+     them in saturation for the same reason the file kinds do: four hundred
+     lines of code must not be able to out-shout the one thing on screen that
+     means an agent is waiting on you. */
+  --color-syn-comment: #6a6a74;
+  --color-syn-string: #8fb99a;
+  --color-syn-keyword: #9a8cc4;
+  --color-syn-type: #7d95b0;
+  --color-syn-number: #c2ab63;
+  --color-syn-fn: #b8845f;
+  --color-syn-attr: #8a8a94;
+
+  /* ── Type, at desk size ────────────────────────────────────────
+     The web scale is tuned for a phone that has to fit a workbench into
+     390px. A window has room, and the thing people do here longest is read
+     a conversation — so reading gets its own size and a line-height that
+     suits prose, while the chrome around it stays small and quiet. Raising
+     everything uniformly would just make a dense screen bigger; this widens
+     the gap between what you read and what you operate. */
+  --text-read: 0.9375rem;          /* 15px - the conversation */
+  --text-read--line-height: 1.7;
+  --text-lede: 1.0625rem;          /* 17px - a first line worth slowing for */
+  --text-lede--line-height: 1.5;
+
+  /* Desk density. Rows are taller than the web build's 34px because a mouse
+     is precise and a window is not short of vertical space; what a tight row
+     buys on a phone is nothing here. */
+  --row: 40px;
+  --row-tight: 32px;
+  --control: 30px;
+}
+
+@theme {
+  /* Widened from the web scale. Same names, same roles, one step up, so
+     nothing has to be re-annotated at the point of use. */
+  --text-ui: 0.84375rem;           /* 13.5px, was 13 */
+  --text-meta: 0.75rem;            /* 12px, was 11.5 */
+  --text-micro: 0.6875rem;         /* 11px, was 10.5 */
+  --text-code: 0.8125rem;          /* 13px */
+  --text-code--line-height: 1.65;
+  --text-body--line-height: 1.7;
+  --text-display: 1.75rem;         /* 28px, was 24 */
+  --text-display--line-height: 1.25;
+  --text-title: 1.0625rem;         /* 17px, was 16 */
+}
+
+@theme {
+  /* `next/font` sets these on <html>; here the faces are declared above and
+     these point at them, so `--font-sans` and friends resolve unchanged. */
+  --font-archivo: "Archivo";
+  --font-archivo-narrow: "Archivo Narrow";
+  --font-jetbrains: "JetBrains Mono";
+}
+
+@layer base {
+  /* The window is the app. Nothing scrolls but the panes inside it. */
+  html,
+  body,
+  #root {
+    height: 100%;
+    overflow: hidden;
+  }
+
+  /* Chrome renders Archivo; WKWebView may not have it yet when the first frame
+     paints. Both fall back to the system face rather than to Times. */
+  body {
+    font-family: var(--font-archivo, Archivo), ui-sans-serif, -apple-system, system-ui, sans-serif;
+  }
+}
+
+@layer components {
+  /* ── Drag ──────────────────────────────────────────────────────
+     The title bar is hidden, so the app has to say which parts of itself are
+     the window. Anything pressable inside a drag region must opt back out, or
+     it becomes furniture you cannot click. */
+  .drag {
+    -webkit-app-region: drag;
+  }
+  .no-drag {
+    -webkit-app-region: no-drag;
+  }
+
+  /* ── Server identity ───────────────────────────────────────────
+     A mark, never a hue.
+
+     The system already spends colour twice: semantic signals (ember, sage,
+     brick, slate) and the deliberately-desaturated file kinds. A third colour
+     namespace would compete with ember, and the rule holding the whole design
+     together is that ember is the only loud thing on screen. So which server a
+     row belongs to is carried by *shape* — a monogram — in the greys that are
+     already there. */
+  .server-mark {
+    font-family: var(--font-narrow, Archivo Narrow), ui-sans-serif, system-ui, sans-serif;
+    font-size: var(--text-meta);
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    color: var(--color-dim);
+    background: var(--color-raise);
+    border: 1px solid var(--color-line);
+    border-radius: var(--radius-sm);
+    box-shadow: var(--shadow-raise);
+    transition:
+      color var(--dur-native) var(--ease-swift),
+      background var(--dur-native) var(--ease-swift),
+      border-color var(--dur-native) var(--ease-swift);
+  }
+  .server-mark[data-on="true"] {
+    color: var(--color-bone);
+    background: var(--color-overlay);
+    border-color: var(--color-line);
+  }
+  /* Unreachable is dimmed, not hidden, and not red. Red is `brick` and means
+     something failed; a server you cannot reach has not failed, it is simply
+     not there — usually because the VPN is off, which the memo expects to be
+     the common case. */
+  .server-mark[data-reach="unreachable"] {
+    color: var(--color-mute);
+    background: transparent;
+    border-style: dashed;
+    border-color: var(--color-line-soft);
+    box-shadow: none;
+  }
+
+  /* Rows from a server that is not answering. Readable, obviously stale. */
+  .stale {
+    opacity: 0.45;
+    filter: saturate(0.4);
+  }
+
+  /* ── Rows ──────────────────────────────────────────────────────
+     A sidebar row on this platform is a full-width rounded rect that fills on
+     selection — not a strip with a coloured edge. The edge marker is a web
+     convention; matching the platform is most of what "native" means here. */
+  .row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    min-height: var(--row-tight);
+    padding-inline: 0.625rem;
+    border-radius: var(--radius-md);
+    transition:
+      background var(--dur-native) var(--ease-swift),
+      color var(--dur-native) var(--ease-swift);
+  }
+  .row:hover {
+    background: color-mix(in srgb, var(--color-raise) 70%, transparent);
+  }
+  .row[data-on="true"] {
+    background: var(--color-overlay);
+    box-shadow: var(--shadow-raise);
+  }
+
+  /* ── Controls ──────────────────────────────────────────────────
+     One height, so a toolbar reads as a row of instruments rather than as
+     whatever each control happened to need. */
+  .control {
+    height: var(--control);
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    padding-inline: 0.625rem;
+    border-radius: var(--radius-md);
+    font-size: var(--text-ui);
+    transition: background var(--dur-native) var(--ease-swift);
+  }
+
+  /* A segmented control, the way the platform draws one: a recessed track and
+     a raised knob, rather than two flat buttons that change colour. */
+  .track {
+    display: inline-flex;
+    gap: 2px;
+    padding: 2px;
+    border-radius: var(--radius-md);
+    background: var(--color-ground);
+    box-shadow: inset 0 1px 2px rgb(0 0 0 / 0.35);
+  }
+  .track > button {
+    padding: 0.25rem 0.625rem;
+    border-radius: 6px;
+    font-size: var(--text-ui);
+    color: var(--color-mute);
+    transition:
+      background var(--dur-native) var(--ease-swift),
+      color var(--dur-native) var(--ease-swift);
+  }
+  .track > button:hover {
+    color: var(--color-dim);
+  }
+  .track > button[data-on="true"] {
+    background: var(--color-overlay);
+    color: var(--color-bone);
+    box-shadow: var(--shadow-raise);
+  }
+
+  /* A keyboard hint, inline. Desk software tells you its shortcuts where you
+     use them rather than hiding them in a menu. */
+  .keycap {
+    display: inline-grid;
+    place-items: center;
+    min-width: 1.125rem;
+    height: 1.125rem;
+    padding-inline: 0.25rem;
+    border: 1px solid var(--color-line);
+    border-radius: 4px;
+    background: var(--color-ground);
+    font-size: var(--text-micro);
+    color: var(--color-mute);
+  }
+}
+
+@layer components {
+  /* ── Markdown, at reading size ───────────────────────────────────
+     `components/Markdown.tsx` sets its own paragraph and list rhythm at the
+     web's 14px. Reading here is 15px, and a `#` inside a reply must not
+     compete with the page title — so headings step down one size each and
+     the whole thing inherits `--text-read`. Code blocks take the same ground
+     and mono as the file viewer. */
+  .prose-desk .ft-md {
+    font-size: var(--text-read);
+    line-height: var(--text-read--line-height);
+    color: var(--color-text);
+  }
+  .prose-desk .ft-md h1 { font-size: var(--text-lede); line-height: 1.4; color: var(--color-bone); font-weight: 600; margin: 1.25rem 0 0.5rem; }
+  .prose-desk .ft-md h2 { font-size: var(--text-read); color: var(--color-bone); font-weight: 600; margin: 1.1rem 0 0.4rem; }
+  .prose-desk .ft-md h3, .prose-desk .ft-md h4 { font-size: var(--text-ui); color: var(--color-bone); font-weight: 600; margin: 1rem 0 0.3rem; }
+  .prose-desk .ft-md pre {
+    margin: 0.75rem 0;
+    padding: 0.75rem 0.9rem;
+    border-radius: var(--radius-md);
+    background: var(--color-panel);
+    border: 1px solid var(--color-line-soft);
+    font-family: var(--font-mono);
+    font-size: var(--text-code);
+    line-height: var(--text-code--line-height);
+    overflow-x: auto;
+  }
+  .prose-desk .ft-md :not(pre) > code {
+    font-family: var(--font-mono);
+    font-size: var(--text-code);
+    color: var(--color-bone);
+    background: color-mix(in srgb, var(--color-ground) 80%, transparent);
+    padding: 0.05rem 0.35rem;
+    border-radius: 4px;
+  }
+  .prose-desk .ft-md table { border-collapse: collapse; margin: 0.75rem 0; font-size: var(--text-ui); }
+  .prose-desk .ft-md th, .prose-desk .ft-md td { border: 1px solid var(--color-line); padding: 0.3rem 0.6rem; text-align: left; }
+  .prose-desk .ft-md th { color: var(--color-bone); background: var(--color-panel); }
+  .prose-desk .ft-md blockquote { border-left: 2px solid var(--color-line); padding-left: 0.85rem; color: var(--color-dim); margin: 0.75rem 0; }
+  .prose-desk .ft-md hr { border: 0; border-top: 1px solid var(--color-line); margin: 1rem 0; }
+  .prose-desk .ft-md input[type="checkbox"] { margin-right: 0.4rem; }
+}
+
+/* A path the agent or a tool printed, which opens the file. Underlined the
+   way an editor underlines them: only enough to say it is live. */
+.path-link {
+  cursor: pointer;
+  text-decoration: underline dotted;
+  text-decoration-color: var(--color-mute);
+  text-underline-offset: 3px;
+}
+.path-link:hover {
+  color: var(--color-bone);
+  text-decoration-color: var(--color-slate);
+}
+
+/* Something is happening, said in text: a band of light crossing the words,
+   the way the agents people already use say it. Colour stays the text's own —
+   mute, brightening to bone as the band passes — so it reads as the text
+   itself being lit, not a spinner beside it. */
+@keyframes text-sheen {
+  from { background-position: 130% 0; }
+  to { background-position: -30% 0; }
+}
+.text-sheen {
+  color: transparent;
+  background: linear-gradient(90deg, var(--color-mute) 0%, var(--color-mute) 30%, var(--color-bone) 50%, var(--color-mute) 70%, var(--color-mute) 100%);
+  background-size: 200% 100%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  animation: text-sheen 1.6s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .text-sheen { animation: none; color: var(--color-dim); background: none; }
+}
+
+/* Off macOS there is no vibrancy to show through and no traffic lights to
+   leave room for: the panels are solid and the title bar starts at the edge. */
+html:not([data-platform="macos"]) {
+  --color-panel-vibrant: var(--color-panel);
+  --color-strip: var(--color-panel);
+  --chrome-lights: 0.75rem;
+}

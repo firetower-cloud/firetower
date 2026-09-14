@@ -1,0 +1,58 @@
+# The control plane, the worker and the CLI on every pull request that touches
+# them: format, lints, and the test suite against a real Postgres. No secrets,
+# so it is safe for a pull request from a fork.
+name: backend ci
+
+on:
+  pull_request:
+    paths:
+      - "crates/**"
+      - "migrations/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
+      - ".github/workflows/backend-ci.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: backend-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: depot-ubuntu-22.04
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: firetower
+          POSTGRES_PASSWORD: firetower
+          POSTGRES_DB: firetower
+        ports:
+          # The port the tests default to, so nothing here needs configuring.
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U firetower -d firetower"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+
+      - run: cargo fmt --check
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      # The worker's tests commit in throwaway repositories, and a runner has
+      # no identity of its own. Configuration rather than the GIT_AUTHOR_*
+      # variables: those would override the author the worker names on purpose.
+      - run: |
+          git config --global user.name firetower
+          git config --global user.email ci@firetower.cloud
+      - run: cargo test --workspace --locked --no-fail-fast
+        env:
+          DATABASE_URL: postgres://firetower:firetower@localhost:5433/firetower

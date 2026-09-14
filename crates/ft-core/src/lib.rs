@@ -1667,6 +1667,18 @@ mod launch_tests {
     }
 }
 
+/// Where a session's diff is measured from.
+///
+/// `Base` is the branch: everything since it left the base, committed or not
+/// — what a pull request would carry. `Head` is the working tree: only what
+/// is not committed yet — what an editor marks in its file tree.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub enum DiffSince {
+    #[default]
+    Base,
+    Head,
+}
+
 /// One file's worth of a unified diff.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]

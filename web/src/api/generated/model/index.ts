@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.32.1
+ * OpenAPI spec version: 0.32.2
  */
 
 export * from './accessEntry';
@@ -42,11 +42,13 @@ export * from './controlPlaneTarget';
 export * from './conversation';
 export * from './conversationEvent';
 export * from './createAccount';
+export * from './createdUser';
 export * from './credentials';
 export * from './decision';
 export * from './deleteHostParams';
 export * from './destroySessionParams';
 export * from './diagnosis';
+export * from './diffSince';
 export * from './dockerState';
 export * from './dockerStatus';
 export * from './done';
@@ -101,7 +103,9 @@ export * from './newPullRequest';
 export * from './newRepo';
 export * from './newRun';
 export * from './newSession';
+export * from './newUser';
 export * from './organization';
+export * from './organizationName';
 export * from './orgId';
 export * from './page';
 export * from './pendingAuth';
@@ -171,6 +175,7 @@ export * from './taskId';
 export * from './taskKind';
 export * from './taskScope';
 export * from './taskState';
+export * from './temporaryPassword';
 export * from './topic';
 export * from './trackerKey';
 export * from './trackerStatus';
@@ -186,6 +191,7 @@ export * from './updateStep';
 export * from './upgradePlan';
 export * from './usage';
 export * from './user';
+export * from './userChange';
 export * from './userId';
 export * from './vaultView';
 export * from './workspaceId';

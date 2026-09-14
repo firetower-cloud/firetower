@@ -1829,7 +1829,17 @@ You are in the directory that holds them, not inside one of them.              P
     /// skipped would say something happened that did not.
     async fn start_agent(&self, spec: ft_proto::StartAgent, out: &Out) -> Result<()> {
         let id = spec.session_id.clone();
-        let path = self.git.worktree_path(&spec.workspace);
+        // Where the workspace was recorded when it was made, when the control
+        // plane says which record; the derived name otherwise. The record wins
+        // because the name can drift — see `StartAgent::workspace_session`.
+        let recorded = match &spec.workspace_session {
+            Some(first) => self.store.workspace_path(first).await?.map(PathBuf::from),
+            None => None,
+        };
+        let path = match recorded {
+            Some(recorded) if tokio::fs::metadata(&recorded).await.is_ok() => recorded,
+            _ => self.git.worktree_path(&spec.workspace),
+        };
 
         anyhow::ensure!(
             tokio::fs::metadata(&path).await.is_ok(),
@@ -2414,9 +2424,9 @@ You are in the directory that holds them, not inside one of them.              P
                 })?)
             }
 
-            ft_proto::Action::Diff { checkout } => {
+            ft_proto::Action::Diff { checkout, since } => {
                 let (dest, base) = self.checkout_diff_refs(session_id, &checkout).await?;
-                self.git.diff(&dest, &base).await
+                self.git.diff_since(&dest, &base, since).await
             }
 
             ft_proto::Action::AddRepo { repo, mut env } => {
@@ -3866,8 +3876,12 @@ mod tests {
             matches!(answered, Some(ToServer::Pong)),
             "the heartbeat must arrive before the download ends"
         );
+        // A quarter of the download is the line: without overtaking, all four
+        // hundred chunks go first. How many are already committed to the pipe
+        // when the ping lands varies with the machine (a dozen here, near
+        // fifty on a shared runner), so the bound is loose on purpose.
         assert!(
-            chunks_first < 40,
+            chunks_first < 100,
             "it should have overtaken the queue, not waited most of it out — \
              {chunks_first} chunks went first"
         );
@@ -4423,6 +4437,7 @@ mod tests {
                             share: ft_core::Share::Equal,
                             env: vec![],
                             agent_home: vec![],
+                            workspace_session: None,
                         }),
                     },
                 },
@@ -4514,6 +4529,7 @@ mod tests {
                     share: ft_core::Share::Equal,
                     env: vec![],
                     agent_home: vec![],
+                    workspace_session: None,
                 })),
             ],
         )

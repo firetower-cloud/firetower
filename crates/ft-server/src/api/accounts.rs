@@ -414,15 +414,15 @@ async fn switch_for(
 ) -> ApiResult<Json<SwitchedAccount>> {
     let session = state
         .db
-        .session_of(&owner, &id)
+        .session_of(owner, &id)
         .await?
         .ok_or_else(|| ApiError::not_found("session"))?;
     if session.forgotten_at.is_some() {
         return Err(invalid("this workspace has been removed"));
     }
-    let target = find(&state.db, &owner, &req.account_id).await?;
+    let target = find(&state.db, owner, &req.account_id).await?;
     let kind = Agent::from_name(&target.kind).ok_or_else(|| invalid("unknown agent"))?;
-    validate(&state, &owner, &target.id, kind).await?;
+    validate(state, owner, &target.id, kind).await?;
     if kind != session.agent && !req.accept_permission_change {
         return Err(invalid(
             "confirm the destination agent’s default permissions before handing off",
@@ -454,7 +454,7 @@ async fn switch_for(
             "this task was already handed off; open its continuation",
         ));
     }
-    let source = selected(&state.db, &owner, &id).await?;
+    let source = selected(&state.db, owner, &id).await?;
     if source.as_ref().is_some_and(|a| a.id == target.id) {
         return Err(invalid("this task already uses that account"));
     }
@@ -464,7 +464,7 @@ async fn switch_for(
         .map_err(|e| if e.as_database_error().is_some_and(|e| e.is_unique_violation()) { invalid("an account switch is already in progress") } else {e.into()})?
         .ok_or_else(||invalid("the task changed while selecting an account; refresh and try again"))?;
     let result =
-        super::sessions::continue_with_account(&state, &owner, &session, &target.id, kind).await;
+        super::sessions::continue_with_account(state, owner, &session, &target.id, kind).await;
     match result {
         Ok(next) => {
             let detail = format!(
@@ -662,6 +662,18 @@ async fn fallback_tick(state: &AppState) -> anyhow::Result<()> {
                     .await?;
             }
         }
+    }
+    Ok(())
+}
+
+pub(super) async fn ensure_not_switching(
+    db: &crate::db::Db,
+    id: &SessionId,
+) -> Result<(), ApiError> {
+    let changing:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM agent_account_switches WHERE session_id=$1 AND state='switching')")
+        .bind(id.as_str()).fetch_one(db.pool()).await?;
+    if changing {
+        return Err(invalid("wait for the account switch to finish"));
     }
     Ok(())
 }
@@ -866,16 +878,4 @@ mod tests {
             .iter()
             .any(|l| l.scope == "five_hour" && l.status == "rejected"));
     }
-}
-
-pub(super) async fn ensure_not_switching(
-    db: &crate::db::Db,
-    id: &SessionId,
-) -> Result<(), ApiError> {
-    let changing:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM agent_account_switches WHERE session_id=$1 AND state='switching')")
-        .bind(id.as_str()).fetch_one(db.pool()).await?;
-    if changing {
-        return Err(invalid("wait for the account switch to finish"));
-    }
-    Ok(())
 }

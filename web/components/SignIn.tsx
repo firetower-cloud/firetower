@@ -6,6 +6,7 @@ import { Mark } from "./Signal";
 import { useLogin } from "@/src/api/generated/auth/auth";
 import { setupState } from "@/src/api/generated/setup/setup";
 import { ApiError, rememberToken } from "@/src/api/http";
+import { useQueryClient } from "@tanstack/react-query";
 
 /**
  * The only screen anybody sees before signing in.
@@ -23,6 +24,7 @@ export function SignIn() {
   const [failed, setFailed] = useState<string | null>(null);
 
   const login = useLogin();
+  const cache = useQueryClient();
 
   const submit = (event: React.FormEvent) => {
     event.preventDefault();
@@ -33,6 +35,9 @@ export function SignIn() {
       {
         onSuccess: async ({ token }) => {
           rememberToken(token);
+          // Anything asked before signing in was answered "who are you?";
+          // asked again now, it is answered.
+          cache.clear();
 
           // Where to land is "is setting up finished?", not "is this password
           // temporary?". Routing on the password alone meant that after the

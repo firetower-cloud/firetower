@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.32.1
+ * OpenAPI spec version: 0.32.2
  */
 import type { EventKind } from './eventKind';
 import type { SessionId } from './sessionId';

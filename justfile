@@ -95,7 +95,7 @@ dev: db
 
 # Rust types -> contract -> typed client. No pipeline, just this.
 #
-# Two contracts: the control plane's, which the web application is generated
+# Two contracts: the control plane's, which both clients are generated
 # from, and the updater's, which nothing is generated from — both sides of it
 # compile the same `ft-updater-api` crate — but which is written out so a
 # change to it is a diff somebody reviews.
@@ -103,10 +103,11 @@ gen:
     cargo run --quiet -p ft-server --bin gen-openapi
     cargo run --quiet -p ft-updater --bin firetower-updater -- openapi > api/updater.json
     cd web && pnpm orval && pnpm tsc --noEmit
+    cd desktop && pnpm orval && pnpm tsc --noEmit
 
 # Fails if the committed contract is stale. What a CI job would run.
 gen-check: gen
-    git diff --exit-code api/ web/src/api/generated
+    git diff --exit-code api/ web/src/api/generated desktop/src/api/generated
 
 # The release artifact. Web first: the Rust build embeds its output.
 build:
@@ -138,6 +139,7 @@ build-worker:
 test: db
     cargo test --workspace
     cd web && pnpm tsc --noEmit
+    cd desktop && pnpm tsc --noEmit && pnpm test
 
 lint:
     cargo clippy --workspace --all-targets -- -D warnings

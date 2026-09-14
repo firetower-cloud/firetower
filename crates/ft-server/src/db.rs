@@ -836,6 +836,7 @@ impl Db {
             .collect())
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn insert_session(
         &self,
         id: &SessionId,

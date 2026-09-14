@@ -4,6 +4,10 @@
   "use strict";
   if (window.__firetowerAnnotations) return;
   window.__firetowerAnnotations = true;
+  // The panel is the window this preview is embedded in — the desktop app.
+  // In a browser tab of its own there is no panel to talk to, and the page
+  // is simply the page.
+  if (window.parent === window) return;
   const script = document.currentScript;
   const session = script.dataset.session;
   const port = Number(script.dataset.port);
@@ -17,11 +21,17 @@
     const candidate = new URL(
       supplied || remembered || script.dataset.ui || "",
     );
+    // A desktop client embeds the preview from an origin of its own scheme,
+    // whose `origin` the URL parser reports as "null" — so it is rebuilt.
+    const origin =
+      candidate.protocol === "tauri:"
+        ? "tauri://" + candidate.host
+        : candidate.origin;
     if (
-      ["http:", "https:"].includes(candidate.protocol) &&
-      candidate.origin !== location.origin
+      ["http:", "https:", "tauri:"].includes(candidate.protocol) &&
+      origin !== location.origin
     ) {
-      uiOrigin = candidate.origin;
+      uiOrigin = origin;
       localStorage.setItem(connectionKey, uiOrigin);
     }
     if (supplied)
@@ -92,6 +102,30 @@
   fallback.hidden = true;
   toolbar.append(fallback);
   document.documentElement.append(host);
+  // Where the page is, for the panel's address bar — a frame's location is
+  // not readable from outside its origin, so the page says. Client-side
+  // routers move without loading, so history is watched as well as popstate.
+  function here() {
+    // Without the fragment that named the interface — that is ours, not the page's.
+    const fragment = new URLSearchParams(location.hash.slice(1));
+    fragment.delete("__firetower_ui");
+    const hash = fragment.toString();
+    return (location.pathname + location.search + (hash ? "#" + hash : "")).slice(0, 2048);
+  }
+  function moved() {
+    tell("navigated", { path: here() });
+  }
+  for (const method of ["pushState", "replaceState"]) {
+    const original = history[method];
+    history[method] = function (...args) {
+      const result = original.apply(this, args);
+      queueMicrotask(moved);
+      return result;
+    };
+  }
+  window.addEventListener("popstate", moved);
+  window.addEventListener("hashchange", moved);
+
   let panelWindow = null,
     channel = null,
     annotating = false,
@@ -121,6 +155,9 @@
   }
   function openPanel() {
     expanded = true;
+    // The window this preview sits in is the panel — a desktop client draws
+    // its own — so there is nothing to embed here.
+    if (panelWindow && panelWindow === window.parent) return;
     collapse.hidden = false;
     if (!uiOrigin) {
       status.hidden = false;
@@ -476,9 +513,15 @@
       setMode(true);
       return;
     }
+    // The panel is the iframe this script opened, a popup it opened, or the
+    // window the preview is embedded in — when that window is the configured
+    // interface, which is how a desktop client takes the panel's place.
+    const embedder = window.parent !== window && event.source === window.parent;
     if (
       event.origin !== uiOrigin ||
-      (event.source !== frame.contentWindow && event.source !== panelWindow) ||
+      (event.source !== frame.contentWindow &&
+        event.source !== panelWindow &&
+        !embedder) ||
       data.source !== "firetower-panel"
     )
       return;
@@ -490,13 +533,21 @@
         event.source === frame.contentWindow
       )
         return;
+      if (embedder) {
+        // Nothing of the script's own panel is wanted any more, and the
+        // toolbar's toggle is drawn by the window around the preview.
+        frame.hidden = true;
+        fallback.hidden = true;
+        collapse.hidden = true;
+        toolbar.hidden = true;
+      }
       const newConnection =
         panelWindow !== event.source || channel !== data.channel;
       panelWindow = event.source;
       channel = data.channel;
       clearTimeout(handshakeTimer);
       status.hidden = true;
-      tell("ready", { session, port, enabled: annotating });
+      tell("ready", { session, port, enabled: annotating, path: here() });
       if (newConnection && selected?.isConnected)
         tell("selection", {
           snapshot: snapshot(selected),
@@ -506,6 +557,15 @@
     }
     if (data.channel !== channel) return;
     if (data.type === "mode") setMode(data.enabled === true);
+    if (data.type === "go") history.go(Math.max(-10, Math.min(10, Number(data.delta) || 0)));
+    if (data.type === "reload") location.reload();
+    if (
+      data.type === "navigate" &&
+      typeof data.path === "string" &&
+      data.path.startsWith("/") &&
+      !data.path.startsWith("//")
+    )
+      location.assign(data.path);
     if (data.type === "parent" && selected) {
       let p = selected;
       const steps = Math.min(10, Math.max(1, Number(data.steps) || 1));

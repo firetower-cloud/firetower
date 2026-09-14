@@ -10,7 +10,7 @@
       "name": "AGPL-3.0-only",
       "identifier": "AGPL-3.0-only"
     },
-    "version": "0.32.1"
+    "version": "0.32.2"
   },
   "paths": {
     "/api/v1/agent-accounts": {
@@ -994,6 +994,47 @@
             }
           },
           "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/organization": {
+      "patch": {
+        "tags": [
+          "organization"
+        ],
+        "summary": "Rename the organisation.",
+        "operationId": "rename_organization",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrganizationName"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Organization"
+                }
+              }
+            }
+          },
+          "403": {
             "description": "",
             "content": {
               "application/json": {
@@ -2943,6 +2984,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "since",
+            "in": "query",
+            "description": "Measured from the base of the branch (the default) or from the last commit.",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/DiffSince"
+            }
           }
         ],
         "responses": {
@@ -4878,6 +4928,246 @@
           }
         }
       }
+    },
+    "/api/v1/users": {
+      "get": {
+        "tags": [
+          "organization"
+        ],
+        "summary": "Everyone in the organisation.",
+        "operationId": "list_users",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/User"
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "organization"
+        ],
+        "summary": "Add a user. The answer carries their temporary password.",
+        "operationId": "create_user",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewUser"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreatedUser"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/users/{id}": {
+      "delete": {
+        "tags": [
+          "organization"
+        ],
+        "summary": "Remove a user for good. Their workspaces go with them; prefer switching off.",
+        "operationId": "delete_user",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "User id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "organization"
+        ],
+        "summary": "Change a user's role, or switch them off or on.",
+        "operationId": "change_user",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "User id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UserChange"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/User"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/users/{id}/password": {
+      "post": {
+        "tags": [
+          "organization"
+        ],
+        "summary": "Give a user a new temporary password. Their sessions end; they replace it on sign-in.",
+        "operationId": "reset_user_password",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "User id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TemporaryPassword"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -5257,12 +5547,34 @@
         "description": "What the web application needs before it can do anything else.",
         "required": [
           "version",
-          "eventsPath"
+          "eventsPath",
+          "authModes"
         ],
         "properties": {
+          "authModes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "How to sign in here: `password`, `proxy`, or `open`.\n\nA native client cannot see the deployment's configuration and must not\nguess: a password form shown to an SSO deployment is a dead end, and a\nbrowser round trip demanded of a laptop install is rude."
+          },
           "eventsPath": {
             "type": "string",
             "description": "Where the event stream lives. Config, never assumed same-origin — which\nis what lets one bundle serve localhost and a hosted deployment alike."
+          },
+          "organization": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What the people who run it call it. For a client that is about to ask\nsomebody to hand over a password, and should say whose."
+          },
+          "serverId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Which Firetower this is, independent of the address it answers on.\n\nThe installation's organisation id, which already exists, is already\nunique and is already stable. A client pins its token to this rather\nthan to a URL, so the same server on a new address is still the same\nserver — and a different server on a familiar address is not, which is\nthe case worth catching.\n\n`None` before the setup wizard has been finished, because until then\nthere is nothing here to be trusted yet."
           },
           "version": {
             "type": "string"
@@ -5964,6 +6276,22 @@
           }
         }
       },
+      "CreatedUser": {
+        "type": "object",
+        "description": "A user, and the password made for them — shown once, never again.",
+        "required": [
+          "user",
+          "password"
+        ],
+        "properties": {
+          "password": {
+            "type": "string"
+          },
+          "user": {
+            "$ref": "#/components/schemas/User"
+          }
+        }
+      },
       "Credentials": {
         "type": "object",
         "required": [
@@ -6086,6 +6414,14 @@
             "description": "One sentence, written for whoever is looking at the screen."
           }
         }
+      },
+      "DiffSince": {
+        "type": "string",
+        "description": "Where a session's diff is measured from.\n\n`Base` is the branch: everything since it left the base, committed or not\n— what a pull request would carry. `Head` is the working tree: only what\nis not committed yet — what an editor marks in its file tree.",
+        "enum": [
+          "Base",
+          "Head"
+        ]
       },
       "DockerState": {
         "type": "object",
@@ -7442,6 +7778,22 @@
           }
         }
       },
+      "NewUser": {
+        "type": "object",
+        "required": [
+          "username",
+          "role"
+        ],
+        "properties": {
+          "role": {
+            "type": "string",
+            "description": "`admin` or `member`."
+          },
+          "username": {
+            "type": "string"
+          }
+        }
+      },
       "OrgId": {
         "type": "string",
         "description": "Identifies an organisation."
@@ -7456,6 +7808,17 @@
           "id": {
             "$ref": "#/components/schemas/OrgId"
           },
+          "name": {
+            "type": "string"
+          }
+        }
+      },
+      "OrganizationName": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "properties": {
           "name": {
             "type": "string"
           }
@@ -9022,6 +9385,18 @@
           "closed"
         ]
       },
+      "TemporaryPassword": {
+        "type": "object",
+        "description": "What a reset hands back: the new temporary password, said once.",
+        "required": [
+          "password"
+        ],
+        "properties": {
+          "password": {
+            "type": "string"
+          }
+        }
+      },
       "Topic": {
         "type": "string",
         "description": "What a client can subscribe to.",
@@ -9986,6 +10361,10 @@
           "mustChangePassword"
         ],
         "properties": {
+          "disabled": {
+            "type": "boolean",
+            "description": "Switched off by an administrator: cannot sign in, keeps what they made."
+          },
           "id": {
             "$ref": "#/components/schemas/UserId"
           },
@@ -10001,6 +10380,25 @@
           },
           "username": {
             "type": "string"
+          }
+        }
+      },
+      "UserChange": {
+        "type": "object",
+        "properties": {
+          "disabled": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Switched off, or back on."
+          },
+          "role": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`admin` or `member`, when the role changes."
           }
         }
       },

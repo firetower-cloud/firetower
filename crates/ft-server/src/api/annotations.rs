@@ -398,6 +398,7 @@ mod database_tests {
         (
             AppState {
                 updates: crate::updates::Updates::new(db.pool().clone()),
+                policy: crate::auth::Policy::open(),
                 db,
                 accounts,
                 fleet,

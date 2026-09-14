@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.32.1
+ * OpenAPI spec version: 0.32.2
  */
 import type { OrgId } from './orgId';
 import type { UserId } from './userId';
@@ -12,6 +12,8 @@ import type { UserId } from './userId';
  * Someone who can sign in.
  */
 export interface User {
+  /** Switched off by an administrator: cannot sign in, keeps what they made. */
+  disabled?: boolean;
   id: UserId;
   /**
      * True while the password came from a file rather than from a person.

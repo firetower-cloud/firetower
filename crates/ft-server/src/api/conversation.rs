@@ -141,7 +141,7 @@ pub(crate) async fn conversation_events(
 
     // One normaliser for the whole connection: the backlog leaves it holding
     // the state the live lines are about to need.
-    let mut normaliser = reader_for(&state, &id).await;
+    let mut normaliser = reader_for(state, id).await;
     let mut backlog = Vec::new();
     let mut replayed = 0u64;
     let mut echoed: Vec<String> = Vec::new();
@@ -186,8 +186,8 @@ pub(crate) async fn conversation_events(
     // arrives there is nothing here to draw and the message somebody sent
     // simply was not on the screen after a reload. An agent in the middle of a
     // long command does not echo for as long as that command runs.
-    state.fleet.echoed(&id, &echoed).await;
-    for pending in state.fleet.typed(&id).await {
+    state.fleet.echoed(id, &echoed).await;
+    for pending in state.fleet.typed(id).await {
         replayed += 1;
         let item = ft_core::turn::ItemId::new(format!("pending-{}", pending.at.timestamp_millis()));
         backlog.push(ConversationEvent {

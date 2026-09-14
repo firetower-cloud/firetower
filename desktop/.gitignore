@@ -1,0 +1,6 @@
+
+dist
+node_modules
+src-tauri/target
+# Regenerated on every build from capabilities/ and the plugin set.
+src-tauri/gen/schemas

@@ -117,7 +117,7 @@ pub async fn serve(state: AppState, preview: Preview, mut request: Request) -> R
 
     let mut answer = match sent {
         Ok(Ok(answer)) => {
-            keep_if_reusable(&state, &preview, upgrading, sender);
+            keep_if_reusable(&state, &preview, upgrading || closes(&answer), sender);
             answer
         }
         // A connection the pool believed in turned out to be gone. Ordinary —
@@ -134,7 +134,7 @@ pub async fn serve(state: AppState, preview: Preview, mut request: Request) -> R
             let again = fresh.send_request(spare.expect("checked just above"));
             match tokio::time::timeout(HEADERS_TIMEOUT, again).await {
                 Ok(Ok(answer)) => {
-                    keep_if_reusable(&state, &preview, upgrading, fresh);
+                    keep_if_reusable(&state, &preview, upgrading || closes(&answer), fresh);
                     answer
                 }
                 Ok(Err(e)) => {
@@ -233,17 +233,38 @@ async fn connect(
     Ok(sender)
 }
 
-/// Offer the connection back to the pool, unless this request took the socket.
+/// Whether the application will close the connection after this response.
+///
+/// Hyper only learns that when the close arrives, which is after the body —
+/// by which time the connection may already be back in the pool and handed
+/// to the next request, which then fails with "connection closed before
+/// message completed". The response says so up front: `Connection: close`,
+/// or HTTP/1.0 without a `keep-alive` (Python's `http.server`, for one).
+fn closes(answer: &hyper::Response<hyper::body::Incoming>) -> bool {
+    let connection = answer
+        .headers()
+        .get(header::CONNECTION)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    if connection.split(',').any(|t| t.trim() == "close") {
+        return true;
+    }
+    answer.version() == hyper::Version::HTTP_10 && !connection.contains("keep-alive")
+}
+
+/// Offer the connection back to the pool, unless this request spent it.
 ///
 /// An upgrade stops being HTTP the moment the 101 lands, so its connection is
-/// not a connection any more and must never be handed to the next asset.
+/// not a connection any more and must never be handed to the next asset. One
+/// the application is about to close is the same to the next request.
 fn keep_if_reusable(
     state: &AppState,
     preview: &Preview,
-    upgrading: bool,
+    spent: bool,
     sender: hyper::client::conn::http1::SendRequest<Body>,
 ) {
-    if upgrading {
+    if spent {
         return;
     }
     state

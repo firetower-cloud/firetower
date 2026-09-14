@@ -1,0 +1,5 @@
+# Same convention as `web/`: approving a build script here means the decision is
+# reviewed and in version control rather than re-prompted on every clone.
+allowBuilds:
+  # the bundler Vite runs on
+  esbuild: true
