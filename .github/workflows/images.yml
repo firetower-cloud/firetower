@@ -52,6 +52,12 @@ on:
         type: string
         required: false
 
+# Two merges in quick succession publish in order rather than racing for the
+# `edge` tag.
+concurrency:
+  group: images-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   publish:
     runs-on: ubuntu-latest
@@ -79,7 +85,7 @@ jobs:
       IMAGE: ghcr.io/${{ github.repository_owner }}/${{ matrix.name }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           # A release builds the tagged commit, not wherever main is now.
           ref: ${{ inputs.ref || github.ref }}
@@ -101,9 +107,9 @@ jobs:
           fi
           echo "Cargo.toml and the tag both say $found"
 
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
-      - uses: docker/login-action@v3
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -116,7 +122,7 @@ jobs:
       #   no version  → edge, the tip of main
       #   0.2.0       → 0.2.0, 0.2, latest
       - id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
         with:
           images: ${{ env.IMAGE }}
           tags: |
@@ -125,7 +131,7 @@ jobs:
             type=semver,pattern={{major}}.{{minor}},value=${{ inputs.version || '0.0.0' }},enable=${{ inputs.version != '' }}
             type=raw,value=latest,enable=${{ inputs.version != '' }}
 
-      - uses: docker/build-push-action@v6
+      - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
           file: ${{ matrix.dockerfile }}

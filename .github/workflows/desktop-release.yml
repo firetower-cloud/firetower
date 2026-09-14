@@ -74,9 +74,7 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
-          cache-dependency-path: |
-            desktop/pnpm-lock.yaml
-            web/pnpm-lock.yaml
+          cache-dependency-path: desktop/pnpm-lock.yaml
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
       # Both halves of the universal binary, whatever the runner came with.
       - if: matrix.platform == 'mac'
@@ -86,8 +84,6 @@ jobs:
         with:
           workspaces: desktop/src-tauri
 
-      - run: pnpm install --frozen-lockfile
-        working-directory: web
       - run: pnpm install --frozen-lockfile
         working-directory: desktop
 
