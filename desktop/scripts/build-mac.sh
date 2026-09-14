@@ -18,7 +18,9 @@ fi
 
 pnpm install --frozen-lockfile
 (cd ../web && pnpm install --frozen-lockfile)
-pnpm tauri build --bundles app,dmg ${target[@]+"${target[@]}"}
+# No updater artifacts here: they need the release's private key, and an
+# unsigned local build is not something the updater should ever hand out.
+pnpm tauri build --bundles app,dmg --config '{"bundle":{"createUpdaterArtifacts":false}}' ${target[@]+"${target[@]}"}
 
 echo
 find src-tauri/target -path '*/release/bundle/dmg/*.dmg' -newer package.json -print

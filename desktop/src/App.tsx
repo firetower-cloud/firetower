@@ -17,6 +17,8 @@ import { NewWorkspace } from "~/ui/NewWorkspace";
 import { Boundary } from "~/ui/Boundary";
 import { Gate } from "~/ui/Gate";
 import { navigate, usePathname } from "~/shims/next-navigation";
+import { offerUpdate } from "~/update";
+import { useConfirm } from "~/ui/Confirm";
 
 const StylePage = import.meta.env.DEV ? lazy(() => import("~/ui/StylePage").then((m) => ({ default: m.StylePage }))) : () => null;
 
@@ -42,6 +44,13 @@ export function App() {
   useEffect(() => onServers(() => setReal(servers())), []);
   const [palette, setPalette] = useState(false);
   const path = usePathname();
+  /* Once, after the window is up: is there a newer build. */
+  const confirm = useConfirm();
+  useEffect(() => {
+    const t = setTimeout(() => void offerUpdate(confirm), 4000);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {

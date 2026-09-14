@@ -115,3 +115,16 @@ written (`src/platform.ts`); in the shell, `Ctrl` is the pty's and the app's
 keys are `Ctrl+Shift`; the panels are solid, there being no vibrancy to show
 through (`tauri.macos.conf.json` holds what is macOS-only). Tokens are in the
 OS keychain on every platform (`bridge.secrets`).
+
+## Releasing
+
+The app has its own release-please package (`desktop`, tags `desktop-v*`,
+`desktop/CHANGELOG.md`); commits scoped `(desktop)` land in its release PR.
+Merging that PR makes a draft release and runs `desktop-release.yml`: a
+universal `.dmg` signed with the Developer ID certificate and notarized, an
+`.exe` and `.msi` for Windows, each with the updater's signature, and
+`latest.json` — then the release is published, as a pre-release while the
+version is 0.x. The signing job runs in the `release` environment: a reviewer
+approves it before its secrets are readable. The app checks `latest.json`
+once after start and offers the update in a dialog. `desktop-ci.yml` runs on
+pull requests; `desktop-build.yml` builds unsigned installers on demand.

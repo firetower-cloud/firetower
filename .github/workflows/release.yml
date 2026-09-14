@@ -13,9 +13,13 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       # Only true on the run where a release PR was merged and the tag cut.
-      released: ${{ steps.release.outputs.release_created }}
-      tag: ${{ steps.release.outputs.tag_name }}
-      version: ${{ steps.release.outputs.version }}
+      released: ${{ steps.release.outputs['.--release_created'] }}
+      tag: ${{ steps.release.outputs['.--tag_name'] }}
+      version: ${{ steps.release.outputs['.--version'] }}
+      # The desktop app is its own package with its own tag (desktop-v*).
+      desktop_released: ${{ steps.release.outputs['desktop--release_created'] }}
+      desktop_tag: ${{ steps.release.outputs['desktop--tag_name'] }}
+      desktop_version: ${{ steps.release.outputs['desktop--version'] }}
     steps:
       - uses: googleapis/release-please-action@v4
         id: release
@@ -37,3 +41,19 @@ jobs:
     with:
       ref: ${{ needs.please.outputs.tag }}
       version: ${{ needs.please.outputs.version }}
+
+  # The desktop app: signed, notarized installers onto the draft release
+  # release-please just made, then published. Same reason for calling rather
+  # than triggering as above — and the signing job runs in the `release`
+  # environment, where a reviewer approves before any secret is read.
+  desktop:
+    needs: please
+    if: needs.please.outputs.desktop_released == 'true'
+    uses: ./.github/workflows/desktop-release.yml
+    permissions:
+      contents: write
+    secrets: inherit
+    with:
+      tag: ${{ needs.please.outputs.desktop_tag }}
+      version: ${{ needs.please.outputs.desktop_version }}
+      ref: ${{ github.sha }}

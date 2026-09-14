@@ -50,7 +50,17 @@
       }
     },
     "macOS": {
-      "minimumSystemVersion": "12.0"
+      "minimumSystemVersion": "12.0",
+      "entitlements": "entitlements.plist"
+    },
+    "createUpdaterArtifacts": true
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEYxQTI4OTk1RTFEMEREMEQKUldRTjNkRGhsWW1pOGV3WWVKSllDTTVjQm5QS0oxbGRUMVdPQjlEWGdCOGxSQzB3MjRVUmVBc0wK",
+      "endpoints": [
+        "https://github.com/firetower-cloud/firetower/releases/latest/download/latest.json"
+      ]
     }
   }
 }

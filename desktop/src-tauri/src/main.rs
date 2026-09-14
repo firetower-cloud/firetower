@@ -100,6 +100,9 @@ fn main() {
         .plugin(tauri_plugin_opener::init())
         // Apps remember where they were; pages do not.
         .plugin(tauri_plugin_window_state::Builder::default().build())
+        // A new build is offered from the GitHub release; the renderer asks.
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .setup(|app| {
             let window = app.get_webview_window("main").expect("main window");
 
