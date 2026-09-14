@@ -4,6 +4,10 @@
   "use strict";
   if (window.__firetowerAnnotations) return;
   window.__firetowerAnnotations = true;
+  // The panel is the window this preview is embedded in — the desktop app.
+  // In a browser tab of its own there is no panel to talk to, and the page
+  // is simply the page.
+  if (window.parent === window) return;
   const script = document.currentScript;
   const session = script.dataset.session;
   const port = Number(script.dataset.port);

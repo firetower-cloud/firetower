@@ -57,6 +57,9 @@ pub struct User {
     /// True while the password came from a file rather than from a person.
     /// Nothing but replacing it is permitted until this clears.
     pub must_change_password: bool,
+    /// Switched off by an administrator: cannot sign in, keeps what they made.
+    #[serde(default)]
+    pub disabled: bool,
 }
 
 #[derive(Debug, Clone, Serialize, ToSchema)]
@@ -177,7 +180,186 @@ impl Accounts {
             username: username.to_string(),
             role: "admin".into(),
             must_change_password: true,
+            disabled: false,
         })
+    }
+
+    // ── the organisation, and who is in it ─────────────────────────────
+
+    /// Rename the organisation. Setting up is not involved: that was `finish_setup`, once.
+    pub async fn rename_organization(&self, org: &OrgId, name: &str) -> Result<Organization> {
+        let name = name.trim();
+        anyhow::ensure!(!name.is_empty(), "an organisation needs a name");
+        anyhow::ensure!(name.chars().count() <= 80, "that name is too long");
+        sqlx::query("UPDATE organizations SET name = $1 WHERE id = $2")
+            .bind(name)
+            .bind(org.as_str())
+            .execute(&self.pool)
+            .await?;
+        Ok(Organization {
+            id: org.clone(),
+            name: name.to_string(),
+        })
+    }
+
+    /// Everyone in the organisation, administrators first, then by name.
+    pub async fn users_of(&self, org: &OrgId) -> Result<Vec<User>> {
+        let rows = sqlx::query(
+            "SELECT * FROM users WHERE org_id = $1
+             ORDER BY (role = 'admin') DESC, lower(username)",
+        )
+        .bind(org.as_str())
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows.into_iter().map(user_from_row).collect())
+    }
+
+    /// How many administrators could still sign in, for the checks below.
+    async fn active_admins(tx: &mut sqlx::PgConnection, org: &OrgId) -> Result<i64> {
+        Ok(sqlx::query(
+            "SELECT count(*) AS n FROM users WHERE org_id = $1 AND role = 'admin' AND NOT disabled",
+        )
+        .bind(org.as_str())
+        .fetch_one(tx)
+        .await?
+        .get("n"))
+    }
+
+    /// A new member or administrator, with a password made here and said
+    /// once. They have to replace it the first time they sign in, so the
+    /// administrator who passed it on is not left holding a working one.
+    pub async fn create_user(&self, org: &OrgId, username: &str, role: &str) -> Result<(User, String)> {
+        let username = username.trim();
+        anyhow::ensure!(!username.is_empty(), "a user needs a username");
+        anyhow::ensure!(username.chars().count() <= 64, "that username is too long");
+        anyhow::ensure!(
+            username.chars().all(|c| c.is_alphanumeric() || matches!(c, '.' | '_' | '-' | '@')),
+            "a username is letters, digits, and . _ - @"
+        );
+        anyhow::ensure!(matches!(role, "admin" | "member"), "a role is admin or member");
+        let password = temporary_password();
+        let id = UserId::new();
+        let done = sqlx::query(
+            "INSERT INTO users (id, org_id, username, password_hash, role, must_change_password)
+             VALUES ($1, $2, $3, $4, $5, TRUE)
+             ON CONFLICT (org_id, username) DO NOTHING",
+        )
+        .bind(id.as_str())
+        .bind(org.as_str())
+        .bind(username)
+        .bind(hash_password(&password)?)
+        .bind(role)
+        .execute(&self.pool)
+        .await?;
+        if done.rows_affected() == 0 {
+            bail!("there is already a user called {username}");
+        }
+        Ok((
+            User {
+                id,
+                org_id: org.clone(),
+                username: username.to_string(),
+                role: role.to_string(),
+                must_change_password: true,
+                disabled: false,
+            },
+            password,
+        ))
+    }
+
+    /// Admin or member. The last administrator cannot be made a member —
+    /// an organisation nobody can administer is a locked room.
+    pub async fn set_role(&self, id: &UserId, role: &str) -> Result<User> {
+        anyhow::ensure!(matches!(role, "admin" | "member"), "a role is admin or member");
+        let mut tx = self.pool.begin().await?;
+        let user = sqlx::query("SELECT * FROM users WHERE id = $1 FOR UPDATE")
+            .bind(id.as_str())
+            .fetch_optional(&mut *tx)
+            .await?
+            .map(user_from_row)
+            .context("no such user")?;
+        if user.role == "admin" && role != "admin" && Self::active_admins(&mut tx, &user.org_id).await? <= 1 {
+            bail!("{} is the only administrator", user.username);
+        }
+        sqlx::query("UPDATE users SET role = $1 WHERE id = $2")
+            .bind(role)
+            .bind(id.as_str())
+            .execute(&mut *tx)
+            .await?;
+        tx.commit().await?;
+        Ok(User { role: role.to_string(), ..user })
+    }
+
+    /// Switch a user off or back on. Off ends their sessions at once; what
+    /// they made stays theirs. The last administrator cannot be switched off.
+    pub async fn set_disabled(&self, id: &UserId, disabled: bool) -> Result<User> {
+        let mut tx = self.pool.begin().await?;
+        let user = sqlx::query("SELECT * FROM users WHERE id = $1 FOR UPDATE")
+            .bind(id.as_str())
+            .fetch_optional(&mut *tx)
+            .await?
+            .map(user_from_row)
+            .context("no such user")?;
+        if disabled && user.role == "admin" && !user.disabled && Self::active_admins(&mut tx, &user.org_id).await? <= 1 {
+            bail!("{} is the only administrator", user.username);
+        }
+        sqlx::query("UPDATE users SET disabled = $1 WHERE id = $2")
+            .bind(disabled)
+            .bind(id.as_str())
+            .execute(&mut *tx)
+            .await?;
+        if disabled {
+            sqlx::query("DELETE FROM user_sessions WHERE user_id = $1")
+                .bind(id.as_str())
+                .execute(&mut *tx)
+                .await?;
+        }
+        tx.commit().await?;
+        Ok(User { disabled, ..user })
+    }
+
+    /// A new temporary password, said once; every session of theirs ends and
+    /// the next sign-in has to replace it.
+    pub async fn reset_password(&self, id: &UserId) -> Result<String> {
+        let password = temporary_password();
+        let mut tx = self.pool.begin().await?;
+        let done = sqlx::query(
+            "UPDATE users SET password_hash = $1, must_change_password = TRUE WHERE id = $2",
+        )
+        .bind(hash_password(&password)?)
+        .bind(id.as_str())
+        .execute(&mut *tx)
+        .await?;
+        if done.rows_affected() == 0 {
+            bail!("no such user");
+        }
+        sqlx::query("DELETE FROM user_sessions WHERE user_id = $1")
+            .bind(id.as_str())
+            .execute(&mut *tx)
+            .await?;
+        tx.commit().await?;
+        Ok(password)
+    }
+
+    /// Gone for good, with everything they owned — the database cascades.
+    /// Refused for the last administrator.
+    pub async fn delete_user(&self, id: &UserId) -> Result<()> {
+        let mut tx = self.pool.begin().await?;
+        let user = sqlx::query("SELECT * FROM users WHERE id = $1 FOR UPDATE")
+            .bind(id.as_str())
+            .fetch_optional(&mut *tx)
+            .await?
+            .map(user_from_row)
+            .context("no such user")?;
+        if user.role == "admin" && !user.disabled && Self::active_admins(&mut tx, &user.org_id).await? <= 1 {
+            bail!("{} is the only administrator", user.username);
+        }
+        sqlx::query("DELETE FROM users WHERE id = $1")
+            .bind(id.as_str())
+            .execute(&mut *tx)
+            .await?;
+        tx.commit().await?;
+        Ok(())
     }
 
     /// Name the organisation and mark setting up as finished.
@@ -260,8 +442,13 @@ impl Accounts {
         if !verify_password(password, &stored)? {
             return Ok(None);
         }
-
-        Ok(Some(user_from_row(row)))
+        let user = user_from_row(row);
+        // Switched off reads as a wrong password from outside, for the same
+        // reason a missing username does: nothing to enumerate.
+        if user.disabled {
+            return Ok(None);
+        }
+        Ok(Some(user))
     }
 
     /// Replace a password, and sign every *other* browser out.
@@ -353,8 +540,12 @@ impl Accounts {
             return Ok(None);
         };
 
-        self.user_by_id(&UserId::from_stored(row.get::<String, _>("user_id")))
-            .await
+        // Switched off since this token was last checked: the sessions went
+        // then, but belt and braces.
+        Ok(self
+            .user_by_id(&UserId::from_stored(row.get::<String, _>("user_id")))
+            .await?
+            .filter(|u| !u.disabled))
     }
 
     pub async fn close_session(&self, token: &str) -> Result<()> {
@@ -421,7 +612,14 @@ fn user_from_row(r: sqlx::postgres::PgRow) -> User {
         username: r.get("username"),
         role: r.get("role"),
         must_change_password: r.get("must_change_password"),
+        disabled: r.try_get("disabled").unwrap_or(false),
     }
+}
+
+/// A password for somebody else to replace: long, from the same alphabet as a
+/// token, readable enough to be passed on by hand.
+fn temporary_password() -> String {
+    mint_token().chars().take(20).collect()
 }
 
 /// Long enough to be worth having, with nothing else asked of it.

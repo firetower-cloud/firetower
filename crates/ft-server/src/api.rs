@@ -27,6 +27,7 @@ mod tasks;
 mod terminal;
 mod trackers;
 mod updates;
+mod users;
 
 // `providers` on its own is the module below, which is this crate's git-host
 // screen rather than the git hosts themselves.
@@ -267,6 +268,11 @@ async fn credential_for(
         ft_core::session::NewCheckout,
         ft_core::FileDiff,
         ft_core::DiffSince,
+        users::OrganizationName,
+        users::NewUser,
+        users::CreatedUser,
+        users::UserChange,
+        users::TemporaryPassword,
         ft_core::Compute,
         ft_core::SshKey,
         crate::sshkey::PublicIdentity,
@@ -315,6 +321,10 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(setup::setup_state))
         .routes(routes!(setup::name_organization))
         .routes(routes!(setup::complete_setup))
+        .routes(routes!(users::rename_organization))
+        .routes(routes!(users::list_users, users::create_user))
+        .routes(routes!(users::change_user, users::delete_user))
+        .routes(routes!(users::reset_user_password))
         .routes(routes!(hosts::list_hosts, hosts::create_host))
         .routes(routes!(hosts::delete_host))
         .routes(routes!(hosts::rename_host))
