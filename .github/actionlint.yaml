@@ -1,0 +1,7 @@
+# Depot's runners, so the linter knows the labels are real.
+self-hosted-runner:
+  labels:
+    - depot-ubuntu-22.04
+    - depot-ubuntu-latest
+    - depot-macos-latest
+    - depot-windows-2022
