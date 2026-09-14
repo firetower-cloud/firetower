@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0](https://github.com/firetower-cloud/firetower/compare/desktop-v0.2.0...desktop-v0.3.0) (2026-09-14)
+
+
+### Features
+
+* **desktop:** the disk image is an installer again ([917ed47](https://github.com/firetower-cloud/firetower/commit/917ed4751e034e44da5a7dcd7d72163e4a3fa9ee))
+
 ## 0.2.0 (2026-09-14)
 
 
