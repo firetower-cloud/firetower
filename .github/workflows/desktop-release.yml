@@ -57,7 +57,7 @@ jobs:
         include:
           - platform: mac
             os: depot-macos-latest
-            args: --target universal-apple-darwin --bundles app,dmg
+            args: --target universal-apple-darwin --bundles app
           - platform: windows
             os: depot-windows-2022
             args: --bundles nsis,msi
@@ -81,7 +81,8 @@ jobs:
       # Both halves of the universal binary, whatever the runner came with.
       - if: matrix.platform == 'mac'
         run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+      - if: matrix.platform == 'mac'
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           workspaces: desktop/src-tauri
 
@@ -140,6 +141,24 @@ jobs:
           updaterJsonPreferNsis: true
           args: ${{ matrix.args }} ${{ env.SIGN_CONFIG != '' && format('--config {0}', toJSON(env.SIGN_CONFIG)) || '' }}
 
+      # A plain disk image from the .app: Tauri's own DMG script styles it
+      # through Finder, which a headless runner has no session for.
+      - if: matrix.platform == 'mac'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        working-directory: desktop/src-tauri/target/universal-apple-darwin/release/bundle
+        run: |
+          version=$(node -p "require('../../../../tauri.conf.json').version")
+          mkdir -p dmg
+          hdiutil create -volname Firetower -srcfolder macos/Firetower.app -ov -format UDZO "dmg/Firetower_${version}_universal.dmg"
+          # Signed already (the .app was); notarized as a file of its own.
+          xcrun notarytool submit "dmg/Firetower_${version}_universal.dmg" --key "$APPLE_API_KEY_PATH" --key-id "$APPLE_API_KEY" --issuer "$APPLE_API_ISSUER" --wait
+          xcrun stapler staple "dmg/Firetower_${version}_universal.dmg"
+          gh release upload "$TAG" "dmg/Firetower_${version}_universal.dmg" --clobber
       - if: always() && matrix.platform == 'mac'
         shell: bash
         run: rm -f "$RUNNER_TEMP/AuthKey.p8"

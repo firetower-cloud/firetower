@@ -30,12 +30,12 @@ jobs:
         include:
           - os: depot-macos-latest
             platform: mac
-            args: --target universal-apple-darwin --bundles dmg --config {"bundle":{"createUpdaterArtifacts":false}}
+            args: --target universal-apple-darwin --bundles app --config unsigned.conf.json
             artifact: firetower-macos
             glob: desktop/src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
           - os: depot-windows-2022
             platform: windows
-            args: --bundles nsis,msi --config {"bundle":{"createUpdaterArtifacts":false}}
+            args: --bundles nsis,msi --config unsigned.conf.json
             artifact: firetower-windows
             glob: |
               desktop/src-tauri/target/release/bundle/nsis/*.exe
@@ -61,7 +61,10 @@ jobs:
       # Both halves of the universal binary, whatever the runner came with.
       - if: matrix.platform == 'mac'
         run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+      # Not on Windows for now: with the cache restored there the app's build
+      # script found none of the plugins' permission files.
+      - if: matrix.platform == 'mac'
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           workspaces: desktop/src-tauri
 
@@ -80,6 +83,16 @@ jobs:
           projectPath: desktop
           args: ${{ matrix.args }}
 
+      # A plain disk image from the .app: Tauri's own DMG script styles it
+      # through Finder, which a headless runner has no session for.
+      - if: matrix.platform == 'mac'
+        shell: bash
+        working-directory: desktop/src-tauri/target/universal-apple-darwin/release/bundle
+        run: |
+          version=$(node -p "require('../../../../tauri.conf.json').version")
+          mkdir -p dmg
+          hdiutil create -volname Firetower -srcfolder macos/Firetower.app -ov -format UDZO "dmg/Firetower_${version}_universal.dmg"
+          ls -la dmg
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: ${{ matrix.artifact }}
