@@ -9,7 +9,7 @@
  * answered — a reload never asks twice — and the last panel is the same one
  * `/` shows from then on.
  */
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Mark } from "./Signal";
 import { useSetupState, useCompleteSetup } from "@/src/api/generated/setup/setup";
@@ -26,6 +26,22 @@ export function Setup() {
   ].filter(Boolean) as string[];
   const [done, setDone] = useState(false);
 
+  /* While developing, `?preview=password|organisation|done` draws a step
+     without the server having to be in that state. Not in a build. */
+  const preview =
+    process.env.NODE_ENV === "development" && typeof window !== "undefined"
+      ? new URLSearchParams(window.location.search).get("preview")
+      : null;
+  const shown = preview === "password" ? ["Password"] : preview === "organisation" ? ["Organisation"] : preview === "done" ? [] : outstanding;
+
+  // Nothing left to ask, and this is not the moment right after answering:
+  // the page has no reason to exist for this install. Decided after render —
+  // navigating while rendering is a state change React refuses.
+  const nothingToDo = !preview && !isLoading && outstanding.length === 0 && !!state?.completed && !done;
+  useEffect(() => {
+    if (nothingToDo) router.replace("/");
+  }, [nothingToDo, router]);
+
   if (isLoading) {
     return (
       <div className="min-h-screen px-8 pt-7">
@@ -33,16 +49,11 @@ export function Setup() {
       </div>
     );
   }
-  // Nothing left to ask, and this is not the moment right after answering:
-  // the page has no reason to exist for this install.
-  if (outstanding.length === 0 && state?.completed && !done) {
-    router.replace("/");
-    return null;
-  }
-  const current = outstanding[0];
+  if (nothingToDo) return null;
+  const current = shown[0];
   const advance = () => void refetch();
   const finish = () => {
-    if (!state?.completed) complete.mutate();
+    if (!preview && !state?.completed) complete.mutate();
     setDone(true);
   };
   const steps = ["Password", "Organisation", "The app"];
@@ -73,13 +84,12 @@ export function Setup() {
   );
 }
 
-/** Marks setting up as finished the moment the last panel is on screen. */
+/** Marks setting up as finished once the last panel is on screen. */
 function Done({ onSeen }: { onSeen: () => void }) {
-  const [seen, setSeen] = useState(false);
-  if (!seen) {
-    setSeen(true);
+  useEffect(() => {
     onSeen();
-  }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   return (
     <p className="px-6 text-ui text-sage">Done. This Firetower is yours.</p>
   );
