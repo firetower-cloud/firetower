@@ -57,8 +57,6 @@ jobs:
             web/pnpm-lock.yaml
 
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
-        with:
-          # Both halves of the universal binary; a no-op on Windows.
 
       # Both halves of the universal binary, whatever the runner came with.
       - if: matrix.platform == 'mac'
