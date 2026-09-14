@@ -14,6 +14,9 @@
           "path": "web/package.json",
           "jsonpath": "$.version"
         }
+      ],
+      "exclude-paths": [
+        "desktop"
       ]
     },
     "desktop": {
