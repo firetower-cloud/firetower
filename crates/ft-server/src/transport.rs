@@ -772,12 +772,13 @@ mod tests {
             tail,
         };
 
-        // The pipe outlives the process, so waiting first loses nothing and
-        // gives the reader task time to drain.
-        let status = conn.exit_status().await.expect("it exits immediately");
+        // Through `said`, which waits for the child and then for the reader
+        // task to drain: the pipe outlives the process, but on a busy machine
+        // the line is not in the ring the instant the exit is.
+        let (said, status) = conn.said().await;
+        let status = status.expect("it exits immediately");
         assert_eq!(status.code(), Some(127));
 
-        let said = conn.stderr_tail();
         assert!(
             said.iter().any(|l| l.contains("command not found")),
             "the reason should have survived: {said:?}"
