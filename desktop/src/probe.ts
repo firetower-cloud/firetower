@@ -17,7 +17,31 @@ export type Bootstrap = {
 
 export type Reached =
   | { ok: true; url: string; at: Bootstrap }
-  | { ok: false; why: "unreachable" | "not-firetower"; detail: string };
+  | { ok: false; why: "unreachable" | "refused" | "not-firetower" | "too-old"; detail: string };
+
+/**
+ * The oldest control plane this app can talk to.
+ *
+ * A server that is older answers the web interface and refuses the app: it
+ * only sends the cross-origin headers a webview needs from this version on.
+ * Rather than let that read as a bad address, the probe names the server's
+ * version and says to upgrade it.
+ */
+export const MIN_SERVER = "0.34.1";
+
+/** `a` is at least `b`, reading the first three dotted numbers of each. */
+export function atLeast(a: string, b: string): boolean {
+  const num = (v: string) =>
+    v
+      .split(".")
+      .slice(0, 3)
+      .map((p) => parseInt(p, 10) || 0);
+  const [x, y] = [num(a), num(b)];
+  for (let i = 0; i < 3; i++) {
+    if ((x[i] ?? 0) !== (y[i] ?? 0)) return (x[i] ?? 0) > (y[i] ?? 0);
+  }
+  return true;
+}
 
 /**
  * What somebody typed, as a URL.
@@ -36,12 +60,35 @@ export function candidates(typed: string): string[] {
   return [`https://${raw}`, `http://${raw}`];
 }
 
+/**
+ * Whether anything answers at all, asked in a way the engine cannot refuse.
+ *
+ * A request the server answered without the cross-origin headers a webview
+ * needs throws exactly like one nothing answered — the engine hides both
+ * behind `Load failed`. Asked again with `no-cors`, the first comes back as an
+ * opaque response and the second still throws. That is the difference between
+ * a server that refused the app and a route that is missing, and it is the
+ * difference between "upgrade your Firetower" and "check the VPN".
+ */
+async function answers(url: string, signal: AbortSignal): Promise<boolean> {
+  try {
+    await fetch(`${url}/api/v1/bootstrap`, { signal, mode: "no-cors", redirect: "follow" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function ask(url: string, signal: AbortSignal): Promise<Reached> {
   let res: Response;
   try {
     res = await fetch(`${url}/api/v1/bootstrap`, { signal, redirect: "follow" });
   } catch (e) {
-    return { ok: false, why: "unreachable", detail: String((e as Error)?.message ?? e) };
+    const detail = String((e as Error)?.message ?? e);
+    if (await answers(url, signal)) {
+      return { ok: false, why: "refused", detail };
+    }
+    return { ok: false, why: "unreachable", detail };
   }
 
   if (!res.ok) {
@@ -53,6 +100,9 @@ async function ask(url: string, signal: AbortSignal): Promise<Reached> {
     // Something answered; whether it is a Firetower is a different question.
     if (typeof at.version !== "string" || !Array.isArray(at.authModes)) {
       return { ok: false, why: "not-firetower", detail: "that is not a Firetower" };
+    }
+    if (!atLeast(at.version, MIN_SERVER)) {
+      return { ok: false, why: "too-old", detail: `Firetower ${at.version}` };
     }
     return { ok: true, url, at };
   } catch {
@@ -75,8 +125,9 @@ export async function reach(typed: string, ms = 6000): Promise<Reached> {
       const answer = await ask(url, stop.signal);
       if (answer.ok) return answer;
       last = answer;
-      // A wrong scheme is worth retrying; a wrong server is not.
-      if (answer.why === "not-firetower") return answer;
+      // A wrong scheme is worth retrying; a wrong server is not, and neither
+      // is one that answered and would not talk to the app.
+      if (answer.why !== "unreachable") return answer;
     } finally {
       clearTimeout(timer);
     }
