@@ -13,9 +13,9 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       # Only true on the run where a release PR was merged and the tag cut.
-      released: ${{ steps.release.outputs['.--release_created'] }}
-      tag: ${{ steps.release.outputs['.--tag_name'] }}
-      version: ${{ steps.release.outputs['.--version'] }}
+      released: ${{ steps.release.outputs.release_created }}
+      tag: ${{ steps.release.outputs.tag_name }}
+      version: ${{ steps.release.outputs.version }}
       # The desktop app is its own package with its own tag (desktop-v*).
       desktop_released: ${{ steps.release.outputs['desktop--release_created'] }}
       desktop_tag: ${{ steps.release.outputs['desktop--tag_name'] }}

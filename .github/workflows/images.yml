@@ -107,7 +107,7 @@ jobs:
           fi
           echo "Cargo.toml and the tag both say $found"
 
-      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
 
       - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
@@ -131,7 +131,7 @@ jobs:
             type=semver,pattern={{major}}.{{minor}},value=${{ inputs.version || '0.0.0' }},enable=${{ inputs.version != '' }}
             type=raw,value=latest,enable=${{ inputs.version != '' }}
 
-      - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+      - uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: .
           file: ${{ matrix.dockerfile }}
