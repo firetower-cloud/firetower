@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.33.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.32.2...firetower-v0.33.0) (2026-09-14)
+
+
+### Features
+
+* connect the Mac client to a real control plane ([4c4643d](https://github.com/firetower-cloud/firetower/commit/4c4643d649abff6dc5d2578da6fd1ae8004f1b87))
+* **desktop:** add an agent to the workspace, and hand it notes ([4e1b2ec](https://github.com/firetower-cloud/firetower/commit/4e1b2ecc307b3790866e7d23e55fcf08f0ab4b4c))
+* **desktop:** links leave the app, the tree marks what is not committed ([6030ad1](https://github.com/firetower-cloud/firetower/commit/6030ad198c87fca935b29a5f508b00828421f5b9))
+* **desktop:** preview a session's port, and annotate it ([a8eeac7](https://github.com/firetower-cloud/firetower/commit/a8eeac776141523a9fdfe6f5f72432ae82318799))
+* **desktop:** the preview's address follows the page ([1e8974b](https://github.com/firetower-cloud/firetower/commit/1e8974b7b0d7845bfcae469f0cbc57ca67dac627))
+* **desktop:** Windows, the keychain, installers ([10cc003](https://github.com/firetower-cloud/firetower/commit/10cc00344f5adf0710133e1caadf3fd8480ff0be))
+* the web app is the admin console ([45ba96a](https://github.com/firetower-cloud/firetower/commit/45ba96a9b248bf377e0f115787ea825153372115))
+
+
+### Bug Fixes
+
+* **desktop:** compile the plugins on every platform ([824c148](https://github.com/firetower-cloud/firetower/commit/824c148874b299f51d5cb31996f003acd63bf5fb))
+* **server:** the checks the backend workflow runs ([52fb444](https://github.com/firetower-cloud/firetower/commit/52fb4443505ccd29efc5396332b3185918c5b84d))
+* **server:** the dying-child test waits for the reader ([f1c06b6](https://github.com/firetower-cloud/firetower/commit/f1c06b64ed6575f0e90a713c1dd66c6bc0ad9aae))
+* **web:** setting up navigates after render, and can be previewed while developing ([c0649f0](https://github.com/firetower-cloud/firetower/commit/c0649f09ff575b27f5c65d2d79dc294ee91e45e2))
+* **web:** the console's cards have room inside, and their notes read as notes ([6ad6b82](https://github.com/firetower-cloud/firetower/commit/6ad6b82d3182795059d13c53d541c2880b85ea82))
+* **worker:** the probe agreement test asks a fake agent ([266c507](https://github.com/firetower-cloud/firetower/commit/266c5077ef301dc36892f9bf5cfbc0d11e61ea41))
+
 ## [0.32.2](https://github.com/firetower-cloud/firetower/compare/firetower-v0.32.1...firetower-v0.32.2) (2026-09-12)
 
 
