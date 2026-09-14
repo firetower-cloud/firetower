@@ -51,8 +51,8 @@ export function Account() {
       </p>
 
       <Card className="mt-7">
-        <CardHead note="Changing it signs every other browser and app out.">Password</CardHead>
-        <div className="flex max-w-[24rem] flex-col gap-2 px-4 pb-4">
+        <CardHead note={<span className="text-meta text-mute">Changing it signs every other browser and app out.</span>}><span className="text-ui text-bone">Password</span></CardHead>
+        <div className="flex max-w-[24rem] flex-col gap-2 px-4 py-4">
           <Input type="password" value={current} onChange={(v) => setCurrent(v)} placeholder="Current password" autoComplete="current-password" />
           <Input type="password" value={next} onChange={(v) => setNext(v)} placeholder="New password" autoComplete="new-password" />
           <Input type="password" value={again} onChange={(v) => setAgain(v)} placeholder="New password, again" autoComplete="new-password" onKeyDown={(e) => e.key === "Enter" && rotate()} />
@@ -67,8 +67,8 @@ export function Account() {
       </Card>
 
       <Card className="mt-4">
-        <CardHead note="This browser only.">Sign out</CardHead>
-        <div className="px-4 pb-4">
+        <CardHead note={<span className="text-meta text-mute">This browser only.</span>}><span className="text-ui text-bone">Sign out</span></CardHead>
+        <div className="px-4 py-4">
           <Button
             variant="quiet"
             disabled={logout.isPending}

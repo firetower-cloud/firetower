@@ -59,8 +59,8 @@ function Name({ current }: { current: string }) {
   const value = name ?? current;
   return (
     <Card className="mt-7">
-      <CardHead note="What the app shows for this server.">Name</CardHead>
-      <div className="flex items-center gap-2 px-4 pb-4">
+      <CardHead note={<span className="text-meta text-mute">What the app shows for this server.</span>}><span className="text-ui text-bone">Name</span></CardHead>
+      <div className="flex items-center gap-2 px-4 py-4">
         <Input value={value} onChange={(v) => setName(v)} placeholder="The organisation" className="max-w-[24rem]" />
         <Button
           disabled={!value.trim() || value.trim() === current || rename.isPending}
@@ -110,14 +110,14 @@ function Users({ me }: { me?: User }) {
   return (
     <Card className="mt-4">
       <CardHead
-        note="Who can sign in to this Firetower, from the app or here."
+        note={<span className="text-meta text-mute">Who can sign in to this Firetower, from the app or here.</span>}
         aside={
           <Button size="sm" onClick={() => setAdding(true)}>
             Add a user
           </Button>
         }
       >
-        Users
+        <span className="text-ui text-bone">Users</span>
       </CardHead>
       {isPending && <p className="px-4 pb-4 text-ui text-mute">Reading…</p>}
       {error ? <p className="px-4 pb-4 text-ui text-brick">{why(error)}</p> : null}

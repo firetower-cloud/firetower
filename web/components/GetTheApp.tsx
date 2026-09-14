@@ -56,8 +56,8 @@ export function GetTheApp() {
       </p>
 
       <Card className="mt-7">
-        <CardHead>Connect the app to this server</CardHead>
-        <div className="px-4 pb-4">
+        <CardHead><span className="text-ui text-bone">Connect the app to this server</span></CardHead>
+        <div className="px-4 py-4">
           <p className="text-ui text-dim">
             In the app, choose <span className="text-text">Connect to a Firetower</span>, paste the address, and sign in as{" "}
             <span className="font-mono text-text">{me?.user.username ?? "…"}</span> with your password.
@@ -69,8 +69,8 @@ export function GetTheApp() {
       </Card>
 
       <Card className="mt-4">
-        <CardHead note={downloads.version ? `Latest: ${downloads.version}` : "The latest release"}>Download</CardHead>
-        <div className="flex flex-wrap gap-3 px-4 pb-4">
+        <CardHead note={<span className="text-meta text-mute">{downloads.version ? `Latest: ${downloads.version}` : "The latest release"}</span>}><span className="text-ui text-bone">Download</span></CardHead>
+        <div className="flex flex-wrap gap-3 px-4 pt-4 pb-3">
           <Platform name="macOS" hint="Apple silicon and Intel" href={downloads.mac} glyph={<AppleGlyph />} />
           <Platform name="Windows" hint="64-bit, installs per user" href={downloads.windows} glyph={<WindowsGlyph />} />
         </div>
