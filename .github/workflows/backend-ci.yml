@@ -47,12 +47,12 @@ jobs:
 
       - run: cargo fmt --check
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      # The worker's tests commit in throwaway repositories, and a runner has
+      # no identity of its own. Configuration rather than the GIT_AUTHOR_*
+      # variables: those would override the author the worker names on purpose.
+      - run: |
+          git config --global user.name firetower
+          git config --global user.email ci@firetower.cloud
       - run: cargo test --workspace --locked --no-fail-fast
         env:
           DATABASE_URL: postgres://firetower:firetower@localhost:5433/firetower
-          # The worker's tests commit in throwaway repositories; a runner has
-          # no identity of its own.
-          GIT_AUTHOR_NAME: firetower
-          GIT_AUTHOR_EMAIL: ci@firetower.cloud
-          GIT_COMMITTER_NAME: firetower
-          GIT_COMMITTER_EMAIL: ci@firetower.cloud
