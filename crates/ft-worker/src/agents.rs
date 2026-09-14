@@ -14,16 +14,18 @@ use tokio::process::Command;
 /// under it — and one of those answering is as good as one the machine came
 /// with. Which of them answered is the version reported.
 pub async fn probe(state: &Path) -> Vec<AgentPresence> {
-    let path = crate::runtime::path_with_agents(state).await;
+    probe_on(&crate::runtime::path_with_agents(state).await).await
+}
 
+async fn probe_on(path: &std::ffi::OsStr) -> Vec<AgentPresence> {
     let mut out = Vec::new();
     for kind in Agent::all() {
-        let version = version_of(kind.command(), &path).await;
+        let version = version_of(kind.command(), path).await;
         let installed = version.is_some();
 
         // Only worth asking if it's there at all.
         let (logged_in, account) = if installed {
-            signed_in(kind, &path).await
+            signed_in(kind, path).await
         } else {
             (None, None)
         };
@@ -45,8 +47,11 @@ pub async fn probe(state: &Path) -> Vec<AgentPresence> {
 /// the moment before a launch, where the alternative to knowing is starting a
 /// process that isn't there and reporting it as an agent that never woke up.
 pub async fn present(state: &Path, kind: Agent) -> bool {
-    let path = crate::runtime::path_with_agents(state).await;
-    version_of(kind.command(), &path).await.is_some()
+    present_on(&crate::runtime::path_with_agents(state).await, kind).await
+}
+
+async fn present_on(path: &std::ffi::OsStr, kind: Agent) -> bool {
+    version_of(kind.command(), path).await.is_some()
 }
 
 /// Whether an agent is signed in, and as whom.
@@ -132,18 +137,40 @@ mod tests {
             .is_none());
     }
 
+    /// A PATH holding exactly one agent, which answers at once.
+    ///
+    /// The real ones are not asked: whether a machine has them is not the
+    /// question, and a cold `claude --version` on a busy runner can take
+    /// longer than the probe waits, which made the two answers disagree.
+    #[cfg(unix)]
+    fn one_fake_agent(kind: Agent) -> (tempfile::TempDir, std::ffi::OsString) {
+        use std::os::unix::fs::PermissionsExt;
+        let bin = tempfile::tempdir().unwrap();
+        let exe = bin.path().join(kind.command());
+        std::fs::write(&exe, "#!/bin/sh\necho 1.0.0\n").unwrap();
+        std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let path = bin.path().as_os_str().to_os_string();
+        (bin, path)
+    }
+
+    #[cfg(unix)]
     #[tokio::test]
     async fn present_agrees_with_what_probing_found() {
         // The launch guard and the agents screen must never disagree — one
         // saying a host has an agent while the other refuses to start it is
         // the confusing failure this check exists to remove.
-        let empty = tempfile::tempdir().unwrap();
-        let found = probe(empty.path()).await;
+        let (_bin, path) = one_fake_agent(Agent::ClaudeCode);
+        let found = probe_on(&path).await;
 
         for kind in Agent::all() {
             let probed = found.iter().find(|a| a.kind == kind).unwrap().installed;
             assert_eq!(
-                present(empty.path(), kind).await,
+                probed,
+                kind == Agent::ClaudeCode,
+                "{kind:?} on the fake PATH"
+            );
+            assert_eq!(
+                present_on(&path, kind).await,
                 probed,
                 "{kind:?} answered differently to the two questions"
             );
