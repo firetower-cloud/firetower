@@ -1017,6 +1017,7 @@ mod tests {
             share: Default::default(),
             env: vec![("KEY".into(), "value".into())],
             agent_home: Vec::new(),
+            workspace_session: None,
         }));
 
         let wire = serde_json::to_string(&frame).expect("encoding");

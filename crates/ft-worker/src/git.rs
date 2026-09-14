@@ -1853,7 +1853,15 @@ mod tests {
         run(
             &tree,
             "git",
-            &["-c", "user.name=t", "-c", "user.email=t@x", "commit", "-qm", "notes"],
+            &[
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@x",
+                "commit",
+                "-qm",
+                "notes",
+            ],
         )
         .await
         .unwrap();

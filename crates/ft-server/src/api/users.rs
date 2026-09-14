@@ -138,7 +138,10 @@ pub(super) async fn change_user(
     let mut user = one_of_ours(&state, me, &id).await?;
     if let Some(disabled) = request.disabled {
         if disabled && id == me.id {
-            return Err(ApiError::new(ErrorCode::InvalidRequest, "you cannot switch yourself off"));
+            return Err(ApiError::new(
+                ErrorCode::InvalidRequest,
+                "you cannot switch yourself off",
+            ));
         }
         user = state
             .accounts
@@ -201,7 +204,10 @@ pub(super) async fn delete_user(
     let me = admin(&principal)?;
     let id = UserId::from_stored(id);
     if id == me.id {
-        return Err(ApiError::new(ErrorCode::InvalidRequest, "you cannot remove yourself"));
+        return Err(ApiError::new(
+            ErrorCode::InvalidRequest,
+            "you cannot remove yourself",
+        ));
     }
     let user = one_of_ours(&state, me, &id).await?;
     state

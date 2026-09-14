@@ -4433,6 +4433,7 @@ mod tests {
                             share: ft_core::Share::Equal,
                             env: vec![],
                             agent_home: vec![],
+                            workspace_session: None,
                         }),
                     },
                 },
@@ -4524,6 +4525,7 @@ mod tests {
                     share: ft_core::Share::Equal,
                     env: vec![],
                     agent_home: vec![],
+                    workspace_session: None,
                 })),
             ],
         )

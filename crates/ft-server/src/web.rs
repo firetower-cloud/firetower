@@ -110,9 +110,9 @@ impl IntoResponse for Asset {
 
 /// Find what to send for a path.
 ///
-/// In order: the file itself, the file with `.html`, a directory's index, and
-/// finally the dynamic-route shell — a path whose last segment matched nothing
-/// is a runtime value, and the export wrote that route as `_`.
+/// In order: the file itself, the file with `.html`, and a directory's index.
+/// The console has no dynamic routes, so a path that matches none of those is
+/// not there.
 fn resolve(uri: &Uri) -> Option<Asset> {
     let path = uri.path().trim_start_matches('/');
 
@@ -133,16 +133,7 @@ fn resolve(uri: &Uri) -> Option<Asset> {
         format!("{}/index.html", path.trim_end_matches('/')),
     ];
 
-    for candidate in candidates {
-        if let Some(asset) = load(&candidate) {
-            return Some(asset);
-        }
-    }
-
-    // `/sessions/01J8…` → `sessions/_.html`. Only one segment is replaced:
-    // deeper guessing would start answering paths that genuinely are not there.
-    let (parent, _) = path.rsplit_once('/')?;
-    load(&format!("{parent}/_.html"))
+    candidates.iter().find_map(|candidate| load(candidate))
 }
 
 fn load(name: &str) -> Option<Asset> {
@@ -190,18 +181,15 @@ mod tests {
         if !built() {
             return;
         }
-        assert!(resolve_path("/secrets").is_some(), "secrets.html");
+        assert!(resolve_path("/organization").is_some(), "organization.html");
     }
 
-    /// The reason this module has a resolver at all.
     #[test]
-    fn any_session_gets_the_one_shell_that_was_built_for_all_of_them() {
+    fn a_path_nobody_exported_is_not_served() {
         if !built() {
             return;
         }
-        let asset =
-            resolve_path("/sessions/01J8ZXQ2K3M4N5P6R7S8T9V0W1").expect("the placeholder shell");
-        assert!(asset.content_type.starts_with("text/html"));
+        assert!(resolve_path("/sessions/01J8ZXQ2K3M4N5P6R7S8T9V0W1").is_none());
     }
 
     #[test]

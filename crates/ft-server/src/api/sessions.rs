@@ -2631,87 +2631,6 @@ async fn require_ready(
     Ok(())
 }
 
-#[cfg(test)]
-mod tests {
-    use super::{asked_for, nothing_to_do, within};
-
-    /// Ending a filtered list must end that list and nothing beside it.
-    #[test]
-    fn only_the_workspaces_named_are_ended() {
-        let wanted = ["s_two".to_string(), "s_three".to_string()];
-
-        assert!(!asked_for("s_one", Some(&wanted)));
-        assert!(asked_for("s_two", Some(&wanted)));
-        assert!(asked_for("s_three", Some(&wanted)));
-
-        // No list at all is the whole fleet — what the button did before it
-        // could be narrowed, and what an empty body still means.
-        assert!(asked_for("s_one", None));
-
-        // An empty list names nothing. Reading it as "everything" would turn a
-        // press meant for a filtered-to-nothing list into ending the fleet.
-        assert!(!asked_for("s_one", Some(&[])));
-    }
-
-    #[test]
-    fn a_path_belongs_to_the_checkout_it_is_under() {
-        // The review sheet shows workspace-relative paths, so each checkout is
-        // committed with its own share of them, named from inside itself.
-        assert_eq!(
-            within("backend", "backend/src/main.rs").as_deref(),
-            Some("src/main.rs")
-        );
-        assert_eq!(within("backend", "web/app/page.tsx"), None);
-        // A checkout that *is* the workspace holds everything.
-        assert_eq!(within("", "README.md").as_deref(), Some("README.md"));
-        // Not a prefix match on the string: `backend-2` is a different
-        // repository, and committing its files into `backend` would be wrong
-        // in the quietest possible way.
-        assert_eq!(within("backend", "backend-2/src/main.rs"), None);
-    }
-
-    /// The asymmetry that committed nothing and said it had.
-    ///
-    /// `session_changes` puts a checkout's directory in front of a file only
-    /// when the session holds more than one. So a single-repo session — which
-    /// still has a real subdirectory on disk — sends `hello.sh`, `within`
-    /// looked for `sandbox-firetower/hello.sh`, found nothing, and the commit
-    /// skipped the only checkout there was. The push that followed was a
-    /// no-op and the pull request came back "No commits between".
-    #[test]
-    fn a_single_checkout_claims_the_bare_paths_the_sheet_sends() {
-        let checkout = "sandbox-firetower";
-        let sent = "hello.sh";
-
-        // What the prefix rule alone does with it: nothing.
-        assert_eq!(within(checkout, sent), None);
-
-        // What the commit handler does now, when there is exactly one place a
-        // path could possibly belong.
-        let single = true;
-        let kept = within(checkout, sent).or_else(|| single.then(|| sent.to_string()));
-        assert_eq!(kept.as_deref(), Some("hello.sh"));
-
-        // And with two checkouts the sheet prefixes, so the prefix rule is the
-        // only one that may apply — a bare path must not be swept into the
-        // first checkout that happens to be looked at.
-        let single = false;
-        assert_eq!(
-            within("backend", sent).or_else(|| single.then(|| sent.to_string())),
-            None
-        );
-    }
-
-    #[test]
-    fn a_repository_this_change_did_not_touch_is_not_a_failure() {
-        // Pushing a session that changed one of its two repositories must not
-        // report the other one as broken.
-        assert!(nothing_to_do("nothing to commit, working tree clean"));
-        assert!(nothing_to_do("Everything up-to-date"));
-        assert!(!nothing_to_do("permission denied (publickey)"));
-    }
-}
-
 /// Stop is acknowledged by the worker before credentials or agent change.
 /// A cross-agent continuation gets its own conversation in the same workspace.
 pub(super) async fn continue_with_account(
@@ -2825,4 +2744,85 @@ pub(super) async fn continue_with_account(
     let (_, Json(next)) =
         start_another_agent(state.clone(), owner.to_string(), workspace, req).await?;
     Ok(next.id)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{asked_for, nothing_to_do, within};
+
+    /// Ending a filtered list must end that list and nothing beside it.
+    #[test]
+    fn only_the_workspaces_named_are_ended() {
+        let wanted = ["s_two".to_string(), "s_three".to_string()];
+
+        assert!(!asked_for("s_one", Some(&wanted)));
+        assert!(asked_for("s_two", Some(&wanted)));
+        assert!(asked_for("s_three", Some(&wanted)));
+
+        // No list at all is the whole fleet — what the button did before it
+        // could be narrowed, and what an empty body still means.
+        assert!(asked_for("s_one", None));
+
+        // An empty list names nothing. Reading it as "everything" would turn a
+        // press meant for a filtered-to-nothing list into ending the fleet.
+        assert!(!asked_for("s_one", Some(&[])));
+    }
+
+    #[test]
+    fn a_path_belongs_to_the_checkout_it_is_under() {
+        // The review sheet shows workspace-relative paths, so each checkout is
+        // committed with its own share of them, named from inside itself.
+        assert_eq!(
+            within("backend", "backend/src/main.rs").as_deref(),
+            Some("src/main.rs")
+        );
+        assert_eq!(within("backend", "web/app/page.tsx"), None);
+        // A checkout that *is* the workspace holds everything.
+        assert_eq!(within("", "README.md").as_deref(), Some("README.md"));
+        // Not a prefix match on the string: `backend-2` is a different
+        // repository, and committing its files into `backend` would be wrong
+        // in the quietest possible way.
+        assert_eq!(within("backend", "backend-2/src/main.rs"), None);
+    }
+
+    /// The asymmetry that committed nothing and said it had.
+    ///
+    /// `session_changes` puts a checkout's directory in front of a file only
+    /// when the session holds more than one. So a single-repo session — which
+    /// still has a real subdirectory on disk — sends `hello.sh`, `within`
+    /// looked for `sandbox-firetower/hello.sh`, found nothing, and the commit
+    /// skipped the only checkout there was. The push that followed was a
+    /// no-op and the pull request came back "No commits between".
+    #[test]
+    fn a_single_checkout_claims_the_bare_paths_the_sheet_sends() {
+        let checkout = "sandbox-firetower";
+        let sent = "hello.sh";
+
+        // What the prefix rule alone does with it: nothing.
+        assert_eq!(within(checkout, sent), None);
+
+        // What the commit handler does now, when there is exactly one place a
+        // path could possibly belong.
+        let single = true;
+        let kept = within(checkout, sent).or_else(|| single.then(|| sent.to_string()));
+        assert_eq!(kept.as_deref(), Some("hello.sh"));
+
+        // And with two checkouts the sheet prefixes, so the prefix rule is the
+        // only one that may apply — a bare path must not be swept into the
+        // first checkout that happens to be looked at.
+        let single = false;
+        assert_eq!(
+            within("backend", sent).or_else(|| single.then(|| sent.to_string())),
+            None
+        );
+    }
+
+    #[test]
+    fn a_repository_this_change_did_not_touch_is_not_a_failure() {
+        // Pushing a session that changed one of its two repositories must not
+        // report the other one as broken.
+        assert!(nothing_to_do("nothing to commit, working tree clean"));
+        assert!(nothing_to_do("Everything up-to-date"));
+        assert!(!nothing_to_do("permission denied (publickey)"));
+    }
 }

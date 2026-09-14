@@ -228,15 +228,25 @@ impl Accounts {
     /// A new member or administrator, with a password made here and said
     /// once. They have to replace it the first time they sign in, so the
     /// administrator who passed it on is not left holding a working one.
-    pub async fn create_user(&self, org: &OrgId, username: &str, role: &str) -> Result<(User, String)> {
+    pub async fn create_user(
+        &self,
+        org: &OrgId,
+        username: &str,
+        role: &str,
+    ) -> Result<(User, String)> {
         let username = username.trim();
         anyhow::ensure!(!username.is_empty(), "a user needs a username");
         anyhow::ensure!(username.chars().count() <= 64, "that username is too long");
         anyhow::ensure!(
-            username.chars().all(|c| c.is_alphanumeric() || matches!(c, '.' | '_' | '-' | '@')),
+            username
+                .chars()
+                .all(|c| c.is_alphanumeric() || matches!(c, '.' | '_' | '-' | '@')),
             "a username is letters, digits, and . _ - @"
         );
-        anyhow::ensure!(matches!(role, "admin" | "member"), "a role is admin or member");
+        anyhow::ensure!(
+            matches!(role, "admin" | "member"),
+            "a role is admin or member"
+        );
         let password = temporary_password();
         let id = UserId::new();
         let done = sqlx::query(
@@ -270,7 +280,10 @@ impl Accounts {
     /// Admin or member. The last administrator cannot be made a member —
     /// an organisation nobody can administer is a locked room.
     pub async fn set_role(&self, id: &UserId, role: &str) -> Result<User> {
-        anyhow::ensure!(matches!(role, "admin" | "member"), "a role is admin or member");
+        anyhow::ensure!(
+            matches!(role, "admin" | "member"),
+            "a role is admin or member"
+        );
         let mut tx = self.pool.begin().await?;
         let user = sqlx::query("SELECT * FROM users WHERE id = $1 FOR UPDATE")
             .bind(id.as_str())
@@ -278,7 +291,10 @@ impl Accounts {
             .await?
             .map(user_from_row)
             .context("no such user")?;
-        if user.role == "admin" && role != "admin" && Self::active_admins(&mut tx, &user.org_id).await? <= 1 {
+        if user.role == "admin"
+            && role != "admin"
+            && Self::active_admins(&mut tx, &user.org_id).await? <= 1
+        {
             bail!("{} is the only administrator", user.username);
         }
         sqlx::query("UPDATE users SET role = $1 WHERE id = $2")
@@ -287,7 +303,10 @@ impl Accounts {
             .execute(&mut *tx)
             .await?;
         tx.commit().await?;
-        Ok(User { role: role.to_string(), ..user })
+        Ok(User {
+            role: role.to_string(),
+            ..user
+        })
     }
 
     /// Switch a user off or back on. Off ends their sessions at once; what
@@ -300,7 +319,11 @@ impl Accounts {
             .await?
             .map(user_from_row)
             .context("no such user")?;
-        if disabled && user.role == "admin" && !user.disabled && Self::active_admins(&mut tx, &user.org_id).await? <= 1 {
+        if disabled
+            && user.role == "admin"
+            && !user.disabled
+            && Self::active_admins(&mut tx, &user.org_id).await? <= 1
+        {
             bail!("{} is the only administrator", user.username);
         }
         sqlx::query("UPDATE users SET disabled = $1 WHERE id = $2")
@@ -351,7 +374,10 @@ impl Accounts {
             .await?
             .map(user_from_row)
             .context("no such user")?;
-        if user.role == "admin" && !user.disabled && Self::active_admins(&mut tx, &user.org_id).await? <= 1 {
+        if user.role == "admin"
+            && !user.disabled
+            && Self::active_admins(&mut tx, &user.org_id).await? <= 1
+        {
             bail!("{} is the only administrator", user.username);
         }
         sqlx::query("DELETE FROM users WHERE id = $1")
