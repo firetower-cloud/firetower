@@ -10,17 +10,26 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+triple=""
 target=()
 if [[ "${1:-}" == "--universal" ]]; then
   rustup target add aarch64-apple-darwin x86_64-apple-darwin >/dev/null
-  target=(--target universal-apple-darwin)
+  triple="universal-apple-darwin"
+  target=(--target "$triple")
 fi
 
 pnpm install --frozen-lockfile
-(cd ../web && pnpm install --frozen-lockfile)
 # No updater artifacts here: they need the release's private key, and an
 # unsigned local build is not something the updater should ever hand out.
-pnpm tauri build --bundles app,dmg --config '{"bundle":{"createUpdaterArtifacts":false}}' ${target[@]+"${target[@]}"}
+pnpm tauri build --bundles app --config '{"bundle":{"createUpdaterArtifacts":false}}' ${target[@]+"${target[@]}"}
+
+# Through the same script the release runs, so what you try by hand is the
+# installer other people will open.
+bundle="src-tauri/target/${triple:+$triple/}release/bundle"
+version=$(node -p "require('./src-tauri/tauri.conf.json').version")
+arch=${triple:+universal}
+dmg="$bundle/dmg/Firetower_${version}_${arch:-$(uname -m | sed s/arm64/aarch64/)}.dmg"
+scripts/make-dmg.sh "$bundle/macos/Firetower.app" "$dmg"
 
 echo
-find src-tauri/target -path '*/release/bundle/dmg/*.dmg' -newer package.json -print
+echo "$dmg"

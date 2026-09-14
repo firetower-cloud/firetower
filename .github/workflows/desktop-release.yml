@@ -146,15 +146,18 @@ jobs:
           TAG: ${{ inputs.tag }}
           APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
-        working-directory: desktop/src-tauri/target/universal-apple-darwin/release/bundle
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+        working-directory: desktop
         run: |
-          version=$(node -p "require('../../../../tauri.conf.json').version")
-          mkdir -p dmg
-          hdiutil create -volname Firetower -srcfolder macos/Firetower.app -ov -format UDZO "dmg/Firetower_${version}_universal.dmg"
-          # Signed already (the .app was); notarized as a file of its own.
-          xcrun notarytool submit "dmg/Firetower_${version}_universal.dmg" --key "$APPLE_API_KEY_PATH" --key-id "$APPLE_API_KEY" --issuer "$APPLE_API_ISSUER" --wait
-          xcrun stapler staple "dmg/Firetower_${version}_universal.dmg"
-          gh release upload "$TAG" "dmg/Firetower_${version}_universal.dmg" --clobber
+          bundle=src-tauri/target/universal-apple-darwin/release/bundle
+          version=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          dmg="$bundle/dmg/Firetower_${version}_universal.dmg"
+          scripts/make-dmg.sh "$bundle/macos/Firetower.app" "$dmg"
+          # Apple notarises the container as well as the app inside it.
+          codesign --sign "$APPLE_SIGNING_IDENTITY" --timestamp "$dmg"
+          xcrun notarytool submit "$dmg" --key "$APPLE_API_KEY_PATH" --key-id "$APPLE_API_KEY" --issuer "$APPLE_API_ISSUER" --wait
+          xcrun stapler staple "$dmg"
+          gh release upload "$TAG" "$dmg" --clobber
       - if: always() && matrix.platform == 'mac'
         shell: bash
         run: rm -f "$RUNNER_TEMP/AuthKey.p8"

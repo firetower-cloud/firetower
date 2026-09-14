@@ -78,16 +78,15 @@ jobs:
           projectPath: desktop
           args: ${{ matrix.args }}
 
-      # A plain disk image from the .app: Tauri's own DMG script styles it
-      # through Finder, which a headless runner has no session for.
+      # Tauri's own DMG script arranges the window through Finder, which a
+      # build machine has no session for; this assembles the image instead.
       - if: matrix.platform == 'mac'
         shell: bash
-        working-directory: desktop/src-tauri/target/universal-apple-darwin/release/bundle
         run: |
-          version=$(node -p "require('../../../../tauri.conf.json').version")
-          mkdir -p dmg
-          hdiutil create -volname Firetower -srcfolder macos/Firetower.app -ov -format UDZO "dmg/Firetower_${version}_universal.dmg"
-          ls -la dmg
+          bundle=src-tauri/target/universal-apple-darwin/release/bundle
+          version=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          scripts/make-dmg.sh "$bundle/macos/Firetower.app" \
+            "$bundle/dmg/Firetower_${version}_universal.dmg"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ${{ matrix.artifact }}
