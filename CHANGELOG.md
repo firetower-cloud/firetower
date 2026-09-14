@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.34.1](https://github.com/firetower-cloud/firetower/compare/firetower-v0.34.0...firetower-v0.34.1) (2026-09-14)
+
+
+### Bug Fixes
+
+* **server:** the API answers the desktop app's origin in production ([973cc27](https://github.com/firetower-cloud/firetower/commit/973cc276b092ccb068188b9c90bb067efe6ff498))
+
 ## [0.34.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.33.0...firetower-v0.34.0) (2026-09-14)
 
 
