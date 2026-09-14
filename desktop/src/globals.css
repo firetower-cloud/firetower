@@ -1,0 +1,474 @@
+@import "tailwindcss";
+
+@theme {
+  /* ── Ground: neutral graphite, six steps ────────────────────
+     Each surface is far enough from the one under it to read without a border,
+     so elevation is a colour change and a highlight rather than a line drawn
+     around everything. The hue is neutral on purpose: the warmth in this app
+     belongs to the ember, not to the walls. */
+  --color-ground: #0b0b0c;
+  --color-panel: #111113;
+  --color-raise: #17171a;
+  --color-overlay: #1e1e22;
+  --color-line: #26262b;
+  --color-line-soft: #1a1a1e;
+
+  /* ── Text: four tiers, a real gap between each ──────────────
+     Titles are bright and metadata falls away. The reverse — everything within
+     one step of everything else — is what makes a screen read as grey. */
+  --color-bone: #f4f4f5;
+  --color-text: #c8c8ce;
+  --color-dim: #8b8b93;
+  --color-mute: #5e5e67;
+
+  /* ── Type: six sizes, and a name for each ───────────────────
+     Sizes were written at the point of use, so a label and a sentence and a
+     caption drifted a half-pixel apart in twenty files. These are the sizes;
+     anything not one of them is a mistake, and `just check-style` says so. */
+  --text-display: 1.5rem; /* 24px — the one heading on a page */
+  --text-display--line-height: 1.2;
+  --text-display--letter-spacing: -0.02em;
+  --text-title: 1rem; /* 16px — a row title, a card heading */
+  --text-title--line-height: 1.35;
+  --text-title--letter-spacing: -0.01em;
+  --text-body: 0.875rem; /* 14px — what somebody reads: prose, a message */
+  --text-body--line-height: 1.65;
+  --text-ui: 0.8125rem; /* 13px — controls and labels */
+  --text-ui--line-height: 1.45;
+  --text-meta: 0.71875rem; /* 11.5px — captions, counts, paths */
+  --text-meta--line-height: 1.45;
+  --text-micro: 0.65625rem; /* 10.5px — eyebrows and column headers */
+  --text-micro--line-height: 1.4;
+  --text-code: 0.8125rem; /* 13px — what the machine said */
+  --text-code--line-height: 1.6;
+  /* 16px — the floor for anything you type into, on a touch screen.
+     Not a seventh voice: it is `--text-ui` with a minimum. Under 16px iOS
+     zooms the page when a field takes focus and never zooms back out, which
+     is half of what reads as "the app zoomed by itself". Used below `md` and
+     nowhere else, so the desk keeps the 13px it was designed at. */
+  --text-input: 1rem;
+  --text-input--line-height: 1.5;
+
+  /* ── Signals ────────────────────────────────────────────────
+     Semantic only. Ember answers one question — is something waiting on you —
+     and when it answered forty others it stopped answering that one. Each
+     colour carries a tint for the background of a badge and a deep for its
+     border, so a badge is never a flat block of colour. */
+  --color-ember: #ff6b2c;
+  --color-ember-soft: #ff9a6b;
+  --color-ember-tint: #2a1509;
+  --color-ember-deep: #7a3417;
+  --color-sage: #6ec08a;
+  --color-sage-tint: #12251a;
+  --color-sage-deep: #2c5b3d;
+  --color-brick: #e5645a;
+  --color-brick-tint: #2a1414;
+  --color-brick-deep: #6e2f2b;
+  --color-slate: #7d95b0;
+  --color-slate-tint: #161d26;
+  --color-slate-deep: #35485c;
+
+  /* File kinds: what a file *is*, in the tree and nowhere else. A separate
+     namespace from the signals above, and deliberately below them in
+     saturation: a panel of four hundred rows must not be able to out-shout the
+     one thing on screen that means an agent is waiting on you. Nine
+     categories, not ninety formats. */
+  --color-kind-source: #7b93b8;
+  --color-kind-native: #b8845f;
+  --color-kind-data: #c2ab63;
+  --color-kind-style: #9a8cc4;
+  --color-kind-media: #79b58d;
+  --color-kind-store: #bd79a1;
+  --color-kind-prose: #9a9aa4;
+
+  --font-sans: var(--font-archivo), ui-sans-serif, system-ui, sans-serif;
+  --font-narrow: var(--font-archivo-narrow), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-jetbrains), ui-monospace, "SF Mono", monospace;
+
+  /* ── Radii: three, plus pill ────────────────────────────────── */
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius: 8px;
+
+  /* ── Elevation: a top highlight and a soft drop, never a 1px box ── */
+  --shadow-raise: inset 0 1px 0 rgb(255 255 255 / 0.04), 0 1px 2px rgb(0 0 0 / 0.4);
+  --shadow-float: inset 0 1px 0 rgb(255 255 255 / 0.05), 0 16px 40px -16px rgb(0 0 0 / 0.7);
+
+  /* ── Motion ─────────────────────────────────────────────────── */
+  --ease-swift: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@layer base {
+  html {
+    background: var(--color-ground);
+    color-scheme: dark;
+  }
+
+  body {
+    background: var(--color-ground);
+    color: var(--color-text);
+    font-family: var(--font-sans);
+    font-size: var(--text-ui);
+    -webkit-font-smoothing: antialiased;
+    font-feature-settings: "cv05" 1;
+  }
+
+  /* Selecting text is not the app asking for you. Ember is reserved for that,
+     and a page where every highlighted sentence glows orange spends the one
+     colour that means something on the most ordinary thing anybody does. */
+  ::selection {
+    background: color-mix(in srgb, var(--color-slate) 35%, transparent);
+    color: var(--color-bone);
+  }
+
+  /* Tailwind v4 resets a button to the arrow the page ships with, so every
+     control in the app looked like text until it was pressed. A pointer over
+     something pressable is not decoration — it is how a page says which parts
+     of it are alive. */
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]) {
+    cursor: pointer;
+  }
+
+  :focus-visible {
+    outline: 1px solid var(--color-bone);
+    outline-offset: 2px;
+  }
+
+  /* Double-tap does not zoom, anywhere.
+     `manipulation` is `auto` minus double-tap-to-zoom, which also takes the
+     300ms wait that browsers hold every tap for in case a second one is
+     coming. Pinch is still allowed here — that is decided per surface, on
+     `.no-zoom` below, because a page of prose has no reason to fight the
+     browser and the workbench has every reason. */
+  body {
+    touch-action: manipulation;
+  }
+
+  /* The standard properties, not only the WebKit pseudo-elements: with
+     overlay scrollbars the browser draws a fat translucent bar of its own and
+     ignores anything ::-webkit-scrollbar has to say about it. */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-line) transparent;
+  }
+
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--color-line);
+    border-radius: 99px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--color-overlay);
+  }
+}
+
+@layer components {
+  /* Instrument-panel label: the map-legend voice of the UI */
+  .eyebrow {
+    font-family: var(--font-narrow);
+    font-size: var(--text-micro);
+    font-weight: 600;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--color-mute);
+  }
+
+  .hairline {
+    border-color: var(--color-line);
+  }
+
+  /* A scrollbar you only notice while you are using it.
+     The 9px bar the app draws everywhere is right for a page and wrong inside
+     a control: a message box two lines tall with a bar down the side of it
+     reads as broken furniture rather than as somewhere to type. */
+  .scroll-slim {
+    scrollbar-width: thin;
+    scrollbar-color: transparent transparent;
+  }
+  .scroll-slim:hover {
+    scrollbar-color: var(--color-line) transparent;
+  }
+  .scroll-slim::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  .scroll-slim::-webkit-scrollbar-thumb {
+    background: transparent;
+    border-radius: 99px;
+  }
+  .scroll-slim:hover::-webkit-scrollbar-thumb {
+    background: var(--color-line);
+  }
+
+  /* A drawing wider than the column, with a bar you can see.
+     The opposite call to `.scroll-slim`: this one is drawn without being
+     hovered, because the thing it runs under is a diagram whose right-hand
+     side is off the screen. Waiting for a hover to admit that means the first
+     read of it is of a picture that appears to be missing a piece. */
+  .ft-pre {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-line) transparent;
+  }
+  .ft-pre::-webkit-scrollbar {
+    height: 6px;
+  }
+  .ft-pre::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .ft-pre::-webkit-scrollbar-thumb {
+    background: var(--color-line);
+    border-radius: 99px;
+  }
+
+  .panel {
+    background: var(--color-panel);
+    border: 1px solid var(--color-line);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-raise);
+  }
+
+  /* ── Touch: the workbench is a surface, not a document ──────
+     Chat, diff, files, ship. Scrolling, dragging and tapping surfaces, where
+     a pinch is a fumbled scroll and the page ending up at 1.4× with the
+     composer off the right edge is a bug rather than a preference.
+
+     `pan-x pan-y` allows both scroll directions and refuses the pinch, which
+     is the whole of it in every browser except Safari — Safari has ignored
+     `user-scalable=no` for pinch since iOS 10, deliberately, and honours
+     `touch-action` for scrolling but not for its own gesture recognisers.
+     The JavaScript half of this lives in `useNoZoom`; neither half works
+     alone.
+
+     Deliberately *not* on `body`. Tasks, Configuration, login and setup are
+     documents and keep pinch, because taking zoom away from a page of prose
+     is taking away an accessibility feature to solve a problem that page does
+     not have. The diff gets a size control instead — see `DiffTab`. */
+  .no-zoom {
+    touch-action: pan-x pan-y;
+  }
+
+  /* ── There is no `.safe-bottom` here, on purpose ─────────────
+     `viewport-fit: cover` draws under the notch and the home indicator, so
+     everything resting on an edge has to say how far in that edge really is.
+     The obvious way to write that is a class — and a class in this layer loses
+     to any `pb-*` sitting beside it on the same element, because a *layer*
+     beats specificity and utilities come after components. It does not warn;
+     it just silently does nothing, which it did in three places before this
+     comment replaced it.
+
+     So the insets are written as ordinary utilities at the point of use —
+     `pb-[max(1rem,env(safe-area-inset-bottom))]` — which compose with
+     `sm:pb-3` the way every other padding in the app does. The one rule that
+     genuinely cannot be a utility, because it has to reach forty fields that
+     do not know about it, is at the foot of this file and is outside every
+     layer for the same reason. */
+
+}
+
+/* ── The one loud thing: an agent waiting on you ───────────── */
+@keyframes ember-pulse {
+  0%,
+  100% {
+    opacity: 0.32;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.08;
+    transform: scale(1.9);
+  }
+}
+
+@keyframes breathe {
+  0%,
+  100% {
+    opacity: 0.5;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@keyframes stem-rise {
+  from {
+    transform: scaleY(0);
+    opacity: 0;
+  }
+  to {
+    transform: scaleY(1);
+    opacity: 1;
+  }
+}
+
+@keyframes caret {
+  0%,
+  49% {
+    opacity: 1;
+  }
+  50%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes drift {
+  from {
+    background-position: 0 0;
+  }
+  to {
+    background-position: 240px 0;
+  }
+}
+
+.ember-pulse {
+  animation: ember-pulse 3.2s ease-in-out infinite;
+}
+.breathe {
+  animation: breathe 2.6s ease-in-out infinite;
+}
+.stem-rise {
+  transform-origin: bottom;
+  animation: stem-rise 700ms var(--ease-swift) backwards;
+}
+.caret {
+  animation: caret 1.05s step-end infinite;
+}
+
+/* ── The rail: a session read at a glance ───────────────────
+   A transcript is not a chat log here. Somebody arriving at a session wants to
+   know where the agent got to and what stopped it, then leave — so the shape of
+   the run has to be readable before any of the words are.
+
+   Markers in the left margin carry that: the marker says *state* — running,
+   done, refused — and the label beside it says *kind*. Prose has no marker at
+   all, because the agent talking is the connective tissue between the things it
+   did, and the most common thing on screen should be the quietest.
+
+   There is no line joining them. A hairline down a whole conversation is a
+   thousand pixels of furniture drawn to say something the markers already say,
+   and it turns every message into an entry in a ledger.
+
+   The rule the whole screen follows: mono is what the machine said, sans is
+   speech, narrow is a label.
+
+   Geometry is derived from two values so a nested group lines up without a
+   second set of numbers. */
+.spine,
+.spine-end {
+  --rail: 13px;
+  --gap: 18px;
+}
+
+.spine {
+  position: relative;
+  padding-left: calc(var(--rail) + var(--gap));
+}
+
+.node {
+  position: relative;
+}
+/* In the margin, centred on where the rail used to be, so nested groups reuse
+   this untouched. */
+.node > .mark {
+  position: absolute;
+  left: calc((var(--rail) + var(--gap)) * -1);
+  top: 6px;
+  width: calc(var(--rail) * 2);
+  display: flex;
+  justify-content: center;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1.4;
+  color: var(--color-mute);
+}
+.node > .mark[data-state="running"] {
+  color: var(--color-slate);
+}
+.node > .mark[data-state="failed"] {
+  color: var(--color-brick);
+}
+.node > .mark[data-state="you"] {
+  color: var(--color-ember);
+}
+
+/* Where it stops, which is the answer to "what is it doing".
+   Slate while it is going, ember only once it is waiting on you — the same two
+   colours the rest of the app uses for those two facts. */
+.spine-end {
+  position: relative;
+  height: 16px;
+}
+.spine-end > .tip {
+  position: absolute;
+  left: calc(var(--rail) - 2px);
+  top: 6px;
+  width: 6px;
+  height: 6px;
+  border-radius: 99px;
+  background: var(--color-slate);
+}
+.spine-end > .tip[data-state="you"] {
+  background: var(--color-ember);
+}
+
+/* A subagent gets its own margin, one level in. Same rules, quieter. */
+.spine-nested {
+  --rail: 5px;
+  --gap: 13px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+/* ── Anything you type into is at least 16px, on a touch screen ──
+   Under 16px, iOS zooms the page in when a field takes focus and does not
+   zoom back out. Half of what reads as "the app zoomed by itself" is this
+   rather than a pinch, and it is the composer — the field everybody touches —
+   that provokes it.
+
+   ## Why this is here rather than a class on each field
+
+   Two reasons, and the second is the one that decided it.
+
+   There are forty of them. A rule per field is forty chances to add the
+   forty-first without it, and nothing that would ever say so.
+
+   And a class would not work. Tailwind's layer order is
+   `theme, base, components, utilities`, and a *layer* beats specificity — so
+   `.type-into` in `@layer components` loses to the `text-body` sitting beside
+   it on the same element, however specific it is. Putting it in `@layer
+   utilities` would work only by being later in the file than the generated
+   utilities, which is true today and is not a thing to depend on.
+
+   Declarations outside every layer take precedence over layered ones, whatever
+   their specificity. So this element selector beats `.text-meta` without
+   fighting it, and does so by a rule the cascade guarantees rather than by
+   source order.
+
+   Above `md` none of it applies and the type scale is untouched: there is no
+   soft keyboard to provoke, and 13px is what the interface is drawn at.
+
+   `font-size` only. Line height belongs to the size the element was given —
+   a message box and a one-line field want different ones, and this knows
+   nothing about which it is looking at. */
+@media (width < 48rem) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+  textarea,
+  select {
+    font-size: var(--text-input);
+  }
+}

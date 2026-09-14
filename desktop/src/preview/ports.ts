@@ -7,7 +7,7 @@
  * `:5173`, `port 8000` — newest first, with the line it came from as the
  * caption. The field beside them is for everything the transcript missed.
  */
-import type { Item } from "@/src/api/conversation";
+import type { Item } from "~/api/conversation";
 
 export type Suggested = { port: number; why: string };
 

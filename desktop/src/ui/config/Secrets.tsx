@@ -9,8 +9,8 @@
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Eye, EyeOff, Plus, Trash2 } from "lucide-react";
-import { Icon } from "@/components/ui";
-import { getListSecretsQueryKey, useListSecrets, useRemoveSecret, useReplaceSecret, useRevealSecret } from "@/src/api/generated/secrets/secrets";
+import { Icon } from "~/components/ui";
+import { getListSecretsQueryKey, useListSecrets, useRemoveSecret, useReplaceSecret, useRevealSecret } from "~/api/generated/secrets/secrets";
 import { Section } from "~/ui/config/bits";
 
 import { why } from "~/data";

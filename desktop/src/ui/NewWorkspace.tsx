@@ -19,21 +19,21 @@
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Box, Check, ChevronDown, Cpu, GitBranch, Plus, Search, Server, Terminal, X } from "lucide-react";
-import { GithubMark, Icon } from "@/components/ui";
-import { AgentMark } from "@/components/AgentMark";
+import { GithubMark, Icon } from "~/components/ui";
+import { AgentMark } from "~/components/AgentMark";
 import {
   canRun,
   defaultMode,
   resolve,
   type Where,
-} from "@/components/WhereItRuns";
-import { machineLabel, machines, modesOn, isLocal } from "@/src/api/environments";
-import type { Agent, Execution, Share } from "@/src/api/generated/model";
-import { useCreateSession } from "@/src/api/generated/sessions/sessions";
+} from "~/components/WhereItRuns";
+import { machineLabel, machines, modesOn, isLocal } from "~/api/environments";
+import type { Agent, Execution, Share } from "~/api/generated/model";
+import { useCreateSession } from "~/api/generated/sessions/sessions";
 import { useAccounts, useAgents, useHosts, useRepos } from "~/data";
 import type { Backend } from "~/fleet";
 import { navigate } from "~/shims/next-navigation";
-import { leaveDraft } from "@/src/workspace/draft";
+import { leaveDraft } from "~/workspace/draft";
 import { isMac } from "~/platform";
 
 export type Seed = {

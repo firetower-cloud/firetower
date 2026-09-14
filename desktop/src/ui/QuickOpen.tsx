@@ -10,7 +10,7 @@
  */
 import { useEffect, useMemo, useState } from "react";
 import { CornerDownLeft } from "lucide-react";
-import { useFindFiles } from "@/src/api/generated/sessions/sessions";
+import { useFindFiles } from "~/api/generated/sessions/sessions";
 import { langOf } from "~/syntax";
 
 const TONE: Record<string, string> = { rust: "text-kind-native", ts: "text-kind-source", sql: "text-kind-store", toml: "text-kind-data", make: "text-kind-style", text: "text-kind-prose" };

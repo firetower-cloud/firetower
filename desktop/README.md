@@ -17,32 +17,20 @@ pnpm dev        # or just the renderer, in a browser tab
 
 The style guide is in the rail while developing.
 
-## What is shared with `web/`, and what is not
+## Nothing is shared with `web/`
 
-**Shared: the vocabulary.** `group()`, `doing()`, `shortRepo()`, `elapsed()`,
-`Signal`, `AgentMark`, the `ui/` primitives, and every token in
-`globals.css` — resolved out of `../web`, not copied. So both clients group by
-repository the same way, decide what a workspace is *doing* the same way, and
-mean the same thing by ember.
+The two clients are generated from the same contract, `api/openapi.json`, and
+that is the whole relationship. `orval.config.ts` here writes this client's
+SDK into `src/api/generated/` with `src/client/http.ts` as the mutator, which
+is how the desktop gets a *current server*: a Mac that has connected to
+several needs one base URL and one token per server, not one in module scope.
 
-**Not shared: the screens.** A window is not a page. It wants 34px rows instead
-of a 44px touch floor, a title bar that is part of the app, tabs with ⌘-numbers,
-and no drawer. Rendering `web/`'s own route components in a window was tried
-first and is the wrong trade: it inherits Next's routing and mobile breakpoints
-to save work on layouts that have to change anyway.
-
-The line is: **patterns and vocabulary are shared, layout is not.**
-
-## The one module the desktop replaces
-
-`web/orval.config.ts` points all 86 generated operations at one mutator, so
-swapping that single module (`src/client/http.ts`) is how the desktop gets a
-*current server*: the web's mutator reads one base URL and one token from
-module scope, and a Mac that has connected to several needs one per server.
-`vite.config.ts` swaps it by resolved path, because orval writes
-`import { http } from '../../http'` and an alias on the specifier never sees
-it. That was a silent failure once: every request 404s and the screens render
-empty rather than wrong.
+Everything else the desktop once resolved out of `../web` lives here now:
+the API helpers in `src/api/`, `Signal`, `AgentMark`, `Markdown` and the
+`ui/` primitives in `src/components/`, and the tokens in `src/globals.css`.
+The web console keeps its own copies of the few it still uses, and the two
+are free to drift: a window wants 34px rows, a title bar that is part of the
+app and tabs with ⌘-numbers, none of which a page does.
 
 ## Several servers, not one
 
@@ -57,8 +45,10 @@ server changes.
 
 ```
 src/
-  shims/      next/link, next/navigation, next/font — the whole Next coupling,
-              plus the history patch that makes the shell own addresses
+  shims/      the hash router (`navigate`, `usePathname`, `Link`), plus the
+              history patch that makes the shell own addresses
+  api/        the generated SDK and the hand-written helpers over it
+  components/ Signal, AgentMark, Markdown, WhereItRuns, Steps, the ui/ primitives
   client/     the mutator, with a current server
   servers.ts  the registry of connected servers; fleet.ts reads across them
   preview/    the picker bridge, notes, port suggestions
@@ -67,7 +57,6 @@ src/
               NewWorkspace, Configuration (+ config/), Connect, Fleet,
               ServerStrip, Titlebar, Palette, StylePage
   syntax.ts   ordered regexes, not a parser — enough to read code by
-  overrides/  a component copied here wins over the one in ../web
 src-tauri/    the shell: window, vibrancy, dock badge, notifications
 ```
 

@@ -12,7 +12,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { CornerDownLeft, Search } from "lucide-react";
 import { useFleet } from "~/fleet";
-import { group, shortRepo } from "@/src/api/workspaces";
+import { group, shortRepo } from "~/api/workspaces";
 import { navigate } from "~/shims/next-navigation";
 
 type Item = {

@@ -10,9 +10,9 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle } from "lucide-react";
-import { accountsKey, exhausted, sessionAccountKey, switchAccount, useAccounts, useSessionAccount } from "@/src/api/accounts";
-import type { Session } from "@/src/api/generated/model";
-import { getGetSessionQueryKey, getListSessionsQueryKey } from "@/src/api/generated/sessions/sessions";
+import { accountsKey, exhausted, sessionAccountKey, switchAccount, useAccounts, useSessionAccount } from "~/api/accounts";
+import type { Session } from "~/api/generated/model";
+import { getGetSessionQueryKey, getListSessionsQueryKey } from "~/api/generated/sessions/sessions";
 
 import { why } from "~/data";
 

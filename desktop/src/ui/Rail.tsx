@@ -11,17 +11,17 @@
  */
 import { BookOpen, CircleDashed, CircleFadingArrowUp, LayoutList, ListTodo, Plus, Settings2 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import { Signal } from "@/components/Signal";
-import { AgentMark } from "@/components/AgentMark";
-import { GithubMark, Icon } from "@/components/ui";
-import { doing, group, shortRepo, type Workspace } from "@/src/api/workspaces";
-import { elapsed, minutesSince, needsYou } from "@/src/api/view";
+import { Signal } from "~/components/Signal";
+import { AgentMark } from "~/components/AgentMark";
+import { GithubMark, Icon } from "~/components/ui";
+import { doing, group, shortRepo, type Workspace } from "~/api/workspaces";
+import { elapsed, minutesSince, needsYou } from "~/api/view";
 import type { Backend } from "~/fleet";
 import { useSessions, useUpdatesDot } from "~/data";
 import { navigate, usePathname } from "~/shims/next-navigation";
 import { useStart } from "~/start";
 import { useQueryClient } from "@tanstack/react-query";
-import { getListSessionsQueryKey, renameSession } from "@/src/api/generated/sessions/sessions";
+import { getListSessionsQueryKey, renameSession } from "~/api/generated/sessions/sessions";
 import { ContextMenu, useMenu } from "~/ui/ContextMenu";
 import { usePrompt } from "~/ui/Confirm";
 import { useEndWorkspace } from "~/ui/end";

@@ -2,27 +2,27 @@
  * What the screens read: one hook per thing, off the generated client, with
  * the loading and error states already shaped for a screen.
  */
-import { useListSessions } from "@/src/api/generated/sessions/sessions";
-import { useListRepos } from "@/src/api/generated/repos/repos";
-import { useListTasks } from "@/src/api/generated/tasks/tasks";
-import { useListHosts } from "@/src/api/generated/hosts/hosts";
-import { useListAgents } from "@/src/api/generated/agents/agents";
-import { useListProviders } from "@/src/api/generated/providers/providers";
-import { useListAccounts } from "@/src/api/generated/accounts/accounts";
-import { useMe } from "@/src/api/generated/auth/auth";
-import { useSetupState } from "@/src/api/generated/setup/setup";
-import { useGetUpdates } from "@/src/api/generated/updates/updates";
-import { showsDot } from "@/src/api/updates";
-import { useListTrackers } from "@/src/api/generated/trackers/trackers";
+import { useListSessions } from "~/api/generated/sessions/sessions";
+import { useListRepos } from "~/api/generated/repos/repos";
+import { useListTasks } from "~/api/generated/tasks/tasks";
+import { useListHosts } from "~/api/generated/hosts/hosts";
+import { useListAgents } from "~/api/generated/agents/agents";
+import { useListProviders } from "~/api/generated/providers/providers";
+import { useListAccounts } from "~/api/generated/accounts/accounts";
+import { useMe } from "~/api/generated/auth/auth";
+import { useSetupState } from "~/api/generated/setup/setup";
+import { useGetUpdates } from "~/api/generated/updates/updates";
+import { showsDot } from "~/api/updates";
+import { useListTrackers } from "~/api/generated/trackers/trackers";
 import {
   getListSessionsQueryKey,
   useGetSession,
   useListFiles,
   useSessionDiff,
-} from "@/src/api/generated/sessions/sessions";
+} from "~/api/generated/sessions/sessions";
 import { useMemo } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import type { DiffSince, FileDiff, Repo, Session, Task, TaskKind, TaskState } from "@/src/api/generated/model";
+import type { DiffSince, FileDiff, Repo, Session, Task, TaskKind, TaskState } from "~/api/generated/model";
 
 /** Everything a screen needs to know about where its data came from. */
 export type Feed<T> = { data: T; loading: boolean; error: string | null };

@@ -9,10 +9,10 @@
 import { useEffect, useRef, useState } from "react";
 import { Globe, PanelRight, Pencil, SquareTerminal, Trash2, X } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
-import { getListSessionsQueryKey, useRenameSession } from "@/src/api/generated/sessions/sessions";
-import { Signal } from "@/components/Signal";
-import { AgentMark } from "@/components/AgentMark";
-import { group } from "@/src/api/workspaces";
+import { getListSessionsQueryKey, useRenameSession } from "~/api/generated/sessions/sessions";
+import { Signal } from "~/components/Signal";
+import { AgentMark } from "~/components/AgentMark";
+import { group } from "~/api/workspaces";
 import type { Backend } from "~/fleet";
 import { useSession, useSessions } from "~/data";
 import { navigate } from "~/shims/next-navigation";

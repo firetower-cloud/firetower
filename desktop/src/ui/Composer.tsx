@@ -17,11 +17,11 @@
  */
 import { useEffect, useRef, useState } from "react";
 import { ArrowUp, Check, ChevronDown, FileUp, ImageIcon, Paperclip, Square, X } from "lucide-react";
-import type { Conversation } from "@/src/api/conversation";
-import type { Attached, Control, ControlKind, Session } from "@/src/api/generated/model";
-import { useAttachFile, useInterruptSession, useListFiles, useSendTurn } from "@/src/api/generated/sessions/sessions";
-import { useChooseControl, useSessionControls } from "@/src/api/generated/conversation/conversation";
-import { takeDraft } from "@/src/workspace/draft";
+import type { Conversation } from "~/api/conversation";
+import type { Attached, Control, ControlKind, Session } from "~/api/generated/model";
+import { useAttachFile, useInterruptSession, useListFiles, useSendTurn } from "~/api/generated/sessions/sessions";
+import { useChooseControl, useSessionControls } from "~/api/generated/conversation/conversation";
+import { takeDraft } from "~/workspace/draft";
 
 type Chip = { name: string; kind: "image" | "file"; size: string; url?: string; path?: string };
 

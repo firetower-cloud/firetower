@@ -12,30 +12,25 @@
    reasons that have nothing to do with the change being made. */
 @font-face {
   font-family: "Archivo";
-  src: url("../../web/public/fonts/archivo.woff2") format("woff2");
+  src: url("./fonts/archivo.woff2") format("woff2");
   font-weight: 100 900;
   font-display: swap;
 }
 @font-face {
   font-family: "Archivo Narrow";
-  src: url("../../web/public/fonts/archivo-narrow.woff2") format("woff2");
+  src: url("./fonts/archivo-narrow.woff2") format("woff2");
   font-weight: 100 900;
   font-display: swap;
 }
 @font-face {
   font-family: "JetBrains Mono";
-  src: url("../../web/public/fonts/jetbrains-mono.woff2") format("woff2");
+  src: url("./fonts/jetbrains-mono.woff2") format("woff2");
   font-weight: 100 800;
   font-display: swap;
 }
 
-@import "../../web/app/globals.css";
+@import "./globals.css";
 
-/* Tailwind v4 finds classes through the module graph, and the components live
-   outside this package. Say so explicitly rather than relying on it. */
-@source "../../web/components";
-@source "../../web/app";
-@source "../../web/src";
 @source "./";
 
 @theme {

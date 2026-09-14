@@ -14,8 +14,8 @@
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Check, Link2, Unlink, X } from "lucide-react";
-import { GithubMark, Icon } from "@/components/ui";
-import type { ProviderStatus, TrackerStatus } from "@/src/api/generated/model";
+import { GithubMark, Icon } from "~/components/ui";
+import type { ProviderStatus, TrackerStatus } from "~/api/generated/model";
 import {
   getListProvidersQueryKey,
   listProviders,
@@ -25,8 +25,8 @@ import {
   useGetIdentity,
   useSetClientId,
   useSetIdentity,
-} from "@/src/api/generated/providers/providers";
-import { getListTrackersQueryKey, useDisconnectTracker, useListTrackerScopes, useSetTrackerKey } from "@/src/api/generated/trackers/trackers";
+} from "~/api/generated/providers/providers";
+import { getListTrackersQueryKey, useDisconnectTracker, useListTrackerScopes, useSetTrackerKey } from "~/api/generated/trackers/trackers";
 import { useProviders, useTrackers } from "~/data";
 import { why } from "~/data";
 import { openExternal } from "~/open";

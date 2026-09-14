@@ -8,7 +8,7 @@
  */
 import { useEffect, useRef, useState } from "react";
 import { Globe } from "lucide-react";
-import { useConversation } from "@/src/api/conversation";
+import { useConversation } from "~/api/conversation";
 import { suggestPorts } from "~/preview/ports";
 
 export function PortPicker({ sessionId, open: already, onPick, onClose }: { sessionId: string; open: number[]; onPick: (port: number) => void; onClose: () => void }) {

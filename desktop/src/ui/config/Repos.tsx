@@ -10,8 +10,8 @@
 import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Check, ChevronDown, Loader2, Plus, Trash2, X } from "lucide-react";
-import { GithubMark, Icon } from "@/components/ui";
-import type { Repo } from "@/src/api/generated/model";
+import { GithubMark, Icon } from "~/components/ui";
+import type { Repo } from "~/api/generated/model";
 import {
   getListReposQueryKey,
   useCreateRepo,
@@ -21,8 +21,8 @@ import {
   usePutRepoEnv,
   useRemoveRepoEnv,
   useUpdateRepo,
-} from "@/src/api/generated/repos/repos";
-import { useListProviderRepos } from "@/src/api/generated/providers/providers";
+} from "~/api/generated/repos/repos";
+import { useListProviderRepos } from "~/api/generated/providers/providers";
 import { useProviders, useRepos } from "~/data";
 import { why } from "~/data";
 import { Rows, Section } from "~/ui/config/bits";

@@ -7,7 +7,7 @@
  * they are real before anything is opened: `find_files` by the last segment,
  * then the candidate that ends with what was written.
  */
-import { findFiles } from "@/src/api/generated/sessions/sessions";
+import { findFiles } from "~/api/generated/sessions/sessions";
 
 export type Found = { text: string; path: string; line?: number; start: number; end: number };
 

@@ -12,10 +12,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { ChevronRight, FileCode2, FileDiff, FolderTree, MessageSquarePlus, PanelRightClose, Ship as ShipIcon } from "lucide-react";
-import { useListFiles } from "@/src/api/generated/sessions/sessions";
-import type { FileEntry, Session } from "@/src/api/generated/model";
-import { sendTurn } from "@/src/api/generated/sessions/sessions";
-import { asMessage } from "@/src/api/notes";
+import { useListFiles } from "~/api/generated/sessions/sessions";
+import type { FileEntry, Session } from "~/api/generated/model";
+import { sendTurn } from "~/api/generated/sessions/sessions";
+import { asMessage } from "~/api/notes";
 import { useDiff } from "~/data";
 import { fromPatch, isNew } from "~/patch";
 import { why } from "~/data";

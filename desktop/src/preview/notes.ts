@@ -8,7 +8,7 @@
  */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { http } from "~/client/http";
-import type { KeepAnnotation, PreviewAnnotation } from "@/src/api/generated/model";
+import type { KeepAnnotation, PreviewAnnotation } from "~/api/generated/model";
 
 const at = (session: string) => `/api/v1/sessions/${encodeURIComponent(session)}/annotations`;
 const json = (body: unknown): RequestInit => ({ headers: { "content-type": "application/json" }, body: JSON.stringify(body) });

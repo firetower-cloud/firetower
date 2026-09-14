@@ -12,7 +12,7 @@
 import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { KeyRound, LogOut, Trash2 } from "lucide-react";
-import { useChangePassword, useLogout, useMe } from "@/src/api/generated/auth/auth";
+import { useChangePassword, useLogout, useMe } from "~/api/generated/auth/auth";
 import { useBackendKey, dropCache } from "~/backend";
 import { forget, servers, updateToken } from "~/servers";
 import { navigate } from "~/shims/next-navigation";

@@ -15,10 +15,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Bot, X } from "lucide-react";
-import { AgentMark } from "@/components/AgentMark";
-import { unavailable } from "@/components/workspace/StartAgent";
-import { getListSessionsQueryKey, useCreateSession } from "@/src/api/generated/sessions/sessions";
-import type { Agent, Session } from "@/src/api/generated/model";
+import { AgentMark } from "~/components/AgentMark";
+import { unavailable } from "~/components/workspace/StartAgent";
+import { getListSessionsQueryKey, useCreateSession } from "~/api/generated/sessions/sessions";
+import type { Agent, Session } from "~/api/generated/model";
 import { useAccounts, useAgents, useHosts, why } from "~/data";
 import { navigate } from "~/shims/next-navigation";
 

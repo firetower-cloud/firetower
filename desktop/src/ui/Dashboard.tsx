@@ -8,17 +8,17 @@
  */
 import { useMemo, useState } from "react";
 import { CircleDashed, Plus } from "lucide-react";
-import { Signal } from "@/components/Signal";
-import { AgentMark } from "@/components/AgentMark";
-import { GithubMark, Icon } from "@/components/ui";
-import { doing, group, shortRepo, type Workspace } from "@/src/api/workspaces";
-import { elapsed, minutesSince, needsYou } from "@/src/api/view";
+import { Signal } from "~/components/Signal";
+import { AgentMark } from "~/components/AgentMark";
+import { GithubMark, Icon } from "~/components/ui";
+import { doing, group, shortRepo, type Workspace } from "~/api/workspaces";
+import { elapsed, minutesSince, needsYou } from "~/api/view";
 import type { Backend } from "~/fleet";
 import { useSessions } from "~/data";
 import { navigate } from "~/shims/next-navigation";
 import { useStart } from "~/start";
 import { useQueryClient } from "@tanstack/react-query";
-import { endAllSessions, getListSessionsQueryKey } from "@/src/api/generated/sessions/sessions";
+import { endAllSessions, getListSessionsQueryKey } from "~/api/generated/sessions/sessions";
 import { useConfirm } from "~/ui/Confirm";
 import { why } from "~/data";
 

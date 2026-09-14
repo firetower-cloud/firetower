@@ -42,6 +42,8 @@ const browser: Bridge = {
 };
 
 function tauri(): Bridge | null {
+  // No window under a test runner; the browser bridge is the harmless one.
+  if (typeof window === "undefined") return null;
   const w = window as unknown as { __TAURI_INTERNALS__?: unknown };
   if (!w.__TAURI_INTERNALS__) return null;
 

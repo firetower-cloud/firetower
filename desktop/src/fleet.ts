@@ -12,8 +12,8 @@
  * merged inbox is a glance, and each server's own screen is on its stream.
  */
 import { useEffect, useState } from "react";
-import type { Session } from "@/src/api/generated/model";
-import { NEEDS_YOU } from "@/src/api/view";
+import type { Session } from "~/api/generated/model";
+import { NEEDS_YOU } from "~/api/view";
 import { onServers, servers, type Connected } from "~/servers";
 
 export type Reach = "live" | "unreachable";

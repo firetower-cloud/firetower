@@ -8,9 +8,9 @@
  */
 import { useRef, useState } from "react";
 import { Box, GitBranch, Monitor } from "lucide-react";
-import { useSessionWork } from "@/src/api/generated/sessions/sessions";
-import type { Host, Session } from "@/src/api/generated/model";
-import { executionOf, isLocal, machines } from "@/src/api/environments";
+import { useSessionWork } from "~/api/generated/sessions/sessions";
+import type { Host, Session } from "~/api/generated/model";
+import { executionOf, isLocal, machines } from "~/api/environments";
 import { useHosts, useSessions } from "~/data";
 import { navigate } from "~/shims/next-navigation";
 

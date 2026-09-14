@@ -11,11 +11,11 @@
 import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Check, ChevronDown, Download, Plus, RefreshCw, Trash2, X } from "lucide-react";
-import { AgentMark } from "@/components/AgentMark";
-import { Icon } from "@/components/ui";
-import type { Account, AgentView } from "@/src/api/generated/model";
-import { getListAgentsQueryKey, useCheckAgents, useConfigureAgent, useForgetAgent, useInstallAgent, useSignAgentIn } from "@/src/api/generated/agents/agents";
-import { getListAccountsQueryKey, useCreateAccount, useListAccounts, useUpdateAccount } from "@/src/api/generated/accounts/accounts";
+import { AgentMark } from "~/components/AgentMark";
+import { Icon } from "~/components/ui";
+import type { Account, AgentView } from "~/api/generated/model";
+import { getListAgentsQueryKey, useCheckAgents, useConfigureAgent, useForgetAgent, useInstallAgent, useSignAgentIn } from "~/api/generated/agents/agents";
+import { getListAccountsQueryKey, useCreateAccount, useListAccounts, useUpdateAccount } from "~/api/generated/accounts/accounts";
 import { useAccounts, useAgents, useHosts } from "~/data";
 import { why } from "~/data";
 import { DeviceCode, Rows, Section } from "~/ui/config/bits";

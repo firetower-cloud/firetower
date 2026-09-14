@@ -37,17 +37,17 @@ import {
   X,
 } from "lucide-react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Icon } from "@/components/ui";
-import { Markdown } from "@/components/Markdown";
-import { editFrom } from "@/components/EditCard";
-import { stepLines } from "@/components/Steps";
-import { useConversation, type Asked, type Item, type Questionnaire, type Task } from "@/src/api/conversation";
-import { fold, summarise } from "@/src/api/steps";
-import type { Decision, Event, ItemKind, PlanStep, RequestKind, Session } from "@/src/api/generated/model";
-import { useAnswerRequest, useRelaunchSession, getGetSessionQueryKey, sendTurn } from "@/src/api/generated/sessions/sessions";
-import { asMessage, useNotes, type Note } from "@/src/api/notes";
-import { useListEvents } from "@/src/api/generated/events/events";
-import { elapsed, minutesSince } from "@/src/api/view";
+import { Icon } from "~/components/ui";
+import { Markdown } from "~/components/Markdown";
+import { editFrom } from "~/components/EditCard";
+import { stepLines } from "~/components/Steps";
+import { useConversation, type Asked, type Item, type Questionnaire, type Task } from "~/api/conversation";
+import { fold, summarise } from "~/api/steps";
+import type { Decision, Event, ItemKind, PlanStep, RequestKind, Session } from "~/api/generated/model";
+import { useAnswerRequest, useRelaunchSession, getGetSessionQueryKey, sendTurn } from "~/api/generated/sessions/sessions";
+import { asMessage, useNotes, type Note } from "~/api/notes";
+import { useListEvents } from "~/api/generated/events/events";
+import { elapsed, minutesSince } from "~/api/view";
 import { Composer } from "~/ui/Composer";
 import { AccountSwitcher } from "~/ui/AccountSwitcher";
 import { Annotate, type Anchor } from "~/ui/Annotate";

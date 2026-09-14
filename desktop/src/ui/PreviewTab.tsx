@@ -14,9 +14,9 @@
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Bot, ChevronLeft, ChevronRight, ExternalLink, Monitor, RotateCw, Send, Smartphone, Tablet, Trash2 } from "lucide-react";
-import { usePreviewAddress } from "@/src/api/generated/sessions/sessions";
-import type { PreviewAnnotation, Session } from "@/src/api/generated/model";
-import { elapsed, minutesSince } from "@/src/api/view";
+import { usePreviewAddress } from "~/api/generated/sessions/sessions";
+import type { PreviewAnnotation, Session } from "~/api/generated/model";
+import { elapsed, minutesSince } from "~/api/view";
 import { why } from "~/data";
 import { openExternal } from "~/open";
 import { Annotate, type Anchor } from "~/ui/Annotate";

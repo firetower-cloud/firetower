@@ -14,8 +14,8 @@
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Check, ChevronDown, Copy, Cpu, HardDrive, Key, Loader2, Plus, Trash2, X } from "lucide-react";
-import { Icon } from "@/components/ui";
-import type { Compute, Diagnosis, Host } from "@/src/api/generated/model";
+import { Icon } from "~/components/ui";
+import type { Compute, Diagnosis, Host } from "~/api/generated/model";
 import {
   getListHostsQueryKey,
   useConnectHost,
@@ -27,8 +27,8 @@ import {
   useProbeHost,
   useRenameHost,
   useSshKey,
-} from "@/src/api/generated/hosts/hosts";
-import { parseDestination } from "@/src/api/environments";
+} from "~/api/generated/hosts/hosts";
+import { parseDestination } from "~/api/environments";
 import { useHosts } from "~/data";
 import { Rows, Section } from "~/ui/config/bits";
 import { useConfirm } from "~/ui/Confirm";

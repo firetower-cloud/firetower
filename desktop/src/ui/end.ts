@@ -7,8 +7,8 @@
  * `session_work` — and put in the question, the way the web puts it.
  */
 import { useQueryClient } from "@tanstack/react-query";
-import { destroySession, getListSessionsQueryKey, sessionWork } from "@/src/api/generated/sessions/sessions";
-import type { Workspace } from "@/src/api/workspaces";
+import { destroySession, getListSessionsQueryKey, sessionWork } from "~/api/generated/sessions/sessions";
+import type { Workspace } from "~/api/workspaces";
 import { useConfirm } from "~/ui/Confirm";
 import { why } from "~/data";
 

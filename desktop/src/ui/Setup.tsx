@@ -9,8 +9,8 @@
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Check, Loader2 } from "lucide-react";
-import { useChangePassword } from "@/src/api/generated/auth/auth";
-import { getSetupStateQueryKey, useCompleteSetup, useNameOrganization, useSetupState } from "@/src/api/generated/setup/setup";
+import { useChangePassword } from "~/api/generated/auth/auth";
+import { getSetupStateQueryKey, useCompleteSetup, useNameOrganization, useSetupState } from "~/api/generated/setup/setup";
 import { useBackendKey } from "~/backend";
 import { updateToken } from "~/servers";
 

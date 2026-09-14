@@ -11,11 +11,11 @@
  */
 import { useMemo } from "react";
 import { CircleDashed, CircleSlash2 } from "lucide-react";
-import { Signal } from "@/components/Signal";
-import { AgentMark } from "@/components/AgentMark";
-import { GithubMark, Icon, PageHead } from "@/components/ui";
-import { doing, group, shortRepo, type Workspace } from "@/src/api/workspaces";
-import { elapsed, minutesSince, needsYou } from "@/src/api/view";
+import { Signal } from "~/components/Signal";
+import { AgentMark } from "~/components/AgentMark";
+import { GithubMark, Icon, PageHead } from "~/components/ui";
+import { doing, group, shortRepo, type Workspace } from "~/api/workspaces";
+import { elapsed, minutesSince, needsYou } from "~/api/view";
 import type { Backend } from "~/fleet";
 import { useFleet, waitingIn } from "~/fleet";
 import { navigate } from "~/shims/next-navigation";

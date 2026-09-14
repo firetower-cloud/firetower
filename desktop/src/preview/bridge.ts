@@ -11,7 +11,7 @@
  * on the channel until the picker has answered a hello with `ready`.
  */
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
-import { snapshotSchema, type ElementSnapshot } from "@/src/api/previewAnnotations";
+import { snapshotSchema, type ElementSnapshot } from "~/api/previewAnnotations";
 
 export type Selection = { snapshot: ElementSnapshot; parents: string[] };
 

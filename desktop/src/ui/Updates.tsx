@@ -11,8 +11,8 @@
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, Check, Download, Loader2, RefreshCw, Save, X } from "lucide-react";
-import { Icon } from "@/components/ui";
-import type { FilePlan, UpdateRun, UpdateStatus } from "@/src/api/generated/model";
+import { Icon } from "~/components/ui";
+import type { FilePlan, UpdateRun, UpdateStatus } from "~/api/generated/model";
 import {
   getGetUpdatesQueryKey,
   getListRunsQueryKey,
@@ -25,8 +25,8 @@ import {
   useGetUpdates,
   useListRuns,
   usePlanUpdate,
-} from "@/src/api/generated/updates/updates";
-import { ACTIVE, countEnded, everythingUpgradable, needsChoice, willWrite, wouldEnd } from "@/src/api/updates";
+} from "~/api/generated/updates/updates";
+import { ACTIVE, countEnded, everythingUpgradable, needsChoice, willWrite, wouldEnd } from "~/api/updates";
 import { useBackendKey } from "~/backend";
 
 import { why } from "~/data";

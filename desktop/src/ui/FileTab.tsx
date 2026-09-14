@@ -12,10 +12,10 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { Bot, Check, Copy, Send, X } from "lucide-react";
-import { Markdown } from "@/components/Markdown";
-import { isMarkdown, useFileText } from "@/src/api/text";
-import { sendTurn } from "@/src/api/generated/sessions/sessions";
-import type { Session } from "@/src/api/generated/model";
+import { Markdown } from "~/components/Markdown";
+import { isMarkdown, useFileText } from "~/api/text";
+import { sendTurn } from "~/api/generated/sessions/sessions";
+import type { Session } from "~/api/generated/model";
 import { highlight, langOf, TONE } from "~/syntax";
 import { Annotate, type Anchor } from "~/ui/Annotate";
 import { addedLines, removedLines } from "~/patch";

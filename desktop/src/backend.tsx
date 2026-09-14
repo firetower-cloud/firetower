@@ -14,8 +14,8 @@
  */
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createContext, useContext, useEffect, useRef, type ReactNode } from "react";
-import { applyEvent } from "@/src/api/events";
-import { SocketProvider, useSocket } from "@/src/api/socket";
+import { applyEvent } from "~/api/events";
+import { SocketProvider, useSocket } from "~/api/socket";
 import { useBackendId } from "~/client/http";
 
 const clients = new Map<string, QueryClient>();

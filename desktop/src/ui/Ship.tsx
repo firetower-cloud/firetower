@@ -14,7 +14,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { GitBranch, GitPullRequest, Loader2, RefreshCw } from "lucide-react";
-import type { Session } from "@/src/api/generated/model";
+import type { Session } from "~/api/generated/model";
 import {
   getGetSessionQueryKey,
   getListSessionsQueryKey,
@@ -24,9 +24,9 @@ import {
   useOpenPullRequest,
   usePushSession,
   useSessionWork,
-} from "@/src/api/generated/sessions/sessions";
-import { awaiting, done, shipping } from "@/src/api/ship";
-import { idOf, label as refLabel, parseReference, withTrailer, type Reference } from "@/src/api/issues";
+} from "~/api/generated/sessions/sessions";
+import { awaiting, done, shipping } from "~/api/ship";
+import { idOf, label as refLabel, parseReference, withTrailer, type Reference } from "~/api/issues";
 import type { Changed } from "~/ui/Inspector";
 
 import { why } from "~/data";
