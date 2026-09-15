@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.34.3](https://github.com/firetower-cloud/firetower/compare/firetower-v0.34.2...firetower-v0.34.3) (2026-09-15)
+
+
+### Bug Fixes
+
+* **server:** the update check picks its own package's newest release ([4c8b1ac](https://github.com/firetower-cloud/firetower/commit/4c8b1acc8afc8330d1d237b1d9d42d27bfbf500b))
+
 ## [0.34.2](https://github.com/firetower-cloud/firetower/compare/firetower-v0.34.1...firetower-v0.34.2) (2026-09-15)
 
 
