@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.3](https://github.com/firetower-cloud/firetower/compare/desktop-v0.3.2...desktop-v0.3.3) (2026-09-15)
+
+
+### Bug Fixes
+
+* **desktop:** the updater reads a feed of its own ([71a6cc0](https://github.com/firetower-cloud/firetower/commit/71a6cc019d5ad8780df98782ff9ee456673e2c59))
+
 ## [0.3.2](https://github.com/firetower-cloud/firetower/compare/desktop-v0.3.1...desktop-v0.3.2) (2026-09-15)
 
 
