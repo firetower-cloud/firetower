@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.2](https://github.com/firetower-cloud/firetower/compare/desktop-v0.3.1...desktop-v0.3.2) (2026-09-15)
+
+
+### Bug Fixes
+
+* **agents:** stopping a turn asks the agent rather than signalling it ([b7e221c](https://github.com/firetower-cloud/firetower/commit/b7e221c20c995b047c035046664d9f6a5d616199))
+* **desktop:** a refused app names the reason it was refused ([0b5145b](https://github.com/firetower-cloud/firetower/commit/0b5145b8734a405417b6f52cd0df6bbc781d6afc))
+
 ## [0.3.1](https://github.com/firetower-cloud/firetower/compare/desktop-v0.3.0...desktop-v0.3.1) (2026-09-14)
 
 

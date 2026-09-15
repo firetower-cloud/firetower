@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.34.2](https://github.com/firetower-cloud/firetower/compare/firetower-v0.34.1...firetower-v0.34.2) (2026-09-15)
+
+
+### Bug Fixes
+
+* **agents:** stopping a turn asks the agent rather than signalling it ([b7e221c](https://github.com/firetower-cloud/firetower/commit/b7e221c20c995b047c035046664d9f6a5d616199))
+
 ## [0.34.1](https://github.com/firetower-cloud/firetower/compare/firetower-v0.34.0...firetower-v0.34.1) (2026-09-14)
 
 
