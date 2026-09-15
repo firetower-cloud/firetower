@@ -27,8 +27,10 @@ import {
   useRenameHost,
   useSshKey,
 } from "~/api/generated/hosts/hosts";
+import { getListAgentsQueryKey, useInstallAgent } from "~/api/generated/agents/agents";
+import type { AgentView } from "~/api/generated/model";
 import { parseDestination, reachedTheMachine, stateLabel, waitForOnline } from "~/api/environments";
-import { useHosts } from "~/data";
+import { useAgents, useHosts } from "~/data";
 import { Rows, Section } from "~/ui/config/bits";
 import { useConfirm } from "~/ui/Confirm";
 
@@ -84,6 +86,26 @@ function Detail({ host, onGone }: { host: Host; onGone: () => void }) {
   const remove = useDeleteHost();
   const [name, setName] = useState(host.name);
   const [settling, setSettling] = useState(false);
+  /* The agents, from what the Agents screen already records per host. "Ready"
+     is about the machine; which agents can start is its own line, because a
+     green panel that then refuses to launch Claude Code is worse than a red
+     one. */
+  const agents = useAgents();
+  const installAgent = useInstallAgent();
+  const [fetching, setFetching] = useState<string | null>(null);
+  const offered = agents.data.filter((a) => a.enabled && a.supported);
+  const onThis = (a: AgentView) => a.hosts.find((h) => h.hostId === host.id);
+  const toInstall = offered.filter((a) => !onThis(a)?.installed).length;
+  const fetchAgent = async (a: AgentView) => {
+    setFetching(a.kind);
+    try {
+      await installAgent.mutateAsync({ kind: a.kind, data: { hostId: host.id } });
+      await cache.invalidateQueries({ queryKey: getListAgentsQueryKey() });
+      await readiness.refetch();
+    } finally {
+      setFetching(null);
+    }
+  };
   const refresh = () => Promise.all([cache.invalidateQueries({ queryKey: getListHostsQueryKey() }), readiness.refetch()]);
   // The install returns when the binary is there; the machine answers a few
   // seconds later. Wait for that, so the panel turns green on its own.
@@ -104,7 +126,7 @@ function Detail({ host, onGone }: { host: Host; onGone: () => void }) {
 
       <div>
         <div className="flex items-center gap-2">
-          <span className="text-meta text-dim">{readiness.isPending ? "Checking…" : missing.length === 0 && checks.length > 0 ? "Ready" : `${missing.length} thing${missing.length === 1 ? "" : "s"} missing`}</span>
+          <span className="text-meta text-dim">{readiness.isPending ? "Checking…" : missing.length === 0 && checks.length > 0 ? `Ready${toInstall > 0 ? ` · ${toInstall} agent${toInstall === 1 ? "" : "s"} to install` : ""}` : `${missing.length} thing${missing.length === 1 ? "" : "s"} missing`}</span>
           {readiness.data?.user && <span className="font-mono text-micro text-mute">as {readiness.data.user}</span>}
           <button onClick={() => readiness.refetch()} className="ml-auto text-micro text-mute hover:text-bone">check again</button>
         </div>
@@ -126,6 +148,28 @@ function Detail({ host, onGone }: { host: Host; onGone: () => void }) {
           ))}
         </div>
       </div>
+
+      {host.state === "Online" && offered.length > 0 && (
+        <div>
+          <p className="text-micro uppercase tracking-wide text-mute">Agents</p>
+          <div className="mt-1.5 space-y-1">
+            {offered.map((a) => {
+              const here = onThis(a);
+              return (
+                <div key={a.kind} className="flex items-center gap-2 rounded-md bg-ground px-2.5 py-1.5 text-ui">
+                  {here?.installed ? <Check className="h-3.5 w-3.5 text-sage" strokeWidth={2} /> : <X className="h-3.5 w-3.5 text-brick" strokeWidth={2} />}
+                  <span className={here?.installed ? "text-text" : "text-bone"}>{a.label}</span>
+                  <span className="min-w-0 truncate text-meta text-mute">{here?.installed ? (here.version ?? "installed") : "not installed"}</span>
+                  {!here?.installed && (
+                    <button disabled={fetching !== null} onClick={() => fetchAgent(a)} className="control ml-auto border border-line bg-raise text-bone hover:bg-overlay disabled:text-mute">{fetching === a.kind ? "Fetching…" : "Install"}</button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+          {installAgent.isError && <p className="mt-1 text-meta text-brick">{installAgent.error.message}</p>}
+        </div>
+      )}
 
       {checks.some((c) => c.name === "Worker" && !c.available && c.remedy) && (
         <details className="text-meta text-mute">
@@ -176,6 +220,23 @@ function Add({ onClose, onAdded }: { onClose: () => void; onAdded: (id: string) 
      looks broken. */
   const [made, setMade] = useState<{ host: Host; remedy?: string } | null>(null);
   const [settling, setSettling] = useState(false);
+  /* Once the worker answers, one more step: which agents the machine should
+     run, so it is launchable when this closes. */
+  const [stage, setStage] = useState<"worker" | "agents">("worker");
+  const agents = useAgents();
+  const installAgent = useInstallAgent();
+  const [fetched, setFetched] = useState<Record<string, "fetching" | "done" | string>>({});
+  const fetchAgent = async (a: AgentView) => {
+    if (!made) return;
+    setFetched((f) => ({ ...f, [a.kind]: "fetching" }));
+    try {
+      await installAgent.mutateAsync({ kind: a.kind, data: { hostId: made.host.id } });
+      setFetched((f) => ({ ...f, [a.kind]: "done" }));
+    } catch (e) {
+      setFetched((f) => ({ ...f, [a.kind]: (e as Error).message }));
+    }
+    await cache.invalidateQueries({ queryKey: getListAgentsQueryKey() });
+  };
   const [address, setAddress] = useState("");
   const [user, setUser] = useState("");
   const [label, setLabel] = useState("");
@@ -211,10 +272,11 @@ function Add({ onClose, onAdded }: { onClose: () => void; onAdded: (id: string) 
     if (!made) return;
     await installWorker.mutateAsync({ id: made.host.id });
     setSettling(true);
-    await waitForOnline(made.host.id);
+    const online = await waitForOnline(made.host.id);
     setSettling(false);
     await cache.invalidateQueries({ queryKey: getListHostsQueryKey() });
-    onAdded(made.host.id);
+    if (online) setStage("agents");
+    else onAdded(made.host.id);
   };
 
   const pub = (key.data as { publicKey?: string } | undefined)?.publicKey;
@@ -232,7 +294,21 @@ function Add({ onClose, onAdded }: { onClose: () => void; onAdded: (id: string) 
           <button onClick={onClose} className="ml-auto grid h-7 w-7 place-items-center rounded-md text-mute hover:bg-raise hover:text-bone"><X className="h-4 w-4" strokeWidth={1.75} /></button>
         </div>
 
-        {made ? (
+        {made && stage === "agents" ? (
+          <div className="space-y-3 px-5 py-4">
+            <p className="flex items-center gap-2 text-ui text-bone"><Check className="h-3.5 w-3.5 text-sage" strokeWidth={2} />Connected to {made.host.name}. The worker is installed.</p>
+            <p className="text-meta text-mute">Which agents should this machine run? Each is fetched onto the machine as the standalone binary its publisher ships; nothing else is needed for it.</p>
+            <div className="flex flex-wrap gap-2">
+              {agents.data.filter((a) => a.enabled && a.supported).map((a) => (
+                <button key={a.kind} disabled={fetched[a.kind] === "fetching" || fetched[a.kind] === "done"} onClick={() => fetchAgent(a)} className="control border border-line bg-raise text-bone hover:bg-overlay disabled:text-mute">
+                  {fetched[a.kind] === "done" ? <Check className="h-3.5 w-3.5 text-sage" strokeWidth={2} /> : <Icon of={Plus} size={12} />}
+                  {fetched[a.kind] === "fetching" ? `Fetching ${a.label}…` : fetched[a.kind] === "done" ? a.label : `Install ${a.label}`}
+                </button>
+              ))}
+            </div>
+            {Object.entries(fetched).filter(([, v]) => v !== "fetching" && v !== "done").map(([k, v]) => <p key={k} className="text-meta text-brick">{v}</p>)}
+          </div>
+        ) : made ? (
           <div className="space-y-3 px-5 py-4">
             <p className="flex items-center gap-2 text-ui text-bone"><Check className="h-3.5 w-3.5 text-sage" strokeWidth={2} />Connected to {made.host.name} as {(made.host.compute.type === "Server" && made.host.compute.user) || "the ssh account"}.</p>
             <p className="flex items-center gap-2 text-ui text-bone"><X className="h-3.5 w-3.5 text-brick" strokeWidth={2} />There is no worker on it yet.</p>
@@ -272,7 +348,9 @@ function Add({ onClose, onAdded }: { onClose: () => void; onAdded: (id: string) 
         )}
 
         <div className="flex items-center gap-2 border-t border-line bg-ground/40 px-5 py-3">
-          {made ? (
+          {made && stage === "agents" ? (
+            <button onClick={() => onAdded(made.host.id)} disabled={Object.values(fetched).includes("fetching")} className="control ml-auto bg-bone font-medium text-ground hover:opacity-90 disabled:bg-raise disabled:text-mute">Done</button>
+          ) : made ? (
             <>
               <button onClick={() => onAdded(made.host.id)} disabled={busy} className="control ml-auto text-mute hover:bg-raise hover:text-bone disabled:text-mute">Later</button>
               <button disabled={busy} onClick={install} className="control bg-bone font-medium text-ground hover:opacity-90 disabled:bg-raise disabled:text-mute">{installWorker.isPending ? "Installing…" : settling ? "Reconnecting…" : "Install the worker"}</button>

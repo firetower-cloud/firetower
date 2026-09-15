@@ -10,7 +10,8 @@ import {
   useSshKey,
   getListHostsQueryKey,
 } from "@/src/api/generated/hosts/hosts";
-import type { Compute, Diagnosis, Host } from "@/src/api/generated/model";
+import { getListAgentsQueryKey, useInstallAgent, useListAgents } from "@/src/api/generated/agents/agents";
+import type { AgentView, Compute, Diagnosis, Host } from "@/src/api/generated/model";
 import { parseDestination, waitForOnline } from "@/src/api/environments";
 
 /**
@@ -48,6 +49,12 @@ export function AddCompute({ onClose }: { onClose: () => void }) {
   // looks broken.
   const [made, setMade] = useState<{ host: Host; remedy?: string } | null>(null);
   const [settling, setSettling] = useState(false);
+  // Once the worker answers, one more step: which agents the machine should
+  // run, so it is launchable when this closes.
+  const [stage, setStage] = useState<"worker" | "agents">("worker");
+  const agents = useListAgents();
+  const installAgent = useInstallAgent();
+  const [fetched, setFetched] = useState<Record<string, "fetching" | "done" | string>>({});
   const cache = useQueryClient();
   const create = useCreateHost();
   const probe = useProbeHost();
@@ -97,11 +104,66 @@ export function AddCompute({ onClose }: { onClose: () => void }) {
     if (!made) return;
     await installWorker.mutateAsync({ id: made.host.id });
     setSettling(true);
-    await waitForOnline(made.host.id);
+    const online = await waitForOnline(made.host.id);
     setSettling(false);
     await cache.invalidateQueries({ queryKey: getListHostsQueryKey() });
-    onClose();
+    if (online) setStage("agents");
+    else onClose();
   };
+
+  const fetchAgent = async (a: AgentView) => {
+    if (!made) return;
+    setFetched((f) => ({ ...f, [a.kind]: "fetching" }));
+    try {
+      await installAgent.mutateAsync({ kind: a.kind, data: { hostId: made.host.id } });
+      setFetched((f) => ({ ...f, [a.kind]: "done" }));
+    } catch (e) {
+      setFetched((f) => ({ ...f, [a.kind]: (e as Error).message }));
+    }
+    await cache.invalidateQueries({ queryKey: getListAgentsQueryKey() });
+  };
+
+  if (made && stage === "agents") {
+    const offered = (agents.data ?? []).filter((a) => a.enabled && a.supported);
+    const fetching = Object.values(fetched).includes("fetching");
+    return (
+      <Modal title="Add a machine" onClose={onClose} wide>
+        <p className="mt-2 text-meta text-bone">
+          <span aria-hidden className="mr-2 font-mono text-sage">✓</span>
+          Connected to {made.host.name}. The worker is installed.
+        </p>
+        <p className="mt-3 text-meta leading-[1.5] text-mute">
+          Which agents should this machine run? Each is fetched onto the machine as the standalone
+          binary its publisher ships; nothing else is needed for it.
+        </p>
+        <div className="mt-3 flex flex-wrap gap-2">
+          {offered.map((a) => (
+            <button
+              key={a.kind}
+              type="button"
+              disabled={fetched[a.kind] === "fetching" || fetched[a.kind] === "done"}
+              onClick={() => fetchAgent(a)}
+              className="rounded-sm border border-line px-3 py-2 text-meta text-bone hover:border-dim disabled:opacity-60"
+            >
+              {fetched[a.kind] === "done" ? `✓ ${a.label}` : fetched[a.kind] === "fetching" ? `Fetching ${a.label}…` : `Install ${a.label}`}
+            </button>
+          ))}
+        </div>
+        {Object.entries(fetched)
+          .filter(([, v]) => v !== "fetching" && v !== "done")
+          .map(([k, v]) => (
+            <p key={k} role="alert" className="mt-2 text-meta text-brick">
+              {v}
+            </p>
+          ))}
+        <Foot>
+          <Go onClick={onClose} disabled={fetching}>
+            Done
+          </Go>
+        </Foot>
+      </Modal>
+    );
+  }
 
   if (made) {
     const account = (made.host.compute.type === "Server" && made.host.compute.user) || "the ssh account";

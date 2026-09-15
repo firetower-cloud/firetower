@@ -22,6 +22,8 @@ import { Check, ChevronDown, Cpu, GitBranch, Plus, Search, Server, X } from "luc
 import { GithubMark, Icon } from "~/components/ui";
 import { AgentMark } from "~/components/AgentMark";
 import { canRun, resolve, type Where } from "~/components/WhereItRuns";
+import { Readout, isReady } from "~/components/HostReadiness";
+import { useHostReadiness } from "~/api/generated/hosts/hosts";
 import { machineLabel, machines } from "~/api/environments";
 import type { Agent, Share } from "~/api/generated/model";
 import { useCreateSession } from "~/api/generated/sessions/sessions";
@@ -102,7 +104,10 @@ export function NewWorkspace({
 
   const suggested = name ? `agent/${slug(name)}` : "";
   const shown = typed ? branch : suggested;
-  const ready = !!name.trim() && checkouts.length > 0 && !!host && !!kind && !create.isPending;
+  // The same readout the panel shows, for this machine and this agent, so a
+  // missing agent is an Install button here and not a refusal after Start.
+  const readiness = useHostReadiness(host?.id ?? "", { agent: kind }, { query: { enabled: !!host && !!kind, retry: false, staleTime: 5000 } });
+  const ready = !!name.trim() && checkouts.length > 0 && !!host && !!kind && isReady(readiness.data) && !create.isPending;
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -345,6 +350,11 @@ export function NewWorkspace({
                 })}
               </div>
 
+              {host && kind && (
+                <div className="overflow-hidden rounded-md border border-line bg-panel">
+                  <Readout key={`${host.id}:${kind}`} host={host} agent={kind} agentLabel={agents.find((a) => a.kind === kind)?.label} />
+                </div>
+              )}
             </div>
           </Field>
 
