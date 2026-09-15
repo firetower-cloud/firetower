@@ -158,6 +158,20 @@ impl Reader {
             Reader::Codex(reader) => reader.active_turn(),
         }
     }
+
+    /// Whether a turn is running at all.
+    ///
+    /// Not [`Self::active_turn`]: that answers *which* turn, which only one of
+    /// these agents needs and only because its interrupt request has to name
+    /// one. This answers the question both of them have — is there anything to
+    /// stop — so that pressing stop on a resting session is nothing rather than
+    /// a request the agent will refuse.
+    pub fn working(&self) -> bool {
+        match self {
+            Reader::Claude(reader) => reader.working(),
+            Reader::Codex(reader) => reader.active_turn().is_some(),
+        }
+    }
 }
 
 /// One open assistant block, keyed by its index within the current message.
@@ -223,6 +237,11 @@ struct Request {
 impl ClaudeNormaliser {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Whether a turn is open — see [`Reader::working`].
+    pub fn working(&self) -> bool {
+        self.active_turn.is_some()
     }
 
     /// Read one line and report everything it means.

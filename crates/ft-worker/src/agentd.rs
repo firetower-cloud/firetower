@@ -471,7 +471,7 @@ async fn serve(stream: UnixStream, session: Arc<Session>) -> Result<()> {
             ToAgent::Send { message } => {
                 let _ = session.to_agent.send(message).await;
             }
-            ToAgent::Interrupt => interrupt(&session).await,
+            ToAgent::Interrupt => interrupt(&session),
             ToAgent::Decide { req, result } => {
                 if let Some(waiting) = session.pending.lock().await.remove(&req) {
                     let _ = waiting.answer.send(result);
@@ -595,19 +595,33 @@ async fn send(writer: &mut (impl AsyncWriteExt + Unpin), frame: &FromAgent) -> R
     Ok(())
 }
 
-/// End the turn without ending the session.
+/// Signal the agent to stop what it is doing.
 ///
-/// `SIGINT` rather than `SIGTERM`: the agent treats an interrupt as "stop what
-/// you are doing" and a termination as "stop existing", and the second leaves
-/// the turn unfinished in its own history.
-async fn interrupt(session: &Session) {
+/// **Not how a turn is ended any more.** `SIGINT` ends the turn *and then the
+/// process*, so a session somebody only wanted to interrupt was gone and the
+/// next message reached a socket nobody held. The control plane asks instead —
+/// see `ft_core::turn::interrupt` — and this stays only to answer the frame an
+/// older control plane still sends.
+///
+/// The signal is raised here rather than by running `kill`. There is no such
+/// binary in the worker image: `procps` is not installed, `kill` there is a
+/// shell builtin, and [`Command`] does not go through a shell — so the spawn
+/// failed with `ENOENT` every time, and the error was discarded. Stopping an
+/// agent did nothing at all, silently, for as long as that was the only route.
+fn interrupt(session: &Session) {
     let Some(pid) = session.pid else {
+        tracing::warn!("asked to interrupt an agent whose process id we never had");
         return;
     };
-    let _ = Command::new("kill")
-        .args(["-INT", &pid.to_string()])
-        .output()
-        .await;
+    // Safe: a signal to one pid, with no memory shared and nothing to unwind.
+    // A dead process is `ESRCH`, which is reported rather than acted on.
+    if unsafe { libc::kill(pid as libc::pid_t, libc::SIGINT) } != 0 {
+        tracing::warn!(
+            pid,
+            "interrupting the agent: {}",
+            std::io::Error::last_os_error()
+        );
+    }
 }
 
 /// Talk to an agent that is already running.

@@ -116,6 +116,18 @@ export type Conversation = {
   /** True between a turn starting and finishing — the agent is busy. */
   working: boolean;
   /**
+   * Somebody pressed stop, and the turn they pressed it on has not ended yet.
+   *
+   * Remembered here rather than in the composer because it is a fact about the
+   * turn, and the turn ends here. It is also the only thing that can tell the
+   * two endings apart: an interrupted turn comes back from the agent as a
+   * failure, indistinguishable by reading it from one that broke — which is
+   * why a turn somebody stopped on purpose used to be reported as "the agent
+   * stopped without saying why". The control plane keeps the same flag for the
+   * same reason; see `Progress::stopped`.
+   */
+  stopping?: boolean;
+  /**
    * Why the last turn ended badly, in the agent's own words.
    *
    * Distinct from `trouble`, which is this end losing the stream. This is the
@@ -238,20 +250,25 @@ export function apply(state: Conversation, event: ConversationEvent): Conversati
       };
 
     case "TurnStarted":
-      return { ...state, working: true, stopped: undefined, lastLine };
+      return { ...state, working: true, stopped: undefined, stopping: false, lastLine };
 
     case "TurnCompleted":
       return {
         ...state,
         working: false,
+        stopping: false,
         // Kept when a turn ends without saying, so the meter does not blank
         // between turns.
         usage: event.usage ?? state.usage,
         // Only what the agent actually said. A failed turn with nothing to say
         // still gets a line, because "it stopped and would not say why" is
         // itself worth showing rather than leaving as silence.
+        //
+        // Unless we are the reason it stopped, which is not trouble and does
+        // not need explaining — the agent reports an interrupted turn as a
+        // failure either way.
         stopped:
-          event.status === "Completed"
+          event.status === "Completed" || state.stopping
             ? undefined
             : (event.detail ??
               (event.status === "Failed"
@@ -540,6 +557,16 @@ export function useConversation(sessionId: string) {
     }));
   }, []);
 
+  /**
+   * Note that stop has been pressed, before anything has come back.
+   *
+   * The button waits on the turn ending rather than on the request it sent,
+   * because the request only says somebody was told.
+   */
+  const stopping = useCallback((asked: boolean) => {
+    setState((current) => ({ ...current, stopping: asked }));
+  }, []);
+
   /** Take a request off the screen the moment it is answered. */
   const settle = useCallback((req: string) => {
     setState((current) => ({
@@ -549,5 +576,5 @@ export function useConversation(sessionId: string) {
     }));
   }, []);
 
-  return { conversation: state, echo, settle, remember };
+  return { conversation: state, echo, settle, remember, stopping };
 }

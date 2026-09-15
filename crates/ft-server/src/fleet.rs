@@ -90,9 +90,13 @@ pub enum AgentSpeech {
 }
 
 /// What stopping this session takes.
+///
+/// Every agent here is *asked*. Signalling one is not an option that was left
+/// out: `SIGINT` ends the turn and then the process, so the session somebody
+/// wanted to keep is the thing it costs. The worker still answers the old
+/// `Interrupt` frame, for a control plane older than this, but nothing here
+/// sends it any more.
 enum Stop {
-    /// Its supervisor sends a signal.
-    Signal,
     /// It is asked, in the conversation.
     Ask(serde_json::Value),
     /// Nothing is running.
@@ -372,8 +376,13 @@ impl Progress {
     /// How this agent is stopped.
     fn stop(&mut self) -> Stop {
         match &self.reader {
-            // Its supervisor signals it, which is not a thing it is told.
-            ft_core::normalise::Reader::Claude(_) => Stop::Signal,
+            // Asked, down the same pipe it takes turns on. It used to be
+            // signalled instead, and `SIGINT` ended the turn and then the
+            // process with it — see [`ft_core::turn::interrupt`].
+            ft_core::normalise::Reader::Claude(reader) => match reader.working() {
+                true => Stop::Ask(ft_core::turn::interrupt()),
+                false => Stop::Nothing,
+            },
             ft_core::normalise::Reader::Codex(reader) => {
                 let (Some(thread), Some(turn)) = (reader.thread(), reader.active_turn()) else {
                     // Between turns there is nothing running to stop, and a
@@ -2903,23 +2912,29 @@ impl Fleet {
         // this side knows it was asked for.
         self.ensure_reader(session_id).await;
 
-        // Claude Code is stopped by a signal its supervisor sends; Codex is
-        // asked, in the conversation, and the request has to name the turn.
+        // Both agents are asked, in the conversation — Claude Code with a
+        // control request, Codex with one that has to name the turn.
         let stop = {
             let mut readers = self.progress.write().await;
             match readers.get_mut(session_id.as_str()) {
                 Some(progress) => {
-                    progress.stopped = true;
-                    progress.stop()
+                    let stop = progress.stop();
+                    // Only when there was something to stop. Remembering it
+                    // otherwise would spend the flag on whatever turn ends
+                    // next, and excuse a failure nobody asked for.
+                    if !matches!(stop, Stop::Nothing) {
+                        progress.stopped = true;
+                    }
+                    stop
                 }
-                None => Stop::Signal,
+                // `ensure_reader` just put one there, so this is unreachable.
+                // Nothing rather than a signal even so: a signal ends the agent
+                // along with the turn, and guessing that badly costs a session.
+                None => Stop::Nothing,
             }
         };
 
         let frame = match stop {
-            Stop::Signal => ToWorker::Interrupt {
-                session_id: session_id.clone(),
-            },
             Stop::Ask(message) => ToWorker::SendTurn {
                 session_id: session_id.clone(),
                 message,
@@ -3458,7 +3473,7 @@ mod progress_tests {
                 assert_eq!(message["params"]["threadId"], "th_9");
                 assert_eq!(message["params"]["turnId"], "turn_7");
             }
-            other => panic!("expected a request, got {}", matches!(other, Stop::Signal)),
+            Stop::Nothing => panic!("expected a request, got nothing to stop"),
         }
 
         // And once it has ended there is nothing to stop again.
@@ -3466,11 +3481,39 @@ mod progress_tests {
         assert!(matches!(progress.stop(), Stop::Nothing));
     }
 
-    /// Claude Code is signalled, not asked. The two must not be swapped.
+    /// Claude Code is asked too, with a control request rather than a signal.
+    ///
+    /// The signal is what this replaced: it ended the turn and the agent with
+    /// it, and the next message had nothing left to reach.
     #[test]
-    fn stopping_claude_code_is_a_signal() {
+    fn stopping_claude_code_asks_rather_than_signalling() {
         let mut progress = Progress::for_agent(ft_core::Agent::ClaudeCode, String::new());
-        assert!(matches!(progress.stop(), Stop::Signal));
+        assert!(
+            matches!(progress.stop(), Stop::Nothing),
+            "nothing is running yet"
+        );
+
+        // The echoed user message is what opens a Claude Code turn.
+        progress.read(
+            r#"{"type":"user","uuid":"u1","message":{"role":"user","content":[{"type":"text","text":"go"}]}}"#,
+        );
+        match progress.stop() {
+            Stop::Ask(message) => {
+                assert_eq!(message["type"], "control_request");
+                assert_eq!(message["request"]["subtype"], "interrupt");
+                assert!(
+                    message["request_id"]
+                        .as_str()
+                        .is_some_and(|id| !id.is_empty()),
+                    "the agent answers with the id it was given"
+                );
+            }
+            Stop::Nothing => panic!("expected a request, got nothing to stop"),
+        }
+
+        // And once the turn has ended there is nothing to stop again.
+        progress.read(r#"{"type":"result","subtype":"success","is_error":false}"#);
+        assert!(matches!(progress.stop(), Stop::Nothing));
     }
 
     /// Typing at a Codex session has to reach the thread it is talking in.

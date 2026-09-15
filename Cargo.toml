@@ -77,6 +77,10 @@ mime_guess = "2"
 
 # worker
 portable-pty = "0.9"
+# Raising a signal, which is the whole of what this is used for. The alternative
+# was running `kill`, and the worker image has no such binary — see
+# `agentd::interrupt` for what that cost.
+libc = "0.2"
 
 # secrets
 # Envelope encryption for the vault: a root key wraps a key per secret, and

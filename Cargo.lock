@@ -1013,6 +1013,7 @@ dependencies = [
  "chrono",
  "ft-core",
  "ft-proto",
+ "libc",
  "portable-pty",
  "serde",
  "serde_json",

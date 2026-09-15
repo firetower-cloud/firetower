@@ -569,6 +569,29 @@ pub fn permission_mode(mode: &str) -> serde_json::Value {
     })
 }
 
+/// End the turn that is running, without ending the session.
+///
+/// A control request, for the same reason the permission mode is one: it is
+/// answered out of band, so an agent halfway through a turn takes it now rather
+/// than when it next reads its input — and an agent that only read its input
+/// between turns could never be stopped during one.
+///
+/// A signal is the other way to do this and it is the wrong one. `SIGINT` does
+/// end the turn, reported as `error_during_execution` like this is, and then
+/// the process exits: the session is gone, the next message reaches a socket
+/// nobody holds, and stopping an agent meant losing it. This leaves it running
+/// and ready for the next thing, which is what somebody pressing stop means.
+pub fn interrupt() -> serde_json::Value {
+    serde_json::json!({
+        "type": "control_request",
+        // As in `permission_mode`: the agent answers with the id it was given,
+        // and two requests must not share one. Nothing waits for the answer —
+        // the turn ending is what is being watched for.
+        "request_id": format!("firetower-{}", ulid::Ulid::new()),
+        "request": { "subtype": "interrupt" },
+    })
+}
+
 pub fn user_message(text: &str) -> serde_json::Value {
     user_message_with(text, &[])
 }

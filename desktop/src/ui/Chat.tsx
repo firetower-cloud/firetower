@@ -109,7 +109,7 @@ export function Chat({
   session: Session;
   branch?: string;
 } & Open) {
-  const { conversation, echo, settle, remember } = useConversation(session.id);
+  const { conversation, echo, settle, remember, stopping } = useConversation(session.id);
   const scroller = useRef<HTMLDivElement>(null);
   const body = useRef<HTMLDivElement>(null);
   const following = useRef(true);
@@ -309,6 +309,7 @@ export function Chat({
         conversation={conversation}
         onEcho={echo}
         onRemember={remember}
+        onStopping={stopping}
         disabled={!answerable}
         asking={asked.length + questions.length > 0}
       />

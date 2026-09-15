@@ -16,7 +16,7 @@
  * finished turn. Adding up deltas here would drift.
  */
 import { useEffect, useRef, useState } from "react";
-import { ArrowUp, Check, ChevronDown, FileUp, ImageIcon, Paperclip, Square, X } from "lucide-react";
+import { ArrowUp, Check, ChevronDown, FileUp, ImageIcon, Loader2, Paperclip, Square, X } from "lucide-react";
 import type { Conversation } from "~/api/conversation";
 import type { Attached, Control, ControlKind, Session } from "~/api/generated/model";
 import { useAttachFile, useInterruptSession, useListFiles, useSendTurn } from "~/api/generated/sessions/sessions";
@@ -57,6 +57,7 @@ export function Composer({
   conversation,
   onEcho,
   onRemember,
+  onStopping,
   disabled,
   asking,
 }: {
@@ -64,6 +65,8 @@ export function Composer({
   conversation: Conversation;
   onEcho: (text: string, images: Attached[]) => void;
   onRemember: (of: "model" | "mode" | "effort", value: string) => void;
+  /** Stop was pressed, or the request to stop came back refused. */
+  onStopping: (asked: boolean) => void;
   disabled: boolean;
   asking: boolean;
 }) {
@@ -178,6 +181,26 @@ export function Composer({
     setText("");
     setImages([]);
     setChips([]);
+  };
+
+  /* Pressing stop asks the agent to end the turn; the turn ending is what says
+     it worked, so the button waits on that rather than on the request it sent.
+     A refusal is said out loud: a click that did nothing and reported nothing
+     is indistinguishable from an agent that ignored it, and that is exactly
+     what this button was before. */
+  const stopping = conversation.stopping ?? false;
+  const stop = () => {
+    if (stopping) return;
+    onStopping(true);
+    interrupt.mutate(
+      { id: session.id },
+      {
+        onError: (e) => {
+          onStopping(false);
+          setRefused(`The agent could not be stopped. ${e instanceof Error ? e.message : ""}`.trim());
+        },
+      },
+    );
   };
 
   const set = (kind: ControlKind, value: string) => {
@@ -307,11 +330,16 @@ export function Composer({
 
             {conversation.working ? (
               <button
-                onClick={() => interrupt.mutate({ id: session.id })}
-                title="Interrupt the agent"
-                className="ml-auto grid h-8 w-8 place-items-center rounded-full border border-line bg-raise text-bone transition-colors hover:bg-overlay"
+                onClick={stop}
+                disabled={stopping}
+                title={stopping ? "Stopping" : "Interrupt the agent"}
+                className="ml-auto grid h-8 w-8 place-items-center rounded-full border border-line bg-raise text-bone transition-colors hover:bg-overlay disabled:text-mute disabled:hover:bg-raise"
               >
-                <Square className="h-3.5 w-3.5" strokeWidth={2.5} />
+                {stopping ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" strokeWidth={2.5} />
+                ) : (
+                  <Square className="h-3.5 w-3.5" strokeWidth={2.5} />
+                )}
               </button>
             ) : (
               <button
