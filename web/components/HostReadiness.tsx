@@ -10,7 +10,7 @@ import {
 import { useInstallAgent } from "@/src/api/generated/agents/agents";
 import { useQueryClient } from "@tanstack/react-query";
 import { Copyable } from "@/components/ui";
-import { connectionLabel } from "@/src/api/environments";
+import { connectionLabel, waitForOnline } from "@/src/api/environments";
 
 export function isReady(report?: Readiness): boolean {
   return (
@@ -82,7 +82,8 @@ export function Readout({
   const connect = useConnectHost();
   const installWorker = useInstallWorker();
   const installAgent = useInstallAgent();
-  const working = connect.isPending || installWorker.isPending || installAgent.isPending;
+  const [settling, setSettling] = useState(false);
+  const working = connect.isPending || installWorker.isPending || installAgent.isPending || settling;
 
   const refresh = async () => {
     await report.refetch();
@@ -185,10 +186,15 @@ export function Readout({
               </span>
               {check.name === CONNECTION && sshOk && takesAWorker(host) && (
                 <Do
-                  busy={installWorker.isPending}
-                  label="Install the worker"
+                  busy={installWorker.isPending || settling}
+                  label={settling ? "Reconnecting…" : "Install the worker"}
                   onClick={async () => {
                     await installWorker.mutateAsync({ id: host.id });
+                    // The binary is there; the machine answers a few seconds
+                    // later. Wait for that, so this turns green on its own.
+                    setSettling(true);
+                    await waitForOnline(host.id);
+                    setSettling(false);
                     await refresh();
                   }}
                 />

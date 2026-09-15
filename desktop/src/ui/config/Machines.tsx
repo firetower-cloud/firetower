@@ -27,7 +27,7 @@ import {
   useRenameHost,
   useSshKey,
 } from "~/api/generated/hosts/hosts";
-import { parseDestination, reachedTheMachine, stateLabel } from "~/api/environments";
+import { parseDestination, reachedTheMachine, stateLabel, waitForOnline } from "~/api/environments";
 import { useHosts } from "~/data";
 import { Rows, Section } from "~/ui/config/bits";
 import { useConfirm } from "~/ui/Confirm";
@@ -61,7 +61,7 @@ export function Machines({ live }: { live: boolean }) {
           </div>
         ))}
       </Rows>
-      {adding && <Add onClose={() => setAdding(false)} />}
+      {adding && <Add onClose={() => setAdding(false)} onAdded={(id) => { setAdding(false); setOpen(id); }} />}
     </Section>
   );
 }
@@ -83,14 +83,24 @@ function Detail({ host, onGone }: { host: Host; onGone: () => void }) {
   const rename = useRenameHost();
   const remove = useDeleteHost();
   const [name, setName] = useState(host.name);
+  const [settling, setSettling] = useState(false);
   const refresh = () => Promise.all([cache.invalidateQueries({ queryKey: getListHostsQueryKey() }), readiness.refetch()]);
+  // The install returns when the binary is there; the machine answers a few
+  // seconds later. Wait for that, so the panel turns green on its own.
+  const installed = async () => {
+    setSettling(true);
+    await waitForOnline(host.id);
+    setSettling(false);
+    await refresh();
+  };
 
   const checks = readiness.data?.checks ?? [];
   const missing = checks.filter((c) => c.required && !c.available);
 
   return (
     <div className="space-y-3 border-t border-line-soft bg-ground/40 px-3.5 py-3">
-      {host.diagnosis && <Told d={host.diagnosis} />}
+      {/* The rows below say it when ssh got in; the box is for when it did not. */}
+      {host.diagnosis && host.state !== "Online" && !reachedTheMachine(host) && <Told d={host.diagnosis} />}
 
       <div>
         <div className="flex items-center gap-2">
@@ -106,7 +116,7 @@ function Detail({ host, onGone }: { host: Host; onGone: () => void }) {
                 <span className={c.available ? "text-text" : c.required ? "text-bone" : "text-dim"}>{c.name}</span>
                 <span className="min-w-0 truncate text-meta text-mute">{c.detail}</span>
               </div>
-              {!c.available && c.remedy && (
+              {!c.available && c.remedy && c.name !== "Worker" && (
                 <div className="mt-1 flex items-center gap-2 pl-5">
                   <code className="min-w-0 flex-1 truncate font-mono text-micro text-dim">{c.remedy}</code>
                   {/^\S+( \S+)+$/.test(c.remedy) && <button onClick={() => navigator.clipboard?.writeText(c.remedy!)} className="text-mute hover:text-bone"><Copy className="h-3 w-3" strokeWidth={1.75} /></button>}
@@ -129,7 +139,8 @@ function Detail({ host, onGone }: { host: Host; onGone: () => void }) {
 
       <div className="flex flex-wrap items-center gap-2">
         <button disabled={connect.isPending} onClick={() => connect.mutate({ id: host.id }, { onSuccess: refresh })} className="control border border-line bg-raise text-bone hover:bg-overlay disabled:text-mute">{connect.isPending ? "Connecting…" : "Connect"}</button>
-        <button disabled={install.isPending} onClick={() => install.mutate({ id: host.id }, { onSuccess: refresh })} className="control border border-line bg-raise text-bone hover:bg-overlay disabled:text-mute">{install.isPending ? "Installing…" : host.workerVersion ? "Reinstall the worker" : "Install the worker"}</button>
+        <button disabled={install.isPending || settling} onClick={() => install.mutate({ id: host.id }, { onSuccess: installed })} className="control border border-line bg-raise text-bone hover:bg-overlay disabled:text-mute">{install.isPending ? "Installing…" : settling ? "Reconnecting…" : host.workerVersion ? "Reinstall the worker" : "Install the worker"}</button>
+        {install.isError && <span className="text-meta text-brick">{install.error.message}</span>}
         <button disabled={drain.isPending} onClick={() => drain.mutate({ id: host.id, data: { drained: !host.drained } }, { onSuccess: refresh })} className="control border border-line bg-raise text-dim hover:bg-overlay disabled:text-mute">{host.drained ? "Take new work" : "Drain"}</button>
         <button onClick={() => void confirm({ title: `Remove ${host.name}?`, body: "Nothing on the machine is touched.", action: "Remove", tone: "danger" }).then((ok) => ok && remove.mutate({ id: host.id, params: undefined as never }, { onSuccess: () => { refresh(); onGone(); } }))} className="control ml-auto text-mute hover:text-brick"><Trash2 className="h-3.5 w-3.5" strokeWidth={1.75} />Remove</button>
       </div>
@@ -154,11 +165,17 @@ function Told({ d }: { d: Diagnosis }) {
 
 /* ── Adding one ────────────────────────────────────────────────────────── */
 
-function Add({ onClose }: { onClose: () => void }) {
+function Add({ onClose, onAdded }: { onClose: () => void; onAdded: (id: string) => void }) {
   const cache = useQueryClient();
   const create = useCreateHost();
   const probe = useProbeHost();
+  const installWorker = useInstallWorker();
   const key = useSshKey();
+  /* The machine, once it is saved and ssh got in but found no worker: the
+     dialog turns into that next step rather than closing onto a row that
+     looks broken. */
+  const [made, setMade] = useState<{ host: Host; remedy?: string } | null>(null);
+  const [settling, setSettling] = useState(false);
   const [address, setAddress] = useState("");
   const [user, setUser] = useState("");
   const [label, setLabel] = useState("");
@@ -166,22 +183,38 @@ function Add({ onClose }: { onClose: () => void }) {
   const [copied, setCopied] = useState(false);
 
   const typed = parseDestination(address);
-  const busy = create.isPending || probe.isPending;
+  const busy = create.isPending || probe.isPending || installWorker.isPending || settling;
 
   const body = () => ({
     name: label.trim() || undefined,
     compute: { type: "Server", host: address.trim(), user: user.trim() || undefined, key: { type: "Managed" } } as Compute,
   });
 
-  const save = async () => {
-    await create.mutateAsync({ data: body() });
+  const save = async (needsWorker: Diagnosis | null) => {
+    const host = await create.mutateAsync({ data: body() });
     await cache.invalidateQueries({ queryKey: getListHostsQueryKey() });
-    onClose();
+    if (needsWorker) setMade({ host, remedy: needsWorker.remedy ?? undefined });
+    else onAdded(host.id);
   };
 
   const add = () => {
     setTold(null);
-    probe.mutate({ data: body() }, { onSuccess: (r) => (r.reached ? save() : setTold(r.diagnosis ?? null)) });
+    probe.mutate({ data: body() }, {
+      onSuccess: (r) => {
+        if (!r.reached) return setTold(r.diagnosis ?? null);
+        save(r.diagnosis?.cause === "WorkerMissing" ? r.diagnosis : null);
+      },
+    });
+  };
+
+  const install = async () => {
+    if (!made) return;
+    await installWorker.mutateAsync({ id: made.host.id });
+    setSettling(true);
+    await waitForOnline(made.host.id);
+    setSettling(false);
+    await cache.invalidateQueries({ queryKey: getListHostsQueryKey() });
+    onAdded(made.host.id);
   };
 
   const pub = (key.data as { publicKey?: string } | undefined)?.publicKey;
@@ -199,6 +232,20 @@ function Add({ onClose }: { onClose: () => void }) {
           <button onClick={onClose} className="ml-auto grid h-7 w-7 place-items-center rounded-md text-mute hover:bg-raise hover:text-bone"><X className="h-4 w-4" strokeWidth={1.75} /></button>
         </div>
 
+        {made ? (
+          <div className="space-y-3 px-5 py-4">
+            <p className="flex items-center gap-2 text-ui text-bone"><Check className="h-3.5 w-3.5 text-sage" strokeWidth={2} />Connected to {made.host.name} as {(made.host.compute.type === "Server" && made.host.compute.user) || "the ssh account"}.</p>
+            <p className="flex items-center gap-2 text-ui text-bone"><X className="h-3.5 w-3.5 text-brick" strokeWidth={2} />There is no worker on it yet.</p>
+            <p className="text-meta text-mute">Firetower puts the worker built for that machine into <code className="font-mono">~/.firetower/worker/bin</code> over the connection it just made. No sudo, nothing outside that account's home. Anything else the machine is missing is shown afterwards, with the command that installs it.</p>
+            {made.remedy && (
+              <details className="text-meta text-mute">
+                <summary className="cursor-pointer hover:text-bone">Or do it on the machine yourself</summary>
+                <code className="mt-1.5 block break-all rounded-md bg-ground px-2.5 py-1.5 font-mono text-micro text-dim">{made.remedy}</code>
+              </details>
+            )}
+            {installWorker.isError && <p className="text-meta text-brick">{installWorker.error.message}</p>}
+          </div>
+        ) : (
         <div className="space-y-4 px-5 py-4">
           <Field label="IP address or hostname"><input autoFocus value={address} onChange={(e) => { setTold(null); setAddress(e.target.value); }} placeholder="192.0.2.10" spellCheck={false} className="w-full rounded-lg border border-line bg-ground px-3 py-2 font-mono text-ui text-bone placeholder:text-mute focus:border-slate-deep focus:outline-none" /></Field>
           <div className="grid grid-cols-2 gap-3">
@@ -222,10 +269,20 @@ function Add({ onClose }: { onClose: () => void }) {
 
           {told && <Told d={told} />}
         </div>
+        )}
 
         <div className="flex items-center gap-2 border-t border-line bg-ground/40 px-5 py-3">
-          <button onClick={onClose} className="control ml-auto text-mute hover:bg-raise hover:text-bone">Cancel</button>
-          <button disabled={!typed.host || busy} onClick={add} className="control bg-bone font-medium text-ground hover:opacity-90 disabled:bg-raise disabled:text-mute">{probe.isPending ? "Reaching it…" : create.isPending ? "Adding…" : "Add it"}</button>
+          {made ? (
+            <>
+              <button onClick={() => onAdded(made.host.id)} disabled={busy} className="control ml-auto text-mute hover:bg-raise hover:text-bone disabled:text-mute">Later</button>
+              <button disabled={busy} onClick={install} className="control bg-bone font-medium text-ground hover:opacity-90 disabled:bg-raise disabled:text-mute">{installWorker.isPending ? "Installing…" : settling ? "Reconnecting…" : "Install the worker"}</button>
+            </>
+          ) : (
+            <>
+              <button onClick={onClose} className="control ml-auto text-mute hover:bg-raise hover:text-bone">Cancel</button>
+              <button disabled={!typed.host || busy} onClick={add} className="control bg-bone font-medium text-ground hover:opacity-90 disabled:bg-raise disabled:text-mute">{probe.isPending ? "Reaching it…" : create.isPending ? "Adding…" : "Add it"}</button>
+            </>
+          )}
         </div>
       </div>
     </div>

@@ -5,12 +5,13 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Modal, Foot, Go, Quiet } from "./Modal";
 import {
   useCreateHost,
+  useInstallWorker,
   useProbeHost,
   useSshKey,
   getListHostsQueryKey,
 } from "@/src/api/generated/hosts/hosts";
-import type { Compute, Diagnosis } from "@/src/api/generated/model";
-import { parseDestination } from "@/src/api/environments";
+import type { Compute, Diagnosis, Host } from "@/src/api/generated/model";
+import { parseDestination, waitForOnline } from "@/src/api/environments";
 
 /**
  * Adding a machine.
@@ -42,10 +43,16 @@ export function AddCompute({ onClose }: { onClose: () => void }) {
   const [user, setUser] = useState("");
   const [label, setLabel] = useState("");
   const [told, setTold] = useState<Diagnosis | null>(null);
+  // The machine, once it is saved and ssh got in but found no worker: the
+  // dialog turns into that next step rather than closing onto a row that
+  // looks broken.
+  const [made, setMade] = useState<{ host: Host; remedy?: string } | null>(null);
+  const [settling, setSettling] = useState(false);
   const cache = useQueryClient();
   const create = useCreateHost();
   const probe = useProbeHost();
-  const busy = create.isPending || probe.isPending;
+  const installWorker = useInstallWorker();
+  const busy = create.isPending || probe.isPending || installWorker.isPending || settling;
   // Only so the form can show what it made of a pasted destination. The server
   // parses the address itself and prefers the account field when it has one.
   const typed = parseDestination(address);
@@ -68,10 +75,11 @@ export function AddCompute({ onClose }: { onClose: () => void }) {
     } as Compute,
   });
 
-  const save = async () => {
-    await create.mutateAsync({ data: body() });
+  const save = async (needsWorker: Diagnosis | null) => {
+    const host = await create.mutateAsync({ data: body() });
     await cache.invalidateQueries({ queryKey: getListHostsQueryKey() });
-    onClose();
+    if (needsWorker) setMade({ host, remedy: needsWorker.remedy ?? undefined });
+    else onClose();
   };
 
   const add = () =>
@@ -79,11 +87,64 @@ export function AddCompute({ onClose }: { onClose: () => void }) {
       { data: body() },
       {
         onSuccess: (result) => {
-          if (result.reached) save();
-          else setTold(result.diagnosis ?? null);
+          if (!result.reached) return setTold(result.diagnosis ?? null);
+          save(result.diagnosis?.cause === "WorkerMissing" ? result.diagnosis : null);
         },
       },
     );
+
+  const install = async () => {
+    if (!made) return;
+    await installWorker.mutateAsync({ id: made.host.id });
+    setSettling(true);
+    await waitForOnline(made.host.id);
+    setSettling(false);
+    await cache.invalidateQueries({ queryKey: getListHostsQueryKey() });
+    onClose();
+  };
+
+  if (made) {
+    const account = (made.host.compute.type === "Server" && made.host.compute.user) || "the ssh account";
+    return (
+      <Modal title="Add a machine" onClose={onClose} wide>
+        <p className="mt-2 text-meta text-bone">
+          <span aria-hidden className="mr-2 font-mono text-sage">✓</span>
+          Connected to {made.host.name} as {account}.
+        </p>
+        <p className="mt-2 text-meta text-bone">
+          <span aria-hidden className="mr-2 font-mono text-brick">✕</span>
+          There is no worker on it yet.
+        </p>
+        <p className="mt-3 text-meta leading-[1.5] text-mute">
+          Firetower puts the worker built for that machine into{" "}
+          <code className="font-mono">~/.firetower/worker/bin</code> over the connection it just
+          made. No sudo, nothing outside that account&apos;s home. Anything else the machine is
+          missing is shown afterwards, with the command that installs it.
+        </p>
+        {made.remedy && (
+          <details className="mt-3 text-meta text-mute">
+            <summary className="cursor-pointer hover:text-bone">Or do it on the machine yourself</summary>
+            <code className="mt-1.5 block break-all rounded-sm bg-black/25 px-3 py-2 font-mono text-meta text-bone">
+              {made.remedy}
+            </code>
+          </details>
+        )}
+        {installWorker.error && (
+          <p role="alert" className="mt-3 text-meta text-brick">
+            {installWorker.error.message}
+          </p>
+        )}
+        <Foot>
+          <Go onClick={install} disabled={busy}>
+            {installWorker.isPending ? "Installing…" : settling ? "Reconnecting…" : "Install the worker"}
+          </Go>
+          <Quiet onClick={onClose} disabled={busy}>
+            Later
+          </Quiet>
+        </Foot>
+      </Modal>
+    );
+  }
 
   return (
     <Modal title="Add a machine" onClose={onClose} wide>
@@ -138,7 +199,7 @@ export function AddCompute({ onClose }: { onClose: () => void }) {
           {busy ? "Checking…" : told ? "Check again" : "Add"}
         </Go>
         {told && (
-          <Quiet onClick={save} disabled={!ready || busy}>
+          <Quiet onClick={() => save(null)} disabled={!ready || busy}>
             Save for later
           </Quiet>
         )}

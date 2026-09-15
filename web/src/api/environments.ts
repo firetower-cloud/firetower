@@ -1,3 +1,4 @@
+import { listHosts } from "./generated/hosts/hosts";
 import type { Host } from "./generated/model";
 
 /**
@@ -135,4 +136,24 @@ export function parseDestination(input: string): { user?: string; host: string; 
     }
   }
   return { user, host: rest, port: undefined };
+}
+
+/**
+ * Wait for a machine to come up after its worker was installed.
+ *
+ * Installing returns when the binary is in place; the supervisor then
+ * reconnects on its own task, and the row says Online a few seconds later.
+ * Refreshing the instant the install returned showed the old diagnosis and a
+ * "check again" that somebody had to press — so this watches the list until
+ * the machine answers, or gives up after a while and lets the panel say what
+ * it sees.
+ */
+export async function waitForOnline(id: string, seconds = 45): Promise<Host | undefined> {
+  for (let i = 0; i < seconds; i++) {
+    const hosts = await listHosts().catch(() => [] as Host[]);
+    const host = hosts.find((h) => h.id === id);
+    if (host?.state === "Online") return host;
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  return undefined;
 }
