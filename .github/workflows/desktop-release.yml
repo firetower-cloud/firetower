@@ -140,29 +140,39 @@ jobs:
       # A plain disk image from the .app: Tauri's own DMG script styles it
       # through Finder, which a headless runner has no session for.
       - if: matrix.platform == 'mac'
+        id: dmg
         shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ inputs.tag }}
-          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
-          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
         working-directory: desktop
         run: |
           bundle=src-tauri/target/universal-apple-darwin/release/bundle
           version=$(node -p "require('./src-tauri/tauri.conf.json').version")
-          dmg="$bundle/dmg/Firetower_${version}_universal.dmg"
+          dmg="$bundle/dmg/Firetower_${version}_macos.dmg"
           scripts/make-dmg.sh "$bundle/macos/Firetower.app" "$dmg"
-          # Apple notarises the container as well as the app inside it.
-          codesign --sign "$APPLE_SIGNING_IDENTITY" --timestamp "$dmg"
-          xcrun notarytool submit "$dmg" --key "$APPLE_API_KEY_PATH" --key-id "$APPLE_API_KEY" --issuer "$APPLE_API_ISSUER" --wait
-          xcrun stapler staple "$dmg"
-          gh release upload "$TAG" "$dmg" --clobber
+          echo "path=$dmg" >> "$GITHUB_OUTPUT"
+
+      # Apple notarises the image as well as the app inside it, and staples
+      # the ticket to the image. The image itself is not code-signed: the app
+      # inside carries the signature, and the keychain Tauri imported the
+      # certificate into was deleted when its build ended.
+      - if: matrix.platform == 'mac'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+          DMG: ${{ steps.dmg.outputs.path }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        working-directory: desktop
+        run: |
+          xcrun notarytool submit "$DMG" --key "$APPLE_API_KEY_PATH" --key-id "$APPLE_API_KEY" --issuer "$APPLE_API_ISSUER" --wait
+          xcrun stapler staple "$DMG"
+          gh release upload "$TAG" "$DMG" --clobber
       - if: always() && matrix.platform == 'mac'
         shell: bash
         run: rm -f "$RUNNER_TEMP/AuthKey.p8"
 
-  # Nothing is visible until both platforms are on it.
+  # Nothing is visible until both platforms are on it: release-please leaves
+  # the release a draft, and this is what publishes it.
   publish:
     needs: [release, build]
     runs-on: depot-ubuntu-22.04
@@ -172,11 +182,14 @@ jobs:
       - env:
           GH_TOKEN: ${{ github.token }}
           ID: ${{ needs.release.outputs.id }}
+          TAG: ${{ inputs.tag }}
           VERSION: ${{ needs.release.outputs.version }}
         run: |
-          # Pre-release while the version is 0.x: the updater's `latest`
-          # endpoint skips pre-releases, so people on a stable build are never
-          # offered a beta.
-          pre=false; case "$VERSION" in 0.*) pre=true;; esac
-          gh api -X PATCH "repos/${GITHUB_REPOSITORY}/releases/$ID" -F draft=false -F prerelease=$pre >/dev/null
-          echo "published $VERSION (prerelease=$pre)"
+          gh api -X PATCH "repos/${GITHUB_REPOSITORY}/releases/$ID" -F draft=false -F prerelease=false >/dev/null
+          # The app's updater reads one fixed address. GitHub's own `latest`
+          # is the newest release of the whole repository, whichever package
+          # cut it, so `latest.json` is copied onto a rolling release of the
+          # desktop's own. Its links point at this versioned release.
+          gh release download "$TAG" -R "$GITHUB_REPOSITORY" -p latest.json -D "$RUNNER_TEMP"
+          gh release upload desktop-latest "$RUNNER_TEMP/latest.json" -R "$GITHUB_REPOSITORY" --clobber
+          echo "published $VERSION"

@@ -90,7 +90,7 @@ it lets go. Paths the agent writes in the conversation open the same way
 
 `scripts/build-mac.sh` builds the `.dmg` on this Mac (`--universal` for one
 file that runs on Apple Silicon and Intel). A Windows installer can only be
-built on Windows: `gh workflow run desktop-build.yml`, then `gh run download`,
+built on Windows: `gh workflow run desktop.yml`, then `gh run download`,
 gives the `.exe` (per-user, what people install) and the `.msi` (for deploying
 by policy) from a Windows runner, unsigned. Signing and notarization are the
 release workflow's job and happen behind a protected environment; nothing
@@ -110,10 +110,15 @@ OS keychain on every platform (`bridge.secrets`).
 The app has its own release-please package (`desktop`, tags `desktop-v*`,
 `desktop/CHANGELOG.md`); commits scoped `(desktop)` land in its release PR.
 Merging that PR makes a draft release and runs `desktop-release.yml`: a
-universal `.dmg` signed with the Developer ID certificate and notarized, an
-`.exe` and `.msi` for Windows, each with the updater's signature, and
-`latest.json` — then the release is published, as a pre-release while the
-version is 0.x. The signing job runs in the `release` environment: a reviewer
-approves it before its secrets are readable. The app checks `latest.json`
-once after start and offers the update in a dialog. `desktop-ci.yml` runs on
-pull requests; `desktop-build.yml` builds unsigned installers on demand.
+universal `.dmg` (`Firetower_<version>_macos.dmg`) with the app signed by the
+Developer ID certificate and the image notarized, an `.exe` and `.msi` for
+Windows, each with the updater's signature, and `latest.json` — then the
+release is published. The signing job runs in the `release` environment: a
+reviewer approves it before its secrets are readable. `latest.json` is also
+copied onto the rolling `desktop-latest` release, the one fixed address the
+app reads: GitHub's own `latest` is whichever package of this repository
+released most recently. The app checks it once after start and offers the
+update in a dialog. `desktop.yml` runs on pull requests and by hand
+(`gh workflow run desktop.yml`, then `gh run download`) and leaves the
+unsigned installers as artifacts, which is how a change is tried before it is
+released.

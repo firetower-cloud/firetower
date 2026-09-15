@@ -11,6 +11,10 @@ name: desktop
 on:
   workflow_dispatch:
   pull_request:
+    # Not on a release PR: it changes versions and changelogs, nothing a
+    # build would catch.
+    branches-ignore:
+      - "release-please--branches--**"
     paths:
       - "desktop/**"
       - "api/openapi.json"
@@ -86,7 +90,7 @@ jobs:
           bundle=src-tauri/target/universal-apple-darwin/release/bundle
           version=$(node -p "require('./src-tauri/tauri.conf.json').version")
           scripts/make-dmg.sh "$bundle/macos/Firetower.app" \
-            "$bundle/dmg/Firetower_${version}_universal.dmg"
+            "$bundle/dmg/Firetower_${version}_macos.dmg"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ${{ matrix.artifact }}

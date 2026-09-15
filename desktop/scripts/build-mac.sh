@@ -27,7 +27,7 @@ pnpm tauri build --bundles app --config '{"bundle":{"createUpdaterArtifacts":fal
 # installer other people will open.
 bundle="src-tauri/target/${triple:+$triple/}release/bundle"
 version=$(node -p "require('./src-tauri/tauri.conf.json').version")
-arch=${triple:+universal}
+arch=${triple:+macos}
 dmg="$bundle/dmg/Firetower_${version}_${arch:-$(uname -m | sed s/arm64/aarch64/)}.dmg"
 scripts/make-dmg.sh "$bundle/macos/Firetower.app" "$dmg"
 
