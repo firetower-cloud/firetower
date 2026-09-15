@@ -15,7 +15,7 @@
 import { useEffect, useState } from "react";
 import { ArrowRight, CircleSlash2, Loader2, Lock } from "lucide-react";
 import { Mark } from "~/ui/Mark";
-import { MIN_SERVER, reach, signIn, type Bootstrap } from "~/probe";
+import { MIN_SERVER, packaged, reach, signIn, type Bootstrap } from "~/probe";
 import { remember } from "~/servers";
 
 type Stage =
@@ -226,9 +226,15 @@ function NoRoute({
  * Something answered and would not talk to the app.
  *
  * Told apart from no route by `probe.ts`, and drawn differently because the
- * remedy is different: the VPN is fine, the server is behind. Either it is
- * older than `MIN_SERVER` and said so, or it is older still and only sends the
- * cross-origin headers a webview needs to its own web page.
+ * remedy is different: the VPN is fine, so this is about which origins that
+ * server answers.
+ *
+ * Two reasons, and they are not the same remedy, so this does not guess. A
+ * shipped client's pages come from an origin every control plane from
+ * `MIN_SERVER` on allows, so being refused means the server is behind. A
+ * development build's pages come from vite, on an origin no production server
+ * allows — and stating the first reason there sent somebody to check the
+ * version of a server that was already current.
  */
 function Refused({
   typed,
@@ -246,11 +252,21 @@ function Refused({
       <div className="text-center">
         <CircleSlash2 className="mx-auto h-6 w-6 text-mute" strokeWidth={1.5} />
         <h1 className="mt-4 text-title text-bone">{typed} answered, but refused the app</h1>
-        <p className="mt-2 text-read text-dim">
-          It is running a Firetower older than {MIN_SERVER}, which only talks to its own web
-          page. Upgrade it from its Updates screen, or with <span className="font-mono">firetower upgrade</span> on
-          the machine, then try again.
-        </p>
+        {packaged() ? (
+          <p className="mt-2 text-read text-dim">
+            It is running a Firetower older than {MIN_SERVER}, which only talks to its own web
+            page. Upgrade it from its Updates screen, or with <span className="font-mono">firetower upgrade</span> on
+            the machine, then try again.
+          </p>
+        ) : (
+          <p className="mt-2 text-read text-dim">
+            This is a development build, and its pages come from{" "}
+            <span className="font-mono">{globalThis.location?.origin}</span> — an address no
+            control plane answers. Point it at a server you are running with{" "}
+            <span className="font-mono">--dev</span>, or use an installed Firetower to reach
+            this one.
+          </p>
+        )}
       </div>
 
       <p className="mt-2.5 text-center font-mono text-micro text-mute">{detail}</p>

@@ -29,6 +29,33 @@ export type Reached =
  */
 export const MIN_SERVER = "0.34.1";
 
+/**
+ * The origins a shipped client's pages have, on every platform it runs on.
+ *
+ * The same list the control plane allows — `ft_server::CLIENT_ORIGINS` — and
+ * kept here for one question the app has to answer about itself: *could* a
+ * server ever have let us in?
+ */
+export const PACKAGED_ORIGINS = [
+  "tauri://localhost",
+  "http://tauri.localhost",
+  "https://tauri.localhost",
+];
+
+/**
+ * Whether this build's pages come from where a shipped one's do.
+ *
+ * False in development, where the pages are served by vite on a port of its
+ * own. That origin is on no production allowlist and never will be — allowing
+ * it would let any page on anybody's dev server call a real control plane — so
+ * a refusal there is this build being what it is, not the server being behind.
+ * Saying otherwise sent somebody to check the version of a server that was
+ * already current.
+ */
+export function packaged(origin = globalThis.location?.origin ?? ""): boolean {
+  return PACKAGED_ORIGINS.includes(origin);
+}
+
 /** `a` is at least `b`, reading the first three dotted numbers of each. */
 export function atLeast(a: string, b: string): boolean {
   const num = (v: string) =>

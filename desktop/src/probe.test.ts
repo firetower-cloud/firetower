@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { atLeast, candidates, MIN_SERVER, reach } from "./probe";
+import { atLeast, candidates, MIN_SERVER, packaged, PACKAGED_ORIGINS, reach } from "./probe";
 
 const fine = { version: MIN_SERVER, eventsPath: "/api/v1/events", serverId: "o_1", organization: "Kev", authModes: ["password"] };
 
@@ -59,5 +59,18 @@ describe("atLeast", () => {
 describe("candidates", () => {
   it("tries https before http for a bare name", () => {
     expect(candidates("ft2.westlabs.dev")).toEqual(["https://ft2.westlabs.dev", "http://ft2.westlabs.dev"]);
+  });
+});
+
+describe("what a refusal means", () => {
+  it("is the server being behind, for a client that ships", () => {
+    for (const origin of PACKAGED_ORIGINS) expect(packaged(origin)).toBe(true);
+  });
+
+  it("is this build being a dev build, when the pages come from vite", () => {
+    // No production allowlist has this, and none should: it would let any page
+    // on anybody's dev server call a real control plane.
+    expect(packaged("http://localhost:5273")).toBe(false);
+    expect(packaged("")).toBe(false);
   });
 });
