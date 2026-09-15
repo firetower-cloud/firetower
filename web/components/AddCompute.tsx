@@ -49,7 +49,6 @@ export function AddCompute({ onClose }: { onClose: () => void }) {
   // Only so the form can show what it made of a pasted destination. The server
   // parses the address itself and prefers the account field when it has one.
   const typed = parseDestination(address);
-  const account = user.trim() || typed.user || "";
   const ready = !!typed.host;
 
   const edit =
@@ -121,7 +120,7 @@ export function AddCompute({ onClose }: { onClose: () => void }) {
         What you call it, in every list. Left blank it is called {typed.host || "where it is"}.
       </Field>
 
-      <HowWeGetIn user={account} />
+      <HowWeGetIn />
 
       <p className="mt-3 text-meta leading-[1.5] text-mute">
         Firetower then connects and says what the machine has and what it is missing — the worker
@@ -206,28 +205,20 @@ function NotAnswering({ told }: { told: Diagnosis }) {
 }
 
 /**
- * The command, for whoever adds keys on the machine itself.
- *
- * The path follows the username rather than saying `~/.ssh`, because the
- * account you paste this as is often not the account Firetower will be. Pasting
- * `~/.ssh/authorized_keys` while logged in as root puts the key in root's file
- * and leaves `deploy` still refusing.
+ * The lines for whoever adds the key on the machine itself, run as the
+ * account Firetower will connect as — `~` is that account's home, wherever
+ * the machine keeps it (`/home` on Linux, `/Users` on a Mac, somewhere else
+ * entirely under LDAP). Guessing the path was wrong on every Mac.
  *
  * `mkdir` and both `chmod`s are not padding: sshd ignores an `authorized_keys`
- * it considers too permissive, without saying so, and a fresh cloud image often
- * has no `~/.ssh` at all. Either fails in a way indistinguishable from a wrong
- * key.
+ * it considers too permissive, without saying so, and a fresh machine often
+ * has no `~/.ssh` at all.
  */
-function authorizedKeys(user: string, key: string) {
-  const who = user.trim();
-  const home = !who || who === "root" ? "/root" : `/home/${who}`;
-  const owner = who || "root";
-
+function authorizedKeys(key: string) {
   return [
-    `mkdir -p ${home}/.ssh && chmod 700 ${home}/.ssh`,
-    `echo '${key}' >> ${home}/.ssh/authorized_keys`,
-    `chmod 600 ${home}/.ssh/authorized_keys`,
-    `chown -R ${owner} ${home}/.ssh`,
+    "mkdir -p ~/.ssh && chmod 700 ~/.ssh",
+    `printf '%s\\n' '${key}' >> ~/.ssh/authorized_keys`,
+    "chmod 600 ~/.ssh/authorized_keys",
   ].join("\n");
 }
 
@@ -245,12 +236,7 @@ function authorizedKeys(user: string, key: string) {
  * `authorized_keys` on a machine you already own. A command assumes the last of
  * those, and on Google Cloud the guest agent will quietly undo it.
  */
-function HowWeGetIn({
-  user,
-}: {
-  /** Whose authorized_keys the by-hand lines should write to. */
-  user: string;
-}) {
+function HowWeGetIn() {
   const { data: identity, isLoading } = useSshKey();
   const [copied, setCopied] = useState(false);
   const [showing, setShowing] = useState(false);
@@ -293,12 +279,12 @@ function HowWeGetIn({
         onClick={() => setShowing(!showing)}
         className="mt-3 text-meta text-slate hover:text-bone"
       >
-        {showing ? "▾" : "▸"} Adding it to authorized_keys by hand
+        {showing ? "▾" : "▸"} Adding it to authorized_keys by hand, logged in as that account
       </button>
 
       {showing && (
         <pre className="mt-2 overflow-x-auto rounded-sm bg-black/25 px-3 py-2 font-mono text-meta leading-[1.7] text-bone">
-          {authorizedKeys(user, identity?.publicKey ?? "…")}
+          {authorizedKeys(identity?.publicKey ?? "…")}
         </pre>
       )}
     </div>

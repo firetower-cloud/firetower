@@ -215,8 +215,8 @@ function Add({ onClose }: { onClose: () => void }) {
             )}
             <p className="mt-2 text-meta text-mute">Give it to the machine the way that machine takes keys: <code className="font-mono">~/.ssh/authorized_keys</code> of the account above on a machine you own; the provider's console, instance metadata or OS Login on Google Cloud; the CA where there is one. It is public — safe anywhere.</p>
             <details className="mt-2 text-meta text-mute">
-              <summary className="cursor-pointer hover:text-bone">Adding it to authorized_keys by hand</summary>
-              <pre className="mt-1.5 overflow-x-auto rounded-md bg-panel px-2.5 py-1.5 font-mono text-micro text-dim">{authorizedKeys(user.trim() || typed.user || "", pub ?? "…")}</pre>
+              <summary className="cursor-pointer hover:text-bone">Adding it to authorized_keys by hand, logged in as that account</summary>
+              <pre className="mt-1.5 overflow-x-auto rounded-md bg-panel px-2.5 py-1.5 font-mono text-micro text-dim">{authorizedKeys(pub ?? "…")}</pre>
             </details>
           </div>
 
@@ -233,21 +233,20 @@ function Add({ onClose }: { onClose: () => void }) {
 }
 
 /**
- * The lines for whoever adds keys on the machine itself. The path follows the
- * username rather than saying `~/.ssh`, because the account you paste this as
- * is often not the account Firetower will be. `mkdir` and both `chmod`s are not
- * padding: sshd ignores an `authorized_keys` it considers too permissive,
- * without saying so.
+ * The lines for whoever adds the key on the machine itself, run as the
+ * account Firetower will connect as — `~` is that account's home, wherever
+ * the machine keeps it (`/home` on Linux, `/Users` on a Mac, somewhere else
+ * entirely under LDAP). Guessing the path was wrong on every Mac.
+ *
+ * `mkdir` and both `chmod`s are not padding: sshd ignores an `authorized_keys`
+ * it considers too permissive, without saying so, and a fresh machine often
+ * has no `~/.ssh` at all.
  */
-function authorizedKeys(user: string, key: string) {
-  const who = user.trim();
-  const home = !who || who === "root" ? "/root" : `/home/${who}`;
-  const owner = who || "root";
+function authorizedKeys(key: string) {
   return [
-    `mkdir -p ${home}/.ssh && chmod 700 ${home}/.ssh`,
-    `echo '${key}' >> ${home}/.ssh/authorized_keys`,
-    `chmod 600 ${home}/.ssh/authorized_keys`,
-    `chown -R ${owner} ${home}/.ssh`,
+    "mkdir -p ~/.ssh && chmod 700 ~/.ssh",
+    `printf '%s\\n' '${key}' >> ~/.ssh/authorized_keys`,
+    "chmod 600 ~/.ssh/authorized_keys",
   ].join("\n");
 }
 
