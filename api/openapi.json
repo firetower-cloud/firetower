@@ -10,7 +10,7 @@
       "name": "AGPL-3.0-only",
       "identifier": "AGPL-3.0-only"
     },
-    "version": "0.32.2"
+    "version": "0.34.2"
   },
   "paths": {
     "/api/v1/agent-accounts": {
@@ -702,8 +702,8 @@
         "tags": [
           "hosts"
         ],
-        "summary": "Forget a host, and take its container with it.",
-        "description": "Refuses while sessions are running unless `force`, in which case they are\ntold to end first — an agent that gets to shut down leaves its worktree and\ntmux session behind cleanly, rather than having the floor pulled out.\n\nA container Firetower started is Firetower's to stop. One it merely found\nrunning is not, and start-up says as much when it adopts nothing.",
+        "summary": "Forget a host.",
+        "description": "Refuses while sessions are running unless `force`, in which case they are\ntold to end first — an agent that gets to shut down leaves its worktree and\ntmux session behind cleanly, rather than having the floor pulled out.\n\nNothing on the machine is touched: the worker installed there is the\naccount's, and removing a host is forgetting it, not uninstalling it.",
         "operationId": "delete_host",
         "parameters": [
           {
@@ -959,7 +959,7 @@
           "hosts"
         ],
         "summary": "Put a worker on this machine.",
-        "description": "The control plane and the worker are the same source at the same version,\nand the connection is already open — so this copies the binary Firetower is\nholding down the wire it is already trusted on, into the worker's own state\ndirectory. No sudo, nothing outside the account's home, and nothing touched\nthat somebody else installed.\n\nWhat was here before was a `cargo build` in the interface. Asking for a Rust\ntoolchain on the machine whose entire job is to not have things installed on\nit is not a setup step; it is a reason to give up.",
+        "description": "Runs the installer script over the ssh connection Firetower already has —\nthe same script a person runs with `curl | sh` — pinned to this control\nplane's version. It fetches the build for *that* machine, so a Linux\ncontrol plane installs onto a Mac. No sudo, nothing outside the account's\nhome, and nothing touched that somebody else installed.",
         "operationId": "install_worker",
         "parameters": [
           {
@@ -984,7 +984,7 @@
             }
           },
           "400": {
-            "description": "Not a machine Firetower installs onto, or the wrong shape for this binary",
+            "description": "Not a machine reached over ssh",
             "content": {
               "application/json": {
                 "schema": {
@@ -4160,7 +4160,7 @@
         "tags": [
           "hosts"
         ],
-        "summary": "The public half of Firetower's own ssh key.",
+        "summary": "The public half of Firetower's own ssh key, and the one line that installs\na worker with it.",
         "description": "Read before adding a server, because the machine has to be given this before\nit will let Firetower in — and that is a step on the *other* machine, which\nnothing here can do.\n\nThere is no companion endpoint for the private half, and there should never\nbe one. It goes from the vault to a file ssh reads and no further.",
         "operationId": "ssh_key",
         "responses": {
@@ -5659,9 +5659,6 @@
         "description": "What went wrong, at the granularity of what fixes it.",
         "enum": [
           "WorkerMissing",
-          "DockerMissing",
-          "DockerDenied",
-          "ContainerMissing",
           "AuthRefused",
           "Unreachable",
           "HostKeyChanged",
@@ -6025,42 +6022,12 @@
           },
           {
             "type": "object",
-            "description": "A worker in a container on the control-plane machine.\n\nReached with `docker exec` rather than ssh: the same bidirectional pipe\nwithout an sshd, a key, or a host key to verify.",
-            "required": [
-              "image",
-              "name",
-              "type"
-            ],
-            "properties": {
-              "image": {
-                "type": "string"
-              },
-              "name": {
-                "type": "string"
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "Container"
-                ]
-              }
-            }
-          },
-          {
-            "type": "object",
             "description": "A worker on another machine. What a real deployment looks like.\n\nHeld as the parts of an ssh destination rather than one string, because\neach part is a separate decision: the address is the machine, the user is\nthe account work runs as, and the key is which of several you keep.\nAssembling them is [`Compute::ssh_destination`]'s job.",
             "required": [
               "host",
               "type"
             ],
             "properties": {
-              "container": {
-                "type": [
-                  "string",
-                  "null"
-                ],
-                "description": "The container the worker runs in on that machine. Absent runs the\nbinary on the host itself, for a machine whose image already has it.\n\nReached by ssh-ing to the machine and running `docker exec` there,\nnever by ssh-ing into the container — that would need a key inside\nthe image, a published port, and a host key that changes on every\nrecreate."
-              },
               "host": {
                 "type": "string",
                 "description": "A hostname, an address, or a name from your ssh config."
@@ -6898,13 +6865,6 @@
           }
         ]
       },
-      "Execution": {
-        "type": "string",
-        "enum": [
-          "container",
-          "host"
-        ]
-      },
       "Fallback": {
         "type": "object",
         "required": [
@@ -7163,17 +7123,6 @@
             "type": "boolean",
             "description": "Finishing what it has, taking nothing new. Separate from being\nunreachable: a draining host is still online and still working."
           },
-          "execution": {
-            "oneOf": [
-              {
-                "type": "null"
-              },
-              {
-                "$ref": "#/components/schemas/Execution",
-                "description": "Where the worker executes, resolved by the control plane."
-              }
-            ]
-          },
           "id": {
             "$ref": "#/components/schemas/HostId"
           },
@@ -7228,7 +7177,6 @@
         "required": [
           "hostId",
           "name",
-          "kind",
           "online",
           "drained",
           "upgradable",
@@ -7240,9 +7188,6 @@
           },
           "hostId": {
             "type": "string"
-          },
-          "kind": {
-            "$ref": "#/components/schemas/TargetKind"
           },
           "name": {
             "type": "string"
@@ -7261,7 +7206,7 @@
             "items": {
               "type": "string"
             },
-            "description": "Sessions on this machine, by title. They end when it is recreated."
+            "description": "Sessions on this machine, by title. They end when it is reinstalled."
           },
           "upgradable": {
             "type": "boolean"
@@ -7303,7 +7248,7 @@
               "string",
               "null"
             ],
-            "description": "What `firetower-worker --version` said on the machine.\n\nAbsent when the copy succeeded and the probe did not answer. The\ninstall still happened; the supervisor's next connection is the verdict."
+            "description": "What `firetower-worker --version` said on the machine.\n\nAbsent when the install ran and the probe did not answer. The install\nstill happened; the supervisor's next connection is the verdict."
           }
         }
       },
@@ -8126,7 +8071,8 @@
         "required": [
           "publicKey",
           "fingerprint",
-          "algorithm"
+          "algorithm",
+          "installCommand"
         ],
         "properties": {
           "algorithm": {
@@ -8135,6 +8081,10 @@
           "fingerprint": {
             "type": "string",
             "description": "`SHA256:…`, to match against `ssh-keygen -lf` on the other machine when\nthe two disagree about what was installed."
+          },
+          "installCommand": {
+            "type": "string",
+            "description": "The one line to paste on a machine: installs the worker and authorises\nthis key, so the machine can be added the moment it finishes."
           },
           "publicKey": {
             "type": "string",
@@ -9249,13 +9199,6 @@
             "type": "string"
           }
         }
-      },
-      "TargetKind": {
-        "type": "string",
-        "enum": [
-          "container",
-          "binary"
-        ]
       },
       "Targets": {
         "type": "object",

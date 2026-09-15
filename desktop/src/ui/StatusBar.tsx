@@ -7,10 +7,10 @@
  * machine is context. A machine that has gone quiet says so in place.
  */
 import { useRef, useState } from "react";
-import { Box, GitBranch, Monitor } from "lucide-react";
+import { GitBranch, Monitor } from "lucide-react";
 import { useSessionWork } from "~/api/generated/sessions/sessions";
 import type { Host, Session } from "~/api/generated/model";
-import { executionOf, isLocal, machines } from "~/api/environments";
+import { isLocal, machines } from "~/api/environments";
 import { useHosts, useSessions } from "~/data";
 import { navigate } from "~/shims/next-navigation";
 
@@ -20,12 +20,10 @@ const SHARE: Record<string, string> = { yields: "yields", equal: "equal share", 
 export function whereItRuns(host: Host | undefined, hosts: Host[]) {
   if (!host) return null;
   const machine = machines(hosts).find((m) => m.hosts.some((h) => h.id === host.id));
-  const execution = executionOf(host);
   return {
     name: isLocal(machine) ? "Firetower's machine" : (machine?.label ?? host.name),
-    execution,
-    how: execution === "container" ? "in a container" : execution === "host" ? "on the machine" : "",
-    Mark: execution === "container" ? Box : Monitor,
+    how: "on the machine",
+    Mark: Monitor,
     quiet: host.state === "Unreachable" || !!host.reconnecting,
     draining: host.state === "Draining" || !!host.drained,
   };
@@ -105,7 +103,7 @@ export function HostCard({ host, where, at }: { host: Host; where: NonNullable<R
         <span className={`ml-auto text-micro ${host.state === "Online" ? "text-sage" : host.state === "Draining" ? "text-dim" : "text-brick"}`}>{host.state === "Unreachable" ? "Not answering" : host.state}</span>
       </div>
       <p className="mt-1.5 text-meta text-dim">
-        {where.how ? where.how[0].toUpperCase() + where.how.slice(1) : "Execution unknown"}
+        {where.how[0].toUpperCase() + where.how.slice(1)}
         {docker ? ` · ${docker}` : ""}
       </p>
       <p className="text-meta text-dim">

@@ -359,11 +359,7 @@ pub(super) async fn create_session(
         is_local_path(&r.remote)
             && !matches!(
                 host.compute,
-                ft_core::Compute::Local
-                    | ft_core::Compute::Server {
-                        container: None,
-                        ..
-                    }
+                ft_core::Compute::Local | ft_core::Compute::Server { .. }
             )
     }) {
         return Err(ApiError::new(

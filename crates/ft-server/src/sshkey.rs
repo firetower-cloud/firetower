@@ -45,17 +45,22 @@ pub struct PublicIdentity {
     /// the two disagree about what was installed.
     pub fingerprint: String,
     pub algorithm: String,
+    /// The one line to paste on a machine: installs the worker and authorises
+    /// this key, so the machine can be added the moment it finishes.
+    pub install_command: String,
 }
 
 /// The comment on the key, so it is identifiable in a file of them.
 const COMMENT: &str = "firetower";
 
 fn describe(key: &PrivateKey) -> Result<PublicIdentity> {
+    let public_key = key
+        .public_key()
+        .to_openssh()
+        .context("encoding the public key")?;
     Ok(PublicIdentity {
-        public_key: key
-            .public_key()
-            .to_openssh()
-            .context("encoding the public key")?,
+        install_command: crate::install::one_liner(Some(&public_key)),
+        public_key,
         fingerprint: key.fingerprint(Default::default()).to_string(),
         algorithm: key.algorithm().to_string(),
     })

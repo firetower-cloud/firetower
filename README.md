@@ -73,14 +73,13 @@ npm i -g @firetower/cli
 firetower install
 ```
 
-To set up a worker on a server:
+To set up a worker on a machine — a server, a VM, a Mac:
 
 ```sh
-npm i -g @firetower/cli
-firetower worker install
+curl -fsSL https://usefiretower.com/worker.sh | sh
 ```
 
-A session can run Docker: `docker compose up` inside a session works, and the preview for a published port reaches it. The worker runs a daemon of its own, which means **worker containers are privileged** — anything in a session can become root on the machine hosting that worker. Give a worker a machine of its own and treat everything else on it as reachable from any session. Set `FIRETOWER_WORKER_DOCKER=off` to turn it off: workers come up as before, without Docker in sessions.
+The worker runs on the machine itself, as the account you connect with, with that machine's tools. It needs git, tmux and an sshd; the script says what is missing and offers to install it. Agents run with the machine's filesystem and network, so the machine is the unit of isolation: give a worker a VM of its own when that is what you want, and use the machine itself when that is the point.
 
 Everything else — putting it on a domain, adding a server, connecting repositories, secrets, upgrades — is in the documentation.
 

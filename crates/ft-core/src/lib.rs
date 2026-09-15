@@ -5,7 +5,7 @@
 //! testable and reusable verbatim in a hosted control plane.
 
 pub mod readiness;
-pub use readiness::{Execution, Readiness, Requirement};
+pub use readiness::{Readiness, Requirement};
 
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
@@ -36,39 +36,6 @@ pub use turn::{ItemId, ItemKind, RequestId, TurnEvent, TurnId};
 pub const SESSION_ENV: &str = "FIRETOWER_SESSION";
 /// Where the worker on this machine keeps its state.
 pub const WORKER_ROOT_ENV: &str = "FIRETOWER_WORKER_ROOT";
-
-/// Turns the Docker daemon inside worker containers off: `off`, or anything
-/// else to leave it on.
-///
-/// Here for the reason [`SESSION_ENV`] is — every end reads it, and there are
-/// four. An operator sets it on the control plane; `ft_server::container`
-/// passes it into the container it creates; that image's entrypoint reads it
-/// to decide whether to start a daemon; and `ft_worker::docker` reads it to
-/// know that "no daemon" was somebody's decision rather than a fault. Four
-/// spellings of one string is how a setting comes to be silently ignored.
-///
-/// Any value but `off` leaves it on, because the useful configuration is the
-/// default one and a typo should not quietly remove a feature.
-pub const DOCKER_ENV: &str = "FIRETOWER_WORKER_DOCKER";
-
-/// How much memory a worker container may have, if an operator says.
-///
-/// Unset means unlimited, which is what a worker has always had and what a
-/// machine with one worker on it usually wants. The reason to set it is the
-/// machine, not the worker: without a limit the kernel's own out-of-memory
-/// killer chooses by size when a machine runs short, and the largest thing on a
-/// busy worker is frequently the agent rather than whatever ran away with the
-/// memory — so the session dies and the container that caused it does not.
-///
-/// A ceiling turns that into an ordinary cgroup kill inside the worker, where
-/// the workspace limits decide who goes. Worth leaving the machine a couple of
-/// gigabytes below its total: a host with nothing spare is a host nobody can
-/// ssh into to find out what happened.
-///
-/// Read by `ft_server::container` when it creates a worker, and passed to
-/// `docker run --memory`, so the value is whatever Docker accepts: `17g`,
-/// `2048m`.
-pub const WORKER_MEMORY_ENV: &str = "FIRETOWER_WORKER_MEMORY";
 
 /// Which agent runs inside a workspace.
 ///
@@ -123,21 +90,15 @@ impl Agent {
         }
     }
 
-    /// Where to get it, when the machine does not already have it.
+    /// Whether Firetower fetches this one when the machine does not have it.
     ///
-    /// npm for both of these — not because they are JavaScript (neither is any
-    /// more; both ship a native binary in a per-platform package) but because
-    /// it is the channel their publishers actually support, it resolves the
-    /// right build for the architecture, and the registry hands over a digest
-    /// with the tarball so verifying costs nothing.
-    ///
-    /// `None` for a shell: every machine has one, and fetching it would be
-    /// absurd.
-    pub fn package(&self) -> Option<&'static str> {
+    /// Both agents ship a standalone binary per platform, and the worker
+    /// fetches that — see `ft_worker::runtime`. Not a shell: every machine has
+    /// one, and fetching it would be absurd.
+    pub fn installable(&self) -> bool {
         match self {
-            Agent::ClaudeCode => Some("@anthropic-ai/claude-code"),
-            Agent::Codex => Some("@openai/codex"),
-            Agent::Shell => None,
+            Agent::ClaudeCode | Agent::Codex => true,
+            Agent::Shell => false,
         }
     }
 
@@ -385,12 +346,6 @@ pub enum Compute {
     /// A worker as a child process here. Inherits your environment, and its
     /// workspaces are directories you can open.
     Local,
-    /// A worker in a container on the control-plane machine.
-    ///
-    /// Reached with `docker exec` rather than ssh: the same bidirectional pipe
-    /// without an sshd, a key, or a host key to verify.
-    #[serde(rename_all = "camelCase")]
-    Container { image: String, name: String },
     /// A worker on another machine. What a real deployment looks like.
     ///
     /// Held as the parts of an ssh destination rather than one string, because
@@ -416,15 +371,6 @@ pub enum Compute {
         /// machine answers with — connecting trusts a key it hasn't seen before
         /// and remembers it, so this is a record rather than a guarantee.
         host_key: Option<String>,
-        /// The container the worker runs in on that machine. Absent runs the
-        /// binary on the host itself, for a machine whose image already has it.
-        ///
-        /// Reached by ssh-ing to the machine and running `docker exec` there,
-        /// never by ssh-ing into the container — that would need a key inside
-        /// the image, a published port, and a host key that changes on every
-        /// recreate.
-        #[serde(default)]
-        container: Option<String>,
     },
 }
 
@@ -433,7 +379,6 @@ impl Compute {
     pub fn label(&self) -> &'static str {
         match self {
             Compute::Local => "local",
-            Compute::Container { .. } => "container",
             Compute::Server { .. } => "server",
         }
     }
@@ -448,7 +393,7 @@ impl Compute {
                 Some(user) => format!("{user}@{host}"),
                 None => host.clone(),
             }),
-            Compute::Local | Compute::Container { .. } => None,
+            Compute::Local => None,
         }
     }
 }
@@ -584,7 +529,6 @@ mod destination_tests {
             port: None,
             key: SshKey::Default,
             host_key: None,
-            container: None,
         };
         assert_eq!(
             named.ssh_destination().as_deref(),
@@ -597,7 +541,6 @@ mod destination_tests {
             port: None,
             key: SshKey::Default,
             host_key: None,
-            container: None,
         };
         assert_eq!(anonymous.ssh_destination().as_deref(), Some("fire-01"));
 
@@ -613,9 +556,6 @@ pub struct Host {
     /// Machine grouping; "local" means the machine hosting the control plane.
     #[serde(default)]
     pub machine: Option<String>,
-    /// Where the worker executes, resolved by the control plane.
-    #[serde(default)]
-    pub execution: Option<Execution>,
     pub id: HostId,
     /// What the user calls it. `localhost` is a real host, not a special case.
     pub name: String,
@@ -859,14 +799,8 @@ pub struct Diagnosis {
 /// What went wrong, at the granularity of what fixes it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub enum Cause {
-    /// We got there, and there is no `firetower` to run.
+    /// We got there, and there is no `firetower-worker` to run.
     WorkerMissing,
-    /// We got there, and there is no `docker` to run it with.
-    DockerMissing,
-    /// Docker is installed and this account may not talk to it.
-    DockerDenied,
-    /// Docker answered, and the container isn't running.
-    ContainerMissing,
     /// The machine is there and refused us.
     AuthRefused,
     /// Nothing answered at that address.
@@ -894,11 +828,7 @@ impl Cause {
     pub fn reached_the_machine(&self) -> bool {
         match self {
             // ssh got in, and what it found on the other side was wrong.
-            Cause::WorkerMissing
-            | Cause::DockerMissing
-            | Cause::DockerDenied
-            | Cause::ContainerMissing
-            | Cause::ProtocolMismatch => true,
+            Cause::WorkerMissing | Cause::ProtocolMismatch => true,
 
             // ssh never got in, or refused to.
             Cause::AuthRefused | Cause::Unreachable | Cause::HostKeyChanged | Cause::Unknown => {
@@ -1808,17 +1738,12 @@ mod contract_tests {
 
         for kind in [
             Compute::Local,
-            Compute::Container {
-                image: "firetower/worker:dev".into(),
-                name: "firetower-worker".into(),
-            },
             Compute::Server {
                 host: "203.0.113.44".into(),
                 user: Some("root".into()),
                 port: None,
                 key: SshKey::Default,
                 host_key: None,
-                container: None,
             },
         ] {
             let written = serde_json::to_value(&kind).expect("a kind serialises");
@@ -1877,8 +1802,7 @@ mod ssh_key_tests {
     fn the_shapes_the_migration_writes_are_the_ones_we_read() {
         let file: Compute = serde_json::from_str(
             r#"{"type":"Server","host":"fire-01","user":"deploy",
-                "key":{"type":"File","path":"~/.ssh/fire"},
-                "container":"firetower-worker"}"#,
+                "key":{"type":"File","path":"~/.ssh/fire"}}"#,
         )
         .unwrap();
 
@@ -1929,9 +1853,6 @@ mod reachability_tests {
     fn what_counts_as_having_reached_the_machine() {
         // ssh worked; the far side is missing something.
         assert!(Cause::WorkerMissing.reached_the_machine());
-        assert!(Cause::DockerMissing.reached_the_machine());
-        assert!(Cause::DockerDenied.reached_the_machine());
-        assert!(Cause::ContainerMissing.reached_the_machine());
         assert!(Cause::ProtocolMismatch.reached_the_machine());
 
         // ssh did not.

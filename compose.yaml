@@ -65,21 +65,12 @@ services:
       - .:/workspace
       - cargo:/cargo
       - target:/target
-      # The worker container is reached over ssh with this key.
+      # Machines are reached over ssh with this key.
       - ./.dev/ssh:/root/.ssh:ro
     ports:
       - "4400:4400"
       - "3000:3000"
     command: just dev
-    profiles: ["full"]
-
-  worker:
-    build:
-      context: .
-      dockerfile: Dockerfile.worker
-    volumes:
-      # Only the public half; the control plane keeps the private key.
-      - ./.dev/ssh/id_ed25519.pub:/root/.ssh/authorized_keys:ro
     profiles: ["full"]
 
 volumes:

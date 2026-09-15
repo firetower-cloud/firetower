@@ -44,11 +44,6 @@ pub const SESSION_LABEL: &str = "com.firetower.session";
 /// What Compose labels a session's resources with, via `COMPOSE_PROJECT_NAME`.
 const COMPOSE_LABEL: &str = "com.docker.compose.project";
 
-/// Re-exported so this module reads as one thing. Defined in `ft-core`,
-/// which is the crate both the worker and the control plane share — see
-/// [`ft_core::DOCKER_ENV`] for what it is and who reads it.
-pub use ft_core::DOCKER_ENV;
-
 /// How long any one Docker command gets before we give up on it.
 ///
 /// **Not decoration.** A daemon that is wedged rather than absent accepts a
@@ -108,23 +103,6 @@ pub fn project(session: &SessionId) -> String {
 /// a daemon that answers are different things, and it is the second one a
 /// `docker compose up` needs.
 pub async fn state() -> DockerState {
-    // Turned off deliberately, and that is not the same as broken.
-    //
-    // Without this the answer would be `Stopped`, because the client is in the
-    // image and finds nothing behind the socket — and a session would be told
-    // its machine has a fault and to report it, about a setting somebody chose
-    // on purpose. `Absent` is what "there is no Docker here" means, and this
-    // is that.
-    //
-    // Readable because the control plane passes it into the container, and
-    // `docker exec` gives this process the container's environment.
-    if std::env::var(DOCKER_ENV).is_ok_and(|v| v.eq_ignore_ascii_case("off")) {
-        return DockerState {
-            status: ft_core::DockerStatus::Absent,
-            detail: Some("Docker is turned off for this worker".into()),
-        };
-    }
-
     let mut command = Command::new("docker");
     command.args(["info", "--format", "{{.ServerVersion}}"]);
 

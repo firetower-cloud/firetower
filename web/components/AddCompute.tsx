@@ -15,34 +15,25 @@ import { parseDestination } from "@/src/api/environments";
 /**
  * Adding a machine.
  *
- * ## What it asks, and what it stopped asking
+ * ## What it asks
  *
- * Three fields about the machine — where it is, who to connect as, and what to
- * call the container when one is used — plus the key it has to be given.
+ * Two fields about the machine — where it is and who to connect as — plus the
+ * one line to run on it, which installs the worker and gives the machine
+ * Firetower's key in the same breath.
  *
  * The address and the account were briefly one box taking `editor@10.0.4.7`.
  * They are two things: an address is where, an account is who, and a form is
- * clearer when it says so. The single box also quietly dropped the container
- * name, which left no way to point Firetower at a container called anything
- * other than `firetower-worker`. Pasting a whole destination into the address
- * still works — `parseDestination` splits it and the server prefers a field
- * somebody filled in over one it parsed.
+ * clearer when it says so. Pasting a whole destination into the address still
+ * works — `parseDestination` splits it and the server prefers a field somebody
+ * filled in over one it parsed.
  *
- * Two questions did go, and stay gone:
- *
- * * **Container or directly on host** is a mode, chosen per workspace, on the
- *   machine. Both are available on everything Firetower can reach, so asking
- *   here meant adding the same machine twice to get both.
- * * **This server or a remote one** was only ever about ssh-ing to the machine
- *   Firetower is already on. It does not.
+ * What it does not ask: **container or directly on host**. Agents run on the
+ * machine, as the account above. And **this server or a remote one** was only
+ * ever about ssh-ing to the machine Firetower is already on. It does not.
  */
-/** The container to look for, and the only one anybody has to type. */
-const DEFAULT_CONTAINER = "firetower-worker";
-
 export function AddCompute({ onClose }: { onClose: () => void }) {
   const [address, setAddress] = useState("");
   const [user, setUser] = useState("");
-  const [container, setContainer] = useState(DEFAULT_CONTAINER);
   const [label, setLabel] = useState("");
   const [keyPath, setKeyPath] = useState("");
   const [ownKey, setOwnKey] = useState(false);
@@ -64,10 +55,6 @@ export function AddCompute({ onClose }: { onClose: () => void }) {
       setter(value);
     };
 
-  // The environment made here is the one reached directly on the machine. The
-  // container on it is the same connection with `docker exec` in front, and is
-  // made when somebody picks that mode — but the *name* to use has to be
-  // collected now, because nothing later asks for it.
   const body = () => ({
     name: label.trim() || undefined,
     compute: {
@@ -78,30 +65,8 @@ export function AddCompute({ onClose }: { onClose: () => void }) {
     } as Compute,
   });
 
-  // Both environments, in one go.
-  //
-  // A machine is a place and the two ways of running on it are modes, so a
-  // machine that has just been added should have both — otherwise picking
-  // Container in New workspace has to invent one, and the name typed above
-  // would have nowhere to live. The container is created rather than probed:
-  // whether it is running is a question for the moment somebody picks it, and
-  // it is the one HostReadiness already answers.
   const save = async () => {
     await create.mutateAsync({ data: body() });
-    const named = container.trim();
-    if (named) {
-      const base = label.trim() || typed.host;
-      await create
-        .mutateAsync({
-          data: {
-            name: `${base} · container`,
-            compute: { ...body().compute, container: named } as Compute,
-          },
-        })
-        // A machine that is added and a second environment that is not is
-        // still a machine that is added. Picking Container makes one.
-        .catch(() => {});
-    }
     await cache.invalidateQueries({ queryKey: getListHostsQueryKey() });
     onClose();
   };
@@ -138,22 +103,8 @@ export function AddCompute({ onClose }: { onClose: () => void }) {
         onChange={edit(setUser)}
         placeholder={typed.user || "editor"}
       >
-        Who to connect as. Directly on the host, the worker and its agents run as this account with
-        its permissions; for a container, it is the account that runs{" "}
-        <code className="font-mono">docker exec</code>. Left blank, it is whatever your ssh config
-        says.
-      </Field>
-
-      <Field
-        label="Container name"
-        optional
-        value={container}
-        onChange={edit(setContainer)}
-        placeholder={DEFAULT_CONTAINER}
-      >
-        Which container to run agents in, when this machine is used in Container mode. Leave it as{" "}
-        <code className="font-mono">{DEFAULT_CONTAINER}</code> unless yours is called something
-        else.
+        Who to connect as. The worker and its agents run as this account, with its permissions.
+        Left blank, it is whatever your ssh config says.
       </Field>
 
       <Field
@@ -175,9 +126,8 @@ export function AddCompute({ onClose }: { onClose: () => void }) {
       />
 
       <p className="mt-3 text-meta leading-[1.5] text-mute">
-        Both ways of running are then available on it — in the worker container named above, or on
-        the machine itself. Firetower checks whichever you pick, when you pick it, and says what is
-        missing.
+        Firetower then checks the machine and says what is missing. Agents run on it directly, as
+        the account above.
       </p>
 
       {(create.error || probe.error) && (
@@ -312,19 +262,19 @@ function HowWeGetIn({
   user: string;
 }) {
   const { data: identity, isLoading } = useSshKey();
-  const [copied, setCopied] = useState(false);
+  const [copied, setCopied] = useState<"line" | "key" | null>(null);
   const [showing, setShowing] = useState(false);
 
-  const copy = async () => {
+  const copy = async (what: "line" | "key") => {
     if (!identity) return;
-    await navigator.clipboard.writeText(identity.publicKey);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    await navigator.clipboard.writeText(what === "line" ? identity.installCommand : identity.publicKey);
+    setCopied(what);
+    setTimeout(() => setCopied(null), 2000);
   };
 
   return (
     <div className="mt-5 rounded-sm border border-line bg-ground/40 p-3">
-      <p className="eyebrow">Firetower gets in with this key</p>
+      <p className="eyebrow">Run this on the machine</p>
 
       {ownKey ? (
         <>
@@ -349,43 +299,56 @@ function HowWeGetIn({
       ) : (
         <>
           <p className="mt-2 text-meta leading-[1.5] text-mute">
-            Give this public key to the machine you are about to name. It is public — safe to paste
-            into a provider&apos;s web form, a cloud-init file, or
-            <code className="mx-1 font-mono text-slate">authorized_keys</code> on a machine you own.
+            As the account you named above. It installs the worker into that account&apos;s home,
+            says what the machine is missing and offers to install it, and gives the machine
+            Firetower&apos;s key — so it can be added the moment it finishes.
           </p>
 
           <div className="mt-2 flex items-start gap-2">
             <code className="min-w-0 flex-1 break-all rounded-sm border border-line bg-ground px-3 py-2 font-mono text-meta leading-[1.5] text-bone">
-              {isLoading ? "…" : (identity?.publicKey ?? "no key yet")}
+              {isLoading ? "…" : (identity?.installCommand ?? "no key yet")}
             </code>
             <button
               type="button"
-              onClick={copy}
+              onClick={() => copy("line")}
               disabled={!identity}
               className="shrink-0 rounded-sm border border-line px-3 py-2 text-meta text-slate hover:text-bone disabled:opacity-40"
             >
-              {copied ? "Copied" : "Copy"}
+              {copied === "line" ? "Copied" : "Copy"}
             </button>
           </div>
-
-          <p className="mt-2 text-meta leading-[1.5] text-mute">
-            Most providers take it when you create the machine, or in its settings afterwards. Some
-            manage keys their own way — Google Cloud through instance metadata or OS Login, and an
-            SSH CA through the CA.
-          </p>
 
           <button
             type="button"
             onClick={() => setShowing(!showing)}
             className="mt-3 text-meta text-slate hover:text-bone"
           >
-            {showing ? "▾" : "▸"} Adding it on the machine yourself
+            {showing ? "▾" : "▸"} Just the key, for a provider&apos;s web form or cloud-init
           </button>
 
           {showing && (
-            <pre className="mt-2 overflow-x-auto rounded-sm bg-black/25 px-3 py-2 font-mono text-meta leading-[1.7] text-bone">
-              {authorizedKeys(user, identity?.publicKey ?? "…")}
-            </pre>
+            <>
+              <div className="mt-2 flex items-start gap-2">
+                <code className="min-w-0 flex-1 break-all rounded-sm border border-line bg-ground px-3 py-2 font-mono text-meta leading-[1.5] text-bone">
+                  {identity?.publicKey ?? "…"}
+                </code>
+                <button
+                  type="button"
+                  onClick={() => copy("key")}
+                  disabled={!identity}
+                  className="shrink-0 rounded-sm border border-line px-3 py-2 text-meta text-slate hover:text-bone disabled:opacity-40"
+                >
+                  {copied === "key" ? "Copied" : "Copy"}
+                </button>
+              </div>
+              <p className="mt-2 text-meta leading-[1.5] text-mute">
+                Some providers manage keys their own way — Google Cloud through instance metadata
+                or OS Login, an SSH CA through the CA. On a machine you own, by hand:
+              </p>
+              <pre className="mt-2 overflow-x-auto rounded-sm bg-black/25 px-3 py-2 font-mono text-meta leading-[1.7] text-bone">
+                {authorizedKeys(user, identity?.publicKey ?? "…")}
+              </pre>
+            </>
           )}
 
           <div className="mt-3 flex items-center justify-between gap-3">

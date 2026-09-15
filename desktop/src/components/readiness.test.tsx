@@ -5,15 +5,15 @@ import { Readout, isReady } from "./HostReadiness";
 import { getHostReadinessQueryKey } from "~/api/generated/hosts/hosts";
 import type { Host, Readiness } from "~/api/generated/model";
 
-const server = (container?: string): Host => ({
+/** A machine reached over ssh, online unless said otherwise. */
+const server = (online: boolean | string = true): Host => ({
   id: "h1",
   name: "video-vm",
-  compute: { type: "Server", host: "192.0.2.10", user: "editor", key: { type: "Managed" }, container },
-  state: container ? "Online" : "Unreachable",
+  compute: { type: "Server", host: "192.0.2.10", user: "editor", key: { type: "Managed" } },
+  state: online ? "Online" : "Unreachable",
   drained: false,
   reconnecting: false,
   docker: { status: "Unknown" },
-  execution: container ? "container" : "host",
 });
 
 function draw(host: Host, report: Readiness) {
@@ -49,7 +49,7 @@ describe("when everything is ready", () => {
   };
 
   it("is one sentence, not a list of things that are fine", () => {
-    const out = draw(server("firetower-worker"), report);
+    const out = draw(server(), report);
     expect(out).toContain("Ready — runs as root");
     // The old card put every passing check on screen, on a form people fill in
     // twenty times a day.
@@ -58,27 +58,32 @@ describe("when everything is ready", () => {
   });
 
   it("still says how many were checked, and offers them", () => {
-    expect(draw(server("firetower-worker"), report)).toContain("3 checks");
+    expect(draw(server(), report)).toContain("3 checks");
   });
 
-  it("names the environment a container runs in, and the machine a host does", () => {
-    expect(draw(server("firetower-worker"), report)).toContain("in video-vm");
+  it("names the machine it runs on", () => {
     expect(draw(server(), { ...report, user: "editor" })).toContain("on editor@192.0.2.10");
   });
 });
 
 describe("when there is no worker on the machine yet", () => {
   const report: Readiness = {
-    checks: [fail("Worker connection", "The worker is not connected.", "Install it. See docs.")],
+    checks: [
+      fail(
+        "Worker connection",
+        "The worker is not connected.",
+        "curl -fsSL https://usefiretower.com/worker.sh | sh -s -- --authorize 'ssh-ed25519 AAAA firetower'",
+      ),
+    ],
   };
 
   it("says that, rather than counting requirements it could not measure", () => {
-    const out = draw(server(), report);
+    const out = draw(server(false), report);
     expect(out).toContain("There is no worker on editor@192.0.2.10 yet");
   });
 
   it("offers to put one there, because it can", () => {
-    const out = draw(server(), report);
+    const out = draw(server(false), report);
     expect(out).toContain("Install the worker");
     expect(out).toContain("~/.firetower/worker/bin");
     // What was here before: a Rust toolchain on a machine whose whole purpose
@@ -86,9 +91,9 @@ describe("when there is no worker on the machine yet", () => {
     expect(out).not.toContain("cargo build");
   });
 
-  it("does not offer that for a container, whose worker comes from its image", () => {
-    const out = draw(server("firetower-worker"), report);
-    expect(out).not.toContain("Install the worker");
+  it("shows the one line a person can run instead, key and all", () => {
+    const out = draw(server(false), report);
+    expect(out).toContain("worker.sh | sh -s -- --authorize");
   });
 });
 

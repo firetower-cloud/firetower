@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.32.2
+ * OpenAPI spec version: 0.34.2
  */
 import * as zod from 'zod';
 
@@ -36,11 +36,10 @@ export const GetUpdatesResponse = zod.object({
   "hosts": zod.array(zod.object({
   "drained": zod.boolean(),
   "hostId": zod.string(),
-  "kind": zod.enum(['container', 'binary']),
   "name": zod.string(),
   "online": zod.boolean(),
   "reason": zod.string().nullish(),
-  "sessions": zod.array(zod.string()).describe('Sessions on this machine, by title. They end when it is recreated.'),
+  "sessions": zod.array(zod.string()).describe('Sessions on this machine, by title. They end when it is reinstalled.'),
   "upgradable": zod.boolean(),
   "version": zod.string().nullish()
 })),
@@ -90,11 +89,10 @@ export const CheckUpdatesResponse = zod.object({
   "hosts": zod.array(zod.object({
   "drained": zod.boolean(),
   "hostId": zod.string(),
-  "kind": zod.enum(['container', 'binary']),
   "name": zod.string(),
   "online": zod.boolean(),
   "reason": zod.string().nullish(),
-  "sessions": zod.array(zod.string()).describe('Sessions on this machine, by title. They end when it is recreated.'),
+  "sessions": zod.array(zod.string()).describe('Sessions on this machine, by title. They end when it is reinstalled.'),
   "upgradable": zod.boolean(),
   "version": zod.string().nullish()
 })),

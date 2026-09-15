@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.32.2
+ * OpenAPI spec version: 0.34.2
  */
 
 export * from './accessEntry.ts';
@@ -61,7 +61,6 @@ export * from './envVariable.ts';
 export * from './errorCode.ts';
 export * from './event.ts';
 export * from './eventKind.ts';
-export * from './execution.ts';
 export * from './fallback.ts';
 export * from './fileChoice.ts';
 export * from './fileDiff.ts';
@@ -168,7 +167,6 @@ export * from './streamKind.ts';
 export * from './switch.ts';
 export * from './switchAccount.ts';
 export * from './switchedAccount.ts';
-export * from './targetKind.ts';
 export * from './targets.ts';
 export * from './task.ts';
 export * from './taskId.ts';

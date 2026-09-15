@@ -10,7 +10,7 @@ import {
 import { useInstallAgent } from "@/src/api/generated/agents/agents";
 import { useQueryClient } from "@tanstack/react-query";
 import { Copyable } from "@/components/ui";
-import { connectionLabel, environmentLabel, executionOf } from "@/src/api/environments";
+import { connectionLabel } from "@/src/api/environments";
 
 export function isReady(report?: Readiness): boolean {
   return (
@@ -30,9 +30,9 @@ export function isReady(report?: Readiness): boolean {
  */
 const CONNECTION = "Worker connection";
 
-/** A machine Firetower can put a worker on: reached over ssh, running it directly. */
+/** A machine Firetower can put a worker on: one it reaches over ssh. */
 function takesAWorker(host: Host): boolean {
-  return host.compute.type === "Server" && !host.compute.container;
+  return host.compute.type === "Server";
 }
 
 /**
@@ -41,19 +41,16 @@ function takesAWorker(host: Host): boolean {
  * ## Why ready is one line
  *
  * This used to be a card of eight rows, every one of them saying `Ready`, open
- * on a form people fill in twenty times a day. In a container all eight are
- * ready by construction — the image put them there — so the card spent a third
- * of the dialog proving something nobody doubted, and the one case where the
- * answer is genuinely unknown looked exactly the same as the case where it
- * isn't.
+ * on a form people fill in twenty times a day. On a machine that is set up all
+ * eight are ready, so the card spent a third of the dialog proving something
+ * nobody doubted, and the one case where the answer is genuinely unknown
+ * looked exactly the same as the case where it isn't.
  *
  * So: **problems are shown, readiness is not.** Ready collapses to a sentence
  * with the count beside it; the list is still there, behind the count, for
  * whoever wants to see what was actually checked. Everything that is missing is
  * itemised in full, with what can be done about it.
  *
- * The rule does not change between a container and a host, which is the other
- * half of what was wrong: one mode showed a card and the other showed a button.
  */
 export function Readout({
   host,
@@ -103,14 +100,7 @@ export function Readout({
   // Said as one sentence rather than a table of two: where it runs, and who it
   // runs as. Both are things people get wrong about a host they set up weeks
   // ago, and neither is worth a row of its own.
-  const where =
-    host.compute.type === "Local"
-      ? executionOf(host) === "host"
-        ? "on this machine"
-        : "in the Firetower container"
-      : executionOf(host) === "host"
-        ? `on ${connectionLabel(host)}`
-        : `in ${environmentLabel(host)}`;
+  const where = host.compute.type === "Local" ? "on this machine" : `on ${connectionLabel(host)}`;
 
   if (report.isFetching && !report.data) {
     return (
@@ -218,16 +208,18 @@ export function Readout({
 
         {missing.some((c) => c.name === CONNECTION) && takesAWorker(host) && (
           <p className="mt-2.5 text-meta leading-[1.5] text-mute">
-            Firetower copies its own binary, at the version this control plane runs, into{" "}
-            <code className="font-mono">~/.firetower/worker/bin</code> over the connection it
-            already has. No sudo, and nothing outside that account&apos;s home.
+            Firetower runs its installer over the connection it already has: the worker built for
+            that machine lands in <code className="font-mono">~/.firetower/worker/bin</code>, and
+            anything the machine is missing is named. No sudo, and nothing outside that
+            account&apos;s home. Or run the same line on the machine yourself:
           </p>
         )}
 
         {/* One remedy per thing that is genuinely the machine's, and never for
-            something there is a button for above. */}
+            something there is a button for above — except the worker itself,
+            whose remedy is the one line a person can run instead of the button. */}
         {missing
-          .filter((c) => command(c) && !actionable(c, host, agent, agentLabel))
+          .filter((c) => command(c) && (c.name === CONNECTION || !actionable(c, host, agent, agentLabel)))
           .map((check) => (
             <Remedy key={check.name} check={check} />
           ))}

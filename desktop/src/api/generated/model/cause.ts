@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.32.2
+ * OpenAPI spec version: 0.34.2
  */
 
 /**
@@ -14,9 +14,6 @@ export type Cause = typeof Cause[keyof typeof Cause];
 
 export const Cause = {
   WorkerMissing: 'WorkerMissing',
-  DockerMissing: 'DockerMissing',
-  DockerDenied: 'DockerDenied',
-  ContainerMissing: 'ContainerMissing',
   AuthRefused: 'AuthRefused',
   Unreachable: 'Unreachable',
   HostKeyChanged: 'HostKeyChanged',

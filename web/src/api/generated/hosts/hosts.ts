@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.32.2
+ * OpenAPI spec version: 0.34.2
  */
 import {
   useMutation,
@@ -344,9 +344,9 @@ export const useProbeHost = <TError = ApiError,
  * told to end first — an agent that gets to shut down leaves its worktree and
  * tmux session behind cleanly, rather than having the floor pulled out.
  *
- * A container Firetower started is Firetower's to stop. One it merely found
- * running is not, and start-up says as much when it adopts nothing.
- * @summary Forget a host, and take its container with it.
+ * Nothing on the machine is touched: the worker installed there is the
+ * account's, and removing a host is forgetting it, not uninstalling it.
+ * @summary Forget a host.
  */
 export const deleteHost = async (id: string,
     params?: DeleteHostParams, options?: Parameters<typeof http>[1]): Promise<void> => {
@@ -396,7 +396,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type DeleteHostMutationError = ApiError
 
     /**
- * @summary Forget a host, and take its container with it.
+ * @summary Forget a host.
  */
 export const useDeleteHost = <TError = ApiError,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteHost>>, TError,{id: string;params?: DeleteHostParams}, TContext>, request?: SecondParameter<typeof http>}
@@ -767,15 +767,11 @@ export const getInstallWorkerUrl = (id: string,) => {
 }
 
 /**
- * The control plane and the worker are the same source at the same version,
- * and the connection is already open — so this copies the binary Firetower is
- * holding down the wire it is already trusted on, into the worker's own state
- * directory. No sudo, nothing outside the account's home, and nothing touched
- * that somebody else installed.
- *
- * What was here before was a `cargo build` in the interface. Asking for a Rust
- * toolchain on the machine whose entire job is to not have things installed on
- * it is not a setup step; it is a reason to give up.
+ * Runs the installer script over the ssh connection Firetower already has —
+ * the same script a person runs with `curl | sh` — pinned to this control
+ * plane's version. It fetches the build for *that* machine, so a Linux
+ * control plane installs onto a Mac. No sudo, nothing outside the account's
+ * home, and nothing touched that somebody else installed.
  * @summary Put a worker on this machine.
  */
 export const installWorker = async (id: string, options?: Parameters<typeof http>[1]): Promise<Installed> => {
@@ -852,7 +848,8 @@ export const useInstallWorker = <TError = ApiError,
  *
  * There is no companion endpoint for the private half, and there should never
  * be one. It goes from the vault to a file ssh reads and no further.
- * @summary The public half of Firetower's own ssh key.
+ * @summary The public half of Firetower's own ssh key, and the one line that installs
+a worker with it.
  */
 export const sshKey = async ( options?: Parameters<typeof http>[1]): Promise<PublicIdentity> => {
 
@@ -923,7 +920,8 @@ export function useSshKey<TData = Awaited<ReturnType<typeof sshKey>>, TError = u
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
- * @summary The public half of Firetower's own ssh key.
+ * @summary The public half of Firetower's own ssh key, and the one line that installs
+a worker with it.
  */
 
 export function useSshKey<TData = Awaited<ReturnType<typeof sshKey>>, TError = unknown>(
@@ -941,7 +939,8 @@ export function useSshKey<TData = Awaited<ReturnType<typeof sshKey>>, TError = u
 
 
 /**
- * @summary The public half of Firetower's own ssh key.
+ * @summary The public half of Firetower's own ssh key, and the one line that installs
+a worker with it.
  */
 export const useSetSshKeyQueryData = () => {
   const queryClient = useQueryClient();
@@ -951,7 +950,8 @@ export const useSetSshKeyQueryData = () => {
 }
 
 /**
- * @summary The public half of Firetower's own ssh key.
+ * @summary The public half of Firetower's own ssh key, and the one line that installs
+a worker with it.
  */
 export const useGetSshKeyQueryData = () => {
   const queryClient = useQueryClient();

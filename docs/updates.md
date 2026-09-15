@@ -9,8 +9,7 @@ and presses one of two buttons. There is no automatic mode.
 | Target | How | Sessions on it |
 | --- | --- | --- |
 | The control plane | The `updater` container beside it pulls the release, rewrites the deployment files the release changed, runs `docker compose up -d firetower` against the deployment's own `firetower.yml`, and waits for `/readyz`. If it does not answer within three minutes, the previous image is put back. A `pg_dump` is written into `backups/` first. | End when it is recreated. Sessions on other machines keep running under tmux and reconnect. |
-| A worker in a container — on a server, or on this machine | The control plane recreates it over the same ssh connection it already uses: `docker pull`, `docker rm -f`, `docker run` with everything the container was created with, read from `docker inspect`. A Compose-managed worker gets `docker compose pull && up -d` in its own directory instead. | End when it is recreated. |
-| A worker installed by hand (`firetower-worker` on the PATH, no container) | Not moved. Firetower does not know how it was put there. `firetower worker install` on that machine moves it into a container it can. | — |
+| A worker on a machine | The control plane runs the installer over the same ssh connection it already uses, pinned to the version being moved to. The script fetches the build for that machine's own shape and replaces `~/.firetower/worker/bin/firetower-worker`. | End when it is reinstalled. |
 | `@firetower/cli` on your own machine | Not reachable. The screen says which version the release wants. | — |
 
 The order in a run is fixed: back up, the updater, the control plane, then each

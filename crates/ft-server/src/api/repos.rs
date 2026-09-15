@@ -732,7 +732,6 @@ mod tests {
     fn somewhere(name: &str, compute: ft_core::Compute) -> ft_core::Host {
         ft_core::Host {
             machine: None,
-            execution: None,
             id: ft_core::HostId::new(),
             name: name.into(),
             state: ft_core::HostState::Online,
@@ -784,7 +783,6 @@ mod tests {
                     port: None,
                     key: ft_core::SshKey::Default,
                     host_key: None,
-                    container: None,
                 },
             ),
         );

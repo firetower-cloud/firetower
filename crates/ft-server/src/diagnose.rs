@@ -1,9 +1,9 @@
 //! Reading a failed connection.
 //!
 //! A worker speaks frames on stdout and nothing else, so a failed connection
-//! leaves one piece of evidence: whatever ssh, docker or the remote shell wrote
-//! to stderr before the stream closed. Each case below has a different fix, and
-//! a closed stream on its own distinguishes none of them.
+//! leaves one piece of evidence: whatever ssh or the remote shell wrote to
+//! stderr before the stream closed. Each case below has a different fix, and a
+//! closed stream on its own distinguishes none of them.
 
 use crate::transport::WORKER_BINARY;
 use ft_core::{Cause, Compute, Diagnosis};
@@ -12,8 +12,7 @@ use ft_core::{Cause, Compute, Diagnosis};
 ///
 /// `status` is the child's exit code where we have it — see [`is_not_found`].
 /// The text decides where the two disagree: ssh passes a remote shell's wording
-/// through more reliably than its exit code. Where there is no text at all, the
-/// status is all there is, and `docker exec` is exactly that case.
+/// through more reliably than its exit code.
 pub fn from_output(
     stderr: &[String],
     status: Option<std::process::ExitStatus>,
@@ -21,86 +20,18 @@ pub fn from_output(
 ) -> Diagnosis {
     let detail = stderr.join("\n");
     let said = detail.to_lowercase();
-    let containerised = matches!(compute, Compute::Container { .. })
-        || matches!(
-            compute,
-            Compute::Server {
-                container: Some(_),
-                ..
-            }
-        );
 
-    let found = if said.contains("permission denied while trying to connect to the docker daemon")
-        || (said.contains("docker daemon") && said.contains("permission denied"))
-    {
+    let found = if worker_not_found(&said) || (is_not_found(status) && said.is_empty()) {
+        // ssh got in, so the address, the account and the key are all right.
+        // One thing is left, and it is one command — which is worth carrying
+        // on the diagnosis rather than only in the screen that happens to know
+        // about it, since every place a diagnosis is shown is a place somebody
+        // is looking for this.
         Diagnosis::new(
-            Cause::DockerDenied,
-            "Docker is there, and this account isn't allowed to talk to it.",
+            Cause::WorkerMissing,
+            "Firetower isn't installed on that machine.",
         )
-        .with_remedy(format!(
-            "sudo usermod -aG docker {}\n# then log out and back in",
-            account(compute)
-        ))
-    } else if said.contains("cannot connect to the docker daemon") {
-        Diagnosis::new(
-            Cause::DockerMissing,
-            "Docker isn't running on that machine.",
-        )
-        .with_remedy("sudo systemctl start docker")
-    } else if said.contains("no such container") || said.contains("is not running") {
-        Diagnosis::new(
-            Cause::ContainerMissing,
-            format!("There's no {} container running there.", container(compute)),
-        )
-        .with_remedy("docker compose up -d")
-    } else if said.contains("docker: command not found") || said.contains("docker: not found") {
-        Diagnosis::new(
-            Cause::DockerMissing,
-            "Docker isn't installed on that machine.",
-        )
-    } else if said.contains("oci runtime exec failed") && !said.contains(WORKER_BINARY) {
-        // The runtime was asked to exec something that is not the worker at
-        // all. That is ours to fix, not the image's — a `PATH=…` word ahead of
-        // the program name once got read as a program *called* `PATH=…`, and
-        // every container-mode host was told to pull a new image over it.
-        Diagnosis::new(
-            Cause::Unknown,
-            format!(
-                "Firetower asked {} to run the wrong thing, and the container refused it. \
-                 This is a bug in Firetower, not in that machine.",
-                container(compute)
-            ),
-        )
-    } else if said.contains("firetower-worker: command not found")
-        || said.contains("firetower-worker: not found")
-        // Docker phrases it its own way, and this is the one an upgrade meets:
-        // an image built before the worker had its own name has `firetower` and
-        // not `firetower-worker`.
-        || said.contains("executable file not found")
-        || said.contains("firetower: command not found")
-        || said.contains("firetower: not found")
-        || (is_not_found(status) && !said.contains("docker"))
-    {
-        // One shell message, two fixes: a container running the wrong image,
-        // or a machine with nothing installed. The text says which neither.
-        if containerised {
-            Diagnosis::new(
-                Cause::WorkerMissing,
-                "That container is running, and it isn't a Firetower worker.",
-            )
-            .with_remedy("docker compose pull && docker compose up -d")
-        } else {
-            // ssh got in, so the address, the account and the key are all
-            // right. One thing is left, and it is one command — which is worth
-            // carrying on the diagnosis rather than only in the screen that
-            // happens to know about it, since every place a diagnosis is shown
-            // is a place somebody is looking for this.
-            Diagnosis::new(
-                Cause::WorkerMissing,
-                "Firetower isn't installed on that machine.",
-            )
-            .with_remedy(crate::api::hosts::setup_instructions(compute))
-        }
+        .with_remedy(crate::install::one_liner(None))
     } else if said.contains("permission denied (publickey")
         || said.contains("no supported authentication methods")
         || said.contains("too many authentication failures")
@@ -155,6 +86,22 @@ pub fn from_output(
     found.with_detail(detail)
 }
 
+/// Whether the shell on the far end said it could not find the worker.
+///
+/// Every shell has its own wording, and two of them put the name last: bash
+/// and dash say `firetower-worker: command not found`, `sh -c … exec` says
+/// `exec: firetower-worker: not found`, and zsh — the login shell of every
+/// Mac — says `command not found: firetower-worker`, reversed. The first
+/// version of this matched the first two and sent every macOS host to the
+/// fallback, with no cause and no remedy.
+fn worker_not_found(said: &str) -> bool {
+    let binary = WORKER_BINARY;
+    said.contains(&format!("{binary}: command not found"))
+        || said.contains(&format!("{binary}: not found"))
+        || said.contains(&format!("command not found: {binary}"))
+        || said.contains(&format!("{binary}: no such file or directory"))
+}
+
 /// A worker that spoke, in a version we don't.
 pub fn protocol_mismatch(theirs: u32, ours: u32, compute: &Compute) -> Diagnosis {
     let d = Diagnosis::new(
@@ -162,29 +109,20 @@ pub fn protocol_mismatch(theirs: u32, ours: u32, compute: &Compute) -> Diagnosis
         format!("That worker speaks protocol {theirs}; this control plane speaks {ours}."),
     );
     match compute {
-        Compute::Server {
-            container: Some(_), ..
-        }
-        | Compute::Container { .. } => d.with_remedy("docker compose pull && docker compose up -d"),
-        _ => d,
+        Compute::Server { .. } => d.with_remedy(format!(
+            "Install the worker again from the Compute screen, or on the machine:\n{}",
+            crate::install::one_liner(None)
+        )),
+        Compute::Local => d,
     }
 }
 
 /// Whether the far end could not run what it was asked to run.
 ///
-/// 127 is a shell saying it found nothing by that name. 126 is `docker exec`
-/// saying the same about a container — and it matters here because docker
-/// writes that reason to **stdout**, which this transport reads as the frame
-/// stream. So the text never reaches the stderr we diagnose from, and the exit
-/// status is the only evidence left:
-///
-/// ```text
-/// $ docker exec -i old-worker firetower-worker --stdio >out 2>err; echo $?
-/// 126
-/// $ cat err          # empty
-/// $ cat out
-/// OCI runtime exec failed: … "firetower-worker": executable file not found …
-/// ```
+/// 127 is a shell saying it found nothing by that name. 126 is a shell saying
+/// it found something it could not execute — a binary for the wrong
+/// architecture, or a file with no execute bit — which for our purposes is
+/// the same answer: there is no worker there that runs.
 fn is_not_found(status: Option<std::process::ExitStatus>) -> bool {
     matches!(status.and_then(|s| s.code()), Some(126) | Some(127))
 }
@@ -194,29 +132,7 @@ fn is_not_found(status: Option<std::process::ExitStatus>) -> bool {
 fn machine(compute: &Compute) -> String {
     match compute {
         Compute::Server { host, .. } => host.clone(),
-        Compute::Container { name, .. } => name.clone(),
         Compute::Local => "this machine".to_string(),
-    }
-}
-
-fn container(compute: &Compute) -> String {
-    match compute {
-        Compute::Server {
-            container: Some(name),
-            ..
-        }
-        | Compute::Container { name, .. } => format!("`{name}`"),
-        _ => "worker".to_string(),
-    }
-}
-
-/// The account the command ran as, for a remedy someone can paste.
-fn account(compute: &Compute) -> String {
-    match compute {
-        // Absent means ssh chose, and its choice is the local username,
-        // which is not on the row.
-        Compute::Server { user, .. } => user.clone().unwrap_or_else(|| "$USER".to_string()),
-        _ => "$USER".to_string(),
     }
 }
 
@@ -224,23 +140,14 @@ fn account(compute: &Compute) -> String {
 mod tests {
     use super::*;
 
-    fn server_with(container: Option<&str>) -> Compute {
+    fn server() -> Compute {
         Compute::Server {
             host: "fire-01".into(),
             user: Some("deploy".into()),
             port: None,
             key: ft_core::SshKey::Default,
             host_key: None,
-            container: container.map(Into::into),
         }
-    }
-
-    fn server() -> Compute {
-        server_with(None)
-    }
-
-    fn in_container() -> Compute {
-        server_with(Some("firetower-worker"))
     }
 
     fn code(n: i32) -> Option<std::process::ExitStatus> {
@@ -248,138 +155,45 @@ mod tests {
         Some(std::process::ExitStatus::from_raw(n << 8))
     }
 
-    /// The one that sent every container-mode host to `docker compose pull`
-    /// over a bug in the argv Firetower assembled.
-    #[test]
-    fn a_runtime_asked_to_exec_the_wrong_thing_blames_firetower() {
-        let said = vec![
-            "OCI runtime exec failed: exec failed: unable to start container process: \
-             exec: \"PATH=/root/.firetower/worker/bin:/usr/bin\": \
-             stat PATH=/root/.firetower/worker/bin:/usr/bin: no such file or directory: unknown"
-                .to_string(),
-        ];
-        let told = from_output(&said, code(126), &in_container());
-        assert!(
-            told.summary.contains("bug in Firetower"),
-            "{}",
-            told.summary
-        );
-        assert!(
-            told.remedy.is_none(),
-            "nothing on that machine is going to fix it: {told:?}"
-        );
-    }
-
-    /// A container that really is running the wrong image still says so.
-    #[test]
-    fn a_runtime_that_cannot_find_the_worker_still_blames_the_image() {
-        let said = vec![
-            "OCI runtime exec failed: exec failed: unable to start container process: \
-             exec: \"firetower-worker\": executable file not found in $PATH: unknown"
-                .to_string(),
-        ];
-        let told = from_output(&said, code(126), &in_container());
-        assert!(
-            told.summary.contains("isn't a Firetower worker"),
-            "{}",
-            told.summary
-        );
-    }
-
     fn read(lines: &[&str], compute: &Compute) -> Diagnosis {
         let lines: Vec<String> = lines.iter().map(|l| l.to_string()).collect();
         from_output(&lines, None, compute)
     }
 
-    /// A machine with nothing installed on it.
+    /// A machine with nothing installed on it, in every shell's words.
     #[test]
-    fn a_missing_worker_is_named_rather_than_reported_as_a_closed_stream() {
-        let d = read(&["bash: firetower-worker: command not found"], &server());
-        assert_eq!(d.cause, Cause::WorkerMissing);
-        assert!(d.summary.contains("isn't installed"), "{}", d.summary);
+    fn a_missing_worker_is_named_whatever_the_shell_calls_it() {
+        for line in [
+            "bash: firetower-worker: command not found",
+            "firetower-worker: line 0: exec: firetower-worker: not found",
+            "zsh:1: command not found: firetower-worker",
+            "sh: 1: firetower-worker: not found",
+        ] {
+            let d = read(&[line], &server());
+            assert_eq!(d.cause, Cause::WorkerMissing, "{line}");
+            assert!(d.summary.contains("isn't installed"), "{}", d.summary);
 
-        // And says what to run. ssh worked, so this is the only thing between
-        // the machine and working — leaving it out sent people to the docs to
-        // find one line.
-        let remedy = d.remedy.as_deref().unwrap_or_default();
-        assert!(remedy.contains("firetower-worker"), "{remedy}");
-        assert!(
-            !remedy.contains("firetower worker install"),
-            "native setup must not install a container"
-        );
+            // And says what to run. ssh worked, so this is the only thing
+            // between the machine and working.
+            let remedy = d.remedy.as_deref().unwrap_or_default();
+            assert!(remedy.contains("worker.sh"), "{remedy}");
+        }
     }
 
-    /// The case with no text at all. `docker exec` puts its reason on stdout,
-    /// which the transport reads as frames, so stderr is empty and the exit
-    /// status is the only thing left to go on.
+    /// The case with no text at all: the exit status is the only evidence.
     #[test]
-    fn a_container_that_cannot_run_the_worker_is_diagnosed_from_its_exit_status() {
-        use std::os::unix::process::ExitStatusExt;
-
-        let d = from_output(
-            &[],
-            Some(std::process::ExitStatus::from_raw(126 << 8)),
-            &in_container(),
-        );
-
+    fn a_silent_127_is_a_missing_worker() {
+        let d = from_output(&[], code(127), &server());
         assert_eq!(d.cause, Cause::WorkerMissing);
         assert!(d.remedy.is_some(), "it should say how to fix it");
     }
 
-    /// Docker says it differently, and this is the message an upgrade meets:
-    /// a worker image built before the binary had its own name.
+    /// Some other program being missing is not the worker being missing.
     #[test]
-    fn an_image_without_the_worker_binary_is_a_missing_worker() {
-        let d = read(
-            &[
-                "OCI runtime exec failed: exec failed: unable to start container \
-               process: exec: \"firetower-worker\": executable file not found in $PATH: unknown",
-            ],
-            &in_container(),
-        );
-
-        assert_eq!(d.cause, Cause::WorkerMissing);
-        assert!(d.remedy.is_some(), "it should say how to fix it");
-    }
-
-    /// Same shell message, different fix; only the host tells them apart.
-    #[test]
-    fn a_missing_worker_inside_a_container_is_a_wrong_image() {
-        let d = read(&["bash: firetower: command not found"], &in_container());
-        assert_eq!(d.cause, Cause::WorkerMissing);
-        assert!(
-            d.summary.contains("isn't a Firetower worker"),
-            "{}",
-            d.summary
-        );
-        assert!(d.remedy.unwrap().contains("docker compose pull"));
-    }
-
-    #[test]
-    fn a_stopped_container_says_so_and_says_how_to_start_it() {
-        let d = read(
-            &["Error response from daemon: No such container: firetower-worker"],
-            &in_container(),
-        );
-        assert_eq!(d.cause, Cause::ContainerMissing);
-        assert_eq!(d.remedy.as_deref(), Some("docker compose up -d"));
-    }
-
-    #[test]
-    fn docker_refusing_this_account_is_not_docker_being_absent() {
-        // Near-identical wording, unrelated fixes.
-        let denied = read(
-            &["permission denied while trying to connect to the Docker daemon socket"],
-            &in_container(),
-        );
-        assert_eq!(denied.cause, Cause::DockerDenied);
-        assert!(denied.remedy.unwrap().contains("usermod -aG docker deploy"));
-
-        let stopped = read(
-            &["Cannot connect to the Docker daemon at unix:///var/run/docker.sock."],
-            &in_container(),
-        );
-        assert_eq!(stopped.cause, Cause::DockerMissing);
+    fn a_different_missing_command_is_not_blamed_on_the_worker() {
+        let d = read(&["zsh:1: command not found: docker"], &server());
+        assert_eq!(d.cause, Cause::Unknown);
+        assert!(d.detail.unwrap().contains("docker"));
     }
 
     #[test]
@@ -441,11 +255,19 @@ mod tests {
     /// evidence has to survive it being wrong.
     #[test]
     fn the_raw_text_is_kept_even_when_the_cause_is_known() {
-        let d = read(&["bash: firetower: command not found"], &server());
+        let d = read(&["bash: firetower-worker: command not found"], &server());
         assert_eq!(
             d.detail.as_deref(),
-            Some("bash: firetower: command not found")
+            Some("bash: firetower-worker: command not found")
         );
+    }
+
+    #[test]
+    fn a_protocol_mismatch_on_a_server_says_how_to_move_it() {
+        let d = protocol_mismatch(12, 14, &server());
+        assert_eq!(d.cause, Cause::ProtocolMismatch);
+        assert!(d.remedy.unwrap().contains("worker.sh"));
+        assert!(protocol_mismatch(12, 14, &Compute::Local).remedy.is_none());
     }
 
     #[test]

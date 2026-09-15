@@ -50,12 +50,31 @@ pub async fn check(root: &Path, agent: Option<Agent>) -> Readiness {
 }
 
 async fn check_with_path(root: &Path, agent: Option<Agent>, path: &OsStr) -> Readiness {
-    let (git, tmux, shell, node, npm, user) = tokio::join!(
-        tool("Git", "git", &["--version"], true, "Install git using this machine's package manager.", path),
-        tool("tmux", "tmux", &["-V"], true, "Install tmux using this machine's package manager.", path),
-        tool("Shell", "sh", &["-c", "printf 'sh available'"], true, "Install a POSIX shell and make sh available on PATH.", path),
-        tool("Node.js", "node", &["--version"], false, "Install a Node.js version supported by your agent if you need npm-based agent installation.", path),
-        tool("npm", "npm", &["--version"], false, "Install npm if you want to install agents through npm.", path),
+    let (git, tmux, shell, user) = tokio::join!(
+        tool(
+            "Git",
+            "git",
+            &["--version"],
+            true,
+            "Install git using this machine's package manager.",
+            path
+        ),
+        tool(
+            "tmux",
+            "tmux",
+            &["-V"],
+            true,
+            "Install tmux using this machine's package manager.",
+            path
+        ),
+        tool(
+            "Shell",
+            "sh",
+            &["-c", "printf 'sh available'"],
+            true,
+            "Install a POSIX shell and make sh available on PATH.",
+            path
+        ),
         output("id", &["-un"], path),
     );
     let mut checks = vec![
@@ -89,9 +108,8 @@ async fn check_with_path(root: &Path, agent: Option<Agent>, path: &OsStr) -> Rea
     });
     if let Some(agent) = agent {
         checks.push(tool(agent.label(), agent.command(), &["--version"], true,
-            "Install this agent on the selected environment and ensure its executable is on the worker's PATH. See docs/host-execution.md.", path).await);
+            "Install this agent on the machine, or let Firetower fetch it: the readiness panel offers Install, and `firetower-worker agents add` does the same by hand.", path).await);
     }
-    checks.extend([node, npm]);
     Readiness { checks, user }
 }
 
@@ -126,8 +144,10 @@ mod tests {
         assert_eq!(std::fs::read_dir(bin.path()).unwrap().count(), 0);
     }
 
+    /// git, tmux, a shell and the agent. Nothing else is asked of a machine —
+    /// not Node, not Docker.
     #[tokio::test]
-    async fn existing_agent_does_not_require_npm_or_docker() {
+    async fn an_existing_agent_needs_nothing_but_git_tmux_and_a_shell() {
         let root = tempfile::tempdir().unwrap();
         let bin = tempfile::tempdir().unwrap();
         for command in ["git", "tmux", "sh", "claude"] {
@@ -138,10 +158,13 @@ mod tests {
             check_with_path(root.path(), Some(Agent::ClaudeCode), bin.path().as_os_str()).await;
         assert!(result.ready(), "{}", result.missing());
         assert_eq!(result.user.as_deref(), Some("editor"));
-        assert!(result
-            .checks
-            .iter()
-            .any(|c| c.name == "npm" && !c.available && !c.required));
+        assert!(
+            !result
+                .checks
+                .iter()
+                .any(|c| c.name == "npm" || c.name == "Node.js"),
+            "Node is not a requirement of a machine"
+        );
     }
 
     #[tokio::test]

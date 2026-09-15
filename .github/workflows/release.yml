@@ -57,3 +57,88 @@ jobs:
       tag: ${{ needs.please.outputs.desktop_tag }}
       version: ${{ needs.please.outputs.desktop_version }}
       ref: ${{ github.sha }}
+
+  # The worker, as a binary a machine installs: one per shape it runs on, plus
+  # the installer script and a checksum file, all on the release the job
+  # above cut. `usefiretower.com/worker.sh` redirects to the newest release's
+  # copy of the script, and the script downloads its binary from the same
+  # release — so the two can never disagree.
+  worker:
+    needs: please
+    if: needs.please.outputs.released == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: depot-macos-latest
+            target: aarch64-apple-darwin
+            asset: firetower-worker-darwin-arm64.tar.gz
+          - os: depot-macos-latest
+            target: x86_64-apple-darwin
+            asset: firetower-worker-darwin-x86_64.tar.gz
+          # Static, so one Linux binary runs on whatever libc a distribution
+          # ships — there is no glibc version to argue about.
+          - os: depot-ubuntu-22.04
+            target: x86_64-unknown-linux-musl
+            asset: firetower-worker-linux-x86_64.tar.gz
+          - os: depot-ubuntu-22.04-arm
+            target: aarch64-unknown-linux-musl
+            asset: firetower-worker-linux-arm64.tar.gz
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ needs.please.outputs.tag }}
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          targets: ${{ matrix.target }}
+      - if: contains(matrix.target, 'musl')
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          key: worker-${{ matrix.target }}
+      - name: build
+        run: cargo build --release -p ft-cli --no-default-features --bin firetower-worker --target ${{ matrix.target }}
+      - name: the binary agrees with the tag
+        env:
+          VERSION: ${{ needs.please.outputs.version }}
+        run: |
+          said="$(target/${{ matrix.target }}/release/firetower-worker --version || true)"
+          case "$said" in *"$VERSION"*) ;; *) echo "built $said, tag says $VERSION" >&2; exit 1 ;; esac
+      - name: pack
+        run: |
+          mkdir -p dist
+          tar -czf "dist/${{ matrix.asset }}" -C "target/${{ matrix.target }}/release" firetower-worker
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ${{ matrix.asset }}
+          path: dist/${{ matrix.asset }}
+          if-no-files-found: error
+
+  # Everything the installer reads, on the release, in one step — so a
+  # release either has the whole set or none of it.
+  worker-release:
+    needs: [please, worker]
+    runs-on: depot-ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ needs.please.outputs.tag }}
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: firetower-worker-*
+          path: dist
+          merge-multiple: true
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.please.outputs.tag }}
+        run: |
+          cp install/worker.sh dist/worker.sh
+          cd dist
+          sha256sum firetower-worker-*.tar.gz worker.sh > SHA256SUMS
+          ls -la
+          gh release upload "$TAG" firetower-worker-*.tar.gz worker.sh SHA256SUMS --clobber

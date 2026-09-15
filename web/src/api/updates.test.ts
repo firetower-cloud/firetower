@@ -22,7 +22,6 @@ import {
 const host = (over: Partial<HostTarget> = {}): HostTarget => ({
   hostId: "h_1",
   name: "fire-01",
-  kind: "container",
   version: "0.30.1",
   online: true,
   drained: false,
@@ -54,7 +53,7 @@ const status = (over: Partial<UpdateStatus> = {}): UpdateStatus => ({
   hosts: [
     host(),
     host({ hostId: "h_2", name: "hetzner-2", sessions: ["web"] }),
-    host({ hostId: "h_3", name: "gcp-old", kind: "binary", upgradable: false, reason: "installed by hand" }),
+    host({ hostId: "h_3", name: "gcp-old", upgradable: false, reason: "up to date" }),
   ],
   activeRun: null,
   ...over,

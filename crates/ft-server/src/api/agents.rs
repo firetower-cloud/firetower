@@ -629,7 +629,7 @@ pub(super) async fn install_agent(
 
     // Not every agent is something we fetch. Saying so here means the worker
     // is never asked a question it can only refuse.
-    if kind.package().is_none() {
+    if !kind.installable() {
         return Err(ApiError::new(
             ErrorCode::InvalidRequest,
             format!("{} is not something Firetower installs", kind.label()),

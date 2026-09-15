@@ -1,62 +1,30 @@
-import type { Host, Execution } from "./generated/model";
-
-export function executionOf(host: Host): Execution | undefined {
-  if (host.execution) return host.execution;
-  if (host.compute.type === "Container") return "container";
-  if (host.compute.type === "Server") return host.compute.container ? "container" : "host";
-  // Older servers cannot say whether their local process is in Docker.
-  return undefined;
-}
+import type { Host } from "./generated/model";
 
 /**
  * Which machine this environment is on.
  *
  * Identity comes from the compute and nothing else. It used to fold an SSH
  * connection flagged `sameMachine` into `local`, so the machine hosting
- * Firetower could hold two execution modes — and picking the one the control
- * plane is not in meant asking Firetower to ssh to the machine it is already
- * sitting on. That is not a mode of "this server"; it is another machine that
- * happens to be underneath us, and it is chosen like any other.
+ * Firetower could hold two rows — and picking the one the control plane is
+ * not in meant asking Firetower to ssh to the machine it is already sitting
+ * on. That is not a mode of "this server"; it is another machine that happens
+ * to be underneath us, and it is chosen like any other.
  */
 export function machineKey(host: Host): string {
   const compute = host.compute;
   if (compute.type === "Local") return "local";
-  if (compute.type === "Container") return `container:${compute.name}`;
   return `ssh:${compute.host}:${compute.port ?? 22}`;
 }
 
 export function environmentLabel(host: Host): string {
-  const execution = executionOf(host);
-  if (host.compute.type === "Local") {
-    return execution === "container"
-      ? "Firetower container"
-      : execution === "host"
-        ? "Firetower host process"
-        : "Firetower process";
-  }
-  return host.name;
-}
-
-export function executionLabel(host: Host): string {
-  return executionOf(host) === "container"
-    ? "Container"
-    : executionOf(host) === "host"
-      ? "Directly on host"
-      : "Execution unknown";
-}
-
-/** What "Run in" says when it is a fact rather than a choice. */
-export function executionFact(execution: Execution | undefined, local: boolean): string {
-  if (execution === "container") return local ? "the Firetower container" : "a container";
-  if (execution === "host") return local ? "this machine, as the Firetower account" : "the machine itself";
-  return "the Firetower process";
+  return host.compute.type === "Local" ? "This machine" : host.name;
 }
 
 export function connectionLabel(host: Host): string {
   const c = host.compute;
   if (c.type === "Server")
     return `${c.user ? `${c.user}@` : ""}${c.host}${c.port ? `:${c.port}` : ""}`;
-  return c.type === "Container" ? c.name : "Alongside the control plane";
+  return "Alongside the control plane";
 }
 
 export type Machine = {
@@ -100,44 +68,9 @@ export function machineLabel(machine: Machine): string {
     : machine.label;
 }
 
-/**
- * The machine hosting the control plane runs agents exactly where the control
- * plane runs: in its container, or on the machine. There is no second answer to
- * offer, and offering one was inventing a choice the system does not have.
- */
+/** The machine hosting the control plane: agents run where the control plane runs. */
 export function isLocal(machine: Machine | undefined): boolean {
   return machine?.key === "local";
-}
-
-/** The execution modes this machine already has an environment for. */
-export function modesOn(machine: Machine | undefined): Execution[] {
-  const modes = new Set<Execution>();
-  for (const host of machine?.hosts ?? []) {
-    const execution = executionOf(host);
-    if (execution) modes.add(execution);
-  }
-  return [...modes];
-}
-
-export function environmentsOn(machine: Machine | undefined, execution: Execution): Host[] {
-  return (machine?.hosts ?? []).filter((h) => executionOf(h) === execution);
-}
-
-/**
- * How to reach this machine, borrowed from an environment already on it.
- *
- * A machine's second mode is the same connection with a different far end, so
- * nobody should be asked for the address a second time. Returns undefined for a
- * machine there is no ssh connection to — the local one — which is also the one
- * that never needs a second mode.
- */
-export function connectionOf(
-  machine: Machine | undefined,
-): Extract<Host["compute"], { type: "Server" }> | undefined {
-  for (const host of machine?.hosts ?? []) {
-    if (host.compute.type === "Server") return host.compute;
-  }
-  return undefined;
 }
 
 /**

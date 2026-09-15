@@ -2,13 +2,13 @@
  * Machines: where agents run.
  *
  * Adding one is the web's `AddCompute` flow exactly — probe the destination
- * with `probe_host`, and on `reached` create both environments in one go: the
- * machine itself, and the container on it, because picking Container in the
- * new-workspace form should not have to invent one. A probe that does not
- * reach says why, with the diagnosis's own remedy.
+ * with `probe_host`, and on `reached` create the machine. A probe that does
+ * not reach says why, with the diagnosis's own remedy. The dialog shows the
+ * one line to run on the machine first: it installs the worker and gives the
+ * machine Firetower's key, so the probe then reaches.
  *
- * Each machine's row answers `host_readiness` — docker, the worker, the agents
- * — with the remedies the server suggests, and the verbs that fix what it can:
+ * Each machine's row answers `host_readiness` — the worker, the agents — with
+ * the remedies the server suggests, and the verbs that fix what it can:
  * connect, install the worker, drain, rename, remove.
  */
 import { useState } from "react";
@@ -32,8 +32,6 @@ import { parseDestination } from "~/api/environments";
 import { useHosts } from "~/data";
 import { Rows, Section } from "~/ui/config/bits";
 import { useConfirm } from "~/ui/Confirm";
-
-const DEFAULT_CONTAINER = "firetower-worker";
 
 export function Machines({ live }: { live: boolean }) {
   const hosts = useHosts();
@@ -71,8 +69,7 @@ export function Machines({ live }: { live: boolean }) {
 
 function describe(c: Compute): string {
   if (c.type === "Local") return "this server";
-  if (c.type === "Container") return `container ${c.name}`;
-  return `${c.user ? `${c.user}@` : ""}${c.host}${c.port ? `:${c.port}` : ""}${c.container ? ` · in ${c.container}` : ""}`;
+  return `${c.user ? `${c.user}@` : ""}${c.host}${c.port ? `:${c.port}` : ""}`;
 }
 
 /* ── One machine ───────────────────────────────────────────────────────── */
@@ -155,12 +152,11 @@ function Add({ onClose }: { onClose: () => void }) {
   const key = useSshKey();
   const [address, setAddress] = useState("");
   const [user, setUser] = useState("");
-  const [container, setContainer] = useState(DEFAULT_CONTAINER);
   const [label, setLabel] = useState("");
   const [ownKey, setOwnKey] = useState(false);
   const [keyPath, setKeyPath] = useState("");
   const [told, setTold] = useState<Diagnosis | null>(null);
-  const [copied, setCopied] = useState(false);
+  const [copied, setCopied] = useState<"line" | "key" | null>(null);
 
   const typed = parseDestination(address);
   const busy = create.isPending || probe.isPending;
@@ -170,16 +166,8 @@ function Add({ onClose }: { onClose: () => void }) {
     compute: { type: "Server", host: address.trim(), user: user.trim() || undefined, key: ownKey && keyPath.trim() ? { type: "File", path: keyPath.trim() } : { type: "Managed" } } as Compute,
   });
 
-  /* Both environments, in one go — the machine, then the container on it. A
-     machine that is added and a second environment that is not is still a
-     machine that is added. */
   const save = async () => {
     await create.mutateAsync({ data: body() });
-    const named = container.trim();
-    if (named) {
-      const base = label.trim() || typed.host;
-      await create.mutateAsync({ data: { name: `${base} · container`, compute: { ...body().compute, container: named } as Compute } }).catch(() => {});
-    }
     await cache.invalidateQueries({ queryKey: getListHostsQueryKey() });
     onClose();
   };
@@ -190,6 +178,12 @@ function Add({ onClose }: { onClose: () => void }) {
   };
 
   const pub = (key.data as { publicKey?: string } | undefined)?.publicKey;
+  const line = (key.data as { installCommand?: string } | undefined)?.installCommand;
+  const copy = (what: "line" | "key") => {
+    navigator.clipboard?.writeText((what === "line" ? line : pub) ?? "");
+    setCopied(what);
+    setTimeout(() => setCopied(null), 1400);
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-ground/70 py-[8vh] backdrop-blur-[3px]" onMouseDown={onClose}>
@@ -205,8 +199,6 @@ function Add({ onClose }: { onClose: () => void }) {
             <Field label="SSH account"><input value={user} onChange={(e) => setUser(e.target.value)} placeholder={typed.user || "editor"} className="w-full rounded-lg border border-line bg-ground px-3 py-2 font-mono text-ui text-bone placeholder:text-mute focus:border-slate-deep focus:outline-none" /></Field>
             <Field label="Name"><input value={label} onChange={(e) => setLabel(e.target.value)} placeholder={typed.host || "video-vm"} className="w-full rounded-lg border border-line bg-ground px-3 py-2 text-ui text-bone placeholder:text-mute focus:border-slate-deep focus:outline-none" /></Field>
           </div>
-          <Field label="Container name" hint="The environment agents run in, made when first picked"><input value={container} onChange={(e) => setContainer(e.target.value)} placeholder={DEFAULT_CONTAINER} className="w-full rounded-lg border border-line bg-ground px-3 py-2 font-mono text-ui text-bone placeholder:text-mute focus:border-slate-deep focus:outline-none" /></Field>
-
           <div className="rounded-lg border border-line bg-ground p-3">
             <div className="flex items-center gap-2 text-ui text-dim"><Key className="h-3.5 w-3.5" strokeWidth={1.75} />How Firetower gets in</div>
             <div className="track mt-2">
@@ -215,12 +207,19 @@ function Add({ onClose }: { onClose: () => void }) {
             </div>
             {!ownKey ? (
               <div className="mt-2">
-                <p className="text-meta text-mute">Add this public key to the machine's <code className="font-mono">~/.ssh/authorized_keys</code>.</p>
+                <p className="text-meta text-mute">Run this on the machine, as the account above. It installs the worker and adds Firetower's key to <code className="font-mono">~/.ssh/authorized_keys</code>.</p>
                 {key.isPending ? <p className="mt-1.5 flex items-center gap-2 text-meta text-mute"><Loader2 className="h-3 w-3 animate-spin" />Reading the key…</p> : (
-                  <div className="mt-1.5 flex items-start gap-2">
-                    <code className="scroll-slim min-w-0 flex-1 overflow-x-auto rounded-md bg-panel px-2.5 py-1.5 font-mono text-micro whitespace-nowrap text-dim">{pub ?? JSON.stringify(key.data)}</code>
-                    <button onClick={() => { navigator.clipboard?.writeText(pub ?? ""); setCopied(true); setTimeout(() => setCopied(false), 1400); }} className="control border border-line bg-raise text-bone hover:bg-overlay">{copied ? <Check className="h-3.5 w-3.5 text-sage" strokeWidth={2} /> : <Copy className="h-3.5 w-3.5" strokeWidth={1.75} />}</button>
-                  </div>
+                  <>
+                    <div className="mt-1.5 flex items-start gap-2">
+                      <code className="scroll-slim min-w-0 flex-1 overflow-x-auto rounded-md bg-panel px-2.5 py-1.5 font-mono text-micro whitespace-nowrap text-dim">{line ?? JSON.stringify(key.data)}</code>
+                      <button onClick={() => copy("line")} className="control border border-line bg-raise text-bone hover:bg-overlay">{copied === "line" ? <Check className="h-3.5 w-3.5 text-sage" strokeWidth={2} /> : <Copy className="h-3.5 w-3.5" strokeWidth={1.75} />}</button>
+                    </div>
+                    <p className="mt-2 text-meta text-mute">Just the key, for a provider's web form or cloud-init:</p>
+                    <div className="mt-1.5 flex items-start gap-2">
+                      <code className="scroll-slim min-w-0 flex-1 overflow-x-auto rounded-md bg-panel px-2.5 py-1.5 font-mono text-micro whitespace-nowrap text-dim">{pub ?? ""}</code>
+                      <button onClick={() => copy("key")} className="control border border-line bg-raise text-bone hover:bg-overlay">{copied === "key" ? <Check className="h-3.5 w-3.5 text-sage" strokeWidth={2} /> : <Copy className="h-3.5 w-3.5" strokeWidth={1.75} />}</button>
+                    </div>
+                  </>
                 )}
               </div>
             ) : (

@@ -26,7 +26,7 @@ import { useRouter } from "next/navigation";
 import { AddCompute } from "./AddCompute";
 import { isReady } from "./HostReadiness";
 import { WhereItRuns, canRun, resolve, type Where } from "./WhereItRuns";
-import { environmentLabel, executionLabel } from "@/src/api/environments";
+import { environmentLabel } from "@/src/api/environments";
 
 /**
  * The form, in the dialog it always opens in.
@@ -108,7 +108,6 @@ export function NewWorkspace({
   // launched is this screen's business, and the block is a control.
   const [where, setWhere] = useState<Where>({
     machine: "",
-    execution: "container",
     hostId: "",
     agent: "",
   });
@@ -677,7 +676,7 @@ function usable(host?: Host) {
 /** "this machine" rather than `localhost` — a hostname doesn't say it. */
 function where(host?: Host) {
   if (!host) return "nowhere to run";
-  return `${environmentLabel(host)} · ${executionLabel(host)}`;
+  return environmentLabel(host);
 }
 
 /**

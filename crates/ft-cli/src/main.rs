@@ -289,6 +289,9 @@ async fn main() -> Result<()> {
 
             anyhow::ensure!(stdio, "the worker only speaks over stdio; pass --stdio");
 
+            // The machine's real PATH, not whatever started this process.
+            ft_worker::path::adopt().await;
+
             let worker = std::sync::Arc::new(
                 ft_worker::Worker::open(&root)
                     .await
