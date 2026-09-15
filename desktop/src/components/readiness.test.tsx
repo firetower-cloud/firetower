@@ -67,12 +67,15 @@ describe("when everything is ready", () => {
 });
 
 describe("when there is no worker on the machine yet", () => {
+  const sshIn = { name: "SSH", detail: "connected as editor", available: true, required: true };
   const report: Readiness = {
+    user: "editor",
     checks: [
+      sshIn,
       fail(
-        "Worker connection",
-        "The worker is not connected.",
-        "curl -fsSL https://usefiretower.com/worker.sh | sh -s -- --authorize 'ssh-ed25519 AAAA firetower'",
+        "Worker",
+        "Firetower isn't installed on that machine.",
+        "curl -fsSL https://usefiretower.com/worker.sh | sh",
       ),
     ],
   };
@@ -80,6 +83,11 @@ describe("when there is no worker on the machine yet", () => {
   it("says that, rather than counting requirements it could not measure", () => {
     const out = draw(server(false), report);
     expect(out).toContain("There is no worker on editor@192.0.2.10 yet");
+  });
+
+  it("says ssh got in, told apart from the worker not being there", () => {
+    const out = draw(server(false), report);
+    expect(out).toContain("SSH · connected as editor");
   });
 
   it("offers to put one there, because it can", () => {
@@ -91,9 +99,32 @@ describe("when there is no worker on the machine yet", () => {
     expect(out).not.toContain("cargo build");
   });
 
-  it("shows the one line a person can run instead, key and all", () => {
+  it("folds the by-hand line away underneath", () => {
     const out = draw(server(false), report);
-    expect(out).toContain("worker.sh | sh -s -- --authorize");
+    expect(out).toContain("Or do it on the machine yourself");
+    expect(out).toContain("worker.sh | sh");
+  });
+});
+
+describe("when ssh itself did not get in", () => {
+  const report: Readiness = {
+    checks: [
+      fail("SSH", "192.0.2.10 refused the key.", "Give the machine Firetower's public key, then check again."),
+      { name: "Worker", detail: "not checked", available: false, required: false },
+    ],
+  };
+
+  it("blames the connection, not the worker", () => {
+    const out = draw(server(false), report);
+    expect(out).toContain("Firetower can&#x27;t get into editor@192.0.2.10");
+    expect(out).toContain("refused the key");
+    expect(out).not.toContain("Install the worker");
+  });
+
+  it("says the worker was not checked rather than missing", () => {
+    const out = draw(server(false), report);
+    expect(out).toContain("not checked");
+    expect(out).not.toContain("There is no worker");
   });
 });
 
@@ -124,6 +155,7 @@ describe("when the worker is there and something else is not", () => {
   it("gives the package manager as something to copy, since that one is yours", () => {
     const out = draw(server(), report);
     expect(out).toContain("sudo apt install tmux");
+    expect(out).toContain("Firetower does not run sudo for you");
     // Once. It was in the row's own detail as well, so the same command was
     // printed twice on the same line.
     expect(out.split("sudo apt install tmux")).toHaveLength(2);

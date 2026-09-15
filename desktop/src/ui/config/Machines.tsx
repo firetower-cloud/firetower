@@ -1,14 +1,13 @@
 /**
  * Machines: where agents run.
  *
- * Adding one is the web's `AddCompute` flow exactly — probe the destination
- * with `probe_host`, and on `reached` create the machine. A probe that does
- * not reach says why, with the diagnosis's own remedy. The dialog shows the
- * one line to run on the machine first: it installs the worker and gives the
- * machine Firetower's key, so the probe then reaches.
+ * Adding one is the web's `AddCompute` flow exactly — show the key the machine
+ * has to be given, probe the destination with `probe_host`, and on `reached`
+ * create the machine. A probe that does not reach says why, with the
+ * diagnosis's own remedy. Nothing here installs: the machine's own row does.
  *
- * Each machine's row answers `host_readiness` — the worker, the agents — with
- * the remedies the server suggests, and the verbs that fix what it can:
+ * Each machine's row answers `host_readiness` — ssh, the worker, the agents —
+ * with the remedies the server suggests, and the verbs that fix what it can:
  * connect, install the worker, drain, rename, remove.
  */
 import { useState } from "react";
@@ -28,7 +27,7 @@ import {
   useRenameHost,
   useSshKey,
 } from "~/api/generated/hosts/hosts";
-import { parseDestination } from "~/api/environments";
+import { parseDestination, reachedTheMachine, stateLabel } from "~/api/environments";
 import { useHosts } from "~/data";
 import { Rows, Section } from "~/ui/config/bits";
 import { useConfirm } from "~/ui/Confirm";
@@ -48,14 +47,14 @@ export function Machines({ live }: { live: boolean }) {
         {hosts.data.map((h) => (
           <div key={h.id}>
             <button onClick={() => setOpen(open === h.id ? null : h.id)} className="flex w-full items-center gap-3 px-3.5 py-3 text-left hover:bg-raise/60">
-              <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${h.state === "Online" ? "bg-sage" : h.state === "Draining" ? "bg-kind-data" : "bg-brick"}`} />
+              <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${h.state === "Online" ? "bg-sage" : h.state === "Draining" || reachedTheMachine(h) ? "bg-kind-data" : "bg-brick"}`} />
               <span className="min-w-0 flex-1">
                 <span className="block text-ui text-bone">{h.name}</span>
                 <span className="block font-mono text-micro text-mute">{describe(h.compute)} · worker {h.workerVersion ?? "not installed"}</span>
               </span>
               {h.cpus != null && <span className="flex items-center gap-1.5 text-meta text-mute"><Icon of={Cpu} size={12} />{h.cpus}</span>}
               {h.memoryMb != null && <span className="flex items-center gap-1.5 text-meta text-mute"><Icon of={HardDrive} size={12} />{Math.round(h.memoryMb / 1024)} GB</span>}
-              <span className="w-[68px] text-right text-meta text-mute">{h.drained ? "draining" : h.state}</span>
+              <span className="w-[76px] text-right text-meta text-mute">{stateLabel(h)}</span>
               <ChevronDown className={`h-3.5 w-3.5 text-mute transition-transform ${open === h.id ? "rotate-180" : ""}`} strokeWidth={2} />
             </button>
             {open === h.id && live && <Detail host={h} onGone={() => setOpen(null)} />}
@@ -118,6 +117,16 @@ function Detail({ host, onGone }: { host: Host; onGone: () => void }) {
         </div>
       </div>
 
+      {checks.some((c) => c.name === "Worker" && !c.available && c.remedy) && (
+        <details className="text-meta text-mute">
+          <summary className="cursor-pointer hover:text-bone">Or do it on the machine yourself</summary>
+          <code className="mt-1.5 block break-all rounded-md bg-ground px-2.5 py-1.5 font-mono text-micro text-dim">{checks.find((c) => c.name === "Worker")?.remedy}</code>
+        </details>
+      )}
+      {missing.some((c) => c.name !== "Worker" && /^(sudo |brew |apt|dnf|yum|pacman|apk|zypper)/.test(c.remedy ?? "")) && (
+        <p className="text-meta text-mute">Run that on the machine, then check again. Firetower does not run sudo for you.</p>
+      )}
+
       <div className="flex flex-wrap items-center gap-2">
         <button disabled={connect.isPending} onClick={() => connect.mutate({ id: host.id }, { onSuccess: refresh })} className="control border border-line bg-raise text-bone hover:bg-overlay disabled:text-mute">{connect.isPending ? "Connecting…" : "Connect"}</button>
         <button disabled={install.isPending} onClick={() => install.mutate({ id: host.id }, { onSuccess: refresh })} className="control border border-line bg-raise text-bone hover:bg-overlay disabled:text-mute">{install.isPending ? "Installing…" : host.workerVersion ? "Reinstall the worker" : "Install the worker"}</button>
@@ -153,17 +162,15 @@ function Add({ onClose }: { onClose: () => void }) {
   const [address, setAddress] = useState("");
   const [user, setUser] = useState("");
   const [label, setLabel] = useState("");
-  const [ownKey, setOwnKey] = useState(false);
-  const [keyPath, setKeyPath] = useState("");
   const [told, setTold] = useState<Diagnosis | null>(null);
-  const [copied, setCopied] = useState<"line" | "key" | null>(null);
+  const [copied, setCopied] = useState(false);
 
   const typed = parseDestination(address);
   const busy = create.isPending || probe.isPending;
 
   const body = () => ({
     name: label.trim() || undefined,
-    compute: { type: "Server", host: address.trim(), user: user.trim() || undefined, key: ownKey && keyPath.trim() ? { type: "File", path: keyPath.trim() } : { type: "Managed" } } as Compute,
+    compute: { type: "Server", host: address.trim(), user: user.trim() || undefined, key: { type: "Managed" } } as Compute,
   });
 
   const save = async () => {
@@ -178,11 +185,10 @@ function Add({ onClose }: { onClose: () => void }) {
   };
 
   const pub = (key.data as { publicKey?: string } | undefined)?.publicKey;
-  const line = (key.data as { installCommand?: string } | undefined)?.installCommand;
-  const copy = (what: "line" | "key") => {
-    navigator.clipboard?.writeText((what === "line" ? line : pub) ?? "");
-    setCopied(what);
-    setTimeout(() => setCopied(null), 1400);
+  const copy = () => {
+    navigator.clipboard?.writeText(pub ?? "");
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1400);
   };
 
   return (
@@ -200,31 +206,18 @@ function Add({ onClose }: { onClose: () => void }) {
             <Field label="Name"><input value={label} onChange={(e) => setLabel(e.target.value)} placeholder={typed.host || "video-vm"} className="w-full rounded-lg border border-line bg-ground px-3 py-2 text-ui text-bone placeholder:text-mute focus:border-slate-deep focus:outline-none" /></Field>
           </div>
           <div className="rounded-lg border border-line bg-ground p-3">
-            <div className="flex items-center gap-2 text-ui text-dim"><Key className="h-3.5 w-3.5" strokeWidth={1.75} />How Firetower gets in</div>
-            <div className="track mt-2">
-              <button data-on={!ownKey} onClick={() => setOwnKey(false)}>Firetower's key</button>
-              <button data-on={ownKey} onClick={() => setOwnKey(true)}>A key on the server</button>
-            </div>
-            {!ownKey ? (
-              <div className="mt-2">
-                <p className="text-meta text-mute">Run this on the machine, as the account above. It installs the worker and adds Firetower's key to <code className="font-mono">~/.ssh/authorized_keys</code>.</p>
-                {key.isPending ? <p className="mt-1.5 flex items-center gap-2 text-meta text-mute"><Loader2 className="h-3 w-3 animate-spin" />Reading the key…</p> : (
-                  <>
-                    <div className="mt-1.5 flex items-start gap-2">
-                      <code className="scroll-slim min-w-0 flex-1 overflow-x-auto rounded-md bg-panel px-2.5 py-1.5 font-mono text-micro whitespace-nowrap text-dim">{line ?? JSON.stringify(key.data)}</code>
-                      <button onClick={() => copy("line")} className="control border border-line bg-raise text-bone hover:bg-overlay">{copied === "line" ? <Check className="h-3.5 w-3.5 text-sage" strokeWidth={2} /> : <Copy className="h-3.5 w-3.5" strokeWidth={1.75} />}</button>
-                    </div>
-                    <p className="mt-2 text-meta text-mute">Just the key, for a provider's web form or cloud-init:</p>
-                    <div className="mt-1.5 flex items-start gap-2">
-                      <code className="scroll-slim min-w-0 flex-1 overflow-x-auto rounded-md bg-panel px-2.5 py-1.5 font-mono text-micro whitespace-nowrap text-dim">{pub ?? ""}</code>
-                      <button onClick={() => copy("key")} className="control border border-line bg-raise text-bone hover:bg-overlay">{copied === "key" ? <Check className="h-3.5 w-3.5 text-sage" strokeWidth={2} /> : <Copy className="h-3.5 w-3.5" strokeWidth={1.75} />}</button>
-                    </div>
-                  </>
-                )}
+            <div className="flex items-center gap-2 text-ui text-dim"><Key className="h-3.5 w-3.5" strokeWidth={1.75} />Firetower gets in with this key</div>
+            {key.isPending ? <p className="mt-1.5 flex items-center gap-2 text-meta text-mute"><Loader2 className="h-3 w-3 animate-spin" />Reading the key…</p> : (
+              <div className="mt-2 flex items-start gap-2">
+                <code className="scroll-slim min-w-0 flex-1 overflow-x-auto rounded-md bg-panel px-2.5 py-1.5 font-mono text-micro whitespace-nowrap text-dim">{pub ?? JSON.stringify(key.data)}</code>
+                <button onClick={copy} className="control border border-line bg-raise text-bone hover:bg-overlay">{copied ? <Check className="h-3.5 w-3.5 text-sage" strokeWidth={2} /> : <Copy className="h-3.5 w-3.5" strokeWidth={1.75} />}</button>
               </div>
-            ) : (
-              <input value={keyPath} onChange={(e) => setKeyPath(e.target.value)} placeholder="~/.ssh/id_ed25519" className="mt-2 w-full rounded-lg border border-line bg-panel px-3 py-2 font-mono text-ui text-bone placeholder:text-mute focus:outline-none" />
             )}
+            <p className="mt-2 text-meta text-mute">Give it to the machine the way that machine takes keys: <code className="font-mono">~/.ssh/authorized_keys</code> of the account above on a machine you own; the provider's console, instance metadata or OS Login on Google Cloud; the CA where there is one. It is public — safe anywhere.</p>
+            <details className="mt-2 text-meta text-mute">
+              <summary className="cursor-pointer hover:text-bone">Adding it to authorized_keys by hand</summary>
+              <pre className="mt-1.5 overflow-x-auto rounded-md bg-panel px-2.5 py-1.5 font-mono text-micro text-dim">{authorizedKeys(user.trim() || typed.user || "", pub ?? "…")}</pre>
+            </details>
           </div>
 
           {told && <Told d={told} />}
@@ -237,6 +230,25 @@ function Add({ onClose }: { onClose: () => void }) {
       </div>
     </div>
   );
+}
+
+/**
+ * The lines for whoever adds keys on the machine itself. The path follows the
+ * username rather than saying `~/.ssh`, because the account you paste this as
+ * is often not the account Firetower will be. `mkdir` and both `chmod`s are not
+ * padding: sshd ignores an `authorized_keys` it considers too permissive,
+ * without saying so.
+ */
+function authorizedKeys(user: string, key: string) {
+  const who = user.trim();
+  const home = !who || who === "root" ? "/root" : `/home/${who}`;
+  const owner = who || "root";
+  return [
+    `mkdir -p ${home}/.ssh && chmod 700 ${home}/.ssh`,
+    `echo '${key}' >> ${home}/.ssh/authorized_keys`,
+    `chmod 600 ${home}/.ssh/authorized_keys`,
+    `chown -R ${owner} ${home}/.ssh`,
+  ].join("\n");
 }
 
 function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {

@@ -185,11 +185,14 @@ async fn missing_native_worker_has_native_setup_instructions_and_stays_unready()
     .unwrap()
     .0;
     assert!(!report.ready());
-    // The one line that puts a worker there, with the key in it.
-    let remedy = report.checks[0].remedy.as_ref().unwrap();
-    assert!(remedy.contains("worker.sh"), "{remedy}");
-    assert!(remedy.contains("--authorize"), "{remedy}");
-    assert!(!remedy.contains("firetower worker install"));
+    // Two rows: whether ssh got in, and whether a worker is there. With no
+    // diagnosis yet, ssh has not been seen to get in, so the worker is not a
+    // question yet.
+    let names: Vec<&str> = report.checks.iter().map(|c| c.name.as_str()).collect();
+    assert_eq!(names, vec!["SSH", "Worker"]);
+    let worker = report.checks.iter().find(|c| c.name == "Worker").unwrap();
+    assert!(!worker.available);
+    assert!(!worker.required, "not asked until ssh gets in");
 }
 
 #[tokio::test]

@@ -694,30 +694,7 @@ pub(super) async fn host_readiness(
         .await?
         .ok_or_else(|| ApiError::not_found("host"))?;
     if !state.fleet.is_connected(&id).await {
-        // The one line that fixes a machine with nothing on it, with the key
-        // in it so the machine is reachable the moment it finishes. Best
-        // effort: a key that cannot be read is a line without one, not a
-        // readiness check that fails for a second reason.
-        let key = crate::sshkey::ensure(&state.vault)
-            .await
-            .ok()
-            .map(|identity| identity.public_key);
-        return Ok(Json(ft_core::Readiness {
-            user: None,
-            checks: vec![ft_core::Requirement {
-                name: "Worker connection".into(),
-                available: false,
-                required: true,
-                detail: host
-                    .diagnosis
-                    .as_ref()
-                    .map(|d| d.summary.clone())
-                    .unwrap_or_else(|| {
-                        "The worker is not connected. Check the connection and try again.".into()
-                    }),
-                remedy: Some(setup_instructions(&host.compute, key.as_deref())),
-            }],
-        }));
+        return Ok(Json(not_connected(&host)));
     }
     let readiness = state
         .fleet
@@ -730,12 +707,73 @@ pub(super) async fn host_readiness(
     Ok(Json(readiness))
 }
 
-/// What to run to get a worker onto a machine that has none.
-pub(crate) fn setup_instructions(compute: &ft_core::Compute, key: Option<&str>) -> String {
-    match compute {
-        ft_core::Compute::Local => {
-            "Install Git, tmux and a POSIX shell on the machine running Firetower.".into()
-        }
-        ft_core::Compute::Server { .. } => crate::install::one_liner(key),
+/// What a machine with no worker connected has to say about itself.
+///
+/// Two facts, told apart. Whether ssh got in and whether there is a worker to
+/// run are different questions with different fixes — the key, or the
+/// installer — and one red row saying "worker connection" read as the key
+/// having failed on a machine it had got into perfectly well.
+///
+/// `SSH` passes when the last diagnosis says the machine answered — see
+/// [`ft_core::Cause::reached_the_machine`] — and then `Worker` carries what
+/// was found there and the one line that fixes it. When ssh did not get in,
+/// `SSH` carries the diagnosis and `Worker` is not required: it was never
+/// asked, and a row that says so is worth more than one that guesses.
+pub(crate) fn not_connected(host: &Host) -> ft_core::Readiness {
+    let ft_core::Compute::Server { user, .. } = &host.compute else {
+        return ft_core::Readiness {
+            user: None,
+            checks: vec![ft_core::Requirement {
+                name: "Worker".into(),
+                available: false,
+                required: true,
+                detail: "The worker on this machine is not running.".into(),
+                remedy: Some(
+                    "Install Git, tmux and a POSIX shell on the machine running Firetower.".into(),
+                ),
+            }],
+        };
+    };
+
+    let reached = host
+        .diagnosis
+        .as_ref()
+        .is_some_and(|d| d.cause.reached_the_machine());
+    let said = host.diagnosis.as_ref().map(|d| d.summary.clone());
+    let account = user
+        .clone()
+        .unwrap_or_else(|| "the ssh account".to_string());
+
+    let ssh = ft_core::Requirement {
+        name: "SSH".into(),
+        available: reached,
+        required: true,
+        detail: if reached {
+            format!("connected as {account}")
+        } else {
+            said.clone().unwrap_or_else(|| "Not connected yet.".into())
+        },
+        remedy: (!reached).then(|| {
+            "Give the machine Firetower's public key — Add a machine shows it — then check again."
+                .to_string()
+        }),
+    };
+    let worker = ft_core::Requirement {
+        name: "Worker".into(),
+        available: false,
+        // Not asked until ssh gets in, and a row that says "not checked" is
+        // worth more than one that guesses.
+        required: reached,
+        detail: if reached {
+            said.unwrap_or_else(|| "Firetower isn't installed on that machine.".into())
+        } else {
+            "not checked".into()
+        },
+        remedy: reached.then(|| crate::install::one_liner(None)),
+    };
+
+    ft_core::Readiness {
+        user: reached.then_some(account),
+        checks: vec![ssh, worker],
     }
 }

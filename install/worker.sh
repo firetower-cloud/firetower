@@ -19,6 +19,9 @@
 #                     `-` reads it from stdin (the control plane uses this)
 #   --agent NAME      also fetch an agent: claude-code or codex
 #   --yes             install missing packages without asking
+#   --skip-packages   never install packages: report them and carry on with
+#                     the worker (the control plane uses this — it does not
+#                     run sudo on your machine)
 #
 # The same script runs over ssh when you press "Install the worker" in
 # Firetower, so what happens there is exactly what happens here.
@@ -40,6 +43,7 @@ FROM=""
 AUTHORIZE=""
 AGENT=""
 YES=0
+SKIP_PACKAGES=0
 
 say()  { printf '%s\n' "$*"; }
 warn() { printf 'warning: %s\n' "$*" >&2; }
@@ -52,6 +56,7 @@ while [ $# -gt 0 ]; do
         --from)      [ $# -ge 2 ] || die "--from needs a file, or -"; FROM="$2"; shift 2 ;;
         --agent)     [ $# -ge 2 ] || die "--agent needs a name"; AGENT="$2"; shift 2 ;;
         --yes|-y)    YES=1; shift ;;
+        --skip-packages) SKIP_PACKAGES=1; shift ;;
         -h|--help)   sed -n '2,25p' "$0" 2>/dev/null || say "see https://usefiretower.com/docs"; exit 0 ;;
         *)           die "unknown option: $1" ;;
     esac
@@ -103,6 +108,14 @@ for tool in git tmux curl tar; do
 done
 MISSING="${MISSING# }"
 
+# What this script itself cannot do without: fetching and unpacking. git and
+# tmux are the worker's business and can arrive later; these two cannot.
+NEEDED_HERE=""
+if [ -z "$FROM" ]; then
+    command -v curl >/dev/null 2>&1 || NEEDED_HERE="$NEEDED_HERE curl"
+fi
+command -v tar >/dev/null 2>&1 || NEEDED_HERE="$NEEDED_HERE tar"
+
 # The one "yes" this script ever asks for. Read from the terminal rather than
 # stdin, because stdin is this script when it arrives through curl.
 ask() {
@@ -119,7 +132,13 @@ ask() {
     return 1
 }
 
-if [ -n "$MISSING" ]; then
+if [ -n "$MISSING" ] && [ "$SKIP_PACKAGES" -eq 1 ]; then
+    say "This machine is missing: $MISSING"
+    if [ -n "$NEEDED_HERE" ]; then
+        die "cannot install the worker without${NEEDED_HERE}. Install it and run this again."
+    fi
+    say "Not installing packages; the worker will report them."
+elif [ -n "$MISSING" ]; then
     say "This machine is missing: $MISSING"
     if [ "$OS" = darwin ] && [ -z "$PM" ]; then
         say "Homebrew is not installed, and that is how tmux gets onto a Mac."

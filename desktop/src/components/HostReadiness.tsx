@@ -21,14 +21,17 @@ export function isReady(report?: Readiness): boolean {
 }
 
 /**
- * The check that stands in for all the others when there is no worker yet.
+ * The two checks that stand in for all the others when there is no worker yet.
  *
  * Readiness is measured *by* the worker, so a machine without one cannot report
- * which tools it has — the server answers with this single row instead. It is
- * the one failure Firetower can fix from here, which is why it is named rather
- * than matched on a substring.
+ * which tools it has — the server answers with these two rows instead: whether
+ * ssh got in, and whether there is a worker to run. They are different
+ * questions with different fixes — the key, or the installer — and the second
+ * is the one Firetower can fix from here, which is why it is named rather than
+ * matched on a substring.
  */
-const CONNECTION = "Worker connection";
+const SSH = "SSH";
+const CONNECTION = "Worker";
 
 /** A machine Firetower can put a worker on: one it reaches over ssh. */
 function takesAWorker(host: Host): boolean {
@@ -94,6 +97,16 @@ export function Readout({
   const checks = report.data?.checks ?? [];
   const missing = checks.filter((c) => c.required && !c.available);
   const passed = checks.filter((c) => c.available);
+  // Asked of nothing yet: the worker row while ssh has not got in.
+  const skipped = checks.filter((c) => !c.required && !c.available);
+  const sshOk = checks.some((c) => c.name === SSH && c.available);
+  const noWorker = missing.some((c) => c.name === CONNECTION) && sshOk && takesAWorker(host);
+  const packageToRun = missing.some(
+    (c) =>
+      c.name !== CONNECTION &&
+      c.name !== SSH &&
+      /^(sudo |brew |apt|dnf|yum|pacman|apk|zypper)/.test(c.remedy ?? ""),
+  );
   const ready = isReady(report.data);
   const problem = (installWorker.error ?? installAgent.error ?? connect.error)?.message;
 
@@ -151,9 +164,11 @@ export function Readout({
     <>
       <Verdict tone="bad">
         <span role="alert">
-          {missing.length === 1 && missing[0].name === CONNECTION && takesAWorker(host)
+          {noWorker
             ? `There is no worker on ${connectionLabel(host)} yet.`
-            : `${count(missing.length)} missing on ${connectionLabel(host)}.`}
+            : missing.some((c) => c.name === SSH)
+              ? `Firetower can't get into ${connectionLabel(host)}.`
+              : `${count(missing.length)} missing on ${connectionLabel(host)}.`}
         </span>
       </Verdict>
       <div className="border-t border-brick-deep bg-brick-tint px-3 py-2.5">
@@ -168,7 +183,7 @@ export function Readout({
                 <span className="text-bone">{check.name}</span>
                 <span className="ml-2 text-mute">{detail(check)}</span>
               </span>
-              {check.name === CONNECTION && takesAWorker(host) && (
+              {check.name === CONNECTION && sshOk && takesAWorker(host) && (
                 <Do
                   busy={installWorker.isPending}
                   label="Install the worker"
@@ -195,6 +210,16 @@ export function Readout({
           ))}
         </ul>
 
+        {/* What was not asked, because what comes before it failed. */}
+        {skipped.map((check) => (
+          <p key={check.name} className="mt-1.5 flex items-start gap-2.5 text-meta text-mute">
+            <span aria-hidden className="font-mono">–</span>
+            <span>
+              {check.name} <span className="ml-2">{check.detail}</span>
+            </span>
+          </p>
+        ))}
+
         {/* What passed, in one line. They are here so it is clear the check ran
             and what it covered — not so anybody reads them. */}
         {passed.length > 0 && (
@@ -202,27 +227,46 @@ export function Readout({
             <span aria-hidden className="mr-1.5 font-mono text-sage">
               ✓
             </span>
-            {passed.map((c) => c.name).join(", ")} — all fine.
+            {passed.map((c) => `${c.name}${c.name === SSH ? ` · ${c.detail}` : ""}`).join(", ")} —
+            all fine.
           </p>
         )}
 
-        {missing.some((c) => c.name === CONNECTION) && takesAWorker(host) && (
-          <p className="mt-2.5 text-meta leading-[1.5] text-mute">
-            Firetower runs its installer over the connection it already has: the worker built for
-            that machine lands in <code className="font-mono">~/.firetower/worker/bin</code>, and
-            anything the machine is missing is named. No sudo, and nothing outside that
-            account&apos;s home. Or run the same line on the machine yourself:
-          </p>
+        {noWorker && (
+          <>
+            <p className="mt-2.5 text-meta leading-[1.5] text-mute">
+              Firetower puts the worker built for that machine into{" "}
+              <code className="font-mono">~/.firetower/worker/bin</code> over the connection above.
+              No sudo, and nothing outside that account&apos;s home.
+            </p>
+            {/* The by-hand route: the same installer, run from the machine. It
+                asks before installing anything the machine is missing. */}
+            {missing.find((c) => c.name === CONNECTION)?.remedy && (
+              <details className="mt-2 text-meta text-mute">
+                <summary className="cursor-pointer hover:text-bone">
+                  Or do it on the machine yourself
+                </summary>
+                <code className="mt-1.5 block break-all rounded-sm bg-black/25 px-3 py-2 font-mono text-meta text-bone">
+                  {missing.find((c) => c.name === CONNECTION)?.remedy}
+                </code>
+              </details>
+            )}
+          </>
         )}
 
         {/* One remedy per thing that is genuinely the machine's, and never for
-            something there is a button for above — except the worker itself,
-            whose remedy is the one line a person can run instead of the button. */}
+            something there is a button for above. */}
         {missing
-          .filter((c) => command(c) && (c.name === CONNECTION || !actionable(c, host, agent, agentLabel)))
+          .filter((c) => command(c) && !actionable(c, host, agent, agentLabel))
           .map((check) => (
             <Remedy key={check.name} check={check} />
           ))}
+
+        {packageToRun && (
+          <p className="mt-2.5 text-meta leading-[1.5] text-mute">
+            Run that on the machine, then check again. Firetower does not run sudo for you.
+          </p>
+        )}
 
         {problem && (
           <p role="alert" className="mt-2.5 text-meta text-brick">
@@ -235,9 +279,10 @@ export function Readout({
   );
 }
 
-/** Whether a button above already answers this one. */
+/** Whether a button above already answers this one, or it is a sentence. */
 function actionable(check: Requirement, host: Host, agent?: Agent, agentLabel?: string) {
   if (check.name === CONNECTION) return takesAWorker(host);
+  if (check.name === SSH) return true;
   return !!agent && check.name === agentLabel;
 }
 

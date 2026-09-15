@@ -8,43 +8,54 @@ the point, as it is for a Mac that has Xcode on it.
 
 ## Add a machine
 
-Open Compute → **Add a machine**. It shows one line. Run it on the machine, as
-the account agents should run as:
+Open Compute → **Add a machine**. It shows Firetower's public key. Give it to the
+machine the way that machine takes keys: `~/.ssh/authorized_keys` of the account
+agents should run as, on a machine you own; the provider's console, instance
+metadata or OS Login on Google Cloud; the CA where there is one. That is the one
+thing a machine can only get from a person.
+
+Then the address and the account, and **Add**. Firetower connects and the
+machine's panel says two things, told apart: whether ssh got in, and whether
+there is a worker. A machine the key got into shows **No worker** — not
+*Unreachable* — with **Install the worker** beside it. That runs the installer
+over the connection it just made: the release built for that machine's shape,
+into `~/.firetower/worker/bin`. No sudo, nothing outside the account's home.
+
+What the machine is still missing is then measured by the worker and shown with
+the command that installs it — `brew install tmux`, `sudo apt-get install -y
+tmux` — for you to run. Firetower never runs sudo on a machine; that is the
+one step it leaves to the person who has the password. Run it, **check again**.
+
+### By hand
+
+The installer is `install/worker.sh`, and the panel folds the by-hand line
+under the button for whoever would rather watch it happen:
 
 ```sh
-curl -fsSL https://usefiretower.com/worker.sh | sh -s -- --authorize 'ssh-ed25519 AAAA… firetower'
+curl -fsSL https://usefiretower.com/worker.sh | sh
 ```
 
-Then fill in the address and the account, and choose **Add**.
-
-The script:
+Run as the account agents should run as. The script:
 
 1. Works out what the machine is — macOS or Linux, arm64 or x86_64 — and
    refuses anything else with a sentence. Windows runs it inside WSL2.
 2. Checks for `git`, `tmux`, `curl` and `tar`. For each one missing it prints
-   the package manager's own command — `brew install tmux`,
-   `sudo apt-get install -y git tmux` — and asks before running it. Pass
-   `--yes` on a machine nobody is watching.
+   the package manager's own command and asks before running it. Pass `--yes`
+   on a machine nobody is watching, or `--skip-packages` to leave them to you —
+   which is how the control plane runs it.
 3. Downloads the `firetower-worker` release built for that machine, checks it
    against the release's `SHA256SUMS`, and puts it in
-   `~/.firetower/worker/bin`. Nothing goes anywhere else, and nothing needs
-   sudo.
-4. With `--authorize`, appends Firetower's public key to
-   `~/.ssh/authorized_keys`, so the machine is reachable the moment the script
-   finishes.
+   `~/.firetower/worker/bin`.
+4. With `--authorize KEY`, appends Firetower's public key to
+   `~/.ssh/authorized_keys`.
 5. Says whether an sshd is running, and how to turn one on if not. It never
    turns one on itself.
-6. Prints what `firetower-worker doctor` sees: the same checks Firetower will
-   run over ssh, with the same PATH.
+6. Prints what `firetower-worker doctor` sees: the same checks Firetower runs
+   over ssh, with the same PATH.
 
 Options: `--version X.Y.Z` installs that release rather than the newest;
 `--agent claude-code` or `--agent codex` fetches the agent too; `--from FILE`
 installs a tarball you already have.
-
-**Install the worker** on a machine's readiness panel runs the same script over
-the ssh connection Firetower already has, pinned to the control plane's own
-version. A Linux control plane installs onto a Mac this way: the script fetches
-the build for the machine it is on.
 
 ## What a machine needs
 

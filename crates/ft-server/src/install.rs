@@ -131,7 +131,10 @@ pub async fn install_version(ssh: &SshTransport, version: &str) -> Result<String
     .await
     .context("sending the installer")?;
 
-    let run = format!("sh \"{REMOTE_SCRIPT}\" --yes --version {version}");
+    // The worker, and only the worker. A package the machine is missing is
+    // reported by the worker afterwards, with the command that installs it,
+    // for the person to run — the control plane never runs sudo on a machine.
+    let run = format!("sh \"{REMOTE_SCRIPT}\" --skip-packages --version {version}");
 
     match local_artifact(&asset) {
         Some(tarball) => {
@@ -206,6 +209,7 @@ mod tests {
         assert!(SCRIPT.contains("--from"));
         assert!(SCRIPT.contains("--version"));
         assert!(SCRIPT.contains("--yes"));
+        assert!(SCRIPT.contains("--skip-packages"));
     }
 
     #[test]

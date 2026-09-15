@@ -16,6 +16,25 @@ export function machineKey(host: Host): string {
   return `ssh:${compute.host}:${compute.port ?? 22}`;
 }
 
+/**
+ * The word beside a machine's name.
+ *
+ * Three, not two: a machine ssh got into and found no worker on is not
+ * unreachable — the key worked, the address is right — and saying it was sent
+ * people to check the wrong thing. The diagnosis already knows which; this
+ * only says it.
+ */
+export function stateLabel(host: Host): "Online" | "Draining" | "No worker" | "Unreachable" {
+  if (host.drained || host.state === "Draining") return "Draining";
+  if (host.state === "Online") return "Online";
+  return reachedTheMachine(host) ? "No worker" : "Unreachable";
+}
+
+/** Whether the last attempt got onto the machine and failed only after that. */
+export function reachedTheMachine(host: Host): boolean {
+  return host.diagnosis?.cause === "WorkerMissing" || host.diagnosis?.cause === "ProtocolMismatch";
+}
+
 export function environmentLabel(host: Host): string {
   return host.compute.type === "Local" ? "This machine" : host.name;
 }

@@ -49,24 +49,40 @@ pub async fn check(root: &Path, agent: Option<Agent>) -> Readiness {
     check_with_path(root, agent, &path).await
 }
 
+/// The command that installs a package on this machine, for the remedy.
+///
+/// Named after whichever package manager is on the PATH the checks run with,
+/// so the panel shows `brew install tmux` on a Mac and `sudo apt-get install
+/// -y tmux` on Debian — something to copy, rather than a sentence about
+/// package managers. `sudo` only where the manager needs it: Homebrew
+/// refuses to run as root.
+fn package_remedy(package: &str, path: &OsStr) -> String {
+    let has = |program: &str| std::env::split_paths(path).any(|dir| dir.join(program).is_file());
+    if has("brew") {
+        format!("brew install {package}")
+    } else if has("apt-get") {
+        format!("sudo apt-get update && sudo apt-get install -y {package}")
+    } else if has("dnf") {
+        format!("sudo dnf install -y {package}")
+    } else if has("yum") {
+        format!("sudo yum install -y {package}")
+    } else if has("pacman") {
+        format!("sudo pacman -S --noconfirm {package}")
+    } else if has("apk") {
+        format!("sudo apk add {package}")
+    } else if has("zypper") {
+        format!("sudo zypper install -y {package}")
+    } else {
+        format!("Install {package} using this machine's package manager.")
+    }
+}
+
 async fn check_with_path(root: &Path, agent: Option<Agent>, path: &OsStr) -> Readiness {
+    let git_fix = package_remedy("git", path);
+    let tmux_fix = package_remedy("tmux", path);
     let (git, tmux, shell, user) = tokio::join!(
-        tool(
-            "Git",
-            "git",
-            &["--version"],
-            true,
-            "Install git using this machine's package manager.",
-            path
-        ),
-        tool(
-            "tmux",
-            "tmux",
-            &["-V"],
-            true,
-            "Install tmux using this machine's package manager.",
-            path
-        ),
+        tool("Git", "git", &["--version"], true, &git_fix, path),
+        tool("tmux", "tmux", &["-V"], true, &tmux_fix, path),
         tool(
             "Shell",
             "sh",
@@ -180,6 +196,25 @@ mod tests {
         assert!(!result.ready());
         assert!(result.missing().contains("Worker state directory"));
         assert!(result.missing().contains("Claude Code"));
+    }
+
+    /// The remedy is the command, in the words of whatever package manager
+    /// is there — so it can be copied rather than read.
+    #[test]
+    fn a_missing_package_is_answered_with_the_command_that_installs_it() {
+        let bin = tempfile::tempdir().unwrap();
+        fake(bin.path(), "brew", "exit 0");
+        assert_eq!(
+            package_remedy("tmux", bin.path().as_os_str()),
+            "brew install tmux"
+        );
+
+        let debian = tempfile::tempdir().unwrap();
+        fake(debian.path(), "apt-get", "exit 0");
+        assert!(package_remedy("tmux", debian.path().as_os_str()).starts_with("sudo apt-get"));
+
+        let bare = tempfile::tempdir().unwrap();
+        assert!(package_remedy("tmux", bare.path().as_os_str()).contains("package manager"));
     }
 
     #[tokio::test]

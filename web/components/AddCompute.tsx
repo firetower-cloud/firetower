@@ -17,9 +17,10 @@ import { parseDestination } from "@/src/api/environments";
  *
  * ## What it asks
  *
- * Two fields about the machine — where it is and who to connect as — plus the
- * one line to run on it, which installs the worker and gives the machine
- * Firetower's key in the same breath.
+ * Two fields about the machine — where it is and who to connect as — and the
+ * key the machine has to be given. The key is shown, not a command: people
+ * know where their keys go, and a command is wrong on Google Cloud, wrong
+ * behind an SSH CA, and wrong wherever `~/.ssh` is not the place.
  *
  * The address and the account were briefly one box taking `editor@10.0.4.7`.
  * They are two things: an address is where, an account is who, and a form is
@@ -27,16 +28,19 @@ import { parseDestination } from "@/src/api/environments";
  * works — `parseDestination` splits it and the server prefers a field somebody
  * filled in over one it parsed.
  *
- * What it does not ask: **container or directly on host**. Agents run on the
- * machine, as the account above. And **this server or a remote one** was only
- * ever about ssh-ing to the machine Firetower is already on. It does not.
+ * What it does not ask: **container or directly on host** — agents run on the
+ * machine, as the account above; **this server or a remote one** — that was
+ * only ever about ssh-ing to the machine Firetower is already on; and **which
+ * key** — Firetower's own is the one way in, and a private key on the control
+ * plane's filesystem was a path nobody could see from a container.
+ *
+ * Nothing on this dialog installs anything. Once the key is in, the machine's
+ * own panel does that.
  */
 export function AddCompute({ onClose }: { onClose: () => void }) {
   const [address, setAddress] = useState("");
   const [user, setUser] = useState("");
   const [label, setLabel] = useState("");
-  const [keyPath, setKeyPath] = useState("");
-  const [ownKey, setOwnKey] = useState(false);
   const [told, setTold] = useState<Diagnosis | null>(null);
   const cache = useQueryClient();
   const create = useCreateHost();
@@ -61,7 +65,7 @@ export function AddCompute({ onClose }: { onClose: () => void }) {
       type: "Server",
       host: address.trim(),
       user: user.trim() || undefined,
-      key: ownKey && keyPath.trim() ? { type: "File", path: keyPath.trim() } : { type: "Managed" },
+      key: { type: "Managed" },
     } as Compute,
   });
 
@@ -117,17 +121,11 @@ export function AddCompute({ onClose }: { onClose: () => void }) {
         What you call it, in every list. Left blank it is called {typed.host || "where it is"}.
       </Field>
 
-      <HowWeGetIn
-        ownKey={ownKey}
-        onOwnKey={setOwnKey}
-        keyPath={keyPath}
-        onKeyPath={edit(setKeyPath)}
-        user={account}
-      />
+      <HowWeGetIn user={account} />
 
       <p className="mt-3 text-meta leading-[1.5] text-mute">
-        Firetower then checks the machine and says what is missing. Agents run on it directly, as
-        the account above.
+        Firetower then connects and says what the machine has and what it is missing — the worker
+        first, which it installs from there.
       </p>
 
       {(create.error || probe.error) && (
@@ -243,125 +241,65 @@ function authorizedKeys(user: string, key: string) {
  *
  * The key is what is offered, not a command. Where it goes depends on the
  * machine: a provider's web form when the VM is being made now, instance
- * metadata on Google Cloud, an SSH CA where there is one, and
+ * metadata or OS Login on Google Cloud, an SSH CA where there is one, and
  * `authorized_keys` on a machine you already own. A command assumes the last of
  * those, and on Google Cloud the guest agent will quietly undo it.
  */
 function HowWeGetIn({
-  ownKey,
-  onOwnKey,
-  keyPath,
-  onKeyPath,
   user,
 }: {
-  ownKey: boolean;
-  onOwnKey: (on: boolean) => void;
-  keyPath: string;
-  onKeyPath: (path: string) => void;
-  /** Whose authorized_keys the command should write to. */
+  /** Whose authorized_keys the by-hand lines should write to. */
   user: string;
 }) {
   const { data: identity, isLoading } = useSshKey();
-  const [copied, setCopied] = useState<"line" | "key" | null>(null);
+  const [copied, setCopied] = useState(false);
   const [showing, setShowing] = useState(false);
 
-  const copy = async (what: "line" | "key") => {
+  const copy = async () => {
     if (!identity) return;
-    await navigator.clipboard.writeText(what === "line" ? identity.installCommand : identity.publicKey);
-    setCopied(what);
-    setTimeout(() => setCopied(null), 2000);
+    await navigator.clipboard.writeText(identity.publicKey);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
   };
 
   return (
     <div className="mt-5 rounded-sm border border-line bg-ground/40 p-3">
-      <p className="eyebrow">Run this on the machine</p>
+      <p className="eyebrow">Firetower gets in with this key</p>
 
-      {ownKey ? (
-        <>
-          <Field
-            label="Private key"
-            optional
-            value={keyPath}
-            onChange={onKeyPath}
-            placeholder="~/.ssh/id_ed25519"
-          >
-            A path on the machine running Firetower — which, if that is a container, is inside the
-            container rather than on yours. A key you can see is not necessarily one it can.
-          </Field>
-          <button
-            type="button"
-            onClick={() => onOwnKey(false)}
-            className="mt-3 text-meta text-slate hover:text-bone"
-          >
-            ← Use Firetower&apos;s key
-          </button>
-        </>
-      ) : (
-        <>
-          <p className="mt-2 text-meta leading-[1.5] text-mute">
-            As the account you named above. It installs the worker into that account&apos;s home,
-            says what the machine is missing and offers to install it, and gives the machine
-            Firetower&apos;s key — so it can be added the moment it finishes.
-          </p>
+      <div className="mt-2 flex items-start gap-2">
+        <code className="min-w-0 flex-1 break-all rounded-sm border border-line bg-ground px-3 py-2 font-mono text-meta leading-[1.5] text-bone">
+          {isLoading ? "…" : (identity?.publicKey ?? "no key yet")}
+        </code>
+        <button
+          type="button"
+          onClick={copy}
+          disabled={!identity}
+          className="shrink-0 rounded-sm border border-line px-3 py-2 text-meta text-slate hover:text-bone disabled:opacity-40"
+        >
+          {copied ? "Copied" : "Copy"}
+        </button>
+      </div>
+      <p className="mt-1.5 font-mono text-meta text-mute">{identity?.fingerprint ?? ""}</p>
 
-          <div className="mt-2 flex items-start gap-2">
-            <code className="min-w-0 flex-1 break-all rounded-sm border border-line bg-ground px-3 py-2 font-mono text-meta leading-[1.5] text-bone">
-              {isLoading ? "…" : (identity?.installCommand ?? "no key yet")}
-            </code>
-            <button
-              type="button"
-              onClick={() => copy("line")}
-              disabled={!identity}
-              className="shrink-0 rounded-sm border border-line px-3 py-2 text-meta text-slate hover:text-bone disabled:opacity-40"
-            >
-              {copied === "line" ? "Copied" : "Copy"}
-            </button>
-          </div>
+      <p className="mt-2 text-meta leading-[1.5] text-mute">
+        Give it to the machine the way that machine takes keys:{" "}
+        <code className="font-mono text-slate">~/.ssh/authorized_keys</code> of the account above on
+        a machine you own; the provider&apos;s console, instance metadata or OS Login on Google
+        Cloud; the CA where there is one. It is public — safe anywhere.
+      </p>
 
-          <button
-            type="button"
-            onClick={() => setShowing(!showing)}
-            className="mt-3 text-meta text-slate hover:text-bone"
-          >
-            {showing ? "▾" : "▸"} Just the key, for a provider&apos;s web form or cloud-init
-          </button>
+      <button
+        type="button"
+        onClick={() => setShowing(!showing)}
+        className="mt-3 text-meta text-slate hover:text-bone"
+      >
+        {showing ? "▾" : "▸"} Adding it to authorized_keys by hand
+      </button>
 
-          {showing && (
-            <>
-              <div className="mt-2 flex items-start gap-2">
-                <code className="min-w-0 flex-1 break-all rounded-sm border border-line bg-ground px-3 py-2 font-mono text-meta leading-[1.5] text-bone">
-                  {identity?.publicKey ?? "…"}
-                </code>
-                <button
-                  type="button"
-                  onClick={() => copy("key")}
-                  disabled={!identity}
-                  className="shrink-0 rounded-sm border border-line px-3 py-2 text-meta text-slate hover:text-bone disabled:opacity-40"
-                >
-                  {copied === "key" ? "Copied" : "Copy"}
-                </button>
-              </div>
-              <p className="mt-2 text-meta leading-[1.5] text-mute">
-                Some providers manage keys their own way — Google Cloud through instance metadata
-                or OS Login, an SSH CA through the CA. On a machine you own, by hand:
-              </p>
-              <pre className="mt-2 overflow-x-auto rounded-sm bg-black/25 px-3 py-2 font-mono text-meta leading-[1.7] text-bone">
-                {authorizedKeys(user, identity?.publicKey ?? "…")}
-              </pre>
-            </>
-          )}
-
-          <div className="mt-3 flex items-center justify-between gap-3">
-            <span className="font-mono text-meta text-mute">{identity?.fingerprint ?? ""}</span>
-            <button
-              type="button"
-              onClick={() => onOwnKey(true)}
-              className="shrink-0 text-meta text-slate hover:text-bone"
-            >
-              Use my own key instead →
-            </button>
-          </div>
-        </>
+      {showing && (
+        <pre className="mt-2 overflow-x-auto rounded-sm bg-black/25 px-3 py-2 font-mono text-meta leading-[1.7] text-bone">
+          {authorizedKeys(user, identity?.publicKey ?? "…")}
+        </pre>
       )}
     </div>
   );
