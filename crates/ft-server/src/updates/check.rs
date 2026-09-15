@@ -1,9 +1,14 @@
 //! Asking what the newest release is.
 //!
-//! GitHub's releases feed, because that is where release-please publishes:
-//! the tag, the date and the changelog section for that version, in one
+//! GitHub's releases list, because that is where release-please publishes:
+//! the tag, the date and the changelog section for each version, in one
 //! document that needs no credential to read. Sixty requests an hour anonymous
 //! is more than a six-hourly check and a button will ever use.
+//!
+//! The list rather than `releases/latest`: the desktop app is released from
+//! the same repository under its own tags, and GitHub's `latest` is whichever
+//! package released most recently. The newest `firetower-v*` release in the
+//! list is the one.
 //!
 //! The deployment files at a tag come from the raw content host, so a plan can
 //! say what a release changed in `firetower.yml` before anybody agrees to it.
@@ -16,7 +21,7 @@ use std::time::Duration;
 /// Where the feed and the files are. Overridable for a test or a mirror.
 #[derive(Clone, Debug)]
 pub struct Feed {
-    /// The `releases/latest` document.
+    /// The releases list, newest first.
     pub releases_url: String,
     /// Prefix for `<prefix>/<tag>/deploy/<file>`.
     pub raw_base: String,
@@ -32,7 +37,8 @@ impl Feed {
                 .ok()
                 .filter(|s| !s.trim().is_empty())
                 .unwrap_or_else(|| {
-                    "https://api.github.com/repos/firetower-cloud/firetower/releases/latest".into()
+                    "https://api.github.com/repos/firetower-cloud/firetower/releases?per_page=30"
+                        .into()
                 }),
             raw_base: std::env::var(Self::RAW_ENV)
                 .ok()
@@ -86,11 +92,32 @@ pub async fn latest(http: &reqwest::Client, feed: &Feed) -> Result<Latest> {
         .json()
         .await
         .context("reading the releases feed")?;
-    read_release(&body)
+    pick_release(&body)
 }
 
-/// Read one release document. Separate from fetching so it can be tested on
-/// what GitHub actually returns.
+/// The newest control plane release in a list of releases. A draft, a
+/// pre-release, or another package's tag is not one. Separate from fetching
+/// so it can be tested on what GitHub actually returns.
+pub fn pick_release(body: &serde_json::Value) -> Result<Latest> {
+    let releases = body.as_array().context("the releases feed is not a list")?;
+    releases
+        .iter()
+        .filter(|r| !flag(r, "draft") && !flag(r, "prerelease"))
+        .filter(|r| {
+            r.get("tag_name")
+                .and_then(|v| v.as_str())
+                .is_some_and(|t| t.starts_with(version::TAG_PREFIX))
+        })
+        .filter_map(|r| read_release(r).ok())
+        .max_by(|a, b| a.version.cmp(&b.version))
+        .context("no control plane release in the feed")
+}
+
+fn flag(release: &serde_json::Value, name: &str) -> bool {
+    release.get(name).and_then(|v| v.as_bool()).unwrap_or(false)
+}
+
+/// Read one release document.
 pub fn read_release(body: &serde_json::Value) -> Result<Latest> {
     let tag = body
         .get("tag_name")
@@ -180,6 +207,29 @@ mod tests {
     fn a_release_without_a_version_tag_is_refused() {
         let body = serde_json::json!({"tag_name": "nightly"});
         assert!(read_release(&body).is_err());
+    }
+
+    /// The list interleaves both packages' releases, newest first, with the
+    /// draft release-please just made and the desktop's rolling feed in it.
+    #[test]
+    fn the_newest_control_plane_release_is_picked_from_the_list() {
+        let body = serde_json::json!([
+            {"tag_name": "desktop-v0.4.0", "draft": false, "prerelease": false},
+            {"tag_name": "firetower-v0.35.0", "draft": true, "prerelease": false},
+            {"tag_name": "firetower-v0.34.1", "draft": false, "prerelease": false},
+            {"tag_name": "firetower-v0.34.0", "draft": false, "prerelease": false},
+            {"tag_name": "desktop-latest", "draft": false, "prerelease": true}
+        ]);
+        assert_eq!(pick_release(&body).unwrap().version, Version::new(0, 34, 1));
+    }
+
+    #[test]
+    fn a_list_with_no_control_plane_release_is_refused() {
+        let body = serde_json::json!([
+            {"tag_name": "desktop-v0.4.0", "draft": false, "prerelease": false}
+        ]);
+        assert!(pick_release(&body).is_err());
+        assert!(pick_release(&serde_json::json!({"tag_name": "firetower-v0.34.1"})).is_err());
     }
 
     #[test]

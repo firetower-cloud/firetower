@@ -131,6 +131,6 @@ and fail having done nothing.
 | `FIRETOWER_UPDATER_TOKEN` | `.env`, read by both services | The shared token. |
 | `FIRETOWER_UPDATER_URL` | control plane | Where the updater is; `firetower.yml` sets it. Unset means no updater. |
 | `FIRETOWER_NOTIFY_URL` | control plane | Also receives one POST per new release, if set. |
-| `FIRETOWER_UPDATE_FEED` | control plane | The `releases/latest` document to read. GitHub's by default. |
+| `FIRETOWER_UPDATE_FEED` | control plane | The releases list to read, GitHub's by default. The newest published `firetower-v*` release in it is the one; the desktop app's tags in the same list are skipped. |
 | `FIRETOWER_UPDATE_RAW` | control plane | Where release files are fetched from, for the diffs. |
 | `FIRETOWER_UPDATER_HELPER_IMAGE` | updater | The image Compose is run from. `docker:28-cli` by default. |
