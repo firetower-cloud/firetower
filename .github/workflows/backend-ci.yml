@@ -5,6 +5,10 @@ name: backend ci
 
 on:
   pull_request:
+    # Not on a release PR: it changes versions and changelogs, nothing a
+    # build would catch.
+    branches-ignore:
+      - "release-please--branches--**"
     paths:
       - "crates/**"
       - "migrations/**"
