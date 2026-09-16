@@ -13,6 +13,7 @@ on:
       - "crates/**"
       - "migrations/**"
       - "install/**"
+      - "Dockerfile"
       - "Cargo.toml"
       - "Cargo.lock"
       - "rust-toolchain.toml"
@@ -79,7 +80,7 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           key: installer
-      - run: shellcheck -s sh install/worker.sh
+      - run: shellcheck -s sh install/worker.sh install/install.sh
       - run: cargo build --release -p ft-cli --no-default-features --bin firetower-worker --target x86_64-unknown-linux-musl
       - run: |
           mkdir -p dist
@@ -106,3 +107,30 @@ jobs:
             su editor -c "sh /install/worker.sh --from /dist/firetower-worker-linux-x86_64.tar.gz --skip-packages" >/dev/null
             su editor -c "~/.firetower/worker/bin/firetower-worker doctor"
           '
+      # The control plane's installer on the same bare machine: no Node, no
+      # CLI, and afterwards `firetower --version` answers. Docker's installer
+      # is not exercised in a container; a real VM is where that is tried.
+      - name: the control-plane installer gets Node and the CLI onto a bare machine
+        run: |
+          docker run --rm -v "$PWD/install:/install:ro" debian:bookworm-slim sh -c '
+            set -e
+            apt-get update >/dev/null && apt-get install -y --no-install-recommends curl ca-certificates >/dev/null
+            sh /install/install.sh --yes --deps-only --skip-docker
+            firetower --version
+          '
+
+  # The image, built the way a release builds it, so a file the binary embeds
+  # and the Dockerfile does not copy fails a pull request rather than a
+  # release. Only the build stage: compiling is the check, and pushing is not.
+  image:
+    runs-on: depot-ubuntu-22.04
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3
+      - uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6
+        with:
+          context: .
+          target: build
+          push: false
+          cache-from: type=gha,scope=firetower
+          cache-to: type=gha,mode=max,scope=firetower-pr

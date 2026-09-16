@@ -66,12 +66,13 @@ The control plane and the worker communicate entirely through SSH, and you can c
 
 ## Running it
 
-To install the control plane:
+To install the control plane, on a Linux server:
 
 ```sh
-npm i -g @firetower/cli
-firetower install
+curl -fsSL https://usefiretower.com/install.sh | sh
 ```
+
+It puts Docker and Node on the machine if they are missing — showing each line and asking first — installs the CLI, and hands over to `firetower install`, which asks about the domain and how the machine is reached. Firetower is built server-first: the control plane runs on Linux, and you connect from your Mac, Windows machine or phone with the client. Already have Docker and Node? `npm i -g @firetower/cli && firetower install` is the same thing without the first two steps.
 
 To set up a worker on a machine — a server, a VM, a Mac:
 

@@ -142,11 +142,11 @@ jobs:
           TAG: ${{ needs.please.outputs.tag }}
           VERSION: ${{ needs.please.outputs.version }}
         run: |
-          cp install/worker.sh dist/worker.sh
+          cp install/worker.sh install/install.sh dist/
           cd dist
-          sha256sum firetower-worker-*.tar.gz worker.sh > SHA256SUMS
+          sha256sum firetower-worker-*.tar.gz worker.sh install.sh > SHA256SUMS
           ls -la
-          gh release upload "$TAG" firetower-worker-*.tar.gz worker.sh SHA256SUMS --clobber
+          gh release upload "$TAG" firetower-worker-*.tar.gz worker.sh install.sh SHA256SUMS --clobber
 
           # The same files onto the rolling release `usefiretower.com/worker.sh`
           # redirects to. GitHub's own `latest` is the newest release of the
@@ -157,7 +157,7 @@ jobs:
               --title "worker: latest" \
               --notes "The newest worker, for \`curl -fsSL https://usefiretower.com/worker.sh | sh\`. Moved on every release; the versioned releases hold the same files."
           fi
-          gh release upload worker-latest firetower-worker-*.tar.gz worker.sh SHA256SUMS -R "$GITHUB_REPOSITORY" --clobber
+          gh release upload worker-latest firetower-worker-*.tar.gz worker.sh install.sh SHA256SUMS -R "$GITHUB_REPOSITORY" --clobber
           gh release edit worker-latest -R "$GITHUB_REPOSITORY" --notes "The newest worker ($VERSION), for \`curl -fsSL https://usefiretower.com/worker.sh | sh\`. Moved on every release; firetower-v$VERSION holds the same files."
 
       # The whole chain, before anybody is told the release exists: the
@@ -172,3 +172,11 @@ jobs:
             | sh -s -- --version "$VERSION" --skip-packages
           said="$("$FIRETOWER_WORKER_ROOT/bin/firetower-worker" --version)"
           case "$said" in *"$VERSION"*) echo "ok: $said" ;; *) echo "installed $said, expected $VERSION" >&2; exit 1 ;; esac
+      # And the control plane's: the published script gets the CLI onto a
+      # machine. The runner has Docker and Node already, so this proves the
+      # download, the script and the npm step — the rest is a real server's.
+      - name: the published installer gets the CLI onto a machine
+        run: |
+          curl -fsSL "https://github.com/$GITHUB_REPOSITORY/releases/download/worker-latest/install.sh" \
+            | sh -s -- --yes --deps-only --skip-docker
+          firetower --version
