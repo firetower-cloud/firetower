@@ -23,6 +23,7 @@ on:
       - "Cargo.lock"
       - "crates/**"
       - "migrations/**"
+      - "install/**"
       - "web/**"
       - "Dockerfile"
       - "Dockerfile.updater"

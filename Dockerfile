@@ -69,6 +69,8 @@ ENV CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc \
 COPY Cargo.toml Cargo.lock ./
 COPY crates ./crates
 COPY migrations ./migrations
+# Embedded in the control plane: the worker installer it runs over ssh.
+COPY install ./install
 
 # Where the previous stage left the interface. rust-embed reads this at compile
 # time, so it has to be in place before cargo runs rather than copied in after.
