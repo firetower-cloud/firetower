@@ -19,6 +19,7 @@ import { AgentMark } from "~/components/AgentMark";
 import { unavailable } from "~/components/workspace/StartAgent";
 import { getListSessionsQueryKey, useCreateSession } from "~/api/generated/sessions/sessions";
 import type { Agent, Session } from "~/api/generated/model";
+import { usable } from "~/api/accounts";
 import { useAccounts, useAgents, useHosts, why } from "~/data";
 import { navigate } from "~/shims/next-navigation";
 
@@ -53,7 +54,8 @@ export function AddAgent({
     [agents.data, host],
   );
   /* Accounts for the chosen kind. One is a fact, not a choice. */
-  const forKind = useMemo(() => accounts.data.filter((a) => a.enabled && a.kind === picked), [accounts.data, picked]);
+  const forKind = useMemo(() => accounts.data.filter((a) => a.kind === picked && usable(a)), [accounts.data, picked]);
+  const chosen = forKind.find((a) => a.id === account) ?? forKind.find((a) => a.isDefault) ?? forKind[0];
 
   useEffect(() => {
     const key = (e: KeyboardEvent) => e.key === "Escape" && onClose();
@@ -64,7 +66,7 @@ export function AddAgent({
   const start = (agent: Agent) => {
     setTrouble(null);
     create.mutate(
-      { data: { workspaceId, agent, accountId: forKind.length > 1 ? account : null, prompt: prompt ?? null } },
+      { data: { workspaceId, agent, accountId: chosen?.id ?? null, prompt: prompt ?? null } },
       {
         onSuccess: (made) => {
           cache.invalidateQueries({ queryKey: getListSessionsQueryKey() });
@@ -102,7 +104,7 @@ export function AddAgent({
                   onClick={() => {
                     setPicked(agent.kind);
                     setAccount(null);
-                    const mine = accounts.data.filter((a) => a.enabled && a.kind === agent.kind);
+                    const mine = accounts.data.filter((a) => a.kind === agent.kind && usable(a));
                     if (mine.length <= 1) start(agent.kind);
                   }}
                   className={`flex w-full items-center gap-3 px-4 py-2 text-left transition-colors ${reason ? "opacity-50" : "hover:bg-raise/70"} ${on ? "bg-raise/50" : ""}`}
@@ -116,7 +118,7 @@ export function AddAgent({
                 </button>
                 {on && forKind.length > 1 && (
                   <div className="flex items-center gap-2 px-4 pb-2.5 pl-11">
-                    <select value={account ?? forKind.find((a) => a.isDefault)?.id ?? forKind[0].id} onChange={(e) => setAccount(e.target.value)} className="min-w-0 flex-1 rounded-md border border-line bg-ground px-2 py-1 text-ui text-bone focus:outline-none">
+                    <select value={chosen?.id ?? ""} onChange={(e) => setAccount(e.target.value)} className="min-w-0 flex-1 rounded-md border border-line bg-ground px-2 py-1 text-ui text-bone focus:outline-none">
                       {forKind.map((a) => <option key={a.id} value={a.id}>{a.name}{a.identity ? ` · ${a.identity}` : ""}</option>)}
                     </select>
                     <button disabled={create.isPending} onClick={() => start(agent.kind)} className="control bg-bone font-medium text-ground hover:opacity-90 disabled:bg-raise disabled:text-mute">Start</button>
