@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.35.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.34.3...firetower-v0.35.0) (2026-09-16)
+
+
+### ⚠ BREAKING CHANGES
+
+* **worker:** the worker runs on the machine itself
+
+### Features
+
+* **hosts:** adding a machine carries on to installing the worker ([aada912](https://github.com/firetower-cloud/firetower/commit/aada91244cb00b81ed54b46f07bc076d14000024))
+* **hosts:** the agents are on the machine's panel and in the dialogs ([d4e9448](https://github.com/firetower-cloud/firetower/commit/d4e9448c26ffeaba459933ef8fd2e8cdcb5613b4))
+* **hosts:** the key is what a person gives a machine; the panel does the rest ([51d5a82](https://github.com/firetower-cloud/firetower/commit/51d5a824d69a6ab766900dc918a206dd906039d4))
+* **worker:** the worker runs on the machine itself ([4ffe8e7](https://github.com/firetower-cloud/firetower/commit/4ffe8e7195b3bdc959576e7eee20b7d460dbc359))
+
+
+### Bug Fixes
+
+* **hosts:** the by-hand authorized_keys lines use ~ rather than guessing the home directory ([07ebe83](https://github.com/firetower-cloud/firetower/commit/07ebe830842c5986ea7d772fe5fe6e53cbf33db6))
+
 ## [0.34.3](https://github.com/firetower-cloud/firetower/compare/firetower-v0.34.2...firetower-v0.34.3) (2026-09-15)
 
 
