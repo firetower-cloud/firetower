@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.36.1](https://github.com/firetower-cloud/firetower/compare/firetower-v0.36.0...firetower-v0.36.1) (2026-09-16)
+
+
+### Bug Fixes
+
+* **server:** toggling an agent keeps its credential, and no account is invented ([7535567](https://github.com/firetower-cloud/firetower/commit/753556752f1cfa993a2012c9973f59b70426e578))
+
 ## [0.36.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.35.0...firetower-v0.36.0) (2026-09-16)
 
 

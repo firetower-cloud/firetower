@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.9.0](https://github.com/firetower-cloud/firetower/compare/desktop-v0.8.0...desktop-v0.9.0) (2026-09-16)
+
+
+### Features
+
+* **desktop:** a subscription is connected with its token or a code, and the list says what is left ([74bf4e6](https://github.com/firetower-cloud/firetower/commit/74bf4e6a397ec73dbba6edbea753882dc7ef6572))
+* **desktop:** a workspace starts on a named account, never on nothing ([6c13ab2](https://github.com/firetower-cloud/firetower/commit/6c13ab2755f1bb5dd2947d7371cdd101e33861bc))
+* **desktop:** switch account any time, and choose what happens at the limit ([a6586c0](https://github.com/firetower-cloud/firetower/commit/a6586c0de4ecac48509755d78a9efc3075912ad9))
+
+
+### Bug Fixes
+
+* **desktop:** the account line lives under the composer, and the limit editor says what a hand-off is ([5f0e7d7](https://github.com/firetower-cloud/firetower/commit/5f0e7d73169ebe53580eaa1e58f9dbd9adfb7c1f))
+* **server:** toggling an agent keeps its credential, and no account is invented ([7535567](https://github.com/firetower-cloud/firetower/commit/753556752f1cfa993a2012c9973f59b70426e578))
+
 ## [0.8.0](https://github.com/firetower-cloud/firetower/compare/desktop-v0.7.0...desktop-v0.8.0) (2026-09-16)
 
 
