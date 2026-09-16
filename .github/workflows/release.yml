@@ -32,7 +32,10 @@ jobs:
   # `on: push: tags` job would never run, leaving a release with no image.
   # Calling it directly also avoids needing a personal access token.
   image:
-    needs: please
+    # After the worker is on the release: the image carries the worker
+    # tarballs it was released with, so a control plane installs the worker
+    # it ships rather than one a machine has to fetch from GitHub.
+    needs: [please, worker-release]
     if: needs.please.outputs.released == 'true'
     uses: ./.github/workflows/images.yml
     permissions:
@@ -136,9 +139,35 @@ jobs:
       - env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.please.outputs.tag }}
+          VERSION: ${{ needs.please.outputs.version }}
         run: |
           cp install/worker.sh dist/worker.sh
           cd dist
           sha256sum firetower-worker-*.tar.gz worker.sh > SHA256SUMS
           ls -la
           gh release upload "$TAG" firetower-worker-*.tar.gz worker.sh SHA256SUMS --clobber
+
+          # The same files onto the rolling release `usefiretower.com/worker.sh`
+          # redirects to. GitHub's own `latest` is the newest release of the
+          # whole repository, whichever package cut it — the desktop's, half
+          # the time — so the script's "newest" has to be a release of its own.
+          if ! gh release view worker-latest -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create worker-latest -R "$GITHUB_REPOSITORY" --prerelease \
+              --title "worker: latest" \
+              --notes "The newest worker, for \`curl -fsSL https://usefiretower.com/worker.sh | sh\`. Moved on every release; the versioned releases hold the same files."
+          fi
+          gh release upload worker-latest firetower-worker-*.tar.gz worker.sh SHA256SUMS -R "$GITHUB_REPOSITORY" --clobber
+          gh release edit worker-latest -R "$GITHUB_REPOSITORY" --notes "The newest worker ($VERSION), for \`curl -fsSL https://usefiretower.com/worker.sh | sh\`. Moved on every release; firetower-v$VERSION holds the same files."
+
+      # The whole chain, before anybody is told the release exists: the
+      # rolling release, the script from it, the tarball it names, the
+      # checksum, and the binary answering. A failure here fails the release.
+      - name: the published installer installs the published worker
+        env:
+          VERSION: ${{ needs.please.outputs.version }}
+        run: |
+          export FIRETOWER_WORKER_ROOT="$RUNNER_TEMP/worker-smoke"
+          curl -fsSL "https://github.com/$GITHUB_REPOSITORY/releases/download/worker-latest/worker.sh" \
+            | sh -s -- --version "$VERSION" --skip-packages
+          said="$("$FIRETOWER_WORKER_ROOT/bin/firetower-worker" --version)"
+          case "$said" in *"$VERSION"*) echo "ok: $said" ;; *) echo "installed $said, expected $VERSION" >&2; exit 1 ;; esac

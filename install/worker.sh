@@ -34,6 +34,9 @@ set -eu
 PATH="$PATH:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/local/sbin:$HOME/.local/bin"
 export PATH
 
+# Releases are tagged `firetower-v<version>`; `worker-latest` is a rolling
+# release the newest worker is copied onto, because GitHub's own "latest" is
+# whichever package released last and may hold no worker at all.
 RELEASES="${FIRETOWER_RELEASES:-https://github.com/firetower-cloud/firetower/releases}"
 ROOT="${FIRETOWER_WORKER_ROOT:-$HOME/.firetower/worker}"
 BIN="$ROOT/bin"
@@ -175,10 +178,10 @@ elif [ -n "$FROM" ]; then
     cp "$FROM" "$TMP/$ASSET"
 else
     if [ -n "$VERSION" ]; then
-        base="$RELEASES/download/v$VERSION"
+        base="$RELEASES/download/firetower-v$VERSION"
         which="$VERSION"
     else
-        base="$RELEASES/latest/download"
+        base="$RELEASES/download/worker-latest"
         which="the newest release"
     fi
     say "Fetching firetower-worker ($which) for $OS $ARCH…"

@@ -12,6 +12,7 @@ on:
     paths:
       - "crates/**"
       - "migrations/**"
+      - "install/**"
       - "Cargo.toml"
       - "Cargo.lock"
       - "rust-toolchain.toml"
@@ -60,3 +61,46 @@ jobs:
       - run: cargo test --workspace --locked --no-fail-fast
         env:
           DATABASE_URL: postgres://firetower:firetower@localhost:5433/firetower
+
+  # The installer, on the platform it is not developed on: a bare Debian with
+  # nothing but tar, the way a fresh VM arrives. Proves the script's own
+  # logic — shape detection, --from, --skip-packages, where the binary lands,
+  # the doctor naming apt-get for what is missing — without a release.
+  installer:
+    runs-on: depot-ubuntu-22.04
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          targets: x86_64-unknown-linux-musl
+      - run: sudo apt-get update && sudo apt-get install -y musl-tools shellcheck
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          key: installer
+      - run: shellcheck -s sh install/worker.sh
+      - run: cargo build --release -p ft-cli --no-default-features --bin firetower-worker --target x86_64-unknown-linux-musl
+      - run: |
+          mkdir -p dist
+          tar -czf dist/firetower-worker-linux-x86_64.tar.gz -C target/x86_64-unknown-linux-musl/release firetower-worker
+      - name: a bare machine, the worker from a tarball, nothing installed for it
+        run: |
+          docker run --rm -v "$PWD/install:/install:ro" -v "$PWD/dist:/dist:ro" debian:bookworm-slim sh -c '
+            set -e
+            useradd -m editor
+            su editor -c "sh /install/worker.sh --from /dist/firetower-worker-linux-x86_64.tar.gz --skip-packages" | tee /tmp/out
+            grep -q "Installed firetower-worker" /tmp/out
+            su editor -c "~/.firetower/worker/bin/firetower-worker --version"
+            # git and tmux are not there, and the doctor says how to get them.
+            su editor -c "~/.firetower/worker/bin/firetower-worker doctor" > /tmp/doctor 2>&1 || true
+            grep -q "MISSING  tmux" /tmp/doctor
+            grep -q "apt-get install -y tmux" /tmp/doctor
+          '
+      - name: with the packages, the machine is ready
+        run: |
+          docker run --rm -v "$PWD/install:/install:ro" -v "$PWD/dist:/dist:ro" debian:bookworm-slim sh -c '
+            set -e
+            apt-get update >/dev/null && apt-get install -y --no-install-recommends git tmux >/dev/null
+            useradd -m editor
+            su editor -c "sh /install/worker.sh --from /dist/firetower-worker-linux-x86_64.tar.gz --skip-packages" >/dev/null
+            su editor -c "~/.firetower/worker/bin/firetower-worker doctor"
+          '
