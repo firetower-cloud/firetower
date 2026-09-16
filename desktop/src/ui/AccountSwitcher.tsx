@@ -2,26 +2,46 @@
  * Whose subscription this conversation is running on, and what to do when it
  * runs out.
  *
- * One line above the composer, always there: the account, **Switch account**,
- * and the usage-limit rule (`FallbackLine`). When a limit is exhausted the
- * line grows into the web's recovery card — continue with the recommended
- * account, or choose. `src/api/accounts.ts` is the contract: which limit is
- * exhausted, what the candidates are, and `switchAccount` with the
- * permission-change acknowledgement when the hand-off is to another agent.
+ * Three pieces with one state between them, so the composer can place each
+ * where it belongs: `AccountLine` is the compact line in the composer's hint
+ * row (account · usage-limit rule · Switch); `AccountNotice` sits above the
+ * input and only appears when a limit is exhausted or a switch has something
+ * to say; `AccountSwitcher` wraps both, holds the state and draws the modals.
+ * `src/api/accounts.ts` is the contract: which limit is exhausted, what the
+ * candidates are, and `switchAccount` with the permission-change
+ * acknowledgement when the hand-off is to another agent.
  */
-import { useMemo, useState } from "react";
+import { createContext, useContext, useMemo, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, X } from "lucide-react";
 import { AgentMark } from "~/components/AgentMark";
 import { accountsKey, exhausted, quota, sessionAccountKey, switchAccount, usable, useAccounts, useSessionAccount } from "~/api/accounts";
-import type { Account, Agent, AgentView, Session } from "~/api/generated/model";
+import type { Account, Agent, AgentView, Limit, Session, Switch } from "~/api/generated/model";
 import { getGetSessionQueryKey, getListSessionsQueryKey } from "~/api/generated/sessions/sessions";
 import { useAgents, why } from "~/data";
 import { navigate } from "~/shims/next-navigation";
 import { FallbackLine } from "~/ui/AccountFallback";
 import { ConnectAccount } from "~/ui/config/ConnectAccount";
 
-export function AccountSwitcher({ session, working }: { session: Session; working: boolean }) {
+type Shared = {
+  session: Session;
+  working: boolean;
+  label: string;
+  account?: Account | null;
+  loaded: boolean;
+  blocked?: Limit;
+  recommended?: Account;
+  last?: Switch;
+  pending: boolean;
+  error: unknown;
+  accounts: Account[];
+  open: () => void;
+  continueWith: (id: string) => void;
+};
+
+const Ctx = createContext<Shared | null>(null);
+
+export function AccountSwitcher({ session, working, children }: { session: Session; working: boolean; children: React.ReactNode }) {
   const cache = useQueryClient();
   const current = useSessionAccount(session.id);
   const accounts = useAccounts();
@@ -35,11 +55,14 @@ export function AccountSwitcher({ session, working }: { session: Session; workin
   const label = (kind: string) => agents.data.find((a) => a.kind === kind)?.label ?? kind;
   const account = current.data?.account;
   const blocked = current.data?.limits.find((l) => exhausted(l));
+  /* Not a candidate until it is known which one is current: a list drawn
+     before the answer arrives would offer the account already in use. */
   const candidates = useMemo(() => {
+    if (!current.data) return [];
     const list = (accounts.data ?? []).filter((a) => usable(a) && a.id !== account?.id);
     list.sort((a, b) => Number(b.kind === session.agent) - Number(a.kind === session.agent));
     return list;
-  }, [accounts.data, account?.id, session.agent]);
+  }, [accounts.data, account?.id, session.agent, current.data]);
   const recommended = candidates.find((a) => a.kind === session.agent && a.mode === "Subscription" && !a.limits.some((l) => exhausted(l)));
   const chosen = candidates.find((a) => a.id === selected);
   const changesAgent = !!chosen && chosen.kind !== session.agent;
@@ -63,56 +86,31 @@ export function AccountSwitcher({ session, working }: { session: Session; workin
   });
   const pending = switcher.isPending || inFlight;
 
-  // Nothing to say about an agent that spends nothing.
-  if (own && !own.needsCredential) return null;
+  const shared: Shared | null =
+    own && !own.needsCredential
+      ? null
+      : {
+          session,
+          working,
+          label: own?.label ?? session.agent,
+          account,
+          loaded: !!current.data,
+          blocked,
+          recommended,
+          last,
+          pending,
+          error: switcher.error,
+          accounts: accounts.data ?? [],
+          open: () => setChoosing(true),
+          continueWith: (id) => {
+            setSelected(id);
+            switcher.mutate(id);
+          },
+        };
 
   return (
-    <div className={`mt-8 rounded-xl border px-4 py-3 ${blocked ? "border-kind-data/40 bg-panel" : "border-line-soft bg-panel/60"}`}>
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-meta">
-        <span className="flex items-center gap-1.5 text-dim">
-          <AgentMark agent={session.agent} size={12} />
-          {own?.label ?? session.agent} · <span className="text-text">{account?.name ?? "no account"}</span>
-        </span>
-        <span className="ml-auto flex items-center gap-4">
-          <FallbackLine sessionId={session.id} />
-          <button disabled={pending || !!session.forgottenAt} onClick={() => setChoosing(true)} className="text-mute hover:text-bone disabled:text-mute">
-            {pending ? "Switching account…" : "Switch account"}
-          </button>
-        </span>
-      </div>
-
-      {blocked && (
-        <div className="mt-3">
-          <p className="flex items-start gap-2.5 text-ui text-text">
-            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-kind-data" strokeWidth={1.75} />
-            <span>
-              <span className="text-bone">{account?.name ?? "This account"}</span> has hit its {blocked.scope} limit
-              {blocked.resetsAt ? ` — it resets ${new Date(blocked.resetsAt * 1000).toLocaleString()}` : ""}. The workspace is kept.
-            </span>
-          </p>
-          <div className="mt-2.5 flex flex-wrap items-center gap-3 text-ui">
-            {recommended && (
-              <button disabled={pending || working} onClick={() => { setSelected(recommended.id); switcher.mutate(recommended.id); }} className="control bg-bone font-medium text-ground hover:opacity-90 disabled:bg-raise disabled:text-mute">
-                Continue with {recommended.name}
-              </button>
-            )}
-            <button disabled={pending} onClick={() => setChoosing(true)} className="control border border-line text-dim hover:text-bone">
-              {recommended ? "Other options" : "Choose another account"}
-            </button>
-            <span className="text-meta text-mute">Or wait for the limit to reset.</span>
-          </div>
-        </div>
-      )}
-
-      {last && (
-        <p className={`mt-2 text-meta ${last.state === "failed" ? "text-brick" : "text-mute"}`}>
-          {last.detail ?? (last.state === "switching" ? "Account switch in progress…" : `Continued on ${accounts.data?.find((a) => a.id === last.toAccountId)?.name ?? "another account"}.`)}
-          {last.nextSessionId && (
-            <button onClick={() => navigate(`/sessions/${last.nextSessionId}`)} className="ml-2 text-bone underline decoration-line underline-offset-2">Open continuation</button>
-          )}
-        </p>
-      )}
-      {switcher.error && <p className="mt-2 text-meta text-brick">{why(switcher.error)}</p>}
+    <Ctx.Provider value={shared}>
+      {children}
 
       {choosing && (
         <div className="fixed inset-0 z-50 flex items-start justify-center bg-ground/70 pt-[10vh] backdrop-blur-[3px]" onMouseDown={() => setChoosing(false)}>
@@ -127,17 +125,20 @@ export function AccountSwitcher({ session, working }: { session: Session; workin
               <div className="grid gap-1.5">
                 {candidates.map((a) => {
                   const here = installedHere(a);
+                  const handoff = a.kind !== session.agent;
                   return (
                     <button key={a.id} disabled={!here || pending} onClick={() => { setSelected(a.id); setPermissionChange(false); }} className={`flex items-start gap-3 rounded-lg border px-3 py-2.5 text-left disabled:opacity-50 ${selected === a.id ? "border-line bg-overlay" : "border-line-soft bg-ground hover:bg-raise"}`}>
                       <AgentMark agent={a.kind as Agent} size={12} className="mt-1 shrink-0 text-dim" />
-                      <span className="min-w-0">
+                      <span className="min-w-0 flex-1">
                         <span className="block text-ui text-bone">{label(a.kind)} · {a.name}</span>
                         <span className="block text-meta text-mute">{here ? quota(a) : "Not installed on this machine"}</span>
                       </span>
+                      {handoff && here && <span className="shrink-0 text-micro text-mute">hands off</span>}
                     </button>
                   );
                 })}
-                {candidates.length === 0 && <p className="text-meta text-mute">No other connected account.</p>}
+                {current.data && candidates.length === 0 && <p className="text-meta text-mute">No other connected account.</p>}
+                {!current.data && <p className="text-meta text-mute">Reading which account this runs on…</p>}
               </div>
               {changesAgent && (
                 <>
@@ -171,16 +172,76 @@ export function AccountSwitcher({ session, working }: { session: Session; workin
           agent={connecting}
           onClose={() => setConnecting(null)}
           onConnected={(made) => {
-            if (!working && made.kind === session.agent) {
-              setSelected(made.id);
-              switcher.mutate(made.id);
-            } else {
-              setSelected(made.id);
-              setChoosing(true);
-            }
+            setSelected(made.id);
+            if (!working && made.kind === session.agent) switcher.mutate(made.id);
+            else setChoosing(true);
           }}
         />
       )}
+    </Ctx.Provider>
+  );
+}
+
+/** The line in the composer's hint row: account, the usage-limit rule, Switch. */
+export function AccountLine() {
+  const s = useContext(Ctx);
+  if (!s) return null;
+  return (
+    <span className="ml-auto flex min-w-0 items-center gap-3">
+      <span className="flex min-w-0 items-center gap-1.5">
+        <AgentMark agent={s.session.agent} size={11} className="shrink-0 text-mute" />
+        <span className="truncate text-dim">{s.account?.name ?? (s.loaded ? "no account" : "…")}</span>
+      </span>
+      <span className="text-line-soft">·</span>
+      <FallbackLine sessionId={s.session.id} agent={s.session.agent} currentId={s.account?.id} />
+      <span className="text-line-soft">·</span>
+      <button disabled={s.pending || !!s.session.forgottenAt} onClick={s.open} className="text-mute hover:text-bone disabled:text-mute">
+        {s.pending ? "Switching…" : "Switch"}
+      </button>
+    </span>
+  );
+}
+
+/** Above the input, only when there is something to deal with. */
+export function AccountNotice() {
+  const s = useContext(Ctx);
+  if (!s) return null;
+  const { blocked, last, recommended, account } = s;
+  const said = s.error ? why(s.error) : null;
+  if (!blocked && !last && !said) return null;
+  return (
+    <div className={`mb-2 rounded-xl border px-4 py-3 ${blocked ? "border-kind-data/40 bg-panel" : "border-line-soft bg-panel/60"}`}>
+      {blocked && (
+        <>
+          <p className="flex items-start gap-2.5 text-ui text-text">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-kind-data" strokeWidth={1.75} />
+            <span>
+              <span className="text-bone">{account?.name ?? "This account"}</span> has hit its {blocked.scope} limit
+              {blocked.resetsAt ? ` — it resets ${new Date(blocked.resetsAt * 1000).toLocaleString()}` : ""}. The workspace is kept.
+            </span>
+          </p>
+          <div className="mt-2.5 flex flex-wrap items-center gap-3 text-ui">
+            {recommended && (
+              <button disabled={s.pending || s.working} onClick={() => s.continueWith(recommended.id)} className="control bg-bone font-medium text-ground hover:opacity-90 disabled:bg-raise disabled:text-mute">
+                Continue with {recommended.name}
+              </button>
+            )}
+            <button disabled={s.pending} onClick={s.open} className="control border border-line text-dim hover:text-bone">
+              {recommended ? "Other options" : "Choose another account"}
+            </button>
+            <span className="text-meta text-mute">Or wait for the limit to reset.</span>
+          </div>
+        </>
+      )}
+      {last && (
+        <p className={`text-meta ${blocked ? "mt-2" : ""} ${last.state === "failed" ? "text-brick" : "text-mute"}`}>
+          {last.detail ?? (last.state === "switching" ? "Account switch in progress…" : `Continued on ${s.accounts.find((a) => a.id === last.toAccountId)?.name ?? "another account"}.`)}
+          {last.nextSessionId && (
+            <button onClick={() => navigate(`/sessions/${last.nextSessionId}`)} className="ml-2 text-bone underline decoration-line underline-offset-2">Open continuation</button>
+          )}
+        </p>
+      )}
+      {said && <p className="mt-1 text-meta text-brick">{said}</p>}
     </div>
   );
 }

@@ -22,6 +22,7 @@ import type { Attached, Control, ControlKind, Session } from "~/api/generated/mo
 import { useAttachFile, useInterruptSession, useListFiles, useSendTurn } from "~/api/generated/sessions/sessions";
 import { useChooseControl, useSessionControls } from "~/api/generated/conversation/conversation";
 import { takeDraft } from "~/workspace/draft";
+import { AccountLine, AccountNotice } from "~/ui/AccountSwitcher";
 
 type Chip = { name: string; kind: "image" | "file"; size: string; url?: string; path?: string };
 
@@ -216,6 +217,7 @@ export function Composer({
   return (
     <div className="shrink-0 px-8 pb-6">
       <div className="mx-auto w-full max-w-[46rem]">
+        <AccountNotice />
         {refused && (
           <div className="mb-2 flex items-center gap-2 text-meta text-brick">
             <X className="h-3.5 w-3.5" strokeWidth={2} />
@@ -364,6 +366,7 @@ export function Composer({
           {conversation.limits && conversation.limits.status !== "allowed" && (
             <span className="ml-auto text-ember-soft">{conversation.limits.window}: {conversation.limits.status}</span>
           )}
+          <AccountLine />
         </div>
       </div>
     </div>

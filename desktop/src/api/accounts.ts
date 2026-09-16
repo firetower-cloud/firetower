@@ -35,12 +35,26 @@ export function usable(account: Account): boolean {
   return account.enabled && account.state === "connected" && account.credentialSet;
 }
 
-/** What is known of an account's allowance, in one line. */
+/** `five_hour` → `5h`: the window, said the short way. */
+function window(scope: string): string {
+  return scope.replace(/^(five|5)_hour$/, "5h").replace(/^(seven|7)_day$/, "7d").replace(/_/g, " ");
+}
+
+/**
+ * What is known of an account's allowance, in one line.
+ *
+ * A window that is fine says nothing: "5h: allowed" is a row of noise next
+ * to the one number that matters. Percentages are shown when the provider
+ * gives them; a status is shown only when it is not the good one.
+ */
 export function quota(account: Account): string {
   if (account.mode === "ApiKey") return "Metered API usage";
   if (account.limits.some((l) => exhausted(l))) return "Limit reached · try after reset";
   if (account.limits.length === 0) return "Connected · quota unknown";
-  return account.limits.map((l) => (l.usedPercent != null ? `${l.scope}: ${l.usedPercent}% used` : `${l.scope}: ${l.status}`)).join(" · ");
+  const said = account.limits
+    .map((l) => (l.usedPercent != null ? `${window(l.scope)} ${l.usedPercent}%` : l.status === "allowed" ? "" : `${window(l.scope)} ${l.status}`))
+    .filter(Boolean);
+  return said.length ? said.join(" · ") : "Within limits";
 }
 
 export const fallbackKey = (id: string) => ["account-fallback", id];
