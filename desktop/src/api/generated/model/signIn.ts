@@ -11,7 +11,7 @@
  */
 export interface SignIn {
   /**
-     * Existing named connection to authenticate.
+     * The named account to authenticate. Made first with `create_account`.
      * @nullable
      */
   accountId?: string | null;

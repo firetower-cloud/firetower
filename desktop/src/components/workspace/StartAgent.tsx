@@ -31,9 +31,8 @@ import { useCurrentSession } from "~/workspace/tabs";
  * Why this agent cannot be started here, or nothing.
  *
  * The same two questions the create dialog asks, in the same order: is it on
- * the machine at all, and can it authenticate there. A subscription lives in
- * the agent's own config on the host it was signed in on, so one machine being
- * signed in says nothing about another.
+ * the machine at all, and is there an account for it to run on. The machine's
+ * own sign-in does not count; a session runs on a named account.
  */
 export function unavailable(
   agent: AgentView,
@@ -46,8 +45,8 @@ export function unavailable(
   const here = agent.hosts.find((h) => h.hostId === hostId);
   if (!here?.installed) return `not installed on ${hostName ?? "that machine"}`;
   if (!agent.needsCredential) return undefined;
-  if (here.loggedIn === true || agent.credentialSet) return undefined;
-  return "no credentials for it there";
+  if (agent.credentialSet) return undefined;
+  return "no account connected for it";
 }
 
 /** One row per agent, with the reason it cannot be started where there is one. */

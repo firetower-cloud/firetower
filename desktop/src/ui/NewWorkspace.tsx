@@ -27,7 +27,9 @@ import { useHostReadiness } from "~/api/generated/hosts/hosts";
 import { machineLabel, machines } from "~/api/environments";
 import type { Agent, Share } from "~/api/generated/model";
 import { useCreateSession } from "~/api/generated/sessions/sessions";
+import { usable } from "~/api/accounts";
 import { useAccounts, useAgents, useHosts, useRepos } from "~/data";
+import { ConnectAccount } from "~/ui/config/ConnectAccount";
 import type { Backend } from "~/fleet";
 import { navigate } from "~/shims/next-navigation";
 import { leaveDraft } from "~/workspace/draft";
@@ -78,6 +80,7 @@ export function NewWorkspace({
   const [accountId, setAccountId] = useState("");
   const [share, setShare] = useState<Share>("equal" as Share);
   const [adding, setAdding] = useState(false);
+  const [connecting, setConnecting] = useState(false);
 
   /* A task names a repository; the id it maps to is only knowable once the
      server has answered. */
@@ -98,16 +101,22 @@ export function NewWorkspace({
     | Agent
     | undefined;
 
-  const mine = accounts.filter(
-    (a) => a.kind === kind && a.enabled && a.state === "connected",
-  );
+  /* The accounts this can run on. There is no "default" entry: the default
+     is one of these, preselected, and with none of them there is nothing to
+     start on. */
+  const mine = useMemo(() => accounts.filter((a) => a.kind === kind && usable(a)), [accounts, kind]);
+  const account = mine.find((a) => a.id === accountId);
+  useEffect(() => {
+    if (account || mine.length === 0) return;
+    setAccountId((mine.find((a) => a.isDefault) ?? mine[0]).id);
+  }, [account, mine]);
 
   const suggested = name ? `agent/${slug(name)}` : "";
   const shown = typed ? branch : suggested;
   // The same readout the panel shows, for this machine and this agent, so a
   // missing agent is an Install button here and not a refusal after Start.
   const readiness = useHostReadiness(host?.id ?? "", { agent: kind }, { query: { enabled: !!host && !!kind, retry: false, staleTime: 5000 } });
-  const ready = !!name.trim() && checkouts.length > 0 && !!host && !!kind && isReady(readiness.data) && !create.isPending;
+  const ready = !!name.trim() && checkouts.length > 0 && !!host && !!kind && !!account && isReady(readiness.data) && !create.isPending;
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -119,7 +128,7 @@ export function NewWorkspace({
   });
 
   const go = () => {
-    if (!ready || !kind) return;
+    if (!ready || !kind || !account) return;
     create.mutate(
       {
         data: {
@@ -129,7 +138,7 @@ export function NewWorkspace({
           workspaceId: seed?.workspaceId as never,
           repos: checkouts.map((c) => ({ repoId: c.id, base: c.base })),
           agent: kind,
-          accountId: mine.find((a) => a.id === accountId)?.id,
+          accountId: account.id,
           branch: shown.trim() || undefined,
           hostId: host?.id,
           share,
@@ -340,7 +349,7 @@ export function NewWorkspace({
                           ? "border-line bg-overlay text-bone"
                           : "border-line bg-panel text-mute hover:bg-raise"
                       }`}
-                      title={ok ? undefined : "Not installed or not signed in on this host"}
+                      title={ok ? undefined : "Not installed there, or no account connected"}
                     >
                       <AgentMark agent={a.kind} size={12} />
                       {a.label}
@@ -359,25 +368,42 @@ export function NewWorkspace({
           </Field>
 
           <Field label="Account" hint="Whose subscription this runs on">
-            <div className="relative">
-              <select
-                value={mine.some((a) => a.id === accountId) ? accountId : ""}
-                onChange={(e) => setAccountId(e.target.value)}
-                className="w-full appearance-none rounded-lg border border-line bg-ground py-2 pr-8 pl-3 text-ui text-bone focus:border-slate-deep focus:outline-none"
-              >
-                <option value="">Default account</option>
-                {mine.map((a) => (
-                  <option key={a.id} value={a.id}>
-                    {a.name}
-                    {a.isDefault ? " · Default" : ""}
-                  </option>
-                ))}
-              </select>
-              <ChevronDown
-                className="pointer-events-none absolute top-1/2 right-3 h-3.5 w-3.5 -translate-y-1/2 text-mute"
-                strokeWidth={2}
-              />
-            </div>
+            {mine.length > 0 ? (
+              <div className="relative">
+                <select
+                  value={account?.id ?? ""}
+                  onChange={(e) => setAccountId(e.target.value)}
+                  className="w-full appearance-none rounded-lg border border-line bg-ground py-2 pr-8 pl-3 text-ui text-bone focus:border-slate-deep focus:outline-none"
+                >
+                  {mine.map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {a.name}
+                      {a.isDefault ? " · Default" : ""}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown
+                  className="pointer-events-none absolute top-1/2 right-3 h-3.5 w-3.5 -translate-y-1/2 text-mute"
+                  strokeWidth={2}
+                />
+              </div>
+            ) : (
+              <div className="flex items-center gap-3 rounded-lg border border-line bg-ground px-3 py-2">
+                <span className="min-w-0 flex-1 text-ui text-kind-data">
+                  No {agents.find((a) => a.kind === kind)?.label ?? "agent"} account connected.
+                </span>
+                {kind && agents.some((a) => a.kind === kind) && (
+                  <button
+                    type="button"
+                    onClick={() => setConnecting(true)}
+                    className="control h-7 border border-line bg-raise text-meta text-bone hover:bg-overlay"
+                  >
+                    <Icon of={Plus} size={12} />
+                    Connect an account
+                  </button>
+                )}
+              </div>
+            )}
           </Field>
 
           <Field label="When the machine is busy">
@@ -423,6 +449,13 @@ export function NewWorkspace({
           </button>
         </div>
       </div>
+      {connecting && kind && agents.some((a) => a.kind === kind) && (
+        <ConnectAccount
+          agent={agents.find((a) => a.kind === kind)!}
+          onClose={() => setConnecting(false)}
+          onConnected={(made) => setAccountId(made.id)}
+        />
+      )}
     </div>
   );
 }

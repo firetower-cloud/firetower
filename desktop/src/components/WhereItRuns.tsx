@@ -159,15 +159,15 @@ function Line({ label, children }: { label: string; children: React.ReactNode })
 /**
  * Whether this agent can start on that environment.
  *
- * Authentication is per host, not global: a subscription lives in the agent's
- * own config on the machine it was signed in on, so one host being logged in
- * says nothing about another. Only a token we hold travels.
+ * Installed there, and with an account connected here. The machine's own
+ * sign-in does not count: a session runs on a named account, so that what it
+ * spends is known and can be switched away from.
  */
 export function canRun(agent: AgentView, hostId: string) {
   const here = agent.hosts.find((h) => h.hostId === hostId);
   if (!here?.installed) return false;
   if (!agent.needsCredential) return true;
-  return here.loggedIn === true || agent.credentialSet;
+  return agent.credentialSet;
 }
 
 /**

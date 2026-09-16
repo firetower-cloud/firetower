@@ -261,8 +261,6 @@ export function Chat({
           {stopped && <Stopped why={stopped} />}
           {session.status === "Failed" && <Relaunch session={session} />}
 
-          <AccountSwitcher session={session} working={working} />
-
           {questions.map((q) => (
             <Questions key={q.req} sessionId={session.id} asking={q} onAnswered={() => settle(q.req)} />
           ))}
@@ -304,15 +302,17 @@ export function Chat({
       {handing && <AddAgent session={session} workspaceId={session.workspaceId ?? session.id} prompt={asMessage(notes)} onClose={() => setHanding(false)} onStarted={clear} />}
       </div>
 
-      <Composer
-        session={session}
-        conversation={conversation}
-        onEcho={echo}
-        onRemember={remember}
-        onStopping={stopping}
-        disabled={!answerable}
-        asking={asked.length + questions.length > 0}
-      />
+      <AccountSwitcher session={session} working={working}>
+        <Composer
+          session={session}
+          conversation={conversation}
+          onEcho={echo}
+          onRemember={remember}
+          onStopping={stopping}
+          disabled={!answerable}
+          asking={asked.length + questions.length > 0}
+        />
+      </AccountSwitcher>
     </div>
   );
 }

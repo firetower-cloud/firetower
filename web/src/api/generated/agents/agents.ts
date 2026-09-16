@@ -465,8 +465,8 @@ export const useInstallAgent = <TError = ApiError,
  * browser, wherever the person is, and can take a quarter of an hour — so the
  * waiting is a task here rather than a request left open.
  *
- * Only Codex works this way. Claude Code hands you a token to paste, which is
- * `configure_agent`.
+ * Only Codex works this way. Claude Code hands you a token to paste, which
+ * goes in the `secret` of `create_account`.
  * @summary Sign an agent in with a device code, on a host.
  */
 export const signAgentIn = async (kind: string,
