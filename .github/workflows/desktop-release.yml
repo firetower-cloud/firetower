@@ -1,9 +1,9 @@
 # The desktop app's release: installers for macOS and Windows onto the
 # GitHub Release for a `desktop-v*` tag, signed and notarized, then published.
 #
-# Called by release.yml when release-please cuts the tag (the release exists
-# as a draft by then), or run by hand for an existing tag when a build has
-# to be redone. The jobs that sign run in the `release` environment: a
+# Called by release.yml when release-please cuts the tag (the release is
+# published by then; the installers land on it as they are built), or run by
+# hand for an existing tag when a build has to be redone. The jobs that sign run in the `release` environment: a
 # reviewer approves the deployment before its secrets are readable, and
 # nothing here prints one. Actions are pinned by commit.
 name: desktop release
@@ -25,8 +25,7 @@ permissions:
   contents: read
 
 jobs:
-  # Which release the assets go onto. release-please leaves a draft; a rerun
-  # by hand finds the published one.
+  # Which release the assets go onto.
   release:
     runs-on: depot-ubuntu-22.04
     permissions:
@@ -171,8 +170,10 @@ jobs:
         shell: bash
         run: rm -f "$RUNNER_TEMP/AuthKey.p8"
 
-  # Nothing is visible until both platforms are on it: release-please leaves
-  # the release a draft, and this is what publishes it.
+  # Once both platforms are on it, the app's updater is pointed at it. The
+  # release itself was published when the tag was cut: a draft had no tag,
+  # and release-please then re-released the desktop on every push to main
+  # until somebody approved the signing — four times in one morning.
   publish:
     needs: [release, build]
     runs-on: depot-ubuntu-22.04
@@ -185,7 +186,6 @@ jobs:
           TAG: ${{ inputs.tag }}
           VERSION: ${{ needs.release.outputs.version }}
         run: |
-          gh api -X PATCH "repos/${GITHUB_REPOSITORY}/releases/$ID" -F draft=false -F prerelease=false >/dev/null
           # The app's updater reads one fixed address. GitHub's own `latest`
           # is the newest release of the whole repository, whichever package
           # cut it, so `latest.json` is copied onto a rolling release of the
