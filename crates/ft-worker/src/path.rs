@@ -136,9 +136,12 @@ mod tests {
             "the existing PATH has to survive, in order: {got:?} vs {had:?}"
         );
 
-        let mut seen = std::collections::HashSet::new();
-        for dir in &got {
-            assert!(seen.insert(dir), "{} appears twice", dir.display());
+        // What was already there is kept as it was, duplicates included —
+        // a CI runner's PATH has several. What this adds must not repeat
+        // anything, including itself.
+        let mut seen: std::collections::HashSet<&PathBuf> = had.iter().collect();
+        for dir in &got[had.len()..] {
+            assert!(seen.insert(dir), "{} was added twice", dir.display());
         }
     }
 
