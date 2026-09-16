@@ -38,6 +38,11 @@ setup:
     set -euo pipefail
     pnpm --dir web install
     pnpm --dir mobile install
+    # The desktop client is a pnpm workspace of its own, and `just test` runs
+    # its tests (`just gen` regenerates its client too). Without this a fresh
+    # clone gets through setup and fails the first `just test` on a missing
+    # node_modules — in the one command whose job is to leave nothing missing.
+    pnpm --dir desktop install
     cargo fetch
     # Never clobbers an existing one — this is the only place your client id lives.
     if [ ! -f .env ]; then
