@@ -12,8 +12,8 @@ export interface ConfigureAgent {
   mode: AgentMode;
   /**
      * The token from `claude setup-token`, or a metered API key — whichever
-     * the mode calls for. Required for both; ignored for an agent that needs
-     * no credential.
+     * the mode calls for. Absent, the mode must be the one already set and
+     * only `enabled` changes; ignored for an agent that needs no credential.
      * @nullable
      */
   secret?: string | null;

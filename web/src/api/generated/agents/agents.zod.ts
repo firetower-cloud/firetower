@@ -9,7 +9,7 @@ import * as zod from 'zod';
 
 
 export const ListAgentsResponseItem = zod.object({
-  "credentialSet": zod.boolean().describe('Whether a credential is held. Only ever true in `ApiKey` mode — a\nsubscription lives in the agent\'s own config on the host.'),
+  "credentialSet": zod.boolean().describe('Whether the default account holds a credential that travels: a\nsubscription token or an API key. False when nothing is connected yet.'),
   "enabled": zod.boolean(),
   "hosts": zod.array(zod.object({
   "account": zod.string().nullish().describe('Which account this host spends against, when it will say.'),
@@ -37,7 +37,7 @@ export const ListAgentsResponse = zod.array(ListAgentsResponseItem)
  * @summary Re-ask every reachable host what it has.
  */
 export const CheckAgentsResponseItem = zod.object({
-  "credentialSet": zod.boolean().describe('Whether a credential is held. Only ever true in `ApiKey` mode — a\nsubscription lives in the agent\'s own config on the host.'),
+  "credentialSet": zod.boolean().describe('Whether the default account holds a credential that travels: a\nsubscription token or an API key. False when nothing is connected yet.'),
   "enabled": zod.boolean(),
   "hosts": zod.array(zod.object({
   "account": zod.string().nullish().describe('Which account this host spends against, when it will say.'),
@@ -69,7 +69,7 @@ export const ConfigureAgentParams = zod.object({
 export const ConfigureAgentBody = zod.object({
   "enabled": zod.boolean().optional(),
   "mode": zod.enum(['Subscription', 'ApiKey', 'NotNeeded']).describe('How an agent proves who it is.'),
-  "secret": zod.string().nullish().describe('The token from `claude setup-token`, or a metered API key — whichever\nthe mode calls for. Required for both; ignored for an agent that needs\nno credential.')
+  "secret": zod.string().nullish().describe('The token from `claude setup-token`, or a metered API key — whichever\nthe mode calls for. Absent, the mode must be the one already set and\nonly `enabled` changes; ignored for an agent that needs no credential.')
 })
 
 export const ConfigureAgentResponse = zod.void()
@@ -103,7 +103,7 @@ export const InstallAgentBody = zod.object({
 }).describe('What a host is being asked to fetch.')
 
 export const InstallAgentResponseItem = zod.object({
-  "credentialSet": zod.boolean().describe('Whether a credential is held. Only ever true in `ApiKey` mode — a\nsubscription lives in the agent\'s own config on the host.'),
+  "credentialSet": zod.boolean().describe('Whether the default account holds a credential that travels: a\nsubscription token or an API key. False when nothing is connected yet.'),
   "enabled": zod.boolean(),
   "hosts": zod.array(zod.object({
   "account": zod.string().nullish().describe('Which account this host spends against, when it will say.'),
@@ -130,8 +130,8 @@ export const InstallAgentResponse = zod.array(InstallAgentResponseItem)
  * browser, wherever the person is, and can take a quarter of an hour — so the
  * waiting is a task here rather than a request left open.
  *
- * Only Codex works this way. Claude Code hands you a token to paste, which is
- * `configure_agent`.
+ * Only Codex works this way. Claude Code hands you a token to paste, which
+ * goes in the `secret` of `create_account`.
  * @summary Sign an agent in with a device code, on a host.
  */
 export const SignAgentInParams = zod.object({
@@ -139,7 +139,7 @@ export const SignAgentInParams = zod.object({
 })
 
 export const SignAgentInBody = zod.object({
-  "accountId": zod.string().nullish().describe('Existing named connection to authenticate.'),
+  "accountId": zod.string().nullish().describe('The named account to authenticate. Made first with `create_account`.'),
   "hostId": zod.string().nullish().describe('Which host should do it. Any that has the agent, by default.\n\nIt matters only in that OpenAI delivers the credential to whichever\nmachine asked for the code — and that machine hands it straight to us,\nso which one it was stops mattering the moment it lands.')
 }).describe('What a sign-in needs from the caller.')
 

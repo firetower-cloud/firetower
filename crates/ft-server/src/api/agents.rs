@@ -176,8 +176,8 @@ pub struct AgentView {
     /// `None` until someone configures it.
     pub mode: Option<AgentMode>,
     pub enabled: bool,
-    /// Whether a credential is held. Only ever true in `ApiKey` mode — a
-    /// subscription lives in the agent's own config on the host.
+    /// Whether the default account holds a credential that travels: a
+    /// subscription token or an API key. False when nothing is connected yet.
     pub credential_set: bool,
     /// True when nothing needs configuring, which is only the plain shell.
     pub needs_credential: bool,
@@ -221,8 +221,8 @@ pub struct AgentOnHost {
 pub struct ConfigureAgent {
     pub mode: AgentMode,
     /// The token from `claude setup-token`, or a metered API key — whichever
-    /// the mode calls for. Required for both; ignored for an agent that needs
-    /// no credential.
+    /// the mode calls for. Absent, the mode must be the one already set and
+    /// only `enabled` changes; ignored for an agent that needs no credential.
     pub secret: Option<String>,
     #[serde(default = "yes")]
     pub enabled: bool,
@@ -280,10 +280,10 @@ pub(super) async fn list_agents(
                     }
                 })
                 .or_else(|| configured.map(|(_, m, ..)| *m)),
-            enabled: default
-                .as_ref()
-                .map(|a| a.enabled)
-                .unwrap_or_else(|| configured.map(|(_, _, e)| *e).unwrap_or(true)),
+            // Whether it is offered when starting work is a fact about the
+            // agent, not about any one account — an account's own `enabled`
+            // says whether *it* can still be picked.
+            enabled: configured.map(|(_, _, e)| *e).unwrap_or(true),
             // Whether one is set, never the value itself.
             credential_set,
             needs_credential: kind.needs_credential(),
@@ -350,7 +350,32 @@ pub(super) async fn configure_agent(
         .map(str::trim)
         .filter(|s| !s.is_empty());
 
+    let owner = owner(&principal)?;
+
+    // No secret and the same mode as before is a change to `enabled` alone:
+    // the credential, wherever it lives, stays as it is.
     if matches!(req.mode, AgentMode::Subscription | AgentMode::ApiKey) && secret.is_none() {
+        let current = match super::accounts::default_account(&state.db, owner, kind).await? {
+            Some(account) => Some(if account.mode == "ApiKey" {
+                AgentMode::ApiKey
+            } else {
+                AgentMode::Subscription
+            }),
+            None => state
+                .db
+                .agent_modes(owner)
+                .await?
+                .into_iter()
+                .find(|(k, ..)| *k == kind)
+                .map(|(_, mode, _)| mode),
+        };
+        if current == Some(req.mode) {
+            state
+                .db
+                .set_agent_mode(owner, kind, req.mode, req.enabled)
+                .await?;
+            return Ok(StatusCode::NO_CONTENT);
+        }
         return Err(ApiError::new(
             ErrorCode::InvalidRequest,
             match kind.token_setup() {
@@ -360,7 +385,6 @@ pub(super) async fn configure_agent(
         ));
     }
 
-    let owner = owner(&principal)?;
     state
         .db
         .set_agent_mode(owner, kind, req.mode, req.enabled)
@@ -390,10 +414,6 @@ pub(super) async fn configure_agent(
         }
     }
 
-    if req.mode != AgentMode::NotNeeded {
-        sqlx::query("INSERT INTO agent_accounts(id,user_id,kind,name,mode,credential_key,is_default,enabled) VALUES($1,$2,$3,'Default account',$4,$3,NOT EXISTS(SELECT 1 FROM agent_accounts WHERE user_id=$2 AND kind=$3 AND is_default),$5) ON CONFLICT(id) DO UPDATE SET mode=excluded.mode,enabled=excluded.enabled,state='connected'")
-            .bind(format!("legacy:{owner}:{kind:?}")).bind(owner).bind(agent_key(kind)).bind(format!("{:?}",req.mode)).bind(req.enabled).execute(state.db.pool()).await?;
-    }
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -401,7 +421,7 @@ pub(super) async fn configure_agent(
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct SignIn {
-    /// Existing named connection to authenticate.
+    /// The named account to authenticate. Made first with `create_account`.
     pub account_id: Option<String>,
     /// Which host should do it. Any that has the agent, by default.
     ///
@@ -417,8 +437,8 @@ pub struct SignIn {
 /// browser, wherever the person is, and can take a quarter of an hour — so the
 /// waiting is a task here rather than a request left open.
 ///
-/// Only Codex works this way. Claude Code hands you a token to paste, which is
-/// `configure_agent`.
+/// Only Codex works this way. Claude Code hands you a token to paste, which
+/// goes in the `secret` of `create_account`.
 #[utoipa::path(
     post, path = "/api/v1/agents/{kind}/login", tag = "agents",
     params(("kind" = String, Path, description = "Agent kind")),
@@ -452,21 +472,30 @@ pub(super) async fn sign_agent_in(
         ));
     }
 
-    let account_id = if let Some(id) = req.account_id {
-        let account = super::accounts::find(&state.db, &owner, &id).await?;
-        if account.kind != agent_key(kind) || account.mode != "Subscription" {
-            return Err(ApiError::new(
-                ErrorCode::InvalidRequest,
-                "this account does not use device sign-in for this agent",
-            ));
-        }
-        id
-    } else {
-        let id = format!("legacy:{owner}:{kind:?}");
-        sqlx::query("INSERT INTO agent_accounts(id,user_id,kind,name,mode,credential_key,state) VALUES($1,$2,$3,'Default account','Subscription',$3,'pending') ON CONFLICT(id) DO NOTHING")
-            .bind(&id).bind(&owner).bind(agent_key(kind)).execute(state.db.pool()).await?;
-        id
-    };
+    // A sign-in lands on a named account, made first. Nothing here invents
+    // one: an account row with no name and no credential is what a person
+    // sees as a connection that never happened.
+    let account_id = req.account_id.ok_or_else(|| {
+        ApiError::new(
+            ErrorCode::InvalidRequest,
+            "create the account first, then sign it in",
+        )
+    })?;
+    let account = super::accounts::find(&state.db, &owner, &account_id).await?;
+    if account.kind != agent_key(kind) || account.mode != "Subscription" {
+        return Err(ApiError::new(
+            ErrorCode::InvalidRequest,
+            "this account does not use device sign-in for this agent",
+        ));
+    }
+    // A second attempt on one that failed starts from pending again, so the
+    // outcome of this attempt is what the list shows. One already connected
+    // keeps working until the new credential replaces the old.
+    sqlx::query("UPDATE agent_accounts SET state='pending' WHERE id=$1 AND user_id=$2 AND state<>'connected'")
+        .bind(&account_id)
+        .bind(&owner)
+        .execute(state.db.pool())
+        .await?;
     let host = choose_host(&state, kind, req.host_id.as_deref()).await?;
 
     let (pending, finished) = state

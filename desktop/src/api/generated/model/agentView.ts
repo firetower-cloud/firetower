@@ -17,8 +17,8 @@ import type { AgentOnHost } from './agentOnHost.ts';
  */
 export interface AgentView {
   /**
-     * Whether a credential is held. Only ever true in `ApiKey` mode — a
-     * subscription lives in the agent's own config on the host.
+     * Whether the default account holds a credential that travels: a
+     * subscription token or an API key. False when nothing is connected yet.
      */
   credentialSet: boolean;
   enabled: boolean;

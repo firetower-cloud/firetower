@@ -322,7 +322,7 @@
           "agents"
         ],
         "summary": "Sign an agent in with a device code, on a host.",
-        "description": "Returns as soon as there is a code to show. Approving it happens in a\nbrowser, wherever the person is, and can take a quarter of an hour — so the\nwaiting is a task here rather than a request left open.\n\nOnly Codex works this way. Claude Code hands you a token to paste, which is\n`configure_agent`.",
+        "description": "Returns as soon as there is a code to show. Approving it happens in a\nbrowser, wherever the person is, and can take a quarter of an hour — so the\nwaiting is a task here rather than a request left open.\n\nOnly Codex works this way. Claude Code hands you a token to paste, which\ngoes in the `secret` of `create_account`.",
         "operationId": "sign_agent_in",
         "parameters": [
           {
@@ -5386,7 +5386,7 @@
         "properties": {
           "credentialSet": {
             "type": "boolean",
-            "description": "Whether a credential is held. Only ever true in `ApiKey` mode — a\nsubscription lives in the agent's own config on the host."
+            "description": "Whether the default account holds a credential that travels: a\nsubscription token or an API key. False when nothing is connected yet."
           },
           "enabled": {
             "type": "boolean"
@@ -6086,7 +6086,7 @@
               "string",
               "null"
             ],
-            "description": "The token from `claude setup-token`, or a metered API key — whichever\nthe mode calls for. Required for both; ignored for an agent that needs\nno credential."
+            "description": "The token from `claude setup-token`, or a metered API key — whichever\nthe mode calls for. Absent, the mode must be the one already set and\nonly `enabled` changes; ignored for an agent that needs no credential."
           }
         }
       },
@@ -8967,7 +8967,7 @@
               "string",
               "null"
             ],
-            "description": "Existing named connection to authenticate."
+            "description": "The named account to authenticate. Made first with `create_account`."
           },
           "hostId": {
             "type": [
