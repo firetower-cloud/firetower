@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.36.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.35.0...firetower-v0.36.0) (2026-09-16)
+
+
+### Features
+
+* **install:** the control plane installs with one line, and the image builds again ([8ed813e](https://github.com/firetower-cloud/firetower/commit/8ed813ed495cf046ab8ef5282bedac97bf0b8740))
+* **install:** the control plane installs with one line, and the image builds again ([75b0c10](https://github.com/firetower-cloud/firetower/commit/75b0c10be1306055bbd38fd4e7a53976232beb18))
+
 ## [0.35.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.34.3...firetower-v0.35.0) (2026-09-16)
 
 
