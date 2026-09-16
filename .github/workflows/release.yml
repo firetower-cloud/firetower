@@ -32,7 +32,10 @@ jobs:
   # `on: push: tags` job would never run, leaving a release with no image.
   # Calling it directly also avoids needing a personal access token.
   image:
-    needs: please
+    # After the worker is on the release: the image carries the worker
+    # tarballs it was released with, so a control plane installs the worker
+    # it ships rather than one a machine has to fetch from GitHub.
+    needs: [please, worker-release]
     if: needs.please.outputs.released == 'true'
     uses: ./.github/workflows/images.yml
     permissions:
@@ -57,3 +60,115 @@ jobs:
       tag: ${{ needs.please.outputs.desktop_tag }}
       version: ${{ needs.please.outputs.desktop_version }}
       ref: ${{ github.sha }}
+
+  # The worker, as a binary a machine installs: one per shape it runs on, plus
+  # the installer script and a checksum file, all on the release the job
+  # above cut. `usefiretower.com/worker.sh` redirects to the newest release's
+  # copy of the script, and the script downloads its binary from the same
+  # release — so the two can never disagree.
+  worker:
+    needs: please
+    if: needs.please.outputs.released == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: depot-macos-latest
+            target: aarch64-apple-darwin
+            asset: firetower-worker-darwin-arm64.tar.gz
+          - os: depot-macos-latest
+            target: x86_64-apple-darwin
+            asset: firetower-worker-darwin-x86_64.tar.gz
+          # Static, so one Linux binary runs on whatever libc a distribution
+          # ships — there is no glibc version to argue about.
+          - os: depot-ubuntu-22.04
+            target: x86_64-unknown-linux-musl
+            asset: firetower-worker-linux-x86_64.tar.gz
+          - os: depot-ubuntu-22.04-arm
+            target: aarch64-unknown-linux-musl
+            asset: firetower-worker-linux-arm64.tar.gz
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ needs.please.outputs.tag }}
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+      # To the toolchain rust-toolchain.toml names, which is the one cargo
+      # will use — the action only knows about the one it installed.
+      - run: rustup target add ${{ matrix.target }}
+      - if: contains(matrix.target, 'musl')
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          key: worker-${{ matrix.target }}
+      - name: build
+        run: cargo build --release -p ft-cli --no-default-features --bin firetower-worker --target ${{ matrix.target }}
+      - name: the binary agrees with the tag
+        env:
+          VERSION: ${{ needs.please.outputs.version }}
+        run: |
+          said="$(target/${{ matrix.target }}/release/firetower-worker --version || true)"
+          case "$said" in *"$VERSION"*) ;; *) echo "built $said, tag says $VERSION" >&2; exit 1 ;; esac
+      - name: pack
+        run: |
+          mkdir -p dist
+          tar -czf "dist/${{ matrix.asset }}" -C "target/${{ matrix.target }}/release" firetower-worker
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ${{ matrix.asset }}
+          path: dist/${{ matrix.asset }}
+          if-no-files-found: error
+
+  # Everything the installer reads, on the release, in one step — so a
+  # release either has the whole set or none of it.
+  worker-release:
+    needs: [please, worker]
+    runs-on: depot-ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ needs.please.outputs.tag }}
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: firetower-worker-*
+          path: dist
+          merge-multiple: true
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.please.outputs.tag }}
+          VERSION: ${{ needs.please.outputs.version }}
+        run: |
+          cp install/worker.sh dist/worker.sh
+          cd dist
+          sha256sum firetower-worker-*.tar.gz worker.sh > SHA256SUMS
+          ls -la
+          gh release upload "$TAG" firetower-worker-*.tar.gz worker.sh SHA256SUMS --clobber
+
+          # The same files onto the rolling release `usefiretower.com/worker.sh`
+          # redirects to. GitHub's own `latest` is the newest release of the
+          # whole repository, whichever package cut it — the desktop's, half
+          # the time — so the script's "newest" has to be a release of its own.
+          if ! gh release view worker-latest -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create worker-latest -R "$GITHUB_REPOSITORY" --prerelease \
+              --title "worker: latest" \
+              --notes "The newest worker, for \`curl -fsSL https://usefiretower.com/worker.sh | sh\`. Moved on every release; the versioned releases hold the same files."
+          fi
+          gh release upload worker-latest firetower-worker-*.tar.gz worker.sh SHA256SUMS -R "$GITHUB_REPOSITORY" --clobber
+          gh release edit worker-latest -R "$GITHUB_REPOSITORY" --notes "The newest worker ($VERSION), for \`curl -fsSL https://usefiretower.com/worker.sh | sh\`. Moved on every release; firetower-v$VERSION holds the same files."
+
+      # The whole chain, before anybody is told the release exists: the
+      # rolling release, the script from it, the tarball it names, the
+      # checksum, and the binary answering. A failure here fails the release.
+      - name: the published installer installs the published worker
+        env:
+          VERSION: ${{ needs.please.outputs.version }}
+        run: |
+          export FIRETOWER_WORKER_ROOT="$RUNNER_TEMP/worker-smoke"
+          curl -fsSL "https://github.com/$GITHUB_REPOSITORY/releases/download/worker-latest/worker.sh" \
+            | sh -s -- --version "$VERSION" --skip-packages
+          said="$("$FIRETOWER_WORKER_ROOT/bin/firetower-worker" --version)"
+          case "$said" in *"$VERSION"*) echo "ok: $said" ;; *) echo "installed $said, expected $VERSION" >&2; exit 1 ;; esac

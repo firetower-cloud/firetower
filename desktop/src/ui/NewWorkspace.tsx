@@ -6,7 +6,7 @@
  * enough. An earlier version of this asked for a name, one repository, a branch
  * and a first message, which is a plausible-looking form that cannot express
  * half of what a workspace is: several repositories cut at different bases,
- * which machine, **container or straight on the host**, whose subscription, and
+ * which machine, whose subscription, and
  * how it competes for that machine when other agents are already on it.
  *
  * The UI is this client's own. The fields, their meaning and the payload are
@@ -18,17 +18,14 @@
  * answered. A task seeds the composer instead, unsent.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Box, Check, ChevronDown, Cpu, GitBranch, Plus, Search, Server, Terminal, X } from "lucide-react";
+import { Check, ChevronDown, Cpu, GitBranch, Plus, Search, Server, X } from "lucide-react";
 import { GithubMark, Icon } from "~/components/ui";
 import { AgentMark } from "~/components/AgentMark";
-import {
-  canRun,
-  defaultMode,
-  resolve,
-  type Where,
-} from "~/components/WhereItRuns";
-import { machineLabel, machines, modesOn, isLocal } from "~/api/environments";
-import type { Agent, Execution, Share } from "~/api/generated/model";
+import { canRun, resolve, type Where } from "~/components/WhereItRuns";
+import { Readout, isReady } from "~/components/HostReadiness";
+import { useHostReadiness } from "~/api/generated/hosts/hosts";
+import { machineLabel, machines } from "~/api/environments";
+import type { Agent, Share } from "~/api/generated/model";
 import { useCreateSession } from "~/api/generated/sessions/sessions";
 import { useAccounts, useAgents, useHosts, useRepos } from "~/data";
 import type { Backend } from "~/fleet";
@@ -77,7 +74,7 @@ export function NewWorkspace({
   const [checkouts, setCheckouts] = useState<Checkout[]>([]);
   const [branch, setBranch] = useState("");
   const [typed, setTyped] = useState(false);
-  const [where, setWhere] = useState<Where>({ machine: "", execution: "container", hostId: "", agent: "" });
+  const [where, setWhere] = useState<Where>({ machine: "", hostId: "", agent: "" });
   const [accountId, setAccountId] = useState("");
   const [share, setShare] = useState<Share>("equal" as Share);
   const [adding, setAdding] = useState(false);
@@ -91,14 +88,7 @@ export function NewWorkspace({
   }, [repos, seed?.repo, checkouts.length]);
 
   const all = useMemo(() => machines(hosts), [hosts]);
-  const { machine, host } = useMemo(() => resolve(hosts, where), [hosts, where]);
-  const modes = modesOn(machine);
-  const local = isLocal(machine);
-  const execution: Execution = local
-    ? ((modes[0] ?? "container") as Execution)
-    : where.picked
-      ? where.execution
-      : defaultMode(machine);
+  const { host } = useMemo(() => resolve(hosts, where), [hosts, where]);
 
   const runsHere = (kind: Agent) => {
     const a = agents.find((x) => x.kind === kind);
@@ -114,7 +104,10 @@ export function NewWorkspace({
 
   const suggested = name ? `agent/${slug(name)}` : "";
   const shown = typed ? branch : suggested;
-  const ready = !!name.trim() && checkouts.length > 0 && !!host && !!kind && !create.isPending;
+  // The same readout the panel shows, for this machine and this agent, so a
+  // missing agent is an Install button here and not a refusal after Start.
+  const readiness = useHostReadiness(host?.id ?? "", { agent: kind }, { query: { enabled: !!host && !!kind, retry: false, staleTime: 5000 } });
+  const ready = !!name.trim() && checkouts.length > 0 && !!host && !!kind && isReady(readiness.data) && !create.isPending;
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -335,32 +328,6 @@ export function NewWorkspace({
                 </select>
               </div>
 
-              {/* On the machine hosting Firetower the mode is not a choice:
-                  agents run where the control plane runs. */}
-              {!local && (
-                <div className="track w-full">
-                  {(["container", "host"] as Execution[]).map((m) => (
-                    <button
-                      key={m}
-                      data-on={execution === m}
-                      onClick={() => setWhere({ ...where, execution: m, picked: true, hostId: "" })}
-                      className="flex-1"
-                    >
-                      <span className="flex items-center justify-center gap-1.5">
-                        <Icon of={m === "container" ? Box : Terminal} size={12} />
-                        {m === "container" ? "Container" : "On the host"}
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              )}
-
-              <p className="text-micro text-mute">
-                {execution === "container"
-                  ? "The agent gets the image's tools, not whatever is on that machine."
-                  : "The agent runs straight on the machine, with its tools and its state."}
-              </p>
-
               <div className="flex flex-wrap gap-1.5 pt-0.5">
                 {agents.map((a) => {
                   const ok = runsHere(a.kind);
@@ -383,10 +350,10 @@ export function NewWorkspace({
                 })}
               </div>
 
-              {!host && all.length > 0 && (
-                <p className="text-micro text-kind-data">
-                  That machine has no environment for this mode yet — starting will make one.
-                </p>
+              {host && kind && (
+                <div className="overflow-hidden rounded-md border border-line bg-panel">
+                  <Readout key={`${host.id}:${kind}`} host={host} agent={kind} agentLabel={agents.find((a) => a.kind === kind)?.label} />
+                </div>
               )}
             </div>
           </Field>
@@ -441,7 +408,7 @@ export function NewWorkspace({
         <div className="flex items-center gap-3 border-t border-line bg-ground/40 px-5 py-3">
           <span className="flex items-center gap-1.5 text-meta text-mute">
             <Icon of={Cpu} size={12} />
-            {host ? `${machine ? machineLabel(machine) : ""} · ${execution}` : backend.org}
+            {host ? machineLabel(all.find((m) => m.hosts.some((h) => h.id === host.id)) ?? all[0]) : backend.org}
           </span>
           <button onClick={onClose} className="control ml-auto text-mute hover:bg-raise hover:text-bone">
             Cancel

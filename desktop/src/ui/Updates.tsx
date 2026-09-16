@@ -64,7 +64,7 @@ export function Updates() {
       <div className="mt-6 overflow-hidden rounded-xl border border-line bg-panel">
         <Row name="Control plane" version={s.controlPlane.version} ok={s.controlPlane.upgradable} reason={s.controlPlane.reason} sessions={s.controlPlane.sessions.length} note={s.controlPlane.updater.reachable ? `updater ${s.controlPlane.updater.version ?? ""}` : (s.controlPlane.updater.problem ?? "updater unreachable")} />
         {s.hosts.map((h) => (
-          <Row key={h.hostId} name={h.name} version={h.version ?? "—"} ok={h.upgradable} reason={h.reason} sessions={h.sessions.length} note={`${h.kind}${h.online ? "" : " · offline"}${h.drained ? " · drained" : ""}`} />
+          <Row key={h.hostId} name={h.name} version={h.version ?? "—"} ok={h.upgradable} reason={h.reason} sessions={h.sessions.length} note={`${h.online ? "online" : "offline"}${h.drained ? " · drained" : ""}`} />
         ))}
       </div>
 

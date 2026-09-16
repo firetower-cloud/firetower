@@ -11,7 +11,6 @@ use std::sync::Arc;
 pub mod accounts;
 pub mod api;
 pub mod auth;
-mod container;
 pub mod db;
 pub mod diagnose;
 pub mod fleet;

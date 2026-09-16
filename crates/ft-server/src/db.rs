@@ -1829,7 +1829,6 @@ fn host_from_row(r: sqlx::postgres::PgRow) -> Result<Host> {
     let raw: String = r.get("state");
     Ok(Host {
         machine: r.get("machine"),
-        execution: None,
         id: HostId::from_stored(r.get::<String, _>("id")),
         name: r.get("name"),
         state: serde_json::from_str::<HostState>(&format!("\"{raw}\""))
@@ -2010,7 +2009,6 @@ mod tests {
                         path: "~/.ssh/fire".into(),
                     },
                     host_key: None,
-                    container: None,
                 },
             )
             .await
@@ -2033,35 +2031,9 @@ mod tests {
                     path: "~/.ssh/fire".into()
                 },
                 host_key: None,
-                container: None,
             }
         );
         assert_eq!(db.hosts().await.unwrap().len(), 2);
-    }
-
-    #[tokio::test]
-    async fn a_container_host_round_trips_its_details() {
-        // The kind is stored as a tagged value, so the fields that only mean
-        // something for one variant have to survive the trip intact.
-        let (db, _owner) = db_with_user().await;
-        let host = db
-            .ensure_host(
-                "worker-1",
-                Compute::Container {
-                    image: "firetower/worker:dev".into(),
-                    name: "firetower-worker-1".into(),
-                },
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(
-            host.compute,
-            Compute::Container {
-                image: "firetower/worker:dev".into(),
-                name: "firetower-worker-1".into(),
-            }
-        );
     }
 
     #[tokio::test]
@@ -2870,7 +2842,6 @@ mod tests {
                     port: None,
                     key: ft_core::SshKey::Default,
                     host_key: None,
-                    container: Some("firetower-worker".into()),
                 },
             )
             .await

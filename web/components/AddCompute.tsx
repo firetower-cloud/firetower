@@ -5,56 +5,64 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Modal, Foot, Go, Quiet } from "./Modal";
 import {
   useCreateHost,
+  useInstallWorker,
   useProbeHost,
   useSshKey,
   getListHostsQueryKey,
 } from "@/src/api/generated/hosts/hosts";
-import type { Compute, Diagnosis } from "@/src/api/generated/model";
-import { parseDestination } from "@/src/api/environments";
+import { getListAgentsQueryKey, useInstallAgent, useListAgents } from "@/src/api/generated/agents/agents";
+import type { AgentView, Compute, Diagnosis, Host } from "@/src/api/generated/model";
+import { parseDestination, waitForOnline } from "@/src/api/environments";
 
 /**
  * Adding a machine.
  *
- * ## What it asks, and what it stopped asking
+ * ## What it asks
  *
- * Three fields about the machine — where it is, who to connect as, and what to
- * call the container when one is used — plus the key it has to be given.
+ * Two fields about the machine — where it is and who to connect as — and the
+ * key the machine has to be given. The key is shown, not a command: people
+ * know where their keys go, and a command is wrong on Google Cloud, wrong
+ * behind an SSH CA, and wrong wherever `~/.ssh` is not the place.
  *
  * The address and the account were briefly one box taking `editor@10.0.4.7`.
  * They are two things: an address is where, an account is who, and a form is
- * clearer when it says so. The single box also quietly dropped the container
- * name, which left no way to point Firetower at a container called anything
- * other than `firetower-worker`. Pasting a whole destination into the address
- * still works — `parseDestination` splits it and the server prefers a field
- * somebody filled in over one it parsed.
+ * clearer when it says so. Pasting a whole destination into the address still
+ * works — `parseDestination` splits it and the server prefers a field somebody
+ * filled in over one it parsed.
  *
- * Two questions did go, and stay gone:
+ * What it does not ask: **container or directly on host** — agents run on the
+ * machine, as the account above; **this server or a remote one** — that was
+ * only ever about ssh-ing to the machine Firetower is already on; and **which
+ * key** — Firetower's own is the one way in, and a private key on the control
+ * plane's filesystem was a path nobody could see from a container.
  *
- * * **Container or directly on host** is a mode, chosen per workspace, on the
- *   machine. Both are available on everything Firetower can reach, so asking
- *   here meant adding the same machine twice to get both.
- * * **This server or a remote one** was only ever about ssh-ing to the machine
- *   Firetower is already on. It does not.
+ * Nothing on this dialog installs anything. Once the key is in, the machine's
+ * own panel does that.
  */
-/** The container to look for, and the only one anybody has to type. */
-const DEFAULT_CONTAINER = "firetower-worker";
-
 export function AddCompute({ onClose }: { onClose: () => void }) {
   const [address, setAddress] = useState("");
   const [user, setUser] = useState("");
-  const [container, setContainer] = useState(DEFAULT_CONTAINER);
   const [label, setLabel] = useState("");
-  const [keyPath, setKeyPath] = useState("");
-  const [ownKey, setOwnKey] = useState(false);
   const [told, setTold] = useState<Diagnosis | null>(null);
+  // The machine, once it is saved and ssh got in but found no worker: the
+  // dialog turns into that next step rather than closing onto a row that
+  // looks broken.
+  const [made, setMade] = useState<{ host: Host; remedy?: string } | null>(null);
+  const [settling, setSettling] = useState(false);
+  // Once the worker answers, one more step: which agents the machine should
+  // run, so it is launchable when this closes.
+  const [stage, setStage] = useState<"worker" | "agents">("worker");
+  const agents = useListAgents();
+  const installAgent = useInstallAgent();
+  const [fetched, setFetched] = useState<Record<string, "fetching" | "done" | string>>({});
   const cache = useQueryClient();
   const create = useCreateHost();
   const probe = useProbeHost();
-  const busy = create.isPending || probe.isPending;
+  const installWorker = useInstallWorker();
+  const busy = create.isPending || probe.isPending || installWorker.isPending || settling;
   // Only so the form can show what it made of a pasted destination. The server
   // parses the address itself and prefers the account field when it has one.
   const typed = parseDestination(address);
-  const account = user.trim() || typed.user || "";
   const ready = !!typed.host;
 
   const edit =
@@ -64,46 +72,21 @@ export function AddCompute({ onClose }: { onClose: () => void }) {
       setter(value);
     };
 
-  // The environment made here is the one reached directly on the machine. The
-  // container on it is the same connection with `docker exec` in front, and is
-  // made when somebody picks that mode — but the *name* to use has to be
-  // collected now, because nothing later asks for it.
   const body = () => ({
     name: label.trim() || undefined,
     compute: {
       type: "Server",
       host: address.trim(),
       user: user.trim() || undefined,
-      key: ownKey && keyPath.trim() ? { type: "File", path: keyPath.trim() } : { type: "Managed" },
+      key: { type: "Managed" },
     } as Compute,
   });
 
-  // Both environments, in one go.
-  //
-  // A machine is a place and the two ways of running on it are modes, so a
-  // machine that has just been added should have both — otherwise picking
-  // Container in New workspace has to invent one, and the name typed above
-  // would have nowhere to live. The container is created rather than probed:
-  // whether it is running is a question for the moment somebody picks it, and
-  // it is the one HostReadiness already answers.
-  const save = async () => {
-    await create.mutateAsync({ data: body() });
-    const named = container.trim();
-    if (named) {
-      const base = label.trim() || typed.host;
-      await create
-        .mutateAsync({
-          data: {
-            name: `${base} · container`,
-            compute: { ...body().compute, container: named } as Compute,
-          },
-        })
-        // A machine that is added and a second environment that is not is
-        // still a machine that is added. Picking Container makes one.
-        .catch(() => {});
-    }
+  const save = async (needsWorker: Diagnosis | null) => {
+    const host = await create.mutateAsync({ data: body() });
     await cache.invalidateQueries({ queryKey: getListHostsQueryKey() });
-    onClose();
+    if (needsWorker) setMade({ host, remedy: needsWorker.remedy ?? undefined });
+    else onClose();
   };
 
   const add = () =>
@@ -111,11 +94,119 @@ export function AddCompute({ onClose }: { onClose: () => void }) {
       { data: body() },
       {
         onSuccess: (result) => {
-          if (result.reached) save();
-          else setTold(result.diagnosis ?? null);
+          if (!result.reached) return setTold(result.diagnosis ?? null);
+          save(result.diagnosis?.cause === "WorkerMissing" ? result.diagnosis : null);
         },
       },
     );
+
+  const install = async () => {
+    if (!made) return;
+    await installWorker.mutateAsync({ id: made.host.id });
+    setSettling(true);
+    const online = await waitForOnline(made.host.id);
+    setSettling(false);
+    await cache.invalidateQueries({ queryKey: getListHostsQueryKey() });
+    if (online) setStage("agents");
+    else onClose();
+  };
+
+  const fetchAgent = async (a: AgentView) => {
+    if (!made) return;
+    setFetched((f) => ({ ...f, [a.kind]: "fetching" }));
+    try {
+      await installAgent.mutateAsync({ kind: a.kind, data: { hostId: made.host.id } });
+      setFetched((f) => ({ ...f, [a.kind]: "done" }));
+    } catch (e) {
+      setFetched((f) => ({ ...f, [a.kind]: (e as Error).message }));
+    }
+    await cache.invalidateQueries({ queryKey: getListAgentsQueryKey() });
+  };
+
+  if (made && stage === "agents") {
+    const offered = (agents.data ?? []).filter((a) => a.enabled && a.supported);
+    const fetching = Object.values(fetched).includes("fetching");
+    return (
+      <Modal title="Add a machine" onClose={onClose} wide>
+        <p className="mt-2 text-meta text-bone">
+          <span aria-hidden className="mr-2 font-mono text-sage">✓</span>
+          Connected to {made.host.name}. The worker is installed.
+        </p>
+        <p className="mt-3 text-meta leading-[1.5] text-mute">
+          Which agents should this machine run? Each is fetched onto the machine as the standalone
+          binary its publisher ships; nothing else is needed for it.
+        </p>
+        <div className="mt-3 flex flex-wrap gap-2">
+          {offered.map((a) => (
+            <button
+              key={a.kind}
+              type="button"
+              disabled={fetched[a.kind] === "fetching" || fetched[a.kind] === "done"}
+              onClick={() => fetchAgent(a)}
+              className="rounded-sm border border-line px-3 py-2 text-meta text-bone hover:border-dim disabled:opacity-60"
+            >
+              {fetched[a.kind] === "done" ? `✓ ${a.label}` : fetched[a.kind] === "fetching" ? `Fetching ${a.label}…` : `Install ${a.label}`}
+            </button>
+          ))}
+        </div>
+        {Object.entries(fetched)
+          .filter(([, v]) => v !== "fetching" && v !== "done")
+          .map(([k, v]) => (
+            <p key={k} role="alert" className="mt-2 text-meta text-brick">
+              {v}
+            </p>
+          ))}
+        <Foot>
+          <Go onClick={onClose} disabled={fetching}>
+            Done
+          </Go>
+        </Foot>
+      </Modal>
+    );
+  }
+
+  if (made) {
+    const account = (made.host.compute.type === "Server" && made.host.compute.user) || "the ssh account";
+    return (
+      <Modal title="Add a machine" onClose={onClose} wide>
+        <p className="mt-2 text-meta text-bone">
+          <span aria-hidden className="mr-2 font-mono text-sage">✓</span>
+          Connected to {made.host.name} as {account}.
+        </p>
+        <p className="mt-2 text-meta text-bone">
+          <span aria-hidden className="mr-2 font-mono text-brick">✕</span>
+          There is no worker on it yet.
+        </p>
+        <p className="mt-3 text-meta leading-[1.5] text-mute">
+          Firetower puts the worker built for that machine into{" "}
+          <code className="font-mono">~/.firetower/worker/bin</code> over the connection it just
+          made. No sudo, nothing outside that account&apos;s home. Anything else the machine is
+          missing is shown afterwards, with the command that installs it.
+        </p>
+        {made.remedy && (
+          <details className="mt-3 text-meta text-mute">
+            <summary className="cursor-pointer hover:text-bone">Or do it on the machine yourself</summary>
+            <code className="mt-1.5 block break-all rounded-sm bg-black/25 px-3 py-2 font-mono text-meta text-bone">
+              {made.remedy}
+            </code>
+          </details>
+        )}
+        {installWorker.error && (
+          <p role="alert" className="mt-3 text-meta text-brick">
+            {installWorker.error.message}
+          </p>
+        )}
+        <Foot>
+          <Go onClick={install} disabled={busy}>
+            {installWorker.isPending ? "Installing…" : settling ? "Reconnecting…" : "Install the worker"}
+          </Go>
+          <Quiet onClick={onClose} disabled={busy}>
+            Later
+          </Quiet>
+        </Foot>
+      </Modal>
+    );
+  }
 
   return (
     <Modal title="Add a machine" onClose={onClose} wide>
@@ -138,22 +229,8 @@ export function AddCompute({ onClose }: { onClose: () => void }) {
         onChange={edit(setUser)}
         placeholder={typed.user || "editor"}
       >
-        Who to connect as. Directly on the host, the worker and its agents run as this account with
-        its permissions; for a container, it is the account that runs{" "}
-        <code className="font-mono">docker exec</code>. Left blank, it is whatever your ssh config
-        says.
-      </Field>
-
-      <Field
-        label="Container name"
-        optional
-        value={container}
-        onChange={edit(setContainer)}
-        placeholder={DEFAULT_CONTAINER}
-      >
-        Which container to run agents in, when this machine is used in Container mode. Leave it as{" "}
-        <code className="font-mono">{DEFAULT_CONTAINER}</code> unless yours is called something
-        else.
+        Who to connect as. The worker and its agents run as this account, with its permissions.
+        Left blank, it is whatever your ssh config says.
       </Field>
 
       <Field
@@ -166,18 +243,11 @@ export function AddCompute({ onClose }: { onClose: () => void }) {
         What you call it, in every list. Left blank it is called {typed.host || "where it is"}.
       </Field>
 
-      <HowWeGetIn
-        ownKey={ownKey}
-        onOwnKey={setOwnKey}
-        keyPath={keyPath}
-        onKeyPath={edit(setKeyPath)}
-        user={account}
-      />
+      <HowWeGetIn />
 
       <p className="mt-3 text-meta leading-[1.5] text-mute">
-        Both ways of running are then available on it — in the worker container named above, or on
-        the machine itself. Firetower checks whichever you pick, when you pick it, and says what is
-        missing.
+        Firetower then connects and says what the machine has and what it is missing — the worker
+        first, which it installs from there.
       </p>
 
       {(create.error || probe.error) && (
@@ -191,7 +261,7 @@ export function AddCompute({ onClose }: { onClose: () => void }) {
           {busy ? "Checking…" : told ? "Check again" : "Add"}
         </Go>
         {told && (
-          <Quiet onClick={save} disabled={!ready || busy}>
+          <Quiet onClick={() => save(null)} disabled={!ready || busy}>
             Save for later
           </Quiet>
         )}
@@ -258,28 +328,20 @@ function NotAnswering({ told }: { told: Diagnosis }) {
 }
 
 /**
- * The command, for whoever adds keys on the machine itself.
- *
- * The path follows the username rather than saying `~/.ssh`, because the
- * account you paste this as is often not the account Firetower will be. Pasting
- * `~/.ssh/authorized_keys` while logged in as root puts the key in root's file
- * and leaves `deploy` still refusing.
+ * The lines for whoever adds the key on the machine itself, run as the
+ * account Firetower will connect as — `~` is that account's home, wherever
+ * the machine keeps it (`/home` on Linux, `/Users` on a Mac, somewhere else
+ * entirely under LDAP). Guessing the path was wrong on every Mac.
  *
  * `mkdir` and both `chmod`s are not padding: sshd ignores an `authorized_keys`
- * it considers too permissive, without saying so, and a fresh cloud image often
- * has no `~/.ssh` at all. Either fails in a way indistinguishable from a wrong
- * key.
+ * it considers too permissive, without saying so, and a fresh machine often
+ * has no `~/.ssh` at all.
  */
-function authorizedKeys(user: string, key: string) {
-  const who = user.trim();
-  const home = !who || who === "root" ? "/root" : `/home/${who}`;
-  const owner = who || "root";
-
+function authorizedKeys(key: string) {
   return [
-    `mkdir -p ${home}/.ssh && chmod 700 ${home}/.ssh`,
-    `echo '${key}' >> ${home}/.ssh/authorized_keys`,
-    `chmod 600 ${home}/.ssh/authorized_keys`,
-    `chown -R ${owner} ${home}/.ssh`,
+    "mkdir -p ~/.ssh && chmod 700 ~/.ssh",
+    `printf '%s\\n' '${key}' >> ~/.ssh/authorized_keys`,
+    "chmod 600 ~/.ssh/authorized_keys",
   ].join("\n");
 }
 
@@ -293,24 +355,11 @@ function authorizedKeys(user: string, key: string) {
  *
  * The key is what is offered, not a command. Where it goes depends on the
  * machine: a provider's web form when the VM is being made now, instance
- * metadata on Google Cloud, an SSH CA where there is one, and
+ * metadata or OS Login on Google Cloud, an SSH CA where there is one, and
  * `authorized_keys` on a machine you already own. A command assumes the last of
  * those, and on Google Cloud the guest agent will quietly undo it.
  */
-function HowWeGetIn({
-  ownKey,
-  onOwnKey,
-  keyPath,
-  onKeyPath,
-  user,
-}: {
-  ownKey: boolean;
-  onOwnKey: (on: boolean) => void;
-  keyPath: string;
-  onKeyPath: (path: string) => void;
-  /** Whose authorized_keys the command should write to. */
-  user: string;
-}) {
+function HowWeGetIn() {
   const { data: identity, isLoading } = useSshKey();
   const [copied, setCopied] = useState(false);
   const [showing, setShowing] = useState(false);
@@ -326,79 +375,40 @@ function HowWeGetIn({
     <div className="mt-5 rounded-sm border border-line bg-ground/40 p-3">
       <p className="eyebrow">Firetower gets in with this key</p>
 
-      {ownKey ? (
-        <>
-          <Field
-            label="Private key"
-            optional
-            value={keyPath}
-            onChange={onKeyPath}
-            placeholder="~/.ssh/id_ed25519"
-          >
-            A path on the machine running Firetower — which, if that is a container, is inside the
-            container rather than on yours. A key you can see is not necessarily one it can.
-          </Field>
-          <button
-            type="button"
-            onClick={() => onOwnKey(false)}
-            className="mt-3 text-meta text-slate hover:text-bone"
-          >
-            ← Use Firetower&apos;s key
-          </button>
-        </>
-      ) : (
-        <>
-          <p className="mt-2 text-meta leading-[1.5] text-mute">
-            Give this public key to the machine you are about to name. It is public — safe to paste
-            into a provider&apos;s web form, a cloud-init file, or
-            <code className="mx-1 font-mono text-slate">authorized_keys</code> on a machine you own.
-          </p>
+      <div className="mt-2 flex items-start gap-2">
+        <code className="min-w-0 flex-1 break-all rounded-sm border border-line bg-ground px-3 py-2 font-mono text-meta leading-[1.5] text-bone">
+          {isLoading ? "…" : (identity?.publicKey ?? "no key yet")}
+        </code>
+        <button
+          type="button"
+          onClick={copy}
+          disabled={!identity}
+          className="shrink-0 rounded-sm border border-line px-3 py-2 text-meta text-slate hover:text-bone disabled:opacity-40"
+        >
+          {copied ? "Copied" : "Copy"}
+        </button>
+      </div>
+      <p className="mt-1.5 font-mono text-meta text-mute">{identity?.fingerprint ?? ""}</p>
 
-          <div className="mt-2 flex items-start gap-2">
-            <code className="min-w-0 flex-1 break-all rounded-sm border border-line bg-ground px-3 py-2 font-mono text-meta leading-[1.5] text-bone">
-              {isLoading ? "…" : (identity?.publicKey ?? "no key yet")}
-            </code>
-            <button
-              type="button"
-              onClick={copy}
-              disabled={!identity}
-              className="shrink-0 rounded-sm border border-line px-3 py-2 text-meta text-slate hover:text-bone disabled:opacity-40"
-            >
-              {copied ? "Copied" : "Copy"}
-            </button>
-          </div>
+      <p className="mt-2 text-meta leading-[1.5] text-mute">
+        Give it to the machine the way that machine takes keys:{" "}
+        <code className="font-mono text-slate">~/.ssh/authorized_keys</code> of the account above on
+        a machine you own; the provider&apos;s console, instance metadata or OS Login on Google
+        Cloud; the CA where there is one. It is public — safe anywhere.
+      </p>
 
-          <p className="mt-2 text-meta leading-[1.5] text-mute">
-            Most providers take it when you create the machine, or in its settings afterwards. Some
-            manage keys their own way — Google Cloud through instance metadata or OS Login, and an
-            SSH CA through the CA.
-          </p>
+      <button
+        type="button"
+        onClick={() => setShowing(!showing)}
+        className="mt-3 text-meta text-slate hover:text-bone"
+      >
+        {showing ? "▾" : "▸"} Adding it to authorized_keys by hand, logged in as that account
+      </button>
 
-          <button
-            type="button"
-            onClick={() => setShowing(!showing)}
-            className="mt-3 text-meta text-slate hover:text-bone"
-          >
-            {showing ? "▾" : "▸"} Adding it on the machine yourself
-          </button>
-
-          {showing && (
-            <pre className="mt-2 overflow-x-auto rounded-sm bg-black/25 px-3 py-2 font-mono text-meta leading-[1.7] text-bone">
-              {authorizedKeys(user, identity?.publicKey ?? "…")}
-            </pre>
-          )}
-
-          <div className="mt-3 flex items-center justify-between gap-3">
-            <span className="font-mono text-meta text-mute">{identity?.fingerprint ?? ""}</span>
-            <button
-              type="button"
-              onClick={() => onOwnKey(true)}
-              className="shrink-0 text-meta text-slate hover:text-bone"
-            >
-              Use my own key instead →
-            </button>
-          </div>
-        </>
+      {showing && (
+        <pre className="mt-2 overflow-x-auto rounded-sm bg-black/25 px-3 py-2 font-mono text-meta leading-[1.7] text-bone">
+          {authorizedKeys(identity?.publicKey ?? "…")}
+        </pre>
       )}
     </div>
   );

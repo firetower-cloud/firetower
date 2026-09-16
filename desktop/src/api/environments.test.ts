@@ -3,12 +3,8 @@ import {
   machines,
   machineKey,
   machineLabel,
-  executionOf,
   environmentLabel,
   isLocal,
-  modesOn,
-  environmentsOn,
-  connectionOf,
   parseDestination,
 } from "./environments";
 import type { Host } from "./generated/model";
@@ -23,18 +19,17 @@ const host = (id: string, compute: Host["compute"], extra: Partial<Host> = {}): 
   docker: { status: "Unknown" },
   ...extra,
 });
-const ssh = (container?: string): Extract<Host["compute"], { type: "Server" }> => ({
+const ssh = (): Extract<Host["compute"], { type: "Server" }> => ({
   type: "Server",
   host: "video-vm",
   key: { type: "Managed" },
-  container,
 });
 
 describe("which machine an environment is on", () => {
-  it("gives a remote machine both ways of running under one entry", () => {
-    const groups = machines([host("remote-container", ssh("worker")), host("remote-native", ssh())]);
+  it("groups rows that reach the same address and port", () => {
+    const groups = machines([host("editor", { ...ssh(), user: "editor" }), host("root", { ...ssh(), user: "root" })]);
     expect(groups).toHaveLength(1);
-    expect(modesOn(groups[0])).toEqual(["container", "host"]);
+    expect(groups[0].hosts).toHaveLength(2);
   });
 
   it("keeps machines on different SSH ports distinct", () => {
@@ -42,13 +37,12 @@ describe("which machine an environment is on", () => {
   });
 
   /**
-   * The change this whole screen turns on. An ssh connection to the machine
-   * underneath used to be folded into `local`, which gave "this server" a
-   * second mode — and choosing it asked Firetower to ssh to the machine it is
-   * already sitting on.
+   * An ssh connection to the machine underneath used to be folded into
+   * `local`, which gave "this server" a second mode — and choosing it asked
+   * Firetower to ssh to the machine it is already sitting on.
    */
   it("does not fold an ssh connection into the machine hosting Firetower", () => {
-    const local = host("local-container", { type: "Local" }, { execution: "container" });
+    const local = host("local", { type: "Local" });
     const underneath = host(
       "the-vm",
       { ...ssh(), host: "control-vm" },
@@ -57,14 +51,13 @@ describe("which machine an environment is on", () => {
     );
     const groups = machines([local, underneath]);
     expect(groups.map((m) => m.key)).toEqual(["local", "ssh:control-vm:22"]);
-    expect(modesOn(groups[0])).toEqual(["container"]);
   });
 
-  it("leaves the machine hosting Firetower with exactly one way of running", () => {
-    const groups = machines([host("local", { type: "Local" }, { execution: "host" })]);
+  it("knows the machine hosting Firetower", () => {
+    const groups = machines([host("local", { type: "Local" })]);
     expect(isLocal(groups[0])).toBe(true);
-    expect(modesOn(groups[0])).toEqual(["host"]);
-    expect(environmentLabel(groups[0].hosts[0])).toBe("Firetower host process");
+    expect(environmentLabel(groups[0].hosts[0])).toBe("This machine");
+    expect(machineKey(groups[0].hosts[0])).toBe("local");
   });
 
   it("calls a machine what you call it, and says where it is beside that", () => {
@@ -76,30 +69,6 @@ describe("which machine an environment is on", () => {
   it("does not say the address twice when that is all it is called", () => {
     const [machine] = machines([host("10.0.4.7", { type: "Server", host: "10.0.4.7", key: { type: "Managed" } })]);
     expect(machineLabel(machine)).toBe("10.0.4.7");
-  });
-
-  it("does not claim a legacy local process runs on the underlying VM", () => {
-    const legacy = host("localhost", { type: "Local" });
-    expect(executionOf(legacy)).toBeUndefined();
-    expect(environmentLabel(legacy)).toBe("Firetower process");
-  });
-
-  it("groups a container Firetower started on its own", () => {
-    expect(machineKey(host("c", { type: "Container", name: "worker-1", image: "ft" })))
-      .toBe("container:worker-1");
-  });
-});
-
-describe("the second mode on a machine", () => {
-  it("borrows the connection rather than asking for the address again", () => {
-    const [machine] = machines([host("remote-native", { ...ssh(), user: "editor", port: 2222 })]);
-    expect(connectionOf(machine)).toMatchObject({ host: "video-vm", user: "editor", port: 2222 });
-    expect(environmentsOn(machine, "container")).toEqual([]);
-  });
-
-  it("has nothing to borrow on the machine hosting Firetower, which never needs it", () => {
-    const [machine] = machines([host("local", { type: "Local" }, { execution: "container" })]);
-    expect(connectionOf(machine)).toBeUndefined();
   });
 });
 

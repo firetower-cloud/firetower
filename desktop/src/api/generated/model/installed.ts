@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.32.2
+ * OpenAPI spec version: 0.34.2
  */
 
 /**
@@ -13,8 +13,8 @@ export interface Installed {
   /**
      * What `firetower-worker --version` said on the machine.
      *
-     * Absent when the copy succeeded and the probe did not answer. The
-     * install still happened; the supervisor's next connection is the verdict.
+     * Absent when the install ran and the probe did not answer. The install
+     * still happened; the supervisor's next connection is the verdict.
      * @nullable
      */
   version?: string | null;

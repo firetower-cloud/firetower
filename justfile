@@ -81,7 +81,9 @@ dev: db
     }
     trap cleanup EXIT INT TERM
 
-    cargo watch -x 'run -p ft-cli -- serve --dev' & pids+=($!)
+    # A worker built here is what "Install the worker" sends to a machine of
+    # this shape, so a checkout can be tried on a real host without a release.
+    FIRETOWER_WORKER_ARTIFACTS=target/artifacts cargo watch -x 'run -p ft-cli -- serve --dev' & pids+=($!)
     NEXT_PUBLIC_FIRETOWER_API=http://localhost:4400 pnpm --dir web dev & pids+=($!)
 
     # `wait -n` would be tidier but needs bash 4.3, and macOS ships 3.2.
@@ -114,26 +116,21 @@ build:
     pnpm --dir web build
     cargo build --release
 
-# The image a container host runs. Slow the first time, cached after.
-worker-image:
-    docker build -f Dockerfile.worker --build-arg VERSION=dev -t firetower/worker:dev .
-
-# The updater, for running the deployment's compose file locally.
-updater-image:
-    docker build -f Dockerfile.updater --build-arg VERSION=dev -t firetower/updater:dev .
-
-# Both architectures, the way the workflow builds them.
+# The worker, packed the way a release publishes it, for this machine's shape.
 #
-# Loads nothing: a manifest with two platforms in it can't live in a local image
-# store. This is for finding out that the cross-compile broke here rather than
-# in CI ten minutes later.
-worker-image-check:
-    docker buildx build -f Dockerfile.worker \
-        --platform linux/amd64,linux/arm64 --build-arg VERSION=dev .
-
-# The small static binary that gets copied to a host.
+# Lands in target/artifacts as firetower-worker-<os>-<arch>.tar.gz. A control
+# plane started with FIRETOWER_WORKER_ARTIFACTS pointing there — `just dev`
+# does — installs it onto a machine of the same shape instead of downloading a
+# release, and `install/worker.sh --from <that file>` does the same by hand.
 build-worker:
-    cargo build --release --no-default-features --target x86_64-unknown-linux-musl
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cargo build --release -p ft-cli --no-default-features --bin firetower-worker
+    case "$(uname -s)" in Darwin) os=darwin ;; Linux) os=linux ;; *) echo "unsupported: $(uname -s)" >&2; exit 1 ;; esac
+    case "$(uname -m)" in arm64|aarch64) arch=arm64 ;; x86_64|amd64) arch=x86_64 ;; *) echo "unsupported: $(uname -m)" >&2; exit 1 ;; esac
+    mkdir -p target/artifacts
+    tar -czf "target/artifacts/firetower-worker-$os-$arch.tar.gz" -C target/release firetower-worker
+    echo "  target/artifacts/firetower-worker-$os-$arch.tar.gz"
 
 # The database tests need Postgres; `just db` is enough to satisfy them.
 test: db
@@ -256,35 +253,6 @@ session-check:
     echo
     printf '  %d passed, %d failed, %d skipped\n\n' "$passed" "$failed" "$skipped"
     [ "$failed" -eq 0 ]
-
-# Reclaim what the workers' image caches have grown to.
-#
-# Each container host keeps its own `/var/lib/docker` on a volume, so that
-# sessions can run compose stacks and so that upgrading a worker does not
-# re-pull postgres and node from scratch. It grows and never shrinks: a cache
-# is only useful because nothing prunes it.
-#
-# Stops each worker first — a daemon does not survive its storage being
-# removed underneath it — and starts them again after. Sessions on those
-# workers keep their worktrees and their tmux; what they lose is any container
-# they had running, and the next pull is a slow one.
-worker-cache-clean:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    volumes=$(docker volume ls -q --filter name='^firetower-docker-')
-    if [ -z "$volumes" ]; then
-        echo "  no worker image caches on this machine."
-        exit 0
-    fi
-    echo "  reclaiming:"
-    for volume in $volumes; do
-        worker=${volume#firetower-docker-}
-        docker stop "$worker" >/dev/null 2>&1 || true
-        docker volume rm "$volume" >/dev/null
-        docker start "$worker" >/dev/null 2>&1 || true
-        echo "    $volume"
-    done
-    echo "  done. The next compose up on those workers will pull again."
 
 # Give the space back to the filesystem. Only worth it after db-clean.
 db-vacuum:

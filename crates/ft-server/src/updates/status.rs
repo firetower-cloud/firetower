@@ -3,7 +3,7 @@
 use super::store::Checked;
 use super::{
     check, client, deploy, version, ControlPlaneTarget, FileChoice, HostTarget, Release,
-    TargetKind, UpdateStatus, UpdaterView, Updates, UpgradePlan,
+    UpdateStatus, UpdaterView, Updates, UpgradePlan,
 };
 use crate::AppState;
 use anyhow::{Context, Result};
@@ -144,13 +144,6 @@ pub async fn status(state: &AppState) -> Result<UpdateStatus> {
         .iter()
         .filter(|h| h.compute != ft_core::Compute::Local)
     {
-        let kind = match &host.compute {
-            ft_core::Compute::Container { .. } => TargetKind::Container,
-            ft_core::Compute::Server {
-                container: Some(_), ..
-            } => TargetKind::Container,
-            _ => TargetKind::Binary,
-        };
         let online = state.fleet.is_connected(&host.id).await;
         let behind = match (&host.worker_version, &latest_version) {
             (Some(theirs), Some(latest)) => version::parse(theirs)
@@ -159,25 +152,13 @@ pub async fn status(state: &AppState) -> Result<UpdateStatus> {
             (None, Some(_)) => true,
             (_, None) => false,
         };
-        let (upgradable, reason) = match kind {
-            TargetKind::Binary => (
-                false,
-                Some(
-                    "installed by hand — Firetower doesn't know how, so it won't touch it. \
-                     `firetower worker install` on that machine moves it into a container it can."
-                        .to_string(),
-                ),
-            ),
-            TargetKind::Container if !online => (
-                false,
-                Some("not connected; it has to answer before it can be recreated".into()),
-            ),
-            TargetKind::Container => (behind, (!behind).then(|| "up to date".to_string())),
-        };
+        // Reinstalled over ssh, which needs the machine and not the worker —
+        // so a worker that is behind is upgradable whether or not it is
+        // connected right now.
+        let (upgradable, reason) = (behind, (!behind).then(|| "up to date".to_string()));
         targets.push(HostTarget {
             host_id: host.id.as_str().to_string(),
             name: host.name.clone(),
-            kind,
             version: host.worker_version.clone(),
             online,
             drained: host.drained,

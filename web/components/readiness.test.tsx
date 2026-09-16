@@ -5,15 +5,15 @@ import { Readout, isReady } from "./HostReadiness";
 import { getHostReadinessQueryKey } from "@/src/api/generated/hosts/hosts";
 import type { Host, Readiness } from "@/src/api/generated/model";
 
-const server = (container?: string): Host => ({
+/** A machine reached over ssh, online unless said otherwise. */
+const server = (online: boolean | string = true): Host => ({
   id: "h1",
   name: "video-vm",
-  compute: { type: "Server", host: "192.0.2.10", user: "editor", key: { type: "Managed" }, container },
-  state: container ? "Online" : "Unreachable",
+  compute: { type: "Server", host: "192.0.2.10", user: "editor", key: { type: "Managed" } },
+  state: online ? "Online" : "Unreachable",
   drained: false,
   reconnecting: false,
   docker: { status: "Unknown" },
-  execution: container ? "container" : "host",
 });
 
 function draw(host: Host, report: Readiness) {
@@ -49,7 +49,7 @@ describe("when everything is ready", () => {
   };
 
   it("is one sentence, not a list of things that are fine", () => {
-    const out = draw(server("firetower-worker"), report);
+    const out = draw(server(), report);
     expect(out).toContain("Ready — runs as root");
     // The old card put every passing check on screen, on a form people fill in
     // twenty times a day.
@@ -58,27 +58,40 @@ describe("when everything is ready", () => {
   });
 
   it("still says how many were checked, and offers them", () => {
-    expect(draw(server("firetower-worker"), report)).toContain("3 checks");
+    expect(draw(server(), report)).toContain("3 checks");
   });
 
-  it("names the environment a container runs in, and the machine a host does", () => {
-    expect(draw(server("firetower-worker"), report)).toContain("in video-vm");
+  it("names the machine it runs on", () => {
     expect(draw(server(), { ...report, user: "editor" })).toContain("on editor@192.0.2.10");
   });
 });
 
 describe("when there is no worker on the machine yet", () => {
+  const sshIn = { name: "SSH", detail: "connected as editor", available: true, required: true };
   const report: Readiness = {
-    checks: [fail("Worker connection", "The worker is not connected.", "Install it. See docs.")],
+    user: "editor",
+    checks: [
+      sshIn,
+      fail(
+        "Worker",
+        "Firetower isn't installed on that machine.",
+        "curl -fsSL https://usefiretower.com/worker.sh | sh",
+      ),
+    ],
   };
 
   it("says that, rather than counting requirements it could not measure", () => {
-    const out = draw(server(), report);
+    const out = draw(server(false), report);
     expect(out).toContain("There is no worker on editor@192.0.2.10 yet");
   });
 
+  it("says ssh got in, told apart from the worker not being there", () => {
+    const out = draw(server(false), report);
+    expect(out).toContain("SSH · connected as editor");
+  });
+
   it("offers to put one there, because it can", () => {
-    const out = draw(server(), report);
+    const out = draw(server(false), report);
     expect(out).toContain("Install the worker");
     expect(out).toContain("~/.firetower/worker/bin");
     // What was here before: a Rust toolchain on a machine whose whole purpose
@@ -86,9 +99,32 @@ describe("when there is no worker on the machine yet", () => {
     expect(out).not.toContain("cargo build");
   });
 
-  it("does not offer that for a container, whose worker comes from its image", () => {
-    const out = draw(server("firetower-worker"), report);
+  it("folds the by-hand line away underneath", () => {
+    const out = draw(server(false), report);
+    expect(out).toContain("Or do it on the machine yourself");
+    expect(out).toContain("worker.sh | sh");
+  });
+});
+
+describe("when ssh itself did not get in", () => {
+  const report: Readiness = {
+    checks: [
+      fail("SSH", "192.0.2.10 refused the key.", "Give the machine Firetower's public key, then check again."),
+      { name: "Worker", detail: "not checked", available: false, required: false },
+    ],
+  };
+
+  it("blames the connection, not the worker", () => {
+    const out = draw(server(false), report);
+    expect(out).toContain("Firetower can&#x27;t get into editor@192.0.2.10");
+    expect(out).toContain("refused the key");
     expect(out).not.toContain("Install the worker");
+  });
+
+  it("says the worker was not checked rather than missing", () => {
+    const out = draw(server(false), report);
+    expect(out).toContain("not checked");
+    expect(out).not.toContain("There is no worker");
   });
 });
 
@@ -119,6 +155,7 @@ describe("when the worker is there and something else is not", () => {
   it("gives the package manager as something to copy, since that one is yours", () => {
     const out = draw(server(), report);
     expect(out).toContain("sudo apt install tmux");
+    expect(out).toContain("Firetower does not run sudo for you");
     // Once. It was in the row's own detail as well, so the same command was
     // printed twice on the same line.
     expect(out.split("sudo apt install tmux")).toHaveLength(2);

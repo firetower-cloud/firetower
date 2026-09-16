@@ -24,9 +24,10 @@ const PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// How long an agent install may take before we stop waiting.
 ///
-/// Its own number rather than [`PROBE_TIMEOUT`] because it is not a probe: npm
-/// is fetching a few hundred megabytes over whatever line that host has, and
-/// thirty seconds is an ordinary amount of time for that to still be going.
+/// Its own number rather than [`PROBE_TIMEOUT`] because it is not a probe: the
+/// worker is fetching a binary of a few hundred megabytes over whatever line
+/// that host has, and thirty seconds is an ordinary amount of time for that to
+/// still be going.
 const INSTALL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
 
 /// How often to provoke an answer when nothing else is being said.
@@ -1196,9 +1197,9 @@ impl Fleet {
 
     /// The transport a host's kind implies.
     ///
-    /// The worker is identical in all three cases and cannot tell which it is
+    /// The worker is identical in both cases and cannot tell which it is
     /// behind — that indifference is what lets one binary serve a child
-    /// process, a container, and a server on the other side of the world.
+    /// process and a server on the other side of the world.
     pub fn transport_for(
         host: &ft_core::Host,
         home: &std::path::Path,
@@ -1207,13 +1208,6 @@ impl Fleet {
         Ok(match &host.compute {
             ft_core::Compute::Local => {
                 Arc::new(crate::transport::LocalTransport::new(home.join("worker"))?)
-            }
-            ft_core::Compute::Container { name, .. } => {
-                Arc::new(crate::transport::DockerTransport {
-                    container: name.clone(),
-                    // Inside the container, not on this machine.
-                    root: std::path::PathBuf::from("/var/lib/firetower/worker"),
-                })
             }
             ft_core::Compute::Server { .. } => Arc::new(
                 Self::ssh_transport_for(host, home, vault)?
@@ -1229,13 +1223,7 @@ impl Fleet {
         home: &std::path::Path,
         vault: Option<&Arc<crate::vault::Vault>>,
     ) -> Result<Option<crate::transport::SshTransport>> {
-        let ft_core::Compute::Server {
-            port,
-            key,
-            container,
-            ..
-        } = &host.compute
-        else {
+        let ft_core::Compute::Server { port, key, .. } = &host.compute else {
             return Ok(None);
         };
         Ok(Some(crate::transport::SshTransport {
@@ -1253,13 +1241,6 @@ impl Fleet {
             // Only when the key is one the vault holds. A path, or ssh's
             // own choice, needs nothing from us.
             vault: key.is_held().then(|| vault.cloned()).flatten(),
-            container: container.clone(),
-            // Inside a container, the path the image creates. On the
-            // machine itself, the worker's own default: that account may
-            // have no way to write under /var/lib.
-            root: container
-                .as_ref()
-                .map(|_| std::path::PathBuf::from("/var/lib/firetower/worker")),
         }))
     }
 

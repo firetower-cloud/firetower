@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.32.2
+ * OpenAPI spec version: 0.34.2
  */
 
 /**
@@ -20,6 +20,11 @@ export interface PublicIdentity {
      * the two disagree about what was installed.
      */
   fingerprint: string;
+  /**
+     * The one line to paste on a machine: installs the worker and authorises
+     * this key, so the machine can be added the moment it finishes.
+     */
+  installCommand: string;
   /** `ssh-ed25519 AAAAC3… firetower`, exactly as `authorized_keys` wants it. */
   publicKey: string;
 }

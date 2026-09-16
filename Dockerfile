@@ -111,6 +111,25 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
 
 COPY --from=build /firetower /usr/local/bin/firetower
 
+# The worker this control plane installs onto machines: the tarballs released
+# with this version, for every shape a machine can be. Streamed down the ssh
+# connection by "Install the worker", so a machine never has to reach GitHub
+# and the worker a control plane installs is the one it was released with.
+#
+# Best effort. A development build (`VERSION` unset, or a version with no
+# release yet) has none, and the installer then downloads as it would for
+# anybody — the directory is simply empty.
+ARG VERSION=0.0.0-dev
+ENV FIRETOWER_WORKER_ARTIFACTS=/usr/share/firetower/workers
+RUN mkdir -p "$FIRETOWER_WORKER_ARTIFACTS" \
+    && for shape in darwin-arm64 darwin-x86_64 linux-x86_64 linux-arm64; do \
+        asset="firetower-worker-$shape.tar.gz"; \
+        curl -fsSL --retry 3 -o "$FIRETOWER_WORKER_ARTIFACTS/$asset" \
+            "https://github.com/firetower-cloud/firetower/releases/download/firetower-v$VERSION/$asset" \
+        || { rm -f "$FIRETOWER_WORKER_ARTIFACTS/$asset"; echo "no released worker for $shape at $VERSION; machines will download"; }; \
+    done \
+    && ls -la "$FIRETOWER_WORKER_ARTIFACTS"
+
 # The root key, the token, and anything else this install owns. A volume in the
 # compose file: losing it means every stored credential has to be added again.
 ENV FIRETOWER_HOME=/var/lib/firetower

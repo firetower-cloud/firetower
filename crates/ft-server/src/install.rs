@@ -1,171 +1,153 @@
 //! Putting a worker on a machine that has none.
 //!
-//! The control plane and the worker are built from the same source at the same
-//! version, and the connection that would run the worker is already open — so
-//! the binary a bare host needs is one Firetower is holding, and it can go down
-//! the wire it is already trusted on. What used to be here instead was a
-//! `cargo build` in the interface, which asks somebody to install Rust on a
-//! machine whose whole purpose is to not have things installed on it.
+//! One installer, in one place: the script in `install/worker.sh`. A person
+//! runs it with `curl | sh`; this module runs the same script over the ssh
+//! connection Firetower already has, so the two can never disagree about
+//! where the worker goes or what the machine needs. It fetches the release
+//! built for *that* machine, which is what lets a Linux control plane put a
+//! worker on a Mac.
 //!
-//! What this never does: use sudo, write outside the account's home, or touch a
-//! worker somebody else installed. It writes one directory —
-//! `~/.firetower/worker/bin` — which the worker already owns, and which
+//! What this never does: use sudo, write outside the account's home, or touch
+//! a worker somebody else installed. The script writes one directory —
+//! `~/.firetower/worker` — which the worker already owns, and which
 //! [`crate::transport::worker_command`] puts last on PATH so an operator's own
 //! copy still wins.
 //!
-//! Not the small artifact `Dockerfile.worker` builds: the control-plane image
-//! carries one binary, so what goes down the wire is that binary under a
-//! two-line wrapper. Bigger than it needs to be, and the alternative is
-//! carrying a second worker build in an image that never runs it.
+//! ## Testing without a release
+//!
+//! A release is what the script downloads from. Between releases — a checkout
+//! being worked on — there is none with this version in it, so the control
+//! plane can be pointed at a directory of tarballs instead:
+//! `FIRETOWER_WORKER_ARTIFACTS=target/artifacts`, holding
+//! `firetower-worker-<os>-<arch>.tar.gz` as `just build-worker` makes them.
+//! When the one for the machine's shape is there it is streamed down the
+//! connection and the script installs it from stdin; when it is not, the
+//! script downloads as it would for anybody.
 
-use crate::transport::{SshTransport, INSTALLED_BIN, WORKER_BINARY};
+use crate::transport::{SshTransport, INSTALLED_ROOT};
 use anyhow::{Context, Result};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
-/// What to send, and how the far end will have to run it.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Source {
-    pub path: PathBuf,
-    /// Whether this is the control plane's own binary rather than a worker.
-    ///
-    /// They are two programs: a worker answers `--stdio`, and the control plane
-    /// answers `worker --stdio`. Sending the wrong one under the right name
-    /// produces `unknown option '--stdio'` on a machine nobody is looking at,
-    /// so the difference is carried here and settled by a two-line wrapper.
-    pub needs_wrapper: bool,
-}
+/// The installer, as shipped in this build.
+pub const SCRIPT: &str = include_str!("../../../install/worker.sh");
 
-/// The worker to send: the one built beside us, or failing that, ourselves.
+/// Where the same script is published, for the line a person types.
+pub const SCRIPT_URL: &str = "https://usefiretower.com/worker.sh";
+
+/// The directory of tarballs to install from instead of a release.
+pub const ARTIFACTS_ENV: &str = "FIRETOWER_WORKER_ARTIFACTS";
+
+/// Where the script lands on the machine before it runs.
+const REMOTE_SCRIPT: &str = "$HOME/.firetower/worker/install.sh";
+
+/// The one line to run on a machine.
 ///
-/// A source checkout builds both binaries side by side, so the first branch is
-/// what anyone developing this hits. The release image carries only
-/// `firetower`, so the second is the one production takes — the binary running
-/// this code can do the worker's job, it is just spelled differently, and a
-/// wrapper is cheaper than a second worker build in an image that never runs
-/// it.
-pub fn source_from(exe: &Path) -> Result<Source> {
-    let sibling = exe.with_file_name(WORKER_BINARY);
-    if sibling.is_file() {
-        return Ok(Source {
-            path: sibling,
-            needs_wrapper: false,
-        });
+/// With the key, it also authorises Firetower on the account, so the machine
+/// can be added the moment the script finishes. Without it — in a diagnosis,
+/// where the key is a screen away — it installs and says so.
+pub fn one_liner(public_key: Option<&str>) -> String {
+    match public_key {
+        Some(key) => format!(
+            "curl -fsSL {SCRIPT_URL} | sh -s -- --authorize '{}'",
+            key.trim().replace('\'', "'\\''")
+        ),
+        None => format!("curl -fsSL {SCRIPT_URL} | sh"),
     }
-    anyhow::ensure!(
-        exe.is_file(),
-        "there is no worker binary to send: {} is not a file",
-        exe.display()
-    );
-    Ok(Source {
-        path: exe.to_path_buf(),
-        needs_wrapper: true,
-    })
 }
 
-pub fn source() -> Result<Source> {
-    source_from(&std::env::current_exe().context("locating the Firetower binary")?)
-}
-
-/// Whether a binary built here will run there.
+/// The release asset built for a machine, from what `uname -sm` said.
 ///
-/// `uname -sm` rather than two round trips. The alias list is short on purpose:
-/// these are the names the machines Firetower runs on actually answer with, and
-/// guessing beyond them is how a binary that cannot run gets installed anyway.
-pub fn runs_there(uname_sm: &str, os: &str, arch: &str) -> bool {
+/// The names are the script's names, and the script's names are the release
+/// job's: `darwin`/`linux`, `arm64`/`x86_64`. The alias list is short on
+/// purpose — these are what the machines Firetower runs on answer with.
+pub fn artifact_for(uname_sm: &str) -> Result<String> {
     let mut parts = uname_sm.split_whitespace();
-    let (Some(their_os), Some(their_arch)) = (parts.next(), parts.next()) else {
-        return false;
+    let (Some(os), Some(arch)) = (parts.next(), parts.next()) else {
+        anyhow::bail!("that machine did not say what it is: `{}`", uname_sm.trim());
     };
-    let same_os = match os {
-        "linux" => their_os.eq_ignore_ascii_case("linux"),
-        "macos" => their_os.eq_ignore_ascii_case("darwin"),
-        _ => false,
+    let os = match os.to_ascii_lowercase().as_str() {
+        "darwin" => "darwin",
+        "linux" => "linux",
+        other => anyhow::bail!("no worker is published for {other}"),
     };
-    let same_arch = match arch {
-        "x86_64" => matches!(their_arch, "x86_64" | "amd64"),
-        "aarch64" => matches!(their_arch, "aarch64" | "arm64"),
-        other => their_arch == other,
+    let arch = match arch.to_ascii_lowercase().as_str() {
+        "x86_64" | "amd64" => "x86_64",
+        "aarch64" | "arm64" => "arm64",
+        other => anyhow::bail!("no worker is published for {os} on {other}"),
     };
-    same_os && same_arch
+    Ok(format!("firetower-worker-{os}-{arch}.tar.gz"))
 }
 
-/// Said to whoever asked, when the machine is the wrong shape for our binary.
+/// A tarball for this machine, in the directory the environment names.
 ///
-/// Names both sides. "Architecture mismatch" sends somebody to check the wrong
-/// machine half the time.
-pub fn mismatch(uname_sm: &str) -> String {
-    format!(
-        "that machine is {}, and this control plane is {} {} — its own binary will not run there. \
-         Install a firetower-worker built for that machine into {INSTALLED_BIN}, or onto its PATH.",
-        uname_sm.trim(),
-        std::env::consts::OS,
-        std::env::consts::ARCH,
-    )
+/// `None` when nothing was named, or when what was named has no tarball of
+/// that name — either way the script downloads, which is the ordinary path.
+pub fn local_artifact(asset: &str) -> Option<PathBuf> {
+    let dir = std::env::var_os(ARTIFACTS_ENV).map(PathBuf::from)?;
+    let path = dir.join(asset);
+    path.is_file().then_some(path)
 }
 
-/// The script that catches the bytes on the other end.
+/// Put this build's version of the worker there, and say what version
+/// answered afterwards.
 ///
-/// Written to a dot-file and moved into place, so a connection that drops
-/// halfway leaves nothing that looks like a worker. `chmod` before the move for
-/// the same reason.
-pub fn receive(needs_wrapper: bool) -> String {
-    let landing = if needs_wrapper {
-        "firetower"
-    } else {
-        WORKER_BINARY
-    };
-    let mut script = format!(
-        "set -e
-mkdir -p \"{INSTALLED_BIN}\"
-cat > \"{INSTALLED_BIN}/.incoming\"
-chmod 755 \"{INSTALLED_BIN}/.incoming\"
-mv \"{INSTALLED_BIN}/.incoming\" \"{INSTALLED_BIN}/{landing}\"
-"
-    );
-    if needs_wrapper {
-        // `dirname $0` rather than the literal directory: a home that is not
-        // where we think it is still resolves, and the wrapper keeps working if
-        // the account moves.
-        script.push_str(&format!(
-            "printf '%s\\n' '#!/bin/sh' 'exec \"$(dirname \"$0\")/firetower\" worker \"$@\"' > \"{INSTALLED_BIN}/{WORKER_BINARY}\"
-chmod 755 \"{INSTALLED_BIN}/{WORKER_BINARY}\"
-"
-        ));
-    }
-    script
-}
-
-/// Put the worker there, and say what version answered afterwards.
-///
-/// The version is `None` when the bytes landed and the probe did not answer.
-/// Those are two outcomes, and treating the second as a failed install threw
-/// away a worker that was sitting there working: the caller stopped short of
-/// waking the supervisor, so nothing tried the machine again.
+/// The version is `None` when the script ran and the probe did not answer.
+/// Those are two outcomes, and treating the second as a failed install throws
+/// away a worker that is sitting there working: the real verdict is the
+/// supervisor's next connection.
 pub async fn install(ssh: &SshTransport) -> Result<Option<String>> {
+    install_version(ssh, env!("CARGO_PKG_VERSION")).await?;
+
+    // Asked the way a connection will ask, so a probe and a session resolve to
+    // the same binary. Not fatal: the install is what was requested, and the
+    // real verdict is the supervisor's next connection.
+    match ssh.ask(&crate::transport::worker_probe()).await {
+        Ok(version) => Ok(Some(version)),
+        Err(e) => {
+            tracing::warn!("the worker was installed, but did not answer --version: {e:#}");
+            Ok(None)
+        }
+    }
+}
+
+/// Run the installer on the machine for one version, and hand back what it
+/// printed.
+///
+/// The script goes first, into the directory it will fill — sent rather than
+/// fetched by the machine, so the version of the script that runs is this
+/// build's. Then the tarball, if this build has one for that machine's shape;
+/// otherwise the script downloads it from the release.
+pub async fn install_version(ssh: &SshTransport, version: &str) -> Result<String> {
     let uname = ssh
         .ask("uname -sm")
         .await
         .context("asking the machine what it is")?;
-    anyhow::ensure!(
-        runs_there(&uname, std::env::consts::OS, std::env::consts::ARCH),
-        "{}",
-        mismatch(&uname)
-    );
+    let asset = artifact_for(&uname)?;
 
-    let source = source()?;
-    ssh.send(&receive(source.needs_wrapper), &source.path)
-        .await
-        .context("sending the worker")?;
+    ssh.send_text(
+        &format!("mkdir -p \"{INSTALLED_ROOT}\" && cat > \"{REMOTE_SCRIPT}\""),
+        SCRIPT,
+    )
+    .await
+    .context("sending the installer")?;
 
-    // Asked the way a connection will ask, so a probe and a session resolve to
-    // the same binary. Not fatal: the copy is what was requested, and the real
-    // verdict is the supervisor's next connection.
-    match ssh.ask(&crate::transport::worker_probe()).await {
-        Ok(version) => Ok(Some(version)),
-        Err(e) => {
-            tracing::warn!("the worker was copied, but did not answer --version: {e:#}");
-            Ok(None)
+    // The worker, and only the worker. A package the machine is missing is
+    // reported by the worker afterwards, with the command that installs it,
+    // for the person to run — the control plane never runs sudo on a machine.
+    let run = format!("sh \"{REMOTE_SCRIPT}\" --skip-packages --version {version}");
+
+    match local_artifact(&asset) {
+        Some(tarball) => {
+            tracing::info!(
+                asset,
+                from = %tarball.display(),
+                "installing the worker from a local build"
+            );
+            ssh.send(&format!("{run} --from -"), &tarball)
+                .await
+                .context("installing the worker from the local build")
         }
+        None => ssh.ask(&run).await.context("installing the worker"),
     }
 }
 
@@ -174,100 +156,65 @@ mod tests {
     use super::*;
 
     #[test]
-    fn prefers_the_worker_built_beside_us() {
-        let dir = tempfile::tempdir().unwrap();
-        let exe = dir.path().join("firetower");
-        std::fs::write(&exe, "control plane").unwrap();
-        std::fs::write(dir.path().join(WORKER_BINARY), "worker").unwrap();
-
-        let source = source_from(&exe).unwrap();
-        assert_eq!(source.path, dir.path().join(WORKER_BINARY));
-        assert!(
-            !source.needs_wrapper,
-            "a real worker is run by the name it is asked for"
+    fn a_machine_of_each_shape_gets_its_own_tarball() {
+        assert_eq!(
+            artifact_for("Darwin arm64").unwrap(),
+            "firetower-worker-darwin-arm64.tar.gz"
+        );
+        assert_eq!(
+            artifact_for("Linux x86_64\n").unwrap(),
+            "firetower-worker-linux-x86_64.tar.gz"
+        );
+        assert_eq!(
+            artifact_for("Linux aarch64").unwrap(),
+            "firetower-worker-linux-arm64.tar.gz"
+        );
+        assert_eq!(
+            artifact_for("Linux amd64").unwrap(),
+            "firetower-worker-linux-x86_64.tar.gz"
         );
     }
 
     #[test]
-    fn falls_back_to_ourselves_and_says_it_needs_the_wrapper() {
-        let dir = tempfile::tempdir().unwrap();
-        let exe = dir.path().join("firetower");
-        std::fs::write(&exe, "control plane").unwrap();
-
-        let source = source_from(&exe).unwrap();
-        assert_eq!(source.path, exe);
-        assert!(source.needs_wrapper);
+    fn a_machine_of_another_shape_is_refused_with_its_name() {
+        let said = artifact_for("FreeBSD amd64").unwrap_err().to_string();
+        assert!(said.contains("freebsd"), "{said}");
+        assert!(artifact_for("Linux").is_err(), "half an answer");
+        assert!(artifact_for("").is_err());
     }
 
+    /// The key goes into single quotes on the far end, so one inside it has
+    /// to be escaped the way a shell wants.
     #[test]
-    fn refuses_to_send_a_binary_that_is_not_there() {
-        let dir = tempfile::tempdir().unwrap();
-        assert!(source_from(&dir.path().join("gone")).is_err());
-    }
+    fn the_one_liner_carries_the_key_safely() {
+        let line = one_liner(Some("ssh-ed25519 AAAA firetower"));
+        assert!(line
+            .starts_with("curl -fsSL https://usefiretower.com/worker.sh | sh -s -- --authorize '"));
+        assert!(line.ends_with("'ssh-ed25519 AAAA firetower'"), "{line}");
 
-    #[test]
-    fn a_machine_of_the_same_shape_takes_our_binary() {
-        assert!(runs_there("Linux x86_64", "linux", "x86_64"));
-        assert!(runs_there("Linux amd64", "linux", "x86_64"));
-        assert!(runs_there("Linux aarch64", "linux", "aarch64"));
-        assert!(runs_there("Darwin arm64", "macos", "aarch64"));
-    }
+        let odd = one_liner(Some("it's"));
+        assert!(odd.contains(r"'it'\''s'"), "{odd}");
 
-    #[test]
-    fn a_machine_of_another_shape_does_not() {
-        assert!(!runs_there("Linux aarch64", "linux", "x86_64"));
-        assert!(!runs_there("Darwin arm64", "linux", "aarch64"));
-        assert!(!runs_there("Linux", "linux", "x86_64"), "half an answer");
-        assert!(!runs_there("", "linux", "x86_64"));
-    }
-
-    #[test]
-    fn the_mismatch_names_both_machines() {
-        let said = mismatch("Linux aarch64");
-        assert!(said.contains("Linux aarch64"), "{said}");
-        assert!(said.contains(std::env::consts::ARCH), "{said}");
-    }
-
-    /// Nothing lands under a name a connection would try until it is complete.
-    #[test]
-    fn a_dropped_connection_leaves_nothing_that_looks_like_a_worker() {
-        for wrapper in [false, true] {
-            let script = receive(wrapper);
-            let landing = script
-                .lines()
-                .find(|l| l.starts_with("cat >"))
-                .expect("it catches the bytes");
-            assert!(landing.contains("/.incoming"), "{landing}");
-            assert!(
-                script.contains(&format!("chmod 755 \"{INSTALLED_BIN}/.incoming\"")),
-                "executable before it is in place, and every path quoted: {script}"
-            );
-            assert!(script.starts_with("set -e"), "stops at the first failure");
-        }
-    }
-
-    #[test]
-    fn our_own_binary_is_installed_under_a_name_that_answers_stdio() {
-        let script = receive(true);
-        assert!(
-            script.contains(&format!(
-                "mv \"{INSTALLED_BIN}/.incoming\" \"{INSTALLED_BIN}/firetower\"\n"
-            )),
-            "{script}"
+        assert_eq!(
+            one_liner(None),
+            "curl -fsSL https://usefiretower.com/worker.sh | sh"
         );
-        assert!(
-            script.contains("exec \"$(dirname \"$0\")/firetower\" worker \"$@\""),
-            "the wrapper turns `--stdio` into `worker --stdio`: {script}"
-        );
-        assert!(script.contains(&format!("chmod 755 \"{INSTALLED_BIN}/{WORKER_BINARY}\"")));
+    }
+
+    /// The script is what runs on every machine, so it has to be here.
+    #[test]
+    fn the_installer_ships_with_the_control_plane() {
+        assert!(SCRIPT.starts_with("#!/bin/sh"), "a POSIX script, not bash");
+        assert!(SCRIPT.contains("--authorize"));
+        assert!(SCRIPT.contains("--from"));
+        assert!(SCRIPT.contains("--version"));
+        assert!(SCRIPT.contains("--yes"));
+        assert!(SCRIPT.contains("--skip-packages"));
     }
 
     #[test]
-    fn a_real_worker_needs_no_wrapper() {
-        let script = receive(false);
-        assert!(script.contains(&format!(
-            "mv \"{INSTALLED_BIN}/.incoming\" \"{INSTALLED_BIN}/{WORKER_BINARY}\""
-        )));
-        assert!(!script.contains("dirname"), "nothing to wrap: {script}");
+    fn nothing_named_means_nothing_local() {
+        std::env::remove_var(ARTIFACTS_ENV);
+        assert!(local_artifact("firetower-worker-darwin-arm64.tar.gz").is_none());
     }
 }

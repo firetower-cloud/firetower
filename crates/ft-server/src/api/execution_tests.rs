@@ -130,7 +130,6 @@ fn native() -> Compute {
         port: None,
         key: ft_core::SshKey::Default,
         host_key: None,
-        container: None,
     }
 }
 
@@ -186,9 +185,14 @@ async fn missing_native_worker_has_native_setup_instructions_and_stays_unready()
     .unwrap()
     .0;
     assert!(!report.ready());
-    let remedy = report.checks[0].remedy.as_ref().unwrap();
-    assert!(remedy.contains("Docker is not required"));
-    assert!(!remedy.contains("firetower worker install"));
+    // Two rows: whether ssh got in, and whether a worker is there. With no
+    // diagnosis yet, ssh has not been seen to get in, so the worker is not a
+    // question yet.
+    let names: Vec<&str> = report.checks.iter().map(|c| c.name.as_str()).collect();
+    assert_eq!(names, vec!["SSH", "Worker"]);
+    let worker = report.checks.iter().find(|c| c.name == "Worker").unwrap();
+    assert!(!worker.available);
+    assert!(!worker.required, "not asked until ssh gets in");
 }
 
 #[tokio::test]
@@ -269,31 +273,15 @@ async fn workspace_keeps_its_environment_and_refuses_a_different_host_on_resume(
 }
 
 #[test]
-fn both_machine_locations_use_the_selected_execution_transport() {
+fn both_machine_locations_use_the_ssh_transport() {
     for same_machine in [false, true] {
-        for container in [None, Some("video-worker".to_string())] {
-            let mut compute = native();
-            if let Compute::Server {
-                container: configured,
-                ..
-            } = &mut compute
-            {
-                *configured = container.clone();
-            }
-            let host: Host = serde_json::from_value(serde_json::json!({
-                "id": "h_transport", "name": "video", "state": "Online", "compute": compute,
-                "machine": if same_machine { Some("local") } else { None },
-            }))
-            .unwrap();
-            let transport =
-                crate::fleet::Fleet::transport_for(&host, std::path::Path::new("/tmp"), None)
-                    .unwrap();
-            let expected = if container.is_some() {
-                "ssh editor@vm docker exec video-worker"
-            } else {
-                "ssh editor@vm"
-            };
-            assert_eq!(transport.describe(), expected);
-        }
+        let host: Host = serde_json::from_value(serde_json::json!({
+            "id": "h_transport", "name": "video", "state": "Online", "compute": native(),
+            "machine": if same_machine { Some("local") } else { None },
+        }))
+        .unwrap();
+        let transport =
+            crate::fleet::Fleet::transport_for(&host, std::path::Path::new("/tmp"), None).unwrap();
+        assert_eq!(transport.describe(), "ssh editor@vm");
     }
 }

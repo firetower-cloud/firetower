@@ -185,58 +185,6 @@ impl Transport for LocalTransport {
     }
 }
 
-/// A worker on another machine, reached over SSH.
-///
-/// Not wired up yet — it exists here so the shape of the trait is settled by a
-/// second implementation rather than by one.
-/// A worker in a container on this machine.
-///
-/// `docker exec` gives the same bidirectional pipe an ssh session does, with no
-/// sshd to run, no key to manage and no host key to verify. The worker cannot
-/// tell the difference — which is the whole point of the transport being an
-/// abstraction.
-pub struct DockerTransport {
-    pub container: String,
-    pub root: std::path::PathBuf,
-}
-
-#[async_trait]
-impl Transport for DockerTransport {
-    fn describe(&self) -> String {
-        format!("docker exec {}", self.container)
-    }
-
-    async fn connect(&self) -> Result<Connection> {
-        let mut child = Command::new("docker")
-            .arg("exec")
-            // Interactive without a tty: frames are bytes, and a tty would
-            // helpfully translate newlines and corrupt them.
-            .arg("-i")
-            .arg(&self.container)
-            .arg(WORKER_BINARY)
-            .arg("--stdio")
-            .arg("--root")
-            .arg(&self.root)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .kill_on_drop(true)
-            .spawn()
-            .with_context(|| format!("connecting to container {}", self.container))?;
-
-        let stdout = child.stdout.take().context("docker stdout was not piped")?;
-        let stdin = child.stdin.take().context("docker stdin was not piped")?;
-        let tail = child.stderr.take().map(|e| watch(e, self.describe()));
-
-        Ok(Connection {
-            reader: Box::new(stdout),
-            writer: Box::new(stdin),
-            child: Some(child),
-            tail,
-        })
-    }
-}
-
 /// What a host is asked to run.
 ///
 /// Not `firetower`. That is a person's command — `@firetower/cli` installs its
@@ -248,6 +196,12 @@ impl Transport for DockerTransport {
 /// `localhost` does not use this: that worker is spawned from the control
 /// plane's own executable by absolute path.
 pub const WORKER_BINARY: &str = "firetower-worker";
+
+/// Where a worker keeps its state on a machine, and where the installer puts
+/// the binary: under the account's home, which is the one directory it is
+/// certain to be able to write. A fragment of a remote command — the shell on
+/// that machine expands `$HOME`.
+pub const INSTALLED_ROOT: &str = "$HOME/.firetower/worker";
 
 /// Where Firetower puts a worker it installed itself.
 ///
@@ -286,30 +240,9 @@ fn through_sh(args: &str) -> String {
     )
 }
 
-/// Single-quote a path for the remote shell.
-fn quoted(path: &std::path::Path) -> String {
-    format!("'{}'", path.display().to_string().replace('\'', r"'\''"))
-}
-
 /// The command that starts a worker on the far end.
-///
-/// Inside a container there is no shell in front of it: `docker exec` takes a
-/// program and its arguments, so a `PATH=…` word ahead of the program name is
-/// read as a program *called* `PATH=…` and nothing runs. That is what broke
-/// every container-mode worker. A container's worker comes from its image
-/// anyway — [`crate::api::hosts::install_worker`] refuses to touch one — so
-/// there is nothing for the installed directory to add there.
-pub fn worker_command(containerised: bool, root: Option<&std::path::Path>) -> String {
-    let mut args = String::from("--stdio");
-    if let Some(root) = root {
-        args.push_str(&format!(" --root {}", quoted(root)));
-    }
-
-    if containerised {
-        format!("{WORKER_BINARY} {args}")
-    } else {
-        through_sh(&args)
-    }
+pub fn worker_command() -> String {
+    through_sh("--stdio")
 }
 
 /// What to ask a freshly installed worker, so a probe and a session resolve to
@@ -338,20 +271,6 @@ pub struct SshTransport {
     pub home: std::path::PathBuf,
     /// Where a held key is read from, when the key is one.
     pub vault: Option<Arc<crate::vault::Vault>>,
-    /// The container to run the worker in on that machine, if it runs in one.
-    ///
-    /// Reached by ssh-ing to the machine and running `docker exec` there,
-    /// rather than by ssh-ing into the container: no sshd, no key inside the
-    /// image, no published port, and no host key that changes on every
-    /// recreate.
-    pub container: Option<String>,
-    /// Where that worker keeps its state.
-    ///
-    /// `Some` inside a container, where we are root and `/var/lib/firetower` is
-    /// what the image creates. `None` on the machine itself, leaving the
-    /// worker's own default of `~/.firetower/worker` — that account may have no
-    /// way to write under `/var/lib`.
-    pub root: Option<std::path::PathBuf>,
 }
 
 impl SshTransport {
@@ -493,7 +412,8 @@ impl SshTransport {
         Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
     }
 
-    /// Send a file to a command's standard input on the machine.
+    /// Send a file to a command's standard input on the machine, and hand back
+    /// what the command printed.
     ///
     /// This is how a worker binary gets there: down the connection that is
     /// already trusted, rather than through a second channel the operator would
@@ -505,11 +425,30 @@ impl SshTransport {
     /// a hundred megabytes spent on nothing. The far end prints nothing until
     /// it is done, so writing before reading cannot fill a pipe nobody is
     /// draining.
-    pub async fn send(&self, command: &str, file: &std::path::Path) -> Result<()> {
-        let mut source = tokio::fs::File::open(file)
+    pub async fn send(&self, command: &str, file: &std::path::Path) -> Result<String> {
+        let source = tokio::fs::File::open(file)
             .await
             .with_context(|| format!("reading {}", file.display()))?;
+        self.send_from(command, source, &file.display().to_string())
+            .await
+    }
 
+    /// The same, for something already in memory — the installer script.
+    pub async fn send_text(&self, command: &str, text: &str) -> Result<String> {
+        self.send_from(
+            command,
+            std::io::Cursor::new(text.as_bytes().to_vec()),
+            "text",
+        )
+        .await
+    }
+
+    async fn send_from(
+        &self,
+        command: &str,
+        mut source: impl tokio::io::AsyncRead + Unpin,
+        what: &str,
+    ) -> Result<String> {
         let mut ssh = self.command().await?;
         ssh.arg(command);
         let mut child = ssh
@@ -523,7 +462,7 @@ impl SshTransport {
         let mut stdin = child.stdin.take().context("ssh stdin was not piped")?;
         tokio::io::copy(&mut source, &mut stdin)
             .await
-            .with_context(|| format!("sending {} to {}", file.display(), self.destination))?;
+            .with_context(|| format!("sending {what} to {}", self.destination))?;
         drop(stdin);
 
         // Generous, and bounded all the same: this is a large file over
@@ -539,9 +478,19 @@ impl SshTransport {
 
         if !output.status.success() {
             let said = String::from_utf8_lossy(&output.stderr);
-            anyhow::bail!("{} refused it: {}", self.destination, said.trim());
+            let said = said.trim();
+            let last = said.lines().last().unwrap_or("").trim();
+            anyhow::bail!(
+                "{} refused it: {}",
+                self.destination,
+                if last.is_empty() {
+                    "no reason given"
+                } else {
+                    last
+                }
+            );
         }
-        Ok(())
+        Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
     }
 }
 
@@ -560,28 +509,16 @@ impl Transport for SshTransport {
         }
         described.push(' ');
         described.push_str(&self.destination);
-        if let Some(container) = &self.container {
-            described.push_str(&format!(" docker exec {container}"));
-        }
         described
     }
 
     async fn connect(&self) -> Result<Connection> {
         let mut ssh = self.command().await?;
 
-        // `-i` and not `-t`: frames are bytes, and a tty would translate
-        // newlines and corrupt them.
-        if let Some(container) = &self.container {
-            ssh.arg("docker").arg("exec").arg("-i").arg(container);
-        }
-
         // One argument, because ssh joins them with spaces and hands the
         // result to a shell anyway — and the quoting inside only survives if
         // this side does not add its own.
-        ssh.arg(worker_command(
-            self.container.is_some(),
-            self.root.as_deref(),
-        ));
+        ssh.arg(worker_command());
 
         let mut child = ssh
             .stdin(Stdio::piped())
@@ -707,27 +644,12 @@ mod tests {
             // These describe themselves without connecting, and a key ssh
             // chooses for itself never reaches the vault.
             vault: None,
-            container: None,
-            root: None,
         }
     }
 
     #[test]
     fn a_transport_describes_itself_for_the_log() {
         assert_eq!(ssh("root@203.0.113.44").describe(), "ssh root@203.0.113.44");
-    }
-
-    /// "No worker on that machine" and "no worker in that container" are told
-    /// apart from this line, so it has to name the container.
-    #[test]
-    fn a_containerised_server_says_so_in_its_description() {
-        let described = SshTransport {
-            container: Some("firetower-worker".into()),
-            ..ssh("deploy@fire-01")
-        }
-        .describe();
-
-        assert_eq!(described, "ssh deploy@fire-01 docker exec firetower-worker");
     }
 
     #[test]
@@ -753,7 +675,7 @@ mod tests {
     async fn what_a_dying_child_said_survives_it() {
         let mut child = Command::new("sh")
             .arg("-c")
-            .arg("echo 'bash: firetower: command not found' >&2; exit 127")
+            .arg("echo 'bash: firetower-worker: command not found' >&2; exit 127")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -829,7 +751,7 @@ mod tests {
     /// and a worker the operator installed still wins.
     #[test]
     fn the_remote_command_looks_where_firetower_installs_last() {
-        let command = worker_command(false, None);
+        let command = worker_command();
         assert!(
             command.contains(&format!("PATH=\"$PATH:{INSTALLED_BIN}\"")),
             "appended, so an operator's own copy is the one that answers: {command}"
@@ -847,7 +769,7 @@ mod tests {
     /// `VAR=value cmd` and exit without running anything.
     #[test]
     fn a_direct_host_is_asked_through_a_posix_shell() {
-        let command = worker_command(false, None);
+        let command = worker_command();
         assert!(command.starts_with("sh -c '"), "{command}");
         // `$0` eats the word after the script, so the name has to be repeated
         // or `--stdio` is swallowed as the shell's own name.
@@ -857,38 +779,11 @@ mod tests {
         );
     }
 
-    /// `docker exec` takes a program, not a shell line: a `PATH=…` word in
-    /// front of the name is read as a program called `PATH=…`, and every
-    /// container-mode worker stopped answering.
-    #[test]
-    fn a_container_is_asked_for_the_program_and_nothing_else() {
-        let command = worker_command(true, None);
-        assert_eq!(command, format!("{WORKER_BINARY} --stdio"));
-        assert!(!command.contains("PATH="), "{command}");
-        assert!(!command.contains("sh -c"), "{command}");
-    }
-
-    /// The root the image uses, and any root with a space in it.
-    #[test]
-    fn a_root_is_quoted_for_the_shell_on_the_other_side() {
-        let command = worker_command(
-            true,
-            Some(std::path::Path::new("/var/lib/firetower/worker")),
-        );
-        assert!(
-            command.ends_with("--stdio --root '/var/lib/firetower/worker'"),
-            "{command}"
-        );
-
-        let spaced = worker_command(false, Some(std::path::Path::new("/mnt/big disk/worker")));
-        assert!(spaced.contains("--root '/mnt/big disk/worker'"), "{spaced}");
-    }
-
     /// Whatever answers a probe is what will answer a session.
     #[test]
     fn the_probe_resolves_the_same_binary_a_session_would() {
         let probe = worker_probe();
-        let session = worker_command(false, None);
+        let session = worker_command();
         let script = |s: &str| s[s.find('\'').unwrap()..s.rfind('\'').unwrap()].to_string();
         assert_eq!(script(&probe), script(&session));
         assert!(probe.ends_with("--version"), "{probe}");

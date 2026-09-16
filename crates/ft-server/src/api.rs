@@ -299,7 +299,6 @@ async fn credential_for(
         crate::trackers::ScopeKind,
         crate::updates::RunState,
         crate::updates::StepState,
-        crate::updates::TargetKind,
         crate::updates::deploy::FileVerdict,
         crate::updates::deploy::FilePlan,
         crate::updates::store::Targets

@@ -10,7 +10,7 @@ Running Firetower needs Docker and one compose file — that is the
 | **Rust** 1.90+ | Builds everything. `rustup` handles the rest — the toolchain is pinned. |
 | **git** | Mirrors and worktrees. Already on most machines. |
 | **tmux** | Holds the agent's terminal. This is the piece that keeps a session alive after you disconnect, so it isn't optional. |
-| **Docker** | Postgres for the control plane, and a container host if you add one. |
+| **Docker** | Postgres for the control plane. |
 | **Node 22+ and pnpm** | Builds the web application. |
 | **[just](https://github.com/casey/just)** | Task runner. Every command below assumes it. |
 | **cargo-watch** | Rebuilds the control plane on save. Only needed for `just dev`. |
@@ -63,7 +63,7 @@ The web application has its own dev server, so development runs two processes:
 just dev        # control plane on :4400, web application on :3000
 just test
 just gen        # regenerate the API contract and the typed client
-just worker-image   # after a protocol change, or containers fail the handshake
+just build-worker   # a worker tarball for this machine's shape, for a real host
 ```
 
 While developing, the interface and the control plane are two processes on two
@@ -75,8 +75,8 @@ asking itself.
 Don't edit Rust while a local session is cloning: `cargo watch` restarts the
 control plane, which kills the local worker as its child and abandons the
 fetch. If you change the shape of a protocol frame, bump `PROTOCOL_VERSION` in
-`ft-proto` and rebuild the worker image — an old container fails the handshake
-with the stream closing.
+`ft-proto` and reinstall the worker on any machine you are testing against —
+an old worker fails the handshake with the stream closing.
 
 The web application is pinned to pnpm. Running `npm install` in `web/` would
 produce a second lockfile, so `packageManager` refuses it.
@@ -119,47 +119,47 @@ follow:
   the id from the address bar rather than the router. See
   `crates/ft-server/src/web.rs`.
 
-## Images
+## Images, and the worker
 
 ```sh
-just worker-image        # the worker, after a protocol change
 just updater-image       # the updater beside the control plane
 docker build -t firetower .   # the control plane, interface and all
+just build-worker        # the worker binary, packed as a release would
 ```
 
-All three are published together on release: the control plane compares its
-version against each worker's on every handshake, and its API version against
-the updater's on every call, so shipping one without the others tells everyone
-their fleet has drifted.
+The two images and the worker binaries are published together on release: the
+control plane compares its version against each worker's on every handshake,
+and its API version against the updater's on every call, so shipping one
+without the others tells everyone their fleet has drifted.
+
+The worker is not an image. It is one binary per platform, installed into
+`~/.firetower/worker/bin` on a machine by `install/worker.sh` — the same
+script whether a person runs it with `curl | sh` or the control plane runs it
+over ssh. To try a checkout on a real machine without a release, `just
+build-worker` packs a tarball into `target/artifacts`, and `just dev` starts
+the control plane with `FIRETOWER_WORKER_ARTIFACTS` pointing there, so
+"Install the worker" sends that build to a machine of the same shape.
 
 ## Docker inside a session
 
-A session can run `docker compose up`. The worker container runs a daemon of
-its own, so a stack a session brings up is reachable on that container's
-`127.0.0.1` — which is where `tunnel.rs` connects, and therefore what makes a
-preview reach a compose service. A daemon on the *machine* would publish on the
-machine, where the worker's loopback cannot see it, so this cannot be done by
-sharing the host's socket.
+A session can run `docker compose up` when the machine has Docker. It is the
+machine's daemon: a stack a session brings up is published on the machine's
+`127.0.0.1`, which is where `tunnel.rs` connects, and therefore what makes a
+preview reach a compose service.
 
 Two things follow, and neither is hidden from the agent — both are written into
 the `AGENTS.md` a session starts with:
 
-* **The daemon is shared by every session on that worker.** A worker container
-  is created per host, not per session. So published ports are shared — two
-  sessions both mapping `3000:3000` collide — and `docker ps` in one session
-  lists another's containers.
-* **Teardown is by label.** There is no per-session container to throw away, so
-  each session gets its own Compose project name and everything carrying it is
-  removed when the session ends. A bare `docker run` is only cleared up if it
-  carries `--label com.firetower.session=$FIRETOWER_SESSION`.
+* **The daemon is shared by every session on that machine.** Published ports
+  are shared — two sessions both mapping `3000:3000` collide — and `docker ps`
+  in one session lists another's containers.
+* **Teardown is by label.** Each session gets its own Compose project name and
+  everything carrying it is removed when the session ends. A bare `docker run`
+  is only cleared up if it carries
+  `--label com.firetower.session=$FIRETOWER_SESSION`.
 
-**Worker containers are privileged.** A daemon inside a container needs
-privileges an ordinary container does not have, so anything in a session can
-become root on the machine hosting that worker. The boundary is the machine:
-give a worker a VM of its own and treat everything else on it as reachable from
-any session. `FIRETOWER_WORKER_DOCKER=off` on the control plane turns this off
-— workers come up exactly as before, with no Docker in sessions and a message
-that says so.
+The boundary is the machine. Anything a session runs has the account's access
+to it, so give a worker a VM of its own when that is what you want.
 
 To check any of this, run it from inside a session:
 

@@ -14,8 +14,8 @@
 //! asking for a human's command. Nobody types this one.
 //!
 //! It is also the build the `server` feature was written for — no axum, no
-//! database, no embedded web application — which the worker image had never
-//! actually used. See `Dockerfile.worker`.
+//! database, no embedded web application — and the one `install/worker.sh`
+//! puts on a machine.
 //!
 //! `localhost` does not come through here. That worker is spawned from the
 //! control plane's own executable by absolute path, so it has never been a
@@ -42,7 +42,7 @@ struct Cli {
 
     /// Where this worker keeps its state: repository mirrors, worktrees, its
     /// event log, and the agent's own directory.
-    #[arg(long)]
+    #[arg(long, global = true)]
     root: Option<PathBuf>,
 
     #[command(subcommand)]
@@ -77,12 +77,24 @@ enum AgentsCommand {
 
 #[derive(Subcommand)]
 enum Command {
+    /// What this machine has and what it is missing, as Firetower sees it.
+    ///
+    /// The same checks the control plane runs over ssh, with the same PATH, so
+    /// a green table here is a green table there. Exits non-zero when
+    /// something required is missing, so a script can ask.
+    Doctor {
+        /// Also check that this agent is here and answers: `claude-code` or
+        /// `codex`.
+        #[arg(long)]
+        agent: Option<String>,
+    },
+
     /// The agents this machine can run.
     ///
-    /// They are not in the image: each is a few hundred megabytes and they are
-    /// published on their own schedules, so a new one would otherwise mean a
-    /// new Firetower before anybody could use it. They go on the volume, which
-    /// survives recreating the container to upgrade the worker.
+    /// Each is fetched as the standalone binary its publisher ships, into the
+    /// worker's own state directory, one directory per version. Nothing else
+    /// on the machine is needed to install one, and nothing on the machine is
+    /// changed by it.
     ///
     /// Nothing here signs anything in. Installing a binary and authenticating
     /// it are separate acts, and what an agent authenticates with is held by
@@ -190,7 +202,13 @@ async fn main() -> Result<()> {
             println!("{value}");
             return Ok(());
         }
+        Some(Command::Doctor { agent }) => {
+            ft_worker::path::adopt().await;
+            let root = cli.root.clone().unwrap_or_else(default_root);
+            return doctor(&root, agent.as_deref()).await;
+        }
         Some(Command::Agents { what }) => {
+            ft_worker::path::adopt().await;
             let root = cli.root.clone().unwrap_or_else(default_root);
             return agents(&root, what).await;
         }
@@ -250,6 +268,11 @@ async fn main() -> Result<()> {
 
     let root = cli.root.unwrap_or_else(default_root);
 
+    // sshd started this with the daemon's own PATH, which has nothing the
+    // account installed on it. Ask the machine what it really has, once, before
+    // the first `git` or `tmux` is looked for.
+    ft_worker::path::adopt().await;
+
     let worker = std::sync::Arc::new(
         ft_worker::Worker::open(&root)
             .await
@@ -266,11 +289,63 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-/// Where a worker keeps its state when nobody says.
+/// What this machine has, printed for the person standing at it.
 ///
-/// The control plane always passes `--root`, so this is for the two callbacks
-/// below — git's askpass and an agent's hook — which are started by something
-/// that knows nothing about our arguments.
+/// One row per check, the way the readiness panel shows them, and the PATH
+/// the checks ran with — because "tmux missing" on a machine that has tmux is
+/// a PATH question, and this is the line that answers it.
+async fn doctor(root: &std::path::Path, agent: Option<&str>) -> anyhow::Result<()> {
+    let agent = agent.map(agent_named).transpose()?;
+
+    tokio::fs::create_dir_all(root)
+        .await
+        .with_context(|| format!("making {}", root.display()))?;
+
+    let report = ft_worker::readiness::check(root, agent).await;
+
+    println!("firetower-worker {}", env!("CARGO_PKG_VERSION"));
+    println!("state      {}", root.display());
+    if let Some(user) = &report.user {
+        println!("account    {user}");
+    }
+    println!();
+
+    let width = report
+        .checks
+        .iter()
+        .map(|c| c.name.len())
+        .max()
+        .unwrap_or(0);
+    let mut missing = 0;
+    for check in &report.checks {
+        let mark = if check.available {
+            "ok"
+        } else if check.required {
+            missing += 1;
+            "MISSING"
+        } else {
+            "absent"
+        };
+        println!("{mark:<8} {:<width$}  {}", check.name, check.detail);
+        if !check.available {
+            if let Some(remedy) = &check.remedy {
+                println!("         {:<width$}  → {remedy}", "");
+            }
+        }
+    }
+
+    println!();
+    println!("PATH       {}", std::env::var("PATH").unwrap_or_default());
+
+    if missing > 0 {
+        anyhow::bail!(
+            "{missing} thing{} missing",
+            if missing == 1 { "" } else { "s" }
+        );
+    }
+    Ok(())
+}
+
 /// List, add or remove the agents this machine can run.
 ///
 /// Written for somebody watching a terminal: what is here, or what changed,
@@ -363,23 +438,13 @@ fn directory_name(kind: ft_core::Agent) -> &'static str {
 
 /// Where this worker keeps its state, when nobody said.
 ///
-/// `/var/lib/firetower/worker` first, because that is what the image creates
-/// and what the control plane passes when it runs a worker in a container.
-/// Without this check the two disagree: `HOME` inside the image is redirected
-/// to the volume, so the home-directory answer would be
-/// `/var/lib/firetower/home/.firetower/worker` — a second state directory
-/// beside the real one, and agents installed by hand would land somewhere no
-/// session looks.
-///
-/// On a machine that is not a worker container it does not exist, and the
-/// home-directory answer is the right one.
+/// `~/.firetower/worker`: the account's own home, which is the one directory
+/// it is certain to be able to write, and where the installer puts the binary
+/// itself. The control plane passes `--root` when it wants somewhere else;
+/// the callbacks — git's askpass, an agent's hook — and a person at the
+/// terminal get this.
 fn default_root() -> PathBuf {
-    let in_image = PathBuf::from("/var/lib/firetower/worker");
-    if in_image.is_dir() {
-        return in_image;
-    }
-
     directories::BaseDirs::new()
         .map(|d| d.home_dir().join(".firetower").join("worker"))
-        .unwrap_or(in_image)
+        .unwrap_or_else(|| PathBuf::from(".firetower/worker"))
 }

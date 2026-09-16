@@ -16,7 +16,7 @@
 //! and after a restart — unless it was drained before the run touched it.
 
 use super::store::{Run, Step, Store};
-use super::{runner, version, worker, RunState, StepState};
+use super::{version, RunState, StepState};
 use crate::AppState;
 use anyhow::{anyhow, Context, Result};
 use ft_updater_api::{JobKind, JobState};
@@ -29,7 +29,7 @@ pub const UPDATER: &str = "updater";
 pub const CONTROL_PLANE: &str = "control_plane";
 pub const HOST_PREFIX: &str = "host:";
 
-/// How long a recreated worker has to come back and shake hands.
+/// How long a reinstalled worker has to come back and shake hands.
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(180);
 /// How long the updater has to finish a backup.
 const BACKUP_TIMEOUT: Duration = Duration::from_secs(10 * 60);
@@ -299,7 +299,8 @@ async fn preflight(state: &AppState, run: &Run, log: &Log) -> Result<String> {
         if !state.fleet.is_connected(&id).await {
             anyhow::bail!("{} is not connected", host.name);
         }
-        runner_for(state, &host)?;
+        crate::fleet::Fleet::ssh_transport_for(&host, &state.home, Some(&state.vault))?
+            .with_context(|| format!("{} is not reached over ssh", host.name))?;
         log.say(&format!(
             "{} answers as worker {}",
             host.name,
@@ -527,8 +528,8 @@ async fn upgrade_host(
         .host_by_id(&id)
         .await?
         .with_context(|| format!("host {host_id} is gone"))?;
-    let name = container_name(&host)?;
-    let runner = runner_for(state, &host)?;
+    let ssh = crate::fleet::Fleet::ssh_transport_for(&host, &state.home, Some(&state.vault))?
+        .context("a server host is reached over ssh")?;
 
     // Taken out of service for the length of the step, and put back after
     // unless it was already out.
@@ -547,61 +548,18 @@ async fn upgrade_host(
         end_sessions_on(state, &host, log).await?;
     }
 
-    log.say(&format!("inspecting {name} via {}", runner.describe()))
-        .await;
-    let q = worker::quote(&name);
-    let inspect = runner
-        .run(&format!(
-            "docker inspect {q} && echo ---firetower-image--- && docker image inspect \"$(docker inspect -f '{{{{.Image}}}}' {q})\""
-        ))
-        .await?;
-    if !inspect.ok() {
-        log.say_all(&inspect.stderr, "").await;
-        anyhow::bail!(
-            "could not read the container: {}",
-            inspect
-                .stderr
-                .trim()
-                .lines()
-                .last()
-                .unwrap_or("docker inspect failed")
-        );
-    }
-    let (container_json, image_json) = inspect
-        .stdout
-        .split_once("---firetower-image---")
-        .context("docker inspect said something unexpected")?;
-    let container: serde_json::Value =
-        serde_json::from_str(container_json.trim()).context("reading docker inspect")?;
-    let image: serde_json::Value =
-        serde_json::from_str(image_json.trim()).context("reading docker image inspect")?;
-
-    let plan = worker::plan_from_inspect(&container, &image)?;
-    let script = worker::script(&plan, &name)?;
-    log.say_all(&script, "$ ").await;
-
-    let ran = runner.run(&script).await?;
-    log.say_all(&ran.stdout, "").await;
-    log.say_all(&ran.stderr, "").await;
-    if !ran.ok() {
-        anyhow::bail!(
-            "the upgrade command exited {}",
-            ran.status
-                .map(|s| s.to_string())
-                .unwrap_or_else(|| "by signal".into())
-        );
-    }
-
-    if let Some(stamped) = worker::version_from_output(&ran.stdout) {
-        if let Some(v) = version::parse(&stamped) {
-            if v.to_string() != run.to_version {
-                anyhow::bail!(
-                    "the image that came up is {v}, not {} — latest may have moved; check again",
-                    run.to_version
-                );
-            }
-        }
-    }
+    // The same installer a person runs, over the same connection a session
+    // takes, pinned to the version this run is moving to. What it fetches is
+    // the build for that machine's own shape.
+    log.say(&format!(
+        "installing firetower-worker {} on {} via ssh {}",
+        run.to_version, host.name, ssh.destination
+    ))
+    .await;
+    let said = crate::install::install_version(&ssh, &run.to_version)
+        .await
+        .context("reinstalling the worker")?;
+    log.say_all(&said, "").await;
 
     log.say("waiting for the worker to reconnect").await;
     let started = std::time::Instant::now();
@@ -621,7 +579,7 @@ async fn upgrade_host(
         }
         if started.elapsed() > HANDSHAKE_TIMEOUT {
             anyhow::bail!(
-                "the container was recreated but the worker did not shake hands as {} within {}s",
+                "the worker was reinstalled but did not shake hands as {} within {}s",
                 run.to_version,
                 HANDSHAKE_TIMEOUT.as_secs()
             );
@@ -918,69 +876,9 @@ async fn local_host(state: &AppState) -> Result<ft_core::Host> {
         .context("this machine is not in the fleet")
 }
 
-/// The container a host's worker runs in. What is recreated.
-pub fn container_name(host: &ft_core::Host) -> Result<String> {
-    let name = match &host.compute {
-        ft_core::Compute::Container { name, .. } => name.clone(),
-        ft_core::Compute::Server {
-            container: Some(name),
-            ..
-        } => name.clone(),
-        ft_core::Compute::Server {
-            container: None, ..
-        } => anyhow::bail!(
-            "{} runs a worker installed by hand, not in a container, so Firetower cannot \
-             recreate it",
-            host.name
-        ),
-        ft_core::Compute::Local => {
-            anyhow::bail!("this machine's worker is upgraded with the control plane")
-        }
-    };
-    anyhow::ensure!(
-        worker::valid_container_name(&name),
-        "{name} is not a name a container can have"
-    );
-    Ok(name)
-}
-
-/// How to run a command where a host's container is.
-pub fn runner_for(state: &AppState, host: &ft_core::Host) -> Result<Box<dyn runner::Runner>> {
-    container_name(host)?;
-    match &host.compute {
-        ft_core::Compute::Container { .. } => Ok(Box::new(runner::LocalRunner)),
-        ft_core::Compute::Server { .. } => {
-            let transport =
-                crate::fleet::Fleet::ssh_transport_for(host, &state.home, Some(&state.vault))?
-                    .context("a server host is reached over ssh")?;
-            Ok(Box::new(runner::SshRunner { transport }))
-        }
-        ft_core::Compute::Local => anyhow::bail!("this machine is not a host to upgrade"),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn host(compute: ft_core::Compute) -> ft_core::Host {
-        ft_core::Host {
-            machine: None,
-            execution: None,
-            id: ft_core::HostId::from_stored("h_1"),
-            name: "fire-01".into(),
-            state: ft_core::HostState::Online,
-            compute,
-            drained: false,
-            cpus: None,
-            memory_mb: None,
-            worker_version: Some("0.30.1".into()),
-            diagnosis: None,
-            docker: Default::default(),
-            capacity: None,
-            reconnecting: false,
-        }
-    }
 
     #[test]
     fn the_steps_go_control_plane_first_then_each_machine() {
@@ -1018,43 +916,6 @@ mod tests {
         );
         assert_eq!(workers_only.len(), 2);
         assert!(!workers_only.iter().any(|(t, _)| t == BACKUP));
-    }
-
-    #[test]
-    fn only_a_container_has_something_to_recreate() {
-        assert_eq!(
-            container_name(&host(ft_core::Compute::Server {
-                host: "1.2.3.4".into(),
-                user: None,
-                port: None,
-                key: ft_core::SshKey::Default,
-                host_key: None,
-                container: Some("firetower-worker".into()),
-            }))
-            .unwrap(),
-            "firetower-worker"
-        );
-        let said = container_name(&host(ft_core::Compute::Server {
-            host: "1.2.3.4".into(),
-            user: None,
-            port: None,
-            key: ft_core::SshKey::Default,
-            host_key: None,
-            container: None,
-        }))
-        .unwrap_err()
-        .to_string();
-        assert!(said.contains("by hand"), "{said}");
-        assert!(container_name(&host(ft_core::Compute::Local)).is_err());
-        assert!(container_name(&host(ft_core::Compute::Server {
-            host: "1.2.3.4".into(),
-            user: None,
-            port: None,
-            key: ft_core::SshKey::Default,
-            host_key: None,
-            container: Some("bad name;".into()),
-        }))
-        .is_err());
     }
 
     #[test]

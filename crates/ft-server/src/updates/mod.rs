@@ -9,9 +9,9 @@
 //!
 //! ## Who does what
 //!
-//! * **Workers** are recreated by the control plane, over the same ssh path a
-//!   connection takes — see [`worker`] for what is run, and [`runner`] for
-//!   how. The key never goes anywhere it did not already go.
+//! * **Workers** are reinstalled by the control plane, over the same ssh path
+//!   a connection takes — the installer script, pinned to the version being
+//!   moved to. The key never goes anywhere it did not already go.
 //! * **The control plane** cannot recreate itself, so an updater container
 //!   beside it does — see [`client`] and the `ft-updater` crate. The updater
 //!   holds the Docker socket and nothing else: no key, no password, no
@@ -29,12 +29,10 @@
 pub mod check;
 pub mod client;
 pub mod deploy;
-pub mod runner;
 pub mod runs;
 pub mod status;
 pub mod store;
 pub mod version;
-pub mod worker;
 
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -213,27 +211,17 @@ pub struct ControlPlaneTarget {
     pub updater: UpdaterView,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-pub enum TargetKind {
-    /// A worker container Firetower can recreate — on a server, or here.
-    Container,
-    /// A `firetower-worker` binary somebody put on a machine. Reported only.
-    Binary,
-}
-
 #[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct HostTarget {
     pub host_id: String,
     pub name: String,
-    pub kind: TargetKind,
     pub version: Option<String>,
     pub online: bool,
     pub drained: bool,
     pub upgradable: bool,
     pub reason: Option<String>,
-    /// Sessions on this machine, by title. They end when it is recreated.
+    /// Sessions on this machine, by title. They end when it is reinstalled.
     pub sessions: Vec<String>,
 }
 

@@ -3,28 +3,13 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.32.2
+ * OpenAPI spec version: 0.34.2
  */
 import type { SshKey } from './sshKey';
 
 export type Compute = {
   type: 'Local';
 } | {
-  image: string;
-  name: string;
-  type: 'Container';
-} | {
-  /**
-     * The container the worker runs in on that machine. Absent runs the
-     * binary on the host itself, for a machine whose image already has it.
-     *
-     * Reached by ssh-ing to the machine and running `docker exec` there,
-     * never by ssh-ing into the container — that would need a key inside
-     * the image, a published port, and a host key that changes on every
-     * recreate.
-     * @nullable
-     */
-  container?: string | null;
   /** A hostname, an address, or a name from your ssh config. */
   host: string;
   /**

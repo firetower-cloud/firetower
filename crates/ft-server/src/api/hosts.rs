@@ -1,10 +1,10 @@
-//! Where agents run: a container here, or a server you own.
+//! Where agents run: this machine, or a server you own.
 //!
 //! Adding one connects to it there and then, so a wrong address is a message
 //! on the form rather than a host that quietly never works.
 
 use super::{ApiError, ApiResult, ErrorCode};
-use crate::{container, fleet, AppState};
+use crate::{fleet, AppState};
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
@@ -75,14 +75,8 @@ pub(super) async fn create_host(
     {
         return Err(ApiError::new(
             ErrorCode::InvalidRequest,
-            "This worker connection is already configured. Select its existing environment.",
+            "That machine is already added.",
         ));
-    }
-
-    if let ft_core::Compute::Container { image, name } = &compute {
-        container::start(image, name)
-            .await
-            .map_err(|e| ApiError::new(ErrorCode::HostUnreachable, format!("{e:#}")))?;
     }
 
     let host = state.db.ensure_host(&name, compute).await?;
@@ -98,10 +92,10 @@ pub(super) async fn create_host(
         .map_err(|e| ApiError::new(ErrorCode::Internal, format!("{e:#}")))?;
 
     // A host that didn't answer is kept, not discarded. Most reasons a first
-    // connection fails are fixable on the machine — no worker installed, no
-    // container running, the wrong key — and deleting the row would mean
-    // retyping the form to retry. It is stored `Unreachable` with a diagnosis,
-    // and the supervisor keeps trying, so fixing the machine is enough.
+    // connection fails are fixable on the machine — no worker installed, the
+    // wrong key — and deleting the row would mean retyping the form to retry.
+    // It is stored `Unreachable` with a diagnosis, and the supervisor keeps
+    // trying, so fixing the machine is enough.
     state.fleet.supervise(host.id.clone(), transport).await;
 
     let host = state
@@ -128,7 +122,6 @@ fn settled(compute: ft_core::Compute) -> Result<ft_core::Compute, ApiError> {
             port,
             key,
             host_key,
-            container,
         } => {
             let typed = ft_core::parse_destination(&host);
 
@@ -153,30 +146,12 @@ fn settled(compute: ft_core::Compute) -> Result<ft_core::Compute, ApiError> {
                     .map_err(|e| ApiError::new(ErrorCode::InvalidRequest, format!("{e:#}")))?;
             }
 
-            // Blank means the worker runs on the machine itself.
-            let container = given(container);
-            // The one value from this form that reaches a remote shell — in
-            // `docker exec`, and in the commands an upgrade runs. Docker's
-            // own rule for a name, checked here rather than trusted there.
-            if let Some(name) = &container {
-                if !crate::updates::worker::valid_container_name(name) {
-                    return Err(ApiError::new(
-                        ErrorCode::InvalidRequest,
-                        format!(
-                            "{name} is not a name a container can have: letters, digits, \
-                             `_`, `.` and `-`, starting with a letter or digit"
-                        ),
-                    ));
-                }
-            }
-
             Ok(ft_core::Compute::Server {
                 host: typed.host,
                 user: given(user).or(typed.user),
                 port: port.or(typed.port),
                 key,
                 host_key: given(host_key),
-                container,
             })
         }
         other => Ok(other),
@@ -196,7 +171,6 @@ fn called(given: Option<&str>, compute: &ft_core::Compute) -> String {
         Some(given) => given.to_string(),
         None => match compute {
             ft_core::Compute::Local => "localhost".to_string(),
-            ft_core::Compute::Container { name, .. } => name.clone(),
             ft_core::Compute::Server { host, .. } => host.clone(),
         },
     }
@@ -303,14 +277,14 @@ pub struct Removal {
     pub force: bool,
 }
 
-/// Forget a host, and take its container with it.
+/// Forget a host.
 ///
 /// Refuses while sessions are running unless `force`, in which case they are
 /// told to end first — an agent that gets to shut down leaves its worktree and
 /// tmux session behind cleanly, rather than having the floor pulled out.
 ///
-/// A container Firetower started is Firetower's to stop. One it merely found
-/// running is not, and start-up says as much when it adopts nothing.
+/// Nothing on the machine is touched: the worker installed there is the
+/// account's, and removing a host is forgetting it, not uninstalling it.
 #[utoipa::path(
     delete, path = "/api/v1/hosts/{id}", tag = "hosts",
     params(
@@ -359,8 +333,7 @@ pub(super) async fn delete_host(
     }
 
     // Ask before taking the floor away. Each one gets to tear down its own
-    // worktree and tmux session; a container about to be removed doesn't care,
-    // but a server does — that host keeps running afterwards.
+    // worktree and tmux session — that machine keeps running afterwards.
     for session in state.db.live_session_ids_on(&id).await? {
         if !state.fleet.is_connected(&id).await {
             break;
@@ -383,14 +356,6 @@ pub(super) async fn delete_host(
     // Ours on purpose: the transport is about to stop working, and an error
     // logged for something we did deliberately reads like a fault.
     state.fleet.stop_supervising(&id).await;
-
-    if let ft_core::Compute::Container { name, .. } = &host.compute {
-        if let Err(e) = container::remove(name).await {
-            // The row still goes. A container we couldn't remove is a mess on
-            // the Docker side, not a reason to keep a host nobody wants.
-            tracing::warn!(container = %name, "removing: {e:#}");
-        }
-    }
 
     // Its sessions and events go with it — they are a record of what that
     // worker reported, and the worker is what is being removed.
@@ -416,17 +381,6 @@ pub(super) async fn list_hosts(State(state): State<AppState>) -> ApiResult<Json<
 /// about this process — so it is answered here rather than stored and left to
 /// go stale across a restart.
 async fn seen(state: &AppState, mut host: Host) -> Host {
-    host.execution = Some(match &host.compute {
-        ft_core::Compute::Local => local_execution(),
-        ft_core::Compute::Container { .. } => ft_core::Execution::Container,
-        ft_core::Compute::Server { container, .. } => {
-            if container.is_some() {
-                ft_core::Execution::Container
-            } else {
-                ft_core::Execution::Host
-            }
-        }
-    });
     host.reconnecting =
         host.state != ft_core::HostState::Online && state.fleet.is_supervised(&host.id).await;
     // For the same reason, and from the same place: what a machine has is what
@@ -441,28 +395,24 @@ async fn seen(state: &AppState, mut host: Host) -> Host {
 pub struct Installed {
     /// What `firetower-worker --version` said on the machine.
     ///
-    /// Absent when the copy succeeded and the probe did not answer. The
-    /// install still happened; the supervisor's next connection is the verdict.
+    /// Absent when the install ran and the probe did not answer. The install
+    /// still happened; the supervisor's next connection is the verdict.
     pub version: Option<String>,
 }
 
 /// Put a worker on this machine.
 ///
-/// The control plane and the worker are the same source at the same version,
-/// and the connection is already open — so this copies the binary Firetower is
-/// holding down the wire it is already trusted on, into the worker's own state
-/// directory. No sudo, nothing outside the account's home, and nothing touched
-/// that somebody else installed.
-///
-/// What was here before was a `cargo build` in the interface. Asking for a Rust
-/// toolchain on the machine whose entire job is to not have things installed on
-/// it is not a setup step; it is a reason to give up.
+/// Runs the installer script over the ssh connection Firetower already has —
+/// the same script a person runs with `curl | sh` — pinned to this control
+/// plane's version. It fetches the build for *that* machine, so a Linux
+/// control plane installs onto a Mac. No sudo, nothing outside the account's
+/// home, and nothing touched that somebody else installed.
 #[utoipa::path(
     post, path = "/api/v1/hosts/{id}/worker", tag = "hosts",
     params(("id" = String, Path, description = "Host id")),
     responses(
         (status = 200, body = Installed),
-        (status = 400, body = ApiError, description = "Not a machine Firetower installs onto, or the wrong shape for this binary"),
+        (status = 400, body = ApiError, description = "Not a machine reached over ssh"),
         (status = 404, body = ApiError),
     ),
 )]
@@ -477,28 +427,12 @@ pub(super) async fn install_worker(
         .await?
         .ok_or_else(|| ApiError::not_found("host"))?;
 
-    // A container's worker comes from its image. Writing one into a running
-    // container would leave the image and what is running disagreeing, and the
-    // next recreate would undo it without saying so.
-    if !matches!(
-        &host.compute,
-        ft_core::Compute::Server {
-            container: None,
-            ..
-        }
-    ) {
-        return Err(ApiError::new(
-            ErrorCode::InvalidRequest,
-            "Firetower only installs a worker onto a machine it runs on directly. A container's worker comes from its image.",
-        ));
-    }
-
     let ssh = fleet::Fleet::ssh_transport_for(&host, &state.home, Some(&state.vault))
         .map_err(|e| ApiError::new(ErrorCode::Internal, format!("{e:#}")))?
         .ok_or_else(|| {
             ApiError::new(
                 ErrorCode::InvalidRequest,
-                "that host is not reached over ssh",
+                "this machine's worker is the control plane's own, and is upgraded with it",
             )
         })?;
 
@@ -558,7 +492,6 @@ mod tests {
             port: None,
             key: ft_core::SshKey::Default,
             host_key: None,
-            container: None,
         }
     }
 
@@ -582,7 +515,6 @@ mod tests {
                 port: Some(2222),
                 key: ft_core::SshKey::Default,
                 host_key: None,
-                container: None,
             }
         );
     }
@@ -627,7 +559,6 @@ mod tests {
                 path: "~/.ssh/nothing-is-here".into(),
             },
             host_key: None,
-            container: None,
         })
         .unwrap_err();
 
@@ -636,7 +567,8 @@ mod tests {
     }
 }
 
-/// The public half of Firetower's own ssh key.
+/// The public half of Firetower's own ssh key, and the one line that installs
+/// a worker with it.
 ///
 /// Read before adding a server, because the machine has to be given this before
 /// it will let Firetower in — and that is a step on the *other* machine, which
@@ -709,7 +641,6 @@ pub(super) async fn probe_host(
     // never saved: it exists for the length of the attempt.
     let pretend = ft_core::Host {
         machine: None,
-        execution: None,
         id: ft_core::HostId::from_stored("probe".to_string()),
         name: "probe".to_string(),
         state: ft_core::HostState::Unreachable,
@@ -740,18 +671,6 @@ pub(super) async fn probe_host(
     }))
 }
 
-/// `Local` shares the control plane's process environment, including Docker.
-fn local_execution() -> ft_core::Execution {
-    if std::path::Path::new("/.dockerenv").exists()
-        || std::path::Path::new("/run/.containerenv").exists()
-        || std::env::var("FIRETOWER_EXECUTION").is_ok_and(|v| v == "container")
-    {
-        ft_core::Execution::Container
-    } else {
-        ft_core::Execution::Host
-    }
-}
-
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct ReadinessQuery {
     pub agent: Option<ft_core::Agent>,
@@ -775,22 +694,7 @@ pub(super) async fn host_readiness(
         .await?
         .ok_or_else(|| ApiError::not_found("host"))?;
     if !state.fleet.is_connected(&id).await {
-        return Ok(Json(ft_core::Readiness {
-            user: None,
-            checks: vec![ft_core::Requirement {
-                name: "Worker connection".into(),
-                available: false,
-                required: true,
-                detail: host
-                    .diagnosis
-                    .as_ref()
-                    .map(|d| d.summary.clone())
-                    .unwrap_or_else(|| {
-                        "The worker is not connected. Check the connection and try again.".into()
-                    }),
-                remedy: Some(setup_instructions(&host.compute)),
-            }],
-        }));
+        return Ok(Json(not_connected(&host)));
     }
     let readiness = state
         .fleet
@@ -803,12 +707,73 @@ pub(super) async fn host_readiness(
     Ok(Json(readiness))
 }
 
-pub(crate) fn setup_instructions(compute: &ft_core::Compute) -> String {
-    match compute {
-        ft_core::Compute::Local if local_execution() == ft_core::Execution::Host =>
-            "Install Git, tmux, a POSIX shell and your selected agent on the Firetower host. See docs/host-execution.md.".into(),
-        ft_core::Compute::Server { container: None, .. } =>
-            "Install the matching firetower-worker binary, Git, tmux and your selected agent directly on this machine. Make them available on the SSH account's PATH. See docs/host-execution.md for build and setup commands. Docker is not required.".into(),
-        _ => "Set up and start the worker container on this machine, then check again. See docs/host-execution.md.".into(),
+/// What a machine with no worker connected has to say about itself.
+///
+/// Two facts, told apart. Whether ssh got in and whether there is a worker to
+/// run are different questions with different fixes — the key, or the
+/// installer — and one red row saying "worker connection" read as the key
+/// having failed on a machine it had got into perfectly well.
+///
+/// `SSH` passes when the last diagnosis says the machine answered — see
+/// [`ft_core::Cause::reached_the_machine`] — and then `Worker` carries what
+/// was found there and the one line that fixes it. When ssh did not get in,
+/// `SSH` carries the diagnosis and `Worker` is not required: it was never
+/// asked, and a row that says so is worth more than one that guesses.
+pub(crate) fn not_connected(host: &Host) -> ft_core::Readiness {
+    let ft_core::Compute::Server { user, .. } = &host.compute else {
+        return ft_core::Readiness {
+            user: None,
+            checks: vec![ft_core::Requirement {
+                name: "Worker".into(),
+                available: false,
+                required: true,
+                detail: "The worker on this machine is not running.".into(),
+                remedy: Some(
+                    "Install Git, tmux and a POSIX shell on the machine running Firetower.".into(),
+                ),
+            }],
+        };
+    };
+
+    let reached = host
+        .diagnosis
+        .as_ref()
+        .is_some_and(|d| d.cause.reached_the_machine());
+    let said = host.diagnosis.as_ref().map(|d| d.summary.clone());
+    let account = user
+        .clone()
+        .unwrap_or_else(|| "the ssh account".to_string());
+
+    let ssh = ft_core::Requirement {
+        name: "SSH".into(),
+        available: reached,
+        required: true,
+        detail: if reached {
+            format!("connected as {account}")
+        } else {
+            said.clone().unwrap_or_else(|| "Not connected yet.".into())
+        },
+        remedy: (!reached).then(|| {
+            "Give the machine Firetower's public key — Add a machine shows it — then check again."
+                .to_string()
+        }),
+    };
+    let worker = ft_core::Requirement {
+        name: "Worker".into(),
+        available: false,
+        // Not asked until ssh gets in, and a row that says "not checked" is
+        // worth more than one that guesses.
+        required: reached,
+        detail: if reached {
+            said.unwrap_or_else(|| "Firetower isn't installed on that machine.".into())
+        } else {
+            "not checked".into()
+        },
+        remedy: reached.then(|| crate::install::one_liner(None)),
+    };
+
+    ft_core::Readiness {
+        user: reached.then_some(account),
+        checks: vec![ssh, worker],
     }
 }

@@ -3,19 +3,17 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.32.2
+ * OpenAPI spec version: 0.34.2
  */
-import type { TargetKind } from './targetKind';
 
 export interface HostTarget {
   drained: boolean;
   hostId: string;
-  kind: TargetKind;
   name: string;
   online: boolean;
   /** @nullable */
   reason?: string | null;
-  /** Sessions on this machine, by title. They end when it is recreated. */
+  /** Sessions on this machine, by title. They end when it is reinstalled. */
   sessions: string[];
   upgradable: boolean;
   /** @nullable */

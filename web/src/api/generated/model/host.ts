@@ -3,13 +3,12 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.32.2
+ * OpenAPI spec version: 0.34.2
  */
 import type { Capacity } from './capacity';
 import type { Compute } from './compute';
 import type { Diagnosis } from './diagnosis';
 import type { DockerState } from './dockerState';
-import type { Execution } from './execution';
 import type { HostId } from './hostId';
 import type { HostState } from './hostState';
 
@@ -39,7 +38,6 @@ export interface Host {
      * unreachable: a draining host is still online and still working.
      */
   drained?: boolean;
-  execution?: null | Execution;
   id: HostId;
   /**
      * Machine grouping; "local" means the machine hosting the control plane.

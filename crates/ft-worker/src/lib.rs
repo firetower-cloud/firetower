@@ -68,6 +68,7 @@ pub mod first_run;
 pub mod git;
 pub mod history;
 pub mod hooks;
+pub mod path;
 pub mod readiness;
 pub mod runtime;
 pub mod store;
@@ -1931,6 +1932,12 @@ You are in the directory that holds them, not inside one of them.              P
                 .to_string_lossy()
                 .to_string(),
         ));
+        // The version an agent runs is the one this worker installed. An agent
+        // that replaces itself mid-session is one nothing here chose.
+        env.push((
+            crate::runtime::NO_SELF_UPDATE.0.to_string(),
+            crate::runtime::NO_SELF_UPDATE.1.to_string(),
+        ));
 
         // Compose scopes a stack by project name, and every session on this
         // worker shares one daemon — so without this, two sessions running the
@@ -2075,6 +2082,10 @@ You are in the directory that holds them, not inside one of them.              P
                 .await
                 .to_string_lossy()
                 .to_string(),
+        ));
+        env.push((
+            crate::runtime::NO_SELF_UPDATE.0.to_string(),
+            crate::runtime::NO_SELF_UPDATE.1.to_string(),
         ));
 
         // Compose scopes a stack by project name, and every session on this
