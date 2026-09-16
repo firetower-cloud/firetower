@@ -23,6 +23,10 @@ concurrency:
 
 jobs:
   check:
+    # Not on release-please's own pull request: it changes versions and
+    # changelogs, nothing a build would catch. `branches-ignore` above filters
+    # the *target* branch, so this is the check that actually skips it.
+    if: ${{ !startsWith(github.head_ref, 'release-please--') }}
     runs-on: depot-ubuntu-22.04
     defaults:
       run:

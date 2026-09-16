@@ -28,6 +28,10 @@ concurrency:
 
 jobs:
   check:
+    # Not on release-please's own pull request: it changes versions and
+    # changelogs, nothing a build would catch. `branches-ignore` above filters
+    # the *target* branch, so this is the check that actually skips it.
+    if: ${{ !startsWith(github.head_ref, 'release-please--') }}
     runs-on: depot-ubuntu-22.04
     services:
       postgres:
@@ -68,6 +72,10 @@ jobs:
   # logic — shape detection, --from, --skip-packages, where the binary lands,
   # the doctor naming apt-get for what is missing — without a release.
   installer:
+    # Not on release-please's own pull request: it changes versions and
+    # changelogs, nothing a build would catch. `branches-ignore` above filters
+    # the *target* branch, so this is the check that actually skips it.
+    if: ${{ !startsWith(github.head_ref, 'release-please--') }}
     runs-on: depot-ubuntu-22.04
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
@@ -123,6 +131,10 @@ jobs:
   # and the Dockerfile does not copy fails a pull request rather than a
   # release. Only the build stage: compiling is the check, and pushing is not.
   image:
+    # Not on release-please's own pull request: it changes versions and
+    # changelogs, nothing a build would catch. `branches-ignore` above filters
+    # the *target* branch, so this is the check that actually skips it.
+    if: ${{ !startsWith(github.head_ref, 'release-please--') }}
     runs-on: depot-ubuntu-22.04
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5

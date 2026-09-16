@@ -24,7 +24,6 @@
       "package-name": "firetower-desktop",
       "component": "desktop",
       "changelog-path": "CHANGELOG.md",
-      "draft": true,
       "extra-files": [
         "src-tauri/Cargo.toml",
         {
