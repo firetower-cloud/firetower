@@ -1,3 +1,5 @@
+
+
 <div align="center">
 
 [![Firetower — run any coding agent, on your own servers, from anywhere.](.github/assets/header.jpg)](https://usefiretower.com)
@@ -28,7 +30,7 @@ And yes, it works with your own subscription (Claude Code, Codex, etc.).
 
 ## Demo
 
-https://github.com/user-attachments/assets/694af074-f15f-42ef-a2ad-0a7b8a43dccf
+https://github.com/user-attachments/assets/6e9eb02f-4e31-4c6e-8580-6cd11cea526a
 
 
 ## Why is Firetower different?
@@ -96,16 +98,7 @@ Native execution is also supported on the control-plane machine and remote machi
 
 | | |
 | --- | --- |
-| [Getting started](https://usefiretower.com/docs/getting-started) | The short path from nothing to a running session |
-| [How it works](https://usefiretower.com/docs/self-hosting) | Control plane, workers, and the protocol between them |
-| [Install the app](https://usefiretower.com/docs/self-hosting/app/install) | The control plane, with Docker |
-| [Add a machine](https://usefiretower.com/docs/self-hosting/machines/install) | Run sessions on a server over SSH |
-| [Put it on a domain](https://usefiretower.com/docs/self-hosting/domain) | HTTPS, certificates, and what goes wrong |
-| [Daily operations](https://usefiretower.com/docs/self-hosting/operations) | Draining, backups, and version drift |
-| [Upgrading](https://usefiretower.com/docs/self-hosting/app/upgrade) | The app and [the worker](https://usefiretower.com/docs/self-hosting/machines/upgrade) — or [from the Updates screen](docs/updates.md) |
-| [Connect repositories](https://usefiretower.com/docs/repositories) | Git URLs, paths, and authorizing GitHub |
-| [Secrets](https://usefiretower.com/docs/secrets) | How credentials are sealed, and where the root key lives |
-
+| [Getting started](https://usefiretower.com/docs) | The short path from nothing to a running session |
 
 ## Supported agents
 
@@ -116,6 +109,8 @@ Native execution is also supported on the control-plane machine and remote machi
 | OpenCode | Planned |
 | Grok| Planned |
 | Cursor | Planned |
+| Kimi | Planned |
+| Hermes | Planned |
 
 ## Contributing
 
