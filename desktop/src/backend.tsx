@@ -15,6 +15,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createContext, useContext, useEffect, useRef, type ReactNode } from "react";
 import { applyEvent } from "~/api/events";
+import { forgetConversations } from "~/api/conversation";
 import { SocketProvider, useSocket } from "~/api/socket";
 import { useBackendId } from "~/client/http";
 
@@ -98,4 +99,7 @@ export function useBackendKey(): string {
 export function dropCache(id: string) {
   clients.get(id)?.clear();
   clients.delete(id);
+  // Transcripts are kept outside the QueryClient — see `held` in
+  // `api/conversation.ts` — so clearing one does not clear the other.
+  forgetConversations(id);
 }

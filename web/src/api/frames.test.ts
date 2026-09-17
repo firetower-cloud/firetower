@@ -3,7 +3,11 @@ import { addressed, keyOf, nextResume } from "./frames";
 import type { ServerFrame } from "./generated/model";
 
 const line = (id: string): ServerFrame =>
-  ({ t: "line", id, lineNo: 1, type: "TurnStarted", turn: "turn-1" }) as unknown as ServerFrame;
+  ({
+    t: "line",
+    id,
+    events: [{ lineNo: 1, type: "TurnStarted", turn: "turn-1" }],
+  }) as unknown as ServerFrame;
 
 const reset = (id?: string): ServerFrame =>
   ({ t: "reset", topic: id ? "conversation" : "sessions", ...(id ? { id } : {}) }) as ServerFrame;
