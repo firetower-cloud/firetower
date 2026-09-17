@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.34.2
+ * OpenAPI spec version: 0.36.1
  */
 import * as zod from 'zod';
 
@@ -35,37 +35,37 @@ export const StreamBody = zod.union([zod.object({
   "t": zod.enum(['ping'])
 })]).describe('What a client says.')
 
-export const streamResponseThreeLineOneThreeUsageTwoCacheReadTokensMin = 0;
+export const streamResponseThreeEventsItemOneThreeUsageTwoCacheReadTokensMin = 0;
 
-export const streamResponseThreeLineOneThreeUsageTwoCacheWriteTokensMin = 0;
+export const streamResponseThreeEventsItemOneThreeUsageTwoCacheWriteTokensMin = 0;
 
-export const streamResponseThreeLineOneThreeUsageTwoContextUsedMin = 0;
+export const streamResponseThreeEventsItemOneThreeUsageTwoContextUsedMin = 0;
 
-export const streamResponseThreeLineOneThreeUsageTwoContextWindowMin = 0;
+export const streamResponseThreeEventsItemOneThreeUsageTwoContextWindowMin = 0;
 
-export const streamResponseThreeLineOneThreeUsageTwoDurationMsMin = 0;
+export const streamResponseThreeEventsItemOneThreeUsageTwoDurationMsMin = 0;
 
-export const streamResponseThreeLineOneThreeUsageTwoFirstTokenMsMin = 0;
+export const streamResponseThreeEventsItemOneThreeUsageTwoFirstTokenMsMin = 0;
 
-export const streamResponseThreeLineOneThreeUsageTwoInputTokensMin = 0;
+export const streamResponseThreeEventsItemOneThreeUsageTwoInputTokensMin = 0;
 
-export const streamResponseThreeLineOneThreeUsageTwoModelsItemCacheReadTokensMin = 0;
+export const streamResponseThreeEventsItemOneThreeUsageTwoModelsItemCacheReadTokensMin = 0;
 
-export const streamResponseThreeLineOneThreeUsageTwoModelsItemCacheWriteTokensMin = 0;
+export const streamResponseThreeEventsItemOneThreeUsageTwoModelsItemCacheWriteTokensMin = 0;
 
-export const streamResponseThreeLineOneThreeUsageTwoModelsItemContextWindowMin = 0;
+export const streamResponseThreeEventsItemOneThreeUsageTwoModelsItemContextWindowMin = 0;
 
-export const streamResponseThreeLineOneThreeUsageTwoModelsItemInputTokensMin = 0;
+export const streamResponseThreeEventsItemOneThreeUsageTwoModelsItemInputTokensMin = 0;
 
-export const streamResponseThreeLineOneThreeUsageTwoModelsItemOutputTokensMin = 0;
+export const streamResponseThreeEventsItemOneThreeUsageTwoModelsItemOutputTokensMin = 0;
 
-export const streamResponseThreeLineOneThreeUsageTwoOutputTokensMin = 0;
+export const streamResponseThreeEventsItemOneThreeUsageTwoOutputTokensMin = 0;
 
-export const streamResponseThreeLineOneThreeUsageTwoThinkingTokensMin = 0;
+export const streamResponseThreeEventsItemOneThreeUsageTwoThinkingTokensMin = 0;
 
-export const streamResponseThreeLineOneOnethreeUsedPercentMin = 0;
+export const streamResponseThreeEventsItemOneOnethreeUsedPercentMin = 0;
 
-export const streamResponseThreeLineTwoLineNoMin = 0;
+export const streamResponseThreeEventsItemTwoLineNoMin = 0;
 
 
 
@@ -123,8 +123,7 @@ export const StreamResponse = zod.union([zod.object({
 }).describe('Something that happened, recorded by the worker that it happened on.\n\nSessions are a projection of these, never the other way round.'),
   "t": zod.enum(['event'])
 }).describe('A session of yours changed.'),zod.object({
-  "id": zod.string(),
-  "line": zod.union([zod.object({
+  "events": zod.array(zod.union([zod.object({
   "commands": zod.array(zod.object({
   "description": zod.string().nullish(),
   "name": zod.string()
@@ -142,26 +141,26 @@ export const StreamResponse = zod.union([zod.object({
   "turn": zod.string().describe('One exchange: a prompt in, and everything that happened before the agent stopped.'),
   "type": zod.enum(['TurnCompleted']),
   "usage": zod.union([zod.null(),zod.object({
-  "cacheReadTokens": zod.int().min(streamResponseThreeLineOneThreeUsageTwoCacheReadTokensMin).nullish().describe('Absent when the agent does not say.'),
-  "cacheWriteTokens": zod.int().min(streamResponseThreeLineOneThreeUsageTwoCacheWriteTokensMin).nullish().describe('What was written into the cache on this turn, and billed as such.\n\nReported apart from what was read because they cost different amounts\nand mean different things: reading is the session being cheap, writing\nis it having said something new and large.'),
-  "contextUsed": zod.int().min(streamResponseThreeLineOneThreeUsageTwoContextUsedMin).nullish().describe('Everything the model had in front of it on the last request.\n\nInput plus both kinds of cache plus what it wrote. This is the number\nthat matters to somebody deciding whether a session has room left —\ninput alone reads as almost nothing once caching is working, which is\nexactly when it is least true.'),
-  "contextWindow": zod.int().min(streamResponseThreeLineOneThreeUsageTwoContextWindowMin).nullish().describe('How much room the model has at all.'),
+  "cacheReadTokens": zod.int().min(streamResponseThreeEventsItemOneThreeUsageTwoCacheReadTokensMin).nullish().describe('Absent when the agent does not say.'),
+  "cacheWriteTokens": zod.int().min(streamResponseThreeEventsItemOneThreeUsageTwoCacheWriteTokensMin).nullish().describe('What was written into the cache on this turn, and billed as such.\n\nReported apart from what was read because they cost different amounts\nand mean different things: reading is the session being cheap, writing\nis it having said something new and large.'),
+  "contextUsed": zod.int().min(streamResponseThreeEventsItemOneThreeUsageTwoContextUsedMin).nullish().describe('Everything the model had in front of it on the last request.\n\nInput plus both kinds of cache plus what it wrote. This is the number\nthat matters to somebody deciding whether a session has room left —\ninput alone reads as almost nothing once caching is working, which is\nexactly when it is least true.'),
+  "contextWindow": zod.int().min(streamResponseThreeEventsItemOneThreeUsageTwoContextWindowMin).nullish().describe('How much room the model has at all.'),
   "costUsd": zod.number().nullish().describe('The agent\'s own estimate, in dollars. Its arithmetic, not ours.'),
   "denied": zod.array(zod.string()).optional().describe('Tools the person refused during the turn.'),
-  "durationMs": zod.int().min(streamResponseThreeLineOneThreeUsageTwoDurationMsMin).nullish().describe('How long the turn took, wall clock.'),
-  "firstTokenMs": zod.int().min(streamResponseThreeLineOneThreeUsageTwoFirstTokenMsMin).nullish().describe('How long before it said anything.'),
-  "inputTokens": zod.int().min(streamResponseThreeLineOneThreeUsageTwoInputTokensMin),
+  "durationMs": zod.int().min(streamResponseThreeEventsItemOneThreeUsageTwoDurationMsMin).nullish().describe('How long the turn took, wall clock.'),
+  "firstTokenMs": zod.int().min(streamResponseThreeEventsItemOneThreeUsageTwoFirstTokenMsMin).nullish().describe('How long before it said anything.'),
+  "inputTokens": zod.int().min(streamResponseThreeEventsItemOneThreeUsageTwoInputTokensMin),
   "models": zod.array(zod.object({
-  "cacheReadTokens": zod.int().min(streamResponseThreeLineOneThreeUsageTwoModelsItemCacheReadTokensMin),
-  "cacheWriteTokens": zod.int().min(streamResponseThreeLineOneThreeUsageTwoModelsItemCacheWriteTokensMin),
-  "contextWindow": zod.int().min(streamResponseThreeLineOneThreeUsageTwoModelsItemContextWindowMin).nullish(),
+  "cacheReadTokens": zod.int().min(streamResponseThreeEventsItemOneThreeUsageTwoModelsItemCacheReadTokensMin),
+  "cacheWriteTokens": zod.int().min(streamResponseThreeEventsItemOneThreeUsageTwoModelsItemCacheWriteTokensMin),
+  "contextWindow": zod.int().min(streamResponseThreeEventsItemOneThreeUsageTwoModelsItemContextWindowMin).nullish(),
   "costUsd": zod.number().nullish(),
-  "inputTokens": zod.int().min(streamResponseThreeLineOneThreeUsageTwoModelsItemInputTokensMin),
+  "inputTokens": zod.int().min(streamResponseThreeEventsItemOneThreeUsageTwoModelsItemInputTokensMin),
   "model": zod.string().describe('The canonical name where the agent gives one, so `claude-opus-5[1m]`\nand `claude-opus-5` are not two rows.'),
-  "outputTokens": zod.int().min(streamResponseThreeLineOneThreeUsageTwoModelsItemOutputTokensMin)
+  "outputTokens": zod.int().min(streamResponseThreeEventsItemOneThreeUsageTwoModelsItemOutputTokensMin)
 }).describe('One model\'s share of a turn.')).optional().describe('What each model did, when more than one was involved.\n\nA turn is rarely one model: something small names things and summarises\nalongside the one doing the work, and it is on the bill. Totals hide\nthat; this does not.'),
-  "outputTokens": zod.int().min(streamResponseThreeLineOneThreeUsageTwoOutputTokensMin),
-  "thinkingTokens": zod.int().min(streamResponseThreeLineOneThreeUsageTwoThinkingTokensMin).nullish().describe('Of the output, how much was reasoning rather than answer.')
+  "outputTokens": zod.int().min(streamResponseThreeEventsItemOneThreeUsageTwoOutputTokensMin),
+  "thinkingTokens": zod.int().min(streamResponseThreeEventsItemOneThreeUsageTwoThinkingTokensMin).nullish().describe('Of the output, how much was reasoning rather than answer.')
 }).describe('What a turn cost, and how much room is left.\n\nNot `Eq`, because the cost is a float. Comparing two of these for equality\nis a test convenience, not something to build on.')]).optional()
 }),zod.object({
   "item": zod.string().describe('One thing in the transcript — a message, a thought, a tool call.'),
@@ -228,7 +227,7 @@ export const StreamResponse = zod.union([zod.object({
   "resetsAt": zod.int().nullish().describe('Unix seconds.'),
   "status": zod.string().describe('`allowed`, and whatever else turns up.'),
   "type": zod.enum(['Limited']),
-  "usedPercent": zod.int().min(streamResponseThreeLineOneOnethreeUsedPercentMin).nullish().describe('How much of the window is gone, when the agent says.\n\nClaude Code does not, which is why a bar was not worth drawing.\nCodex does, and a window is a far more useful thing to see as a\nproportion than as a word.'),
+  "usedPercent": zod.int().min(streamResponseThreeEventsItemOneOnethreeUsedPercentMin).nullish().describe('How much of the window is gone, when the agent says.\n\nClaude Code does not, which is why a bar was not worth drawing.\nCodex does, and a window is a far more useful thing to see as a\nproportion than as a word.'),
   "window": zod.string().describe('`five_hour`, and whatever else turns up.')
 }).describe('What the account\'s own limits say.\n\nArrives on its own schedule rather than with a turn: a window, whether\nwe are inside it, and when it starts again. A proportion when the agent\nsends one, and nothing drawn from it when it does not — Claude Code\nsays none, which is why this is optional rather than a number somebody\nhas to trust.'),zod.object({
   "agent": zod.string().nullish(),
@@ -250,10 +249,11 @@ export const StreamResponse = zod.union([zod.object({
   "source": zod.enum(['ClaudeStreamJson', 'CodexAppServer']).describe('Which agent\'s output a raw frame came from.\n\nCarried so that a frame kept for later is still interpretable later: the\nbytes alone do not say whose they are.'),
   "type": zod.enum(['Raw'])
 }).describe('A line we kept but could not name.\n\nOnly for what nothing else matched — the complete raw log is already\nwhat Firetower stores, so repeating every mapped line here would double\nthe volume to say nothing new. This is the marker for \"an agent said\nsomething in a shape we have never seen\", which is how a version that\ngrew a new message type shows up as a gap to fill rather than as\nsilence.')]).describe('Something an agent said or did.\n\nThe vocabulary the interface draws, and the only thing that crosses out of\nthe normaliser.').and(zod.object({
-  "lineNo": zod.int().min(streamResponseThreeLineTwoLineNoMin)
-})).describe('One thing that happened, and where in the log it was said.\n\nThe line number travels with the event because several events can come from\none line, and a client\'s cursor has to be a position in the agent\'s log\nrather than a count of what it drew.'),
+  "lineNo": zod.int().min(streamResponseThreeEventsItemTwoLineNoMin)
+})).describe('One thing that happened, and where in the log it was said.\n\nThe line number travels with the event because several events can come from\none line, and a client\'s cursor has to be a position in the agent\'s log\nrather than a count of what it drew.')),
+  "id": zod.string(),
   "t": zod.enum(['line'])
-}).describe('One line of a session\'s transcript.'),zod.object({
+}).describe('One line of a session\'s transcript, whole.\n\nEvery event a single log line normalised into, together in one frame.\nA line is the only place a client\'s cursor can be — several events come\nfrom one line, and `ContentDelta` appends rather than replaces, so a\nboundary inside a line can neither be resumed from (the rest is lost)\nnor re-sent (the text arrives twice). Delivered whole, it is always\nexactly one or the other.'),zod.object({
   "id": zod.string().nullish(),
   "t": zod.enum(['reset']),
   "topic": zod.enum(['sessions', 'conversation']).describe('What a client can subscribe to.')

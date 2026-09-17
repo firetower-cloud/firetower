@@ -62,9 +62,11 @@ pub struct Since {
 
 /// Everything the agent has said so far.
 ///
-/// A snapshot. Use the stream for a session that is still running — this is for
-/// one that has finished, and for a first paint that wants to be a single
-/// request rather than a connection.
+/// A snapshot, and what a client opens a session with: one request, folded in
+/// one pass, rather than a backlog arriving down the stream an event at a time
+/// — which a screen following the end of a transcript draws as the whole
+/// conversation being typed out again. The stream is what carries it from
+/// there, resumed at `lastLine`.
 #[utoipa::path(
     get, path = "/api/v1/sessions/{id}/conversation", tag = "sessions",
     params(
@@ -75,10 +77,23 @@ pub struct Since {
 )]
 pub(super) async fn get_conversation(
     State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
     Path(id): Path<String>,
     Query(since): Query<Since>,
 ) -> ApiResult<Json<Conversation>> {
     let id = SessionId::from_stored(id);
+
+    // Somebody else's conversation is "no such session", as it is on the stream
+    // beside this. Both carry everything an agent said and everything it was
+    // told; this one went without the check while it was the endpoint nothing
+    // called, and it is now how every session is opened.
+    state
+        .db
+        .session_of(owner(&principal)?, &id)
+        .await
+        .map_err(|e| ApiError::new(ErrorCode::Internal, format!("{e:#}")))?
+        .ok_or_else(|| ApiError::new(ErrorCode::NotFound, "no such session"))?;
+
     let lines = state
         .db
         .agent_lines_since(&id, 0)
@@ -106,12 +121,26 @@ pub(super) async fn get_conversation(
 }
 
 /// Everything a session has said since `resume_from`, and everything it says
-/// next.
+/// next — **one log line at a time**.
 ///
 /// Split out from the SSE handler so the multiplexed socket carries exactly the
 /// same events as the endpoint it replaces — the normaliser, the backlog and
 /// the gap-closing subscribe-before-read are all subtle enough that a second
 /// copy would drift.
+///
+/// ## Why a line, and not an event
+///
+/// One line of the agent's log normalises into several events, and a client's
+/// resume cursor is a position in *that log* — so an event is not a place it
+/// can stop. Delivered one event at a time, a client that dropped after two of
+/// a line's three had the cursor of a line it had only partly applied: it
+/// resumed past the third, which was then lost for good. It could not simply
+/// be re-sent either, because `ContentDelta` appends — a line delivered twice
+/// is a paragraph written twice.
+///
+/// Yielding whole lines makes the boundary exact in both directions. Every
+/// event of a line arrives together or not at all, so a cursor is only ever
+/// between lines, where re-sending and skipping are both impossible.
 ///
 /// The caller has already established that this session is theirs.
 pub(crate) async fn conversation_events(
@@ -119,7 +148,7 @@ pub(crate) async fn conversation_events(
     host_id: &ft_core::HostId,
     id: &SessionId,
     resume_from: u64,
-) -> impl Stream<Item = ConversationEvent> + Send {
+) -> impl Stream<Item = Vec<ConversationEvent>> + Send {
     // Subscribing before reading is what closes the gap: a line that arrives
     // while the backlog is being replayed waits in the channel rather than
     // being missed, and is skipped below if the replay already had it.
@@ -142,13 +171,14 @@ pub(crate) async fn conversation_events(
     // One normaliser for the whole connection: the backlog leaves it holding
     // the state the live lines are about to need.
     let mut normaliser = reader_for(state, id).await;
-    let mut backlog = Vec::new();
+    let mut backlog: Vec<Vec<ConversationEvent>> = Vec::new();
     let mut replayed = 0u64;
     let mut echoed: Vec<String> = Vec::new();
     let mut gathering: std::collections::HashMap<String, String> = Default::default();
     for (line_no, line) in stored {
         let line_no = line_no.max(0) as u64;
         replayed = line_no;
+        let mut batch = Vec::new();
         for event in normaliser.push(&line) {
             // What the agent has said back, so a message still waiting to be
             // echoed can be told from one that already has been. The text
@@ -175,9 +205,10 @@ pub(crate) async fn conversation_events(
                 _ => {}
             }
             if line_no > resume_from {
-                backlog.push(ConversationEvent { line_no, event });
+                batch.push(ConversationEvent { line_no, event });
             }
         }
+        deliver(&mut backlog, batch);
     }
 
     // Anything typed at this session that the agent has not repeated back yet.
@@ -190,49 +221,59 @@ pub(crate) async fn conversation_events(
     for pending in state.fleet.typed(id).await {
         replayed += 1;
         let item = ft_core::turn::ItemId::new(format!("pending-{}", pending.at.timestamp_millis()));
-        backlog.push(ConversationEvent {
-            line_no: replayed,
-            event: ft_core::TurnEvent::ItemStarted {
-                item: item.clone(),
-                kind: ft_core::turn::ItemKind::UserMessage,
-                title: None,
-                task: None,
-            },
-        });
-        backlog.push(ConversationEvent {
-            line_no: replayed,
-            event: ft_core::TurnEvent::ContentDelta {
-                item: item.clone(),
-                stream: ft_core::turn::StreamKind::UserText,
-                delta: pending.text.clone(),
-            },
-        });
-        backlog.push(ConversationEvent {
-            line_no: replayed,
-            event: ft_core::TurnEvent::ItemCompleted {
-                item,
-                status: ft_core::turn::ItemStatus::Completed,
-            },
-        });
+        // The three together, as one line: the delta is the message's whole
+        // text, so a client that took the start and missed this would show an
+        // empty bubble, and one that took it twice would show it twice.
+        deliver(
+            &mut backlog,
+            vec![
+                ConversationEvent {
+                    line_no: replayed,
+                    event: ft_core::TurnEvent::ItemStarted {
+                        item: item.clone(),
+                        kind: ft_core::turn::ItemKind::UserMessage,
+                        title: None,
+                        task: None,
+                    },
+                },
+                ConversationEvent {
+                    line_no: replayed,
+                    event: ft_core::TurnEvent::ContentDelta {
+                        item: item.clone(),
+                        stream: ft_core::turn::StreamKind::UserText,
+                        delta: pending.text.clone(),
+                    },
+                },
+                ConversationEvent {
+                    line_no: replayed,
+                    event: ft_core::TurnEvent::ItemCompleted {
+                        item,
+                        status: ft_core::turn::ItemStatus::Completed,
+                    },
+                },
+            ],
+        );
     }
 
-    for question in waiting {
-        if let AgentSpeech::Asks {
-            req,
-            tool_name,
-            input,
-        } = question
-        {
-            backlog.push(ConversationEvent {
+    let asking: Vec<ConversationEvent> = waiting
+        .into_iter()
+        .filter_map(|question| match question {
+            AgentSpeech::Asks {
+                req,
+                tool_name,
+                input,
+            } => Some(ConversationEvent {
                 line_no: replayed,
                 event: wanted(req, tool_name, input),
-            });
-        }
-    }
+            }),
+            _ => None,
+        })
+        .collect();
+    deliver(&mut backlog, asking);
 
     let following = BroadcastStream::new(live)
         .filter_map(|frame| async move { frame.ok() })
-        .flat_map(move |speech| {
+        .filter_map(move |speech| {
             let events = match speech {
                 AgentSpeech::Line { line_no, line } if line_no > replayed => normaliser
                     .push(&line)
@@ -255,10 +296,29 @@ pub(crate) async fn conversation_events(
                 }],
                 AgentSpeech::Closed => Vec::new(),
             };
-            futures::stream::iter(events)
+            // Every event here came off one line, so the batch is already a
+            // whole one. An empty batch is a line that drew nothing.
+            async move { (!events.is_empty()).then_some(events) }
         });
 
     futures::stream::iter(backlog).chain(following)
+}
+
+/// Add a line's events to the backlog, keeping one batch per line number.
+///
+/// The typed messages and the open questions are stamped with the last line the
+/// agent wrote rather than lines of their own, so two of these can share a
+/// number. They have to go out together: a cursor sitting on that number means
+/// "everything stamped with it has been applied", and that has to be true of
+/// all of it or none.
+fn deliver(backlog: &mut Vec<Vec<ConversationEvent>>, batch: Vec<ConversationEvent>) {
+    let Some(line_no) = batch.first().map(|e| e.line_no) else {
+        return;
+    };
+    match backlog.last_mut() {
+        Some(last) if last[0].line_no == line_no => last.extend(batch),
+        _ => backlog.push(batch),
+    }
 }
 
 /// The conversation as it happens.
@@ -297,6 +357,10 @@ pub(super) async fn stream_conversation(
 
     let stream = conversation_events(&state, &session.host_id, &id, resume_from)
         .await
+        // Flattened back out: this endpoint's cursor is `Last-Event-ID`, which
+        // the browser sets from whatever it saw last and we do not control. The
+        // socket is where the exact boundary lives.
+        .flat_map(futures::stream::iter)
         .map(|event| {
             Ok(sse::Event::default()
                 .id(event.line_no.to_string())

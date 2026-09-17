@@ -120,11 +120,18 @@ pub enum ServerFrame {
         #[schema(inline)]
         event: ft_core::Event,
     },
-    /// One line of a session's transcript.
+    /// One line of a session's transcript, whole.
+    ///
+    /// Every event a single log line normalised into, together in one frame.
+    /// A line is the only place a client's cursor can be — several events come
+    /// from one line, and `ContentDelta` appends rather than replaces, so a
+    /// boundary inside a line can neither be resumed from (the rest is lost)
+    /// nor re-sent (the text arrives twice). Delivered whole, it is always
+    /// exactly one or the other.
     Line {
         id: String,
         #[schema(inline)]
-        line: crate::api::conversation::ConversationEvent,
+        events: Vec<crate::api::conversation::ConversationEvent>,
     },
     /// Frames were dropped because this subscription fell behind. Resubscribe
     /// from your cursor; nothing else on the socket is affected.
@@ -350,10 +357,10 @@ async fn follow_conversation(
                 .await
                 .boxed();
 
-        while let Some(line) = events.next().await {
+        while let Some(batch) = events.next().await {
             let frame = ServerFrame::Line {
                 id: raw.clone(),
-                line,
+                events: batch,
             };
             if out.send(frame).await.is_err() {
                 return;

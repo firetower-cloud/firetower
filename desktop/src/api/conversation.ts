@@ -8,8 +8,10 @@
  * mean is testable without rendering anything.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useSyncExternalStore } from "react";
 import { useSocket } from "./socket";
+import { currentBackend } from "~/client/http";
+import { getConversation } from "./generated/sessions/sessions";
 import type {
   Attached,
   ConversationEvent,
@@ -281,7 +283,15 @@ export function apply(state: Conversation, event: ConversationEvent): Conversati
       // Already here. A stream that reconnects replays, and folding the same
       // line twice must not draw the same thing twice — React keys on these
       // ids, so a duplicate is a visible fault rather than a harmless one.
-      if (items.some((i) => i.id === event.item)) return { ...state, lastLine };
+      //
+      // Emptied rather than left alone, because `ContentDelta` appends: an item
+      // whose start is being replayed is about to have every one of its deltas
+      // replayed too, and keeping the old text would give it the same sentence
+      // twice. A resume that begins *after* the start does not come through
+      // here at all — its deltas land on what is already drawn, which is the
+      // other half of the same rule.
+      if (items.some((i) => i.id === event.item))
+        return change(event.item, (item) => ({ ...item, text: "", output: "" }));
 
       // A message somebody typed is shown before it has been anywhere, so the
       // composer feels immediate. The agent echoes it back a moment later —
@@ -456,14 +466,213 @@ function sameImages(existing: Attached[] | undefined, received: Attached[]) {
   );
 }
 
+/* ---- where a conversation is kept ------------------------------------ */
+
 /**
- * Follow a session's conversation.
+ * The conversations this window has read, and what is being done to them.
  *
- * Read with `fetch` rather than `EventSource` because the session token is a
- * bearer header and `EventSource` cannot send one. The cost is doing our own
- * reconnection, which is the loop below; the alternative was putting a
- * credential in a query string, where it would end up in logs.
+ * Outside React on purpose. Held in the component that drew it, a transcript
+ * died with the tab: opening a workspace, glancing at another and coming back
+ * re-read the session from line one and re-folded it a token at a time, which
+ * is watching the agent type the whole conversation again. There was no stale
+ * cache to blame — there was no cache at all.
+ *
+ * Keyed by server *and* session, for the reason `backend.tsx` gives a
+ * QueryClient per server: a session id is only unique within the Firetower that
+ * minted it.
  */
+type Held = {
+  state: Conversation;
+  /** Components drawing it, told when it changes. */
+  watchers: Set<() => void>;
+  /** Lines that arrived this frame and have not been folded in yet. */
+  waiting: ConversationEvent[];
+  /** The fold that is already scheduled, if there is one. */
+  soon: number;
+  /** How many hooks want this followed, and how to stop following it. */
+  readers: number;
+  stop?: () => void;
+};
+
+const held = new Map<string, Held>();
+
+/**
+ * How many conversations to keep once nothing is drawing them.
+ *
+ * Enough that moving between the workspaces somebody actually has open is
+ * free, small enough that a long day of them is not a leak. Anything evicted
+ * costs one request to read again, not a re-stream.
+ */
+const KEEP = 12;
+
+/* A frame clock where there is one. Under a test runner there is not, and the
+   point here is coalescing rather than the clock itself. */
+const nextFrame: (fn: () => void) => number =
+  typeof requestAnimationFrame === "function"
+    ? requestAnimationFrame
+    : (fn) => setTimeout(fn, 0) as unknown as number;
+const dropFrame: (id: number) => void =
+  typeof cancelAnimationFrame === "function" ? cancelAnimationFrame : clearTimeout;
+
+function entry(key: string): Held {
+  let it = held.get(key);
+  if (!it) {
+    it = { state: nothing, watchers: new Set(), waiting: [], soon: 0, readers: 0 };
+    held.set(key, it);
+  }
+  return it;
+}
+
+function read(key: string): Conversation {
+  return held.get(key)?.state ?? nothing;
+}
+
+/** Replace a conversation and redraw whatever is showing it. */
+function put(key: string, next: Conversation) {
+  const it = entry(key);
+  it.state = next;
+  // Re-inserted so the map reads least-recently-changed first, which is the
+  // order `sweep` evicts in.
+  held.delete(key);
+  held.set(key, it);
+  for (const watcher of it.watchers) watcher();
+}
+
+/**
+ * Fold everything that has arrived since the last frame, in one go.
+ *
+ * The socket delivers each line as its own message, and every message is its
+ * own task — so React's automatic batching, which works within a task, never
+ * saw two of them together. One render per line meant one render per token on
+ * anything with a backlog. Coalescing to a frame keeps live typing at the
+ * refresh rate and makes a replay a paint rather than a performance.
+ */
+function drain(key: string) {
+  const it = held.get(key);
+  if (!it) return;
+  if (it.soon) dropFrame(it.soon);
+  it.soon = 0;
+  if (!it.waiting.length) return;
+  const arrived = it.waiting;
+  it.waiting = [];
+  put(key, arrived.reduce(apply, it.state));
+}
+
+/** Take a line, to be folded with whatever else lands in the same frame. */
+function took(key: string, events: ConversationEvent[]) {
+  const it = entry(key);
+  it.waiting.push(...events);
+  if (!it.soon) it.soon = nextFrame(() => drain(key));
+}
+
+/** Take a conversation out, and whatever was scheduled against it. */
+function drop(key: string, it: Held) {
+  if (it.soon) dropFrame(it.soon);
+  it.stop?.();
+  held.delete(key);
+}
+
+/** Forget the conversations nobody has looked at for longest. */
+function sweep() {
+  for (const [key, it] of held) {
+    if (held.size <= KEEP) return;
+    if (it.readers || it.watchers.size) continue;
+    drop(key, it);
+  }
+}
+
+/**
+ * Drop everything belonging to one server.
+ *
+ * Called when a Firetower is disconnected, beside its QueryClient: a transcript
+ * is the most private thing this window holds, and leaving it warm for a server
+ * somebody has signed out of is not a cache, it is a copy.
+ */
+export function forgetConversations(backend: string) {
+  for (const [key, it] of held) {
+    if (key.startsWith(`${backend}:`)) drop(key, it);
+  }
+}
+
+/**
+ * Read a conversation, then keep reading it.
+ *
+ * ## The first paint is a request
+ *
+ * A session that has not been read yet is fetched whole, as one JSON document,
+ * and folded in a single pass. The stream would have delivered exactly the same
+ * events — but one frame at a time, in order, at the granularity the model
+ * produced them, which a screen following the end of the transcript renders as
+ * the conversation being typed out again from the top.
+ *
+ * Nothing is lost between the two. The subscription resumes at the snapshot's
+ * own `lastLine`, and the control plane replays whatever the log has gained
+ * since from the same table the snapshot came out of — so a line written
+ * between the read and the subscribe arrives on the socket rather than falling
+ * down the gap.
+ *
+ * ## And one follower, however many are watching
+ *
+ * The socket hands every frame to every listener on that subscription. Two
+ * components on one conversation — the transcript and the port picker above it
+ * — would each fold every delta into the same store, and `ContentDelta`
+ * appends, so the agent would appear to say everything twice.
+ */
+function start(key: string, sessionId: string, follow: ReturnType<typeof useSocket>["follow"]) {
+  let stop: (() => void) | undefined;
+  let dropped = false;
+
+  const listen = () => {
+    if (dropped) return;
+    stop = follow({
+      topic: "conversation",
+      id: sessionId,
+      cursor: () => {
+        // A line still waiting to be folded is one we have, and the server
+        // must not send it again — `ContentDelta` appends, so a line replayed
+        // is a sentence written twice.
+        drain(key);
+        return read(key).lastLine || undefined;
+      },
+      onFrame: (frame) => {
+        if (frame.t === "error") {
+          drain(key);
+          put(key, { ...read(key), trouble: frame.message });
+          return;
+        }
+        if (frame.t !== "line") return;
+        took(key, frame.events as ConversationEvent[]);
+      },
+    });
+  };
+
+  if (read(key).lastLine > 0) {
+    // Read once already, and still here. Pick up exactly where that left off.
+    listen();
+  } else {
+    getConversation(sessionId)
+      .then((snapshot) => {
+        if (dropped) return;
+        const folded = (snapshot.events as ConversationEvent[]).reduce(apply, read(key));
+        // The snapshot's own cursor, not the last line that drew something: a
+        // log line can normalise to no events at all, and resuming from the
+        // last *drawn* one would ask for those again on every open.
+        put(key, { ...folded, lastLine: Math.max(folded.lastLine, snapshot.lastLine) });
+      })
+      .catch((e) => {
+        // Not fatal, and not worth a banner: the subscription below replays
+        // from nothing, which is what this used to do every time.
+        console.warn("[firetower] could not read the conversation, streaming it instead", e);
+      })
+      .finally(listen);
+  }
+
+  return () => {
+    dropped = true;
+    stop?.();
+  };
+}
+
 /**
  * Follow a session's conversation.
  *
@@ -472,54 +681,53 @@ function sameImages(existing: Attached[] | undefined, received: Attached[]) {
  * own. Reconnection belongs to the socket now, and a session that has ended
  * still has a transcript worth reading, so there is nothing left for it to
  * decide.
+ *
+ * Holds no transcript of its own any more — see `held` above. Moving between
+ * sessions is now a change of which key is read, so the previous conversation
+ * is neither shown for a frame nor thrown away.
  */
 export function useConversation(sessionId: string) {
-  const [state, setState] = useState<Conversation>(nothing);
-  /** Read when resubscribing, without making it a dependency. */
-  const cursor = useRef(0);
   const { follow } = useSocket();
+  // Read rather than subscribed to, as every generated request reads it: the
+  // provider is keyed on the server, so changing one remounts this anyway.
+  const key = `${currentBackend() ?? ""}:${sessionId}`;
 
-  // Moving to another session starts from nothing rather than showing the last
-  // one's transcript while this one loads. Adjusted during render rather than
-  // in an effect: an effect would paint the wrong conversation first and then
-  // correct it, which is a visible flash of somebody else's work.
-  const [shownFor, setShownFor] = useState(sessionId);
-  if (shownFor !== sessionId) {
-    setShownFor(sessionId);
-    setState(nothing);
-  }
+  const state = useSyncExternalStore(
+    useCallback(
+      (fn: () => void) => {
+        const it = entry(key);
+        it.watchers.add(fn);
+        return () => void it.watchers.delete(fn);
+      },
+      [key],
+    ),
+    useCallback(() => read(key), [key]),
+  );
 
-  // Followed over the page's one socket rather than a connection of its own.
-  //
-  // This used to hold an SSE stream per open agent tab, which is what capped a
-  // workspace at three or four agents: a browser allows six connections per
-  // origin on HTTP/1.1, and four of them held open here left nothing for
-  // `POST /sessions` or `GET /agents` to run on. The tab that could not open
-  // was not being refused — its request never got a connection.
-  //
-  // A subscription costs nothing, so this is now free to be open in as many
-  // tabs as somebody wants.
   useEffect(() => {
-    // Belongs with the subscription, and this re-runs when the session does.
-    cursor.current = 0;
-    return follow({
-        topic: "conversation",
-        id: sessionId,
-        // Where this got to, read at resubscribe time — so a reconnect
-        // continues rather than replaying the session from the top.
-        cursor: () => cursor.current || undefined,
-        onFrame: (frame) => {
-          if (frame.t === "error") {
-            setState((current) => ({ ...current, trouble: frame.message }));
-            return;
-          }
-          if (frame.t !== "line") return;
-          const event = frame.line as ConversationEvent;
-          cursor.current = Math.max(cursor.current, event.lineNo);
-          setState((current) => apply(current, event));
-        },
-    });
-  }, [sessionId, follow]);
+    const it = entry(key);
+    it.readers += 1;
+    if (it.readers === 1) it.stop = start(key, sessionId, follow);
+
+    return () => {
+      it.readers -= 1;
+      if (it.readers > 0) return;
+      it.stop?.();
+      it.stop = undefined;
+      // Whatever arrived in the last frame is part of what the cursor claims.
+      drain(key);
+      sweep();
+    };
+  }, [key, sessionId, follow]);
+
+  /** Change what is held, with anything buffered folded in first. */
+  const change = useCallback(
+    (how: (current: Conversation) => Conversation) => {
+      drain(key);
+      put(key, how(read(key)));
+    },
+    [key],
+  );
 
   /**
    * Show a setting as chosen before the agent confirms it.
@@ -532,30 +740,33 @@ export function useConversation(sessionId: string) {
    * corrects itself rather than lying indefinitely. Effort is never restated at
    * all, so for that this is the only record.
    */
-  const remember = useCallback((of: "model" | "mode" | "effort", value: string) => {
-    setState((current) => ({ ...current, [of]: value }));
-  }, []);
+  const remember = useCallback(
+    (of: "model" | "mode" | "effort", value: string) => change((c) => ({ ...c, [of]: value })),
+    [change],
+  );
 
   /** Optimistically show what somebody just sent, before it comes back. */
-  const echo = useCallback((text: string, images: Attached[] = []) => {
-    setState((current) => ({
-      ...current,
-      working: true,
-      items: [
-        ...current.items,
-        {
-          id: `${TYPED}${Date.now()}`,
-          kind: "UserMessage" as ItemKind,
-          text,
-          output: "",
-          // Shown straight away, and replaced by the agent's echo of the same
-          // message a moment later. Without this a picture vanishes between
-          // pressing send and the round trip finishing.
-          images,
-        },
-      ],
-    }));
-  }, []);
+  const echo = useCallback(
+    (text: string, images: Attached[] = []) =>
+      change((c) => ({
+        ...c,
+        working: true,
+        items: [
+          ...c.items,
+          {
+            id: `${TYPED}${Date.now()}`,
+            kind: "UserMessage" as ItemKind,
+            text,
+            output: "",
+            // Shown straight away, and replaced by the agent's echo of the same
+            // message a moment later. Without this a picture vanishes between
+            // pressing send and the round trip finishing.
+            images,
+          },
+        ],
+      })),
+    [change],
+  );
 
   /**
    * Note that stop has been pressed, before anything has come back.
@@ -563,18 +774,18 @@ export function useConversation(sessionId: string) {
    * The button waits on the turn ending rather than on the request it sent,
    * because the request only says somebody was told.
    */
-  const stopping = useCallback((asked: boolean) => {
-    setState((current) => ({ ...current, stopping: asked }));
-  }, []);
+  const stopping = useCallback((asked: boolean) => change((c) => ({ ...c, stopping: asked })), [change]);
 
   /** Take a request off the screen the moment it is answered. */
-  const settle = useCallback((req: string) => {
-    setState((current) => ({
-      ...current,
-      asked: current.asked.filter((a) => a.req !== req),
-      questions: current.questions.filter((q) => q.req !== req),
-    }));
-  }, []);
+  const settle = useCallback(
+    (req: string) =>
+      change((c) => ({
+        ...c,
+        asked: c.asked.filter((a) => a.req !== req),
+        questions: c.questions.filter((q) => q.req !== req),
+      })),
+    [change],
+  );
 
   return { conversation: state, echo, settle, remember, stopping };
 }

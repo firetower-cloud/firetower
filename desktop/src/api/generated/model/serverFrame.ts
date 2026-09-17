@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.34.2
+ * OpenAPI spec version: 0.36.1
  */
 import type { EventKind } from './eventKind.ts';
 import type { SessionId } from './sessionId.ts';
@@ -35,18 +35,11 @@ export type ServerFrame = {
 };
   t: 'event';
 } | {
-  id: string;
-  /**
-     * One thing that happened, and where in the log it was said.
-     *
-     * The line number travels with the event because several events can come from
-     * one line, and a client's cursor has to be a position in the agent's log
-     * rather than a count of what it drew.
-     */
-  line: TurnEvent & {
+  events: (TurnEvent & {
   /** @minimum 0 */
   lineNo: number;
-};
+})[];
+  id: string;
   t: 'line';
 } | {
   /** @nullable */
