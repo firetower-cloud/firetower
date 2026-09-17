@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.9.1](https://github.com/firetower-cloud/firetower/compare/desktop-v0.9.0...desktop-v0.9.1) (2026-09-17)
+
+
+### Bug Fixes
+
+* a conversation is read once and kept, not re-streamed on every open ([037ff05](https://github.com/firetower-cloud/firetower/commit/037ff05d0eaf5d0f0a1d5626c309c3f32d4a3766))
+* **conversation:** cache session transcripts to eliminate replay on ([70013bf](https://github.com/firetower-cloud/firetower/commit/70013bf27607940fe5aa99e8270d8f895714e3ce))
+
 ## [0.9.0](https://github.com/firetower-cloud/firetower/compare/desktop-v0.8.0...desktop-v0.9.0) (2026-09-16)
 
 
