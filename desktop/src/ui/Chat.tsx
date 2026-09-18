@@ -27,6 +27,7 @@ import {
   ChevronRight,
   Copy,
   FileText,
+  FileUp,
   GitBranch,
   Pencil,
   RotateCcw,
@@ -48,7 +49,8 @@ import { useAnswerRequest, useRelaunchSession, getGetSessionQueryKey, sendTurn }
 import { asMessage, useNotes, type Note } from "~/api/notes";
 import { useListEvents } from "~/api/generated/events/events";
 import { elapsed, minutesSince } from "~/api/view";
-import { Composer } from "~/ui/Composer";
+import { Composer, TAKES, type Hand } from "~/ui/Composer";
+import { folderRefusals, useFileDrop } from "~/ui/drop";
 import { AccountSwitcher } from "~/ui/AccountSwitcher";
 import { Annotate, type Anchor } from "~/ui/Annotate";
 import { markPaths, resolvePath } from "~/paths";
@@ -114,6 +116,12 @@ export function Chat({
   const body = useRef<HTMLDivElement>(null);
   const following = useRef(true);
 
+  /* Dropped files are the composer's business — it owns the size rules, the
+     chips and the refusal line — but the composer is a strip at the bottom and
+     the conversation is what a hand aims at. So the whole pane is the target
+     and it hands what it caught down. One surface, because `drop` bubbles. */
+  const hand = useRef<Hand | null>(null);
+
   /* Notes on what the agent said — the web's own store, so they survive a
      reload and go out as one ordinary message. */
   const { notes, add, drop, clear } = useNotes(session.id);
@@ -151,6 +159,14 @@ export function Chat({
 
   const { items, asked, questions, working, stopped } = conversation;
   const answerable = session.status !== "Ended";
+
+  /* An ended session has no one to read the file and a workspace that is going
+     away, so the pane stops offering. Refusing the drag outright is kinder
+     than taking the file and then greying out the send button. */
+  const { over, surface } = useFileDrop(
+    ({ files, folders }) => hand.current?.(files, folderRefusals(folders)),
+    answerable,
+  );
 
   const rows = useMemo(() => fold(items), [items]);
 
@@ -211,7 +227,20 @@ export function Chat({
   }, [working]);
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
+    <div className="relative flex h-full min-h-0 flex-col" {...surface}>
+      {over && (
+        <div className="pointer-events-none absolute inset-2 z-40 grid place-items-center rounded-2xl border border-slate bg-ground/45">
+          {/* The limit, not the routing. Where a file ends up is shown for
+              real a moment later — the chip names the path it landed at. */}
+          <span className="flex items-center gap-2.5 rounded-xl border border-line bg-overlay px-4 py-2.5 shadow-(--shadow-float)">
+            <FileUp className="h-4 w-4 text-slate" strokeWidth={1.75} />
+            <span>
+              <span className="block text-ui text-bone">Drop to attach</span>
+              <span className="block text-meta text-mute">{TAKES}</span>
+            </span>
+          </span>
+        </div>
+      )}
       <div className="relative flex min-h-0 flex-1 flex-col">
       <div
         ref={scroller}
@@ -311,6 +340,7 @@ export function Chat({
           onStopping={stopping}
           disabled={!answerable}
           asking={asked.length + questions.length > 0}
+          hand={hand}
         />
       </AccountSwitcher>
     </div>

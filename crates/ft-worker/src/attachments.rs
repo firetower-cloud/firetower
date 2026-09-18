@@ -26,7 +26,13 @@ pub const DIR: &str = "attachments";
 /// browser and the workspace holds that line whole. Larger than an image is
 /// allowed because this never enters the model's context — but not unbounded,
 /// because five processes have to carry it at once.
-pub const BIGGEST: usize = 10 * 1024 * 1024;
+///
+/// This is a Firetower somebody runs themselves, so the bound is about the
+/// memory those hops hold rather than about anyone's quota. It must stay at or
+/// below the server's request limit (`DefaultBodyLimit` in `ft-server`) with
+/// room for base64's extra third, and the composer must not offer more than
+/// this or the refusal arrives after the upload rather than before it.
+pub const BIGGEST: usize = 25 * 1024 * 1024;
 
 /// Write a file into the workspace and say where it landed.
 ///

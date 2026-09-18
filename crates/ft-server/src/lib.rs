@@ -527,6 +527,23 @@ fn build_router(
     let mut app = axum::Router::new()
         .merge(api)
         .merge(operational(state))
+        // Axum's `Json` refuses a body over 2 MB unless told otherwise, which
+        // is the right default for an API of small JSON and the wrong one for
+        // this API: an attachment travels as base64 inside the body. Nothing
+        // said so, so a file over about 1.5 MB was refused by the server while
+        // the composer was still promising 25 — a 413 where the interface had
+        // already said yes.
+        //
+        // The number is taken from what the client can actually produce, so
+        // the limit that stops you is always the one with something to say:
+        //
+        //   one attachment   25 MB  -> 34 MB of base64
+        //   ten 5 MB images  50 MB  -> 67 MB of base64, all in one turn
+        //
+        // 128 MiB clears both with room. It is a ceiling against a runaway
+        // body rather than a budget — the caps that produce a readable message
+        // live in `attachments::BIGGEST` and in the composer.
+        .layer(axum::extract::DefaultBodyLimit::max(BIGGEST_BODY))
         .layer(tower_http::trace::TraceLayer::new_for_http());
 
     if !dev {
@@ -549,6 +566,18 @@ fn build_router(
         preview_first,
     ))
 }
+
+/// The most one request body may be.
+///
+/// Taken from what the client can actually produce, so the limit that stops you
+/// is always the one with something to say:
+///
+///   one attachment   25 MB  -> 34 MB of base64
+///   ten 5 MB images  50 MB  -> 67 MB of base64, all in one turn
+///
+/// A ceiling against a runaway body rather than a budget. The caps that produce
+/// a readable message live in `attachments::BIGGEST` and in the composer.
+const BIGGEST_BODY: usize = 128 * 1024 * 1024;
 
 /// Which origins may call the API from a browser engine.
 ///
@@ -645,6 +674,51 @@ mod tests {
     async fn the_contract_is_generated_from_the_handlers() {
         let doc = serde_json::to_string(&ApiDoc::openapi()).unwrap();
         assert!(doc.contains("Firetower"));
+    }
+
+    /// One route that reads its whole body, under `limit`; returns the status
+    /// a body of `bytes` gets. `None` is axum's own default.
+    async fn body_of(limit: Option<usize>, bytes: usize) -> axum::http::StatusCode {
+        use tower::ServiceExt as _;
+
+        let mut app = axum::Router::new().route(
+            "/attach",
+            axum::routing::post(|_: axum::body::Bytes| async { "ok" }),
+        );
+        if let Some(n) = limit {
+            app = app.layer(axum::extract::DefaultBodyLimit::max(n));
+        }
+        let request = axum::http::Request::builder()
+            .method("POST")
+            .uri("/attach")
+            .header("content-type", "application/json")
+            .body(axum::body::Body::from(vec![b'A'; bytes]))
+            .unwrap();
+        app.oneshot(request).await.unwrap().status()
+    }
+
+    /// An attachment-sized body is accepted, and by default would not be.
+    ///
+    /// `Bytes` — and so `Json`, which uses it — refuses anything over 2 MB
+    /// unless told otherwise. Nothing told it otherwise, so a file over about
+    /// 1.5 MB came back 413 from a composer that had already said yes. Both
+    /// halves are pinned here: the ceiling we set, and the default we are
+    /// overriding, because a test of only the first would still pass if the
+    /// layer were dropped and axum's default happened to be raised.
+    #[tokio::test]
+    async fn an_attachment_sized_body_is_accepted() {
+        use axum::http::StatusCode;
+
+        // 25 MB of file is about 34 MB once base64 has had its extra third.
+        assert_eq!(
+            body_of(Some(BIGGEST_BODY), 34 * 1024 * 1024).await,
+            StatusCode::OK
+        );
+        // And the default this layer exists to override.
+        assert_eq!(
+            body_of(None, 3 * 1024 * 1024).await,
+            StatusCode::PAYLOAD_TOO_LARGE
+        );
     }
 
     /// A router of one route under the production CORS layer, asked a
