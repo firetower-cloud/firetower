@@ -227,7 +227,23 @@ async fn updater_view(updates: &Updates) -> UpdaterView {
 }
 
 /// What moving the control plane to `to` would do to the deployment's files.
-pub async fn plan(state: &AppState, to: &Version) -> Result<UpgradePlan> {
+///
+/// `control_plane` says whether it is one of the targets at all. When it is
+/// not there is nothing to answer: no deployment file is written for a worker
+/// upgrade, and the updater — the only way to read those files — has no part
+/// in one. Asking it anyway is what used to make a deployment with no
+/// `FIRETOWER_UPDATER_TOKEN` refuse to upgrade a worker, with a message about
+/// a container that was not involved.
+pub async fn plan(state: &AppState, to: &Version, control_plane: bool) -> Result<UpgradePlan> {
+    if !control_plane {
+        return Ok(UpgradePlan {
+            version: to.to_string(),
+            files: Vec::new(),
+            env_missing: Vec::new(),
+            updater_upgrade: false,
+        });
+    }
+
     let updates = &state.updates;
     let updater = updates
         .updater
@@ -283,7 +299,9 @@ pub async fn files_to_write(
     to: &Version,
     choices: &[FileChoice],
 ) -> Result<Vec<ft_updater_api::FileWrite>> {
-    let planned = plan(state, to).await?;
+    // Only reached for a run that moves the control plane — `create_run`
+    // leaves the plan empty otherwise — so the full plan is the right one.
+    let planned = plan(state, to, true).await?;
     let mut writes = Vec::new();
     for file in planned.files {
         let chosen = choices.iter().find(|c| c.name == file.name);

@@ -5,6 +5,7 @@ import type {
   StepState,
   UpdateRun,
   UpdateStatus,
+  UpgradePlan,
 } from "./generated/model";
 
 /**
@@ -28,6 +29,20 @@ export function everythingUpgradable(status: UpdateStatus): Chosen {
 /** Nothing ticked means nothing to do. */
 export function nothingChosen(chosen: Chosen): boolean {
   return !chosen.controlPlane && chosen.hostIds.length === 0;
+}
+
+/**
+ * Whether the run may be started.
+ *
+ * The plan is a condition only when the control plane is a target. It answers
+ * what an upgrade writes to the deployment's files, and a worker upgrade
+ * writes none of them — so waiting for one either way is what left a worker
+ * alone and behind on a deployment whose updater was never configured, under
+ * a message about a container that had no part in it.
+ */
+export function canStart(chosen: Chosen, plan: UpgradePlan | undefined): boolean {
+  if (nothingChosen(chosen)) return false;
+  return !chosen.controlPlane || !!plan;
 }
 
 /**
