@@ -11,8 +11,23 @@ import { findFiles } from "~/api/generated/sessions/sessions";
 
 export type Found = { text: string; path: string; line?: number; start: number; end: number };
 
-/** A path is either something with a directory in it, or a bare name with a source-ish extension. */
-const PATH = /(?<![\w/@.-])((?:\.{1,2}\/)?(?:[\w@.-]+\/)+[\w@.-]+\.[a-zA-Z0-9]{1,8}|[\w@-][\w@.-]*\.(?:tsx?|jsx?|mjs|cjs|rs|py|go|rb|java|kt|swift|c|h|cpp|cs|php|lua|zig|sh|bash|zsh|json|ya?ml|toml|md|mdx|css|scss|html|sql|txt|env))(?::(\d{1,6}))?(?::\d{1,6})?(?![\w/@-])/g;
+/**
+ * A path is either something with a directory in it, or a bare name with a
+ * source-ish extension.
+ *
+ * The leading `/` is optional and part of the match rather than a boundary.
+ * Absolute paths used to fall out entirely — the lookbehind rejects a start
+ * position preceded by a slash, so every offset inside `/tmp/shot.png` was
+ * refused and the whole thing was invisible. Agents print absolute paths
+ * constantly (`/tmp`, a container path, anything they captured), and a path
+ * you can read but not click is the irritation this file exists to remove.
+ * Whether it is *reachable* is still decided by `resolvePath`, not here.
+ *
+ * URLs stay out of it: after `https:` the two slashes leave no position where
+ * a directory component can begin, and the `https?.`/`www.` guard below
+ * catches what is left.
+ */
+const PATH = /(?<![\w/@.-])(\/?(?:\.{1,2}\/)?(?:[\w@.-]+\/)+[\w@.-]+\.[a-zA-Z0-9]{1,8}|[\w@-][\w@.-]*\.(?:tsx?|jsx?|mjs|cjs|rs|py|go|rb|java|kt|swift|c|h|cpp|cs|php|lua|zig|sh|bash|zsh|json|ya?ml|toml|md|mdx|css|scss|html|sql|txt|env|png|jpe?g|gif|webp|avif|bmp|ico|svg))(?::(\d{1,6}))?(?::\d{1,6})?(?![\w/@-])/g;
 
 export function findPaths(text: string): Found[] {
   const out: Found[] = [];
@@ -20,6 +35,14 @@ export function findPaths(text: string): Found[] {
     const path = m[1].replace(/^\.\//, "");
     // A URL host or a version is not a path.
     if (/^(https?|www)\./.test(path) || /^\d+(\.\d+)+$/.test(path)) continue;
+    // Nor is the tail of one. `http://localhost:3000/static/app.js` offers
+    // `3000/static/app.js` as a perfectly well-formed relative path, and the
+    // colon in front of it is not a character the lookbehind can refuse —
+    // `foo:bar.ts` is how half the world writes a path and a line. So the
+    // decision is made on the run of text the match sits in rather than on the
+    // one character before it.
+    const run = text.slice(0, m.index ?? 0).split(/\s/).pop() ?? "";
+    if (run.includes("://") || /^www\./.test(run)) continue;
     out.push({ text: m[0], path, line: m[2] ? Number(m[2]) : undefined, start: m.index ?? 0, end: (m.index ?? 0) + m[0].length });
   }
   return out;
@@ -87,5 +110,9 @@ export function markPaths(root: HTMLElement) {
 }
 
 // Reachable from the console while developing, since the pieces above run
-// inside event handlers that are awkward to poke at.
-if (import.meta.env.DEV) (window as unknown as { __ftPaths?: unknown }).__ftPaths = { findPaths, resolvePath };
+// inside event handlers that are awkward to poke at. Guarded on `window`
+// existing as well as on DEV, because a test runner is also a dev build and
+// there is no window in one.
+if (import.meta.env.DEV && typeof window !== "undefined") {
+  (window as unknown as { __ftPaths?: unknown }).__ftPaths = { findPaths, resolvePath };
+}
