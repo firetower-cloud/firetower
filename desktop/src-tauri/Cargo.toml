@@ -1,6 +1,6 @@
 [package]
 name = "firetower-desktop"
-version = "0.10.0" # x-release-please-version
+version = "0.11.0" # x-release-please-version
 edition = "2021"
 description = "Firetower, as a desktop application"
 publish = false
