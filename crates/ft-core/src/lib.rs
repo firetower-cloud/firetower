@@ -1633,14 +1633,7 @@ pub fn split_diff(diff: &str) -> Vec<FileDiff> {
             continue;
         }
 
-        // `+++ b/path` is the name after the change, which is the one to show.
-        // A deleted file has `+++ /dev/null`, so fall back to the old name.
-        let path = chunk
-            .lines()
-            .find_map(|l| l.strip_prefix("+++ b/"))
-            .or_else(|| chunk.lines().find_map(|l| l.strip_prefix("--- a/")))
-            .unwrap_or_else(|| chunk.lines().next().unwrap_or("unknown"))
-            .to_string();
+        let path = path_in(chunk);
 
         let mut added = 0;
         let mut removed = 0;
@@ -1665,6 +1658,158 @@ pub fn split_diff(diff: &str) -> Vec<FileDiff> {
     }
 
     files
+}
+
+/// The file a chunk is about, as a path the repository can act on.
+///
+/// Not decoration: the review sheet sends these back as the paths to `git add`,
+/// so a name carrying a prefix or a stray tab is a commit that fails with "did
+/// not match any files". The `+++`/`---` pair is the dependable answer and most
+/// chunks have one — but a binary file, a rename that changed nothing and a
+/// mode-only change have no hunks at all, and those are the ones that used to
+/// come back as `a/demo.mp4 b/demo.mp4` and could not be committed.
+///
+/// Everything is read above the first `@@`, because a diff that itself removes
+/// a line beginning `--- ` would otherwise look like it had a second header.
+fn path_in(chunk: &str) -> String {
+    let head = chunk.split("\n@@").next().unwrap_or(chunk);
+
+    // `+++ b/path` is the name after the change, which is the one to show.
+    // A deleted file has `+++ /dev/null`, so fall back to the old name.
+    let named = |prefix: &str| {
+        head.lines()
+            .filter_map(|l| l.strip_prefix(prefix))
+            .find_map(one_side)
+    };
+    if let Some(path) = named("+++ ").or_else(|| named("--- ")) {
+        return path;
+    }
+
+    // A rename or a copy carrying no change has nothing else naming the file.
+    if let Some(to) = head.lines().find_map(|l| {
+        l.strip_prefix("rename to ")
+            .or_else(|| l.strip_prefix("copy to "))
+    }) {
+        return unquote(to.trim_end());
+    }
+
+    // `Binary files a/x and b/x differ`, which is the whole of what git prints
+    // for a binary file — the shape every image and video arrives in. Read from
+    // the right, so the name after the change wins and a name that contains
+    // " and " does not split in the wrong place.
+    if let Some(body) = head.lines().find_map(|l| {
+        l.strip_prefix("Binary files ")
+            .and_then(|b| b.strip_suffix(" differ"))
+    }) {
+        if let Some((before, after)) = body.rsplit_once(" and ") {
+            // A new file is `/dev/null and b/x`, a deleted one `a/x and
+            // /dev/null`, so whichever side is a name is the name.
+            if let Some(path) = one_side(after).or_else(|| one_side(before)) {
+                return path;
+            }
+        }
+    }
+
+    // Nothing left but the header itself.
+    if let Some(path) = header_path(head.lines().next().unwrap_or_default()) {
+        return path;
+    }
+
+    "unknown".to_string()
+}
+
+/// One side of a header line: `b/path`, `"a/path"` quoted, or `/dev/null` for a
+/// side that is not there — which is `None`, so the caller tries the other one.
+///
+/// The trailing whitespace goes because git writes a tab after a name with a
+/// space in it, and a pathspec ending in a tab matches nothing.
+fn one_side(text: &str) -> Option<String> {
+    let text = unquote(text.trim_end());
+    let path = text
+        .strip_prefix("a/")
+        .or_else(|| text.strip_prefix("b/"))?;
+    Some(path.to_string())
+}
+
+/// The path out of a `diff --git a/x b/x` header, which is all that is left
+/// when a chunk has no hunks and no `Binary files` line.
+fn header_path(header: &str) -> Option<String> {
+    let header = header.trim_end();
+
+    // Git quotes both sides together when either name needs it, so a quoted
+    // header splits at the one place the sides meet.
+    if header.starts_with('"') {
+        let (_, right) = header.rsplit_once("\" \"")?;
+        return one_side(&format!("\"{right}"));
+    }
+
+    let rest = header.strip_prefix("a/")?;
+    // A name with a space in it leaves more than one place this could split.
+    // Both sides are the same name except in a rename, so the split that makes
+    // them equal is the one git wrote; failing that the first is the guess.
+    let mut first = None;
+    for (at, _) in rest.match_indices(" b/") {
+        let (before, after) = (&rest[..at], &rest[at + 3..]);
+        if before == after {
+            return Some(after.to_string());
+        }
+        first.get_or_insert_with(|| after.to_string());
+    }
+    first
+}
+
+/// Undo the quoting git puts on a name it will not print raw.
+///
+/// `core.quotePath` wraps such a name in quotes and writes every byte outside
+/// ASCII as an octal escape — `"b/caf\303\251.txt"`. Those are bytes of UTF-8
+/// rather than characters, so they are collected as bytes and decoded at the
+/// end. A name that is not quoted is its own answer.
+fn unquote(text: &str) -> String {
+    let Some(inner) = text.strip_prefix('"').and_then(|t| t.strip_suffix('"')) else {
+        return text.to_string();
+    };
+
+    let mut out: Vec<u8> = Vec::with_capacity(inner.len());
+    let mut rest = inner.chars();
+    while let Some(c) = rest.next() {
+        if c != '\\' {
+            let mut buf = [0u8; 4];
+            out.extend_from_slice(c.encode_utf8(&mut buf).as_bytes());
+            continue;
+        }
+        match rest.next() {
+            Some('a') => out.push(0x07),
+            Some('b') => out.push(0x08),
+            Some('f') => out.push(0x0c),
+            Some('n') => out.push(b'\n'),
+            Some('r') => out.push(b'\r'),
+            Some('t') => out.push(b'\t'),
+            Some('v') => out.push(0x0b),
+            // Up to three octal digits, one byte of the name as it is on disk.
+            Some(d) if d.is_digit(8) => {
+                let mut byte = d.to_digit(8).unwrap_or(0);
+                for _ in 0..2 {
+                    let mut ahead = rest.clone();
+                    match ahead.next().and_then(|c| c.to_digit(8)) {
+                        Some(next) => {
+                            byte = byte * 8 + next;
+                            rest = ahead;
+                        }
+                        None => break,
+                    }
+                }
+                out.push(byte as u8);
+            }
+            // `\"` and `\\`, and anything git adds later: itself.
+            Some(other) => {
+                let mut buf = [0u8; 4];
+                out.extend_from_slice(other.encode_utf8(&mut buf).as_bytes());
+            }
+            None => out.push(b'\\'),
+        }
+    }
+
+    String::from_utf8_lossy(&out).into_owned()
 }
 
 #[cfg(test)]
@@ -1708,6 +1853,128 @@ index 3..4 100644\n\
         let files = split_diff(SAMPLE);
         assert!(files[1].patch.starts_with("diff --git a/src/main.rs"));
         assert!(files[1].patch.contains("+fn extra() {}"));
+    }
+
+    /// A file git will not print the contents of. No `---`, no `+++`, no hunk —
+    /// the name is in the header and in one sentence, and nowhere else.
+    ///
+    /// This is what a commit could not be made from: the path came back as
+    /// `a/public/demo/demo.avif b/public/demo/demo.avif`, which `git add` has
+    /// no file for.
+    const NEW_BINARY: &str = "diff --git a/public/demo/demo.avif b/public/demo/demo.avif\n\
+new file mode 100644\n\
+index 0000000..510b42e\n\
+Binary files /dev/null and b/public/demo/demo.avif differ\n";
+
+    #[test]
+    fn a_new_binary_file_is_named_by_the_path_it_has_on_disk() {
+        let files = split_diff(NEW_BINARY);
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].path, "public/demo/demo.avif");
+        assert_eq!((files[0].added, files[0].removed), (0, 0));
+    }
+
+    #[test]
+    fn a_changed_binary_file_is_named_by_the_side_after_the_change() {
+        let diff = "diff --git a/img/logo.png b/img/logo.png\n\
+index 510b42e..dce0f60 100644\n\
+Binary files a/img/logo.png and b/img/logo.png differ\n";
+        assert_eq!(split_diff(diff)[0].path, "img/logo.png");
+    }
+
+    #[test]
+    fn a_deleted_binary_file_falls_back_to_the_side_it_had() {
+        let diff = "diff --git a/img/old.png b/img/old.png\n\
+deleted file mode 100644\n\
+index bdc955b..0000000\n\
+Binary files a/img/old.png and /dev/null differ\n";
+        assert_eq!(split_diff(diff)[0].path, "img/old.png");
+    }
+
+    #[test]
+    fn a_rename_that_changed_nothing_is_named_by_where_it_went() {
+        let diff = "diff --git a/docs/old.md b/docs/new.md\n\
+similarity index 100%\n\
+rename from docs/old.md\n\
+rename to docs/new.md\n";
+        assert_eq!(split_diff(diff)[0].path, "docs/new.md");
+    }
+
+    #[test]
+    fn a_mode_only_change_still_names_its_file() {
+        // Nothing here but the header — no hunk, no rename, no binary line.
+        let diff = "diff --git a/scripts/run.sh b/scripts/run.sh\n\
+old mode 100644\n\
+new mode 100755\n";
+        assert_eq!(split_diff(diff)[0].path, "scripts/run.sh");
+    }
+
+    #[test]
+    fn a_name_with_a_space_keeps_the_space_and_loses_the_tab() {
+        // Git writes a tab after a name with a space in it. A pathspec ending
+        // in a tab matches no file, so a commit of this used to fail too.
+        let diff = "diff --git a/my docs/read me.md b/my docs/read me.md\n\
+index 587be6b..b77b4eb 100644\n\
+--- a/my docs/read me.md\t\n\
++++ b/my docs/read me.md\t\n\
+@@ -1 +1,2 @@\n\
++added\n";
+        assert_eq!(split_diff(diff)[0].path, "my docs/read me.md");
+    }
+
+    #[test]
+    fn a_binary_name_with_a_space_comes_out_of_the_header() {
+        let diff = "diff --git a/demo files/clip one.mp4 b/demo files/clip one.mp4\n\
+new file mode 100644\n\
+index 0000000..ba01f6b\n\
+Binary files /dev/null and b/demo files/clip one.mp4 differ\n";
+        assert_eq!(split_diff(diff)[0].path, "demo files/clip one.mp4");
+    }
+
+    #[test]
+    fn an_accented_name_is_unquoted_back_into_its_own_letters() {
+        // `core.quotePath` writes every byte outside ASCII as an octal escape
+        // and wraps the side in quotes. Decoded as bytes, those are UTF-8.
+        let diff = "diff --git \"a/docs/caf\\303\\251.md\" \"b/docs/caf\\303\\251.md\"\n\
+index 587be6b..b77b4eb 100644\n\
+--- \"a/docs/caf\\303\\251.md\"\t\n\
++++ \"b/docs/caf\\303\\251.md\"\t\n\
+@@ -1 +1,2 @@\n\
++added\n";
+        assert_eq!(split_diff(diff)[0].path, "docs/café.md");
+    }
+
+    #[test]
+    fn an_accented_binary_name_is_read_from_the_quoted_header() {
+        let diff = "diff --git \"a/m\\303\\251dia/clip.mp4\" \"b/m\\303\\251dia/clip.mp4\"\n\
+new file mode 100644\n\
+index 0000000..ba01f6b\n\
+Binary files /dev/null and \"b/m\\303\\251dia/clip.mp4\" differ\n";
+        assert_eq!(split_diff(diff)[0].path, "média/clip.mp4");
+    }
+
+    #[test]
+    fn a_removed_line_that_looks_like_a_header_does_not_rename_the_file() {
+        // A diff of a diff: the content below `@@` is content, whatever it
+        // starts with.
+        let diff = "diff --git a/notes/patch.txt b/notes/patch.txt\n\
+index 587be6b..b77b4eb 100644\n\
+--- a/notes/patch.txt\n\
++++ b/notes/patch.txt\n\
+@@ -1,2 +1,2 @@\n\
+--- a/somewhere/else.rs\n\
++++ b/another/place.rs\n";
+        assert_eq!(split_diff(diff)[0].path, "notes/patch.txt");
+    }
+
+    #[test]
+    fn a_binary_file_sits_beside_text_in_one_diff() {
+        // The shape that started this: four media files added at once, next to
+        // the source change that uses them.
+        let whole = format!("{SAMPLE}{NEW_BINARY}");
+        let files = split_diff(&whole);
+        let paths: Vec<&str> = files.iter().map(|f| f.path.as_str()).collect();
+        assert_eq!(paths, ["README.md", "src/main.rs", "public/demo/demo.avif"]);
     }
 
     #[test]

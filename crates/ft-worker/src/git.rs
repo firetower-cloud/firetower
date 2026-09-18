@@ -23,6 +23,15 @@ pub struct GitRoot {
     worktrees: PathBuf,
 }
 
+/// Print a path with a character outside ASCII as itself, rather than as the
+/// octal escapes `core.quotePath` defaults to.
+///
+/// The review sheet reads the file names back out of the diff and sends them to
+/// `git add`, so a name that arrives escaped is a commit that cannot be made.
+/// `split_diff` unescapes what git still quotes — a tab or a quote in a name —
+/// but an accent is the common case and this keeps it plain.
+const QUOTE_PATH: &str = "core.quotePath=false";
+
 impl GitRoot {
     pub fn new(base: impl AsRef<Path>) -> Self {
         let base = base.as_ref();
@@ -655,7 +664,7 @@ impl GitRoot {
         if since == ft_core::DiffSince::Head {
             // What is not committed yet: the working tree against HEAD, plus
             // the files git does not know about at all.
-            let out = run(dest, "git", &["diff", "HEAD"]).await?;
+            let out = run(dest, "git", &["-c", QUOTE_PATH, "diff", "HEAD"]).await?;
             let untracked = self.untracked_diff(dest).await.unwrap_or_default();
             return Ok(format!("{out}{untracked}"));
         }
@@ -681,7 +690,7 @@ impl GitRoot {
             // than comparing against nothing.
             .unwrap_or_else(|_| base.to_string());
 
-        let out = run(dest, "git", &["diff", &from]).await?;
+        let out = run(dest, "git", &["-c", QUOTE_PATH, "diff", &from]).await?;
         let untracked = self.untracked_diff(dest).await.unwrap_or_default();
         Ok(format!("{out}{untracked}"))
     }
@@ -694,13 +703,31 @@ impl GitRoot {
     /// Done by comparing each against nothing rather than with `add -N`, which
     /// would write intent-to-add entries into an index the agent is also using.
     async fn untracked_diff(&self, dest: &Path) -> Result<String> {
-        let listed = run(dest, "git", &["ls-files", "--others", "--exclude-standard"]).await?;
+        // Names come back NUL-separated because they are about to be used as
+        // paths. Without `-z` git quotes and escapes anything outside ASCII,
+        // and the escaped name is not a file that exists — an untracked
+        // `média.webm` was listed, diffed as nothing, and went missing from the
+        // sheet altogether.
+        let listed = run(
+            dest,
+            "git",
+            &["ls-files", "-z", "--others", "--exclude-standard"],
+        )
+        .await?;
 
         let mut out = String::new();
-        for path in listed.lines().map(str::trim).filter(|p| !p.is_empty()) {
+        for path in listed.split('\0').filter(|p| !p.is_empty()) {
             // `--no-index` exits 1 when the files differ, which here is always.
             let shown = Command::new("git")
-                .args(["diff", "--no-index", "--", "/dev/null", path])
+                .args([
+                    "-c",
+                    QUOTE_PATH,
+                    "diff",
+                    "--no-index",
+                    "--",
+                    "/dev/null",
+                    path,
+                ])
                 .current_dir(dest)
                 .output()
                 .await;
@@ -1949,5 +1976,75 @@ mod tests {
             diff.contains("+and then more"),
             "the uncommitted work is in it: {diff}"
         );
+    }
+
+    /// The shape that could not be committed at all: an agent adds a poster and
+    /// a video, and the review sheet offers them as `a/x b/x` because a binary
+    /// file has no `+++` line to read the name from. Ticking them and pressing
+    /// commit met "pathspec did not match any files".
+    ///
+    /// The whole round trip, because the unit test on `split_diff` cannot see
+    /// the part that actually failed — git rejecting the path it was handed.
+    #[tokio::test]
+    async fn a_binary_file_commits_under_the_path_the_sheet_shows() {
+        let (_origin, remote) = origin().await;
+        let home = TempDir::new().unwrap();
+        let git = GitRoot::new(home.path());
+        let (mirror, _) = git
+            .ensure_mirror(&remote, "acme/backend", None, None)
+            .await
+            .unwrap();
+        let (tree, _) = git
+            .add_worktree(&mirror, "agent/media", "main", "s_media")
+            .await
+            .unwrap();
+
+        // A byte git will not print, which is all it takes to be binary. The
+        // names carry a space and an accent too — both of them arrive escaped
+        // or tab-terminated, and both were the same kind of unusable pathspec.
+        tokio::fs::create_dir_all(tree.join("public/demo"))
+            .await
+            .unwrap();
+        for name in [
+            "public/demo/demo-0.9.avif",
+            "public/demo/demo clip.mp4",
+            "public/demo/démo.webm",
+        ] {
+            tokio::fs::write(tree.join(name), [0x00, 0x01, 0xff, 0x00])
+                .await
+                .unwrap();
+        }
+
+        let diff = git.diff(&tree, "main").await.unwrap();
+        let files = ft_core::split_diff(&diff);
+        let mut paths: Vec<String> = files.iter().map(|f| f.path.clone()).collect();
+        paths.sort();
+        assert_eq!(
+            paths,
+            [
+                "public/demo/demo clip.mp4",
+                "public/demo/demo-0.9.avif",
+                "public/demo/démo.webm",
+            ],
+            "the sheet names the files as they are on disk: {diff}"
+        );
+
+        // Exactly what the review sheet sends back.
+        let said = git
+            .commit(&tree, "add the demo media", &paths, None)
+            .await
+            .expect("a file the sheet listed can be committed");
+        assert!(said.contains('3'), "all three went in: {said}");
+
+        // `-z`, so the accented name is compared as itself rather than as the
+        // escapes git prints when it has to quote.
+        let tracked = run(&tree, "git", &["ls-files", "-z"]).await.unwrap();
+        let tracked: Vec<&str> = tracked.split('\0').filter(|p| !p.is_empty()).collect();
+        for name in &paths {
+            assert!(
+                tracked.contains(&name.as_str()),
+                "{name} is not in the commit: {tracked:?}"
+            );
+        }
     }
 }
