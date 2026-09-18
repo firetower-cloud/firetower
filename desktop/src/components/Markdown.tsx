@@ -12,6 +12,7 @@ import {
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { CopyButton } from "~/components/ui";
+import { isWorkspaceSrc, WorkspaceImage } from "~/components/WorkspaceImage";
 
 /**
  * How wide a sentence gets.
@@ -128,6 +129,16 @@ export const Markdown = memo(function Markdown({ children }: { children: string 
 
           code: ({ className, children }) => <Code className={className}>{children}</Code>,
           pre: ({ children }) => <Block>{children}</Block>,
+
+          // A picture the agent drew or captured. A workspace path is read
+          // through the API — see `WorkspaceImage` for why it cannot just be
+          // an `<img src>` — and anything already a URL is left alone.
+          img: ({ src, alt }) =>
+            isWorkspaceSrc(typeof src === "string" ? src : undefined) ? (
+              <WorkspaceImage src={src as string} alt={alt} />
+            ) : (
+              <img src={typeof src === "string" ? src : undefined} alt={alt ?? ""} className="my-3 max-h-[420px] max-w-full rounded-md border border-line object-contain" />
+            ),
 
           // Tables come from the GitHub extension, and an agent reaching for
           // one usually has something worth lining up.

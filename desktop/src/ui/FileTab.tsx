@@ -13,6 +13,7 @@ import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { Bot, Check, Copy, Send, X } from "lucide-react";
 import { Markdown } from "~/components/Markdown";
+import { ImagesFrom } from "~/components/WorkspaceImage";
 import { isMarkdown, useFileText } from "~/api/text";
 import { sendTurn } from "~/api/generated/sessions/sessions";
 import type { Session } from "~/api/generated/model";
@@ -118,7 +119,11 @@ export function FileTab({ session, path, line }: { session: Session; path: strin
 
       <div ref={body} onMouseUp={takeSelection} className="scroll-slim min-h-0 flex-1 overflow-auto py-2">
         {md && rendered ? (
-          <div className="prose-desk mx-auto max-w-[46rem] px-8 py-4"><Markdown>{text ?? ""}</Markdown></div>
+          /* A README that embeds a screenshot should show it here too, and
+             the pictures in it come out of the same workspace this file did. */
+          <ImagesFrom.Provider value={{ session: sessionId }}>
+            <div className="prose-desk mx-auto max-w-[46rem] px-8 py-4"><Markdown>{text ?? ""}</Markdown></div>
+          </ImagesFrom.Provider>
         ) : (
           <table className="w-max min-w-full border-separate border-spacing-0 font-mono text-code">
             <tbody>

@@ -18,6 +18,8 @@ import { useSession, useSessions } from "~/data";
 import { navigate } from "~/shims/next-navigation";
 import { Chat } from "~/ui/Chat";
 import { FileTab } from "~/ui/FileTab";
+import { ImageTab } from "~/ui/ImageTab";
+import { isImage } from "~/api/text";
 import { PreviewTab } from "~/ui/PreviewTab";
 import { PortPicker } from "~/ui/PortPicker";
 import { AddAgent } from "~/ui/AddAgent";
@@ -412,7 +414,9 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
                   setOpen(true);
                 }}
               />
-            ) : "port" in (tabs.find((t) => t.id === active) ?? {}) ? null : (
+            ) : "port" in (tabs.find((t) => t.id === active) ?? {}) ? null : isImage((tabs.find((t) => t.id === active) as { path: string }).path) ? (
+              <ImageTab session={run} path={(tabs.find((t) => t.id === active) as { path: string }).path} />
+            ) : (
               <FileTab session={run} path={(tabs.find((t) => t.id === active) as { path: string }).path} line={(tabs.find((t) => t.id === active) as { line?: number }).line} />
             )}
             {/* Previews stay mounted while another tab is up: a frame that is

@@ -54,6 +54,7 @@ import { folderRefusals, useFileDrop } from "~/ui/drop";
 import { AccountSwitcher } from "~/ui/AccountSwitcher";
 import { Annotate, type Anchor } from "~/ui/Annotate";
 import { markPaths, resolvePath } from "~/paths";
+import { ImagesFrom } from "~/components/WorkspaceImage";
 import { AddAgent } from "~/ui/AddAgent";
 
 const DID: Partial<Record<ItemKind, string>> = {
@@ -252,6 +253,7 @@ export function Chat({
         }}
       >
         <SessionContext.Provider value={{ session: session.id }}>
+        <ImagesFrom.Provider value={{ session: session.id, onOpen: onOpenFile }}>
         <NotesContext.Provider value={{ notes, drop }}>
         <div ref={body} className="mx-auto w-full max-w-[46rem] px-8 pt-8 pb-4">
           <h1 className="text-display text-bone">{session.title}</h1>
@@ -299,6 +301,7 @@ export function Chat({
 
         </div>
         </NotesContext.Provider>
+        </ImagesFrom.Provider>
         </SessionContext.Provider>
       </div>
 
@@ -500,10 +503,30 @@ function Thought({ item }: { item: Item }) {
 
 function ToolRow({ item, onOpenDiff, onOpenFile }: { item: Item } & Open) {
   const [open, setOpen] = useState(false);
+  const { session } = useContext(SessionContext);
+  const [notice, setNotice] = useState<string | null>(null);
   const failed = item.status === "Failed";
   const Glyph = GLYPH[item.kind] ?? Terminal;
   const line = said(item);
   const path = /\.[a-z0-9]+$/i.test(line) && !line.includes(" ") ? line : null;
+
+  /* Asked before the tab opens, the way a path in the prose already is.
+     Without it, anything ending in a dot and some letters became a tab — and
+     a tool that worked on `/tmp/shot.png` opened a tab that could only ever
+     spend twenty seconds asking the worker for a file it is not allowed to
+     reach. A sentence now beats a spinner then. */
+  const follow = async () => {
+    if (!path || !session) return;
+    const real = await resolvePath(session, path);
+    /* Still a preview, the way a tool row has always opened one — the check
+       added here is about whether it opens at all, not about how long it
+       stays. */
+    if (real) onOpenFile(real);
+    else {
+      setNotice(`${path} is not in this workspace.`);
+      setTimeout(() => setNotice(null), 2500);
+    }
+  };
 
   return (
     <li className="ml-px border-l border-line pl-4">
@@ -513,7 +536,7 @@ function ToolRow({ item, onOpenDiff, onOpenFile }: { item: Item } & Open) {
         <button
           onClick={() => {
             if (item.kind === "FileChange") onOpenDiff();
-            else if (path) onOpenFile(path);
+            else if (path) void follow();
             else setOpen(!open);
           }}
           className={`min-w-0 flex-1 truncate text-left ${failed ? "text-brick" : path ? "text-mute underline decoration-line underline-offset-2 hover:text-dim" : "text-mute"}`}
@@ -523,6 +546,7 @@ function ToolRow({ item, onOpenDiff, onOpenFile }: { item: Item } & Open) {
         {item.status && item.status !== "Completed" && <span className={`shrink-0 text-micro ${failed ? "text-brick" : "text-mute"}`}>{item.status.toLowerCase()}</span>}
         {!item.status && <span className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-slate" />}
       </div>
+      {notice && <p className="px-2 pb-1 text-meta text-mute">{notice}</p>}
       {open && (
         <div className="mb-1 space-y-1.5 px-2">
           {item.input !== undefined && <pre className="scroll-slim max-h-40 overflow-auto rounded-md bg-panel px-3 py-2 font-mono text-micro whitespace-pre-wrap text-mute">{JSON.stringify(item.input, null, 2)}</pre>}

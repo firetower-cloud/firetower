@@ -2876,18 +2876,35 @@ fn login_shell() -> String {
 /// On components rather than on the joined string: `workspace/../escaped` does
 /// start with `workspace` as far as `Path::starts_with` is concerned, which is
 /// a check that passes exactly what it exists to stop.
+///
+/// An absolute path is refused *as an absolute path* rather than quietly made
+/// relative. This used to trim the leading slash, so `/tmp/shot.png` was looked
+/// up at `<workspace>/tmp/shot.png` and came back as a plain "no such file" —
+/// a true sentence about a path nobody asked about, which sent whoever read it
+/// looking for a missing file instead of telling them the one thing they needed
+/// to know: this endpoint only reaches inside the workspace. The refusal has to
+/// name that, because it is the part that cannot be guessed from the outcome.
 fn inside(workspace: &Path, path: &str) -> Result<PathBuf> {
-    let relative = Path::new(path.trim_start_matches('/'));
+    let relative = Path::new(path);
 
     if relative.components().any(|c| {
         matches!(
             c,
-            std::path::Component::ParentDir
-                | std::path::Component::RootDir
-                | std::path::Component::Prefix(_)
+            std::path::Component::RootDir | std::path::Component::Prefix(_)
         )
     }) {
-        anyhow::bail!("{path} is outside the workspace");
+        anyhow::bail!(
+            "{path} is an absolute path, and this only reaches inside the workspace. \
+             Give it a path relative to the workspace root, or copy the file in and \
+             open it there"
+        );
+    }
+
+    if relative
+        .components()
+        .any(|c| matches!(c, std::path::Component::ParentDir))
+    {
+        anyhow::bail!("{path} climbs out of the workspace");
     }
 
     Ok(workspace.join(relative))
@@ -3316,6 +3333,63 @@ mod tests {
     use super::*;
     use ft_core::{Agent, WorkspaceSize};
     use tempfile::TempDir;
+
+    /// The refusal somebody actually reads.
+    ///
+    /// An agent that captures a screenshot puts it in `/tmp`, says so, and the
+    /// path it printed is clickable. This used to strip the slash and report
+    /// `<workspace>/tmp/shot.png` missing — true, and about a path nobody
+    /// named. The sentence has to carry the rule, or the next person spends
+    /// their afternoon looking for a file that was never supposed to be found.
+    #[test]
+    fn an_absolute_path_is_refused_for_being_absolute() {
+        let workspace = Path::new("/srv/work");
+        let refused = inside(workspace, "/tmp/annotation/shot.png")
+            .unwrap_err()
+            .to_string();
+
+        assert!(refused.contains("/tmp/annotation/shot.png"), "{refused}");
+        assert!(
+            refused.contains("absolute"),
+            "say what is wrong with it: {refused}"
+        );
+        assert!(
+            refused.contains("workspace"),
+            "say what it can reach: {refused}"
+        );
+    }
+
+    /// The old behaviour, named so it cannot come back by accident: an
+    /// absolute path must not be silently reinterpreted as a relative one.
+    #[test]
+    fn an_absolute_path_is_not_quietly_made_relative() {
+        assert!(inside(Path::new("/srv/work"), "/etc/passwd").is_err());
+    }
+
+    #[test]
+    fn climbing_out_is_still_refused() {
+        let refused = inside(Path::new("/srv/work"), "src/../../secrets")
+            .unwrap_err()
+            .to_string();
+        assert!(refused.contains("climbs out"), "{refused}");
+    }
+
+    /// And the ordinary case still resolves, including the dotted directory
+    /// attachments live in — refusing that would take the Files panel with it.
+    #[test]
+    fn a_workspace_path_resolves() {
+        let workspace = Path::new("/srv/work");
+        assert_eq!(
+            inside(workspace, "src/main.rs").unwrap(),
+            workspace.join("src/main.rs")
+        );
+        assert_eq!(
+            inside(workspace, ".firetower/attachments/shot.png").unwrap(),
+            workspace.join(".firetower/attachments/shot.png"),
+        );
+        // The Files panel asks for the root with an empty string.
+        assert_eq!(inside(workspace, "").unwrap(), workspace.to_path_buf());
+    }
 
     /// An agent told nothing runs `docker compose up`, meets `command not
     /// found`, and concludes the workspace is broken. Being told plainly is

@@ -11,8 +11,9 @@
  * replacing the pane's content: skimming six files while reading a diff should
  * not leave six tabs behind.
  */
-import { Globe, MessageSquare, X } from "lucide-react";
+import { Globe, Image, MessageSquare, X } from "lucide-react";
 import { langOf } from "~/syntax";
+import { isImage } from "~/api/text";
 
 export type Tab = { id: "chat" } | { id: string; path: string; preview?: boolean; line?: number } | { id: string; port: number; path?: string };
 
@@ -74,6 +75,10 @@ export function TabStrip({
               <MessageSquare className="h-3.5 w-3.5 shrink-0" strokeWidth={1.75} />
             ) : port !== null ? (
               <Globe className="h-3.5 w-3.5 shrink-0" strokeWidth={1.75} />
+            ) : isImage((tab as { path: string }).path) ? (
+              /* A picture gets the shape rather than the dot: the dot carries
+                 a *language*, and a screenshot is not written in one. */
+              <Image className={`h-3.5 w-3.5 shrink-0 ${on ? "text-syn-keyword" : ""}`} strokeWidth={1.75} />
             ) : (
               <span className={`shrink-0 text-micro ${on ? tone((tab as { path: string }).path) : ""}`}>
                 ●
