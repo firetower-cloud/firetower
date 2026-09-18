@@ -367,11 +367,14 @@
       bounds: [bounds.x, bounds.y, bounds.width, bounds.height],
     };
   }
-  function select(el) {
+  // `point` is where the pointer was, in this page's viewport. The panel puts
+  // its card there — an element taller than the view has no on-screen edge to
+  // hang it off, but the click that chose it is always somewhere visible.
+  function select(el, point) {
     selected = el;
     hovered = null;
     openPanel();
-    tell("selection", { snapshot: snapshot(el), parents: parentChoices(el) });
+    tell("selection", { snapshot: snapshot(el), parents: parentChoices(el), point });
     paint();
   }
   function parentChoices(el) {
@@ -415,7 +418,7 @@
         event.stopImmediatePropagation();
         if (kind === "click") {
           const el = target(event);
-          if (el) select(el);
+          if (el) select(el, [event.clientX, event.clientY]);
         }
       },
       true,

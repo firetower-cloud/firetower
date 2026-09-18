@@ -137,14 +137,15 @@ export function Chat({
   });
   /* Only what the agent said can be annotated; the selection has to start
      inside one of its turns, marked `data-said`. */
-  const takeSelection = () => {
+  const takeSelection = (e: React.MouseEvent) => {
     const sel = window.getSelection();
     const quote = sel?.toString().trim();
     if (!quote || quote.length < 2 || !sel?.anchorNode || sel.rangeCount === 0 || !body.current?.contains(sel.anchorNode)) return;
     const said = (sel.anchorNode.parentElement as HTMLElement | null)?.closest<HTMLElement>("[data-said]");
     if (!said) return;
-    const rect = sel.getRangeAt(0).getBoundingClientRect();
-    setDrafting({ quote: quote.length > 400 ? `${quote.slice(0, 400)}…` : quote, line: 0, label: "Note on what the agent said", item: said.dataset.said ?? "", x: rect.left + rect.width / 2, y: rect.bottom });
+    // Where the drag ended — a turn longer than the window has a selection box
+    // whose bottom edge is off the bottom of it. See `FileTab`.
+    setDrafting({ quote: quote.length > 400 ? `${quote.slice(0, 400)}…` : quote, line: 0, label: "Note on what the agent said", item: said.dataset.said ?? "", x: e.clientX, y: e.clientY });
   };
 
   /* The bring-up — Fetch → Worktree → Workspace → Setup → Launch — so a fresh

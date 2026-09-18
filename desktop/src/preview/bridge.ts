@@ -13,7 +13,8 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import { snapshotSchema, type ElementSnapshot } from "~/api/previewAnnotations";
 
-export type Selection = { snapshot: ElementSnapshot; parents: string[] };
+/** A pick from the page. `point` is where the pointer was, in the frame's viewport. */
+export type Selection = { snapshot: ElementSnapshot; parents: string[]; point?: [number, number] };
 
 export type Pin = { id: string; path: string; selector: string; label: string; html: string };
 
@@ -35,6 +36,9 @@ export type Outgoing =
   | { type: "go"; delta: number }
   | { type: "reload" }
   | { type: "navigate"; path: string };
+
+/** A point the page may claim the pointer was at: two real numbers, nothing else. */
+const isPoint = (p: unknown): p is [number, number] => Array.isArray(p) && p.length === 2 && p.every((n) => typeof n === "number" && Number.isFinite(n));
 
 /** A path the page may claim to be at: absolute, one line, not a URL in disguise. */
 const isPath = (p: unknown): p is string => typeof p === "string" && p.startsWith("/") && !p.startsWith("//") && p.length <= 2048 && !/[\r\n]/.test(p);
@@ -91,7 +95,10 @@ export function usePickerBridge(
         const parsed = snapshotSchema.safeParse(d.snapshot);
         const parents = d.parents;
         if (!parsed.success || !Array.isArray(parents) || parents.length > 10 || parents.some((p) => typeof p !== "string" || p.length > 500)) return;
-        held.current.onSelection({ snapshot: parsed.data, parents: parents as string[] });
+        // A selection the page made without a pointer — a keypress, or the
+        // panel's own step to the parent — carries no point, and the panel
+        // falls back to what it can see of the element.
+        held.current.onSelection({ snapshot: parsed.data, parents: parents as string[], point: isPoint(d.point) ? d.point : undefined });
       }
       if (d.type === "located" && typeof d.id === "string") held.current.onLocated(d.id, d.found === true);
       if (d.type === "focus-note" && typeof d.id === "string") held.current.onFocusNote(d.id);
