@@ -20,6 +20,7 @@ import type { Backend } from "~/fleet";
 import { useSessions, useUpdatesDot } from "~/data";
 import { navigate, usePathname } from "~/shims/next-navigation";
 import { useStart } from "~/start";
+import { useNow } from "~/ui/clock";
 import { useQueryClient } from "@tanstack/react-query";
 import { getListSessionsQueryKey, renameSession } from "~/api/generated/sessions/sessions";
 import { ContextMenu, useMenu } from "~/ui/ContextMenu";
@@ -41,6 +42,9 @@ export function Rail({ backend }: { backend: Backend }) {
   const start = useStart();
   const { data: sessions, loading, error } = useSessions();
   const updates = useUpdatesDot();
+  // The ages below are read off the clock, so the rail has to be told the clock
+  // moved — nothing else re-renders a workspace that is quietly working.
+  useNow();
 
   const running = sessions.filter((s) => s.status !== "Ended");
   const repos = group(running);
