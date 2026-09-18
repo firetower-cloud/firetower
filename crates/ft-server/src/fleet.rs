@@ -8,7 +8,7 @@
 use crate::db::Db;
 use anyhow::{Context, Result};
 use ft_core::SessionStatus;
-use ft_core::{AgentPresence, CheckoutSummary, Event, HostId, SessionId};
+use ft_core::{AgentPresence, CheckoutSummary, Event, EventKind, HostId, SessionId};
 use ft_proto::{
     decode, encode, Codec, CodecError, Credential, ProbeFailure, Pty, RemoteInfo, ReqId, ToServer,
     ToWorker, PROTOCOL_VERSION,
@@ -523,6 +523,53 @@ async fn describe(fleet: &Fleet, db: &Db, host_id: &HostId, session_id: &Session
     }
 }
 
+/// Move a session's status *here*, and tell everyone watching.
+///
+/// The replacement for calling `Db::set_session_state` directly, which wrote
+/// the row and stopped there — no row in `events`, nothing on the bus. Every
+/// client is fed by that bus and polls for nothing, so a status decided by the
+/// control plane rather than reported by a worker reached no screen at all: an
+/// agent blocked on a permission stayed green in the rail until something
+/// happened to refetch the list. The phone was told, because `blocked` called
+/// `tell` by hand; the interface was not.
+///
+/// So the event is the only way to say it, and saying it is one call. Statuses
+/// a worker reports already arrive this way — this puts the local ones on the
+/// same path rather than beside it.
+async fn announce_status(
+    db: &Db,
+    events: &broadcast::Sender<Event>,
+    session_id: &SessionId,
+    status: SessionStatus,
+    note: Option<&str>,
+) {
+    let at = chrono::Utc::now();
+    let kind = EventKind::StatusChanged {
+        status,
+        note: note.map(str::to_string),
+    };
+
+    // Writing the event *is* writing the status: `write_event` applies a
+    // `StatusChanged` to the session row in the same transaction. There is no
+    // second call, and so no window where the two disagree.
+    match db.record_local_event(session_id, &kind, at).await {
+        Ok(Some(seq)) => {
+            // a send failure only means nobody is watching
+            let _ = events.send(Event {
+                seq,
+                session_id: session_id.clone(),
+                kind,
+                at,
+            });
+        }
+        // Local events have no host pair to collide on, so this is
+        // unreachable rather than ordinary. Said out loud in case that ever
+        // stops being true.
+        Ok(None) => tracing::warn!(session = %session_id, "a local event was treated as a replay"),
+        Err(e) => tracing::warn!(session = %session_id, "recording a status change: {e:#}"),
+    }
+}
+
 /// Record that a session has stopped for somebody, and say so.
 ///
 /// Two things arrive at this: an agent that asks through a tool of its own —
@@ -531,6 +578,7 @@ async fn describe(fleet: &Fleet, db: &Db, host_id: &HostId, session_id: &Session
 /// afterwards has to find it whichever way it came.
 async fn blocked(
     db: &Db,
+    events: &broadcast::Sender<Event>,
     notify: &crate::notify::Notifier,
     asked: &Arc<RwLock<HashMap<String, Vec<AgentSpeech>>>>,
     conversations: &Arc<RwLock<HashMap<String, broadcast::Sender<AgentSpeech>>>>,
@@ -563,12 +611,7 @@ async fn blocked(
     // A permission prompt is never in a transcript — the agent is blocked, not
     // talking — so this is the only thing that can say the session stopped.
     let note = asking_about(tool_name, input);
-    if let Err(e) = db
-        .set_session_state(session_id, SessionStatus::NeedsYou, Some(&note))
-        .await
-    {
-        tracing::warn!(session = %session_id, "marking as waiting: {e:#}");
-    }
+    announce_status(db, events, session_id, SessionStatus::NeedsYou, Some(&note)).await;
 
     // `news` alone, and deliberately. A watcher attaching re-announces
     // everything the agent is blocked on, which is right for drawing it and
@@ -1135,6 +1178,19 @@ impl Fleet {
         self.events.subscribe()
     }
 
+    /// Move a session's status and tell everyone watching.
+    ///
+    /// What the API handlers call instead of `Db::set_session_state`. See
+    /// [`announce_status`] for why a bare write is not enough.
+    pub async fn set_status(
+        &self,
+        session_id: &SessionId,
+        status: SessionStatus,
+        note: Option<&str>,
+    ) {
+        announce_status(&self.db, &self.events, session_id, status, note).await;
+    }
+
     /// Connect once and say what happened, writing nothing down.
     ///
     /// The same handshake `supervise` runs, without a host to attach it to.
@@ -1693,10 +1749,25 @@ impl Fleet {
                         }
 
                         Ok(ToServer::Event { seq, session_id, kind, at }) => {
-                            if let Err(e) = db.record_event(&host_id, seq, &session_id, &kind, at).await {
-                                tracing::error!("recording event: {e:#}");
-                                continue;
-                            }
+                            // The id of the row, not the worker's `seq`. The
+                            // two are different number spaces, and the replay
+                            // endpoint reads the row id — so forwarding the
+                            // worker's number handed every client a cursor
+                            // that pointed somewhere else in the log, and a
+                            // reconnect replayed a stretch of history it had
+                            // already applied. A re-applied `StatusChanged`
+                            // walks a session's status backwards.
+                            //
+                            // `None` is a replay we already had, which is
+                            // ordinary and must not be announced again.
+                            let written = match db.record_event(&host_id, seq, &session_id, &kind, at).await {
+                                Ok(written) => written,
+                                Err(e) => {
+                                    tracing::error!("recording event: {e:#}");
+                                    continue;
+                                }
+                            };
+                            let Some(seq) = written else { continue };
                             // a send failure only means nobody is watching
                             let _ = events.send(Event { seq, session_id, kind, at });
                         }
@@ -1790,7 +1861,7 @@ impl Fleet {
                             // that stopped for no visible reason.
                             for question in read.asks {
                                 blocked(
-                                    &db, &notify, &asked, &conversations,
+                                    &db, &events, &notify, &asked, &conversations,
                                     &session_id, question,
                                 ).await;
                             }
@@ -1802,12 +1873,7 @@ impl Fleet {
                                     .ok()
                                     .flatten()
                                     .is_some_and(|s| s.needs_you());
-                                if let Err(e) = db
-                                    .set_session_state(&session_id, status, note.as_deref())
-                                    .await
-                                {
-                                    tracing::warn!(session = %session_id, "recording progress: {e:#}");
-                                }
+                                announce_status(&db, &events, &session_id, status, note.as_deref()).await;
                                 // On the change into needing somebody, not
                                 // every time we are told it still does.
                                 if status.needs_you() && !was_waiting {
@@ -1837,7 +1903,7 @@ impl Fleet {
                         }
                         Ok(ToServer::AgentAsks { session_id, req, tool_name, input }) => {
                             blocked(
-                                &db, &notify, &asked, &conversations, &session_id,
+                                &db, &events, &notify, &asked, &conversations, &session_id,
                                 AgentSpeech::Asks { req, tool_name, input },
                             ).await;
                         }
@@ -2090,12 +2156,7 @@ impl Fleet {
                             // pinned on whichever session went last.
                             if let Some(session_id) = session_id {
                                 let note = note_for(&code, &message);
-                                if let Err(e) = db
-                                    .set_session_state(&session_id, SessionStatus::Failed, Some(&note))
-                                    .await
-                                {
-                                    tracing::warn!(session = %session_id, "recording a worker error: {e:#}");
-                                }
+                                announce_status(&db, &events, &session_id, SessionStatus::Failed, Some(&note)).await;
                                 // So an open browser stops waiting without
                                 // being reloaded.
                                 if let Some(tx) = conversations.read().await.get(session_id.as_str()) {
@@ -2776,13 +2837,8 @@ impl Fleet {
         // the stream says this: the agent does not announce that it has been
         // unblocked, it simply carries on.
         if !still_waiting {
-            if let Err(e) = self
-                .db
-                .set_session_state(session_id, SessionStatus::Working, None)
-                .await
-            {
-                tracing::warn!(session = %session_id, "clearing the question: {e:#}");
-            }
+            self.set_status(session_id, SessionStatus::Working, None)
+                .await;
         }
 
         // Which shape an answer takes is the agent's, and which agent this is

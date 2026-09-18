@@ -786,9 +786,9 @@ pub(crate) async fn relaunch(
     let agent_home = agent_home(state, session.agent, &session.id, owner).await?;
 
     state
-        .db
-        .set_session_state(&session.id, ft_core::SessionStatus::Starting, None)
-        .await?;
+        .fleet
+        .set_status(&session.id, ft_core::SessionStatus::Starting, None)
+        .await;
     let started = state
         .fleet
         .start_agent(
@@ -816,7 +816,7 @@ pub(crate) async fn relaunch(
         )
         .await;
     if let Err(error) = started {
-        state.db.set_session_state(&session.id,ft_core::SessionStatus::Failed,Some("The agent did not restart. Its selected account and workspace are preserved; retry the restart.")).await?;
+        state.fleet.set_status(&session.id,ft_core::SessionStatus::Failed,Some("The agent did not restart. Its selected account and workspace are preserved; retry the restart.")).await;
         return Err(error.into());
     }
 
@@ -2688,12 +2688,12 @@ pub(super) async fn continue_with_account(
             }
         }
         state
-            .db
-            .set_session_state(&session.id, ft_core::SessionStatus::Working, None)
-            .await?;
+            .fleet
+            .set_status(&session.id, ft_core::SessionStatus::Working, None)
+            .await;
         if let Err(error)=state.fleet.send_turn(&session.host_id, &session.id,
             "Continue the current task from where it stopped. Check the current workspace state before repeating any interrupted action. Keep the existing permissions and ask again for any pending approval.", &[]).await {
-            state.db.set_session_state(&session.id,ft_core::SessionStatus::Failed,Some("The account was selected, but continuation did not finish. Retry the agent when the host is ready.")).await?;
+            state.fleet.set_status(&session.id,ft_core::SessionStatus::Failed,Some("The account was selected, but continuation did not finish. Retry the agent when the host is ready.")).await;
             return Err(ApiError::new(ErrorCode::HostUnreachable,format!("The account was selected, but continuation failed: {error:#}")));
         }
         return Ok(session.id.clone());

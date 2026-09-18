@@ -1349,6 +1349,14 @@ impl Db {
     ///
     /// Replays are expected — a worker resends anything we might have missed —
     /// so a duplicate is ignored rather than treated as an error.
+    ///
+    /// The id of the row written, or `None` for a replay we already had. That
+    /// answer is what the caller broadcasts as the event's `seq`, and it is why
+    /// it is returned rather than assumed: the fan-out used to forward the
+    /// *worker's* number, which lives in a different space from the one the
+    /// replay endpoint reads, so a client resuming from a live frame asked for
+    /// the wrong place in the log. `None` also stops a replay being announced
+    /// twice.
     pub async fn record_event(
         &self,
         host_id: &HostId,
@@ -1356,21 +1364,66 @@ impl Db {
         session_id: &SessionId,
         kind: &EventKind,
         at: chrono::DateTime<chrono::Utc>,
-    ) -> Result<()> {
+    ) -> Result<Option<i64>> {
+        self.write_event(Some((host_id, seq)), session_id, kind, at)
+            .await
+    }
+
+    /// Record an event the control plane raised itself.
+    ///
+    /// Same log, same side effects, same broadcast — the only difference is
+    /// that there is no worker behind it, so no host and no host cursor. See the
+    /// `local_events` migration for why that is a null rather than a borrowed
+    /// number.
+    pub async fn record_local_event(
+        &self,
+        session_id: &SessionId,
+        kind: &EventKind,
+        at: chrono::DateTime<chrono::Utc>,
+    ) -> Result<Option<i64>> {
+        self.write_event(None, session_id, kind, at).await
+    }
+
+    /// The one body behind both, so a locally raised event cannot drift from a
+    /// worker's in what it does to the rest of the tables.
+    async fn write_event(
+        &self,
+        from: Option<(&HostId, i64)>,
+        session_id: &SessionId,
+        kind: &EventKind,
+        at: chrono::DateTime<chrono::Utc>,
+    ) -> Result<Option<i64>> {
         let mut tx = self.pool.begin().await?;
 
-        sqlx::query(
+        // `ON CONFLICT` names the worker's pair, which is the only thing that
+        // can collide. A local event has no host, and NULLs are distinct, so it
+        // never matches and always writes.
+        let written: Option<i64> = sqlx::query_scalar(
             "INSERT INTO events (host_id, seq, session_id, payload, created_at)
              VALUES ($1, $2, $3, $4, $5)
-             ON CONFLICT (host_id, seq) DO NOTHING",
+             ON CONFLICT (host_id, seq) DO NOTHING
+             RETURNING id",
         )
-        .bind(host_id.as_str())
-        .bind(seq)
+        .bind(from.map(|(host, _)| host.as_str()))
+        .bind(from.map(|(_, seq)| seq))
         .bind(session_id.as_str())
         .bind(serde_json::to_value(kind)?)
         .bind(at)
-        .execute(&mut *tx)
+        .fetch_optional(&mut *tx)
         .await?;
+
+        // Nothing was written, so none of the side effects below should run: a
+        // replayed `StatusChanged` would put an old status back over a newer
+        // one. The cursor still has to move, though — it is what a worker is
+        // told to resume from, and leaving it behind the log it already holds
+        // would have it replay the same stretch on every reconnect, forever.
+        let Some(id) = written else {
+            if let Some((host_id, seq)) = from {
+                advance(&mut tx, host_id, seq).await?;
+            }
+            tx.commit().await?;
+            return Ok(None);
+        };
 
         // The worker may have had to disambiguate the branch name, so the
         // authoritative value arrives with the event rather than being what we
@@ -1433,9 +1486,16 @@ impl Db {
             // Not for a session you removed while its host was away. The
             // worker knows nothing about that and will happily report it as
             // working; applying that here would put a ghost back on the inbox.
+            // `status <> 'Ended'` because nothing escapes the terminal state —
+            // `SessionStatus::can_transition_to` answers `(Ended, _) => false`
+            // and this is where that is held. It used to live only on the
+            // direct write, so an event could put a finished session back to
+            // work and disagree with the model; now both paths run through
+            // here, so it is enforced in one place for both.
             sqlx::query(
                 "UPDATE sessions SET status = $1, note = $2, updated_at = $3
                   WHERE id = $4
+                    AND status <> 'Ended'
                     AND workspace_id IN (SELECT id FROM workspaces WHERE forgotten_at IS NULL)",
             )
             .bind(serde_json::to_string(status)?.trim_matches('"'))
@@ -1446,15 +1506,14 @@ impl Db {
             .await?;
         }
 
-        sqlx::query("UPDATE hosts SET last_seq = $1 WHERE id = $2 AND last_seq < $3")
-            .bind(seq)
-            .bind(host_id.as_str())
-            .bind(seq)
-            .execute(&mut *tx)
-            .await?;
+        // Only a worker has a cursor to advance. A local event is not something
+        // any host has to catch up on.
+        if let Some((host_id, seq)) = from {
+            advance(&mut tx, host_id, seq).await?;
+        }
 
         tx.commit().await?;
-        Ok(())
+        Ok(Some(id))
     }
 
     /// Keep one line a structured agent printed.
@@ -1617,45 +1676,6 @@ impl Db {
             .collect())
     }
 
-    /// Say where a session has got to, from what its agent said.
-    ///
-    /// The only writer of this field for an agent that speaks a protocol —
-    /// hooks are not installed for those, precisely so that this is not one of
-    /// two mechanisms racing to describe the same moment.
-    ///
-    /// The note is replaced every time, including with nothing: a question that
-    /// has been answered should not still be on the card after the agent went
-    /// back to work.
-    ///
-    /// Not for a session somebody removed while its host was away. The worker
-    /// knows nothing about that and will happily go on reporting; applying it
-    /// here would put a ghost back in the inbox.
-    pub async fn set_session_state(
-        &self,
-        session_id: &SessionId,
-        status: SessionStatus,
-        note: Option<&str>,
-    ) -> Result<()> {
-        // `forgotten_at` is a fact about the directory, so it moved to
-        // `workspaces` with the rest of them. Asked for on `sessions` it is not
-        // a filter that matches nothing — it is an error, and this statement
-        // had been failing on every call since.
-        sqlx::query(
-            "UPDATE sessions SET status = $1, note = $2, updated_at = now()
-              WHERE id = $3
-                AND workspace_id IN (SELECT id FROM workspaces WHERE forgotten_at IS NULL)
-                AND status <> $4",
-        )
-        .bind(format!("{status:?}"))
-        .bind(note)
-        .bind(session_id.as_str())
-        // Nothing leaves `Ended`.
-        .bind(format!("{:?}", SessionStatus::Ended))
-        .execute(&self.pool)
-        .await?;
-        Ok(())
-    }
-
     /// Everything the agent has said, in order, from `since` onward.
     pub async fn agent_lines_since(
         &self,
@@ -1738,6 +1758,26 @@ impl Db {
 }
 
 /// One row of the event log.
+/// Move a host's resume cursor forward, never back.
+///
+/// Its own function because it runs on both paths through `write_event` — a
+/// new event and a replayed one. A replay still has to move it: it is what the
+/// host is told to resume from, and a cursor left behind the log we already
+/// hold means the same stretch arrives again on every reconnect.
+async fn advance(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    host_id: &HostId,
+    seq: i64,
+) -> Result<()> {
+    sqlx::query("UPDATE hosts SET last_seq = $1 WHERE id = $2 AND last_seq < $3")
+        .bind(seq)
+        .bind(host_id.as_str())
+        .bind(seq)
+        .execute(&mut **tx)
+        .await?;
+    Ok(())
+}
+
 fn event_from_row(r: sqlx::postgres::PgRow) -> Result<Event> {
     let payload: serde_json::Value = r.get("payload");
     Ok(Event {
@@ -1992,6 +2032,30 @@ mod tests {
     /// to — the same account the first boot creates.
     async fn db_with_user() -> (Db, String) {
         Db::open_for_test_owned().await.unwrap()
+    }
+
+    /// Move a session's status the way production does.
+    ///
+    /// Through the event log, because that is now the only way a status
+    /// changes: `Fleet::set_status` records one of these and broadcasts the
+    /// row id. Tests that used to call a direct write were checking a statement
+    /// nothing ran any more.
+    async fn set_status(
+        db: &Db,
+        id: &SessionId,
+        status: ft_core::SessionStatus,
+        note: Option<&str>,
+    ) {
+        db.record_local_event(
+            id,
+            &EventKind::StatusChanged {
+                status,
+                note: note.map(str::to_string),
+            },
+            chrono::Utc::now(),
+        )
+        .await
+        .unwrap();
     }
 
     #[tokio::test]
@@ -2950,9 +3014,13 @@ mod tests {
         .await
         .unwrap();
 
-        db.set_session_state(&id, ft_core::SessionStatus::NeedsYou, Some("which one?"))
-            .await
-            .unwrap();
+        set_status(
+            &db,
+            &id,
+            ft_core::SessionStatus::NeedsYou,
+            Some("which one?"),
+        )
+        .await;
 
         let moved = db.session(&id).await.unwrap().unwrap();
         assert_eq!(
@@ -2963,9 +3031,7 @@ mod tests {
         assert_eq!(moved.note.as_deref(), Some("which one?"));
 
         // The note is replaced every time, including with nothing.
-        db.set_session_state(&id, ft_core::SessionStatus::Working, None)
-            .await
-            .unwrap();
+        set_status(&db, &id, ft_core::SessionStatus::Working, None).await;
         let back = db.session(&id).await.unwrap().unwrap();
         assert_eq!(back.status, ft_core::SessionStatus::Working);
         assert_eq!(
@@ -2976,9 +3042,13 @@ mod tests {
         // Removed here while the host was away: the worker knows nothing about
         // it and goes on reporting, and none of that applies any more.
         db.forget_session(&id).await.unwrap();
-        db.set_session_state(&id, ft_core::SessionStatus::Working, Some("still going"))
-            .await
-            .unwrap();
+        set_status(
+            &db,
+            &id,
+            ft_core::SessionStatus::Working,
+            Some("still going"),
+        )
+        .await;
 
         let ghost = db.session(&id).await.unwrap().unwrap();
         assert_eq!(
@@ -2987,6 +3057,113 @@ mod tests {
             "a forgotten session is not brought back by its host"
         );
         assert_eq!(ghost.note, None);
+    }
+
+    /// A status the control plane decides is on the stream like any other.
+    ///
+    /// The bug this covers: `NeedsYou` from a permission prompt was written
+    /// straight to the row, so it reached no client. Every client is fed by the
+    /// event log and polls for nothing, which made a blocked agent look idle in
+    /// the rail until something happened to refetch the list. A local event has
+    /// no host — see the `local_events` migration — so what is asserted here is
+    /// that it still lands, still moves the session, and still turns up in a
+    /// replay from a cursor.
+    #[tokio::test]
+    async fn a_status_the_control_plane_decides_is_on_the_stream() {
+        let (db, owner) = db_with_user().await;
+        let host = db.ensure_host("fire-01", Compute::Local).await.unwrap();
+
+        let id = SessionId::new();
+        db.insert_session(
+            &id,
+            &host.id,
+            &owner,
+            Some("acme/backend"),
+            "Fix the flaky test",
+            "fix the flaky test",
+            None,
+            Some("main"),
+            "ClaudeCode",
+            WorkspaceSize::Medium,
+            ft_core::Share::Equal,
+            &[],
+            None,
+        )
+        .await
+        .unwrap();
+
+        let before = db.events_since(0).await.unwrap().len() as i64;
+        set_status(
+            &db,
+            &id,
+            ft_core::SessionStatus::NeedsYou,
+            Some("Write: /tmp/x"),
+        )
+        .await;
+
+        // The row moved, as the direct write used to manage.
+        let moved = db.session(&id).await.unwrap().unwrap();
+        assert_eq!(moved.status, ft_core::SessionStatus::NeedsYou);
+        assert_eq!(moved.note.as_deref(), Some("Write: /tmp/x"));
+
+        // And — the point — it is in the log a reconnecting client replays.
+        let replayed = db.events_since(before).await.unwrap();
+        assert!(
+            replayed.iter().any(|e| e.session_id == id
+                && matches!(
+                    &e.kind,
+                    EventKind::StatusChanged { status, note }
+                        if *status == ft_core::SessionStatus::NeedsYou
+                            && note.as_deref() == Some("Write: /tmp/x")
+                )),
+            "a blocked agent has to be on the stream, or no screen hears about it"
+        );
+    }
+
+    /// `(Ended, _) => false`, held where both paths now run.
+    ///
+    /// This guard used to be on the direct write only, so an event could put a
+    /// finished session back to work and disagree with the state machine.
+    #[tokio::test]
+    async fn nothing_brings_an_ended_session_back() {
+        let (db, owner) = db_with_user().await;
+        let host = db.ensure_host("fire-01", Compute::Local).await.unwrap();
+
+        let id = SessionId::new();
+        db.insert_session(
+            &id,
+            &host.id,
+            &owner,
+            Some("acme/backend"),
+            "Fix the flaky test",
+            "fix the flaky test",
+            None,
+            Some("main"),
+            "ClaudeCode",
+            WorkspaceSize::Medium,
+            ft_core::Share::Equal,
+            &[],
+            None,
+        )
+        .await
+        .unwrap();
+
+        set_status(&db, &id, ft_core::SessionStatus::Ended, None).await;
+        set_status(
+            &db,
+            &id,
+            ft_core::SessionStatus::Working,
+            Some("back to it"),
+        )
+        .await;
+
+        let still = db.session(&id).await.unwrap().unwrap();
+        assert_eq!(
+            still.status,
+            ft_core::SessionStatus::Ended,
+            "nothing escapes the terminal state"
+        );
+        assert_eq!(still.note, None);
     }
 
     /// Removing it here leaves a teardown owed on the machine.

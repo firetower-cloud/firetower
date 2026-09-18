@@ -13,6 +13,7 @@ import { AgentMark } from "~/components/AgentMark";
 import { GithubMark, Icon } from "~/components/ui";
 import { doing, group, shortRepo, type Workspace } from "~/api/workspaces";
 import { elapsed, minutesSince, needsYou } from "~/api/view";
+import { useNow } from "~/ui/clock";
 import type { Backend } from "~/fleet";
 import { useSessions } from "~/data";
 import { navigate } from "~/shims/next-navigation";
@@ -33,6 +34,9 @@ const FILTERS: [Filter, string][] = [
 export function Dashboard({ backend }: { backend: Backend }) {
   const start = useStart();
   const { data: sessions, loading, error } = useSessions();
+  // Same reason as the rail's: the card ages come off the clock, and a session
+  // working quietly produces no renders of its own.
+  useNow();
   const [filter, setFilter] = useState<Filter>("all");
   const [repo, setRepo] = useState("all");
 
