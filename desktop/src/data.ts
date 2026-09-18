@@ -13,7 +13,7 @@ import { useMe } from "~/api/generated/auth/auth";
 import { useSetupState } from "~/api/generated/setup/setup";
 import { useGetUpdates } from "~/api/generated/updates/updates";
 import { showsDot } from "~/api/updates";
-import { useListTrackers } from "~/api/generated/trackers/trackers";
+import { useListTrackers, useListTrackerScopes } from "~/api/generated/trackers/trackers";
 import {
   getListSessionsQueryKey,
   useGetSession,
@@ -22,7 +22,7 @@ import {
 } from "~/api/generated/sessions/sessions";
 import { useMemo } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import type { DiffSince, FileDiff, Repo, Session, Task, TaskKind, TaskState } from "~/api/generated/model";
+import type { DiffSince, FileDiff, ListTasksParams, Page, Repo, Session, Task, TaskScope } from "~/api/generated/model";
 
 /** Everything a screen needs to know about where its data came from. */
 export type Feed<T> = { data: T; loading: boolean; error: string | null };
@@ -55,11 +55,40 @@ export function useSession(id: string | null): Feed<Session | null> {
   return { data: q.data ?? null, loading: !!id && q.isPending, error: q.error ? why(q.error) : null };
 }
 
-export function useTasks(): Feed<Task[]> {
-  // Open issues assigned to nobody in particular — the same default the web
-  // build's Tasks page opens with.
-  const q = useListTasks({ kind: "issue" as TaskKind, state: "open" as TaskState });
-  return { data: (q.data as { tasks?: Task[] } | undefined)?.tasks ?? [], loading: q.isPending, error: q.error ? why(q.error) : null };
+/**
+ * One page of tasks, plus what paging needs to know.
+ *
+ * `total` is null when the source will not say — Linear's connection carries
+ * no count, so the heading falls back to what is on the page. `next` is the
+ * cursor to resume from, and null for a source that pages by number.
+ */
+export type Tasks = Feed<Task[]> & { total: number | null; more: boolean; next: string | null };
+
+/**
+ * What could be worked on, from one tracker.
+ *
+ * The tracker is a parameter rather than a default, because `/tasks` answers
+ * for one source per request and leaving it off means GitHub — which is how a
+ * connected Linear ended up invisible on this screen.
+ *
+ * Nothing is filtered here. The chips and the box are query parameters the
+ * source reads in its own dialect, so a row that arrives is a row to show;
+ * narrowing it again locally only drops what the server already answered.
+ */
+export function useTasks(ask: ListTasksParams, enabled = true): Tasks {
+  const q = useListTasks(ask, { query: { enabled } });
+  const page = q.data as Page | undefined;
+  return {
+    data: page?.tasks ?? [],
+    // `isPending` stays true for a query that was never allowed to run, which
+    // would leave "Reading your trackers…" on screen for a tracker nobody has
+    // connected yet.
+    loading: enabled && q.isPending,
+    error: q.error ? why(q.error) : null,
+    total: page?.total ?? null,
+    more: page?.more ?? false,
+    next: page?.next ?? null,
+  };
 }
 
 export function useRepos(): Feed<Repo[]> {
@@ -111,6 +140,12 @@ export function useAccounts() {
 export function useTrackers() {
   const q = useListTrackers();
   return { data: q.data ?? [], loading: q.isPending, error: q.error ? why(q.error) : null };
+}
+
+/** What one tracker's list can be narrowed to: repositories, or teams. */
+export function useTrackerScopes(id: string, enabled: boolean): Feed<TaskScope[]> {
+  const q = useListTrackerScopes(id, { query: { enabled: enabled && !!id } });
+  return { data: q.data ?? [], loading: enabled && q.isPending, error: q.error ? why(q.error) : null };
 }
 
 /** One directory of a session's workspace, off the worker. */
