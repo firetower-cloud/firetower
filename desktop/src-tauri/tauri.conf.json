@@ -19,6 +19,7 @@
         "minWidth": 880,
         "minHeight": 560,
         "decorations": false,
+        "dragDropEnabled": false,
         "transparent": false,
         "theme": "Dark"
       }

@@ -8,6 +8,7 @@
         "height": 820,
         "minWidth": 880,
         "minHeight": 560,
+        "dragDropEnabled": false,
         "titleBarStyle": "Overlay",
         "hiddenTitle": true,
         "transparent": true,
