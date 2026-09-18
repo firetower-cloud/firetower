@@ -20,6 +20,7 @@ import { elapsed, minutesSince } from "~/api/view";
 import { why } from "~/data";
 import { openExternal } from "~/open";
 import { Annotate, type Anchor } from "~/ui/Annotate";
+import { anchorIn } from "~/preview/anchor";
 import { usePickerBridge, type Selection } from "~/preview/bridge";
 import { usePreviewNotes } from "~/preview/notes";
 import { AddAgent } from "~/ui/AddAgent";
@@ -72,15 +73,13 @@ export function PreviewTab({ session, port, path: initialPath = "/", onPath }: {
       onPath?.(p);
     },
     onSelection: (picked) => {
-      const box = frame.current?.getBoundingClientRect();
-      const [x, y, w, h] = picked.snapshot.bounds;
+      const box = frame.current?.getBoundingClientRect() ?? { left: 0, top: 0, width: window.innerWidth, height: window.innerHeight };
       setDrafting({
         ...picked,
         quote: picked.snapshot.html.trim().slice(0, 400),
         line: 0,
         label: `Note on ${nameOf(picked.snapshot.label, picked.snapshot.html)} · ${picked.snapshot.path}`,
-        x: (box?.left ?? 0) + x + w / 2,
-        y: (box?.top ?? 0) + y + h,
+        ...anchorIn(box, picked.snapshot.bounds, picked.point),
       });
     },
     onLocated: (_id, found) => setNotice(found ? null : "That element is not on this page any more. The note keeps what it captured."),

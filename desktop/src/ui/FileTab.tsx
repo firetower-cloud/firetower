@@ -75,14 +75,16 @@ export function FileTab({ session, path, line }: { session: Session; path: strin
     onSuccess: () => setNotes([]),
   });
 
-  const takeSelection = () => {
+  /* Anchored where the drag ended, not on the selection's box: a selection
+     that runs off the screen has a box whose bottom edge is nowhere near it,
+     and the card would open where it cannot be read. */
+  const takeSelection = (e: React.MouseEvent) => {
     const sel = window.getSelection();
     const quote = sel?.toString().trim();
     if (!quote || !body.current || !sel?.anchorNode || sel.rangeCount === 0) return;
     if (!body.current.contains(sel.anchorNode)) return;
     const row = (sel.anchorNode.parentElement as HTMLElement | null)?.closest("[data-line]");
-    const rect = sel.getRangeAt(0).getBoundingClientRect();
-    setDrafting({ quote: quote.length > 400 ? `${quote.slice(0, 400)}…` : quote, line: Number(row?.getAttribute("data-line") ?? 0), x: rect.left + rect.width / 2, y: rect.bottom });
+    setDrafting({ quote: quote.length > 400 ? `${quote.slice(0, 400)}…` : quote, line: Number(row?.getAttribute("data-line") ?? 0), x: e.clientX, y: e.clientY });
   };
 
   const copy = () => {
