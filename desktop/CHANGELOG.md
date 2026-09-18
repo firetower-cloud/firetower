@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.11.0](https://github.com/firetower-cloud/firetower/compare/desktop-v0.10.0...desktop-v0.11.0) (2026-09-18)
+
+
+### Features
+
+* add image tabs and workspace image support ([680b4ad](https://github.com/firetower-cloud/firetower/commit/680b4adbd6a17572f982615d89d65d086a1b4ea8))
+* add image tabs and workspace image support ([70844d7](https://github.com/firetower-cloud/firetower/commit/70844d73104a95ea7797fa3e0018bd9e5ee1abb6))
+
+
+### Bug Fixes
+
+* ensure annotation card stays on screen for large selections ([ebc8143](https://github.com/firetower-cloud/firetower/commit/ebc814304082afb12a56c4975f0c0cb97d8c0380))
+* ensure annotation card stays on screen for large selections ([4788e29](https://github.com/firetower-cloud/firetower/commit/4788e29ebfc47fda32b23c49ddc534a1776a704f))
+
 ## [0.10.0](https://github.com/firetower-cloud/firetower/compare/desktop-v0.9.1...desktop-v0.10.0) (2026-09-18)
 
 

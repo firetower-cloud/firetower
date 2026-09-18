@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.38.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.37.0...firetower-v0.38.0) (2026-09-18)
+
+
+### Features
+
+* add image tabs and workspace image support ([680b4ad](https://github.com/firetower-cloud/firetower/commit/680b4adbd6a17572f982615d89d65d086a1b4ea8))
+* add image tabs and workspace image support ([70844d7](https://github.com/firetower-cloud/firetower/commit/70844d73104a95ea7797fa3e0018bd9e5ee1abb6))
+
+
+### Bug Fixes
+
+* ensure annotation card stays on screen for large selections ([ebc8143](https://github.com/firetower-cloud/firetower/commit/ebc814304082afb12a56c4975f0c0cb97d8c0380))
+* ensure annotation card stays on screen for large selections ([4788e29](https://github.com/firetower-cloud/firetower/commit/4788e29ebfc47fda32b23c49ddc534a1776a704f))
+* **ft-core:** parse binary file paths from diff headers correctly ([61d04d1](https://github.com/firetower-cloud/firetower/commit/61d04d186534ac8e4f1a1451d462919cf2d9b1c8))
+* **ft-core:** parse binary file paths from diff headers correctly ([bce11dc](https://github.com/firetower-cloud/firetower/commit/bce11dcab065b527351ac24a73cfb082c3c4003c))
+
 ## [0.37.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.36.2...firetower-v0.37.0) (2026-09-18)
 
 
