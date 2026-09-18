@@ -26,7 +26,7 @@ import {
   useListRuns,
   usePlanUpdate,
 } from "~/api/generated/updates/updates";
-import { ACTIVE, countEnded, everythingUpgradable, needsChoice, willWrite, wouldEnd } from "~/api/updates";
+import { ACTIVE, canStart, countEnded, everythingUpgradable, needsChoice, willWrite, wouldEnd } from "~/api/updates";
 import { useBackendKey } from "~/backend";
 
 import { why } from "~/data";
@@ -151,11 +151,14 @@ function Plan({ status, onClose }: { status: UpdateStatus; onClose: () => void }
   const [replace, setReplace] = useState<Record<string, boolean>>({});
   const [whenIdle, setWhenIdle] = useState(true);
   const [endSessions, setEndSessions] = useState(false);
-  const [asked, setAsked] = useState(false);
+  // What the plan on screen was asked about. Ticking the control plane on or
+  // off changes the answer — with it off there are no deployment files in the
+  // run at all — so the question is put again rather than once.
+  const [asked, setAsked] = useState<boolean | null>(null);
 
-  if (!asked) {
-    setAsked(true);
-    plan.mutate({ data: { version } });
+  if (asked !== chosen.controlPlane) {
+    setAsked(chosen.controlPlane);
+    plan.mutate({ data: { version, controlPlane: chosen.controlPlane } });
   }
 
   const p = plan.data;
@@ -179,15 +182,22 @@ function Plan({ status, onClose }: { status: UpdateStatus; onClose: () => void }
           <div>
             <span className="text-ui text-dim">What to upgrade</span>
             <div className="mt-1.5 space-y-1">
-              <label className="flex items-center gap-2 text-ui text-text"><input type="checkbox" checked={chosen.controlPlane} disabled={!status.controlPlane.upgradable} onChange={(e) => setChosen({ ...chosen, controlPlane: e.target.checked })} />Control plane <span className="font-mono text-micro text-mute">{status.controlPlane.version}</span></label>
+              <div>
+                <label className="flex items-center gap-2 text-ui text-text"><input type="checkbox" checked={chosen.controlPlane} disabled={!status.controlPlane.upgradable} onChange={(e) => setChosen({ ...chosen, controlPlane: e.target.checked })} />Control plane <span className="font-mono text-micro text-mute">{status.controlPlane.version}</span></label>
+                {/* Why this one cannot move — an unreachable updater, most
+                    often — belongs against this row and nowhere else. Said
+                    across the whole sheet it reads as the reason the upgrade
+                    is off, which it is not: the workers below are unaffected. */}
+                {!status.controlPlane.upgradable && status.controlPlane.reason && <p className="mt-0.5 pl-6 text-micro text-mute">{status.controlPlane.reason}</p>}
+              </div>
               {status.hosts.map((h) => (
                 <label key={h.hostId} className="flex items-center gap-2 text-ui text-text"><input type="checkbox" checked={chosen.hostIds.includes(h.hostId)} disabled={!h.upgradable} onChange={(e) => setChosen({ ...chosen, hostIds: e.target.checked ? [...chosen.hostIds, h.hostId] : chosen.hostIds.filter((x) => x !== h.hostId) })} />{h.name} <span className="font-mono text-micro text-mute">{h.version ?? "—"}</span>{!h.upgradable && <span className="text-micro text-mute">{h.reason}</span>}</label>
               ))}
             </div>
           </div>
 
-          {plan.isPending && <p className="flex items-center gap-2 text-meta text-mute"><Loader2 className="h-3.5 w-3.5 animate-spin" strokeWidth={2} />Working out what changes…</p>}
-          {plan.error && <p className="text-meta text-brick">{why(plan.error)}</p>}
+          {plan.isPending && chosen.controlPlane && <p className="flex items-center gap-2 text-meta text-mute"><Loader2 className="h-3.5 w-3.5 animate-spin" strokeWidth={2} />Working out what changes…</p>}
+          {plan.error && chosen.controlPlane && <p className="text-meta text-brick">{why(plan.error)}</p>}
           {p && (
             <>
               {p.envMissing.length > 0 && <p className="flex items-start gap-2 rounded-lg border border-kind-data/40 bg-ground px-3 py-2 text-meta text-text"><AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-kind-data" strokeWidth={1.75} />This version wants {p.envMissing.join(", ")} set in the environment.</p>}
@@ -219,7 +229,7 @@ function Plan({ status, onClose }: { status: UpdateStatus; onClose: () => void }
         </div>
         <div className="flex items-center gap-2 border-t border-line bg-ground/40 px-5 py-3">
           <button onClick={onClose} className="control ml-auto text-mute hover:bg-raise hover:text-bone">Cancel</button>
-          <button disabled={!p || create.isPending || (!chosen.controlPlane && chosen.hostIds.length === 0)} onClick={go} className="control bg-bone font-medium text-ground hover:opacity-90 disabled:bg-raise disabled:text-mute">{create.isPending ? "Starting…" : <><Check className="h-3.5 w-3.5" strokeWidth={2} />Start the upgrade</>}</button>
+          <button disabled={!canStart(chosen, p) || create.isPending} onClick={go} className="control bg-bone font-medium text-ground hover:opacity-90 disabled:bg-raise disabled:text-mute">{create.isPending ? "Starting…" : <><Check className="h-3.5 w-3.5" strokeWidth={2} />Start the upgrade</>}</button>
         </div>
       </div>
     </div>

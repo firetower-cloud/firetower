@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.36.1
+ * OpenAPI spec version: 0.36.2
  */
 import * as zod from 'zod';
 
@@ -490,9 +490,11 @@ export const CommitSessionResponse = zod.object({
 })
 
 /**
- * A snapshot. Use the stream for a session that is still running — this is for
- * one that has finished, and for a first paint that wants to be a single
- * request rather than a connection.
+ * A snapshot, and what a client opens a session with: one request, folded in
+ * one pass, rather than a backlog arriving down the stream an event at a time
+ * — which a screen following the end of a transcript draws as the whole
+ * conversation being typed out again. The stream is what carries it from
+ * there, resumed at `lastLine`.
  * @summary Everything the agent has said so far.
  */
 export const GetConversationParams = zod.object({

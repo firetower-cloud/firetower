@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import type { FilePlan, HostTarget, UpdateRun, UpdateStatus } from "./generated/model";
+import type { FilePlan, HostTarget, UpdateRun, UpdateStatus, UpgradePlan } from "./generated/model";
 import {
+  canStart,
   countEnded,
   diffLines,
   duration,
@@ -66,6 +67,28 @@ describe("what starts ticked", () => {
     expect(chosen.hostIds).toEqual(["h_1", "h_2"]);
     expect(nothingChosen(chosen)).toBe(false);
     expect(nothingChosen({ controlPlane: false, hostIds: [] })).toBe(true);
+  });
+});
+
+describe("whether the upgrade may be started", () => {
+  const plan: UpgradePlan = { version: "0.31.0", files: [], envMissing: [], updaterUpgrade: false };
+
+  it("waits for the plan when the control plane is going to move", () => {
+    expect(canStart({ controlPlane: true, hostIds: [] }, undefined)).toBe(false);
+    expect(canStart({ controlPlane: true, hostIds: [] }, plan)).toBe(true);
+  });
+
+  it("does not wait for it when only workers are", () => {
+    // The plan answers what the upgrade writes to the deployment's files, and
+    // a worker upgrade writes none of them. A deployment whose updater is not
+    // configured cannot be planned at all — which used to leave a worker
+    // behind with no way to move it.
+    expect(canStart({ controlPlane: false, hostIds: ["h_1"] }, undefined)).toBe(true);
+  });
+
+  it("needs something ticked either way", () => {
+    expect(canStart({ controlPlane: false, hostIds: [] }, plan)).toBe(false);
+    expect(canStart({ controlPlane: false, hostIds: [] }, undefined)).toBe(false);
   });
 });
 

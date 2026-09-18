@@ -59,6 +59,18 @@ pub(super) async fn check_updates(
 #[serde(rename_all = "camelCase")]
 pub struct PlanRequest {
     pub version: String,
+    /// Whether the control plane is one of the targets.
+    ///
+    /// The deployment's files are the control plane's own business, and the
+    /// updater is what reads them — so a run that moves workers only is
+    /// planned without asking it anything. Defaults to true: a client that
+    /// predates this field is one that only ever planned the whole thing.
+    #[serde(default = "planning_the_control_plane")]
+    pub control_plane: bool,
+}
+
+fn planning_the_control_plane() -> bool {
+    true
 }
 
 /// What moving the control plane to a release would do to the deployment's
@@ -81,7 +93,7 @@ pub(super) async fn plan_update(
             format!("{} is not a version", req.version),
         )
     })?;
-    status::plan(&state, &to)
+    status::plan(&state, &to, req.control_plane)
         .await
         .map(Json)
         .map_err(|e| ApiError::new(ErrorCode::ActionFailed, format!("{e:#}")))

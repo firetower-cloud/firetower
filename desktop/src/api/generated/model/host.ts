@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.36.1
+ * OpenAPI spec version: 0.36.2
  */
 import type { Capacity } from './capacity.ts';
 import type { Compute } from './compute.ts';

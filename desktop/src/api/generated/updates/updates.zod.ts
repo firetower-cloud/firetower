@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.36.1
+ * OpenAPI spec version: 0.36.2
  */
 import * as zod from 'zod';
 
@@ -112,6 +112,7 @@ files. Asked before agreeing, so an edited `firetower.yml` is a diff on
 the screen rather than a surprise on the machine.
  */
 export const PlanUpdateBody = zod.object({
+  "controlPlane": zod.boolean().optional().describe('Whether the control plane is one of the targets.\n\nThe deployment\'s files are the control plane\'s own business, and the\nupdater is what reads them — so a run that moves workers only is\nplanned without asking it anything. Defaults to true: a client that\npredates this field is one that only ever planned the whole thing.'),
   "version": zod.string()
 })
 

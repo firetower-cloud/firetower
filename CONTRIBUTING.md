@@ -140,6 +140,32 @@ build-worker` packs a tarball into `target/artifacts`, and `just dev` starts
 the control plane with `FIRETOWER_WORKER_ARTIFACTS` pointing there, so
 "Install the worker" sends that build to a machine of the same shape.
 
+## Adding a variable the deployment requires
+
+`deploy/.env.example` is the operator's file, and the CLI is what writes their
+`.env` from it — at `firetower install`, and again when `firetower upgrade`
+re-derives the deployment. So an uncommented line added there is not a
+documentation change: nothing puts it on an existing machine, and nothing puts
+it on a new one either unless the CLI knows to generate it.
+
+Adding one means all three, together:
+
+1. the line in `deploy/.env.example`, and its use in `deploy/firetower.yml`;
+2. a CLI that writes it, released;
+3. `deploy/cli.json` bumped to that CLI, with the `reason` saying what an
+   older one gets wrong.
+
+The `minimumCli` bump is the part that is easy to forget and the only part
+anyone finds out about. Without it the release is installable by a CLI that
+cannot produce a working deployment, and the failure surfaces later, somewhere
+unrelated — `FIRETOWER_UPDATER_TOKEN` shipped this way and turned up months
+afterwards as an Updates screen that would not upgrade anything.
+
+`env_missing` on the Updates screen does not cover this. It compares the new
+release's `.env.example` against the previous one, so it names a key added
+*since* the machine was installed and never one that was already there and
+never written.
+
 ## Docker inside a session
 
 A session can run `docker compose up` when the machine has Docker. It is the

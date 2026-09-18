@@ -60,10 +60,13 @@ reaches it on the compose network with `FIRETOWER_UPDATER_TOKEN` from `.env`;
 the updater refuses everything without that token. It decides nothing on its
 own.
 
-An install that predates the updater has no such container yet. The Updates
-screen still upgrades workers, and says that one `firetower upgrade` on the
-machine adds the updater; after that the control plane can upgrade itself from
-the screen.
+An install that predates the updater has no such container yet, and one whose
+`.env` has no `FIRETOWER_UPDATER_TOKEN` has one that refuses everything. Either
+way the control plane is the only target affected: workers are moved over ssh
+and no deployment file is written for them, so the screen still upgrades them
+and says, against the control plane's own row, what to do about it — one
+`firetower upgrade` on the machine to add the updater, or the one line to add
+to `.env`.
 
 ## Where things are kept
 

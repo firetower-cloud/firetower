@@ -3,9 +3,18 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.36.1
+ * OpenAPI spec version: 0.36.2
  */
 
 export interface PlanRequest {
+  /**
+     * Whether the control plane is one of the targets.
+     *
+     * The deployment's files are the control plane's own business, and the
+     * updater is what reads them — so a run that moves workers only is
+     * planned without asking it anything. Defaults to true: a client that
+     * predates this field is one that only ever planned the whole thing.
+     */
+  controlPlane?: boolean;
   version: string;
 }

@@ -10,7 +10,7 @@
       "name": "AGPL-3.0-only",
       "identifier": "AGPL-3.0-only"
     },
-    "version": "0.36.1"
+    "version": "0.36.2"
   },
   "paths": {
     "/api/v1/agent-accounts": {
@@ -2831,7 +2831,7 @@
           "sessions"
         ],
         "summary": "Everything the agent has said so far.",
-        "description": "A snapshot. Use the stream for a session that is still running — this is for\none that has finished, and for a first paint that wants to be a single\nrequest rather than a connection.",
+        "description": "A snapshot, and what a client opens a session with: one request, folded in\none pass, rather than a backlog arriving down the stream an event at a time\n— which a screen following the end of a transcript draws as the whole\nconversation being typed out again. The stream is what carries it from\nthere, resumed at `lastLine`.",
         "operationId": "get_conversation",
         "parameters": [
           {
@@ -7857,6 +7857,10 @@
           "version"
         ],
         "properties": {
+          "controlPlane": {
+            "type": "boolean",
+            "description": "Whether the control plane is one of the targets.\n\nThe deployment's files are the control plane's own business, and the\nupdater is what reads them — so a run that moves workers only is\nplanned without asking it anything. Defaults to true: a client that\npredates this field is one that only ever planned the whole thing."
+          },
           "version": {
             "type": "string"
           }
