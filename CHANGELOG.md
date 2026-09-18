@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.37.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.36.2...firetower-v0.37.0) (2026-09-18)
+
+
+### Features
+
+* broadcast status changes as events for instant UI sync ([1688319](https://github.com/firetower-cloud/firetower/commit/1688319c66ced5c5ee1d072f4ee986e5adfa8fa1))
+* broadcast status changes as events for instant UI sync ([48bd48d](https://github.com/firetower-cloud/firetower/commit/48bd48d05a7a3ea607da3b36d3fbfe1f4b112dae))
+* drag-and-drop file uploads with progress and limits ([aa4be7e](https://github.com/firetower-cloud/firetower/commit/aa4be7e6d29cdacd10703e1be7eb16f9454422da))
+* drag-and-drop file uploads with progress and limits ([8e06607](https://github.com/firetower-cloud/firetower/commit/8e06607675e6242d2e6476ca91fc0b662151a6a7))
+* let worker-only upgrades proceed without updater token ([a8701bc](https://github.com/firetower-cloud/firetower/commit/a8701bc9c944aadc69c933f7a5b6b03f83024c81))
+* let worker-only upgrades proceed without updater token ([8192123](https://github.com/firetower-cloud/firetower/commit/81921231fb47522f48bdb93a6e4508e66121110d))
+
 ## [0.36.2](https://github.com/firetower-cloud/firetower/compare/firetower-v0.36.1...firetower-v0.36.2) (2026-09-17)
 
 
