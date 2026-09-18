@@ -20,3 +20,27 @@ export function GithubMark({ size = 14, className = "" }: { size?: number; class
     </svg>
   );
 }
+
+/**
+ * Linear's mark: a rounded square sliced into four diagonal bands.
+ *
+ * Four subpaths rather than one, because the shape *is* the gaps between them
+ * — drawn as a single outline it fills in at small sizes and reads as a blob.
+ */
+export function LinearMark({ size = 14, className = "" }: { size?: number; className?: string }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="currentColor"
+      aria-hidden
+      className={`shrink-0 ${className}`}
+    >
+      <path d="M2.886 4.18A11.982 11.982 0 0 1 11.99 0C18.624 0 24 5.376 24 12.009c0 3.64-1.62 6.903-4.18 9.105L2.887 4.18Z" />
+      <path d="M1.5 6.132a11.943 11.943 0 0 0-1.29 3.6l14.897 14.896a11.944 11.944 0 0 0 3.598-1.29L1.5 6.132Z" />
+      <path d="M.007 12.998a11.962 11.962 0 0 0 .714 3.58l6.701 6.701a11.963 11.963 0 0 0 3.58.714L.007 12.998Z" />
+      <path d="M3.37 23.679.32 20.63a12.014 12.014 0 0 0 3.05 3.049Z" />
+    </svg>
+  );
+}
