@@ -11,6 +11,10 @@
  */
 import { navigate } from "~/shims/next-navigation";
 import { drag } from "~/drag";
+import { Collapsed, Panel } from "~/island/Island";
+import { islandState, modeOf } from "~/island/state";
+import type { Fleet } from "~/fleet";
+import type { Session } from "~/api/generated/model";
 
 const GROUND = ["ground", "panel", "raise", "overlay", "line", "line-soft"];
 const TEXT = [
@@ -170,6 +174,51 @@ export function StylePage() {
           </div>
         </Section>
 
+        <Section
+          name="Island"
+          note="NEW. The pill above every other window. Three states and one action: it says whether anything is waiting on you, and it takes you there. Drawn here because the real one lives in its own window, where nobody looks at it until it is wrong — and because dormant and demand are otherwise hours apart."
+        >
+          <div className="flex flex-col items-start gap-4 rounded-md border border-line bg-ground p-5">
+            {ISLANDS.map(([label, state]) => (
+              <div key={label} className="flex items-center gap-4">
+                <span className="w-[74px] shrink-0 text-meta text-mute">{label}</span>
+                <div className="island" data-mode={modeOf(state)} data-perch="float">
+                  <Collapsed state={state} mode={modeOf(state)} onGrab={() => {}} />
+                </div>
+              </div>
+            ))}
+
+            <div className="flex items-start gap-4">
+              <span className="w-[74px] shrink-0 pt-2 text-meta text-mute">expanded</span>
+              <div className="island" data-mode="demand" data-perch="float">
+                <Panel state={ISLANDS[2][1]} mode="demand" onOpen={() => {}} onGrab={() => {}} />
+              </div>
+            </div>
+
+            {/* Drawn over a stand-in cutout, because the shape only makes
+                sense against one: the gap in the middle is the notch, and the
+                pill is split around it rather than over it. */}
+            <div className="flex items-start gap-4">
+              <span className="w-[74px] shrink-0 pt-2 text-meta text-mute">docked</span>
+              <div className="relative">
+                <div
+                  className="absolute top-0 left-1/2 -translate-x-1/2 rounded-b-[10px] bg-black"
+                  style={{ width: NOTCH.width, height: NOTCH.height }}
+                  aria-hidden
+                />
+                <div
+                  className="island relative"
+                  data-mode="demand"
+                  data-perch="notch"
+                  style={{ minHeight: NOTCH.height }}
+                >
+                  <Collapsed state={ISLANDS[2][1]} mode="demand" onGrab={() => {}} gap={NOTCH.width} />
+                </div>
+              </div>
+            </div>
+          </div>
+        </Section>
+
         <Section name="Motion" note="Native is quicker than web: 140ms where the web build uses 200ms, on the same curve. Ember-pulse is unchanged — it is the one thing allowed to be slow.">
           <div className="flex gap-4 rounded-md border border-line bg-panel p-4 text-meta text-dim">
             <span>--ease-swift cubic-bezier(0.16, 1, 0.3, 1)</span>
@@ -180,6 +229,51 @@ export function StylePage() {
     </div>
   );
 }
+
+
+/* Three fleets, for the sake of the drawing. The island's states are hours
+   apart in real use — dormant first thing, ember at lunch — which is exactly
+   the kind of thing the style page exists to put side by side. */
+const stub = (over: Partial<Session>): Session =>
+  ({
+    id: "s_1",
+    name: "auth middleware",
+    agent: "ClaudeCode",
+    repo: "westlabs/ledger",
+    workspaceId: "w_1",
+    createdAt: new Date(Date.now() - 28 * 60_000).toISOString(),
+    ...over,
+  }) as unknown as Session;
+
+const backend = (mark: string) =>
+  ({ id: mark, org: mark, user: "kevin", mark, url: "", reach: "live" }) as Fleet["backend"];
+
+/** A 16-inch MacBook Pro's cutout, for the docked drawing. */
+const NOTCH = { width: 200, height: 38 };
+
+const ISLANDS: [string, ReturnType<typeof islandState>][] = [
+  ["dormant", islandState([])],
+  [
+    "ambient",
+    islandState([
+      { backend: backend("W"), error: null, sessions: [stub({ status: "Working" })] },
+    ]),
+  ],
+  [
+    "demand",
+    islandState([
+      {
+        backend: backend("W"),
+        error: null,
+        sessions: [
+          stub({ status: "NeedsYou" }),
+          stub({ id: "s_2", workspaceId: "w_2", name: "rate limiter", repo: "westlabs/api", agent: "Codex", status: "HandedBack", createdAt: new Date(Date.now() - 61 * 60_000).toISOString() }),
+          stub({ id: "s_3", workspaceId: "w_3", name: "query optimisation", repo: "westlabs/web", status: "Working", createdAt: new Date(Date.now() - 300 * 60_000).toISOString() }),
+        ],
+      },
+    ]),
+  ],
+];
 
 function Btn({ children, onClick }: { children: React.ReactNode; onClick: () => void }) {
   return (

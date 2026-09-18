@@ -21,9 +21,14 @@ keyring = { version = "3", features = ["apple-native", "windows-native", "sync-s
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
-# The translucent sidebar is the one macOS-only thing.
+# The translucent sidebar, and the island's four AppKit flags.
 [target.'cfg(target_os = "macos")'.dependencies]
 window-vibrancy = "0.6"
+# Already in the tree — Tauri builds on both. Declared here because `island.rs`
+# reaches for NSScreen and NSWindow directly, and a transitive dependency is
+# not an API you are allowed to call.
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSResponder", "NSScreen", "NSView", "NSWindow"] }
 
 [profile.dev]
 incremental = true

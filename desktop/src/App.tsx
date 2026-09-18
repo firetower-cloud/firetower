@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ServerStrip, type Scope } from "~/ui/ServerStrip";
 import { Titlebar } from "~/ui/Titlebar";
 import { Palette } from "~/ui/Palette";
@@ -18,6 +18,7 @@ import { Boundary } from "~/ui/Boundary";
 import { Gate } from "~/ui/Gate";
 import { navigate, usePathname } from "~/shims/next-navigation";
 import { offerUpdate } from "~/update";
+import { islandState } from "~/island/state";
 import { useConfirm } from "~/ui/Confirm";
 
 const StylePage = import.meta.env.DEV ? lazy(() => import("~/ui/StylePage").then((m) => ({ default: m.StylePage }))) : () => null;
@@ -68,6 +69,27 @@ export function App() {
   const fleet = useFleet();
   const waiting = fleet.reduce((n, f) => n + waitingIn(f.sessions), 0);
   useEffect(() => bridge.setBadge(waiting || null), [waiting]);
+
+  /* And ember on the island, from the same poll.
+     This window is the island's only source. It already holds every backend
+     and already pays for the connections, so the pill is *told*; a second
+     webview asking the same servers the same question is the thing
+     `src/api/events.ts` exists to remember. Sent as a string first so a poll
+     that changed nothing costs nothing. */
+  const forIsland = useMemo(() => JSON.stringify(islandState(fleet)), [fleet]);
+  useEffect(() => bridge.island?.push(JSON.parse(forIsland)), [forIsland]);
+
+  /* A row on the island is a way into the app, and the only thing it does.
+     Whichever server it came from, because the island spans all of them. */
+  useEffect(
+    () =>
+      bridge.island?.onOpen(({ serverId, workspaceId }) => {
+        setScope(serverId as Scope);
+        navigate(`/sessions/${workspaceId}`);
+      }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
 
   const pick = (next: Scope) => {
     setScope(next);

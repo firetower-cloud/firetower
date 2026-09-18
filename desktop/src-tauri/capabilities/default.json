@@ -18,6 +18,9 @@
     "notification:default",
     "opener:default",
     "updater:default",
-    "process:default"
+    "process:default",
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "core:event:allow-emit"
   ]
 }
