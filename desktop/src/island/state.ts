@@ -36,12 +36,28 @@ export type Row = {
 export type IslandState = {
   waiting: Row[];
   working: Row[];
+  /**
+   * How many workspaces are neither, counted but not listed.
+   *
+   * A number rather than rows, because nothing on the pill ever shows an idle
+   * workspace: the panel lists what wants you and what is in flight, and a
+   * list of things that are fine is a list nobody reads. The count is context
+   * for the other two — three waiting out of four is a bad afternoon, three
+   * out of thirty is a Tuesday.
+   */
+  idle: number;
   /** How many backends are connected, and how many of them are dark. */
   servers: number;
   unreachable: number;
 };
 
-export const empty: IslandState = { waiting: [], working: [], servers: 0, unreachable: 0 };
+export const empty: IslandState = {
+  waiting: [],
+  working: [],
+  idle: 0,
+  servers: 0,
+  unreachable: 0,
+};
 
 /**
  * Which of the three the pill is in.
@@ -74,13 +90,17 @@ function lead(place: Workspace, waiting: boolean): Session {
 export function islandState(fleet: Fleet[]): IslandState {
   const waiting: Row[] = [];
   const working: Row[] = [];
+  let idle = 0;
 
   for (const { backend, sessions } of fleet) {
     const live = sessions.filter((s) => s.status !== "Ended");
     for (const [repo, places] of group(live).groups) {
       for (const place of places) {
         const state = doing(place);
-        if (state === "idle") continue;
+        if (state === "idle") {
+          idle += 1;
+          continue;
+        }
 
         const isWaiting = state === "waiting";
         const run = lead(place, isWaiting);
@@ -108,6 +128,7 @@ export function islandState(fleet: Fleet[]): IslandState {
   return {
     waiting,
     working,
+    idle,
     servers: fleet.length,
     unreachable: fleet.filter((f) => f.backend.reach === "unreachable").length,
   };
@@ -125,14 +146,3 @@ export function onScreen(quiet: boolean, mode: Mode): boolean {
   return !quiet || mode === "demand";
 }
 
-/** What the collapsed pill says, in one line. */
-export function headline(state: IslandState): string {
-  if (state.waiting.length > 0) {
-    const [first] = state.waiting;
-    return state.waiting.length === 1 ? first.name : `${state.waiting.length} waiting`;
-  }
-  if (state.working.length > 0) {
-    return state.working.length === 1 ? state.working[0].name : `${state.working.length} running`;
-  }
-  return "";
-}

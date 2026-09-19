@@ -16,6 +16,7 @@ import { Signal } from "~/components/Signal";
 import { AgentMark } from "~/components/AgentMark";
 import { Mark } from "~/ui/Mark";
 import { elapsed } from "~/api/view";
+import { Blocks, type Beat } from "./Blocks";
 import { usePerch } from "./usePerch";
 import {
   activate,
@@ -27,7 +28,7 @@ import {
   sharing,
 } from "./shell";
 import { read, write, type Prefs } from "./prefs";
-import { empty, headline, modeOf, onScreen, type IslandState, type Row } from "./state";
+import { empty, modeOf, onScreen, type IslandState, type Row } from "./state";
 
 /** Long enough that crossing the pill on the way somewhere else does not open it. */
 const IN = 120;
@@ -48,6 +49,7 @@ const DEMO: IslandState = {
   working: [
     { key: "a:3", serverId: "a", workspaceId: "w3", mark: "W", name: "query optimisation", repo: "web", agent: "ClaudeCode", status: "Working", minutes: 300, stale: false },
   ],
+  idle: 3,
   servers: 1,
   unreachable: 0,
 };
@@ -237,6 +239,7 @@ export function Island() {
             onOpen={go}
             onGrab={drag}
             clear={band}
+            gap={perched === "notch" ? notch.width : 0}
           >
             {menu && (
               <Menu
@@ -302,12 +305,7 @@ export function Collapsed({
     mode === "dormant" ? (
       <Mark size={13} className="island-quiet text-mute" />
     ) : (
-      <>
-        <Beat mode={mode} />
-        <span className="max-w-[210px] truncate text-meta whitespace-nowrap text-bone">
-          {headline(state)}
-        </span>
-      </>
+      <Counts state={state} />
     );
 
   /* Docked, the two wings are made the same width, so whatever is on the
@@ -339,7 +337,7 @@ export function Collapsed({
      is tighter than the rest: it is two glyphs and nothing else, and the gap
      the other states need between a dot and a sentence just makes it wide. */
   if (gap === 0) {
-    const pad = mode === "dormant" ? "gap-1 pr-0.5 pl-1.5" : "gap-2 pr-0.5 pl-2.5";
+    const pad = mode === "dormant" ? "gap-1 pr-0.5 pl-1.5" : "gap-2.5 pr-0.5 pl-2.5";
     return (
       <div className={`flex ${row} items-center ${pad}`}>
         {left}
@@ -357,7 +355,7 @@ export function Collapsed({
       className={tall > 0 ? "island-wings" : `island-wings ${row}`}
       style={{ ["--island-gap" as string]: `${gap}px`, ...(tall > 0 ? { height: tall } : null) }}
     >
-      <span className="island-left flex items-center gap-2 pr-2 pl-2.5">{left}</span>
+      <span className="island-left flex items-center gap-2.5 pr-2 pl-2.5">{left}</span>
       <span aria-hidden />
       <span className="island-right flex items-center gap-1.5 pr-1 pl-2">{right}</span>
     </div>
@@ -365,29 +363,38 @@ export function Collapsed({
 }
 
 /**
- * The one moving thing.
+ * The fleet, counted: one glyph and one number per state.
  *
- * Not `Signal`: that draws the lead session's own status, and a summary of
- * five sessions is not any one of them. Two sessions handed back and one
- * failed is still, to the person glancing at it, ember.
+ * Not `Signal`, and no longer a sentence. `Signal` draws the lead session's
+ * own status, and a summary of five sessions is not any one of them; a
+ * headline picks one of the three states and drops the other two. Three
+ * counts fit in the same width as "2 waiting" and answer the question that
+ * sentence was only gesturing at.
+ *
+ * In flight first, then what wants you, then what is merely there. Reading
+ * order is time order: the work happens, it stops and asks, it is done.
+ *
+ * A state with nothing in it is left out rather than shown as a zero — "0
+ * waiting" is a non-event taking up room next to two that are not.
  */
-function Beat({ mode }: { mode: "ambient" | "demand" }) {
-  if (mode === "ambient") {
-    // `breathe` *is* meant for the dot: 50% to 100% and back, which reads as
-    // alive without ever reading as urgent.
-    return <span className="breathe block h-[7px] w-[7px] shrink-0 rounded-full bg-slate" />;
-  }
+function Counts({ state }: { state: IslandState }) {
+  const tally: [Beat, number][] = [
+    ["working", state.working.length],
+    ["waiting", state.waiting.length],
+    ["idle", state.idle],
+  ];
 
-  /* `ember-pulse` is a halo, not a dot — it runs from 32% opacity out to 190%
-     scale and down to 8%. Putting it straight on the dot, as this did at
-     first, leaves the one loud thing in the whole product sitting at a third
-     of its opacity and reading as brown. Solid dot, ring behind it: the same
-     two elements `Signal` draws for the same state inside the app. */
   return (
-    <span className="relative grid h-[7px] w-[7px] shrink-0 place-items-center text-ember">
-      <span className="ember-pulse absolute h-[7px] w-[7px] rounded-full bg-current" />
-      <span className="island-ember relative h-[7px] w-[7px] rounded-full bg-current" />
-    </span>
+    <>
+      {tally
+        .filter(([, n]) => n > 0)
+        .map(([beat, n]) => (
+          <span key={beat} className="island-tally" data-beat={beat}>
+            <Blocks beat={beat} />
+            <b>{n}</b>
+          </span>
+        ))}
+    </>
   );
 }
 
@@ -399,6 +406,7 @@ export function Panel({
   onOpen,
   onGrab,
   clear = 0,
+  gap = 0,
   children,
 }: {
   state: IslandState;
@@ -407,15 +415,40 @@ export function Panel({
   onGrab: () => void;
   /** Height of the cutout to keep clear at the top, when docked. */
   clear?: number;
+  /** Its width, which the band parts around. */
+  gap?: number;
   children?: React.ReactNode;
 }) {
   const overflow = state.waiting.length - MOST_WAITING;
 
   return (
-    <div className="w-[364px] pb-1" style={clear ? { paddingTop: clear } : undefined}>
-      <div className="flex h-[22px] items-center justify-end pr-0.5 pl-2">
-        <Grip onGrab={onGrab} />
-      </div>
+    <div className="w-[364px] pb-1">
+      {/* The band the cutout leaves behind.
+          Only its middle is camera; the wings either side are ordinary screen,
+          and padding them out with nothing was the panel throwing away the one
+          strip of it that is always visible. So the pill does not go anywhere
+          when the panel opens — the counts stay exactly where they were, under
+          the pointer that opened them, and the rows arrive underneath. */}
+      {clear > 0 ? (
+        <div
+          className="island-wings"
+          style={{ ["--island-gap" as string]: `${gap}px`, height: clear }}
+        >
+          <span className="island-left flex items-center gap-2.5 pr-2 pl-2.5">
+            <Counts state={state} />
+          </span>
+          <span aria-hidden />
+          <span className="island-right flex items-center justify-end gap-1.5 pr-1 pl-2">
+            <Grip onGrab={onGrab} />
+          </span>
+        </div>
+      ) : (
+        <div className="flex h-[26px] items-center gap-2.5 pr-0.5 pl-2.5">
+          <Counts state={state} />
+          <span className="grow" />
+          <Grip onGrab={onGrab} />
+        </div>
+      )}
 
       {state.waiting.length > 0 && (
         <>

@@ -10,7 +10,7 @@
 import { describe, expect, it } from "vitest";
 import type { Session, SessionStatus } from "~/api/generated/model";
 import type { Backend, Fleet } from "~/fleet";
-import { headline, islandState, modeOf, onScreen } from "./state";
+import { islandState, modeOf, onScreen } from "./state";
 
 const backend = (id: string, mark: string, reach: Backend["reach"] = "live"): Backend => ({
   id,
@@ -168,38 +168,6 @@ describe("which of the three states it is in", () => {
       ]),
     ]);
     expect(modeOf(state)).toBe("demand");
-  });
-});
-
-describe("the one line on the collapsed pill", () => {
-  it("names the workspace when there is exactly one", () => {
-    expect(headline(islandState([fleet(backend("a", "W"), [session({ status: "NeedsYou" })])]))).toBe(
-      "auth middleware",
-    );
-  });
-
-  it("counts them when there is more than one", () => {
-    const state = islandState([
-      fleet(backend("a", "W"), [
-        session({ id: "s_1", workspaceId: "w_1", status: "NeedsYou" }),
-        session({ id: "s_2", workspaceId: "w_2", status: "NeedsYou" }),
-      ]),
-    ]);
-    expect(headline(state)).toBe("2 waiting");
-  });
-
-  it("talks about what is running only when nothing is waiting", () => {
-    const state = islandState([
-      fleet(backend("a", "W"), [
-        session({ id: "s_1", workspaceId: "w_1", status: "Working" }),
-        session({ id: "s_2", workspaceId: "w_2", status: "Working" }),
-      ]),
-    ]);
-    expect(headline(state)).toBe("2 running");
-  });
-
-  it("says nothing at all when there is nothing", () => {
-    expect(headline(islandState([]))).toBe("");
   });
 });
 

@@ -44,6 +44,29 @@ const waiting = islandState(
   fleet([session("NeedsYou"), session("NeedsYou", { id: "s_2", workspaceId: "w_2", name: "rate limiter" })]),
 );
 
+describe("the fleet, counted", () => {
+  const mixed = { ...waiting, working: [...waiting.waiting].slice(0, 1), idle: 4 };
+
+  it("reads in time order: in flight, then wanting you, then done", () => {
+    const html = renderToStaticMarkup(
+      <Collapsed state={mixed} mode={modeOf(mixed)} onGrab={() => {}} />,
+    );
+    const order = [...html.matchAll(/data-beat="(working|waiting|idle)"/g)].map((m) => m[1]);
+    // The glyphs repeat inside the row, so the first of each is the tally's.
+    expect([...new Set(order)]).toEqual(["working", "waiting", "idle"]);
+  });
+
+  it("leaves a state out rather than showing it as a zero", () => {
+    const only = { ...waiting, working: [], idle: 0 };
+    const html = renderToStaticMarkup(
+      <Collapsed state={only} mode={modeOf(only)} onGrab={() => {}} />,
+    );
+    expect(html).toContain('data-beat="waiting"');
+    expect(html).not.toContain('data-beat="working"');
+    expect(html).not.toContain('data-beat="idle"');
+  });
+});
+
 describe("a pill docked into the notch", () => {
   it("leaves the cutout empty rather than drawing into it", () => {
     const html = renderToStaticMarkup(
@@ -85,18 +108,45 @@ describe("a pill docked into the notch", () => {
   });
 
   /* The panel is wider than any notch, so it cannot be swallowed — but its
-     first rows would still run under one. It starts below the cutout instead. */
-  it("starts the expanded panel below the cutout", () => {
+     first rows would still run under one. The cutout's height becomes a band
+     of its own, parted around the camera, and the rows start below it. */
+  it("gives the cutout's height to a band, and parts it around the camera", () => {
+    // The strip the notch leaves is not padding any more: its wings are
+    // ordinary screen and they carry the counts.
     const html = renderToStaticMarkup(
-      <Panel state={waiting} mode={modeOf(waiting)} onOpen={() => {}} onGrab={() => {}} clear={38} />,
+      <Panel
+        state={waiting}
+        mode={modeOf(waiting)}
+        onOpen={() => {}}
+        onGrab={() => {}}
+        clear={38}
+        gap={200}
+      />,
     );
-    expect(html).toContain("padding-top:38px");
+    expect(html).toContain("height:38px");
+    expect(html).toContain("--island-gap:200px");
+    expect(html).toContain("island-wings");
   });
 
-  it("does not pad the panel when it is floating", () => {
+  it("keeps the counts in the band, where the pill left them", () => {
+    const html = renderToStaticMarkup(
+      <Panel
+        state={waiting}
+        mode={modeOf(waiting)}
+        onOpen={() => {}}
+        onGrab={() => {}}
+        clear={38}
+        gap={200}
+      />,
+    );
+    expect(html).toContain('data-beat="waiting"');
+  });
+
+  it("has no band to part when it is floating", () => {
     const html = renderToStaticMarkup(
       <Panel state={waiting} mode={modeOf(waiting)} onOpen={() => {}} onGrab={() => {}} />,
     );
-    expect(html).not.toContain("padding-top");
+    expect(html).not.toContain("island-wings");
+    expect(html).toContain('data-beat="waiting"');
   });
 });
