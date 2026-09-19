@@ -30,8 +30,22 @@ const OUT = 380;
 const MOST_WAITING = 5;
 const MOST_WORKING = 3;
 
+/* TEMPORARY — for showing the island on a machine with no server attached.
+   Reverted straight after; `git diff` should never show this. */
+const DEMO: IslandState = {
+  waiting: [
+    { key: "a:1", serverId: "a", workspaceId: "w1", mark: "W", name: "auth middleware", repo: "ledger", agent: "ClaudeCode", status: "NeedsYou", minutes: 28, stale: false },
+    { key: "a:2", serverId: "a", workspaceId: "w2", mark: "W", name: "rate limiter", repo: "api", agent: "Codex", status: "HandedBack", minutes: 61, stale: false },
+  ],
+  working: [
+    { key: "a:3", serverId: "a", workspaceId: "w3", mark: "W", name: "query optimisation", repo: "web", agent: "ClaudeCode", status: "Working", minutes: 300, stale: false },
+  ],
+  servers: 1,
+  unreachable: 0,
+};
+
 export function Island() {
-  const [state, setState] = useState<IslandState>(empty);
+  const [state, setState] = useState<IslandState>(import.meta.env.DEV ? DEMO : empty);
   const [open, setOpen] = useState(false);
   const [menu, setMenu] = useState(false);
   const [prefs, setPrefs] = useState<Prefs>(read);
@@ -81,7 +95,7 @@ export function Island() {
   const mode = modeOf(state);
   const show = onScreen(prefs.quiet, mode);
 
-  const { perched, notch, dockable, drag, perchAs } = usePerch({
+  const { perched, notch, box, align, dockable, drag, perchAs } = usePerch({
     pill,
     open: open || menu,
     show,
@@ -110,22 +124,38 @@ export function Island() {
   const expanded = open || menu;
 
   return (
-    <div className="island-root">
-      <div
-        ref={pill}
-        className="island text-text"
-        data-mode={mode}
-        data-perch={perched}
-        /* Docked, the pill is never shorter than the cutout it is filling. */
-        style={perched === "notch" ? { minHeight: notch.height } : undefined}
-        onMouseEnter={enter}
-        onMouseLeave={leave}
-        onContextMenu={(e) => {
-          e.preventDefault();
-          setMenu((was) => !was);
-          setOpen(true);
-        }}
-      >
+    /* The root fills the window, which is bigger than the pill for as long as
+       the pill is changing size. Where inside it the pill sits is the edge
+       that has to stay still: under the notch that is its centre, in a corner
+       it is the corner. */
+    <div className="island-root" data-align={align}>
+      <div className="island-frame" data-perch={perched}>
+        <div
+          className="island text-text"
+          data-mode={mode}
+          data-perch={perched}
+          /* Drawn at the size the content wants and animated to it, rather
+             than sized by the content — the box has to be able to be a
+             different size from what is in it while it is on the way.
+
+             No `minHeight` for the docked case: a floor on the box would
+             leave the row sitting against the top of it, five pixels above
+             the middle of the cutout, which is most of what "not aligned"
+             looked like. The row is given the cutout's height instead, and
+             centres its own contents in it. */
+          style={box ? { width: box.width, height: box.height } : undefined}
+          onMouseEnter={enter}
+          onMouseLeave={leave}
+          onContextMenu={(e) => {
+            e.preventDefault();
+            setMenu((was) => !was);
+            setOpen(true);
+          }}
+        >
+          {/* Keyed on the state so React remounts it and the entry animation
+              runs again: the box stretches, and a beat later what is now
+              inside it fades up. */}
+          <div ref={pill} className="island-body island-enter" key={expanded ? "open" : "shut"}>
         {expanded ? (
           <Panel
             state={state}
@@ -150,8 +180,16 @@ export function Island() {
             )}
           </Panel>
         ) : (
-          <Collapsed state={state} mode={mode} onGrab={drag} gap={perched === "notch" ? notch.width : 0} />
+          <Collapsed
+            state={state}
+            mode={mode}
+            onGrab={drag}
+            gap={perched === "notch" ? notch.width : 0}
+            tall={perched === "notch" ? notch.height : 0}
+          />
         )}
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -165,6 +203,7 @@ export function Collapsed({
   mode,
   onGrab,
   gap = 0,
+  tall = 0,
 }: {
   state: IslandState;
   mode: ReturnType<typeof modeOf>;
@@ -179,37 +218,74 @@ export function Collapsed({
    * to the left of the cutout, which server and the handle to the right.
    */
   gap?: number;
+  /** The cutout's height, which the row fills and centres itself in. */
+  tall?: number;
 }) {
-  const Gap = gap > 0 ? <span className="shrink-0" style={{ width: gap }} aria-hidden /> : null;
-
-  if (mode === "dormant") {
-    return (
-      <div className="flex h-[22px] items-center gap-1 pr-0.5 pl-1.5">
-        <Mark size={13} className="island-quiet text-mute" />
-        {Gap}
-        <Grip onGrab={onGrab} />
-      </div>
-    );
-  }
-
   const one = mode === "demand" ? state.waiting[0] : state.working[0];
   const alone = (mode === "demand" ? state.waiting : state.working).length === 1;
 
-  return (
-    <div className="flex h-[28px] items-center gap-2 pr-0.5 pl-2.5">
-      <Beat mode={mode} />
-      <span className="max-w-[210px] truncate text-meta whitespace-nowrap text-bone">
-        {headline(state)}
-      </span>
-      {Gap}
+  const left =
+    mode === "dormant" ? (
+      <Mark size={13} className="island-quiet text-mute" />
+    ) : (
+      <>
+        <Beat mode={mode} />
+        <span className="max-w-[210px] truncate text-meta whitespace-nowrap text-bone">
+          {headline(state)}
+        </span>
+      </>
+    );
+
+  /* Docked, the two wings are made the same width, so whatever is on the
+     quiet side decides how much empty black sits opposite the text. Padding
+     it out with nothing looked like a mistake; the age of the thing being
+     talked about is the one number that is always available, always
+     changing, and worth a glance on its own. */
+  const right = (
+    <>
+      {one && gap > 0 && (
+        <span className="font-mono text-micro whitespace-nowrap text-dim">
+          {elapsed(one.minutes)}
+        </span>
+      )}
       {/* Which server, when the pill is about exactly one thing. Identity is a
           shape, here as everywhere else. */}
-      {one && alone && (
+      {one && alone && mode !== "dormant" && (
         <span className="server-mark grid h-[15px] w-[15px] shrink-0 place-items-center" data-reach="live">
           {one.mark}
         </span>
       )}
       <Grip onGrab={onGrab} />
+    </>
+  );
+
+  const row = mode === "dormant" ? "h-[22px]" : "h-[28px]";
+
+  /* Floating, it is one row and reads left to right like any other. The nub
+     is tighter than the rest: it is two glyphs and nothing else, and the gap
+     the other states need between a dot and a sentence just makes it wide. */
+  if (gap === 0) {
+    const pad = mode === "dormant" ? "gap-1 pr-0.5 pl-1.5" : "gap-2 pr-0.5 pl-2.5";
+    return (
+      <div className={`flex ${row} items-center ${pad}`}>
+        {left}
+        {right}
+      </div>
+    );
+  }
+
+  /* Docked, it is two wings either side of a hole, and they have to be the
+     same width or the shape is lopsided about the one thing it is aligned to.
+     `.island-wings` makes both tracks as wide as the wider content; the two
+     halves then sit against the cutout with the slack pushed to the outside. */
+  return (
+    <div
+      className={tall > 0 ? "island-wings" : `island-wings ${row}`}
+      style={{ ["--island-gap" as string]: `${gap}px`, ...(tall > 0 ? { height: tall } : null) }}
+    >
+      <span className="island-left flex items-center gap-2 pr-2 pl-2.5">{left}</span>
+      <span aria-hidden />
+      <span className="island-right flex items-center gap-1.5 pr-1 pl-2">{right}</span>
     </div>
   );
 }

@@ -28,12 +28,23 @@ body {
   cursor: default;
 }
 
-/* Measured by `usePerch` to decide how big the window should be, so it must
-   size to its contents and never to the viewport — the window is routinely
-   smaller than the panel about to be drawn in it. */
+/* Fills the window, which is deliberately larger than the pill for as long as
+   the pill is changing size (`usePerch`). Where the pill sits inside that
+   space is the edge that must not appear to move while it grows: its centre
+   under a notch, its right edge in a corner.
+
+   What is *measured* is `.island-body` inside it, which is `width: max-content`
+   and so keeps its natural size however small the window currently is. */
 .island-root {
   position: fixed;
-  top: 0;
-  left: 0;
-  width: max-content;
+  inset: 0;
+  display: flex;
+}
+.island-root[data-align="centre"] {
+  justify-content: center;
+  align-items: flex-start;
+}
+.island-root[data-align="right"] {
+  justify-content: flex-end;
+  align-items: flex-end;
 }

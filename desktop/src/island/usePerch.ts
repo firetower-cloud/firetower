@@ -6,9 +6,22 @@
  * match on every change, because a transparent window larger than its pill is a
  * rectangle of dead space that swallows clicks meant for the desktop.
  *
- * So the loop is: measure the pill, work out where a pill that size belongs
+ * So the loop is: measure the content, work out where a pill that size belongs
  * (`place.ts`), tell the shell (`shell.ts`). Everything worth arguing about is
  * in the middle step, which is pure and tested; this file is the wiring.
+ *
+ * ## Why the window is sometimes bigger than the pill
+ *
+ * The pill grows over 320ms and a window resizes in one frame, so the two
+ * cannot be the same rectangle while the animation is running — the box would
+ * be clipped to its final size before it had got there, which is exactly what
+ * a snap looks like.
+ *
+ * So the window is placed at the *union* of where the pill is and where it is
+ * going, immediately, and settles down to the exact size once the animation
+ * has finished. Growing, the window is already big and the pill expands into
+ * it. Shrinking, the window stays big until the pill has finished pulling in.
+ * Either way the extra is transparent and nobody sees it.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { RefObject } from "react";
@@ -22,6 +35,7 @@ import {
   resolve,
   screenFor,
   snap,
+  union,
   type Mode,
   type Perch,
   type Screen,
@@ -41,7 +55,11 @@ import {
 /** Until the pill has been measured once. Never seen: the window starts hidden. */
 const GUESS: Size = { width: 160, height: 28 };
 
+/** `--dur-island`, plus a frame or two for the compositor to catch up. */
+const SETTLE = 380;
+
 export function usePerch(o: {
+  /** The *content*, at its natural size — not the box, which is animated. */
   pill: RefObject<HTMLElement | null>;
   /** Whether the panel is expanded, which changes the size but never the perch. */
   open: boolean;
@@ -51,6 +69,8 @@ export function usePerch(o: {
   onPerch: (p: Perch) => void;
 }) {
   const [screens, setScreens] = useState<Screen[]>([]);
+  /** The content's natural size in CSS pixels, for the box to be drawn at. */
+  const [box, setBox] = useState<Size | null>(null);
   /* Where it *actually* is, which is not always what was remembered: a fresh
      install has no perch and still docks, and a saved dock degrades to
      floating when the notch is gone. The pill is drawn from this, or it wears
@@ -59,6 +79,10 @@ export function usePerch(o: {
 
   /** The collapsed size, kept so an expanded panel can be grown from it. */
   const collapsed = useRef<Size>(GUESS);
+  /** The size the window is at right now, which leads the pill on the way up. */
+  const held = useRef<Size>(GUESS);
+  /** Takes the extra room back out once the animation has finished. */
+  const slack = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   /** AppKit owns the window for the length of a drag; we must not fight it. */
   const dragging = useRef(false);
   const settling = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -75,25 +99,45 @@ export function usePerch(o: {
     if (!el || dragging.current || displays.length === 0) return;
 
     // Measured in CSS pixels, placed in whatever the shell measures in.
-    const box = el.getBoundingClientRect();
+    const natural = el.getBoundingClientRect();
     const per = unit();
-    const size = { width: Math.ceil(box.width * per), height: Math.ceil(box.height * per) };
+    const size = {
+      width: Math.ceil(natural.width * per),
+      height: Math.ceil(natural.height * per),
+    };
     if (size.width < 2 || size.height < 2) return;
     if (!now.open) collapsed.current = size;
+
+    // The box is drawn at the natural size and animates to it; the window is
+    // placed at the union so the animation has room in whichever direction it
+    // is going.
+    setBox({ width: Math.ceil(natural.width), height: Math.ceil(natural.height) });
+    const room = union(size, held.current);
+    held.current = room;
 
     const base = resolve(now.perch, displays, collapsed.current, anchor);
     if (!base) return;
     setPerched(base.mode);
 
-    const rect = now.open ? grow(base.rect, size, base.screen) : base.rect;
+    const at = (of: Size) => grow(base.rect, of, base.screen, anchor === "corner" ? "right" : "centre");
+
     const mine = ++turn.current;
-    await place(rect);
+    await place(at(room));
     if (mine !== turn.current) return;
 
     if (now.show && !shown.current) {
       shown.current = true;
       await visible(true);
     }
+
+    // Once the pill has stopped moving, take the slack back out of the window
+    // so it is again exactly the shape of what is drawn in it.
+    clearTimeout(slack.current);
+    slack.current = setTimeout(() => {
+      if (mine !== turn.current || dragging.current) return;
+      held.current = size;
+      void place(at(size));
+    }, SETTLE);
   }, []);
 
   /* The displays, and a cheap watch for one arriving or leaving. A monitor is
@@ -186,6 +230,8 @@ export function usePerch(o: {
     };
   }, []);
 
+  useEffect(() => () => clearTimeout(slack.current), []);
+
   const drag = useCallback(() => {
     dragging.current = true;
     void startDragging();
@@ -207,6 +253,10 @@ export function usePerch(o: {
 
   return {
     perched,
+    /** What to draw the animated box at, in CSS pixels. */
+    box,
+    /** Which edges the box is pinned to inside the window while it animates. */
+    align: anchor === "corner" ? ("right" as const) : ("centre" as const),
     /**
      * The cutout on the display it lives on, or zeroes.
      *

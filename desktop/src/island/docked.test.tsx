@@ -49,12 +49,28 @@ describe("a pill docked into the notch", () => {
     const html = renderToStaticMarkup(
       <Collapsed state={waiting} mode="demand" onGrab={() => {}} gap={200} />,
     );
-    expect(html).toContain("width:200px");
+    expect(html).toContain("--island-gap:200px");
+  });
+
+  /* The shape is symmetric about the notch or it is not aligned to it.
+     The first cut hung the dot and the label off the left of the cutout and
+     left the grab handle alone on the right, so one wing was a block and the
+     other a sliver. Nothing was out of place and the whole thing still read
+     as crooked, which was the bug. Both wings exist and the grid gives them
+     equal tracks; what is asserted here is that there are two of them. */
+  it("puts a wing on each side of it", () => {
+    const html = renderToStaticMarkup(
+      <Collapsed state={waiting} mode="demand" onGrab={() => {}} gap={200} />,
+    );
+    expect(html).toContain("island-left");
+    expect(html).toContain("island-right");
+    expect(html).toContain("island-wings");
   });
 
   it("reserves nothing at all when it is floating", () => {
     const html = renderToStaticMarkup(<Collapsed state={waiting} mode="demand" onGrab={() => {}} />);
-    expect(html).not.toContain("width:200px");
+    expect(html).not.toContain("--island-gap");
+    expect(html).not.toContain("island-wings");
   });
 
   /* The nub is the state somebody is most likely to leave docked for days,
@@ -63,7 +79,9 @@ describe("a pill docked into the notch", () => {
     const html = renderToStaticMarkup(
       <Collapsed state={islandState([])} mode="dormant" onGrab={() => {}} gap={200} />,
     );
-    expect(html).toContain("width:200px");
+    expect(html).toContain("--island-gap:200px");
+    expect(html).toContain("island-left");
+    expect(html).toContain("island-right");
   });
 
   /* The panel is wider than any notch, so it cannot be swallowed — but its

@@ -54,6 +54,22 @@
   /* Native motion is quicker than web motion. The same curve, less of it. */
   --dur-native: 140ms;
 
+  /* ── The island's own motion ───────────────────────────────────
+     The one place in the app that is slower than `--dur-native`, and the
+     reason is that this is the only surface imitating a piece of hardware
+     rather than a piece of software. A notch that snaps between two sizes
+     reads as two windows; the same change over 320ms on a curve that leaves
+     almost immediately and takes its time arriving reads as one thing
+     stretching. `ease-out-quint`: no overshoot, because the window is exactly
+     the size of the pill and anything past the end would be clipped off. */
+  --dur-island: 320ms;
+  --ease-island: cubic-bezier(0.22, 1, 0.36, 1);
+
+  /* How far the island's black bleeds sideways at the top before curving back
+     in, and the radius of its bottom corners. One number, so the concave
+     fillet and the convex corner below it are the same arc. */
+  --island-melt: 13px;
+
   /* ── Syntax ────────────────────────────────────────────────────
      A fourth colour namespace, and the only one that earns an exception to
      "colour is spent". It never appears outside a file or a diff, so it
@@ -190,37 +206,127 @@
      No new token and no new hue: the same greys, the same ember, the one
      shape that is not in the app — a thing with no window around it. */
   .island {
+    position: relative;
     background: rgb(9 9 10 / 0.94);
-    border: 1px solid var(--color-line);
-    border-radius: 10px;
+    /* A hairline in white at low alpha, not `--color-line`. #26262b against a
+       black pill is a grey *outline*, and an outline is the tell that this is
+       a window sitting on the screen rather than part of it. */
+    border: 1px solid rgb(255 255 255 / 0.07);
+    border-radius: 11px;
     overflow: hidden;
+    /* The shape is animated, and the size is set from JS on every change —
+       see `.island-body`. Faster out of the gate than `--dur-native` and much
+       longer settling, which is what reads as elastic without any overshoot
+       to clip. */
     transition:
+      width var(--dur-island) var(--ease-island),
+      height var(--dur-island) var(--ease-island),
+      opacity var(--dur-native) var(--ease-swift),
       border-color var(--dur-native) var(--ease-swift),
       background var(--dur-native) var(--ease-swift);
   }
 
-  /* Docked, the pill and the notch are one shape: no top corners, no top
-     edge, flush with the screen, and black rather than near-black so there is
-     no seam where the two meet. */
+  /* Docked, the pill and the notch are one piece of black glass. No border at
+     all — a hairline here traces the join and undoes the whole illusion — and
+     no top corners, because there is no top: the shape starts at the edge of
+     the panel. */
   .island[data-perch="notch"] {
+    border: 0;
     border-top-left-radius: 0;
     border-top-right-radius: 0;
-    border-top: 0;
-    background: rgb(0 0 0 / 0.98);
-    /* The pill is held to the notch's height, so its contents centre inside
-       whatever room that leaves rather than sitting against the top edge. */
-    display: flex;
+    border-bottom-left-radius: var(--island-melt);
+    border-bottom-right-radius: var(--island-melt);
+    background: #000;
+  }
+
+  /* ── Melting into the bezel ────────────────────────────────────
+     What the shape needs at the two top corners is the opposite of a radius:
+     the black has to bulge *outward* along the top edge and curve back in, so
+     the island reads as the panel swelling rather than as a rectangle parked
+     against it. Every product that does this well has these, and their absence
+     is most of what makes a home-made one look stuck on.
+
+     Each is a square of the island's own black with a quarter-disc bitten out
+     of the corner nearest the pill, which leaves a concave fillet: full width
+     where it meets the top of the screen, tapering to nothing where it meets
+     the island's side. */
+  .island-frame {
+    display: inline-flex;
+    position: relative;
+  }
+  .island-frame[data-perch="notch"]::before,
+  .island-frame[data-perch="notch"]::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    width: var(--island-melt);
+    height: var(--island-melt);
+    background: #000;
+    pointer-events: none;
+  }
+  .island-frame[data-perch="notch"]::before {
+    left: calc(var(--island-melt) * -1);
+    mask: radial-gradient(
+      circle at 0 100%,
+      transparent var(--island-melt),
+      #000 calc(var(--island-melt) + 0.5px)
+    );
+  }
+  .island-frame[data-perch="notch"]::after {
+    right: calc(var(--island-melt) * -1);
+    mask: radial-gradient(
+      circle at 100% 100%,
+      transparent var(--island-melt),
+      #000 calc(var(--island-melt) + 0.5px)
+    );
+  }
+
+  /* The content, at its natural size. Measured by `usePerch`, which then sets
+     the size of `.island` around it — so the box animates while what is inside
+     it never reflows mid-flight. */
+  .island-body {
+    width: max-content;
+  }
+
+  /* Docked and collapsed, the two wings must be the same width.
+     The first cut hung everything off the left of the notch and left the grab
+     handle alone on the right, which put a wide block on one side of the
+     cutout and a sliver on the other. Nothing was misaligned, and it read as
+     misaligned, which is the same problem. Two `1fr` tracks around the gap
+     resolve to the wider of the two, so the shape is symmetric about the
+     notch whatever it is saying. */
+  .island[data-perch="notch"] .island-wings {
+    display: grid;
+    grid-template-columns: 1fr var(--island-gap) 1fr;
     align-items: center;
-    justify-content: center;
+  }
+  /* Each wing against the *outer* edge, not the cutout. The wider one fills
+     its track either way; pushing the narrower one outward too is what makes
+     the pair read as two ends of one object rather than as a label with some
+     black after it. */
+  .island[data-perch="notch"] .island-wings > .island-left {
+    justify-self: start;
+  }
+  .island[data-perch="notch"] .island-wings > .island-right {
+    justify-self: end;
+  }
+
+  /* Whatever has just appeared inside the box, arriving rather than blinking
+     on. Short, and behind the growth, so the shape leads and the content
+     follows it in. */
+  .island-enter {
+    animation: island-enter 200ms var(--ease-swift) 70ms backwards;
   }
 
   /* Dormant: a nub, not a notification. It is there so there is something to
      grab and something to right-click, and for no other reason — an island
      that is fully visible while it has nothing to say is a second loud thing
      on a screen that is only allowed one. */
+  /* Opacity only. Declaring `transition` here would replace the list above
+     rather than add to it, and the nub would be the one state whose shape
+     snapped — which is exactly what it did. */
   .island[data-mode="dormant"] {
     opacity: 0.38;
-    transition: opacity var(--dur-native) var(--ease-swift);
   }
   .island[data-mode="dormant"]:hover {
     opacity: 1;
@@ -445,5 +551,15 @@ html:not([data-platform="macos"]) .island {
   }
   .island[data-mode="demand"] {
     border-color: var(--color-ember-deep);
+  }
+}
+
+/* The island's content arriving. Declared here rather than in `globals.css`
+   because it is the native layer's, and nothing in the web build has a box
+   that changes size underneath its own contents. */
+@keyframes island-enter {
+  from {
+    opacity: 0;
+    transform: translateY(-3px);
   }
 }

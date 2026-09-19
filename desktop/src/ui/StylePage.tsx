@@ -182,16 +182,24 @@ export function StylePage() {
             {ISLANDS.map(([label, state]) => (
               <div key={label} className="flex items-center gap-4">
                 <span className="w-[74px] shrink-0 text-meta text-mute">{label}</span>
-                <div className="island" data-mode={modeOf(state)} data-perch="float">
-                  <Collapsed state={state} mode={modeOf(state)} onGrab={() => {}} />
+                <div className="island-frame" data-perch="float">
+                  <div className="island" data-mode={modeOf(state)} data-perch="float">
+                    <div className="island-body">
+                      <Collapsed state={state} mode={modeOf(state)} onGrab={() => {}} />
+                    </div>
+                  </div>
                 </div>
               </div>
             ))}
 
             <div className="flex items-start gap-4">
               <span className="w-[74px] shrink-0 pt-2 text-meta text-mute">expanded</span>
-              <div className="island" data-mode="demand" data-perch="float">
-                <Panel state={ISLANDS[2][1]} mode="demand" onOpen={() => {}} onGrab={() => {}} />
+              <div className="island-frame" data-perch="float">
+                <div className="island" data-mode="demand" data-perch="float">
+                  <div className="island-body">
+                    <Panel state={ISLANDS[2][1]} mode="demand" onOpen={() => {}} onGrab={() => {}} />
+                  </div>
+                </div>
               </div>
             </div>
 
@@ -206,13 +214,18 @@ export function StylePage() {
                   style={{ width: NOTCH.width, height: NOTCH.height }}
                   aria-hidden
                 />
-                <div
-                  className="island relative"
-                  data-mode="demand"
-                  data-perch="notch"
-                  style={{ minHeight: NOTCH.height }}
-                >
-                  <Collapsed state={ISLANDS[2][1]} mode="demand" onGrab={() => {}} gap={NOTCH.width} />
+                <div className="island-frame relative" data-perch="notch">
+                  <div className="island" data-mode="demand" data-perch="notch">
+                    <div className="island-body">
+                      <Collapsed
+                        state={ISLANDS[2][1]}
+                        mode="demand"
+                        onGrab={() => {}}
+                        gap={NOTCH.width}
+                        tall={NOTCH.height}
+                      />
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>

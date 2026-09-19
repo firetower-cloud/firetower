@@ -262,16 +262,40 @@ export function snap(rect: Rect, screens: Screen[]): Placed | null {
  * case where the thing you were pointing at moves, and still better than a
  * panel running off the screen.
  */
-export function grow(from: Rect, to: Size, screen: Screen): Rect {
-  const centre = from.x + from.width / 2;
+export function grow(
+  from: Rect,
+  to: Size,
+  screen: Screen,
+  /**
+   * Which part of the collapsed pill stays put.
+   *
+   * Its centre under the notch, where the pill is centred on something and
+   * sliding sideways as it opens would look like a mistake. Its right edge in
+   * a corner, where the pill is lined up against an edge and the panel should
+   * stay lined up against the same one.
+   */
+  keep: "centre" | "right" = "centre",
+): Rect {
+  const x = keep === "right" ? from.x + from.width - to.width : from.x + from.width / 2 - to.width / 2;
   const below = floor(screen) - MARGIN - (from.y + to.height);
   const y = below >= 0 ? from.y : from.y + from.height - to.height;
   return clampTo(screen, {
-    x: Math.round(centre - to.width / 2),
+    x: Math.round(x),
     y: Math.round(y),
     width: to.width,
     height: to.height,
   });
+}
+
+/**
+ * The smallest box holding both.
+ *
+ * What the window is set to while the pill is between two sizes: big enough
+ * for where it is and where it is going, so a growing pill is never clipped
+ * and a shrinking one is never cut off mid-way.
+ */
+export function union(a: Size, b: Size): Size {
+  return { width: Math.max(a.width, b.width), height: Math.max(a.height, b.height) };
 }
 
 /**

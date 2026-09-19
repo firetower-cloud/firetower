@@ -14,11 +14,8 @@ tauri-build = { version = "2", features = [] }
 # `image-png` is for the taskbar overlay: `set_overlay_icon` takes an `Image`,
 # and decoding the one in `icons/ember.png` needs the decoder compiled in.
 # `image-png` is for the taskbar overlay and the tray: both take an `Image`,
-# and decoding the PNGs in `icons/` needs the decoder compiled in. `tray-icon`
-# is the Windows notification area (`tray.rs`); it is declared on every
-# platform so the build script sees one feature set whatever the target, and
-# the module itself is `cfg`-ed off outside Windows.
-tauri = { version = "2", features = ["macos-private-api", "image-png", "tray-icon"] }
+# and decoding the PNGs in `icons/` needs the decoder compiled in.
+tauri = { version = "2", features = ["macos-private-api", "image-png"] }
 tauri-plugin-notification = "2"
 tauri-plugin-opener = "2"
 tauri-plugin-window-state = "2"
@@ -43,6 +40,11 @@ objc2-app-kit = { version = "0.3", default-features = false, features = ["std", 
 # different type that no amount of casting will accept.
 [target.'cfg(target_os = "windows")'.dependencies]
 windows = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging"] }
+# The notification area (`tray.rs`). Asked for only on the platform that has
+# one, so the Mac build does not link a tray implementation it can never use.
+# Unlike `macos-private-api` above, nothing in `build.rs` reads this one, so
+# it is safe to vary by target.
+tauri = { version = "2", features = ["tray-icon"] }
 
 [profile.dev]
 incremental = true
