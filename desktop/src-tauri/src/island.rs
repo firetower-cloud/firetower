@@ -225,6 +225,12 @@ fn perch<R: Runtime>(window: &tauri::WebviewWindow<R>) {
     // one of them in everything but implementation.
     ns.setLevel(25);
 
+    /* Mouse-moved events, which a window is not sent unless it asks. The pill
+       opens on a poll of the cursor rather than on `:hover`, but an *open*
+       panel is a list whose rows have to light up under the pointer, and that
+       is the document's own hover — which needs these. */
+    ns.setAcceptsMouseMovedEvents(true);
+
     ns.setCollectionBehavior(
         // On every Space, including other apps' full-screen ones. Without this
         // the island belongs to the desktop it was created on and silently
@@ -360,7 +366,10 @@ pub fn island_activate<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
         main_thread(&app, move |mtm| {
             use objc2_app_kit::{NSApplication, NSWindow};
 
-            NSApplication::sharedApplication(mtm).activateIgnoringOtherApps(true);
+            // `activate` and not `activateIgnoringOtherApps`, which is
+            // deprecated from macOS 14 and does nothing in some of the cases
+            // it used to cover.
+            NSApplication::sharedApplication(mtm).activate();
             if let Ok(ptr) = window.ns_window() {
                 let ns: &NSWindow = unsafe { &*(ptr as *const NSWindow) };
                 ns.makeKeyAndOrderFront(None);

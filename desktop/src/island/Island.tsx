@@ -164,6 +164,18 @@ export function Island() {
       fromShell.current = true;
       if (inside === over) return;
       over = inside;
+
+      /* The pointer arriving is when the island asks to come forward, not the
+         panel opening a moment later. A window that is not key is sent no
+         mouse-moved events, so a panel drawn before its window is key has
+         rows that do not light up under the pointer that opened them — and
+         you have to click it to wake it, which is the thing this was supposed
+         to spare you. Asking on arrival leaves the whole open delay for
+         AppKit to get there first.
+
+         It is the island's own window that comes forward, which has no text
+         input in it, so the keyboard lands somewhere it can do no harm. */
+      if (inside) void activate().catch(() => {});
       /* The window is bigger than the pill and never resizes, so everything
          but the pill has to be invisible to the mouse. This is the same
          question, already asked, so it costs nothing to answer both. */
@@ -200,14 +212,6 @@ export function Island() {
      dock would otherwise be built as a full panel for those first frames. */
   const placed = box !== null;
   const expanded = (placed && perched === "float" && mode !== "dormant") || open || menu;
-
-  /* Opening is the one moment the island asks to come forward. A panel is a
-     list you point at, and a window that is not key is sent no mouse moves —
-     so without this the rows do not light up under the pointer that opened
-     them. It hands the keyboard to a window with nothing to type into. */
-  useEffect(() => {
-    if (expanded) void activate();
-  }, [expanded]);
 
   /* Docked, the black fills the whole menu bar rather than just the cutout,
      so that the one edge macOS insists on drawing lands where the bar ends
