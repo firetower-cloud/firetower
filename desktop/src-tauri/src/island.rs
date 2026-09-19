@@ -179,10 +179,18 @@ pub fn create<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
         .maximizable(false)
         .decorations(false)
         .transparent(true)
-        // macOS derives the shadow from the window's alpha channel, so a
-        // transparent window with a rounded pill in it casts a correctly
-        // shaped shadow and needs no bleed drawn around the content.
-        .shadow(true)
+        /* macOS derives the shadow from the window's alpha channel, so a
+           transparent window with a rounded pill in it casts a correctly
+           shaped shadow and needs no bleed drawn around the content.
+
+           Windows derives it from the window, and the window is a stage:
+           wider than the pill, and permanently as wide as the largest panel
+           the island has ever opened. A shadow there is a shadow of a
+           rectangle nobody can see, drawn around a lot of empty air — the
+           halo that made the pill look like it was sitting in a box. It has
+           its own elevation on that platform anyway, a colour step and a top
+           highlight, which is what the rest of the system does. */
+        .shadow(cfg!(not(target_os = "windows")))
         .always_on_top(true)
         .skip_taskbar(true)
         .visible(false)
@@ -356,6 +364,10 @@ fn perch<R: Runtime>(window: &tauri::WebviewWindow<R>) {
 /// chasing an unversioned COM interface for.
 #[cfg(target_os = "windows")]
 fn perch<R: Runtime>(window: &tauri::WebviewWindow<R>) {
+    use windows::Win32::Graphics::Dwm::{
+        DwmSetWindowAttribute, DWMWA_BORDER_COLOR, DWMWA_COLOR_NONE,
+        DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_DONOTROUND,
+    };
     use windows::Win32::UI::WindowsAndMessaging::{
         GetWindowLongPtrW, SetWindowLongPtrW, GWL_EXSTYLE, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
     };
@@ -367,6 +379,29 @@ fn perch<R: Runtime>(window: &tauri::WebviewWindow<R>) {
             hwnd,
             GWL_EXSTYLE,
             held | (WS_EX_NOACTIVATE.0 as isize) | (WS_EX_TOOLWINDOW.0 as isize),
+        );
+    }
+
+    /* And nothing drawn around the window either.
+       Windows 11 rounds the corners of a top-level window and traces it in a
+       border colour, both of which are right for a window and wrong for a
+       stage that is mostly transparent air: what they outline is the
+       rectangle the pill is centred in, not the pill. The shape the island
+       has is the one its own CSS draws. */
+    unsafe {
+        let none = DWMWA_COLOR_NONE;
+        let _ = DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_BORDER_COLOR,
+            std::ptr::from_ref(&none).cast(),
+            size_of_val(&none) as u32,
+        );
+        let square = DWMWCP_DONOTROUND;
+        let _ = DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_WINDOW_CORNER_PREFERENCE,
+            std::ptr::from_ref(&square).cast(),
+            size_of_val(&square) as u32,
         );
     }
 }

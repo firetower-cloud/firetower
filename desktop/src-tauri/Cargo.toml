@@ -42,7 +42,7 @@ objc2-foundation = { version = "0.3", default-features = false, features = ["std
 # from *its* copy of the crate, and two majors in one tree makes that handle a
 # different type that no amount of casting will accept.
 [target.'cfg(target_os = "windows")'.dependencies]
-windows = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging"] }
+windows = { version = "0.61", features = ["Win32_Foundation", "Win32_Graphics_Dwm", "Win32_UI_WindowsAndMessaging"] }
 # The notification area (`tray.rs`). Asked for only on the platform that has
 # one, so the Mac build does not link a tray implementation it can never use.
 # Unlike `macos-private-api` above, nothing in `build.rs` reads this one, so
