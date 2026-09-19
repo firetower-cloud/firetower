@@ -170,23 +170,31 @@ export function Island() {
       if (inside === over) return;
       over = inside;
 
-      /* The pointer arriving is when the island asks to come forward, not the
-         panel opening a moment later. A window that is not key is sent no
-         mouse-moved events, so a panel drawn before its window is key has
-         rows that do not light up under the pointer that opened them — and
-         you have to click it to wake it, which is the thing this was supposed
-         to spare you. Asking on arrival leaves the whole open delay for
-         AppKit to get there first.
+      /* Take the mouse first, then come forward — and in that order, waited
+         on, not fired off together.
+
+         The window ignores the cursor everywhere but the pill, and it asks to
+         be key so that the rows inside light up under the pointer that opened
+         them. Sent as two calls that do not wait for each other, they arrive
+         in whichever order they like, and one of those orders is wrong: a
+         window that becomes key while it is still ignoring the mouse is one
+         WebKit never starts tracking, and it stays untracked after the
+         ignoring stops. Clicking makes it look again, which is exactly the
+         click this was meant to spare you — and it only happens on the runs
+         where the calls landed the wrong way round, which is why it kept
+         looking fixed.
 
          It is the island's own window that comes forward, which has no text
          input in it, so the keyboard lands somewhere it can do no harm. */
-      if (inside) void activate().catch(() => {});
-      /* The window is bigger than the pill and never resizes, so everything
-         but the pill has to be invisible to the mouse. This is the same
-         question, already asked, so it costs nothing to answer both. */
-      void clickThrough(!inside).catch(() => {});
-      if (inside) enter();
-      else leave();
+      if (inside) {
+        await clickThrough(false).catch(() => {});
+        if (!alive) return;
+        void activate().catch(() => {});
+        enter();
+      } else {
+        void clickThrough(true).catch(() => {});
+        leave();
+      }
     };
     const timer = setInterval(() => void ask(), 60);
     return () => {
