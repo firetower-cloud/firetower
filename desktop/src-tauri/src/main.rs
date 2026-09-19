@@ -184,6 +184,7 @@ fn main() {
             island::island_sharing,
             island::island_push,
             island::island_open,
+            island::island_pointer,
         ])
         .run(tauri::generate_context!())
         .expect("firetower failed to start");

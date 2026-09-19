@@ -32,7 +32,7 @@ window-vibrancy = "0.6"
 # reaches for NSScreen and NSWindow directly, and a transitive dependency is
 # not an API you are allowed to call.
 objc2 = "0.6"
-objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSResponder", "NSScreen", "NSView", "NSWindow"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSEvent", "NSResponder", "NSScreen", "NSView", "NSWindow"] }
 
 # The island's window flags on Windows. Pinned to the same major as Tauri's
 # own: `WebviewWindow::hwnd()` hands back a `windows::Win32::Foundation::HWND`

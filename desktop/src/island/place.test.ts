@@ -89,12 +89,14 @@ describe("where a fresh install puts it", () => {
     expect(placed?.rect).toMatchObject({ x: (1728 - 200) / 2, y: 0 });
   });
 
-  it("floats under the menu bar when the display has no notch", () => {
+  it("docks to the top of a display with no notch, like any other", () => {
+    // The cutout decides whether the row leaves a gap in its middle. It does
+    // not decide which displays you are allowed to dock to: a pill you can
+    // carry to the second monitor and not stick to the top of it is a pill
+    // that only half works.
     const placed = defaultPlacement([flat], pill);
-    expect(placed?.mode).toBe("float");
-    // Clear of the menu bar, not over it: with no notch to hide in, a pill
-    // sitting on top of the menus is covering something.
-    expect(placed?.rect.y).toBe(flat.workY + 6);
+    expect(placed?.mode).toBe("notch");
+    expect(placed?.rect.y).toBe(flat.y);
   });
 
   it("uses the display with the menu bar, not the first one listed", () => {
@@ -134,9 +136,13 @@ describe("a perch remembered from last time", () => {
 
   /* Same name, no notch: a different monitor wearing a familiar label, or a
      display that was replaced. Better floating than nowhere. */
-  it("degrades a docked perch to floating if the notch has gone", () => {
+  it("keeps a docked perch on a display whose notch has gone", () => {
+    // Same display name, no cutout any more — a different monitor wearing a
+    // familiar label. It is still a top edge, so it is still a dock.
     const saved: Perch = { screen: flat.name, mode: "notch", x: 764, y: 0 };
-    expect(resolve(saved, [flat], pill)?.mode).toBe("float");
+    const placed = resolve(saved, [flat], pill);
+    expect(placed?.mode).toBe("notch");
+    expect(placed?.rect.y).toBe(flat.y);
   });
 
   it("pulls a perch that is now off the edge back onto the display", () => {
@@ -275,7 +281,8 @@ describe("where it starts out on Windows", () => {
   });
 
   it("still takes the top of the screen when asked for the Mac's anchor", () => {
-    expect(defaultPlacement([windows], pill, "top")?.rect.y).toBe(windows.workY + 6);
+    // Flush with it, now that the top of any display is a perch.
+    expect(defaultPlacement([windows], pill, "top")?.rect.y).toBe(windows.y);
   });
 
   it("follows the taskbar when it moves to the top of the screen", () => {

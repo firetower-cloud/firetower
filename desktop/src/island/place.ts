@@ -73,6 +73,19 @@ export const MARGIN = 4;
 
 export const notched = (s: Screen) => s.notchHeight > 0 && s.notchWidth > 0;
 
+/**
+ * Whether a display's top edge can be docked to — which is all of them.
+ *
+ * It used to be `notched`, and the perch is still called `"notch"` in what is
+ * remembered, because that string is in everybody's `localStorage` and a
+ * rename buys a migration and nothing else. What it means is *docked to the
+ * top of this display*. A cutout is a reason to leave a gap in the middle of
+ * the row and to floor the height; it was never a reason to be the only
+ * display you may dock to. On a monitor with no notch the pill sits over the
+ * menu bar instead of inside a hole in it — centred, where the bar is empty.
+ */
+export const dockable = (_s: Screen) => true;
+
 export const perchOf = (p: Placed): Perch => ({
   screen: p.screen.name,
   mode: p.mode,
@@ -191,7 +204,7 @@ export function defaultPlacement(
   const screen = primaryOf(screens);
   if (!screen) return null;
   if (anchor === "corner") return { screen, mode: "float", rect: corner(screen, size) };
-  return notched(screen)
+  return dockable(screen)
     ? { screen, mode: "notch", rect: dock(screen, size) }
     : { screen, mode: "float", rect: floating(screen, size) };
 }
@@ -219,11 +232,9 @@ export function resolve(
   // The notch is a place, not a coordinate. Recompute it: the pill's width
   // changes with the fleet, and a stored x would leave it off-centre.
   if (saved.mode === "notch") {
-    return notched(screen)
+    return dockable(screen)
       ? { screen, mode: "notch", rect: dock(screen, size) }
-      : // Same display name, no notch any more — a different monitor wearing a
-        // familiar label. Degrade to floating rather than to nothing.
-        { screen, mode: "float", rect: floating(screen, size) };
+      : { screen, mode: "float", rect: floating(screen, size) };
   }
 
   return {
@@ -244,7 +255,7 @@ export function snap(rect: Rect, screens: Screen[]): Placed | null {
   const screen = screenFor(rect, screens);
   if (!screen) return null;
 
-  if (notched(screen)) {
+  if (dockable(screen)) {
     const pull = Math.abs(rect.x + rect.width / 2 - (screen.x + screen.width / 2));
     if (pull <= MAGNET && rect.y <= screen.y + MAGNET) {
       return { screen, mode: "notch", rect: dock(screen, rect) };

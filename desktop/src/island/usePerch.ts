@@ -30,7 +30,7 @@ import {
   fingerprint,
   floating,
   grow,
-  notched,
+  dockable as topDockable,
   perchOf,
   resolve,
   screenFor,
@@ -38,6 +38,7 @@ import {
   union,
   type Mode,
   type Perch,
+  type Rect,
   type Screen,
   type Size,
 } from "./place";
@@ -116,6 +117,46 @@ export function usePerch(o: {
   const shown = useRef(false);
   /** IPC can answer out of order; only the newest placement may win. */
   const turn = useRef(0);
+  /** Whether the pill has ever been measured, as opposed to guessed at. */
+  const measured = useRef(false);
+  /** One placement per frame: the latest rectangle, and who is waiting on it. */
+  const queued = useRef<{ rect: Rect; waiting: Array<() => void> } | null>(null);
+
+  /**
+   * Place the window at most once a frame.
+   *
+   * Several things ask for a placement in the same breath — the state arrives,
+   * a font finishes loading, the panel is keyed out and the row keyed in — and
+   * each one used to move the window the moment it asked. Six `set_position`
+   * calls inside a second, at five different x, is a pill that jitters
+   * sideways before it settles. They are all answers to the same question, so
+   * only the last one is worth sending.
+   *
+   * A timer rather than `requestAnimationFrame`. The window is built hidden
+   * and waits to be placed before it is shown, and a hidden window is not
+   * animating — its frame callbacks never run, so the placement it is waiting
+   * on never happens and the island stays invisible for the whole session.
+   */
+  const placeSoon = useCallback(
+    (rect: Rect) =>
+      new Promise<void>((done) => {
+        const held = queued.current;
+        if (held) {
+          held.rect = rect;
+          held.waiting.push(done);
+          return;
+        }
+        queued.current = { rect, waiting: [done] };
+        setTimeout(async () => {
+          const batch = queued.current;
+          queued.current = null;
+          if (!batch) return;
+          await place(batch.rect);
+          for (const wake of batch.waiting) wake();
+        }, 0);
+      }),
+    [],
+  );
 
   const latest = useRef({ o, screens });
   latest.current = { o, screens };
@@ -135,7 +176,13 @@ export function usePerch(o: {
     if (size.width < 2 || size.height < 2) return;
     if (!now.open) collapsed.current = size;
 
-    const room = union(size, held.current);
+    /* The union covers an animation between two sizes the pill has actually
+       been. `GUESS` is neither — it is a placeholder for the frames before
+       anything has been measured, and unioning with it places the window
+       wider than the pill has ever been, which the centring then reads as an
+       offset and corrects for. Hence the sideways shuffle on the way in. */
+    const room = measured.current ? union(size, held.current) : size;
+    measured.current = true;
     held.current = room;
 
     const base = resolve(now.perch, displays, collapsed.current, anchor);
@@ -182,7 +229,7 @@ export function usePerch(o: {
     });
 
     const mine = ++turn.current;
-    await place(at(room));
+    await placeSoon(at(room));
     if (mine !== turn.current) return;
 
     if (now.show && !shown.current) {
@@ -196,7 +243,7 @@ export function usePerch(o: {
     slack.current = setTimeout(() => {
       if (mine !== turn.current || dragging.current) return;
       held.current = size;
-      void place(at(size));
+      void placeSoon(at(size));
     }, SETTLE);
   }, []);
 
@@ -345,8 +392,8 @@ export function usePerch(o: {
      * eye already expects a boundary.
      */
     bar: home ? Math.max(0, home.workY - home.y) : 0,
-    /** Whether "dock to the notch" is worth offering on the display it is on. */
-    dockable: home ? notched(home) : false,
+    /** Whether "dock to the top" is worth offering on the display it is on. */
+    dockable: home ? topDockable(home) : false,
     drag,
     perchAs,
   };

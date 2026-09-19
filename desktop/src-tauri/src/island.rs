@@ -40,6 +40,17 @@ pub const STATE_EVENT: &str = "island://state";
 /// Sent back when a row is clicked. The main window navigates.
 pub const OPEN_EVENT: &str = "island://open";
 
+/// Where the island was last put, and how tall the primary display is.
+///
+/// Both are written on the way through the commands that already know them —
+/// `island_place` places the window, `island_screens` measures the displays —
+/// so that `island_pointer` can answer "is the pointer over the pill" without
+/// touching AppKit or a window handle from its own thread.
+#[cfg(target_os = "macos")]
+static FRAME: std::sync::Mutex<Option<(f64, f64, f64, f64)>> = std::sync::Mutex::new(None);
+#[cfg(target_os = "macos")]
+static CEILING: std::sync::Mutex<f64> = std::sync::Mutex::new(0.0);
+
 /// One display, in the coordinates `island_place` speaks.
 ///
 /// Origin at the top-left of the primary display, y growing downward, on both
@@ -294,6 +305,8 @@ pub fn island_place<R: Runtime>(
         window
             .set_position(LogicalPosition::new(x, y))
             .map_err(|e| e.to_string())?;
+        // What `island_pointer` tests the cursor against.
+        *FRAME.lock().unwrap() = Some((x, y, width, height));
     }
     // Physical, because that is the only space two monitors at different DPI
     // agree on. `LogicalSize` here would be scaled by whichever monitor Tauri
@@ -465,6 +478,55 @@ pub fn island_open<R: Runtime>(app: AppHandle<R>, target: serde_json::Value) -> 
 
 // ── macOS geometry ───────────────────────────────────────────────────────────
 
+/// Whether the pointer is over the pill right now.
+///
+/// Asked for, rather than announced. The island is deliberately
+/// non-activating — it must never take the keyboard from the terminal you are
+/// watching — and the price is that AppKit sends its webview no mouse-moved
+/// events until it has been clicked, so `:hover` never fires and the pill
+/// only opens once you have already aimed at it twice.
+///
+/// The obvious answer is for the shell to watch the cursor and push, and that
+/// is what this was first: a thread, `NSEvent::mouseLocation`, and an emit.
+/// Nothing arrived. Neither an event nor a bare `eval` reaches this window
+/// from Rust — both report success and the page never runs them — which is a
+/// fault worth its own fix, and is also why the pill has been showing the
+/// demo fleet rather than the real one.
+///
+/// So it is a command instead, and the renderer asks. Commands are the one
+/// direction across this bridge that demonstrably works: it is how the window
+/// gets placed at all. The cost is a poll, and the poll is two comparisons
+/// against the rectangle `island_place` recorded on its way past — no window
+/// handle, no main thread, no event tap, and no accessibility permission,
+/// which is only ever needed to watch the keyboard.
+#[tauri::command]
+pub fn island_pointer() -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        use objc2_app_kit::NSEvent;
+
+        let Some((x, y, width, height)) = *FRAME.lock().unwrap() else {
+            return false;
+        };
+        let ceiling = *CEILING.lock().unwrap();
+        if ceiling <= 0.0 {
+            return false;
+        }
+
+        // AppKit measures the cursor from the bottom-left of the primary
+        // display; everything else here is measured from its top-left.
+        let at = unsafe { NSEvent::mouseLocation() };
+        let (px, py) = (at.x, ceiling - at.y);
+        px >= x && px < x + width && py >= y && py < y + height
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        // Nothing to work around: a topmost window there is sent its mouse
+        // moves, so the renderer's own `:hover` is the answer.
+        false
+    }
+}
+
 /// Run on the main thread, because AppKit answers nothing anywhere else.
 ///
 /// Tauri's command handlers are not guaranteed a thread, and `NSScreen` read
@@ -497,6 +559,8 @@ fn macos_screens(mtm: objc2::MainThreadMarker) -> Vec<Screen> {
         return Vec::new();
     };
     let ceiling = primary.frame().size.height;
+    // The same flip `island_pointer` needs, measured where it is already known.
+    *CEILING.lock().unwrap() = ceiling;
 
     screens
         .iter()

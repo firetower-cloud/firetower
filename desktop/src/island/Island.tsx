@@ -17,7 +17,7 @@ import { AgentMark } from "~/components/AgentMark";
 import { Mark } from "~/ui/Mark";
 import { elapsed } from "~/api/view";
 import { usePerch } from "./usePerch";
-import { open as openWorkspace, onState, onWake, sharing } from "./shell";
+import { open as openWorkspace, onState, onWake, pointerInside, sharing } from "./shell";
 import { read, write, type Prefs } from "./prefs";
 import { empty, headline, modeOf, onScreen, type IslandState, type Row } from "./state";
 
@@ -115,13 +115,54 @@ export function Island() {
     }, OUT);
   };
 
+  /* The pointer, asked of the shell rather than read off the document.
+     Same timers, so the feel is unchanged; it simply also works when another
+     app is in front, which `:hover` on a non-activating window does not.
+
+     A tenth of a second: below what a 120ms open delay can notice, and the
+     question is two comparisons against a rectangle the shell already has. */
+  useEffect(() => {
+    let alive = true;
+    let over = false;
+    const ask = async () => {
+      // A shell that cannot answer is a shell without the command — an older
+      // build, or a platform that does not need it. The document's own
+      // `:hover` is still wired, so the pill keeps working; it just wants the
+      // window clicked first, which is where this started.
+      const inside = await pointerInside().catch(() => false);
+      if (!alive || inside === over) return;
+      over = inside;
+      if (inside) enter();
+      else leave();
+    };
+    const timer = setInterval(() => void ask(), 100);
+    return () => {
+      alive = false;
+      clearInterval(timer);
+    };
+    // `enter` and `leave` only touch a ref and two setters, so the first pair is
+    // as good as any later one.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const go = (row: Row) => {
     setOpen(false);
     setMenu(false);
     void openWorkspace(row.serverId, row.workspaceId);
   };
 
-  const expanded = open || menu;
+  /* Floating, the card stays open. A pill that grows and shrinks as the
+     pointer crosses it is a target that moves while you are aiming at it, and
+     off the notch there is no cutout for the collapsed form to hide in — so
+     the only thing the collapse bought was the animation. Dormant is the
+     exception: with nothing to say it stays a nub rather than sitting there as
+     an open, empty card.
+
+     Not before it has been placed, though. `perched` reads "float" until the
+     displays have been measured and answered for, and a pill that is about to
+     dock would otherwise be built as a full panel for those first frames. */
+  const placed = box !== null;
+  const expanded = (placed && perched === "float" && mode !== "dormant") || open || menu;
 
   /* Docked, the black fills the whole menu bar rather than just the cutout,
      so that the one edge macOS insists on drawing lands where the bar ends
@@ -151,6 +192,9 @@ export function Island() {
           style={box ? { width: box.width, height: box.height } : undefined}
           onMouseEnter={enter}
           onMouseLeave={leave}
+          onClick={() => {
+            if (!expanded) setOpen(true);
+          }}
           onContextMenu={(e) => {
             e.preventDefault();
             setMenu((was) => !was);

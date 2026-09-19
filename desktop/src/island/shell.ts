@@ -74,6 +74,21 @@ export async function sharing(hidden: boolean): Promise<void> {
   await invoke("island_sharing", { hidden });
 }
 
+/**
+ * Whether the pointer is over the pill, asked of the shell.
+ *
+ * `:hover` is not enough. The island never takes focus, and AppKit sends a
+ * non-activating window's webview no mouse-moved events until it has been
+ * clicked — so the pill would only open once you had already aimed at it
+ * twice. The shell knows where the cursor is and where the window is, so it
+ * is asked. See `island_pointer`, which explains why this is a poll and not
+ * something the shell pushes.
+ */
+export async function pointerInside(): Promise<boolean> {
+  if (!invoke) return false;
+  return (await invoke("island_pointer")) === true;
+}
+
 /** Bring the app forward, on this workspace. */
 export async function open(serverId: string, workspaceId: string): Promise<void> {
   if (!invoke) return;
