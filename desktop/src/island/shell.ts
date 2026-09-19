@@ -64,6 +64,56 @@ export async function screens(): Promise<Screen[]> {
   return (await invoke("island_screens")) as Screen[];
 }
 
+/**
+ * The display this window is on, as the webview understands it.
+ *
+ * A fallback, and the difference between a degraded island and no island at
+ * all. Everything downstream needs at least one display: with none, the
+ * placement declines to place, the window is never shown, and nothing says
+ * why — which is what "it is absolutely nowhere" looks like from outside.
+ * The shell asking the system for its monitors is one call that can fail, and
+ * when it does there is still a screen right here to be measured.
+ *
+ * Only ever one, and only the one the window is already on: `screen` knows
+ * nothing about the others. That is enough to dock to the top of it, which
+ * is the common case this rescues — a machine with a single display, where
+ * the answer was never in doubt.
+ */
+export function hereabouts(): Screen[] {
+  if (typeof window === "undefined" || !window.screen) return [];
+  const per = unit();
+  const it = window.screen as Screen0;
+  const px = (n: number | undefined, or = 0) => Math.round((n ?? or) * per);
+
+  const x = px(it.availLeft);
+  const y = 0;
+  const width = px(it.width);
+  const height = px(it.height);
+  if (width < 2 || height < 2) return [];
+
+  return [
+    {
+      name: "this display",
+      primary: true,
+      x,
+      y,
+      width,
+      height,
+      workX: x,
+      workY: px(it.availTop),
+      workWidth: px(it.availWidth, it.width),
+      workHeight: px(it.availHeight, it.height),
+      // No cutout is knowable from here, and the platforms that have one
+      // never take this path.
+      notchWidth: 0,
+      notchHeight: 0,
+    },
+  ];
+}
+
+/** `availLeft` and `availTop` are not in the DOM types, and are in Chromium. */
+type Screen0 = globalThis.Screen & { availLeft?: number; availTop?: number };
+
 export async function place(rect: Rect): Promise<void> {
   if (!invoke) return;
   await invoke("island_place", rect);

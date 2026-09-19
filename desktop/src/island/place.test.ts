@@ -22,6 +22,7 @@ import {
   type Screen,
   type Size,
 } from "./place";
+import { hereabouts } from "./shell";
 
 /** A 16-inch MacBook Pro: notched, primary, origin at zero. */
 const laptop: Screen = {
@@ -326,5 +327,52 @@ describe("the bottom edge", () => {
 
   it("still allows the very top of the display", () => {
     expect(clampTo(windows, { x: 800, y: 0, ...pill }).y).toBe(0);
+  });
+});
+
+describe("when the shell cannot say what displays there are", () => {
+  /* The island was absolutely nowhere on Windows, and this is the shape of
+     why: one call that can fail, a rejection nothing caught, an empty list,
+     and a placement that quietly declines. A single screen measured from the
+     webview is worse than the real answer and infinitely better than none. */
+  const withScreen = <T,>(screen: object, dpr: number, run: () => T): T => {
+    const held = (globalThis as { window?: unknown }).window;
+    (globalThis as { window?: unknown }).window = { screen, devicePixelRatio: dpr };
+    try {
+      return run();
+    } finally {
+      (globalThis as { window?: unknown }).window = held;
+    }
+  };
+
+  const monitor = {
+    width: 1920,
+    height: 1080,
+    availWidth: 1920,
+    availHeight: 1032,
+    availLeft: 0,
+    availTop: 0,
+  };
+
+  /* At a scale of one, so the numbers are the screen's own whichever
+     platform is running the test — `unit()` is what converts them, and it is
+     the same conversion every other measurement here goes through. */
+  it("measures the one the window is on", () => {
+    const [here] = withScreen(monitor, 1, hereabouts);
+    expect(here).toMatchObject({ x: 0, y: 0, width: 1920, height: 1080, workHeight: 1032 });
+    // No cutout is knowable from a webview, and nothing that has one gets here.
+    expect(here.notchHeight).toBe(0);
+  });
+
+  it("gives a docked pill the top of it, centred", () => {
+    const [here] = withScreen(monitor, 1, hereabouts);
+    const placed = defaultPlacement([here], pill, "top");
+    expect(placed?.mode).toBe("notch");
+    expect(placed?.rect.y).toBe(here.y);
+    expect(placed?.rect.x).toBe(Math.round(here.x + (here.width - pill.width) / 2));
+  });
+
+  it("says nothing rather than guessing when there is no window at all", () => {
+    expect(hereabouts()).toEqual([]);
   });
 });

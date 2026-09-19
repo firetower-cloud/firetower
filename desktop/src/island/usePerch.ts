@@ -51,6 +51,7 @@ import { isMac } from "~/platform";
 import {
   anchor,
   bounds,
+  hereabouts,
   hit,
   onMoved,
   place,
@@ -358,7 +359,12 @@ export function usePerch(o: {
     let alive = true;
     let known = "";
     const look = async () => {
-      const found = await readScreens();
+      /* Never allowed to throw. A rejected call here used to leave the list
+         empty for good — and an empty list means the placement declines, the
+         window is never shown, and the island simply is not there, with
+         nothing anywhere saying so. */
+      const asked = await readScreens().catch(() => [] as Screen[]);
+      const found = asked.length > 0 ? asked : hereabouts();
       if (!alive) return;
       const now = fingerprint(found);
       if (now === known) return;
