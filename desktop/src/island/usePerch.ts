@@ -398,6 +398,12 @@ export function usePerch(o: {
     const land = async () => {
       dragging.current = false;
       clearTimeout(settling.current);
+      /* The window is no longer where we last put it — AppKit has just spent
+         a drag moving it — so the record of that has to go, or the placement
+         this landing is about to ask for is skipped as redundant and the pill
+         is left exactly where it was dropped. Docking would then snap it in
+         the stored perch and nowhere on the screen. */
+      last.current = null;
       const where = await bounds();
       const { screens: displays, o: now } = latest.current;
       if (!where || displays.length === 0) return;
@@ -433,6 +439,9 @@ export function usePerch(o: {
   const drag = useCallback(() => {
     dragging.current = true;
     void startDragging();
+
+    // Same reason as in the landing: from here on the window is AppKit's.
+    last.current = null;
 
     /* And a floor under it. The landing is scheduled off the *moves* a drag
        emits, so a drag that is let go without moving emits none and never
