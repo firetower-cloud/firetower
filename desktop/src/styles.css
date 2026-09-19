@@ -211,6 +211,15 @@
      shape that is not in the app — a thing with no window around it. */
   .island {
     position: relative;
+    /* The content is centred in the box, not parked at its left edge. The box
+       animates over 320ms and the content inside is at its natural width the
+       whole time, so for that beat the box is the smaller of the two and
+       clips. Centred, it takes the same sliver off each end and reads as the
+       shape growing around what is in it; left-aligned, it ate the right edge
+       — which is where the handle lives. */
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
     /* The root is transparent to the pointer so the oversized window does not
        eat clicks meant for the menu bar; the pill itself must still take
        them. */
@@ -311,7 +320,14 @@
      notch whatever it is saying. */
   .island[data-perch="notch"] .island-wings {
     display: grid;
-    grid-template-columns: 1fr var(--island-gap) 1fr;
+    /* `min-content` as the floor, not `auto`. A wing whose track is allowed
+       below its own content squashes what is in it — the counts lose their
+       gaps and the handle loses its dots — which is what a state appearing
+       or leaving used to look like while the box was still catching up. */
+    grid-template-columns:
+      minmax(min-content, 1fr)
+      var(--island-gap)
+      minmax(min-content, 1fr);
     align-items: center;
   }
   /* Each wing against the *outer* edge, not the cutout. The wider one fills
@@ -421,6 +437,10 @@
     display: inline-flex;
     align-items: center;
     gap: 5px;
+    /* Never compressed. A count is three characters at most; there is nothing
+       in it to give up, so a box too small for it must overflow and be
+       clipped rather than crush it. */
+    flex-shrink: 0;
   }
   .island-tally b {
     font-weight: inherit;
@@ -434,6 +454,7 @@
   /* Two columns of dots: the only shape that reads as "drag me" with no label
      and no room for one. */
   .island-grip {
+    flex-shrink: 0;
     cursor: grab;
     color: var(--color-mute);
     transition: color var(--dur-native) var(--ease-swift);
