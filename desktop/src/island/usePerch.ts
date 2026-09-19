@@ -10,18 +10,24 @@
  * (`place.ts`), tell the shell (`shell.ts`). Everything worth arguing about is
  * in the middle step, which is pure and tested; this file is the wiring.
  *
- * ## Why the window is sometimes bigger than the pill
+ * ## Why the window follows the pill a frame at a time
  *
- * The pill grows over 320ms and a window resizes in one frame, so the two
- * cannot be the same rectangle while the animation is running — the box would
- * be clipped to its final size before it had got there, which is exactly what
- * a snap looks like.
+ * The pill changes size over 320ms and a window resizes in one step, so the
+ * two cannot be the same rectangle unless the window is told, repeatedly,
+ * what the box currently measures.
  *
- * So the window is placed at the *union* of where the pill is and where it is
- * going, immediately, and settles down to the exact size once the animation
- * has finished. Growing, the window is already big and the pill expands into
- * it. Shrinking, the window stays big until the pill has finished pulling in.
- * Either way the extra is transparent and nobody sees it.
+ * It used to be told twice: once at the union of where the pill was and where
+ * it was going, and once more at the end. Both of those are an eighteen-point
+ * change to the window in a single frame, and the webview re-lays out its
+ * centred content on the *next* one — so for that frame the pill sits nine
+ * points to one side, and then snaps back. Twice per open-and-close, which is
+ * exactly the twitch you see.
+ *
+ * So the window is never far from the box. Each frame of the transition it is
+ * set to what the box actually measures, which moves it a point or two at a
+ * time; the lag is still there and is now smaller than a pixel. The first
+ * placement is the exception — the window is built hidden, and a hidden
+ * window has no frames to follow.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { RefObject } from "react";
@@ -35,7 +41,6 @@ import {
   resolve,
   screenFor,
   snap,
-  union,
   type Mode,
   type Perch,
   type Rect,
@@ -113,6 +118,8 @@ function seen(window_: Rect, pill: Size, lift: number): Rect {
 export function usePerch(o: {
   /** The *content*, at its natural size — not the box, which is animated. */
   pill: RefObject<HTMLElement | null>;
+  /** The box around it, the one whose width and height are animated. */
+  frame: RefObject<HTMLElement | null>;
   /** Whether the panel is expanded, which changes the size but never the perch. */
   open: boolean;
   /** Whether it should be on screen at all. */
@@ -135,6 +142,8 @@ export function usePerch(o: {
   const held = useRef<Size>(GUESS);
   /** Takes the extra room back out once the animation has finished. */
   const slack = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  /** The frame callback walking the window down behind the animated box. */
+  const follow = useRef<number | undefined>(undefined);
   /** AppKit owns the window for the length of a drag; we must not fight it. */
   const dragging = useRef(false);
   const settling = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -206,15 +215,6 @@ export function usePerch(o: {
     if (size.width < 2 || size.height < 2) return;
     if (!now.open) collapsed.current = size;
 
-    /* The union covers an animation between two sizes the pill has actually
-       been. `GUESS` is neither — it is a placeholder for the frames before
-       anything has been measured, and unioning with it places the window
-       wider than the pill has ever been, which the centring then reads as an
-       offset and corrects for. Hence the sideways shuffle on the way in. */
-    const room = measured.current ? union(size, held.current) : size;
-    measured.current = true;
-    held.current = room;
-
     const base = resolve(now.perch, displays, collapsed.current, anchor);
     if (!base) return;
     setPerched(base.mode);
@@ -249,43 +249,70 @@ export function usePerch(o: {
       return lift ? { ...rect, y: rect.y - lift } : rect;
     };
 
-    /* The box is drawn at the natural size and animates to it; the window is
-       placed at the union so the animation has room in whichever direction it
-       is going. Docked, the box carries the lift as well, so the black fills
-       the window right up to the edge that is off the screen. */
+    /* The box is drawn at the natural size and animates to it. Docked, it
+       carries the lift as well, so the black fills the window right up to the
+       edge that is off the screen. */
     setBox({
       width: Math.ceil(natural.width) + (Math.ceil(natural.width) % 2),
       height: Math.ceil(natural.height) + (lift ? LIFT : 0),
     });
 
     const mine = ++turn.current;
-    const window_ = at(room);
-    await placeSoon(window_);
-    if (mine !== turn.current) return;
 
-    /* And where inside that window the pill actually is, for the pointer test.
-       The window carries the melting corners and, for the length of a
-       collapse, the whole outgoing panel; all of it transparent. Handing the
-       shell the window would make the pointer "on the island" while it is
-       over the app underneath, so leaving downward would re-open what you had
-       just left. */
-    void hit(seen(window_, size, lift));
-
-    if (now.show && !shown.current) {
-      shown.current = true;
-      await visible(true);
+    /* The first placement is done outright, because there is nothing to
+       follow yet: the window is built hidden, a hidden window animates
+       nothing, and its frame callbacks never run. Everything after it is the
+       chase below. */
+    if (!shown.current) {
+      const start = at(size);
+      await placeSoon(start);
+      if (mine !== turn.current) return;
+      void hit(seen(start, size, lift));
+      if (now.show) {
+        shown.current = true;
+        await visible(true);
+      }
     }
 
-    // Once the pill has stopped moving, take the slack back out of the window
-    // so it is again exactly the shape of what is drawn in it.
+    /* And then the window follows the box, a frame at a time, in whichever
+       direction it is going.
+       Taking the slack back out in one go is an eighteen-point change to the
+       window's width in a single frame, and the webview re-lays out its
+       centred content on the *next* one: for that frame the pill sits nine
+       points off, then snaps back. That is the twitch on every collapse, and
+       no amount of rounding reaches it, because the content and the window
+       are simply not the same size for one frame.
+
+       So the window is never far from the box: each frame it is set to what
+       the box actually measures mid-transition, which moves it a point or so
+       at a time. The lag is still there and is now smaller than a pixel. */
     clearTimeout(slack.current);
-    slack.current = setTimeout(() => {
+    cancelAnimationFrame(follow.current ?? 0);
+    /* A transition's worth of frames and a little over. The loop ends when
+       the box stops moving; this is the floor under a box that never
+       arrives — a transition interrupted, a display asleep — so that a stuck
+       animation costs nothing rather than a frame callback for ever. */
+    let left = 40;
+    const chase = () => {
       if (mine !== turn.current || dragging.current) return;
-      held.current = size;
-      const shrunk = at(size);
-      void placeSoon(shrunk);
-      void hit(seen(shrunk, size, lift));
-    }, SETTLE);
+      const box = latest.current.o.frame.current;
+      if (!box) return;
+      const now_ = box.getBoundingClientRect();
+      const at_ = even({
+        width: Math.ceil(now_.width * per),
+        height: Math.ceil(now_.height * per),
+      });
+      // The box carries the lifted point already; `roomFor` must not add it twice.
+      const shape = { width: at_.width, height: at_.height - lift };
+      const to = at(shape);
+      held.current = shape;
+      void place(to);
+      void hit(seen(to, shape, lift));
+      const arrived =
+        at_.width === size.width && Math.abs(at_.height - (size.height + lift)) <= 1;
+      if (!arrived && (left -= 1) > 0) follow.current = requestAnimationFrame(chase);
+    };
+    follow.current = requestAnimationFrame(chase);
   }, []);
 
   /* The displays, and a cheap watch for one arriving or leaving. A monitor is
@@ -378,7 +405,13 @@ export function usePerch(o: {
     };
   }, []);
 
-  useEffect(() => () => clearTimeout(slack.current), []);
+  useEffect(
+    () => () => {
+      clearTimeout(slack.current);
+      cancelAnimationFrame(follow.current ?? 0);
+    },
+    [],
+  );
 
   const drag = useCallback(() => {
     dragging.current = true;

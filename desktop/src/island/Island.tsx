@@ -50,6 +50,8 @@ export function Island() {
   const [menu, setMenu] = useState(false);
   const [prefs, setPrefs] = useState<Prefs>(read);
   const pill = useRef<HTMLDivElement>(null);
+  /** The animated box around the pill, which the window is kept the size of. */
+  const frame = useRef<HTMLDivElement>(null);
   const hover = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   const save = useCallback((next: Partial<Prefs>) => {
@@ -97,6 +99,7 @@ export function Island() {
 
   const { perched, notch, bar, box, align, dockable, drag, perchAs } = usePerch({
     pill,
+    frame,
     open: open || menu,
     show,
     perch: prefs.perch,
@@ -185,6 +188,7 @@ export function Island() {
     <div className="island-root" data-align={align}>
       <div className="island-frame" data-perch={perched}>
         <div
+          ref={frame}
           className="island text-text"
           data-mode={mode}
           data-perch={perched}
