@@ -99,17 +99,22 @@ const even = (of: Size): Size => ({
 });
 
 /**
- * The visible pill inside the window it was placed in.
+ * Where the visible pill sits *inside* its window.
  *
- * Centred horizontally — the root is a centring flex container, so whatever
- * the window carries beyond the pill sits half either side — and below the
- * lifted point, which is above the top of the screen where nothing can be
- * pointed at anyway.
+ * An offset from the window's own top-left, not a place on the screen. The
+ * window is moved by things that never tell the renderer — a drag above all —
+ * and an absolute rectangle would be left behind at the spot the drag
+ * started. An inset is true wherever the window goes.
+ *
+ * Centred horizontally, because the root is a centring flex container and
+ * whatever the window carries beyond the pill sits half either side; and
+ * below the lifted point, which is off the top of the screen where nothing
+ * can be pointed at anyway.
  */
 function seen(window_: Rect, pill: Size, lift: number): Rect {
   return {
-    x: Math.round(window_.x + (window_.width - pill.width) / 2),
-    y: window_.y + lift,
+    x: Math.round((window_.width - pill.width) / 2),
+    y: lift,
     width: pill.width,
     height: pill.height,
   };

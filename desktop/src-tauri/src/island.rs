@@ -51,14 +51,22 @@ static FRAME: std::sync::Mutex<Option<(f64, f64, f64, f64)>> = std::sync::Mutex:
 #[cfg(target_os = "macos")]
 static CEILING: std::sync::Mutex<f64> = std::sync::Mutex::new(0.0);
 
-/// The part of that window the pointer can actually see.
+/// The part of that window the pointer can actually see, as an **inset**.
 ///
-/// Not the same rectangle, and the difference is the whole of `island_pointer`
-/// being right. The window is wider than the pill by the melting corners, and
-/// for the length of a collapse it is still the size of the panel that is on
-/// its way out — a transparent margin lying over whatever is behind it. Tested
-/// against the window, the pointer is "on the island" while it is plainly over
-/// the app below, so leaving downward re-opens what you just left.
+/// Not the same rectangle as the window, and the difference is the whole of
+/// `island_pointer` being right. The window is wider than the pill by the
+/// melting corners, and is the size of the largest panel it has ever shown —
+/// a transparent margin lying over whatever is behind it. Tested against the
+/// window, the pointer is "on the island" while it is plainly over the app
+/// below, so leaving downward re-opens what you just left.
+///
+/// Held relative to the window's own origin rather than the screen's, because
+/// the window moves without anyone asking the renderer: a drag is AppKit
+/// carrying it by the scruff, and the placement code stands well back while
+/// that happens. An absolute rectangle would be left behind at the spot the
+/// drag started, the pointer would read as outside, the window would make
+/// itself transparent to the mouse — and the pill would drop out of your hand
+/// and refuse to be picked up again.
 #[cfg(target_os = "macos")]
 static HIT: std::sync::Mutex<Option<(f64, f64, f64, f64)>> = std::sync::Mutex::new(None);
 
@@ -140,9 +148,46 @@ pub fn create<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
         .build()?;
 
     perch(&window);
+    follow_frame(&window);
 
     Ok(())
 }
+
+/// Keep `FRAME` true while the window is moved by something that is not us.
+///
+/// A drag is AppKit carrying the window, frame by frame, with no placement
+/// called and the renderer standing back until it is over. Everything that
+/// asks "is the pointer on the pill" reads `FRAME`, so without this it spends
+/// the whole drag answering about where the pill used to be.
+#[cfg(target_os = "macos")]
+fn follow_frame<R: Runtime>(window: &tauri::WebviewWindow<R>) {
+    let handle = window.clone();
+    window.on_window_event(move |event| {
+        // Read fresh. Asked for once at creation this is 1.0 — the window has
+        // not been put on a display yet and has no scale to report — and every
+        // position after that comes out at twice life size, which puts the
+        // pill's rectangle thousands of points from the pill.
+        let scale = handle.scale_factor().unwrap_or(2.0);
+        let mut held = FRAME.lock().unwrap();
+        let Some(frame) = held.as_mut() else { return };
+        match event {
+            tauri::WindowEvent::Moved(at) => {
+                let at = at.to_logical::<f64>(scale);
+                frame.0 = at.x;
+                frame.1 = at.y;
+            }
+            tauri::WindowEvent::Resized(to) => {
+                let to = to.to_logical::<f64>(scale);
+                frame.2 = to.width;
+                frame.3 = to.height;
+            }
+            _ => {}
+        }
+    });
+}
+
+#[cfg(not(target_os = "macos"))]
+fn follow_frame<R: Runtime>(_window: &tauri::WebviewWindow<R>) {}
 
 /// Take the island down with the window it feeds.
 ///
@@ -352,7 +397,9 @@ pub fn island_click_through<R: Runtime>(app: AppHandle<R>, ignore: bool) -> Resu
 ///
 /// Sent by the renderer, which is the only half that knows: the shell places a
 /// window, the page decides how much of it is pill and how much is the
-/// transparent room an animation needs.
+/// transparent room an animation needs. Given as an offset from the window's
+/// own top-left, so that it survives the window being moved by anything other
+/// than a placement — a drag, most of all.
 #[tauri::command]
 pub fn island_hit(x: f64, y: f64, width: f64, height: f64) -> Result<(), String> {
     #[cfg(target_os = "macos")]
@@ -616,11 +663,15 @@ pub fn island_pointer() -> bool {
     {
         use objc2_app_kit::NSEvent;
 
-        // The pill, not the window it is drawn in. `FRAME` is the fallback for
-        // the frames before the renderer has said which part of it is visible.
-        let seen = *HIT.lock().unwrap();
-        let Some((x, y, width, height)) = seen.or(*FRAME.lock().unwrap()) else {
+        // Wherever the window is *now*, plus the inset that says which part of
+        // it is pill. Without a window there is nothing to be over.
+        let Some((wx, wy, ww, wh)) = *FRAME.lock().unwrap() else {
             return false;
+        };
+        let (x, y, width, height) = match *HIT.lock().unwrap() {
+            Some((dx, dy, w, h)) => (wx + dx, wy + dy, w, h),
+            // Before the renderer has said, the whole window counts.
+            None => (wx, wy, ww, wh),
         };
         let ceiling = *CEILING.lock().unwrap();
         if ceiling <= 0.0 {
