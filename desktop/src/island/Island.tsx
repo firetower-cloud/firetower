@@ -12,10 +12,9 @@
  * it safe to leave on screen all day.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Signal } from "~/components/Signal";
 import { AgentMark } from "~/components/AgentMark";
 import { Mark } from "~/ui/Mark";
-import { elapsed, type Beat } from "~/api/view";
+import { beatOf, elapsed, type Beat } from "~/api/view";
 import { Blocks } from "./Blocks";
 import { usePerch } from "./usePerch";
 import {
@@ -116,6 +115,14 @@ export function Island() {
     onPerch: (perch) => save({ perch }),
   });
 
+  /* Whether the shell is answering about the pointer. Once it has, the
+     document's own `:hover` is ignored: two things deciding when to open,
+     from two different ideas of where the pill is, is one thing too many —
+     and the shell's is the one bounded by the rectangle the pill actually
+     occupies. The DOM's is whatever WebKit believes about a window that is
+     mostly transparent stage. */
+  const fromShell = useRef(false);
+
   const enter = () => {
     clearTimeout(hover.current);
     hover.current = setTimeout(() => setOpen(true), IN);
@@ -126,6 +133,16 @@ export function Island() {
       setOpen(false);
       setMenu(false);
     }, OUT);
+  };
+
+  /* The document's, used only where nothing better is available: Windows,
+     where the shell has no answer, and any build whose shell predates the
+     command. */
+  const enterFromDom = () => {
+    if (!fromShell.current) enter();
+  };
+  const leaveFromDom = () => {
+    if (!fromShell.current) leave();
   };
 
   /* The pointer, asked of the shell rather than read off the document.
@@ -142,8 +159,10 @@ export function Island() {
       // build, or a platform that does not need it. The document's own
       // `:hover` is still wired, so the pill keeps working; it just wants the
       // window clicked first, which is where this started.
-      const inside = await pointerInside().catch(() => false);
-      if (!alive || inside === over) return;
+      const inside = await pointerInside().catch(() => null);
+      if (inside === null || !alive) return;
+      fromShell.current = true;
+      if (inside === over) return;
       over = inside;
       /* The window is bigger than the pill and never resizes, so everything
          but the pill has to be invisible to the mouse. This is the same
@@ -217,8 +236,8 @@ export function Island() {
              looked like. The row is given the cutout's height instead, and
              centres its own contents in it. */
           style={box ? { width: box.width, height: box.height } : undefined}
-          onMouseEnter={enter}
-          onMouseLeave={leave}
+          onMouseEnter={enterFromDom}
+          onMouseLeave={leaveFromDom}
           onClick={() => {
             if (!expanded) setOpen(true);
           }}
@@ -537,7 +556,8 @@ function RowLine({ row, onOpen }: { row: Row; onOpen: (row: Row) => void }) {
         row.stale ? "stale" : ""
       }`}
     >
-      <Signal status={row.status} size={6} />
+      {/* The same mark as the counter above it and the rail behind it. */}
+      <Blocks beat={beatOf(row)} size={9} />
       <span className="min-w-0 flex-1">
         <span className="block truncate text-ui text-dim">{row.name}</span>
         <span className="block truncate font-mono text-micro text-mute">{row.repo}</span>

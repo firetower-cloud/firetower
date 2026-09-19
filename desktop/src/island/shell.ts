@@ -120,8 +120,11 @@ export async function hit(rect: Rect): Promise<void> {
  * is asked. See `island_pointer`, which explains why this is a poll and not
  * something the shell pushes.
  */
-export async function pointerInside(): Promise<boolean> {
-  if (!invoke) return false;
+export async function pointerInside(): Promise<boolean | null> {
+  // `null` and not `false`: "there is no shell to ask" and "the pointer is
+  // not on it" are different answers, and only the first one means the
+  // document's own `:hover` is still needed.
+  if (!invoke) return null;
   return (await invoke("island_pointer")) === true;
 }
 
