@@ -47,6 +47,7 @@ import {
   type Screen,
   type Size,
 } from "./place";
+import { isMac } from "~/platform";
 import {
   anchor,
   bounds,
@@ -248,8 +249,13 @@ export function usePerch(o: {
        outer edge to trace. The one place it can go is off the display. Lifted
        by a point, the pill's top edge is above row zero and what meets the
        bezel is its black. The point is given back as padding, so the row
-       inside sits exactly where it did. */
-    const lift = base.mode === "notch" ? Math.ceil(LIFT * per) : 0;
+       inside sits exactly where it did.
+
+       macOS only, because the hairline is. Windows does not draw one — the
+       island gets a colour step and a top highlight there instead of a
+       shadow — so lifting would push a point of that highlight off the screen
+       to hide something that was never there. */
+    const lift = base.mode === "notch" && isMac ? Math.ceil(LIFT * per) : 0;
     const roomFor = (of: Size): Size => ({
       width: of.width + bleed,
       height: of.height + lift,

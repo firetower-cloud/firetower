@@ -46,8 +46,18 @@ export const inShell = invoke !== null;
  */
 export const unit = (): number => (isMac ? 1 : window.devicePixelRatio || 1);
 
-/** Where a pill that has never been dragged starts out on this platform. */
-export const anchor: Anchor = isMac ? "top" : "corner";
+/**
+ * Where a pill that has never been dragged starts out.
+ *
+ * The top, on both. It was the corner on Windows, and the argument was a good
+ * one — no notch, no convention of a thing at the top middle, and everything
+ * ambient on that platform living by the clock. But the island is the same
+ * object on both, and a pill that starts by the tray on one and under the
+ * menu bar on the other is two products wearing one name. `corner` stays
+ * because the placement maths still knows how, and a drag can still put it
+ * there.
+ */
+export const anchor: Anchor = "top";
 
 export async function screens(): Promise<Screen[]> {
   if (!invoke) return [];

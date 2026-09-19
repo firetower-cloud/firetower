@@ -276,11 +276,13 @@ describe("noticing the displays changed", () => {
   });
 });
 
-describe("where it starts out on Windows", () => {
-  /* Not a translation of the Mac's answer. Windows has no notch and no
-     convention of anything living at the top middle of the screen; the
-     volume and brightness overlays come up bottom right, above the tray, and
-     that is where somebody looks for a thing like this. */
+describe("the corner, which Windows no longer starts in", () => {
+  /* It used to, and the argument was a good one: Windows has no notch and no
+     convention of anything living at the top middle, and the volume and
+     brightness overlays come up bottom right, above the tray. The island is
+     the same object on both platforms though, so it starts at the top on
+     both now. The corner is still an answer the placement can give — these
+     keep it honest. */
   it("tucks into the bottom-right corner of the work area", () => {
     const placed = defaultPlacement([windows], pill, "corner");
     expect(placed?.mode).toBe("float");
@@ -295,8 +297,9 @@ describe("where it starts out on Windows", () => {
     expect(placed!.rect.y + pill.height).toBeLessThanOrEqual(windows.workHeight);
   });
 
-  it("still takes the top of the screen when asked for the Mac's anchor", () => {
-    // Flush with it, now that the top of any display is a perch.
+  it("takes the top of the screen, which is what it is asked for now", () => {
+    // Flush with it, docked, exactly as on a Mac without a cutout.
+    expect(defaultPlacement([windows], pill, "top")?.mode).toBe("notch");
     expect(defaultPlacement([windows], pill, "top")?.rect.y).toBe(windows.y);
   });
 

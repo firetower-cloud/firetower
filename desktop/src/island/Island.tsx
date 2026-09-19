@@ -153,7 +153,12 @@ export function Island() {
      question is two comparisons against a rectangle the shell already has. */
   useEffect(() => {
     let alive = true;
-    let over = false;
+    /* Unknown, not "outside". The first answer has to count as a change, or
+       nothing is ever told where the pointer is — and on a platform where the
+       first answer is "outside", the window would be left ignoring the mouse
+       from the moment it was told to at start-up, which is a pill that cannot
+       be hovered, clicked or picked up for the rest of the session. */
+    let over: boolean | null = null;
     const ask = async () => {
       // A shell that cannot answer is a shell without the command — an older
       // build, or a platform that does not need it. The document's own
@@ -183,7 +188,6 @@ export function Island() {
       if (inside) enter();
       else leave();
     };
-    void clickThrough(true).catch(() => {});
     const timer = setInterval(() => void ask(), 60);
     return () => {
       alive = false;

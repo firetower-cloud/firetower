@@ -46,8 +46,10 @@ pub const OPEN_EVENT: &str = "island://open";
 /// `island_place` places the window, `island_screens` measures the displays —
 /// so that `island_pointer` can answer "is the pointer over the pill" without
 /// touching AppKit or a window handle from its own thread.
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 static FRAME: std::sync::Mutex<Option<(f64, f64, f64, f64)>> = std::sync::Mutex::new(None);
+/// AppKit's flipped origin, and nobody else's: Windows measures from the
+/// top-left with y going down already, so there is nothing to subtract from.
 #[cfg(target_os = "macos")]
 static CEILING: std::sync::Mutex<f64> = std::sync::Mutex::new(0.0);
 
@@ -67,7 +69,7 @@ static CEILING: std::sync::Mutex<f64> = std::sync::Mutex::new(0.0);
 /// drag started, the pointer would read as outside, the window would make
 /// itself transparent to the mouse — and the pill would drop out of your hand
 /// and refuse to be picked up again.
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 static HIT: std::sync::Mutex<Option<(f64, f64, f64, f64)>> = std::sync::Mutex::new(None);
 
 /// One display, in the coordinates `island_place` speaks.
@@ -186,7 +188,32 @@ fn follow_frame<R: Runtime>(window: &tauri::WebviewWindow<R>) {
     });
 }
 
-#[cfg(not(target_os = "macos"))]
+/// The same, in the space Windows already speaks.
+///
+/// No conversion: `island_place` is given device pixels there and the events
+/// report device pixels, so what arrives is what was recorded. The macOS arm
+/// above divides by a scale factor precisely because it is the one that does
+/// not work that way.
+#[cfg(target_os = "windows")]
+fn follow_frame<R: Runtime>(window: &tauri::WebviewWindow<R>) {
+    window.on_window_event(move |event| {
+        let mut held = FRAME.lock().unwrap();
+        let Some(frame) = held.as_mut() else { return };
+        match event {
+            tauri::WindowEvent::Moved(at) => {
+                frame.0 = at.x as f64;
+                frame.1 = at.y as f64;
+            }
+            tauri::WindowEvent::Resized(to) => {
+                frame.2 = to.width as f64;
+                frame.3 = to.height as f64;
+            }
+            _ => {}
+        }
+    });
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 fn follow_frame<R: Runtime>(_window: &tauri::WebviewWindow<R>) {}
 
 /// Take the island down with the window it feeds.
@@ -411,11 +438,11 @@ pub fn island_click_through<R: Runtime>(app: AppHandle<R>, ignore: bool) -> Resu
 /// than a placement — a drag, most of all.
 #[tauri::command]
 pub fn island_hit(x: f64, y: f64, width: f64, height: f64) -> Result<(), String> {
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
     {
         *HIT.lock().unwrap() = Some((x, y, width, height));
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {
         let _ = (x, y, width, height);
     }
@@ -493,6 +520,12 @@ pub fn island_place<R: Runtime>(
                 y.round() as i32,
             ))
             .map_err(|e| e.to_string())?;
+
+        // What `island_pointer` tests the cursor against, in the same space.
+        #[cfg(target_os = "windows")]
+        {
+            *FRAME.lock().unwrap() = Some((x, y, width, height));
+        }
     }
 
     // The shadow is cached from the old shape. Without this the pill keeps the
@@ -667,7 +700,7 @@ pub fn island_open<R: Runtime>(app: AppHandle<R>, target: serde_json::Value) -> 
 /// handle, no main thread, no event tap, and no accessibility permission,
 /// which is only ever needed to watch the keyboard.
 #[tauri::command]
-pub fn island_pointer() -> bool {
+pub fn island_pointer() -> Option<bool> {
     #[cfg(target_os = "macos")]
     {
         use objc2_app_kit::NSEvent;
@@ -675,7 +708,7 @@ pub fn island_pointer() -> bool {
         // Wherever the window is *now*, plus the inset that says which part of
         // it is pill. Without a window there is nothing to be over.
         let Some((wx, wy, ww, wh)) = *FRAME.lock().unwrap() else {
-            return false;
+            return Some(false);
         };
         let (x, y, width, height) = match *HIT.lock().unwrap() {
             Some((dx, dy, w, h)) => (wx + dx, wy + dy, w, h),
@@ -684,20 +717,50 @@ pub fn island_pointer() -> bool {
         };
         let ceiling = *CEILING.lock().unwrap();
         if ceiling <= 0.0 {
-            return false;
+            return Some(false);
         }
 
         // AppKit measures the cursor from the bottom-left of the primary
         // display; everything else here is measured from its top-left.
         let at = unsafe { NSEvent::mouseLocation() };
         let (px, py) = (at.x, ceiling - at.y);
-        px >= x && px < x + width && py >= y && py < y + height
+        Some(px >= x && px < x + width && py >= y && py < y + height)
     }
-    #[cfg(not(target_os = "macos"))]
+
+    /* The same question, and an easier one to ask. Windows measures from the
+       top-left with y going down already, and everything on this side is in
+       device pixels, so there is no flip to undo and no scale to divide by:
+       the rectangle the renderer recorded is in the space `GetCursorPos`
+       answers in. */
+    #[cfg(target_os = "windows")]
     {
-        // Nothing to work around: a topmost window there is sent its mouse
-        // moves, so the renderer's own `:hover` is the answer.
-        false
+        use windows::Win32::Foundation::POINT;
+        use windows::Win32::UI::WindowsAndMessaging::GetCursorPos;
+
+        let Some((wx, wy, ww, wh)) = *FRAME.lock().unwrap() else {
+            return Some(false);
+        };
+        let (x, y, width, height) = match *HIT.lock().unwrap() {
+            Some((dx, dy, w, h)) => (wx + dx, wy + dy, w, h),
+            None => (wx, wy, ww, wh),
+        };
+
+        let mut at = POINT::default();
+        if unsafe { GetCursorPos(&mut at) }.is_err() {
+            return Some(false);
+        }
+        let (px, py) = (at.x as f64, at.y as f64);
+        Some(px >= x && px < x + width && py >= y && py < y + height)
+    }
+
+    /* `None`, and not `false`. "The pointer is not on it" and "nobody here
+       can tell you" are different answers, and the renderer needs the second
+       to know it must go on listening to the document's own `:hover`. A
+       `false` from everywhere was enough to convince it the shell was
+       talking, so it stopped listening to the only thing that was. */
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        None
     }
 }
 

@@ -667,6 +667,13 @@ html:not([data-platform="macos"]) .island {
   box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.06);
 }
 
+/* And no point given back, because none was taken: the window is not lifted
+   off the top of the screen there (`usePerch`), so padding the row down by
+   one would simply move it down by one. */
+html:not([data-platform="macos"]) .island[data-perch="notch"] {
+  padding-top: 0;
+}
+
 /* Reduced motion takes `ember-pulse` away — `globals.css` stops every
    animation, `!important`, and it is right to. But inside the app ember is
    also a bright dot against grey furniture, while out on the island it may be
