@@ -65,6 +65,23 @@ export async function screens(): Promise<Screen[]> {
 }
 
 /**
+ * A line in the island's log, from the page.
+ *
+ * The page's failures are the ones nothing else can see: a document that
+ * throws on the way up draws nothing, says nothing, and leaves a window that
+ * was never told where to go. On a machine with no devtools that is
+ * indistinguishable from the island not existing.
+ */
+export async function note(line: string): Promise<void> {
+  if (!invoke) return;
+  try {
+    await invoke("island_note", { line });
+  } catch {
+    /* a log that throws is worse than no log */
+  }
+}
+
+/**
  * The display this window is on, as the webview understands it.
  *
  * A fallback, and the difference between a degraded island and no island at

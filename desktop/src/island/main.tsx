@@ -12,7 +12,14 @@ import "~/styles.css";
 import "./island.css";
 import "~/platform";
 import { Island } from "./Island";
-import { visible } from "./shell";
+import { note, visible } from "./shell";
+
+/* Anything that kills the page, written where it can be read from another
+   machine. An island that throws on the way up is a window that never asks
+   to be placed or shown, which from outside is an island that is not there
+   — and on a machine with no devtools, that is all anybody can tell you. */
+window.addEventListener("error", (e) => void note(`error ${e.message}`));
+window.addEventListener("unhandledrejection", (e) => void note(`rejected ${String(e.reason)}`));
 
 /**
  * A broken island gets out of the way.

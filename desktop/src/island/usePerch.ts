@@ -53,6 +53,7 @@ import {
   bounds,
   hereabouts,
   hit,
+  note,
   onMoved,
   place,
   screens as readScreens,
@@ -365,6 +366,9 @@ export function usePerch(o: {
          nothing anywhere saying so. */
       const asked = await readScreens().catch(() => [] as Screen[]);
       const found = asked.length > 0 ? asked : hereabouts();
+      if (asked.length === 0) {
+        void note(`no displays from the shell; using ${found.length} of our own`);
+      }
       if (!alive) return;
       const now = fingerprint(found);
       if (now === known) return;

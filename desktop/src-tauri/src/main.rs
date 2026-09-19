@@ -188,6 +188,7 @@ fn main() {
             island::island_hit,
             island::island_activate,
             island::island_click_through,
+            island::island_note,
         ])
         .run(tauri::generate_context!())
         .expect("firetower failed to start");

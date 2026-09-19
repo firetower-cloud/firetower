@@ -122,6 +122,48 @@ pub struct Bounds {
     pub height: f64,
 }
 
+/// A line in the island's log, for the machine you are not sitting at.
+///
+/// A window app on Windows has no console: `eprintln!` goes to a handle
+/// nobody owns, and an installed build has no devtools to open — so when the
+/// pill does not appear there is nothing at all to read, which is how a
+/// missing display list cost a day. This writes the few decisions that
+/// decide whether there is an island: what the displays were, where it was
+/// put, whether it was asked to show. Six lines a session, appended, and the
+/// renderer can add its own through `island_note`.
+pub fn note<R: Runtime>(app: &AppHandle<R>, line: &str) {
+    use std::io::Write;
+
+    let Ok(dir) = app.path().app_log_dir() else { return };
+    if std::fs::create_dir_all(&dir).is_err() {
+        return;
+    }
+    let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(dir.join("island.log"))
+    else {
+        return;
+    };
+    // Seconds since the epoch: no clock crate, and the only thing anybody
+    // reading this needs is the order and the gaps.
+    let at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let _ = writeln!(file, "{at} {line}");
+}
+
+/// The renderer's own line in the same file.
+///
+/// Its failures are the ones hardest to see from outside: a page that throws
+/// on the way up draws nothing, says nothing, and leaves a window that was
+/// never told where to go.
+#[tauri::command]
+pub fn island_note<R: Runtime>(app: AppHandle<R>, line: String) {
+    note(&app, &format!("page: {line}"));
+}
+
 /// Build the window, hidden.
 ///
 /// Hidden because the renderer decides where it goes: it reads the remembered
@@ -151,6 +193,7 @@ pub fn create<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
 
     perch(&window);
     follow_frame(&window);
+    note(app, "created");
 
     Ok(())
 }
@@ -323,6 +366,22 @@ fn perch<R: Runtime>(_window: &tauri::WebviewWindow<R>) {}
 /// Every display, ready to be reasoned about.
 #[tauri::command]
 pub fn island_screens<R: Runtime>(app: AppHandle<R>) -> Result<Vec<Screen>, String> {
+    let told = island_screens_inner(app.clone());
+    match &told {
+        Ok(found) => {
+            // Once is enough: this is polled every four seconds, and a log
+            // that repeats itself is a log nobody reads to the end.
+            static SAID: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+            if !SAID.swap(true, std::sync::atomic::Ordering::Relaxed) {
+                note(&app, &format!("screens {} {found:?}", found.len()));
+            }
+        }
+        Err(e) => note(&app, &format!("screens FAILED {e}")),
+    }
+    told
+}
+
+fn island_screens_inner<R: Runtime>(app: AppHandle<R>) -> Result<Vec<Screen>, String> {
     #[cfg(target_os = "macos")]
     {
         main_thread(&app, macos_screens)
@@ -462,6 +521,12 @@ pub fn island_place<R: Runtime>(
     height: f64,
 ) -> Result<(), String> {
     let window = app.get_webview_window(LABEL).ok_or("no island")?;
+    {
+        static SAID: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+        if !SAID.swap(true, std::sync::atomic::Ordering::Relaxed) {
+            note(&app, &format!("placed {x} {y} {width} {height}"));
+        }
+    }
 
     #[cfg(target_os = "macos")]
     {
@@ -574,6 +639,7 @@ pub fn island_bounds<R: Runtime>(app: AppHandle<R>) -> Result<Bounds, String> {
 #[tauri::command]
 pub fn island_visible<R: Runtime>(app: AppHandle<R>, show: bool) -> Result<(), String> {
     let window = app.get_webview_window(LABEL).ok_or("no island")?;
+    note(&app, &format!("visible {show}"));
 
     // Deliberately not `show()`/`hide()` on macOS. Tauri's `show()` ends in
     // `makeKeyAndOrderFront:`, which takes the keyboard from whatever you were
