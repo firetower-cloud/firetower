@@ -722,7 +722,7 @@ pub fn island_pointer() -> Option<bool> {
 
         // AppKit measures the cursor from the bottom-left of the primary
         // display; everything else here is measured from its top-left.
-        let at = unsafe { NSEvent::mouseLocation() };
+        let at = NSEvent::mouseLocation();
         let (px, py) = (at.x, ceiling - at.y);
         Some(px >= x && px < x + width && py >= y && py < y + height)
     }
