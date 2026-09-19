@@ -17,7 +17,15 @@ import { AgentMark } from "~/components/AgentMark";
 import { Mark } from "~/ui/Mark";
 import { elapsed } from "~/api/view";
 import { usePerch } from "./usePerch";
-import { activate, open as openWorkspace, onState, onWake, pointerInside, sharing } from "./shell";
+import {
+  activate,
+  clickThrough,
+  open as openWorkspace,
+  onState,
+  onWake,
+  pointerInside,
+  sharing,
+} from "./shell";
 import { read, write, type Prefs } from "./prefs";
 import { empty, headline, modeOf, onScreen, type IslandState, type Row } from "./state";
 
@@ -135,10 +143,15 @@ export function Island() {
       const inside = await pointerInside().catch(() => false);
       if (!alive || inside === over) return;
       over = inside;
+      /* The window is bigger than the pill and never resizes, so everything
+         but the pill has to be invisible to the mouse. This is the same
+         question, already asked, so it costs nothing to answer both. */
+      void clickThrough(!inside).catch(() => {});
       if (inside) enter();
       else leave();
     };
-    const timer = setInterval(() => void ask(), 100);
+    void clickThrough(true).catch(() => {});
+    const timer = setInterval(() => void ask(), 60);
     return () => {
       alive = false;
       clearInterval(timer);

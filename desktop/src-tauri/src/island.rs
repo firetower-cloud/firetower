@@ -329,6 +329,25 @@ pub fn island_activate<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
     Ok(())
 }
 
+/// Let the mouse through, everywhere except the pill.
+///
+/// The window is a stage, not a pill: it is the size of the largest panel and
+/// it never changes, because any change to its width moves the content
+/// centred inside it. Almost all of that is transparent, and a transparent
+/// always-on-top rectangle across the top of the screen that swallows clicks
+/// is a menu bar you cannot use.
+///
+/// So it ignores the cursor by default and stops ignoring it while the
+/// pointer is over the pill — which the renderer already asks about sixteen
+/// times a second to decide whether to open.
+#[tauri::command]
+pub fn island_click_through<R: Runtime>(app: AppHandle<R>, ignore: bool) -> Result<(), String> {
+    let window = app.get_webview_window(LABEL).ok_or("no island")?;
+    window
+        .set_ignore_cursor_events(ignore)
+        .map_err(|e| e.to_string())
+}
+
 /// What part of the window the pointer should count as being over.
 ///
 /// Sent by the renderer, which is the only half that knows: the shell places a

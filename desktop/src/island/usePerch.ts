@@ -142,8 +142,12 @@ export function usePerch(o: {
   const held = useRef<Size>(GUESS);
   /** Takes the extra room back out once the animation has finished. */
   const slack = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  /** The frame callback walking the window down behind the animated box. */
+  /** The frame callback walking the pointer's target behind the animated box. */
   const follow = useRef<number | undefined>(undefined);
+  /** The largest the content has ever been, which is the window's size. */
+  const stage = useRef<Size>(GUESS);
+  /** Where the window already is, so it is not told again for nothing. */
+  const last = useRef<Rect | null>(null);
   /** AppKit owns the window for the length of a drag; we must not fight it. */
   const dragging = useRef(false);
   const settling = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -257,59 +261,62 @@ export function usePerch(o: {
       height: Math.ceil(natural.height) + (lift ? LIFT : 0),
     });
 
-    const mine = ++turn.current;
+    /* The stage the pill is drawn on, which only ever grows.
+       Any change to the window's width moves centred content by half of it
+       until the layout catches up, and that is the whole of the glitch — so
+       the window stops changing. It is placed once at the largest the content
+       has ever been and left there; the pill animates inside it, centred by
+       the root, and its middle is the window's middle whatever size it is.
+       The margin around it is transparent and, while the pointer is not on
+       the pill, invisible to the mouse as well (`clickThrough`). */
+    const grown = {
+      width: Math.max(stage.current.width, size.width),
+      height: Math.max(stage.current.height, size.height),
+    };
+    stage.current = grown;
+    const window_ = at(grown);
 
-    /* The first placement is done outright, because there is nothing to
-       follow yet: the window is built hidden, a hidden window animates
-       nothing, and its frame callbacks never run. Everything after it is the
-       chase below. */
-    if (!shown.current) {
-      const start = at(size);
-      await placeSoon(start);
+    const mine = ++turn.current;
+    const settled = last.current;
+    const moved =
+      !settled ||
+      settled.x !== window_.x ||
+      settled.y !== window_.y ||
+      settled.width !== window_.width ||
+      settled.height !== window_.height;
+
+    if (moved) {
+      last.current = window_;
+      await placeSoon(window_);
       if (mine !== turn.current) return;
-      void hit(seen(start, size, lift));
-      if (now.show) {
-        shown.current = true;
-        await visible(true);
-      }
     }
 
-    /* And then the window follows the box, a frame at a time, in whichever
-       direction it is going.
-       Taking the slack back out in one go is an eighteen-point change to the
-       window's width in a single frame, and the webview re-lays out its
-       centred content on the *next* one: for that frame the pill sits nine
-       points off, then snaps back. That is the twitch on every collapse, and
-       no amount of rounding reaches it, because the content and the window
-       are simply not the same size for one frame.
+    if (now.show && !shown.current) {
+      shown.current = true;
+      await visible(true);
+    }
 
-       So the window is never far from the box: each frame it is set to what
-       the box actually measures mid-transition, which moves it a point or so
-       at a time. The lag is still there and is now smaller than a pixel. */
-    clearTimeout(slack.current);
+    /* What the pointer may land on, which is the only thing still following
+       the animation. The window does not move, so this is pure arithmetic on
+       a rectangle the shell already has — no frame change, nothing to lag. */
+    void hit(seen(window_, size, lift));
+
     cancelAnimationFrame(follow.current ?? 0);
-    /* A transition's worth of frames and a little over. The loop ends when
-       the box stops moving; this is the floor under a box that never
-       arrives — a transition interrupted, a display asleep — so that a stuck
-       animation costs nothing rather than a frame callback for ever. */
+    /* A transition's worth of frames and a little over, so that a transition
+       that never finishes costs nothing rather than a frame callback for
+       ever. */
     let left = 40;
     const chase = () => {
       if (mine !== turn.current || dragging.current) return;
       const box = latest.current.o.frame.current;
       if (!box) return;
       const now_ = box.getBoundingClientRect();
-      const at_ = even({
+      const shape = {
         width: Math.ceil(now_.width * per),
-        height: Math.ceil(now_.height * per),
-      });
-      // The box carries the lifted point already; `roomFor` must not add it twice.
-      const shape = { width: at_.width, height: at_.height - lift };
-      const to = at(shape);
-      held.current = shape;
-      void place(to);
-      void hit(seen(to, shape, lift));
-      const arrived =
-        at_.width === size.width && Math.abs(at_.height - (size.height + lift)) <= 1;
+        height: Math.ceil(now_.height * per) - lift,
+      };
+      void hit(seen(window_, shape, lift));
+      const arrived = Math.abs(shape.width - size.width) <= 1;
       if (!arrived && (left -= 1) > 0) follow.current = requestAnimationFrame(chase);
     };
     follow.current = requestAnimationFrame(chase);

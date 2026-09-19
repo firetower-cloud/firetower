@@ -75,6 +75,18 @@ export async function sharing(hidden: boolean): Promise<void> {
 }
 
 /**
+ * Let the mouse through the transparent part of the stage.
+ *
+ * See `island_click_through`: the window is the size of the largest panel and
+ * never changes, so most of it is transparent and must not swallow clicks
+ * meant for the menu bar behind it.
+ */
+export async function clickThrough(ignore: boolean): Promise<void> {
+  if (!invoke) return;
+  await invoke("island_click_through", { ignore });
+}
+
+/**
  * Come forward, so the pointer works inside the expanded panel.
  *
  * See `island_activate`, which explains why a window built never to take
