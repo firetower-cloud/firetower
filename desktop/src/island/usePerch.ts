@@ -45,6 +45,7 @@ import {
 import {
   anchor,
   bounds,
+  hit,
   onMoved,
   place,
   screens as readScreens,
@@ -84,6 +85,29 @@ function melt(): number {
   const raw = getComputedStyle(document.documentElement).getPropertyValue("--island-melt");
   const n = Number.parseFloat(raw);
   return Number.isFinite(n) && n >= 0 ? n : MELT;
+}
+
+/** Rounded up to an even number, so half of it is still a whole pixel. */
+const even = (of: Size): Size => ({
+  width: of.width + (of.width % 2),
+  height: of.height,
+});
+
+/**
+ * The visible pill inside the window it was placed in.
+ *
+ * Centred horizontally — the root is a centring flex container, so whatever
+ * the window carries beyond the pill sits half either side — and below the
+ * lifted point, which is above the top of the screen where nothing can be
+ * pointed at anyway.
+ */
+function seen(window_: Rect, pill: Size, lift: number): Rect {
+  return {
+    x: Math.round(window_.x + (window_.width - pill.width) / 2),
+    y: window_.y + lift,
+    width: pill.width,
+    height: pill.height,
+  };
 }
 
 export function usePerch(o: {
@@ -169,10 +193,16 @@ export function usePerch(o: {
     // Measured in CSS pixels, placed in whatever the shell measures in.
     const natural = el.getBoundingClientRect();
     const per = unit();
-    const size = {
+    /* Even, and even at the source. Every rectangle downstream is derived
+       from this one — what is remembered, what the dock is centred on, what
+       the window is grown to — and each derivation halves a width and rounds.
+       An odd width there puts the pill half a point off the middle of the
+       screen, and a *differently* odd one puts it half a point the other way,
+       which is the shift you see as the box settles. */
+    const size = even({
       width: Math.ceil(natural.width * per),
       height: Math.ceil(natural.height * per),
-    };
+    });
     if (size.width < 2 || size.height < 2) return;
     if (!now.open) collapsed.current = size;
 
@@ -224,13 +254,22 @@ export function usePerch(o: {
        is going. Docked, the box carries the lift as well, so the black fills
        the window right up to the edge that is off the screen. */
     setBox({
-      width: Math.ceil(natural.width),
+      width: Math.ceil(natural.width) + (Math.ceil(natural.width) % 2),
       height: Math.ceil(natural.height) + (lift ? LIFT : 0),
     });
 
     const mine = ++turn.current;
-    await placeSoon(at(room));
+    const window_ = at(room);
+    await placeSoon(window_);
     if (mine !== turn.current) return;
+
+    /* And where inside that window the pill actually is, for the pointer test.
+       The window carries the melting corners and, for the length of a
+       collapse, the whole outgoing panel; all of it transparent. Handing the
+       shell the window would make the pointer "on the island" while it is
+       over the app underneath, so leaving downward would re-open what you had
+       just left. */
+    void hit(seen(window_, size, lift));
 
     if (now.show && !shown.current) {
       shown.current = true;
@@ -243,7 +282,9 @@ export function usePerch(o: {
     slack.current = setTimeout(() => {
       if (mine !== turn.current || dragging.current) return;
       held.current = size;
-      void placeSoon(at(size));
+      const shrunk = at(size);
+      void placeSoon(shrunk);
+      void hit(seen(shrunk, size, lift));
     }, SETTLE);
   }, []);
 

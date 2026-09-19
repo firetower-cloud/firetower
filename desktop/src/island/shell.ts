@@ -75,6 +75,19 @@ export async function sharing(hidden: boolean): Promise<void> {
 }
 
 /**
+ * Which part of the window is the pill, for the shell to test the pointer in.
+ *
+ * The window is routinely bigger: the melting corners hang outside the pill,
+ * and a collapse leaves the panel's rectangle in place for as long as the
+ * animation runs. All of that is transparent, and none of it should count as
+ * being on the island.
+ */
+export async function hit(rect: Rect): Promise<void> {
+  if (!invoke) return;
+  await invoke("island_hit", rect);
+}
+
+/**
  * Whether the pointer is over the pill, asked of the shell.
  *
  * `:hover` is not enough. The island never takes focus, and AppKit sends a

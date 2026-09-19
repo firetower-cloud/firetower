@@ -51,6 +51,17 @@ static FRAME: std::sync::Mutex<Option<(f64, f64, f64, f64)>> = std::sync::Mutex:
 #[cfg(target_os = "macos")]
 static CEILING: std::sync::Mutex<f64> = std::sync::Mutex::new(0.0);
 
+/// The part of that window the pointer can actually see.
+///
+/// Not the same rectangle, and the difference is the whole of `island_pointer`
+/// being right. The window is wider than the pill by the melting corners, and
+/// for the length of a collapse it is still the size of the panel that is on
+/// its way out — a transparent margin lying over whatever is behind it. Tested
+/// against the window, the pointer is "on the island" while it is plainly over
+/// the app below, so leaving downward re-opens what you just left.
+#[cfg(target_os = "macos")]
+static HIT: std::sync::Mutex<Option<(f64, f64, f64, f64)>> = std::sync::Mutex::new(None);
+
 /// One display, in the coordinates `island_place` speaks.
 ///
 /// Origin at the top-left of the primary display, y growing downward, on both
@@ -283,6 +294,24 @@ pub fn island_screens<R: Runtime>(app: AppHandle<R>) -> Result<Vec<Screen>, Stri
     }
 }
 
+/// What part of the window the pointer should count as being over.
+///
+/// Sent by the renderer, which is the only half that knows: the shell places a
+/// window, the page decides how much of it is pill and how much is the
+/// transparent room an animation needs.
+#[tauri::command]
+pub fn island_hit(x: f64, y: f64, width: f64, height: f64) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        *HIT.lock().unwrap() = Some((x, y, width, height));
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (x, y, width, height);
+    }
+    Ok(())
+}
+
 /// Size and position in one call.
 ///
 /// Two calls means two frame changes, and on a transparent window the gap
@@ -505,7 +534,10 @@ pub fn island_pointer() -> bool {
     {
         use objc2_app_kit::NSEvent;
 
-        let Some((x, y, width, height)) = *FRAME.lock().unwrap() else {
+        // The pill, not the window it is drawn in. `FRAME` is the fallback for
+        // the frames before the renderer has said which part of it is visible.
+        let seen = *HIT.lock().unwrap();
+        let Some((x, y, width, height)) = seen.or(*FRAME.lock().unwrap()) else {
             return false;
         };
         let ceiling = *CEILING.lock().unwrap();
