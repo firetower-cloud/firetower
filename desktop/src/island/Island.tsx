@@ -15,8 +15,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Signal } from "~/components/Signal";
 import { AgentMark } from "~/components/AgentMark";
 import { Mark } from "~/ui/Mark";
-import { elapsed } from "~/api/view";
-import { Blocks, type Beat } from "./Blocks";
+import { elapsed, type Beat } from "~/api/view";
+import { Blocks } from "./Blocks";
 import { usePerch } from "./usePerch";
 import {
   activate,
@@ -49,7 +49,7 @@ const DEMO: IslandState = {
   working: [
     { key: "a:3", serverId: "a", workspaceId: "w3", mark: "W", name: "query optimisation", repo: "web", agent: "ClaudeCode", status: "Working", minutes: 300, stale: false },
   ],
-  idle: 3,
+  tally: { working: 1, blocked: 2, done: 3, broken: 0, over: 0 },
   servers: 1,
   unreachable: 0,
 };
@@ -386,9 +386,9 @@ export function Collapsed({
  */
 function Counts({ state }: { state: IslandState }) {
   const tally: [Beat, number][] = [
-    ["working", state.working.length],
-    ["waiting", state.waiting.length],
-    ["idle", state.idle],
+    ["working", state.tally.working],
+    ["blocked", state.tally.blocked],
+    ["done", state.tally.done],
   ];
 
   /* The ones with something in them first, in their own order, and the empty
@@ -414,6 +414,16 @@ function Counts({ state }: { state: IslandState }) {
           <b>{n}</b>
         </span>
       ))}
+      {/* Broken says so rather than holding a slot. A permanent counter for
+          something that is almost always nothing is a lot of pill to spend on
+          a zero, and the day it is not zero is the day you forgive it for
+          being a different width. */}
+      {state.tally.broken > 0 && (
+        <span className="island-tally" data-beat="broken">
+          <Blocks beat="broken" />
+          <b>{state.tally.broken}</b>
+        </span>
+      )}
     </>
   );
 }

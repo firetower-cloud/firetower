@@ -49,6 +49,48 @@ export const needsYou = (s: { status: SessionStatus }) => NEEDS_YOU.includes(s.s
 export const inFlight = (s: { status: SessionStatus }) => IN_FLIGHT.includes(s.status);
 
 /**
+ * What a status *is*, for anything that draws it.
+ *
+ * Deliberately not `NEEDS_YOU`. That grouping answers "does this want a
+ * human", which is the right question for a filter, a count or the dock
+ * badge, and all three of `NeedsYou`, `HandedBack` and `Failed` answer it
+ * yes. It is the wrong question for a colour: finished, blocked and broken
+ * are three different things to feel, and a product that paints them the same
+ * has told you to go and look without telling you what at.
+ *
+ * So attention and appearance are separated here. `needsYou` keeps deciding
+ * who is on the list; this decides what colour they are, and it is the only
+ * thing that does — `Signal`'s dot and the island's blocks both read it, so
+ * they cannot drift apart again.
+ */
+export type Beat = "working" | "blocked" | "done" | "broken" | "over";
+
+export const BEAT: Record<SessionStatus, Beat> = {
+  Starting: "working",
+  Working: "working",
+  /** Stopped mid-task and cannot go on until you answer. */
+  NeedsYou: "blocked",
+  /** It finished and gave it back. Your move, but nothing went wrong. */
+  HandedBack: "done",
+  /** Up, idle, nothing owed either way. */
+  Ready: "done",
+  /** It did not finish, and it will not on its own. */
+  Failed: "broken",
+  Ended: "over",
+};
+
+export const beatOf = (s: { status: SessionStatus }): Beat => BEAT[s.status];
+
+/** One colour per meaning, and nothing else may choose one. */
+export const BEAT_TONE: Record<Beat, string> = {
+  working: "text-slate",
+  blocked: "text-ember",
+  done: "text-sage",
+  broken: "text-brick",
+  over: "text-mute",
+};
+
+/**
  * Whether a session is still going — anything that isn't over, one way or the
  * other. A screen watching one of these has a reason to keep looking.
  */

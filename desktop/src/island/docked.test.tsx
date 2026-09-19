@@ -45,30 +45,38 @@ const waiting = islandState(
 );
 
 describe("the fleet, counted", () => {
-  const mixed = { ...waiting, working: [...waiting.waiting].slice(0, 1), idle: 4 };
+  const mixed = {
+    ...waiting,
+    working: [...waiting.waiting].slice(0, 1),
+    tally: { working: 1, blocked: 2, done: 4, broken: 0, over: 0 },
+  };
 
   it("reads in time order: in flight, then wanting you, then done", () => {
     const html = renderToStaticMarkup(
       <Collapsed state={mixed} mode={modeOf(mixed)} onGrab={() => {}} />,
     );
-    const order = [...html.matchAll(/data-beat="(working|waiting|idle)"/g)].map((m) => m[1]);
+    const order = [...html.matchAll(/data-beat="(working|blocked|done)"/g)].map((m) => m[1]);
     // The glyphs repeat inside the row, so the first of each is the tally's.
-    expect([...new Set(order)]).toEqual(["working", "waiting", "idle"]);
+    expect([...new Set(order)]).toEqual(["working", "blocked", "done"]);
   });
 
   it("keeps an empty state's place rather than resizing the row", () => {
     /* Dropping the slot changes the row's width, and the box animates to a
        new width while its contents are already at it — which is how a glyph
        ends up with its left column cut off for a third of a second. */
-    const only = { ...waiting, working: [], idle: 0 };
+    const only = {
+      ...waiting,
+      working: [],
+      tally: { working: 0, blocked: 2, done: 0, broken: 0, over: 0 },
+    };
     const html = renderToStaticMarkup(
       <Collapsed state={only} mode={modeOf(only)} onGrab={() => {}} />,
     );
-    expect(html).toContain('data-beat="waiting"');
+    expect(html).toContain('data-beat="blocked"');
     expect(html).toContain('data-beat="working"');
     expect(html).toContain('data-empty="true"');
     // And the one with something in it is not the one being hidden.
-    expect(html).not.toMatch(/data-beat="waiting" data-empty/);
+    expect(html).not.toMatch(/data-beat="blocked" data-empty/);
   });
 });
 
@@ -144,7 +152,7 @@ describe("a pill docked into the notch", () => {
         gap={200}
       />,
     );
-    expect(html).toContain('data-beat="waiting"');
+    expect(html).toContain('data-beat="blocked"');
   });
 
   it("has no band to part when it is floating", () => {
@@ -152,6 +160,6 @@ describe("a pill docked into the notch", () => {
       <Panel state={waiting} mode={modeOf(waiting)} onOpen={() => {}} onGrab={() => {}} />,
     );
     expect(html).not.toContain("island-wings");
-    expect(html).toContain('data-beat="waiting"');
+    expect(html).toContain('data-beat="blocked"');
   });
 });

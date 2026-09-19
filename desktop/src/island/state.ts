@@ -12,7 +12,7 @@
  * counted — everything the pill needs and nothing it would have to ask about.
  */
 import type { Agent, Session, SessionStatus } from "~/api/generated/model";
-import { minutesSince, needsYou } from "~/api/view";
+import { beatOf, minutesSince, needsYou, type Beat } from "~/api/view";
 import { doing, group, shortRepo, type Workspace } from "~/api/workspaces";
 import type { Fleet } from "~/fleet";
 
@@ -37,24 +37,37 @@ export type IslandState = {
   waiting: Row[];
   working: Row[];
   /**
-   * How many workspaces are neither, counted but not listed.
+   * How many workspaces are in each state, counted rather than listed.
    *
-   * A number rather than rows, because nothing on the pill ever shows an idle
-   * workspace: the panel lists what wants you and what is in flight, and a
-   * list of things that are fine is a list nobody reads. The count is context
-   * for the other two — three waiting out of four is a bad afternoon, three
-   * out of thirty is a Tuesday.
+   * The lists above are for the panel and they group by *attention*: what
+   * wants you, and what is in flight. This groups by what a thing **is**, and
+   * it is what the counters on the pill are drawn from. The two are different
+   * questions, which is the whole of the colour problem: a workspace that has
+   * finished wants you exactly as much as one that is stuck, and should not
+   * look the same.
+   *
+   * Counts and not rows, because nothing ever lists the ones that are fine —
+   * but three blocked out of four is a bad afternoon and three out of thirty
+   * is a Tuesday, and the pill could not tell those apart.
    */
-  idle: number;
+  tally: Record<Beat, number>;
   /** How many backends are connected, and how many of them are dark. */
   servers: number;
   unreachable: number;
 };
 
+export const noTally: Record<Beat, number> = {
+  working: 0,
+  blocked: 0,
+  done: 0,
+  broken: 0,
+  over: 0,
+};
+
 export const empty: IslandState = {
   waiting: [],
   working: [],
-  idle: 0,
+  tally: { ...noTally },
   servers: 0,
   unreachable: 0,
 };
@@ -90,20 +103,22 @@ function lead(place: Workspace, waiting: boolean): Session {
 export function islandState(fleet: Fleet[]): IslandState {
   const waiting: Row[] = [];
   const working: Row[] = [];
-  let idle = 0;
+  const tally: Record<Beat, number> = { ...noTally };
 
   for (const { backend, sessions } of fleet) {
     const live = sessions.filter((s) => s.status !== "Ended");
     for (const [repo, places] of group(live).groups) {
       for (const place of places) {
         const state = doing(place);
-        if (state === "idle") {
-          idle += 1;
-          continue;
-        }
 
         const isWaiting = state === "waiting";
         const run = lead(place, isWaiting);
+        /* By what it *is*, from the lead run — the same one whose status the
+           row shows, so the counter and the row can never disagree. A
+           workspace with nothing in flight and nothing owed is `done`, which
+           is where the idle ones land. */
+        tally[beatOf(run)] += 1;
+        if (state === "idle") continue;
         const row: Row = {
           key: `${backend.id}:${place.id}`,
           serverId: backend.id,
@@ -128,7 +143,7 @@ export function islandState(fleet: Fleet[]): IslandState {
   return {
     waiting,
     working,
-    idle,
+    tally,
     servers: fleet.length,
     unreachable: fleet.filter((f) => f.backend.reach === "unreachable").length,
   };

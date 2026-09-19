@@ -11,11 +11,11 @@
  */
 import { BookOpen, CircleDashed, CircleFadingArrowUp, LayoutList, ListTodo, Plus, Settings2 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import { Signal } from "~/components/Signal";
 import { AgentMark } from "~/components/AgentMark";
+import { Blocks } from "~/island/Blocks";
 import { GithubMark, Icon } from "~/components/ui";
 import { doing, group, shortRepo, type Workspace } from "~/api/workspaces";
-import { elapsed, minutesSince, needsYou } from "~/api/view";
+import { beatOf, elapsed, minutesSince } from "~/api/view";
 import type { Backend } from "~/fleet";
 import { useSessions, useUpdatesDot } from "~/data";
 import { navigate, usePathname } from "~/shims/next-navigation";
@@ -89,8 +89,10 @@ export function Rail({ backend }: { backend: Backend }) {
                 ) : (
                   <GithubMark size={12} className="text-dim" />
                 )}
-                <span className="min-w-0 truncate text-ui font-medium text-bone">{shortRepo(repo)}</span>
-                <span className="font-mono text-micro text-mute">{places.length}</span>
+                <span className="min-w-0 flex-1 truncate text-ui font-medium text-bone">
+                  {shortRepo(repo)}
+                </span>
+                <RepoTally places={places} />
               </div>
               {places.map((place) => (
                 <Row key={place.id} place={place} on={path === `/sessions/${place.id}`} />
@@ -131,6 +133,38 @@ function NavLink({ href, label, icon, on, dot }: { href: string; label: string; 
   );
 }
 
+/**
+ * What is inside a repository, in the island's counters.
+ *
+ * A bare count said how many workspaces there were, which is the least
+ * interesting thing about them — three is three whether they are all finished
+ * or all stuck. The same glyphs and the same order as the pill, at eight
+ * pixels, so a group that is scrolled past still says what is in it.
+ */
+function RepoTally({ places }: { places: Workspace[] }) {
+  const tally = { working: 0, blocked: 0, done: 0, broken: 0 };
+  for (const place of places) {
+    const beat = beatOf(place.runs[0]);
+    if (beat === "over") continue;
+    tally[beat] += 1;
+  }
+
+  const order: (keyof typeof tally)[] = ["working", "blocked", "done", "broken"];
+
+  return (
+    <span className="flex shrink-0 items-center gap-1.5">
+      {order
+        .filter((beat) => tally[beat] > 0)
+        .map((beat) => (
+          <span key={beat} className="flex items-center gap-1">
+            <Blocks beat={beat} size={8} />
+            <span className="font-mono text-micro tabular-nums text-mute">{tally[beat]}</span>
+          </span>
+        ))}
+    </span>
+  );
+}
+
 /** One workspace: its branch, and what is happening in it. */
 function Row({ place, on }: { place: Workspace; on: boolean }) {
   const state = doing(place);
@@ -167,9 +201,17 @@ function Row({ place, on }: { place: Workspace; on: boolean }) {
       }`}
     >
       <div className="flex items-center gap-2">
-        <Signal status={place.runs[0].status} size={5} />
+        {/* The island's mark, at nine pixels instead of eleven. One alphabet
+            for both places, so a workspace reads the same in the menu bar as
+            it does here.
+
+            There used to be a second dot after the name — `runs.some(needsYou)`
+            in ember — saying again what this already says, and contradicting
+            it for the two statuses where `needsYou` and the colour disagree:
+            a finished workspace drew sage and then ember, a failed one brick
+            and then ember. The mark is the only thing that speaks now. */}
+        <Blocks beat={beatOf(place.runs[0])} size={9} />
         <span className={`min-w-0 flex-1 truncate text-ui ${on ? "text-bone" : "text-dim"}`}>{place.name}</span>
-        {place.runs.some(needsYou) && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-ember" />}
         <span className="shrink-0 font-mono text-micro text-mute">
           {elapsed(minutesSince(place.runs[0].createdAt))}
         </span>

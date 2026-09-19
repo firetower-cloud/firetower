@@ -405,18 +405,28 @@
   .blocks[data-beat="working"] i:nth-child(4) { animation-delay: -160ms; }
   .blocks[data-beat="working"] i:nth-child(3) { animation-delay: -80ms; }
 
-  /* Waiting: still, and breathing. It does not turn, because turning is what
+  /* Blocked: still, and breathing. It does not turn, because turning is what
      working looks like and a thing that is stuck must not look busy. */
-  .blocks[data-beat="waiting"] {
+  .blocks[data-beat="blocked"] {
     color: var(--color-ember);
     filter: drop-shadow(0 0 4px color-mix(in srgb, var(--color-ember) 85%, transparent));
     animation: breathe 1.9s var(--ease-swift) infinite;
   }
-  .blocks[data-beat="waiting"] i:nth-child(4) { opacity: 0; }
+  .blocks[data-beat="blocked"] i:nth-child(4) { opacity: 0; }
 
-  /* Idle: still, and unlit. The one state that must never catch an eye. */
-  .blocks[data-beat="idle"] { color: var(--color-sage); }
-  .blocks[data-beat="idle"] i:nth-child(4) { opacity: 0; }
+  /* Done: still, and unlit. It finished; your move, but nothing went wrong,
+     and nothing that went right should catch an eye. */
+  .blocks[data-beat="done"] { color: var(--color-sage); }
+  .blocks[data-beat="done"] i:nth-child(4) { opacity: 0; }
+
+  /* Broken: still, and its own colour. Not ember — being stuck and having
+     failed are different things, and ember already means the first. */
+  .blocks[data-beat="broken"] { color: var(--color-brick); }
+  .blocks[data-beat="broken"] i:nth-child(4) { opacity: 0; }
+
+  /* Over. Nothing in the app draws one, but the table has a row for it. */
+  .blocks[data-beat="over"] { color: var(--color-mute); }
+  .blocks[data-beat="over"] i:nth-child(4) { opacity: 0; }
 
   @keyframes blocks-away {
     0%,
@@ -448,8 +458,9 @@
     font-size: var(--text-meta);
     color: var(--color-dim);
   }
-  .island-tally[data-beat="waiting"] b { color: var(--color-bone); }
+  .island-tally[data-beat="blocked"] b { color: var(--color-bone); }
   .island-tally[data-beat="working"] b { color: var(--color-text); }
+  .island-tally[data-beat="broken"] b { color: var(--color-brick); }
   /* Holding its place, saying nothing. `visibility` and not `display`, which
      is the whole point: the slot keeps its width, so the row does not resize
      every time a state arrives or goes away. */

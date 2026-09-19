@@ -6,12 +6,14 @@
  * where a rotating square spends most of every turn as a grey smudge and a
  * quadrant blinking out stays a crisp edge the whole way round.
  *
- * The three states are the three `doing()` answers, and each says what it is
- * by how it moves rather than only by its colour: working turns, waiting
- * breathes, idle is perfectly still. Movement means work is happening — which
- * is why the one state that is stuck does not move, however loud it is.
+ * The states are the ones in `BEAT` — the single table that says what a
+ * status means — so this and `Signal` cannot disagree about a colour again.
+ * Each says what it is by how it moves and not only by how it is coloured:
+ * working turns, blocked breathes, done and broken are perfectly still.
+ * Movement means work is happening, which is why the state that is stuck is
+ * the one that does not move, however loud it is.
  */
-export type Beat = "working" | "waiting" | "idle";
+import type { Beat } from "~/api/view";
 
 export function Blocks({ beat, size = 11 }: { beat: Beat; size?: number }) {
   return (
