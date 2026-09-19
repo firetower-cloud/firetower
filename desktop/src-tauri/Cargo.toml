@@ -11,7 +11,14 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 # The feature is declared on every platform so the build script sees one
 # feature set whatever the target; Tauri ignores it off macOS.
-tauri = { version = "2", features = ["macos-private-api"] }
+# `image-png` is for the taskbar overlay: `set_overlay_icon` takes an `Image`,
+# and decoding the one in `icons/ember.png` needs the decoder compiled in.
+# `image-png` is for the taskbar overlay and the tray: both take an `Image`,
+# and decoding the PNGs in `icons/` needs the decoder compiled in. `tray-icon`
+# is the Windows notification area (`tray.rs`); it is declared on every
+# platform so the build script sees one feature set whatever the target, and
+# the module itself is `cfg`-ed off outside Windows.
+tauri = { version = "2", features = ["macos-private-api", "image-png", "tray-icon"] }
 tauri-plugin-notification = "2"
 tauri-plugin-opener = "2"
 tauri-plugin-window-state = "2"
@@ -29,6 +36,13 @@ window-vibrancy = "0.6"
 # not an API you are allowed to call.
 objc2 = "0.6"
 objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSResponder", "NSScreen", "NSView", "NSWindow"] }
+
+# The island's window flags on Windows. Pinned to the same major as Tauri's
+# own: `WebviewWindow::hwnd()` hands back a `windows::Win32::Foundation::HWND`
+# from *its* copy of the crate, and two majors in one tree makes that handle a
+# different type that no amount of casting will accept.
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging"] }
 
 [profile.dev]
 incremental = true

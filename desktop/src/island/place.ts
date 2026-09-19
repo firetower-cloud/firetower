@@ -10,9 +10,12 @@
  * So `island.rs` reports geometry and this file decides, which puts every
  * decision in reach of `place.test.ts`.
  *
- * One coordinate system throughout: logical points, origin at the top-left of
- * the primary display, y growing downward. That is what `island_place` takes,
- * and the Rust has already converted AppKit's bottom-left origin away.
+ * One coordinate system throughout: origin at the top-left of the primary
+ * display, y growing downward, in whatever unit `island_screens` reports and
+ * `island_place` accepts — logical points on macOS, device pixels on Windows,
+ * where per-monitor DPI makes a single logical space a fiction. Nothing in
+ * this file needs to know which; the caller measures the pill in the same unit
+ * before asking (`shell.ts`, `unit()`).
  */
 
 /** A display, as `island_screens` reports it. */
@@ -40,6 +43,19 @@ export type Rect = { x: number; y: number; width: number; height: number };
 /** Docked into the notch, or floating anywhere else. */
 export type Mode = "notch" | "float";
 
+/**
+ * Where a pill that has never been dragged starts out.
+ *
+ * `top` is the Mac: the notch if there is one, under the menu bar if not.
+ * `corner` is Windows, and it is not a translation of the Mac's answer — it is
+ * the answer to a different question. Windows has no notch and no convention
+ * of a thing at the top middle of the screen; everything ambient on that
+ * platform lives at the bottom right, above the tray, which is where the
+ * volume and brightness overlays already appear. A pill pinned to the top
+ * centre there would be a Mac app wearing a Windows coat.
+ */
+export type Anchor = "top" | "corner";
+
 /** What is remembered between launches. */
 export type Perch = { screen: string; mode: Mode; x: number; y: number };
 
@@ -48,6 +64,8 @@ export type Placed = { screen: Screen; mode: Mode; rect: Rect };
 
 /** Between the menu bar and a floating pill. */
 export const GAP = 6;
+/** Between a corner-anchored pill and the two edges it sits against. */
+export const EDGE = 12;
 /** How near the notch a drag has to finish before the pill is pulled in. */
 export const MAGNET = 90;
 /** Never closer than this to an edge, so the pill is never half off. */
@@ -125,16 +143,21 @@ export function floating(screen: Screen, size: Size): Rect {
   };
 }
 
+/** The lowest a pill may sit: clear of the Dock, or of the Windows taskbar. */
+const floor = (screen: Screen) => screen.workY + screen.workHeight;
+
 /**
  * Pull a rectangle fully onto a display.
  *
- * The top edge is allowed to be the top of the *frame* rather than the top of
- * the work area, because the island is a thing that sits over the menu bar on
- * purpose. Every other edge respects a margin.
+ * Asymmetric on purpose. The top edge is allowed to be the top of the *frame*,
+ * because sitting over the menu bar is the point of the thing. The bottom is
+ * held to the *work area*, because the thing below it is a Dock or a taskbar
+ * and a pill dragged behind the taskbar is a pill you cannot get back — the
+ * handle is under there too.
  */
 export function clampTo(screen: Screen, rect: Rect): Rect {
   const wide = rect.width >= screen.width - MARGIN * 2;
-  const tall = rect.height >= screen.height - MARGIN;
+  const tall = rect.height >= floor(screen) - screen.y - MARGIN;
   return {
     ...rect,
     x: wide
@@ -145,14 +168,29 @@ export function clampTo(screen: Screen, rect: Rect): Rect {
         ),
     y: tall
       ? screen.y
-      : Math.min(Math.max(rect.y, screen.y), screen.y + screen.height - rect.height - MARGIN),
+      : Math.min(Math.max(rect.y, screen.y), floor(screen) - rect.height - MARGIN),
   };
 }
 
-/** Where a fresh install puts it: in the notch if there is one, under the menu bar if not. */
-export function defaultPlacement(screens: Screen[], size: Size): Placed | null {
+/** Tucked into the bottom-right of the work area, above the taskbar. */
+export function corner(screen: Screen, size: Size): Rect {
+  return {
+    x: Math.round(screen.workX + screen.workWidth - size.width - EDGE),
+    y: Math.round(floor(screen) - size.height - EDGE),
+    width: size.width,
+    height: size.height,
+  };
+}
+
+/** Where a fresh install puts it. */
+export function defaultPlacement(
+  screens: Screen[],
+  size: Size,
+  anchor: Anchor = "top",
+): Placed | null {
   const screen = primaryOf(screens);
   if (!screen) return null;
+  if (anchor === "corner") return { screen, mode: "float", rect: corner(screen, size) };
   return notched(screen)
     ? { screen, mode: "notch", rect: dock(screen, size) }
     : { screen, mode: "float", rect: floating(screen, size) };
@@ -167,11 +205,16 @@ export function defaultPlacement(screens: Screen[], size: Size): Placed | null {
  * other two are handled by recomputing rather than trusting the stored point —
  * which is why a docked island is never restored from coordinates.
  */
-export function resolve(saved: Perch | null, screens: Screen[], size: Size): Placed | null {
-  if (!saved) return defaultPlacement(screens, size);
+export function resolve(
+  saved: Perch | null,
+  screens: Screen[],
+  size: Size,
+  anchor: Anchor = "top",
+): Placed | null {
+  if (!saved) return defaultPlacement(screens, size, anchor);
 
   const screen = screens.find((s) => s.name === saved.screen);
-  if (!screen) return defaultPlacement(screens, size);
+  if (!screen) return defaultPlacement(screens, size, anchor);
 
   // The notch is a place, not a coordinate. Recompute it: the pill's width
   // changes with the fleet, and a stored x would leave it off-centre.
@@ -221,7 +264,7 @@ export function snap(rect: Rect, screens: Screen[]): Placed | null {
  */
 export function grow(from: Rect, to: Size, screen: Screen): Rect {
   const centre = from.x + from.width / 2;
-  const below = screen.y + screen.height - MARGIN - (from.y + to.height);
+  const below = floor(screen) - MARGIN - (from.y + to.height);
   const y = below >= 0 ? from.y : from.y + from.height - to.height;
   return clampTo(screen, {
     x: Math.round(centre - to.width / 2),

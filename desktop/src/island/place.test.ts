@@ -11,6 +11,7 @@
 import { describe, expect, it } from "vitest";
 import {
   clampTo,
+  corner,
   defaultPlacement,
   fingerprint,
   grow,
@@ -40,6 +41,27 @@ const laptop: Screen = {
 
 /** The same panel with the notch filled in — an Air, or an older Pro. */
 const flat: Screen = { ...laptop, name: "Built-in Display", notchWidth: 0, notchHeight: 0, workY: 25 };
+
+/**
+ * A Windows desktop: device pixels, no notch, and a taskbar at the bottom.
+ *
+ * 1920x1080 at 100%, taskbar 48px — so the work area stops 48 short, and the
+ * whole point of the numbers below is that the pill stops there too.
+ */
+const windows: Screen = {
+  name: "\\\\.\\DISPLAY1",
+  primary: true,
+  x: 0,
+  y: 0,
+  width: 1920,
+  height: 1080,
+  workX: 0,
+  workY: 0,
+  workWidth: 1920,
+  workHeight: 1032,
+  notchWidth: 0,
+  notchHeight: 0,
+};
 
 /** A display to the *left*, which is where the negative coordinates come from. */
 const external: Screen = {
@@ -230,5 +252,54 @@ describe("noticing the displays changed", () => {
      loses the notch, and the pill has to be re-placed for it. */
   it("changes when a display keeps its name but loses its notch", () => {
     expect(fingerprint([laptop])).not.toBe(fingerprint([{ ...laptop, notchHeight: 0 }]));
+  });
+});
+
+describe("where it starts out on Windows", () => {
+  /* Not a translation of the Mac's answer. Windows has no notch and no
+     convention of anything living at the top middle of the screen; the
+     volume and brightness overlays come up bottom right, above the tray, and
+     that is where somebody looks for a thing like this. */
+  it("tucks into the bottom-right corner of the work area", () => {
+    const placed = defaultPlacement([windows], pill, "corner");
+    expect(placed?.mode).toBe("float");
+    expect(placed?.rect).toMatchObject({
+      x: 1920 - 200 - 12,
+      y: 1032 - 28 - 12,
+    });
+  });
+
+  it("sits above the taskbar, not behind it", () => {
+    const placed = defaultPlacement([windows], pill, "corner");
+    expect(placed!.rect.y + pill.height).toBeLessThanOrEqual(windows.workHeight);
+  });
+
+  it("still takes the top of the screen when asked for the Mac's anchor", () => {
+    expect(defaultPlacement([windows], pill, "top")?.rect.y).toBe(windows.workY + 6);
+  });
+
+  it("follows the taskbar when it moves to the top of the screen", () => {
+    const topBar: Screen = { ...windows, workY: 48, workHeight: 1032 };
+    expect(corner(topBar, pill).y).toBe(48 + 1032 - 28 - 12);
+  });
+});
+
+describe("the bottom edge", () => {
+  /* The one clamp that is not symmetric with the top. Over the menu bar is
+     where the island is supposed to be; under the taskbar is where it can
+     never be got back from, because the grab handle is under there too. */
+  it("will not let a drag end underneath the taskbar", () => {
+    const landed = snap({ x: 800, y: 1070, ...pill }, [windows]);
+    expect(landed!.rect.y + pill.height).toBeLessThanOrEqual(windows.workHeight);
+  });
+
+  it("will not let one end underneath the Dock either", () => {
+    const dockBottom = laptop.workY + laptop.workHeight;
+    const landed = snap({ x: 800, y: 1110, ...pill }, [laptop]);
+    expect(landed!.rect.y + pill.height).toBeLessThanOrEqual(dockBottom);
+  });
+
+  it("still allows the very top of the display", () => {
+    expect(clampTo(windows, { x: 800, y: 0, ...pill }).y).toBe(0);
   });
 });

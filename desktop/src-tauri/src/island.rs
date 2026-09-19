@@ -12,15 +12,25 @@
 //! server. The division is the same one `main.rs` already keeps: the shell does
 //! what a web page cannot, and nothing else.
 //!
-//! What a web page cannot do here is four things: sit above the menu bar, know
-//! where the notch is, survive a Space switch, and stay out of the way of the
-//! keyboard. The rest is a webview.
+//! What a web page cannot do here is four things: sit above everything else,
+//! know where the notch is, survive a Space switch, and stay out of the way of
+//! the keyboard. The rest is a webview — the same one on both platforms.
+//!
+//! macOS and Windows want the same four things and spell all of them
+//! differently:
+//!
+//! | | macOS | Windows |
+//! |---|---|---|
+//! | above everything | window level 25 | `HWND_TOPMOST`, via Tauri |
+//! | never takes focus | `orderFrontRegardless` | `WS_EX_NOACTIVATE` |
+//! | not in the app switcher | `IgnoresCycle` | `WS_EX_TOOLWINDOW` |
+//! | on every desktop | `CanJoinAllSpaces` | *nothing* — see `perch` |
 
 use serde::Serialize;
-use tauri::{
-    AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, Runtime, WebviewUrl,
-    WebviewWindowBuilder,
-};
+use tauri::{AppHandle, Emitter, Manager, Runtime, WebviewUrl, WebviewWindowBuilder};
+
+#[cfg(target_os = "macos")]
+use tauri::{LogicalPosition, LogicalSize};
 
 /// The window's label, and the event target for everything sent to it.
 pub const LABEL: &str = "island";
@@ -30,12 +40,22 @@ pub const STATE_EVENT: &str = "island://state";
 /// Sent back when a row is clicked. The main window navigates.
 pub const OPEN_EVENT: &str = "island://open";
 
-/// One display, in the coordinates `set_position` speaks.
+/// One display, in the coordinates `island_place` speaks.
 ///
-/// Tauri places windows in logical points from the top-left of the primary
-/// display, y growing downward. AppKit measures from the bottom-left of the
-/// primary display, y growing up. Everything here is converted once, on the way
-/// out, so that no TypeScript ever has to know AppKit exists.
+/// Origin at the top-left of the primary display, y growing downward, on both
+/// platforms — but not in the same unit, and that is deliberate rather than
+/// sloppy.
+///
+/// macOS reports **logical points**: one scale factor for the desktop as far
+/// as window placement is concerned, and AppKit's bottom-left origin converted
+/// away here so no TypeScript ever learns it exists.
+///
+/// Windows reports **device pixels**. Per-monitor DPI means a 4K display at
+/// 150% and a 1080p display at 100% share no logical space at all, so "logical
+/// coordinates" there is a question with no answer — `LogicalPosition` would
+/// have to pick one monitor's scale and be wrong about the other. Physical
+/// pixels are the one space both monitors agree on. The renderer multiplies
+/// its own measurements by `devicePixelRatio` to match (`shell.ts`).
 #[derive(Serialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct Screen {
@@ -97,7 +117,6 @@ pub fn create<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
         .focused(false)
         .build()?;
 
-    #[cfg(target_os = "macos")]
     perch(&window);
 
     Ok(())
@@ -122,11 +141,11 @@ pub fn close_with<R: Runtime>(main: &tauri::WebviewWindow<R>) {
     });
 }
 
-/// The four AppKit flags that separate a small window from an island.
+/// The flags that separate a small window from an island.
 ///
-/// Without these it is an ordinary window: it hides behind the menu bar, it
-/// disappears when you switch Space, and it vanishes the moment another app
-/// goes full screen. None of them have a Tauri equivalent.
+/// Without them it is an ordinary window: it hides under the menu bar, it
+/// disappears when you switch desktop, and it takes the keyboard the first
+/// time you touch it. None of them have a Tauri equivalent.
 #[cfg(target_os = "macos")]
 fn perch<R: Runtime>(window: &tauri::WebviewWindow<R>) {
     use objc2_app_kit::{NSWindow, NSWindowCollectionBehavior};
@@ -165,6 +184,42 @@ fn perch<R: Runtime>(window: &tauri::WebviewWindow<R>) {
     ns.setMovableByWindowBackground(false);
 }
 
+/// The same four things, in Win32.
+///
+/// Two of them are one call. `WS_EX_NOACTIVATE` is the closest Windows has to
+/// a non-activating panel: the window can be clicked without the foreground
+/// moving to it, so the caret stays in the terminal you were watching.
+/// `WS_EX_TOOLWINDOW` keeps it out of Alt-Tab and off the taskbar, which is
+/// what `IgnoresCycle` buys on the Mac.
+///
+/// The fourth has no answer. macOS has `CanJoinAllSpaces`; Windows has no
+/// public API for pinning a window to every virtual desktop —
+/// `IVirtualDesktopManager` can *ask* which desktop a window is on and can
+/// move it, but the interface that pins one is undocumented and changes
+/// between builds. So on Windows the island belongs to the desktop it was
+/// created on. That is a real difference in behaviour and not one worth
+/// chasing an unversioned COM interface for.
+#[cfg(target_os = "windows")]
+fn perch<R: Runtime>(window: &tauri::WebviewWindow<R>) {
+    use windows::Win32::UI::WindowsAndMessaging::{
+        GetWindowLongPtrW, SetWindowLongPtrW, GWL_EXSTYLE, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
+    };
+
+    let Ok(hwnd) = window.hwnd() else { return };
+    unsafe {
+        let held = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+        SetWindowLongPtrW(
+            hwnd,
+            GWL_EXSTYLE,
+            held | (WS_EX_NOACTIVATE.0 as isize) | (WS_EX_TOOLWINDOW.0 as isize),
+        );
+    }
+}
+
+/// Everywhere else the pill is an ordinary always-on-top window.
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+fn perch<R: Runtime>(_window: &tauri::WebviewWindow<R>) {}
+
 /// Every display, ready to be reasoned about.
 #[tauri::command]
 pub fn island_screens<R: Runtime>(app: AppHandle<R>) -> Result<Vec<Screen>, String> {
@@ -174,11 +229,46 @@ pub fn island_screens<R: Runtime>(app: AppHandle<R>) -> Result<Vec<Screen>, Stri
     }
     #[cfg(not(target_os = "macos"))]
     {
-        // The pill is platform-neutral and Windows is meant to run the same
-        // component; only the notch and the flags above are macOS. Reading the
-        // work area off Tauri's monitors is what that port starts from.
-        let _ = &app;
-        Ok(Vec::new())
+        // No AppKit and no notch: Tauri already reports everything needed, and
+        // reports it in the device pixels this side of the world works in.
+        let window = app.get_webview_window(LABEL).ok_or("no island")?;
+        let monitors = window.available_monitors().map_err(|e| e.to_string())?;
+        let first = window
+            .primary_monitor()
+            .map_err(|e| e.to_string())?
+            .and_then(|m| m.name().cloned());
+
+        Ok(monitors
+            .into_iter()
+            .enumerate()
+            .map(|(index, monitor)| {
+                let frame = monitor.size();
+                let at = monitor.position();
+                let work = monitor.work_area();
+                // Two displays can share a model name. The index keeps the
+                // remembered perch pointing at one of them rather than at
+                // whichever answered first.
+                let name = monitor
+                    .name()
+                    .cloned()
+                    .unwrap_or_else(|| format!("display {}", index + 1));
+                Screen {
+                    primary: first.as_ref() == Some(&name),
+                    name,
+                    x: at.x as f64,
+                    y: at.y as f64,
+                    width: frame.width as f64,
+                    height: frame.height as f64,
+                    work_x: work.position.x as f64,
+                    work_y: work.position.y as f64,
+                    work_width: work.size.width as f64,
+                    work_height: work.size.height as f64,
+                    // No hole in the panel to work around.
+                    notch_width: 0.0,
+                    notch_height: 0.0,
+                }
+            })
+            .collect())
     }
 }
 
@@ -195,12 +285,35 @@ pub fn island_place<R: Runtime>(
     height: f64,
 ) -> Result<(), String> {
     let window = app.get_webview_window(LABEL).ok_or("no island")?;
-    window
-        .set_size(LogicalSize::new(width, height))
-        .map_err(|e| e.to_string())?;
-    window
-        .set_position(LogicalPosition::new(x, y))
-        .map_err(|e| e.to_string())?;
+
+    #[cfg(target_os = "macos")]
+    {
+        window
+            .set_size(LogicalSize::new(width, height))
+            .map_err(|e| e.to_string())?;
+        window
+            .set_position(LogicalPosition::new(x, y))
+            .map_err(|e| e.to_string())?;
+    }
+    // Physical, because that is the only space two monitors at different DPI
+    // agree on. `LogicalSize` here would be scaled by whichever monitor Tauri
+    // thinks the window is on, which is the wrong one exactly while the pill
+    // is being dragged from one screen to the other.
+    #[cfg(not(target_os = "macos"))]
+    {
+        window
+            .set_size(tauri::PhysicalSize::new(
+                width.round() as u32,
+                height.round() as u32,
+            ))
+            .map_err(|e| e.to_string())?;
+        window
+            .set_position(tauri::PhysicalPosition::new(
+                x.round() as i32,
+                y.round() as i32,
+            ))
+            .map_err(|e| e.to_string())?;
+    }
 
     // The shadow is cached from the old shape. Without this the pill keeps the
     // silhouette it had before it grew, which is visible as a bar of shadow
@@ -218,20 +331,29 @@ pub fn island_place<R: Runtime>(
 #[tauri::command]
 pub fn island_bounds<R: Runtime>(app: AppHandle<R>) -> Result<Bounds, String> {
     let window = app.get_webview_window(LABEL).ok_or("no island")?;
-    let scale = window.scale_factor().map_err(|e| e.to_string())?;
-    let position = window
-        .outer_position()
-        .map_err(|e| e.to_string())?
-        .to_logical::<f64>(scale);
-    let size = window
-        .outer_size()
-        .map_err(|e| e.to_string())?
-        .to_logical::<f64>(scale);
+    let position = window.outer_position().map_err(|e| e.to_string())?;
+    let size = window.outer_size().map_err(|e| e.to_string())?;
+
+    // Answered in the same unit `island_place` was asked in — points on macOS,
+    // device pixels everywhere else. See `Screen`.
+    #[cfg(target_os = "macos")]
+    {
+        let scale = window.scale_factor().map_err(|e| e.to_string())?;
+        let position = position.to_logical::<f64>(scale);
+        let size = size.to_logical::<f64>(scale);
+        Ok(Bounds {
+            x: position.x,
+            y: position.y,
+            width: size.width,
+            height: size.height,
+        })
+    }
+    #[cfg(not(target_os = "macos"))]
     Ok(Bounds {
-        x: position.x,
-        y: position.y,
-        width: size.width,
-        height: size.height,
+        x: position.x as f64,
+        y: position.y as f64,
+        width: size.width as f64,
+        height: size.height as f64,
     })
 }
 
@@ -257,7 +379,19 @@ pub fn island_visible<R: Runtime>(app: AppHandle<R>, show: bool) -> Result<(), S
             ns.orderOut(None);
         }
     }
-    #[cfg(not(target_os = "macos"))]
+    // `WS_EX_NOACTIVATE` already stops a click from moving the foreground, but
+    // `ShowWindow` is a second way in: the default `SW_SHOW` activates. The
+    // island coming back out of "hide until something needs you" must not take
+    // the caret out of whatever is being typed into.
+    #[cfg(target_os = "windows")]
+    {
+        use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_HIDE, SW_SHOWNOACTIVATE};
+        let hwnd = window.hwnd().map_err(|e| e.to_string())?;
+        unsafe {
+            let _ = ShowWindow(hwnd, if show { SW_SHOWNOACTIVATE } else { SW_HIDE });
+        }
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {
         if show {
             window.show().map_err(|e| e.to_string())?;
@@ -287,6 +421,11 @@ pub fn island_sharing<R: Runtime>(app: AppHandle<R>, hidden: bool) -> Result<(),
             NSWindowSharingType::ReadOnly
         });
     }
+    // Windows has `SetWindowDisplayAffinity(WDA_EXCLUDEFROMCAPTURE)`, which is
+    // the same idea, but it is honoured by some capture paths and ignored by
+    // others — a privacy control that works most of the time is worse than one
+    // that is plainly absent, so the menu item is macOS-only and this is a
+    // no-op rather than a half-promise.
     #[cfg(not(target_os = "macos"))]
     let _ = (&app, hidden);
     Ok(())

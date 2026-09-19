@@ -27,7 +27,16 @@ import {
   type Screen,
   type Size,
 } from "./place";
-import { bounds, onMoved, place, screens as readScreens, startDragging, visible } from "./shell";
+import {
+  anchor,
+  bounds,
+  onMoved,
+  place,
+  screens as readScreens,
+  startDragging,
+  unit,
+  visible,
+} from "./shell";
 
 /** Until the pill has been measured once. Never seen: the window starts hidden. */
 const GUESS: Size = { width: 160, height: 28 };
@@ -65,12 +74,14 @@ export function usePerch(o: {
     const el = now.pill.current;
     if (!el || dragging.current || displays.length === 0) return;
 
+    // Measured in CSS pixels, placed in whatever the shell measures in.
     const box = el.getBoundingClientRect();
-    const size = { width: Math.ceil(box.width), height: Math.ceil(box.height) };
+    const per = unit();
+    const size = { width: Math.ceil(box.width * per), height: Math.ceil(box.height * per) };
     if (size.width < 2 || size.height < 2) return;
     if (!now.open) collapsed.current = size;
 
-    const base = resolve(now.perch, displays, collapsed.current);
+    const base = resolve(now.perch, displays, collapsed.current, anchor);
     if (!base) return;
     setPerched(base.mode);
 
@@ -208,6 +219,10 @@ export function usePerch(o: {
      * stepped blob rather than one shape. And the width is a gap the content
      * has to be pushed out of, or a collapsed pill centred on the notch puts
      * every word it has behind the camera.
+     *
+     * Used as CSS lengths, which is safe only because notches are a macOS
+     * thing and macOS reports points — the same unit CSS is in. Everywhere
+     * else both numbers are zero.
      */
     notch: { width: home?.notchWidth ?? 0, height: home?.notchHeight ?? 0 },
     /** Whether "dock to the notch" is worth offering on the display it is on. */

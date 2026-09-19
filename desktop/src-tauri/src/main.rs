@@ -15,6 +15,7 @@
 use tauri::{Manager, Runtime, WebviewWindow};
 
 mod island;
+mod tray;
 
 #[cfg(target_os = "macos")]
 use window_vibrancy::{apply_vibrancy, NSVisualEffectMaterial, NSVisualEffectState};
@@ -24,16 +25,29 @@ fn set_title<R: Runtime>(window: WebviewWindow<R>, title: String) {
     let _ = window.set_title(&title);
 }
 
-/// Ember, on the dock.
+/// Ember, on the dock — and on the taskbar button.
 ///
 /// The count is across every backend the client holds, because the person
-/// glancing at the dock does not care which company's server stopped.
+/// glancing at it does not care which company's server stopped.
 #[tauri::command]
 fn set_badge<R: Runtime>(window: WebviewWindow<R>, count: Option<i64>) {
+    let waiting = count.filter(|n| *n > 0);
+
     // On the window rather than the app handle, which is where Tauri puts it.
-    // Windows has no dock badge; the call is a no-op there and the count
-    // stays in the title bar.
-    let _ = window.set_badge_count(count.filter(|n| *n > 0));
+    let _ = window.set_badge_count(waiting);
+
+    // Windows has no dock badge — `set_badge_count` is a no-op there, which is
+    // why this used to say the count stayed in the title bar. The taskbar's
+    // own idea of a badge is an overlay icon on the button, so that is what it
+    // gets: a dot, not a number. An overlay is drawn at 16x16, where a digit
+    // is a smudge, and a count would be a second thing for ember to mean.
+    #[cfg(target_os = "windows")]
+    {
+        let ember = tauri::image::Image::from_bytes(include_bytes!("../icons/ember.png")).ok();
+        let _ = window.set_overlay_icon(if waiting.is_some() { ember } else { None });
+        // And the tower in the tray, lit by the same count.
+        tray::waiting(window.app_handle(), waiting.is_some());
+    }
 }
 
 #[tauri::command]
@@ -136,11 +150,20 @@ fn main() {
             // because where it goes depends on a display it has to check is
             // still there. A failure here must not take the app down with it:
             // the island is an addition to the window, never a condition of it.
-            #[cfg(target_os = "macos")]
+            //
+            // Not gated to macOS any more. The pill is the same component and
+            // the same document on both; what differs is four window flags and
+            // where it starts out, and both of those live in `island.rs`.
             if let Err(e) = island::create(app.handle()) {
                 eprintln!("island: {e}");
             }
             island::close_with(&window);
+
+            // The taskbar's notification area. Windows only — see `tray.rs`.
+            #[cfg(target_os = "windows")]
+            if let Err(e) = tray::create(app.handle()) {
+                eprintln!("tray: {e}");
+            }
 
             Ok(())
         })

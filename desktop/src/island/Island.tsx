@@ -17,7 +17,7 @@ import { AgentMark } from "~/components/AgentMark";
 import { Mark } from "~/ui/Mark";
 import { elapsed } from "~/api/view";
 import { usePerch } from "./usePerch";
-import { open as openWorkspace, onState, sharing } from "./shell";
+import { open as openWorkspace, onState, onWake, sharing } from "./shell";
 import { read, write, type Prefs } from "./prefs";
 import { empty, headline, modeOf, onScreen, type IslandState, type Row } from "./state";
 
@@ -57,6 +57,17 @@ export function Island() {
   }, []);
 
   useEffect(() => void sharing(prefs.unshared), [prefs.unshared]);
+
+  /* "Show the island", from the Windows tray. */
+  useEffect(() => {
+    let off = () => {};
+    let alive = true;
+    void onWake(() => save({ quiet: false })).then((stop) => (alive ? (off = stop) : stop()));
+    return () => {
+      alive = false;
+      off();
+    };
+  }, [save]);
 
   /* Both windows share an origin, so the app can change these too. `storage`
      only fires in the *other* documents of an origin, which is exactly the

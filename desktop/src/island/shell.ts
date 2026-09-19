@@ -11,7 +11,8 @@
  * permission, which is why `capabilities/island.json` stays five lines long: a
  * command is code we wrote, not a capability we granted.
  */
-import type { Rect, Screen } from "./place";
+import { isMac } from "~/platform";
+import type { Anchor, Rect, Screen } from "./place";
 import type { IslandState } from "./state";
 
 type Invoke = (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
@@ -30,6 +31,23 @@ const invoke = native();
 
 /** In a plain browser tab — `pnpm dev` at `/island.html` — nothing native answers. */
 export const inShell = invoke !== null;
+
+/**
+ * CSS pixels to whatever `island_place` is measuring in.
+ *
+ * One on macOS, where a logical point *is* a CSS pixel and window placement
+ * has a single scale for the whole desktop.
+ *
+ * `devicePixelRatio` on Windows, where it is not: per-monitor DPI means a 4K
+ * display at 150% and a 1080p at 100% share no logical space, so `island.rs`
+ * reports and accepts device pixels — the only space both agree on. Read
+ * fresh each time rather than cached, because dragging the pill from one
+ * display to the other changes it underneath us.
+ */
+export const unit = (): number => (isMac ? 1 : window.devicePixelRatio || 1);
+
+/** Where a pill that has never been dragged starts out on this platform. */
+export const anchor: Anchor = isMac ? "top" : "corner";
 
 export async function screens(): Promise<Screen[]> {
   if (!invoke) return [];
@@ -74,6 +92,19 @@ export async function onState(handler: (s: IslandState) => void): Promise<() => 
   if (!invoke) return () => {};
   const { listen } = await import("@tauri-apps/api/event");
   return await listen<IslandState>("island://state", (e) => handler(e.payload));
+}
+
+/**
+ * The tray asking to be seen again.
+ *
+ * The one way back from "hide until something needs you" that does not
+ * involve waiting for something to need you. Windows only, because the menu
+ * item that sends it is.
+ */
+export async function onWake(handler: () => void): Promise<() => void> {
+  if (!invoke) return () => {};
+  const { listen } = await import("@tauri-apps/api/event");
+  return await listen("island://wake", () => handler());
 }
 
 /**
