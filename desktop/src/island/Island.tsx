@@ -17,7 +17,7 @@ import { AgentMark } from "~/components/AgentMark";
 import { Mark } from "~/ui/Mark";
 import { elapsed } from "~/api/view";
 import { usePerch } from "./usePerch";
-import { open as openWorkspace, onState, onWake, pointerInside, sharing } from "./shell";
+import { activate, open as openWorkspace, onState, onWake, pointerInside, sharing } from "./shell";
 import { read, write, type Prefs } from "./prefs";
 import { empty, headline, modeOf, onScreen, type IslandState, type Row } from "./state";
 
@@ -163,6 +163,14 @@ export function Island() {
      dock would otherwise be built as a full panel for those first frames. */
   const placed = box !== null;
   const expanded = (placed && perched === "float" && mode !== "dormant") || open || menu;
+
+  /* Opening is the one moment the island asks to come forward. A panel is a
+     list you point at, and a window that is not key is sent no mouse moves —
+     so without this the rows do not light up under the pointer that opened
+     them. It hands the keyboard to a window with nothing to type into. */
+  useEffect(() => {
+    if (expanded) void activate();
+  }, [expanded]);
 
   /* Docked, the black fills the whole menu bar rather than just the cutout,
      so that the one edge macOS insists on drawing lands where the bar ends

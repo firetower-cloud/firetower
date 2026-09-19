@@ -294,6 +294,41 @@ pub fn island_screens<R: Runtime>(app: AppHandle<R>) -> Result<Vec<Screen>, Stri
     }
 }
 
+/// Come forward, so the pointer works *inside* the panel.
+///
+/// The island is built not to take focus, and that is still right for the
+/// pill: it sits there all day and must never pull the keyboard out of the
+/// terminal you are watching. But an expanded panel is a list you are meant
+/// to point at, and AppKit gives a non-key window's webview no mouse-moved
+/// events — so the rows do not light up and the thing you are hovering does
+/// not know it. Opening is the moment that changes: you have already put the
+/// pointer on it.
+///
+/// The island window is made key rather than the app's main one, so what
+/// arrives is a window with no text input in it — the keyboard has nowhere to
+/// go and nothing to type into.
+#[tauri::command]
+pub fn island_activate<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        let window = app.get_webview_window(LABEL).ok_or("no island")?;
+        main_thread(&app, move |mtm| {
+            use objc2_app_kit::{NSApplication, NSWindow};
+
+            NSApplication::sharedApplication(mtm).activateIgnoringOtherApps(true);
+            if let Ok(ptr) = window.ns_window() {
+                let ns: &NSWindow = unsafe { &*(ptr as *const NSWindow) };
+                ns.makeKeyAndOrderFront(None);
+            }
+        })?;
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = app;
+    }
+    Ok(())
+}
+
 /// What part of the window the pointer should count as being over.
 ///
 /// Sent by the renderer, which is the only half that knows: the shell places a
@@ -328,12 +363,40 @@ pub fn island_place<R: Runtime>(
 
     #[cfg(target_os = "macos")]
     {
-        window
-            .set_size(LogicalSize::new(width, height))
-            .map_err(|e| e.to_string())?;
-        window
-            .set_position(LogicalPosition::new(x, y))
-            .map_err(|e| e.to_string())?;
+        // One frame change. `set_size` and `set_position` are two, and AppKit
+        // draws between them: the window takes its new width while still at
+        // its old origin, so a pill that is centred by shrinking around its
+        // middle visibly jumps sideways and back on every collapse. This is
+        // what the doc comment above has always asked for and never did.
+        let ceiling = *CEILING.lock().unwrap();
+        let placed = if ceiling > 0.0 {
+            window.ns_window().ok().map(|ptr| {
+                use objc2_app_kit::NSWindow;
+                use objc2_foundation::{NSPoint, NSRect, NSSize};
+
+                let ns: &NSWindow = unsafe { &*(ptr as *const NSWindow) };
+                // Back to AppKit's bottom-left origin, once, on the way out.
+                let frame = NSRect::new(
+                    NSPoint::new(x, ceiling - (y + height)),
+                    NSSize::new(width, height),
+                );
+                ns.setFrame_display(frame, true);
+            })
+        } else {
+            None
+        };
+
+        // Before the displays have been measured there is no flip to do, so
+        // the two-call path stands in. It is only ever the first placement.
+        if placed.is_none() {
+            window
+                .set_size(LogicalSize::new(width, height))
+                .map_err(|e| e.to_string())?;
+            window
+                .set_position(LogicalPosition::new(x, y))
+                .map_err(|e| e.to_string())?;
+        }
+
         // What `island_pointer` tests the cursor against.
         *FRAME.lock().unwrap() = Some((x, y, width, height));
     }
