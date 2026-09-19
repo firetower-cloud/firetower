@@ -492,12 +492,60 @@ pub fn island_activate<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
 /// So it ignores the cursor by default and stops ignoring it while the
 /// pointer is over the pill — which the renderer already asks about sixteen
 /// times a second to decide whether to open.
+///
+/// Windows does it by hand, and this is why the island could not be found
+/// there at all. `set_ignore_cursor_events` adds `WS_EX_TRANSPARENT` and
+/// `WS_EX_LAYERED` together, and a window that is given `WS_EX_LAYERED`
+/// without ever being handed layer contents — `SetLayeredWindowAttributes`,
+/// `UpdateLayeredWindow` — draws nothing at all. It stays visible by every
+/// measure: `IsWindowVisible` is true, `GetWindowRect` is right, it is
+/// topmost and the correct size, and the log said so four times over. There
+/// is simply no pixel anywhere. The renderer asks for click-through the
+/// moment it mounts, so the island went invisible at start-up and stayed
+/// that way, and the only thing that would have brought it back was hovering
+/// a spot nobody could see.
+///
+/// `WS_EX_TRANSPARENT` is the half that matters: it is what takes the window
+/// out of hit-testing. Setting it alone leaves the window drawing normally.
+/// Doing it here also stops tao rebuilding the extended style from its own
+/// flags, which is the other thing that call did — the `WS_EX_TOOLWINDOW`
+/// set in `perch` was being dropped every time the pointer crossed the pill.
 #[tauri::command]
 pub fn island_click_through<R: Runtime>(app: AppHandle<R>, ignore: bool) -> Result<(), String> {
     let window = app.get_webview_window(LABEL).ok_or("no island")?;
-    window
-        .set_ignore_cursor_events(ignore)
-        .map_err(|e| e.to_string())
+
+    #[cfg(target_os = "windows")]
+    {
+        use windows::Win32::UI::WindowsAndMessaging::{
+            GetWindowLongPtrW, SetWindowLongPtrW, GWL_EXSTYLE, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
+            WS_EX_TRANSPARENT,
+        };
+
+        let hwnd = window.hwnd().map_err(|e| e.to_string())?;
+        unsafe {
+            let held = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+            // Re-asserted rather than assumed: see above.
+            let perched = held | (WS_EX_NOACTIVATE.0 as isize) | (WS_EX_TOOLWINDOW.0 as isize);
+            let through = WS_EX_TRANSPARENT.0 as isize;
+            let next = if ignore {
+                perched | through
+            } else {
+                perched & !through
+            };
+            if next != held {
+                SetWindowLongPtrW(hwnd, GWL_EXSTYLE, next);
+            }
+        }
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        window
+            .set_ignore_cursor_events(ignore)
+            .map_err(|e| e.to_string())?;
+    }
+
+    Ok(())
 }
 
 /// What part of the window the pointer should count as being over.
