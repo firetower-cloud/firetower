@@ -533,9 +533,18 @@ pub fn island_place<R: Runtime>(
     height: f64,
 ) -> Result<(), String> {
     let window = app.get_webview_window(LABEL).ok_or("no island")?;
+    /* Every rectangle, and not just the first one.
+       This was logged once a launch, which is quiet but answers the wrong
+       question: an island nobody can find has usually been placed more than
+       once, and it is the last placement that says where it went. Logging
+       only on a change keeps it short — the pill is placed on every frame of
+       an animation and most of those ask for the rectangle it already has. */
     {
-        static SAID: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-        if !SAID.swap(true, std::sync::atomic::Ordering::Relaxed) {
+        static SAID: std::sync::Mutex<Option<(f64, f64, f64, f64)>> = std::sync::Mutex::new(None);
+        let mut said = SAID.lock().unwrap();
+        if *said != Some((x, y, width, height)) {
+            *said = Some((x, y, width, height));
+            drop(said);
             note(&app, &format!("placed {x} {y} {width} {height}"));
         }
     }
@@ -676,10 +685,51 @@ pub fn island_visible<R: Runtime>(app: AppHandle<R>, show: bool) -> Result<(), S
     // the caret out of whatever is being typed into.
     #[cfg(target_os = "windows")]
     {
-        use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_HIDE, SW_SHOWNOACTIVATE};
+        use windows::Win32::Foundation::RECT;
+        use windows::Win32::UI::WindowsAndMessaging::{
+            GetWindowRect, IsWindowVisible, SetWindowPos, ShowWindow, HWND_TOPMOST, SWP_NOACTIVATE,
+            SWP_NOMOVE, SWP_NOSIZE, SW_HIDE, SW_SHOWNOACTIVATE,
+        };
         let hwnd = window.hwnd().map_err(|e| e.to_string())?;
         unsafe {
             let _ = ShowWindow(hwnd, if show { SW_SHOWNOACTIVATE } else { SW_HIDE });
+
+            /* Topmost, again. It is a position in the z-order and not a
+               property of the window: another topmost window coming up puts
+               itself above this one, and a window that is shown after having
+               been hidden does not return to the front of that band. Saying
+               it on every show costs nothing and is the difference between
+               an island that is there and an island that is behind whatever
+               was last raised. */
+            if show {
+                let _ = SetWindowPos(
+                    hwnd,
+                    Some(HWND_TOPMOST),
+                    0,
+                    0,
+                    0,
+                    0,
+                    SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+                );
+            }
+
+            /* What Windows thinks, rather than what we asked for. Everything
+               else in this file logs an intention; on a machine where the
+               island cannot be found, the useful line is the one that went
+               and read the window back. */
+            let mut rect = RECT::default();
+            let read = GetWindowRect(hwnd, &mut rect).is_ok();
+            note(
+                &app,
+                &format!(
+                    "shown visible={} rect={} {} {}x{} read={read}",
+                    IsWindowVisible(hwnd).as_bool(),
+                    rect.left,
+                    rect.top,
+                    rect.right - rect.left,
+                    rect.bottom - rect.top,
+                ),
+            );
         }
     }
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
