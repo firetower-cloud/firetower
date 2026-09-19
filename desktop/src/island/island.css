@@ -1,0 +1,55 @@
+/**
+ * What is true of the island's *page*, rather than of the pill.
+ *
+ * Unlayered on purpose. `globals.css` puts its base rules in `@layer base`,
+ * and unlayered CSS wins over layered CSS whatever the specificity — which is
+ * what is wanted here, because this document has to undo two things every
+ * other one in the app relies on: an opaque background, and a viewport it is
+ * expected to fill.
+ *
+ * The pill itself is styled in `styles.css` with the rest of the native layer,
+ * so that the style page can draw it inside the app.
+ */
+
+html,
+body {
+  background: transparent;
+  height: auto;
+  min-height: 0;
+  overflow: visible;
+}
+
+body {
+  margin: 0;
+  /* Nothing here is text anybody would want to select, and a selection
+     highlight on a pill reads as a rendering fault. */
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: default;
+}
+
+/* Fills the window, which is deliberately larger than the pill for as long as
+   the pill is changing size (`usePerch`). Where the pill sits inside that
+   space is the edge that must not appear to move while it grows: its centre
+   under a notch, its right edge in a corner.
+
+   What is *measured* is `.island-body` inside it, which is `width: max-content`
+   and so keeps its natural size however small the window currently is. */
+.island-root {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  /* The window is wider than the pill — while it animates, and permanently
+     once docked, where it carries the melting corners. That margin is
+     transparent, and an always-on-top window swallowing clicks along the top
+     of the screen is a menu bar you cannot hit. Only the pill answers. */
+  pointer-events: none;
+}
+.island-root[data-align="centre"] {
+  justify-content: center;
+  align-items: flex-start;
+}
+.island-root[data-align="right"] {
+  justify-content: flex-end;
+  align-items: flex-end;
+}

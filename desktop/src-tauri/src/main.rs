@@ -2,7 +2,8 @@
 //!
 //! Everything the window does that a web page cannot: an inset title bar (its
 //! own buttons on Windows), a translucent sidebar on macOS, a badge on the
-//! dock, and a notification when an agent stops and asks for you.
+//! dock, a notification when an agent stops and asks for you, and the island —
+//! the same ember, on a pill that outlives the window (`island.rs`).
 //!
 //! Deliberately thin. The renderer reaches this through `src/bridge.ts`, which
 //! is eight calls wide — small enough that swapping this shell for an Electron
@@ -13,6 +14,9 @@
 
 use tauri::{Manager, Runtime, WebviewWindow};
 
+mod island;
+mod tray;
+
 #[cfg(target_os = "macos")]
 use window_vibrancy::{apply_vibrancy, NSVisualEffectMaterial, NSVisualEffectState};
 
@@ -21,16 +25,29 @@ fn set_title<R: Runtime>(window: WebviewWindow<R>, title: String) {
     let _ = window.set_title(&title);
 }
 
-/// Ember, on the dock.
+/// Ember, on the dock — and on the taskbar button.
 ///
 /// The count is across every backend the client holds, because the person
-/// glancing at the dock does not care which company's server stopped.
+/// glancing at it does not care which company's server stopped.
 #[tauri::command]
 fn set_badge<R: Runtime>(window: WebviewWindow<R>, count: Option<i64>) {
+    let waiting = count.filter(|n| *n > 0);
+
     // On the window rather than the app handle, which is where Tauri puts it.
-    // Windows has no dock badge; the call is a no-op there and the count
-    // stays in the title bar.
-    let _ = window.set_badge_count(count.filter(|n| *n > 0));
+    let _ = window.set_badge_count(waiting);
+
+    // Windows has no dock badge — `set_badge_count` is a no-op there, which is
+    // why this used to say the count stayed in the title bar. The taskbar's
+    // own idea of a badge is an overlay icon on the button, so that is what it
+    // gets: a dot, not a number. An overlay is drawn at 16x16, where a digit
+    // is a smudge, and a count would be a second thing for ember to mean.
+    #[cfg(target_os = "windows")]
+    {
+        let ember = tauri::image::Image::from_bytes(include_bytes!("../icons/ember.png")).ok();
+        let _ = window.set_overlay_icon(if waiting.is_some() { ember } else { None });
+        // And the tower in the tray, lit by the same count.
+        tray::waiting(window.app_handle(), waiting.is_some());
+    }
 }
 
 #[tauri::command]
@@ -98,8 +115,16 @@ fn main() {
         .plugin(tauri_plugin_notification::init())
         // Links leave the app: a pull request opens in the browser, not in here.
         .plugin(tauri_plugin_opener::init())
-        // Apps remember where they were; pages do not.
-        .plugin(tauri_plugin_window_state::Builder::default().build())
+        // Apps remember where they were; pages do not. The island is exempt:
+        // it resizes itself on every state change, so a remembered *size*
+        // would be restored over the right one — and its position is
+        // remembered by the renderer, which is the only part that knows
+        // whether the display it was on still exists.
+        .plugin(
+            tauri_plugin_window_state::Builder::default()
+                .with_denylist(&[island::LABEL])
+                .build(),
+        )
         // A new build is offered from the GitHub release; the renderer asks.
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
@@ -120,10 +145,50 @@ fn main() {
             }
 
             let _ = window.set_title("Firetower");
+
+            // Built hidden. The renderer places it and then asks to be shown,
+            // because where it goes depends on a display it has to check is
+            // still there. A failure here must not take the app down with it:
+            // the island is an addition to the window, never a condition of it.
+            //
+            // Not gated to macOS any more. The pill is the same component and
+            // the same document on both; what differs is four window flags and
+            // where it starts out, and both of those live in `island.rs`.
+            if let Err(e) = island::create(app.handle()) {
+                eprintln!("island: {e}");
+            }
+            island::close_with(&window);
+
+            // The taskbar's notification area. Windows only — see `tray.rs`.
+            #[cfg(target_os = "windows")]
+            if let Err(e) = tray::create(app.handle()) {
+                eprintln!("tray: {e}");
+            }
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            set_title, set_badge, notify, minimize, zoom, close, secret_get, secret_set, secret_delete
+            set_title,
+            set_badge,
+            notify,
+            minimize,
+            zoom,
+            close,
+            secret_get,
+            secret_set,
+            secret_delete,
+            island::island_screens,
+            island::island_place,
+            island::island_bounds,
+            island::island_visible,
+            island::island_sharing,
+            island::island_push,
+            island::island_open,
+            island::island_pointer,
+            island::island_hit,
+            island::island_activate,
+            island::island_click_through,
+            island::island_note,
         ])
         .run(tauri::generate_context!())
         .expect("firetower failed to start");

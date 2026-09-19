@@ -1,18 +1,16 @@
 import type { SessionStatus } from "~/api/generated/model";
+import { BEAT, BEAT_TONE } from "~/api/view";
 
 /* One loud colour in the whole system: ember, and only for "an agent is
-   blocked on you". Everything else recedes. */
-export const TONE: Record<SessionStatus, string> = {
-  NeedsYou: "text-ember",
-  HandedBack: "text-sage",
-  // Up and idle. The same restful green as having handed back: both mean
-  // nothing is in flight and it is your move.
-  Ready: "text-sage",
-  Failed: "text-brick",
-  Working: "text-slate",
-  Starting: "text-slate",
-  Ended: "text-mute",
-};
+   blocked on you". Everything else recedes.
+
+   Derived rather than written out, from the one table that says what a status
+   means (`BEAT` in `view.ts`). It used to be a list of its own, and it was
+   right — but being right separately from everything else is how the island
+   came to paint a finished agent ember while this painted it sage. */
+export const TONE: Record<SessionStatus, string> = Object.fromEntries(
+  (Object.keys(BEAT) as SessionStatus[]).map((status) => [status, BEAT_TONE[BEAT[status]]]),
+) as Record<SessionStatus, string>;
 
 export function Signal({ status, size = 8 }: { status: SessionStatus; size?: number }) {
   const tone = TONE[status];
