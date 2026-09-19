@@ -322,7 +322,6 @@ export function Collapsed({
   tall?: number;
 }) {
   const one = mode === "demand" ? state.waiting[0] : state.working[0];
-  const alone = (mode === "demand" ? state.waiting : state.working).length === 1;
 
   const left =
     mode === "dormant" ? (
@@ -341,13 +340,6 @@ export function Collapsed({
       {one && gap > 0 && (
         <span className="font-mono text-micro whitespace-nowrap text-dim">
           {elapsed(one.minutes)}
-        </span>
-      )}
-      {/* Which server, when the pill is about exactly one thing. Identity is a
-          shape, here as everywhere else. */}
-      {one && alone && mode !== "dormant" && (
-        <span className="server-mark grid h-[15px] w-[15px] shrink-0 place-items-center" data-reach="live">
-          {one.mark}
         </span>
       )}
       <Grip onGrab={onGrab} />
@@ -565,9 +557,6 @@ function RowLine({ row, onOpen }: { row: Row; onOpen: (row: Row) => void }) {
       <span className="min-w-0 flex-1">
         <span className="block truncate text-ui text-dim">{row.name}</span>
         <span className="block truncate font-mono text-micro text-mute">{row.repo}</span>
-      </span>
-      <span className="server-mark grid h-[15px] w-[15px] shrink-0 place-items-center" data-reach="live">
-        {row.mark}
       </span>
       <AgentMark agent={row.agent} size={12} className="shrink-0 text-mute" />
       <span className="w-[30px] shrink-0 text-right font-mono text-micro text-mute">
