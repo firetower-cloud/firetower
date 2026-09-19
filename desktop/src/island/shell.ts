@@ -187,8 +187,11 @@ export async function hit(rect: Rect): Promise<void> {
   await invoke("island_hit", rect);
 }
 
+/** Where the pointer is, in CSS pixels from the window's top-left. */
+export type Spot = { x: number; y: number; inside: boolean };
+
 /**
- * Whether the pointer is over the pill, asked of the shell.
+ * Where the pointer is, asked of the shell.
  *
  * `:hover` is not enough. The island never takes focus, and AppKit sends a
  * non-activating window's webview no mouse-moved events until it has been
@@ -196,13 +199,22 @@ export async function hit(rect: Rect): Promise<void> {
  * twice. The shell knows where the cursor is and where the window is, so it
  * is asked. See `island_pointer`, which explains why this is a poll and not
  * something the shell pushes.
+ *
+ * The position comes back with the verdict because the same silence that
+ * stops the pill opening also stops the rows inside it lighting up, and only
+ * the position answers that one: with it the document can be asked what is
+ * under the cursor, which is a question that does not go through AppKit.
  */
-export async function pointerInside(): Promise<boolean | null> {
-  // `null` and not `false`: "there is no shell to ask" and "the pointer is
+export async function pointerAt(): Promise<Spot | null> {
+  // `null` and not "outside": "there is no shell to ask" and "the pointer is
   // not on it" are different answers, and only the first one means the
   // document's own `:hover` is still needed.
   if (!invoke) return null;
-  return (await invoke("island_pointer")) === true;
+  const spot = (await invoke("island_pointer")) as Spot | null;
+  if (!spot) return null;
+  // Points on macOS, device pixels on Windows, CSS pixels from here on.
+  const per = unit();
+  return { x: spot.x / per, y: spot.y / per, inside: spot.inside === true };
 }
 
 /** Bring the app forward, on this workspace. */

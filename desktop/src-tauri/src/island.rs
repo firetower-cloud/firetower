@@ -189,6 +189,18 @@ pub fn create<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
         // Ordered in rather than made key: the island must never take the
         // keyboard from the terminal you are watching.
         .focused(false)
+        /* The click acts, rather than only arriving.
+           A window belonging to an inactive application spends the first
+           click activating it and hands the view nothing, which is the
+           standard behaviour and the right one for a document window. It is
+           the wrong one here: the island is hovered and clicked from inside
+           whatever you are actually working in, so every click was two —
+           one to wake the app, one to mean something. It is also what stops
+           the pill being picked up and dragged in a single gesture, because
+           the grip's press is swallowed the same way.
+           On Windows the flag is ignored; a window there does not eat the
+           click that raises it. */
+        .accept_first_mouse(true)
         .build()?;
 
     perch(&window);
@@ -744,7 +756,7 @@ pub fn island_open<R: Runtime>(app: AppHandle<R>, target: serde_json::Value) -> 
 
 // ── macOS geometry ───────────────────────────────────────────────────────────
 
-/// Whether the pointer is over the pill right now.
+/// Where the pointer is, in the window's own space.
 ///
 /// Asked for, rather than announced. The island is deliberately
 /// non-activating — it must never take the keyboard from the terminal you are
@@ -765,8 +777,36 @@ pub fn island_open<R: Runtime>(app: AppHandle<R>, target: serde_json::Value) -> 
 /// against the rectangle `island_place` recorded on its way past — no window
 /// handle, no main thread, no event tap, and no accessibility permission,
 /// which is only ever needed to watch the keyboard.
+///
+/// It answers with the reading and not just the verdict. `inside` is what the
+/// pill opens on, and has been all along. `x` and `y` are the same cursor
+/// expressed as an offset from the window's top-left, which the renderer
+/// needs for the half of the problem the verdict does not solve: an open
+/// panel whose rows still will not light up, because `:hover` inside the
+/// webview depends on the mouse-moved events that are the very thing not
+/// arriving. Given the offset it can ask the document what is under the
+/// cursor and say so itself, and that path does not care what is frontmost.
+///
+/// They are in the unit the renderer places in — points on macOS, device
+/// pixels on Windows — because that is the unit of the rectangle they are
+/// subtracted from. The renderer divides.
+#[derive(Clone, Copy, Serialize)]
+pub struct Spot {
+    pub x: f64,
+    pub y: f64,
+    pub inside: bool,
+}
+
+/// Off the window by construction: no element is ever found at a negative
+/// offset, so a reading that could not be taken styles nothing.
+const NOWHERE: Spot = Spot {
+    x: -1.0,
+    y: -1.0,
+    inside: false,
+};
+
 #[tauri::command]
-pub fn island_pointer() -> Option<bool> {
+pub fn island_pointer() -> Option<Spot> {
     #[cfg(target_os = "macos")]
     {
         use objc2_app_kit::NSEvent;
@@ -774,7 +814,7 @@ pub fn island_pointer() -> Option<bool> {
         // Wherever the window is *now*, plus the inset that says which part of
         // it is pill. Without a window there is nothing to be over.
         let Some((wx, wy, ww, wh)) = *FRAME.lock().unwrap() else {
-            return Some(false);
+            return Some(NOWHERE);
         };
         let (x, y, width, height) = match *HIT.lock().unwrap() {
             Some((dx, dy, w, h)) => (wx + dx, wy + dy, w, h),
@@ -783,14 +823,18 @@ pub fn island_pointer() -> Option<bool> {
         };
         let ceiling = *CEILING.lock().unwrap();
         if ceiling <= 0.0 {
-            return Some(false);
+            return Some(NOWHERE);
         }
 
         // AppKit measures the cursor from the bottom-left of the primary
         // display; everything else here is measured from its top-left.
         let at = NSEvent::mouseLocation();
         let (px, py) = (at.x, ceiling - at.y);
-        Some(px >= x && px < x + width && py >= y && py < y + height)
+        Some(Spot {
+            x: px - wx,
+            y: py - wy,
+            inside: px >= x && px < x + width && py >= y && py < y + height,
+        })
     }
 
     /* The same question, and an easier one to ask. Windows measures from the
@@ -804,7 +848,7 @@ pub fn island_pointer() -> Option<bool> {
         use windows::Win32::UI::WindowsAndMessaging::GetCursorPos;
 
         let Some((wx, wy, ww, wh)) = *FRAME.lock().unwrap() else {
-            return Some(false);
+            return Some(NOWHERE);
         };
         let (x, y, width, height) = match *HIT.lock().unwrap() {
             Some((dx, dy, w, h)) => (wx + dx, wy + dy, w, h),
@@ -813,10 +857,14 @@ pub fn island_pointer() -> Option<bool> {
 
         let mut at = POINT::default();
         if unsafe { GetCursorPos(&mut at) }.is_err() {
-            return Some(false);
+            return Some(NOWHERE);
         }
         let (px, py) = (at.x as f64, at.y as f64);
-        Some(px >= x && px < x + width && py >= y && py < y + height)
+        Some(Spot {
+            x: px - wx,
+            y: py - wy,
+            inside: px >= x && px < x + width && py >= y && py < y + height,
+        })
     }
 
     /* `None`, and not `false`. "The pointer is not on it" and "nobody here

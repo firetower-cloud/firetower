@@ -16,6 +16,7 @@ import { AgentMark } from "~/components/AgentMark";
 import { Mark } from "~/ui/Mark";
 import { beatOf, elapsed, type Beat } from "~/api/view";
 import { Blocks } from "./Blocks";
+import { warm } from "./hot";
 import { usePerch } from "./usePerch";
 import {
   activate,
@@ -23,7 +24,7 @@ import {
   open as openWorkspace,
   onState,
   onWake,
-  pointerInside,
+  pointerAt,
   sharing,
 } from "./shell";
 import { read, write, type Prefs } from "./prefs";
@@ -164,9 +165,18 @@ export function Island() {
       // build, or a platform that does not need it. The document's own
       // `:hover` is still wired, so the pill keeps working; it just wants the
       // window clicked first, which is where this started.
-      const inside = await pointerInside().catch(() => null);
-      if (inside === null || !alive) return;
+      const spot = await pointerAt().catch(() => null);
+      if (spot === null || !alive) return;
       fromShell.current = true;
+
+      /* Hover inside the panel, from the same reading. The verdict below
+         decides whether the pill is open; this decides which row under the
+         pointer looks it, and it has to happen on every tick and not only on
+         the ticks where the verdict changes — moving from one row to the
+         next changes nothing about being inside. */
+      warm(spot.inside ? spot : null);
+
+      const inside = spot.inside;
       if (inside === over) return;
       over = inside;
 
@@ -560,7 +570,11 @@ function RowLine({ row, onOpen }: { row: Row; onOpen: (row: Row) => void }) {
   return (
     <button
       onClick={() => onOpen(row)}
-      className={`flex h-[34px] w-full items-center gap-2.5 px-3 text-left transition-colors duration-150 hover:bg-raise/70 ${
+      /* Both, and the same. `:hover` is the real thing and fires whenever the
+         app is in front; `data-hot` is what the cursor poll marks when it is
+         not, which is most of the time. See `hot.ts`. */
+      data-hot="false"
+      className={`flex h-[34px] w-full items-center gap-2.5 px-3 text-left transition-colors duration-150 hover:bg-raise/70 data-[hot=true]:bg-raise/70 ${
         row.stale ? "stale" : ""
       }`}
     >
@@ -649,7 +663,8 @@ function Item({ children, onPick }: { children: React.ReactNode; onPick: () => v
   return (
     <button
       onClick={onPick}
-      className="block w-full px-3 py-1.5 text-left text-meta text-text transition-colors duration-150 hover:bg-raise/70"
+      data-hot="false"
+      className="block w-full px-3 py-1.5 text-left text-meta text-text transition-colors duration-150 hover:bg-raise/70 data-[hot=true]:bg-raise/70"
     >
       {children}
     </button>
