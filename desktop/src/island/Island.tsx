@@ -95,7 +95,7 @@ export function Island() {
   const mode = modeOf(state);
   const show = onScreen(prefs.quiet, mode);
 
-  const { perched, notch, box, align, dockable, drag, perchAs } = usePerch({
+  const { perched, notch, bar, box, align, dockable, drag, perchAs } = usePerch({
     pill,
     open: open || menu,
     show,
@@ -122,6 +122,11 @@ export function Island() {
   };
 
   const expanded = open || menu;
+
+  /* Docked, the black fills the whole menu bar rather than just the cutout,
+     so that the one edge macOS insists on drawing lands where the bar ends
+     instead of part way down the notch. */
+  const band = perched === "notch" ? Math.max(notch.height, bar) : 0;
 
   return (
     /* The root fills the window, which is bigger than the pill for as long as
@@ -162,7 +167,7 @@ export function Island() {
             mode={mode}
             onOpen={go}
             onGrab={drag}
-            clear={perched === "notch" ? notch.height : 0}
+            clear={band}
           >
             {menu && (
               <Menu
@@ -185,7 +190,7 @@ export function Island() {
             mode={mode}
             onGrab={drag}
             gap={perched === "notch" ? notch.width : 0}
-            tall={perched === "notch" ? notch.height : 0}
+            tall={band}
           />
         )}
           </div>

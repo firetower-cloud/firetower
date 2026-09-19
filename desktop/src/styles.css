@@ -70,6 +70,10 @@
      fillet and the convex corner below it are the same arc. */
   --island-melt: 13px;
 
+  /* How far a docked pill sits above the first row of the screen. Paired with
+     `LIFT` in `usePerch.ts`, which places the window. */
+  --island-lift: 1px;
+
   /* ── Syntax ────────────────────────────────────────────────────
      A fourth colour namespace, and the only one that earns an exception to
      "colour is spent". It never appears outside a file or a diff, so it
@@ -207,6 +211,10 @@
      shape that is not in the app — a thing with no window around it. */
   .island {
     position: relative;
+    /* The root is transparent to the pointer so the oversized window does not
+       eat clicks meant for the menu bar; the pill itself must still take
+       them. */
+    pointer-events: auto;
     background: rgb(9 9 10 / 0.94);
     /* A hairline in white at low alpha, not `--color-line`. #26262b against a
        black pill is a grey *outline*, and an outline is the tell that this is
@@ -232,6 +240,12 @@
      the panel. */
   .island[data-perch="notch"] {
     border: 0;
+    /* Lifted a point above the top of the screen by `usePerch`, so that the
+       hairline macOS traces around the window is off the display rather than
+       across the join. The point is given straight back, so what is drawn in
+       the pill has not moved. */
+    box-sizing: border-box;
+    padding-top: var(--island-lift);
     border-top-left-radius: 0;
     border-top-right-radius: 0;
     border-bottom-left-radius: var(--island-melt);

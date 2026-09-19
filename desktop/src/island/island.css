@@ -39,6 +39,11 @@ body {
   position: fixed;
   inset: 0;
   display: flex;
+  /* The window is wider than the pill — while it animates, and permanently
+     once docked, where it carries the melting corners. That margin is
+     transparent, and an always-on-top window swallowing clicks along the top
+     of the screen is a menu bar you cannot hit. Only the pill answers. */
+  pointer-events: none;
 }
 .island-root[data-align="centre"] {
   justify-content: center;

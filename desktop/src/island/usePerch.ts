@@ -58,6 +58,33 @@ const GUESS: Size = { width: 160, height: 28 };
 /** `--dur-island`, plus a frame or two for the compositor to catch up. */
 const SETTLE = 380;
 
+/** If the stylesheet is not there to be asked. Kept equal to `--island-melt`. */
+const MELT = 13;
+
+/**
+ * How far a docked pill is lifted above the first row of the screen.
+ *
+ * One point: enough to put the hairline macOS draws around the window above
+ * the display's top edge, and little enough that the point given back as
+ * padding leaves the row where it was. Paired with `--island-lift`.
+ */
+const LIFT = 1;
+
+/**
+ * How far the docked pill's black bleeds sideways, read from the stylesheet.
+ *
+ * The number belongs to the shape, so it is defined where the shape is and
+ * read here rather than written twice. A pill whose window is 13pt too narrow
+ * loses its melting corners silently, which is the kind of drift a second
+ * copy of a constant produces.
+ */
+function melt(): number {
+  if (typeof window === "undefined") return MELT;
+  const raw = getComputedStyle(document.documentElement).getPropertyValue("--island-melt");
+  const n = Number.parseFloat(raw);
+  return Number.isFinite(n) && n >= 0 ? n : MELT;
+}
+
 export function usePerch(o: {
   /** The *content*, at its natural size — not the box, which is animated. */
   pill: RefObject<HTMLElement | null>;
@@ -108,10 +135,6 @@ export function usePerch(o: {
     if (size.width < 2 || size.height < 2) return;
     if (!now.open) collapsed.current = size;
 
-    // The box is drawn at the natural size and animates to it; the window is
-    // placed at the union so the animation has room in whichever direction it
-    // is going.
-    setBox({ width: Math.ceil(natural.width), height: Math.ceil(natural.height) });
     const room = union(size, held.current);
     held.current = room;
 
@@ -119,7 +142,44 @@ export function usePerch(o: {
     if (!base) return;
     setPerched(base.mode);
 
-    const at = (of: Size) => grow(base.rect, of, base.screen, anchor === "corner" ? "right" : "centre");
+    /* Docked, the two melting corners are drawn *outside* the pill — a square
+       of its own black at `left: -13px` and `right: -13px`, with a quarter
+       disc bitten out. The window has to carry them, or they survive exactly
+       as long as the window is oversized for the animation and are clipped
+       off the moment it settles to the pill's own size. That is the shape
+       melting into the bezel for a beat and then going square again.
+
+       Only the window is widened. `collapsed.current` — what is remembered,
+       what a drag snaps, what the notch is centred on — stays the pill. */
+    const bleed = base.mode === "notch" ? Math.ceil(melt() * per) * 2 : 0;
+
+    /* And one point above the first row of the screen.
+       macOS puts a hairline of its own around a window, and on a transparent
+       one it traces the alpha — so it follows the pill rather than the frame,
+       and no amount of CSS moves it: painting past it only hands it a new
+       outer edge to trace. The one place it can go is off the display. Lifted
+       by a point, the pill's top edge is above row zero and what meets the
+       bezel is its black. The point is given back as padding, so the row
+       inside sits exactly where it did. */
+    const lift = base.mode === "notch" ? Math.ceil(LIFT * per) : 0;
+    const roomFor = (of: Size): Size => ({
+      width: of.width + bleed,
+      height: of.height + lift,
+    });
+
+    const at = (of: Size) => {
+      const rect = grow(base.rect, roomFor(of), base.screen, anchor === "corner" ? "right" : "centre");
+      return lift ? { ...rect, y: rect.y - lift } : rect;
+    };
+
+    /* The box is drawn at the natural size and animates to it; the window is
+       placed at the union so the animation has room in whichever direction it
+       is going. Docked, the box carries the lift as well, so the black fills
+       the window right up to the edge that is off the screen. */
+    setBox({
+      width: Math.ceil(natural.width),
+      height: Math.ceil(natural.height) + (lift ? LIFT : 0),
+    });
 
     const mine = ++turn.current;
     await place(at(room));
@@ -275,6 +335,16 @@ export function usePerch(o: {
      * else both numbers are zero.
      */
     notch: { width: home?.notchWidth ?? 0, height: home?.notchHeight ?? 0 },
+    /**
+     * The menu bar, which is a point or two taller than the cutout.
+     *
+     * A docked pill the height of the notch alone stops a point short of the
+     * bar it is sitting in, and the hairline macOS draws along its underside
+     * then falls *inside* the black band rather than at the edge of one —
+     * a line ruled across the notch. Filling the bar puts that edge where the
+     * eye already expects a boundary.
+     */
+    bar: home ? Math.max(0, home.workY - home.y) : 0,
     /** Whether "dock to the notch" is worth offering on the display it is on. */
     dockable: home ? notched(home) : false,
     drag,
