@@ -313,6 +313,7 @@ export function usePerch(o: {
        that never finishes costs nothing rather than a frame callback for
        ever. */
     let left = 40;
+    let settled_ = 0;
     const chase = () => {
       if (mine !== turn.current || dragging.current) return;
       const box = latest.current.o.frame.current;
@@ -323,8 +324,22 @@ export function usePerch(o: {
         height: Math.ceil(now_.height * per) - lift,
       };
       void hit(seen(window_, shape, lift));
-      const arrived = Math.abs(shape.width - size.width) <= 1;
-      if (!arrived && (left -= 1) > 0) follow.current = requestAnimationFrame(chase);
+
+      /* Both dimensions, and twice.
+         Width alone was enough while the pill only ever grew sideways. It is
+         not: the row and the panel are the same width, so opening is a change
+         in height only, and a width-only test called it arrived on the first
+         frame — before the box had moved at all. The chase stopped there and
+         left the pointer's target the height of the closed pill, so the panel
+         you had just opened counted as outside, closed itself, and opened
+         again on the next pass.
+
+         Twice, because the first frame after a size is set still measures the
+         old one: once is indistinguishable from never having started. */
+      const arrived =
+        Math.abs(shape.width - size.width) <= 1 && Math.abs(shape.height - size.height) <= 1;
+      settled_ = arrived ? settled_ + 1 : 0;
+      if (settled_ < 2 && (left -= 1) > 0) follow.current = requestAnimationFrame(chase);
     };
     follow.current = requestAnimationFrame(chase);
   }, []);
