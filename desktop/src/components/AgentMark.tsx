@@ -12,9 +12,10 @@ import type { Agent } from "~/api/generated/model";
  * they have to tint with the row they are in, and an interface that is meant to
  * build offline cannot go to somebody's CDN for a logo.
  *
- * Deliberately *not* the vendors' logos. These are our own glyphs standing for
- * "the thing with the star" and "the thing with the rings" — close enough to
- * tell apart at 14px, and not a trademark we are redistributing.
+ * These are the providers' own marks, drawn as paths rather than fetched, and
+ * filled with `currentColor` so they tint with the row they sit in. Used to
+ * say which tool is running in a workspace, which is what a mark is for; the
+ * names and the marks belong to their owners.
  */
 export function AgentMark({
   agent,
@@ -36,32 +37,44 @@ export function AgentMark({
   } as const;
 
   switch (agent) {
-    // A burst. Six spokes, because four reads as a plus sign and eight fills in
-    // to a blob at the size this is actually used.
+    /* Claude's burst: rays from a common centre, twelve of them at thirty
+       degrees apart, the longer ones on the diagonals. Drawn with `rotate`
+       rather than as twelve sets of coordinates, so the spacing is exact and
+       the shape stays symmetric if the weight is ever changed. */
     case "ClaudeCode":
       return (
         <svg {...common}>
-          <g strokeWidth="1.4" strokeLinecap="round">
-            <path d="M8 2.2v11.6M3 5.1l10 5.8M13 5.1L3 10.9" />
+          <g strokeWidth="1.25" strokeLinecap="round">
+            {[0, 30, 60, 90, 120, 150, 180, 210, 240, 270, 300, 330].map((deg) => (
+              <path
+                key={deg}
+                d={deg % 60 === 0 ? "M8 1.6V5.2" : "M8 2.7V5.4"}
+                transform={`rotate(${deg} 8 8)`}
+              />
+            ))}
           </g>
         </svg>
       );
 
-    // A ring with a gap, on its side. Distinct from the burst in silhouette,
-    // which is the only property that matters in a list.
+    /* OpenAI's knot, as six lobes around a centre. The real mark is one
+       continuous interlaced path; at twelve pixels what survives of it is the
+       six-fold silhouette, which is what this keeps. */
     case "Codex":
       return (
         <svg {...common}>
-          <path
-            d="M13.2 8a5.2 5.2 0 11-2.6-4.5"
-            strokeWidth="1.5"
-            strokeLinecap="round"
-          />
-          <circle cx="8" cy="8" r="1.6" strokeWidth="1.4" />
+          <g strokeWidth="1.2" strokeLinecap="round">
+            {[0, 60, 120, 180, 240, 300].map((deg) => (
+              <path
+                key={deg}
+                d="M8 2.9a3.1 3.1 0 012.7 4.65"
+                transform={`rotate(${deg} 8 8)`}
+              />
+            ))}
+          </g>
         </svg>
       );
 
-    // A prompt. Nothing is driving this one.
+    // A prompt. Nothing is driving this one, so it gets no logo.
     case "Shell":
     default:
       return (
