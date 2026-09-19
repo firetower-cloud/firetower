@@ -145,6 +145,21 @@ describe("a perch remembered from last time", () => {
     expect(placed?.rect.y).toBe(flat.y);
   });
 
+  it("docks anywhere along the top of a display with no cutout", () => {
+    // There is nothing to line up with, so the whole edge is the target. On a
+    // wide external display the middle is a small thing to ask someone to hit
+    // with a pill, and missing it leaves them a border they came to be rid of.
+    const far = { x: external.x + 60, y: external.y + 4, width: 200, height: 28 };
+    const placed = snap(far, [external]);
+    expect(placed?.mode).toBe("notch");
+    expect(placed?.rect.y).toBe(external.y);
+  });
+
+  it("still wants the middle when there is a cutout to line up with", () => {
+    const far = { x: laptop.x + 40, y: laptop.y + 4, width: 200, height: 28 };
+    expect(snap(far, [laptop])?.mode).toBe("float");
+  });
+
   it("pulls a perch that is now off the edge back onto the display", () => {
     const saved: Perch = { screen: laptop.name, mode: "float", x: 1700, y: 200 };
     const placed = resolve(saved, [laptop], pill);

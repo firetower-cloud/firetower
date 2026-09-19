@@ -255,9 +255,16 @@ export function snap(rect: Rect, screens: Screen[]): Placed | null {
   const screen = screenFor(rect, screens);
   if (!screen) return null;
 
-  if (dockable(screen)) {
-    const pull = Math.abs(rect.x + rect.width / 2 - (screen.x + screen.width / 2));
-    if (pull <= MAGNET && rect.y <= screen.y + MAGNET) {
+  if (dockable(screen) && rect.y <= screen.y + MAGNET) {
+    /* Sideways, the pull is to the cutout — a pill docked beside a notch
+       rather than into it is worse than one left floating, so it has to be
+       aimed at. A display without one has nothing to line up with and the
+       whole top edge is the target: asking for the middle of a screen that
+       is two and a half thousand points wide is asking someone to hit a
+       hundred and eighty of them, and what they get for missing is a pill
+       six points below the edge wearing the border that docking hides. */
+    const centred = Math.abs(rect.x + rect.width / 2 - (screen.x + screen.width / 2)) <= MAGNET;
+    if (!notched(screen) || centred) {
       return { screen, mode: "notch", rect: dock(screen, rect) };
     }
   }

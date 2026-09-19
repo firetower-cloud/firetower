@@ -155,6 +155,8 @@ export function usePerch(o: {
   const last = useRef<Rect | null>(null);
   /** AppKit owns the window for the length of a drag; we must not fight it. */
   const dragging = useRef(false);
+  /** The landing, reachable from `drag` so a drag that never moves still ends. */
+  const landing = useRef<() => void>(() => {});
   const settling = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const shown = useRef(false);
   /** IPC can answer out of order; only the newest placement may win. */
@@ -391,8 +393,11 @@ export function usePerch(o: {
       else stop();
     })();
 
+    landing.current = () => void land();
+
     const land = async () => {
       dragging.current = false;
+      clearTimeout(settling.current);
       const where = await bounds();
       const { screens: displays, o: now } = latest.current;
       if (!where || displays.length === 0) return;
@@ -428,6 +433,15 @@ export function usePerch(o: {
   const drag = useCallback(() => {
     dragging.current = true;
     void startDragging();
+
+    /* And a floor under it. The landing is scheduled off the *moves* a drag
+       emits, so a drag that is let go without moving emits none and never
+       lands — and this flag, left set, stops every placement there will ever
+       be. The window then stays wherever AppKit last put it, which after a
+       drag off the side of a display is somewhere you cannot reach it, with
+       nothing left running that would pull it back. */
+    clearTimeout(settling.current);
+    settling.current = setTimeout(() => landing.current(), 700);
   }, []);
 
   /** The menu's "dock to the notch" / "float free", which is a perch, not a flag. */
