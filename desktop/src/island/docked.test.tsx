@@ -56,14 +56,19 @@ describe("the fleet, counted", () => {
     expect([...new Set(order)]).toEqual(["working", "waiting", "idle"]);
   });
 
-  it("leaves a state out rather than showing it as a zero", () => {
+  it("keeps an empty state's place rather than resizing the row", () => {
+    /* Dropping the slot changes the row's width, and the box animates to a
+       new width while its contents are already at it — which is how a glyph
+       ends up with its left column cut off for a third of a second. */
     const only = { ...waiting, working: [], idle: 0 };
     const html = renderToStaticMarkup(
       <Collapsed state={only} mode={modeOf(only)} onGrab={() => {}} />,
     );
     expect(html).toContain('data-beat="waiting"');
-    expect(html).not.toContain('data-beat="working"');
-    expect(html).not.toContain('data-beat="idle"');
+    expect(html).toContain('data-beat="working"');
+    expect(html).toContain('data-empty="true"');
+    // And the one with something in it is not the one being hidden.
+    expect(html).not.toMatch(/data-beat="waiting" data-empty/);
   });
 });
 

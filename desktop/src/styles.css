@@ -450,6 +450,10 @@
   }
   .island-tally[data-beat="waiting"] b { color: var(--color-bone); }
   .island-tally[data-beat="working"] b { color: var(--color-text); }
+  /* Holding its place, saying nothing. `visibility` and not `display`, which
+     is the whole point: the slot keeps its width, so the row does not resize
+     every time a state arrives or goes away. */
+  .island-tally[data-empty="true"] { visibility: hidden; }
 
   /* Two columns of dots: the only shape that reads as "drag me" with no label
      and no room for one. */

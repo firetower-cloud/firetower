@@ -374,8 +374,15 @@ export function Collapsed({
  * In flight first, then what wants you, then what is merely there. Reading
  * order is time order: the work happens, it stops and asks, it is done.
  *
- * A state with nothing in it is left out rather than shown as a zero — "0
- * waiting" is a non-event taking up room next to two that are not.
+ * A state with nothing in it is drawn and then hidden, rather than left out.
+ * Leaving it out changes the width of the row, and the box animates to a new
+ * width over 320ms while what is inside it is already at the new one — so for
+ * that beat the box is the narrower of the two and cuts the ends off its own
+ * contents. A count that arrives is not a reason to redraw the two that did
+ * not: each state keeps its place whether or not it has anything in it, which
+ * makes the row a fixed width, and a fixed width has nothing to animate and
+ * nothing to clip. It also means the ember slot is always in the same place,
+ * which is worth something to a thing you are meant to read at a glance.
  */
 function Counts({ state }: { state: IslandState }) {
   const tally: [Beat, number][] = [
@@ -386,14 +393,18 @@ function Counts({ state }: { state: IslandState }) {
 
   return (
     <>
-      {tally
-        .filter(([, n]) => n > 0)
-        .map(([beat, n]) => (
-          <span key={beat} className="island-tally" data-beat={beat}>
-            <Blocks beat={beat} />
-            <b>{n}</b>
-          </span>
-        ))}
+      {tally.map(([beat, n]) => (
+        <span
+          key={beat}
+          className="island-tally"
+          data-beat={beat}
+          data-empty={n === 0 ? "true" : undefined}
+          aria-hidden={n === 0}
+        >
+          <Blocks beat={beat} />
+          <b>{n}</b>
+        </span>
+      ))}
     </>
   );
 }
