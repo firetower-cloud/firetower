@@ -391,9 +391,18 @@ function Counts({ state }: { state: IslandState }) {
     ["idle", state.idle],
   ];
 
+  /* The ones with something in them first, in their own order, and the empty
+     ones after as spacers. Held in place, an empty slot pads the row from the
+     *left* — so a single count sits adrift in the middle of the wing with a
+     gap where the states that are not happening would be, which reads as
+     something broken rather than something absent. Behind, the same slots
+     hold the same width and the row still never resizes. */
+  const shown = tally.filter(([, n]) => n > 0);
+  const spare = tally.filter(([, n]) => n === 0);
+
   return (
     <>
-      {tally.map(([beat, n]) => (
+      {[...shown, ...spare].map(([beat, n]) => (
         <span
           key={beat}
           className="island-tally"
