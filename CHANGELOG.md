@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.38.1](https://github.com/firetower-cloud/firetower/compare/firetower-v0.38.0...firetower-v0.38.1) (2026-09-20)
+
+
+### Bug Fixes
+
+* **updates:** survive restarts and upgrade workers reliably ([b2b036c](https://github.com/firetower-cloud/firetower/commit/b2b036cb9dd80607f316d47b73a72a8a3ab018c1))
+* **updates:** survive restarts and upgrade workers reliably ([e07df78](https://github.com/firetower-cloud/firetower/commit/e07df78b95d89e84828a10e10a8e5dc1b92e7627))
+
 ## [0.38.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.37.0...firetower-v0.38.0) (2026-09-18)
 
 
