@@ -54,6 +54,26 @@
   /* Native motion is quicker than web motion. The same curve, less of it. */
   --dur-native: 140ms;
 
+  /* ── The island's own motion ───────────────────────────────────
+     The one place in the app that is slower than `--dur-native`, and the
+     reason is that this is the only surface imitating a piece of hardware
+     rather than a piece of software. A notch that snaps between two sizes
+     reads as two windows; the same change over 320ms on a curve that leaves
+     almost immediately and takes its time arriving reads as one thing
+     stretching. `ease-out-quint`: no overshoot, because the window is exactly
+     the size of the pill and anything past the end would be clipped off. */
+  --dur-island: 320ms;
+  --ease-island: cubic-bezier(0.22, 1, 0.36, 1);
+
+  /* How far the island's black bleeds sideways at the top before curving back
+     in, and the radius of its bottom corners. One number, so the concave
+     fillet and the convex corner below it are the same arc. */
+  --island-melt: 13px;
+
+  /* How far a docked pill sits above the first row of the screen. Paired with
+     `LIFT` in `usePerch.ts`, which places the window. */
+  --island-lift: 1px;
+
   /* ── Syntax ────────────────────────────────────────────────────
      A fourth colour namespace, and the only one that earns an exception to
      "colour is spent". It never appears outside a file or a diff, so it
@@ -178,6 +198,287 @@
     border-style: dashed;
     border-color: var(--color-line-soft);
     box-shadow: none;
+  }
+
+
+  /* ── The island ────────────────────────────────────────────────
+     The pill above every other window (`src/island/`). These live here rather
+     than beside it because the style page draws the same three states inside
+     the app, and a component whose only rendering lives in another document
+     is a component nobody looks at until it is wrong.
+
+     No new token and no new hue: the same greys, the same ember, the one
+     shape that is not in the app — a thing with no window around it. */
+  .island {
+    position: relative;
+    /* The content is centred in the box, not parked at its left edge. The box
+       animates over 320ms and the content inside is at its natural width the
+       whole time, so for that beat the box is the smaller of the two and
+       clips. Centred, it takes the same sliver off each end and reads as the
+       shape growing around what is in it; left-aligned, it ate the right edge
+       — which is where the handle lives. */
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+    /* The root is transparent to the pointer so the oversized window does not
+       eat clicks meant for the menu bar; the pill itself must still take
+       them. */
+    pointer-events: auto;
+    background: rgb(9 9 10 / 0.94);
+    /* A hairline in white at low alpha, not `--color-line`. #26262b against a
+       black pill is a grey *outline*, and an outline is the tell that this is
+       a window sitting on the screen rather than part of it. */
+    border: 1px solid rgb(255 255 255 / 0.07);
+    border-radius: 11px;
+    overflow: hidden;
+    /* The shape is animated, and the size is set from JS on every change —
+       see `.island-body`. Faster out of the gate than `--dur-native` and much
+       longer settling, which is what reads as elastic without any overshoot
+       to clip. */
+    transition:
+      width var(--dur-island) var(--ease-island),
+      height var(--dur-island) var(--ease-island),
+      opacity var(--dur-native) var(--ease-swift),
+      border-color var(--dur-native) var(--ease-swift),
+      background var(--dur-native) var(--ease-swift);
+  }
+
+  /* Docked, the pill and the notch are one piece of black glass. No border at
+     all — a hairline here traces the join and undoes the whole illusion — and
+     no top corners, because there is no top: the shape starts at the edge of
+     the panel. */
+  .island[data-perch="notch"] {
+    border: 0;
+    /* Lifted a point above the top of the screen by `usePerch`, so that the
+       hairline macOS traces around the window is off the display rather than
+       across the join. The point is given straight back, so what is drawn in
+       the pill has not moved. */
+    box-sizing: border-box;
+    padding-top: var(--island-lift);
+    border-top-left-radius: 0;
+    border-top-right-radius: 0;
+    border-bottom-left-radius: var(--island-melt);
+    border-bottom-right-radius: var(--island-melt);
+    background: #000;
+  }
+
+  /* ── Melting into the bezel ────────────────────────────────────
+     What the shape needs at the two top corners is the opposite of a radius:
+     the black has to bulge *outward* along the top edge and curve back in, so
+     the island reads as the panel swelling rather than as a rectangle parked
+     against it. Every product that does this well has these, and their absence
+     is most of what makes a home-made one look stuck on.
+
+     Each is a square of the island's own black with a quarter-disc bitten out
+     of the corner nearest the pill, which leaves a concave fillet: full width
+     where it meets the top of the screen, tapering to nothing where it meets
+     the island's side. */
+  .island-frame {
+    display: inline-flex;
+    position: relative;
+  }
+  .island-frame[data-perch="notch"]::before,
+  .island-frame[data-perch="notch"]::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    width: var(--island-melt);
+    height: var(--island-melt);
+    background: #000;
+    pointer-events: none;
+  }
+  .island-frame[data-perch="notch"]::before {
+    left: calc(var(--island-melt) * -1);
+    mask: radial-gradient(
+      circle at 0 100%,
+      transparent var(--island-melt),
+      #000 calc(var(--island-melt) + 0.5px)
+    );
+  }
+  .island-frame[data-perch="notch"]::after {
+    right: calc(var(--island-melt) * -1);
+    mask: radial-gradient(
+      circle at 100% 100%,
+      transparent var(--island-melt),
+      #000 calc(var(--island-melt) + 0.5px)
+    );
+  }
+
+  /* The content, at its natural size. Measured by `usePerch`, which then sets
+     the size of `.island` around it — so the box animates while what is inside
+     it never reflows mid-flight. */
+  .island-body {
+    width: max-content;
+  }
+
+  /* Docked and collapsed, the two wings must be the same width.
+     The first cut hung everything off the left of the notch and left the grab
+     handle alone on the right, which put a wide block on one side of the
+     cutout and a sliver on the other. Nothing was misaligned, and it read as
+     misaligned, which is the same problem. Two `1fr` tracks around the gap
+     resolve to the wider of the two, so the shape is symmetric about the
+     notch whatever it is saying. */
+  .island[data-perch="notch"] .island-wings {
+    display: grid;
+    /* `min-content` as the floor, not `auto`. A wing whose track is allowed
+       below its own content squashes what is in it — the counts lose their
+       gaps and the handle loses its dots — which is what a state appearing
+       or leaving used to look like while the box was still catching up. */
+    grid-template-columns:
+      minmax(min-content, 1fr)
+      var(--island-gap)
+      minmax(min-content, 1fr);
+    align-items: center;
+  }
+  /* Each wing against the *outer* edge, not the cutout. The wider one fills
+     its track either way; pushing the narrower one outward too is what makes
+     the pair read as two ends of one object rather than as a label with some
+     black after it. */
+  .island[data-perch="notch"] .island-wings > .island-left {
+    justify-self: start;
+  }
+  .island[data-perch="notch"] .island-wings > .island-right {
+    justify-self: end;
+  }
+
+  /* Whatever has just appeared inside the box, arriving rather than blinking
+     on. Short, and behind the growth, so the shape leads and the content
+     follows it in. */
+  .island-enter {
+    animation: island-enter 200ms var(--ease-swift) 70ms backwards;
+  }
+
+  /* Dormant: a nub, not a notification. It is there so there is something to
+     grab and something to right-click, and for no other reason — an island
+     that is fully visible while it has nothing to say is a second loud thing
+     on a screen that is only allowed one. */
+  /* Opacity only. Declaring `transition` here would replace the list above
+     rather than add to it, and the nub would be the one state whose shape
+     snapped — which is exactly what it did. */
+  .island[data-mode="dormant"] {
+    opacity: 0.38;
+  }
+  .island[data-mode="dormant"]:hover {
+    opacity: 1;
+  }
+
+  /* `Mark` carries an ember fill — the one place in the app where ember is
+     decoration rather than a signal. On a surface that is on screen all day
+     that exception stops being affordable, so the nub wears the mark in greys. */
+  .island-quiet circle {
+    fill: var(--color-mute);
+  }
+
+  /* ── The three blocks ──────────────────────────────────────────
+     The status glyph (`Blocks.tsx`). Four quadrants, one of them away, and
+     which one walks clockwise. A quadrant leaving and arriving is two crisp
+     edges; a rotating square at eleven pixels is a grey smudge for most of
+     every turn. */
+  .blocks {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: 1fr 1fr;
+    gap: 1.5px;
+    flex-shrink: 0;
+  }
+  .blocks i {
+    display: block;
+    border-radius: 1.5px;
+    background: currentColor;
+  }
+
+  /* Working: turning, and lit. The only state that moves, so movement on its
+     own means something is happening — legible from across a desk, before any
+     colour has been read. */
+  .blocks[data-beat="working"] {
+    color: var(--color-slate);
+    filter: drop-shadow(0 0 4px color-mix(in srgb, var(--color-slate) 80%, transparent));
+  }
+  .blocks[data-beat="working"] i {
+    animation: blocks-away var(--dur-island) var(--ease-island) infinite;
+  }
+  /* Clockwise: top-left, top-right, bottom-right, bottom-left. The delays are
+     negative so every one of them is already mid-cycle on the first frame,
+     rather than the whole square arriving at once and then settling. */
+  .blocks[data-beat="working"] i:nth-child(1) { animation-delay: 0ms; }
+  .blocks[data-beat="working"] i:nth-child(2) { animation-delay: -240ms; }
+  .blocks[data-beat="working"] i:nth-child(4) { animation-delay: -160ms; }
+  .blocks[data-beat="working"] i:nth-child(3) { animation-delay: -80ms; }
+
+  /* Blocked: still, and breathing. It does not turn, because turning is what
+     working looks like and a thing that is stuck must not look busy. */
+  .blocks[data-beat="blocked"] {
+    color: var(--color-ember);
+    filter: drop-shadow(0 0 4px color-mix(in srgb, var(--color-ember) 85%, transparent));
+    animation: breathe 1.9s var(--ease-swift) infinite;
+  }
+  .blocks[data-beat="blocked"] i:nth-child(4) { opacity: 0; }
+
+  /* Done: still, and unlit. It finished; your move, but nothing went wrong,
+     and nothing that went right should catch an eye. */
+  .blocks[data-beat="done"] { color: var(--color-sage); }
+  .blocks[data-beat="done"] i:nth-child(4) { opacity: 0; }
+
+  /* Broken: still, and its own colour. Not ember — being stuck and having
+     failed are different things, and ember already means the first. */
+  .blocks[data-beat="broken"] { color: var(--color-brick); }
+  .blocks[data-beat="broken"] i:nth-child(4) { opacity: 0; }
+
+  /* Over. Nothing in the app draws one, but the table has a row for it. */
+  .blocks[data-beat="over"] { color: var(--color-mute); }
+  .blocks[data-beat="over"] i:nth-child(4) { opacity: 0; }
+
+  @keyframes blocks-away {
+    0%,
+    22% {
+      opacity: 0;
+      transform: scale(0.55);
+    }
+    30%,
+    100% {
+      opacity: 1;
+      transform: scale(1);
+    }
+  }
+
+  /* A glyph and its number. The count carries the weight — bone for the one
+     that wants you, plain for work in flight, dim for what is merely there. */
+  .island-tally {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    /* Never compressed. A count is three characters at most; there is nothing
+       in it to give up, so a box too small for it must overflow and be
+       clipped rather than crush it. */
+    flex-shrink: 0;
+  }
+  .island-tally b {
+    font-weight: inherit;
+    font-variant-numeric: tabular-nums;
+    font-size: var(--text-meta);
+    color: var(--color-dim);
+  }
+  .island-tally[data-beat="blocked"] b { color: var(--color-bone); }
+  .island-tally[data-beat="working"] b { color: var(--color-text); }
+  .island-tally[data-beat="broken"] b { color: var(--color-brick); }
+  /* Holding its place, saying nothing. `visibility` and not `display`, which
+     is the whole point: the slot keeps its width, so the row does not resize
+     every time a state arrives or goes away. */
+  .island-tally[data-empty="true"] { visibility: hidden; }
+
+  /* Two columns of dots: the only shape that reads as "drag me" with no label
+     and no room for one. */
+  .island-grip {
+    flex-shrink: 0;
+    cursor: grab;
+    color: var(--color-mute);
+    transition: color var(--dur-native) var(--ease-swift);
+  }
+  .island-grip:hover {
+    color: var(--color-dim);
+  }
+  .island-grip:active {
+    cursor: grabbing;
   }
 
   /* Rows from a server that is not answering. Readable, obviously stale. */
@@ -365,4 +666,61 @@ html:not([data-platform="macos"]) {
   --color-panel-vibrant: var(--color-panel);
   --color-strip: var(--color-panel);
   --chrome-lights: 0.75rem;
+}
+
+/* And no shadow under the island.
+   macOS derives one from the window's alpha channel, so the pill is lifted off
+   the desktop for free. Windows does not do that for a transparent borderless
+   window, and a CSS `box-shadow` is no substitute: the window is exactly the
+   size of the pill, so the shadow would be drawn outside it and clipped away.
+   Widening the window to make room for one would put a ring of invisible,
+   click-eating dead space around the pill, which is a worse trade on the
+   platform where it sits next to the tray.
+
+   So elevation is done the way the rest of the system does it — a colour step
+   and a top highlight, never a box drawn around everything. */
+html:not([data-platform="macos"]) .island {
+  background: rgb(14 14 16 / 0.97);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.06);
+}
+
+/* And no point given back, because none was taken: the window is not lifted
+   off the top of the screen there (`usePerch`), so padding the row down by
+   one would simply move it down by one. */
+html:not([data-platform="macos"]) .island[data-perch="notch"] {
+  padding-top: 0;
+}
+
+/* Reduced motion takes `ember-pulse` away — `globals.css` stops every
+   animation, `!important`, and it is right to. But inside the app ember is
+   also a bright dot against grey furniture, while out on the island it may be
+   the only mark on the screen, so the pulse is carrying more of the signal
+   there than it does anywhere else. A static halo says the same thing without
+   moving. */
+/* With the walk stopped, working would be a solid square — the one shape the
+   glyph never makes, and no longer one of the family. It keeps a quadrant
+   away, and the glow does the work the movement was doing. */
+@media (prefers-reduced-motion: reduce) {
+  .blocks[data-beat="working"] i:nth-child(4) {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .island-ember {
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-ember) 24%, transparent);
+  }
+  .island[data-mode="demand"] {
+    border-color: var(--color-ember-deep);
+  }
+}
+
+/* The island's content arriving. Declared here rather than in `globals.css`
+   because it is the native layer's, and nothing in the web build has a box
+   that changes size underneath its own contents. */
+@keyframes island-enter {
+  from {
+    opacity: 0;
+    transform: translateY(-3px);
+  }
 }

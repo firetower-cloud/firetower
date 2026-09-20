@@ -15,6 +15,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createContext, useContext, useEffect, useRef, type ReactNode } from "react";
 import { applyEvent } from "~/api/events";
+import { stirFleet } from "~/fleet";
 import { forgetConversations } from "~/api/conversation";
 import { SocketProvider, useSocket } from "~/api/socket";
 import { useBackendId } from "~/client/http";
@@ -53,7 +54,7 @@ export function BackendProvider({ id, children }: { id: string; children: ReactN
     <Ctx.Provider value={id}>
       <QueryClientProvider client={client}>
         <SocketProvider>
-          <Sessions cache={client} />
+          <Sessions cache={client} server={id} />
           {children}
         </SocketProvider>
       </QueryClientProvider>
@@ -69,7 +70,7 @@ export function BackendProvider({ id, children }: { id: string; children: ReactN
  * Renders nothing — it exists to hold a subscription for as long as the
  * server is on screen.
  */
-function Sessions({ cache }: { cache: QueryClient }) {
+function Sessions({ cache, server }: { cache: QueryClient; server: string }) {
   const { follow } = useSocket();
   // A ref, not state: the cursor changes on every event and nothing draws it.
   const seen = useRef<number | undefined>(undefined);
@@ -83,9 +84,18 @@ function Sessions({ cache }: { cache: QueryClient }) {
           if (frame.t !== "event") return;
           seen.current = Math.max(seen.current ?? 0, frame.event.seq);
           applyEvent(cache, frame.event);
+
+          /* And the fleet, which is not in this cache and does not see this
+             socket. It is what the island is drawn from, and on its own it
+             is a ten-second sweep — so the rail under this window changed on
+             the event while the pill above it waited for the next tick. The
+             two kinds that move the island are a session appearing and a
+             session changing status; the rest are detail inside a row. */
+          const kind = frame.event.kind.type;
+          if (kind === "StatusChanged" || kind === "SessionCreated") stirFleet(server);
         },
       }),
-    [cache, follow],
+    [cache, follow, server],
   );
 
   return null;
