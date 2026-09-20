@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.36.2
+ * OpenAPI spec version: 0.38.1
  */
 
 export * from './accessEntry.ts';
@@ -155,6 +155,7 @@ export * from './sessionStatus.ts';
 export * from './setIdentity.ts';
 export * from './setShare.ts';
 export * from './setupState.ts';
+export * from './setVoiceKey.ts';
 export * from './share.ts';
 export * from './signedIn.ts';
 export * from './signIn.ts';
@@ -192,6 +193,8 @@ export * from './user.ts';
 export * from './userChange.ts';
 export * from './userId.ts';
 export * from './vaultView.ts';
+export * from './voiceState.ts';
+export * from './voiceTicket.ts';
 export * from './workspaceId.ts';
 export * from './workspaceSize.ts';
 export * from './workspaceUsage.ts';

@@ -15,3 +15,4 @@ export * from './stream/stream.ts';
 export * from './tasks/tasks.ts';
 export * from './trackers/trackers.ts';
 export * from './updates/updates.ts';
+export * from './voice/voice.ts';

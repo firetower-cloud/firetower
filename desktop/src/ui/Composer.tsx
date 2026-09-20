@@ -24,6 +24,9 @@ import { useAttachFile, useInterruptSession, useListFiles, useSendTurn } from "~
 import { useChooseControl, useSessionControls } from "~/api/generated/conversation/conversation";
 import { takeDraft } from "~/workspace/draft";
 import { AccountLine, AccountNotice } from "~/ui/AccountSwitcher";
+import { Mic } from "~/ui/voice/Mic";
+import { VoiceDialog } from "~/ui/voice/Dialogs";
+import { useVoice } from "~/ui/voice/useVoice";
 
 /**
  * One attached thing, from the moment it is dropped.
@@ -180,6 +183,12 @@ export function Composer({
   /** Clicked, and not yet confirmed by the server or by the agent. */
   const [chosen, setChosen] = useState<Partial<Record<ControlKind, string>>>({});
   const box = useRef<HTMLTextAreaElement>(null);
+  /* Dictation writes into `text` like a second pair of hands. It is given the
+     box because stopping puts the caret back where the words ended, and the
+     setter because everything it hears is an ordinary edit to the draft —
+     there is no second field, and nothing it produces is sent on its own. */
+  const voice = useVoice({ text, setText, box });
+  const listening = voice.state.at !== "idle" && voice.state.at !== "asking";
 
   /* `/` offers the commands this install actually has, as the agent reported
      them at startup; `@` offers files off the worker, one directory at a time,
@@ -309,13 +318,13 @@ export function Composer({
   /** Something is still being read or uploaded, so the message is incomplete. */
   const busy = chips.some((c) => c.pending);
 
-  const submit = () => {
+  const submit = (said: string = text) => {
     /* Sending mid-upload would send the message without the file it was about
        — the path does not exist until the upload answers. */
     if (send.isPending || disabled || busy) return;
     const images = chips.flatMap((c) => (c.image ? [c.image] : []));
     const named = chips.filter((c) => c.path).map((c) => c.path).join("\n");
-    const message = [text.trim(), named].filter(Boolean).join("\n\n");
+    const message = [said.trim(), named].filter(Boolean).join("\n\n");
     if (!message && images.length === 0) return;
 
     onEcho(message, images);
@@ -324,6 +333,14 @@ export function Composer({
     setChips([]);
     held.current = 0;
   };
+
+  /* Send, pressed while still talking. Not a refusal and not a race: the last
+     words are still arriving, so dictation is asked to settle and hands back
+     the finished text. Sending `text` here instead would send the sentence
+     minus whatever was in flight, which is the failure nobody would report as
+     a bug — they would just re-type the end of the sentence and think nothing
+     of it. */
+  const say = () => (listening ? voice.stop((said) => submit(said)) : submit());
 
   /* Pressing stop asks the agent to end the turn; the turn ending is what says
      it worked, so the button waits on that rather than on the request it sent.
@@ -359,6 +376,9 @@ export function Composer({
     <div className="shrink-0 px-8 pb-6">
       <div className="mx-auto w-full max-w-[46rem]">
         <AccountNotice />
+        {voice.blocked && (
+          <VoiceDialog blocked={voice.blocked} onDismiss={voice.dismiss} onConfigure={voice.configure} />
+        )}
         {refused && (
           <div className="mb-2 flex items-center gap-2 text-meta text-brick">
             <X className="h-3.5 w-3.5" strokeWidth={2} />
@@ -430,7 +450,7 @@ export function Composer({
             rows={1}
             value={text}
             disabled={disabled}
-            onChange={(e) => setText(e.target.value)}
+            onChange={(e) => voice.typed(e.target.value)}
             onPaste={(e) => e.clipboardData.files.length && take(e.clipboardData.files)}
             onKeyDown={(e) => {
               if (suggestions.length > 0) {
@@ -441,7 +461,7 @@ export function Composer({
               }
               if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();
-                submit();
+                say();
               }
             }}
             placeholder={
@@ -455,6 +475,8 @@ export function Composer({
               <Paperclip className="h-4 w-4" strokeWidth={1.75} />
               <input type="file" multiple className="hidden" onChange={(e) => take(e.target.files)} />
             </label>
+
+            {voice.possible && <Mic state={voice.state} onStart={voice.start} onStop={voice.stop} />}
 
             {offered.map((c) => (
               <Picker
@@ -489,7 +511,7 @@ export function Composer({
               </button>
             ) : (
               <button
-                onClick={submit}
+                onClick={say}
                 disabled={disabled || busy || (!text.trim() && chips.length === 0)}
                 title={busy ? "Waiting for the files" : "Send"}
                 className="ml-auto grid h-8 w-8 place-items-center rounded-full bg-bone text-ground transition-opacity duration-150 hover:opacity-90 disabled:bg-raise disabled:text-mute"
@@ -501,12 +523,26 @@ export function Composer({
         </div>
 
         <div className="mt-2 flex items-center gap-3 px-1 text-micro text-mute">
-          <span className="flex items-center gap-1">
-            <span className="keycap">⏎</span> send
-          </span>
-          <span className="flex items-center gap-1">
-            <span className="keycap">⇧⏎</span> new line
-          </span>
+          {/* While it listens the two keys are unchanged and already known, and
+              the one thing worth the space is how to make it stop. */}
+          {listening ? (
+            <span className="text-dim">
+              {voice.state.at === "connecting"
+                ? "Connecting…"
+                : voice.state.at === "settling"
+                  ? "Finishing what you said…"
+                  : "Listening — click to stop"}
+            </span>
+          ) : (
+            <>
+              <span className="flex items-center gap-1">
+                <span className="keycap">⏎</span> send
+              </span>
+              <span className="flex items-center gap-1">
+                <span className="keycap">⇧⏎</span> new line
+              </span>
+            </>
+          )}
           {conversation.limits && conversation.limits.status !== "allowed" && (
             <span className="ml-auto text-ember-soft">{conversation.limits.window}: {conversation.limits.status}</span>
           )}

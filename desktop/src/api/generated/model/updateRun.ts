@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.36.2
+ * OpenAPI spec version: 0.38.1
  */
 import type { RunState } from './runState.ts';
 import type { Targets } from './targets.ts';
