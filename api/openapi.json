@@ -10,7 +10,7 @@
       "name": "AGPL-3.0-only",
       "identifier": "AGPL-3.0-only"
     },
-    "version": "0.36.2"
+    "version": "0.38.1"
   },
   "paths": {
     "/api/v1/agent-accounts": {
@@ -5168,6 +5168,103 @@
           }
         }
       }
+    },
+    "/api/v1/voice": {
+      "get": {
+        "tags": [
+          "voice"
+        ],
+        "summary": "Whether dictation can be used here, and whether you can fix it if not.",
+        "description": "[`vault::Vault::holds`] rather than a read: this is a screen asking whether\na button should work, and it decrypts nothing and writes no log line. A\nmicrophone drawn on every composer must not cost an audit entry each time\none opens.",
+        "operationId": "voice_state",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VoiceState"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/voice/key": {
+      "put": {
+        "tags": [
+          "voice"
+        ],
+        "summary": "Hold a key for this install, or replace the one held.",
+        "operationId": "set_voice_key",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetVoiceKey"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/voice/ticket": {
+      "post": {
+        "tags": [
+          "voice"
+        ],
+        "summary": "Mint one, for one connection.",
+        "operationId": "voice_ticket",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VoiceTicket"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "No key held, or OpenAI refused it",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -8918,6 +9015,18 @@
           }
         }
       },
+      "SetVoiceKey": {
+        "type": "object",
+        "required": [
+          "key"
+        ],
+        "properties": {
+          "key": {
+            "type": "string",
+            "description": "The OpenAI key. Replaces whatever is there; the old one is not recoverable."
+          }
+        }
+      },
       "SetupState": {
         "type": "object",
         "description": "Which parts of setting up are still outstanding.\n\nRead before anything else, so the interface knows whether to show the\nwizard, and how much of it.",
@@ -10392,6 +10501,47 @@
           "rootKey": {
             "type": "string",
             "description": "Where the key that unlocks all of this lives — in words, never the key."
+          }
+        }
+      },
+      "VoiceState": {
+        "type": "object",
+        "description": "What dictation knows about itself before anybody presses anything.",
+        "required": [
+          "configured",
+          "mayConfigure"
+        ],
+        "properties": {
+          "configured": {
+            "type": "boolean",
+            "description": "A key is held. Not whether it works — that is only known by using it."
+          },
+          "mayConfigure": {
+            "type": "boolean",
+            "description": "Whether this person may set or replace it. Administrators only."
+          }
+        }
+      },
+      "VoiceTicket": {
+        "type": "object",
+        "description": "A credential for one connection, with about a minute to use it.",
+        "required": [
+          "value",
+          "expiresAt",
+          "session"
+        ],
+        "properties": {
+          "expiresAt": {
+            "type": "string",
+            "description": "When it stops being usable, RFC 3339. Only the connection has to happen\nbefore this; the session it opens outlives it."
+          },
+          "session": {
+            "type": "object",
+            "description": "The `session.update` the client is to send once connected, verbatim.\n\nHanded over rather than left to the client to compose, so that the\nsettings stay decided in one place — this file — even though it is the\nbrowser that sends them. The client echoes; it does not author.\n\nSent at all because the documented transcription flow configures the\nsession after connecting, and whether a pre-configured ephemeral token\nalso suffices is not something the documentation commits to. Sending it\nis idempotent and costs one small frame; not sending it risks the\nfailure that looks like nothing at all — audio going up, no words\ncoming back, every layer apparently healthy."
+          },
+          "value": {
+            "type": "string",
+            "description": "The ephemeral client secret, `ek_…`. Not the key, and not a secret this\ninstall stores: it is minted, handed over and forgotten."
           }
         }
       },

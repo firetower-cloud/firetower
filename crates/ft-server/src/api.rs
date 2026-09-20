@@ -28,6 +28,7 @@ mod terminal;
 mod trackers;
 mod updates;
 mod users;
+mod voice;
 
 // `providers` on its own is the module below, which is this crate's git-host
 // screen rather than the git hosts themselves.
@@ -368,6 +369,9 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(events::list_events))
         .routes(routes!(events::stream_events))
         .routes(routes!(terminal::session_pty))
+        .routes(routes!(voice::voice_state))
+        .routes(routes!(voice::set_voice_key))
+        .routes(routes!(voice::voice_ticket))
         .routes(routes!(sessions::list_files))
         .routes(routes!(sessions::find_files))
         .routes(routes!(sessions::download_file))

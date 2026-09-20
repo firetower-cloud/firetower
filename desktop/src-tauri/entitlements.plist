@@ -5,5 +5,13 @@
   <!-- Hardened runtime, with only what the app does: talk to servers. -->
   <key>com.apple.security.network.client</key>
   <true/>
+  <!-- Dictation. Under the hardened runtime this is not a prompt that can be
+       declined and worked around: without the entitlement the process is
+       terminated the moment it touches the microphone, so the failure looks
+       like a crash rather than like a permission. `Info.plist` carries the
+       sentence macOS shows when it asks; both are required, and each is
+       useless without the other. -->
+  <key>com.apple.security.device.audio-input</key>
+  <true/>
 </dict>
 </plist>

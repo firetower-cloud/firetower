@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- Merged into the bundle's own Info.plist by Tauri, which picks this file
+       up from `src-tauri/` by name. There is no field in `tauri.conf.json`
+       for it.
+
+       The words matter: this is the whole of the system dialog, shown once,
+       and "Firetower would like to access the microphone" with no reason is
+       the kind of prompt people decline by reflex. It says what is listened
+       to, when, and what comes of it. -->
+  <key>NSMicrophoneUsageDescription</key>
+  <string>Firetower listens only while you hold the microphone button in the composer, to write what you say into the agent's prompt.</string>
+</dict>
+</plist>
