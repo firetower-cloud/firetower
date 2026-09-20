@@ -219,7 +219,18 @@ export function useVoice({
         level = Math.max(peak, level * 0.82);
         if (wire.current) wire.current.send(pcm);
         else if (early.current.length < EARLIEST) early.current.push(pcm);
-        setState((was) => (was.at === "listening" ? { ...was, level: Math.min(1, level * 1.6) } : was));
+        setState((was) =>
+          was.at === "listening"
+            ? /* `hearing` comes off the audio, not off the model. The
+                 transcription session runs with turn detection disabled — this
+                 model refuses it — so `speech_started` and `speech_stopped`
+                 are never sent, and a meter waiting on them would sit dim
+                 through an entire sentence. The worklet's own peak is a better
+                 source anyway: it is the same audio being transcribed, so the
+                 bars cannot disagree with the words. */
+              { ...was, level: Math.min(1, level * 1.6), hearing: level > 0.04 }
+            : was,
+        );
       });
     } catch (e) {
       setState(quiet);

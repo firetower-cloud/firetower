@@ -1,13 +1,18 @@
 /**
  * Putting speech into a box somebody is still typing in.
  *
- * The naive version appends deltas and is wrong twice over.
+ * **A delta is a fragment, not a transcript.** Confirmed against the live API
+ * rather than assumed: four seconds of speech arrives as eighteen events
+ * reading `" Ref"`, `"actor"`, `" the"`, `" vault"`, … — word pieces, which
+ * the client joins. This file previously had it the other way round, on the
+ * reasoning that a transcription model revises itself as it hears more; with
+ * that mistake in place a whole dictated sentence rendered as `"."`, the last
+ * fragment, because each delta overwrote the one before it.
  *
- * **A delta is a revision, not an addition.** `gpt-4o-transcribe` re-reads its
- * own segment as it hears more of it: "write a test for" becomes "write a test
- * for the parser" becomes "rewrite the test for the parser". Appending those
- * three gives you all three, run together. So a delta *replaces* the live
- * segment; only a completed segment is ever added to.
+ * The authoritative text still arrives at the end. `.completed` carries the
+ * whole transcript, properly capitalised and punctuated, and it *replaces*
+ * what the fragments built — so a disagreement between the two is settled by
+ * the model rather than by string concatenation here.
  *
  * **The textarea stays editable.** Dictation does not lock the box — you will
  * want to fix a word while still talking, and software that forbids it is
@@ -34,7 +39,7 @@ export type Run = {
   after: string;
   /** Segments the model has finished with. Never revised again. */
   settled: string;
-  /** The segment still being revised. Replaced wholesale by every delta. */
+  /** Fragments since the last completed transcript, joined as they arrive. */
   live: string;
 };
 
@@ -44,9 +49,23 @@ export function open(text: string, caret: number): Run {
   return { before: text.slice(0, at), after: text.slice(at), settled: "", live: "" };
 }
 
-/** The dictated words, settled and live, as one string. */
+/**
+ * The dictated words, settled and live, as one string.
+ *
+ * Trimmed, because fragments carry their own spacing — the first is `" Ref"`,
+ * with a leading space — and that space is the model's business, not the
+ * composer's. Only the ends are touched, so the spacing *between* fragments,
+ * which is the spacing between words, is left exactly as it arrived.
+ */
 export function spoken(run: Run): string {
-  return [run.settled, run.live].filter(Boolean).join(" ");
+  const parts = [run.settled, run.live].filter(Boolean);
+  if (parts.length < 2) return (parts[0] ?? "").trim();
+  const [done, saying] = parts;
+  /* One space between them, and only if neither side brought one. A settled
+     transcript ends in a full stop and the fragment after it opens with a
+     space of its own, so joining unconditionally puts two there. */
+  const gap = /\s$/.test(done) || /^\s/.test(saying) ? "" : " ";
+  return `${done}${gap}${saying}`.trim();
 }
 
 /**
@@ -87,10 +106,19 @@ function tip(run: Run): number {
   return run.before.length + lead + spoken(run).length;
 }
 
-/** A delta: the live segment, revised. */
-export const withDelta = (run: Run, text: string): Run => ({ ...run, live: text });
+/** A delta: one more fragment on the end of what is being said. */
+export const withDelta = (run: Run, fragment: string): Run => ({
+  ...run,
+  live: run.live + fragment,
+});
 
-/** A segment the model has finished. It joins `settled` and stops moving. */
+/**
+ * A transcript the model has finished with.
+ *
+ * It replaces the fragments rather than joining them, which is why `live` is
+ * cleared in the same breath: the completed text *is* those fragments, tidied.
+ * Appending it would say everything twice.
+ */
 export const withSegment = (run: Run, text: string): Run => ({
   ...run,
   settled: [run.settled, text.trim()].filter(Boolean).join(" "),

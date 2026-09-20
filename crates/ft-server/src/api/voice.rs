@@ -184,15 +184,18 @@ fn session() -> serde_json::Value {
                     "format": { "type": "audio/pcm", "rate": 24_000 },
                     "noise_reduction": { "type": "near_field" },
                     "transcription": { "model": MODEL, "prompt": VOCABULARY },
-                    // The model decides where one thing said ends and the next
-                    // begins. Doing it here would mean a second voice detector
-                    // disagreeing with the one already running.
-                    "turn_detection": {
-                        "type": "server_vad",
-                        "threshold": 0.5,
-                        "prefix_padding_ms": 300,
-                        "silence_duration_ms": 500
-                    }
+                    /* Off, because this model refuses it outright: asking for
+                       `server_vad` comes back "Turn detection is not supported
+                       for this transcription model."
+
+                       Which suits dictation anyway. Automatic turn detection
+                       exists to decide where one *utterance* ends so the next
+                       can begin; a person dictating a prompt is composing one
+                       thing and decides themselves when it is finished, by
+                       pressing stop. That press is the commit
+                       (`input_audio_buffer.commit`), and the commit is what
+                       produces the final transcript. */
+                    "turn_detection": null
                 }
             }
         }
