@@ -8,8 +8,13 @@
  * directly with its own token, and the answers are merged here rather than in
  * a cache that has no server dimension.
  *
- * Polled, not streamed, and that is acceptable *here* and nowhere else: the
- * merged inbox is a glance, and each server's own screen is on its stream.
+ * Polled on a slow tick, and stirred by the stream. The sweep is the floor —
+ * it catches servers with no socket, reconnects, and anything the stream did
+ * not carry — but a ten-second floor is the whole of the lag between the rail
+ * and the island. They are drawn in the same window from different sources:
+ * the rail reads a cache that `applyEvent` keeps fresh frame by frame, while
+ * the island is drawn from this, and so changed colour up to ten seconds
+ * after the row behind it did. `stirFleet` closes that gap.
  */
 import { useEffect, useState } from "react";
 import type { Session } from "~/api/generated/model";
@@ -62,6 +67,39 @@ async function ask(s: Connected) {
     known.set(s.serverId, { sessions: known.get(s.serverId)?.sessions ?? [], error: String((e as Error)?.message ?? e) });
   }
   changed();
+}
+
+/**
+ * Ask one server now, because its stream said something worth asking about.
+ *
+ * Called from the socket, which knows a status changed before any sweep
+ * would. It re-reads that one server rather than patching the event into the
+ * held list: the list is what the screens render, an event is a fact about
+ * one session, and reconciling the two here would be a second, worse copy of
+ * `applyEvent`. One request against a server that just spoke is cheap.
+ *
+ * Throttled on the leading edge: the first event is answered immediately,
+ * which is the point, and the rest of a burst collapses into at most one more
+ * sweep when the window closes. A session finishing emits several events in
+ * quick succession and they all say the same thing about the fleet.
+ */
+const cooling = new Set<string>();
+const again = new Set<string>();
+
+export function stirFleet(serverId: string): void {
+  if (cooling.has(serverId)) {
+    again.add(serverId);
+    return;
+  }
+  cooling.add(serverId);
+
+  const now = servers().find((s) => s.serverId === serverId);
+  if (now) void ask(now);
+
+  setTimeout(() => {
+    cooling.delete(serverId);
+    if (again.delete(serverId)) stirFleet(serverId);
+  }, 400);
 }
 
 let ticking: ReturnType<typeof setInterval> | undefined;
