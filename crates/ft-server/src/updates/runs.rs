@@ -40,6 +40,12 @@ const UPDATER_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 const RECREATE_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 /// After a restart, how long the updater has to answer about the job.
 const RESUME_TIMEOUT: Duration = Duration::from_secs(5 * 60);
+/// How many times a step is walked into before a run gives up on it.
+///
+/// Only reached by restarting in the middle of the same step that many times,
+/// which is a control plane that cannot stay up rather than an upgrade that
+/// cannot be done.
+const MOST_ATTEMPTS: i32 = 3;
 
 /// The steps a run has, in order.
 pub fn steps_for(
@@ -370,20 +376,50 @@ async fn backup(state: &AppState, run: &Run, log: &Log) -> Result<String> {
 
 async fn upgrade_updater(state: &AppState, run: &Run, log: &Log) -> Result<String> {
     let updater = updater(state)?;
-    let before = updater.status().await?;
+    let started = std::time::Instant::now();
+
+    // What it is now — waited for rather than demanded. This step can be
+    // walked into a second time, after the control plane was replaced part
+    // way through it, and the updater may be being recreated at that very
+    // moment by the job the first attempt asked for.
+    let before = loop {
+        match updater.status().await {
+            Ok(status) => break status,
+            Err(e) => {
+                if started.elapsed() > UPDATER_TIMEOUT {
+                    return Err(e).context("the updater never answered");
+                }
+                tokio::time::sleep(Duration::from_secs(3)).await;
+            }
+        }
+    };
     if version::parse(&before.version).as_ref() == version::parse(&run.to_version).as_ref() {
         return Ok(format!("already {}", before.version));
     }
 
-    let job = updater
-        .start(JobKind::UpgradeUpdater {
-            version: run.to_version.clone(),
-        })
-        .await?;
-    log.say(&format!("updater job {}: recreating the updater", job.id))
-        .await;
+    // A job already in flight is this run's own, from before the restart.
+    // Asking for a second recreate would be refused as a conflict anyway, and
+    // the one that is running is the one to watch.
+    let job = match before.busy.clone() {
+        Some(id) => {
+            log.say(&format!(
+                "the updater is already on job {id}; waiting for it"
+            ))
+            .await;
+            id
+        }
+        None => {
+            let job = updater
+                .start(JobKind::UpgradeUpdater {
+                    version: run.to_version.clone(),
+                })
+                .await?;
+            log.say(&format!("updater job {}: recreating the updater", job.id))
+                .await;
+            job.id
+        }
+    };
 
-    let started = std::time::Instant::now();
     let mut seen = 0;
     loop {
         tokio::time::sleep(Duration::from_secs(3)).await;
@@ -398,7 +434,7 @@ async fn upgrade_updater(state: &AppState, run: &Run, log: &Log) -> Result<Strin
             }
             Ok(_) => {
                 // Still the old one: read the job for a failure.
-                if let Ok(Some(job)) = updater.job(&job.id.0).await {
+                if let Ok(Some(job)) = updater.job(&job.0).await {
                     for line in &job.log[seen.min(job.log.len())..] {
                         log.say(line).await;
                     }
@@ -561,6 +597,22 @@ async fn upgrade_host(
         .context("reinstalling the worker")?;
     log.say_all(&said, "").await;
 
+    // The installer replaces the file. It cannot replace the process.
+    //
+    // The worker answering right now was started from the old binary and is
+    // holding the ssh connection open, so it goes on reporting the old
+    // version for as long as that connection lasts — and nothing else ends
+    // it. Without this the step reinstalled the worker perfectly and then
+    // waited out its whole timeout for a handshake that was never going to
+    // change, which is every worker upgrade that has ever been asked for.
+    //
+    // Dropping it is the ordinary reconnect path, not a special one: tmux
+    // keeps the sessions, the supervisor redials immediately, and sshd starts
+    // what is now on disk.
+    log.say("dropping the connection so the worker restarts on the new binary")
+        .await;
+    state.fleet.disconnect(&id).await;
+
     log.say("waiting for the worker to reconnect").await;
     let started = std::time::Instant::now();
     loop {
@@ -649,8 +701,43 @@ pub async fn resume(state: AppState) {
                     }
                 });
             }
+            // Every other step is re-enterable, so a restart in the middle of
+            // one is picked up rather than thrown away. Preflight only looks;
+            // a backup takes another dump; the updater step asks the updater
+            // what version it is now and does nothing if that is already the
+            // one wanted; a host step reinstalls a worker that is by then
+            // often already installed. Failing the whole run here is what
+            // turned a control plane restarting for its own reasons — which
+            // this module exists to survive — into an upgrade that could not
+            // be finished.
+            Some(step) if step.attempts < MOST_ATTEMPTS => {
+                tracing::info!(
+                    run = %run.id,
+                    step = %step.target,
+                    attempts = step.attempts,
+                    "the control plane restarted during this step; picking it up again"
+                );
+                let log = Log {
+                    store: store.clone(),
+                    run_id: run.id.clone(),
+                    position: step.position,
+                };
+                log.say("the control plane restarted here; picking this step up again")
+                    .await;
+                if let Err(e) = store.restart_step(&run.id, step.position).await {
+                    tracing::warn!(run = %run.id, "putting the step back: {e:#}");
+                    continue;
+                }
+                spawn(state.clone(), run.id.clone()).await;
+            }
+            // Tried enough. A control plane that dies every time it reaches
+            // this step would otherwise retry it on every start for ever.
             Some(step) => {
-                let said = "the control plane restarted in the middle of this step".to_string();
+                let said = format!(
+                    "the control plane restarted during this step {} times; \
+                     it is not being tried again",
+                    step.attempts
+                );
                 tracing::warn!(run = %run.id, step = %step.target, "{said}");
                 let _ = store
                     .end_step(

@@ -138,10 +138,29 @@ impl Reporter {
     fn finish(&self, state: JobState, error: Option<String>) {
         self.edit(|job| {
             job.state = state;
-            job.error = error.map(|e| redact(&e));
+            // `None` means "nothing to add", not "forget what was said". A
+            // rollback records why it rolled back and then finishes without
+            // an error of its own, because rolling back is what it was for.
+            if let Some(error) = error {
+                job.error = Some(redact(&error));
+            }
             job.finished_at = Some(chrono::Utc::now());
         });
     }
+}
+
+/// Where a failed control-plane upgrade goes back to: the service to recreate,
+/// the tag to re-point at the image it was on, and that image.
+///
+/// One value rather than four arguments — they are only ever passed together,
+/// and getting the repository and the tag the wrong way round would re-tag
+/// somebody's control plane image with a name that is not its own.
+#[derive(Clone, Copy)]
+struct Rollback<'a> {
+    service: &'a str,
+    repo: &'a str,
+    tag: &'a str,
+    previous: &'a str,
 }
 
 impl Jobs {
@@ -363,15 +382,40 @@ impl Jobs {
         }
 
         say.step("recreate");
+
+        // Everything that can be found out before the handover, before it:
+        // once the helper is started this process is gone, and nothing is
+        // left to report what went wrong. Fetching the image and creating the
+        // container are the two steps that can fail for ordinary reasons — a
+        // registry that cannot be reached, a name already taken — and both
+        // are done here, where a failure is still this job's to report.
+        //
+        // The image especially. Nothing else pulls it before this point: the
+        // control-plane step does, and that comes after, so on the first
+        // upgrade of any install it is not on the machine. Creating a
+        // container from an image that is not there is a 404 — which used to
+        // be discarded with the rest of the handover, leaving the control
+        // plane to wait out its timeout against an updater that had never
+        // been asked to do anything.
+        self.fetch_helper_image(say).await?;
+
+        let spec = self.helper_spec(&self.site.service);
+        let name = self.helper_name(say);
+        let _ = self.docker.remove(&name).await;
+        let helper_id = self
+            .docker
+            .create(spec, &name)
+            .await
+            .context("creating the helper container that recreates the updater")?;
+
         say.say("handing over to Compose — this updater goes away here and the new one answers");
         // Not waited for: the helper replaces this process. The new updater
         // removes the helper when it starts.
-        let spec = self.helper_spec(&self.site.service);
         let docker = self.docker.clone();
-        let name = self.helper_name(say);
         tokio::spawn(async move {
-            let _ = docker.remove(&name).await;
-            let _ = docker.run_to_completion(spec, &name).await;
+            if let Err(e) = docker.start(&helper_id).await {
+                tracing::error!("starting the helper container: {e:#}");
+            }
         });
         Ok(JobState::Running)
     }
@@ -426,11 +470,15 @@ impl Jobs {
             say.done("already on that image; nothing to recreate");
             return Ok(JobState::Done);
         }
+        let back_to = Rollback {
+            service: &service,
+            repo: &repo,
+            tag: &tag,
+            previous: &current.image_id,
+        };
         if let Err(e) = self.compose_up(say, &service).await {
             say.failed(format!("{e:#}"));
-            return self
-                .roll_back(say, &service, &repo, &tag, &current.image_id, &written)
-                .await;
+            return self.roll_back(say, &back_to, &written, &e).await;
         }
         say.done("Compose recreated it");
 
@@ -442,8 +490,7 @@ impl Jobs {
             }
             Err(e) => {
                 say.failed(format!("{e:#}"));
-                self.roll_back(say, &service, &repo, &tag, &current.image_id, &written)
-                    .await
+                self.roll_back(say, &back_to, &written, &e).await
             }
         }
     }
@@ -453,12 +500,20 @@ impl Jobs {
     async fn roll_back(
         &self,
         say: &Reporter,
-        service: &str,
-        repo: &str,
-        tag: &str,
-        previous: &str,
+        back_to: &Rollback<'_>,
         written: &[(String, Option<String>)],
+        why: &anyhow::Error,
     ) -> Result<JobState> {
+        let Rollback {
+            service,
+            repo,
+            tag,
+            previous,
+        } = *back_to;
+        // The job's error, not only the step's. Without it the control plane
+        // reported "rolled back to 0.39.0:" and stopped — the one thing the
+        // person reading it needs is the half that was missing.
+        say.edit(|job| job.error = Some(redact(&format!("{why:#}"))));
         say.step("roll back");
         say.say(format!("putting {} back as {repo}:{tag}", short(previous)));
         self.restore(say, written);
@@ -520,13 +575,33 @@ impl Jobs {
         Ok(image.id)
     }
 
-    async fn compose_up(&self, say: &Reporter, service: &str) -> Result<()> {
+    /// Make sure the image the helper runs from is on the machine.
+    ///
+    /// Pulled, because it may not be here at all — nothing else fetches it,
+    /// and the first upgrade of an install finds it missing. But a copy that
+    /// is already here is good enough: the tag is pinned to a major, so a
+    /// refresh changes nothing an upgrade depends on, and a registry that is
+    /// rate-limiting or unreachable is not a reason to refuse to upgrade a
+    /// deployment that has everything it needs. Seen as a Docker Hub token
+    /// endpoint failing for twenty seconds, mid-upgrade, which rolled the
+    /// control plane back for no reason at all.
+    async fn fetch_helper_image(&self, say: &Reporter) -> Result<()> {
         let helper = helper_image();
         let (repo, tag) = split_reference(&helper);
-        self.docker
-            .pull(&repo, &tag, |_| {})
-            .await
-            .with_context(|| format!("fetching the helper image {helper}"))?;
+        let Err(e) = self.docker.pull(&repo, &tag, |_| {}).await else {
+            return Ok(());
+        };
+        if self.docker.inspect_image(&helper).await.is_ok() {
+            say.say(format!(
+                "could not reach the registry for {helper} ({e:#}); using the copy already here"
+            ));
+            return Ok(());
+        }
+        Err(e).with_context(|| format!("fetching the helper image {helper}"))
+    }
+
+    async fn compose_up(&self, say: &Reporter, service: &str) -> Result<()> {
+        self.fetch_helper_image(say).await?;
 
         let spec = self.helper_spec(service);
         // A name of its own per attempt, and cleared first: a helper the
@@ -1085,5 +1160,271 @@ mod tests {
                 }
             }
         });
+    }
+
+    // ── the handover to Compose ────────────────────────────────────────
+    //
+    // A fake daemon, because the thing worth testing is an order: what the
+    // updater finds out *before* it starts the container that replaces it.
+    // After that start there is no process left to report anything, so a
+    // failure that arrives late arrives nowhere — which is what a missing
+    // helper image used to be.
+
+    use std::sync::{Arc, Mutex};
+
+    /// Every request the updater made, in order, as "METHOD /path".
+    type Seen = Arc<Mutex<Vec<String>>>;
+
+    /// Answers the handful of endpoints `upgrade_self` asks for.
+    ///
+    /// `create_fails` makes `POST /containers/create` a 404, which is exactly
+    /// what the daemon says when the image is not on the machine.
+    /// What the fake daemon should go wrong at, if anything.
+    #[derive(Clone, Copy, Default)]
+    struct Awkward {
+        /// `POST /containers/create` 404s, as it does for a missing image.
+        create_fails: bool,
+        /// Pulling the helper image fails, as a rate-limited registry does.
+        helper_pull_fails: bool,
+    }
+
+    async fn fake_daemon(
+        seen: Seen,
+        awkward: Awkward,
+    ) -> (crate::docker::Docker, tempfile::TempDir) {
+        use http_body_util::Full;
+        use hyper::body::Bytes;
+        use hyper::{Request, Response};
+
+        let dir = tempfile::tempdir().unwrap();
+        let socket = dir.path().join("docker.sock");
+        let listener = tokio::net::UnixListener::bind(&socket).unwrap();
+
+        tokio::spawn(async move {
+            loop {
+                let Ok((stream, _)) = listener.accept().await else {
+                    return;
+                };
+                let seen = seen.clone();
+                tokio::spawn(async move {
+                    let service =
+                        hyper::service::service_fn(move |req: Request<hyper::body::Incoming>| {
+                            let seen = seen.clone();
+                            async move {
+                                // Path and query only: the client builds an
+                                // absolute URI, and what matters here is the
+                                // endpoint it asked for.
+                                let path = req
+                                    .uri()
+                                    .path_and_query()
+                                    .map(|p| p.as_str().to_string())
+                                    .unwrap_or_default();
+                                seen.lock()
+                                    .unwrap()
+                                    .push(format!("{} {}", req.method(), path));
+
+                                let (status, body) = answer(req.method(), &path, awkward);
+                                Ok::<_, std::convert::Infallible>(
+                                    Response::builder()
+                                        .status(status)
+                                        .header("content-type", "application/json")
+                                        .body(Full::new(Bytes::from(body)))
+                                        .unwrap(),
+                                )
+                            }
+                        });
+                    let _ = hyper::server::conn::http1::Builder::new()
+                        .serve_connection(hyper_util::rt::TokioIo::new(stream), service)
+                        .await;
+                });
+            }
+        });
+
+        (crate::docker::Docker::at(socket), dir)
+    }
+
+    fn answer(method: &hyper::Method, path: &str, awkward: Awkward) -> (u16, String) {
+        // The updater's own container, as Compose labelled it.
+        let me = serde_json::json!({
+            "Id": "updater-container",
+            "Name": "/firetower-updater-1",
+            "Image": "sha256:old",
+            "Config": {
+                "Image": "ghcr.io/firetower-cloud/firetower-updater:latest",
+                "Labels": {
+                    "com.docker.compose.project": "firetower",
+                    "com.docker.compose.service": "updater",
+                }
+            },
+            "State": {"Running": true}
+        });
+
+        if path.starts_with("/containers/json") {
+            return (
+                200,
+                serde_json::json!([{"Id": "updater-container"}]).to_string(),
+            );
+        }
+        if path.starts_with("/containers/updater-container/json") {
+            return (200, me.to_string());
+        }
+        if path.starts_with("/images/create") {
+            // The daemon answers 200 and puts the failure in the stream.
+            if awkward.helper_pull_fails && path.contains("fromImage=docker&") {
+                return (
+                    200,
+                    r#"{"error":"failed to fetch anonymous token: 429 Too Many Requests"}"#
+                        .to_string(),
+                );
+            }
+            return (200, r#"{"status":"Downloaded newer image"}"#.to_string());
+        }
+        if path.starts_with("/images/") && path.ends_with("/json") {
+            return (
+                200,
+                serde_json::json!({
+                    "Id": "sha256:new",
+                    "RepoDigests": ["ghcr.io/firetower-cloud/firetower-updater@sha256:new"],
+                    "Config": {"Labels": {"org.opencontainers.image.version": "0.39.0"}}
+                })
+                .to_string(),
+            );
+        }
+        if method == hyper::Method::POST && path.starts_with("/containers/create") {
+            return if awkward.create_fails {
+                (
+                    404,
+                    r#"{"message":"No such image: docker:28-cli"}"#.to_string(),
+                )
+            } else {
+                (201, r#"{"Id":"helper-container"}"#.to_string())
+            };
+        }
+        if method == hyper::Method::DELETE {
+            return (204, String::new());
+        }
+        if path.ends_with("/start") {
+            return (204, String::new());
+        }
+        (200, "{}".to_string())
+    }
+
+    fn jobs_for(docker: crate::docker::Docker) -> (Jobs, Reporter) {
+        let site = crate::site::Site {
+            project: "firetower".into(),
+            service: "updater".into(),
+            deploy_dir: "/opt/firetower".into(),
+            config_files: vec!["/opt/firetower/firetower.yml".into()],
+            mount: std::path::PathBuf::from("/deploy"),
+        };
+        let jobs = Jobs::new(docker, site);
+        let reporter = Reporter {
+            id: JobId("test".into()),
+            held: jobs.held.clone(),
+        };
+        jobs.held.lock().unwrap().insert(
+            "test".into(),
+            Job {
+                id: JobId("test".into()),
+                kind: JobKind::UpgradeUpdater {
+                    version: "0.39.0".into(),
+                },
+                state: JobState::Running,
+                steps: Vec::new(),
+                log: Vec::new(),
+                error: None,
+                previous_image: None,
+                image: None,
+                created_at: chrono::Utc::now(),
+                finished_at: None,
+            },
+        );
+        (jobs, reporter)
+    }
+
+    /// Nothing else pulls the helper image before this point — the
+    /// control-plane step does, and that runs afterwards — so on the first
+    /// upgrade of any install it is not on the machine. Creating a container
+    /// from an image that is not there is a 404, and this used to be thrown
+    /// away along with the rest of the handover.
+    #[tokio::test]
+    async fn the_helper_image_is_fetched_before_the_container_that_runs_it() {
+        let seen: Seen = Default::default();
+        let (docker, _dir) = fake_daemon(seen.clone(), Awkward::default()).await;
+        let (jobs, say) = jobs_for(docker);
+
+        jobs.upgrade_self(&say, "0.39.0").await.unwrap();
+
+        let asked = seen.lock().unwrap().clone();
+        let pulled_helper = asked
+            .iter()
+            .position(|r| r.contains("/images/create") && r.contains("fromImage=docker"))
+            .expect("the helper image is pulled");
+        let created = asked
+            .iter()
+            .position(|r| r.contains("POST /containers/create"))
+            .expect("the helper container is created");
+        assert!(
+            pulled_helper < created,
+            "the image has to be there before the container is made: {asked:#?}"
+        );
+    }
+
+    /// And when it still cannot be made, that is this job's failure to report
+    /// — not silence for the control plane to wait out.
+    #[tokio::test]
+    async fn a_helper_that_cannot_be_made_fails_the_job() {
+        let seen: Seen = Default::default();
+        let (docker, _dir) = fake_daemon(
+            seen.clone(),
+            Awkward {
+                create_fails: true,
+                ..Default::default()
+            },
+        )
+        .await;
+        let (jobs, say) = jobs_for(docker);
+
+        let outcome = jobs.upgrade_self(&say, "0.39.0").await;
+        let said = format!("{:#}", outcome.unwrap_err());
+        assert!(
+            said.contains("helper container"),
+            "it should say what could not be made: {said}"
+        );
+
+        // And the start is never reached, so nothing replaced this process.
+        let asked = seen.lock().unwrap().clone();
+        assert!(
+            !asked.iter().any(|r| r.ends_with("/start")),
+            "nothing should have been started: {asked:#?}"
+        );
+    }
+
+    /// A registry that will not answer is not a reason to refuse an upgrade
+    /// whose helper image is already on the machine. Docker Hub's token
+    /// endpoint failing for twenty seconds, mid-upgrade, rolled a control
+    /// plane back for nothing.
+    #[tokio::test]
+    async fn a_registry_that_will_not_answer_is_survivable_when_the_image_is_here() {
+        let seen: Seen = Default::default();
+        let (docker, _dir) = fake_daemon(
+            seen.clone(),
+            Awkward {
+                helper_pull_fails: true,
+                ..Default::default()
+            },
+        )
+        .await;
+        let (jobs, say) = jobs_for(docker);
+
+        jobs.upgrade_self(&say, "0.39.0")
+            .await
+            .expect("the copy already here is good enough");
+
+        let asked = seen.lock().unwrap().clone();
+        assert!(
+            asked.iter().any(|r| r.contains("POST /containers/create")),
+            "it should still have made the helper: {asked:#?}"
+        );
     }
 }

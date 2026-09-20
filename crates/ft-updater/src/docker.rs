@@ -243,6 +243,23 @@ impl Docker {
     /// output is read before the container is gone. `AutoRemove` would race
     /// the read.
     pub async fn run_to_completion(&self, spec: Value, name: &str) -> Result<Finished> {
+        let id = self.create(spec, name).await?;
+
+        let outcome = self.drive(&id).await;
+
+        // Whatever happened, the helper does not stay around.
+        let _ = self.remove(&id).await;
+
+        outcome
+    }
+
+    /// Make a container and hand back its id, without starting it.
+    ///
+    /// Separate from starting it because the updater's own recreate cannot
+    /// wait for the helper that does it: everything that can be reported has
+    /// to happen before the start, which is the point this process stops
+    /// existing.
+    pub async fn create(&self, spec: Value, name: &str) -> Result<String> {
         let created: Value = self
             .json(
                 Method::POST,
@@ -251,18 +268,26 @@ impl Docker {
             )
             .await
             .context("creating the helper container")?;
-        let id = created
+        Ok(created
             .get("Id")
             .and_then(Value::as_str)
             .context("created a container without an Id")?
-            .to_string();
+            .to_string())
+    }
 
-        let outcome = self.drive(&id).await;
-
-        // Whatever happened, the helper does not stay around.
-        let _ = self.remove(&id).await;
-
-        outcome
+    /// Start a container that has been made. Already running is not an error.
+    pub async fn start(&self, id: &str) -> Result<()> {
+        let started = self
+            .send(Method::POST, &format!("/containers/{id}/start"), None, None)
+            .await?;
+        if !started.status().is_success() && started.status() != StatusCode::NOT_MODIFIED {
+            let body = read_all(started.into_body()).await?;
+            return Err(anyhow!(
+                "starting the helper container: {}",
+                error_message(&body).unwrap_or_default()
+            ));
+        }
+        Ok(())
     }
 
     /// Remove a container, running or not.
@@ -287,16 +312,7 @@ impl Docker {
     }
 
     async fn drive(&self, id: &str) -> Result<Finished> {
-        let started = self
-            .send(Method::POST, &format!("/containers/{id}/start"), None, None)
-            .await?;
-        if !started.status().is_success() && started.status() != StatusCode::NOT_MODIFIED {
-            let body = read_all(started.into_body()).await?;
-            return Err(anyhow!(
-                "starting the helper container: {}",
-                error_message(&body).unwrap_or_default()
-            ));
-        }
+        self.start(id).await?;
 
         let waited: Value = self
             .json_with(
