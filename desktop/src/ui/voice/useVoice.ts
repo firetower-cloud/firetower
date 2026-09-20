@@ -306,7 +306,7 @@ export function useVoice({
     if (state.at !== "idle") return;
     void (async () => {
       /* Settled before the microphone is touched, even when it costs a request.
-         Taking somebody's microphone — and making macOS ask for it — only to
+         Taking somebody's microphone — and making the system ask for it — only to
          answer "this is not set up" is the wrong order, and it is the order
          this was in: the read above fails silently on an older server, which
          left the answer unknown, and unknown was being treated as yes. */
