@@ -349,18 +349,15 @@
   }
 
   /* Dormant: a nub, not a notification. It is there so there is something to
-     grab and something to right-click, and for no other reason — an island
-     that is fully visible while it has nothing to say is a second loud thing
-     on a screen that is only allowed one. */
-  /* Opacity only. Declaring `transition` here would replace the list above
-     rather than add to it, and the nub would be the one state whose shape
-     snapped — which is exactly what it did. */
-  .island[data-mode="dormant"] {
-    opacity: 0.38;
-  }
-  .island[data-mode="dormant"]:hover {
-    opacity: 1;
-  }
+     grab and something to right-click, and it says nothing by being empty
+     rather than by being faint.
+
+     It used to fade to 0.38, on the argument that a thing with nothing to
+     say should not be fully visible. That is an argument about a
+     notification, and this is not one: docked, the pill is the black the
+     notch is made of, and a translucent nub is a grey smear across the top
+     of the screen with the wallpaper coming through it. The quiet is in
+     having no counters and a grey mark, not in the alpha. */
 
   /* `Mark` carries an ember fill — the one place in the app where ember is
      decoration rather than a signal. On a surface that is on screen all day
