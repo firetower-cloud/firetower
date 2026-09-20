@@ -1,5 +1,53 @@
 # Changelog
 
+## [0.12.0](https://github.com/firetower-cloud/firetower/compare/desktop-v0.11.0...desktop-v0.12.0) (2026-09-20)
+
+
+### Features
+
+* add floating island pill showing session status ([a3cee21](https://github.com/firetower-cloud/firetower/commit/a3cee21d0d6e1dbcbceffa168971a5a79f9461b9))
+* add floating island pill showing session status ([91459bc](https://github.com/firetower-cloud/firetower/commit/91459bc062e3704c2505420600d2756f484cb6d2))
+* add the island—a floating pill for agent status ([855596e](https://github.com/firetower-cloud/firetower/commit/855596e2e127b65a5f878a390a92fdd849d56e46))
+* add the island—a floating pill for agent status ([58e4f30](https://github.com/firetower-cloud/firetower/commit/58e4f3097c4bdea40076a1565aa984d99b71dfd6))
+* **island:** dock to any display, stay open while floating, stop the shuffle ([e7a06d1](https://github.com/firetower-cloud/firetower/commit/e7a06d1a9dce234ac436701498174ad769f038dd))
+* **island:** it writes down the few things that decide whether it exists ([605bcf9](https://github.com/firetower-cloud/firetower/commit/605bcf99b3c86921ee59404248a393249be173a3))
+* **island:** the fleet counted, one glyph and one number per state ([5a7f808](https://github.com/firetower-cloud/firetower/commit/5a7f80874a33be029d6120bc46e50a6dc245c93f))
+* **island:** the same island on Windows ([055d72e](https://github.com/firetower-cloud/firetower/commit/055d72ea5726586db44c0b290c48c08aebe04e5e))
+* one table decides what a status means, and both places read it ([6207633](https://github.com/firetower-cloud/firetower/commit/6207633a939f5885126e2aa0f128c7ef0273add6))
+* the agent marks are the providers' own ([faf00de](https://github.com/firetower-cloud/firetower/commit/faf00de9a86ac878474885164e2be65f0122b9f2))
+* the agent marks are the published ones, not drawn from memory ([75b1f80](https://github.com/firetower-cloud/firetower/commit/75b1f80a007214eb57b3b78079e3ccfaeee7a3a4))
+
+
+### Bug Fixes
+
+* **island:** a drag makes the remembered placement a lie ([2dbb1ef](https://github.com/firetower-cloud/firetower/commit/2dbb1ef24e340955e9baadf7edaf8cfb4c1f8aa7))
+* **island:** a dragged pill keeps hold of the mouse ([08a5cb7](https://github.com/firetower-cloud/firetower/commit/08a5cb7fe263e053b01a0d2c673f1ae70a90ddf2))
+* **island:** a drop anywhere along a bare top edge docks, and a drag always lands ([623bee3](https://github.com/firetower-cloud/firetower/commit/623bee3d52c2e78dde433c886be58c19d087e60f))
+* **island:** a state arriving no longer cuts the ends off the others ([c4515a7](https://github.com/firetower-cloud/firetower/commit/c4515a775f3c5120214f4010a22c2c71685866ea))
+* **island:** drop an unsafe block objc2 does not need ([dafdf39](https://github.com/firetower-cloud/firetower/commit/dafdf3941636e90ac0e77f08a413e5cbfbfeae0f))
+* **island:** hover and click while another app is in front ([4c22cb7](https://github.com/firetower-cloud/firetower/commit/4c22cb7da7076552bd127c2cacdb706346d6bee0))
+* **island:** it comes forward as the pointer arrives, not as the panel opens ([7c3ca7b](https://github.com/firetower-cloud/firetower/commit/7c3ca7b743cdbf88de250dd1fbb6f7f709636bda))
+* **island:** no box drawn around the stage on Windows ([a92c268](https://github.com/firetower-cloud/firetower/commit/a92c2683607291e8a7a9b56b78baaafd1ef78f00))
+* **island:** one failed call no longer means no island at all ([06ea500](https://github.com/firetower-cloud/firetower/commit/06ea500f83e990a4fbd2ef1f83098e1f880bd1d6))
+* **island:** opening is a change in height, and the chase was only watching width ([5b3c932](https://github.com/firetower-cloud/firetower/commit/5b3c932760573ae3d3e71f73707ba19cf34d9801))
+* **island:** place the window in one frame change, and come forward when open ([0180601](https://github.com/firetower-cloud/firetower/commit/0180601fe811131bed190edcca2b8fe31ab66e66))
+* **island:** re-assert topmost on Windows, and log where the window went ([647c1f5](https://github.com/firetower-cloud/firetower/commit/647c1f5478ed7bf88f6668b59e60ca5eded41f8e))
+* **island:** stop the Windows island making itself invisible ([6ee1ba6](https://github.com/firetower-cloud/firetower/commit/6ee1ba6f7d593b3efdaeaa9884a13e265192a3a7))
+* **island:** take the mouse before coming forward, and in that order ([da0d01a](https://github.com/firetower-cloud/firetower/commit/da0d01a7716574709f03677e28296663f8db5368))
+* **island:** the counts and the handle stop being squashed ([a1ac3dc](https://github.com/firetower-cloud/firetower/commit/a1ac3dca82bd73cefb4796d353d4918686c0c085))
+* **island:** the melt survives the settle, and the notch join is seamless ([60b3e59](https://github.com/firetower-cloud/firetower/commit/60b3e5926610b9da64dfc05a77c96147eb3187ee))
+* **island:** the panel rows wear the same mark, and only the shell opens it ([1eb088e](https://github.com/firetower-cloud/firetower/commit/1eb088edea3a14287b1496cbf56227f80f91a4c0))
+* **island:** the pill drops the server monogram ([2904908](https://github.com/firetower-cloud/firetower/commit/2904908224e71340c53b4180a96b94b236e78d8a))
+* **island:** the pointer test is the pill, and the pill holds its centre ([1347209](https://github.com/firetower-cloud/firetower/commit/1347209205869aed9b4b36bb4d867aefcae7eec0))
+* **island:** the reserved space goes after the counts, not before them ([ceac167](https://github.com/firetower-cloud/firetower/commit/ceac16736356ea00fdaa733a7b1ec66ba6ce917d))
+* **island:** the window follows the box a frame at a time ([015b79f](https://github.com/firetower-cloud/firetower/commit/015b79f6fe0c4ceb40f0ee9dc79974d14fc4192b))
+* **island:** the window is a stage, and stops changing size ([e8a790f](https://github.com/firetower-cloud/firetower/commit/e8a790f6fbfa0e9bacb68d25149ccce996ae6331))
+
+
+### Performance Improvements
+
+* **island:** the island changes when the rail does ([e2b149f](https://github.com/firetower-cloud/firetower/commit/e2b149fb143e4da093721031d896578ad4694dc8))
+
 ## [0.11.0](https://github.com/firetower-cloud/firetower/compare/desktop-v0.10.0...desktop-v0.11.0) (2026-09-18)
 
 
