@@ -26,6 +26,7 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import type { RefObject } from "react";
 import { setVoiceKey, voiceState, voiceTicket } from "~/api/voice";
+import { ApiError } from "~/client/http";
 import { listen, Refused, type Capture } from "./capture";
 import { close, open, reanchor, render, withDelta, withSegment, type Run } from "./splice";
 import { transcribe, type Listening } from "./socket";
@@ -35,6 +36,28 @@ import { quiet, type Blocked, type Dictating, type Voice } from "./state";
 const LONGEST = 5 * 60;
 /** How long it may hear nothing before giving the microphone back. */
 const PATIENCE = 20;
+
+/**
+ * What a refusal from the control plane actually means.
+ *
+ * Every failure used to land on "OpenAI rejected this Firetower's key", which
+ * was a guess dressed as a diagnosis — and wrong in the commonest case of all.
+ * A desktop build that updates itself, pointed at a control plane that has not
+ * been updated, gets a plain 404 from Firetower; OpenAI is never reached. The
+ * dialog said the key had been revoked, which would send somebody to their
+ * billing page over a server they simply had not deployed.
+ *
+ * So the code decides, and only a genuine upstream refusal is reported as one.
+ */
+function standing(e: unknown, mayConfigure: boolean): Blocked {
+  const code = e instanceof ApiError ? e.code : null;
+  // Firetower does not know the route. An older control plane, not a fault.
+  if (code === "NotFound") return { why: "unsupported" };
+  // It knows, and is holding no key.
+  if (code === "ProviderNotConfigured") return { why: "unconfigured", mayConfigure };
+  if (code === "Forbidden") return { why: "unconfigured", mayConfigure: false };
+  return { why: "rejected", detail: e instanceof Error ? e.message : "", mayConfigure };
+}
 
 /**
  * A fixed state, for drawing this without talking at it.
@@ -93,8 +116,10 @@ export function useVoice({
     let live = true;
     voiceState()
       .then((s) => live && setSetUp(s))
-      // An unreachable server is the composer's problem to report, not this
-      // button's. It stays as it was, and pressing it will say what is wrong.
+      /* Swallowed here and asked again when the button is pressed. A server
+         that was unreachable while the composer was drawing is not worth an
+         error nobody asked for — but it must not be mistaken for a server that
+         said yes, which is what `start` below is careful about. */
       .catch(() => {});
     return () => {
       live = false;
@@ -199,7 +224,7 @@ export function useVoice({
     } catch (e) {
       setState(quiet);
       if (e instanceof Refused) setBlocked({ why: "denied" });
-      else setBlocked({ why: "rejected", detail: e instanceof Error ? e.message : "", mayConfigure: !!setUp?.mayConfigure });
+      else setBlocked(standing(e, !!setUp?.mayConfigure));
       return;
     }
     mic.current = capture;
@@ -211,11 +236,7 @@ export function useVoice({
     } catch (e) {
       release();
       setState(quiet);
-      setBlocked({
-        why: "rejected",
-        detail: e instanceof Error ? e.message : "",
-        mayConfigure: !!setUp?.mayConfigure,
-      });
+      setBlocked(standing(e, !!setUp?.mayConfigure));
       return;
     }
 
@@ -264,11 +285,28 @@ export function useVoice({
 
   const start = useCallback(() => {
     if (state.at !== "idle") return;
-    if (setUp && !setUp.configured) {
-      setBlocked({ why: "unconfigured", mayConfigure: setUp.mayConfigure });
-      return;
-    }
-    void begin();
+    void (async () => {
+      /* Settled before the microphone is touched, even when it costs a request.
+         Taking somebody's microphone — and making macOS ask for it — only to
+         answer "this is not set up" is the wrong order, and it is the order
+         this was in: the read above fails silently on an older server, which
+         left the answer unknown, and unknown was being treated as yes. */
+      let known = setUp;
+      if (!known) {
+        try {
+          known = await voiceState();
+          setSetUp(known);
+        } catch (e) {
+          setBlocked(standing(e, false));
+          return;
+        }
+      }
+      if (!known.configured) {
+        setBlocked({ why: "unconfigured", mayConfigure: known.mayConfigure });
+        return;
+      }
+      await begin();
+    })();
   }, [begin, setUp, state.at]);
 
   const configure = useCallback(

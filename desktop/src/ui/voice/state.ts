@@ -40,6 +40,15 @@ export type Voice =
  * composer's own line instead; see `Composer`'s `refused`.
  */
 export type Blocked =
+  /**
+   * This Firetower has no voice routes at all — it predates the feature.
+   *
+   * Its own state rather than an error, because it is neither the person's
+   * fault nor a fault in the running system: the desktop updates on its own
+   * and the control plane does not, so a new app against an old server is the
+   * ordinary case, not the broken one.
+   */
+  | { why: "unsupported" }
   /** Nobody has given this Firetower a key yet. */
   | { why: "unconfigured"; mayConfigure: boolean }
   /** macOS is refusing, and will not ask again on its own. */

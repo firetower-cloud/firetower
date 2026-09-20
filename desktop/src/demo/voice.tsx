@@ -166,6 +166,12 @@ createRoot(document.getElementById("root")!).render(
         />
 
         <State
+          title="Server too old"
+          note="What a self-updating app pointed at an un-updated control plane looks like. Said plainly, because it is nobody's mistake — and emphatically not reported as OpenAI refusing a key, which is what it used to say."
+          voice={blocked({ why: "unsupported" })}
+        />
+
+        <State
           title="Not set up — administrator"
           note="The button is always there. Pressing it when this Firetower has no key opens the way to give it one, and then starts listening — you asked for the microphone, not for a dialog."
           voice={blocked({ why: "unconfigured", mayConfigure: true })}

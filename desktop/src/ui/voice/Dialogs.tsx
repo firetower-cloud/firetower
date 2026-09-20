@@ -102,6 +102,20 @@ export function VoiceDialog({
     }
   };
 
+  if (blocked.why === "unsupported") {
+    return (
+      <Card onClose={onDismiss}>
+        <Head title="This Firetower doesn't have voice input">
+          The app has it; the server it is connected to does not. The desktop updates itself and a control plane does
+          not, so this is what a new app pointed at an older Firetower looks like. Updating the server is what fixes it.
+        </Head>
+        <Foot>
+          <Loud onClick={onDismiss}>Close</Loud>
+        </Foot>
+      </Card>
+    );
+  }
+
   if (blocked.why === "denied") {
     return (
       <Card onClose={onDismiss}>
