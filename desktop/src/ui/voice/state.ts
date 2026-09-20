@@ -7,7 +7,7 @@
  * true at once — which is what the spinner stuck over a live waveform was.
  *
  * The blocked states are separate from the machine on purpose. "The mic is
- * off because macOS says no" is not a phase of listening; it is a thing
+ * off because the system says no" is not a phase of listening; it is a thing
  * standing in front of listening, it wants a dialog rather than a button
  * shape, and it outlives any one attempt to start.
  */
@@ -51,7 +51,7 @@ export type Blocked =
   | { why: "unsupported" }
   /** Nobody has given this Firetower a key yet. */
   | { why: "unconfigured"; mayConfigure: boolean }
-  /** macOS is refusing, and will not ask again on its own. */
+  /** The system is refusing, and will not ask again on its own. */
   | { why: "denied" }
   /** The key exists and OpenAI would not take it. */
   | { why: "rejected"; detail: string; mayConfigure: boolean };

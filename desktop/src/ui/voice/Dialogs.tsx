@@ -14,10 +14,41 @@
  */
 import { useEffect, useState } from "react";
 import { openExternal } from "~/open";
+import { platform } from "~/platform";
 import type { Blocked } from "./state";
 
-/** Straight to the pane, rather than to the top of System Settings. */
-const MIC_SETTINGS = "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone";
+/**
+ * Where the microphone permission lives, per platform.
+ *
+ * Deep links straight to the pane rather than to the top of settings. Both
+ * schemes are declared in `src-tauri/capabilities/default.json`; the opener
+ * plugin allows `http`, `https`, `mailto` and `tel` and refuses everything
+ * else in silence, so a scheme that is not listed there opens nothing and says
+ * nothing about why.
+ */
+const SETTINGS: Record<string, { url: string; name: string; steps: string[] } | null> = {
+  macos: {
+    url: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone",
+    name: "System Settings",
+    steps: ["Open Privacy & Security → Microphone", "Switch Firetower on", "Come back and press the microphone"],
+  },
+  windows: {
+    url: "ms-settings:privacy-microphone",
+    name: "Settings",
+    /* Two switches on Windows, not one, and the second is the one people
+       miss: the per-app list is below a master toggle for desktop
+       applications, and with that off the app never appears in the list at
+       all — which reads as the app being unknown to Windows rather than as a
+       setting being off. */
+    steps: [
+      "Open Privacy & security → Microphone",
+      "Turn on “Let desktop apps access your microphone”",
+      "Come back and press the microphone",
+    ],
+  },
+  // No one pane to point at across desktops; the words carry it instead.
+  linux: null,
+};
 
 const KEYS = "https://platform.openai.com/api-keys";
 
@@ -117,28 +148,31 @@ export function VoiceDialog({
   }
 
   if (blocked.why === "denied") {
+    const here = SETTINGS[platform];
     return (
       <Card onClose={onDismiss}>
         <Head title="Firetower can't hear the microphone">
-          macOS is blocking it, and it won't ask again on its own.
+          {platform === "macos" ? "macOS" : platform === "windows" ? "Windows" : "The system"} is blocking it, and it
+          won't ask again on its own.
           {/* A numbered list rather than a sentence: this is a procedure in
               another application, and the person reading it is about to leave
               this window and follow it from memory. */}
           <ol className="mt-3 space-y-1.5 text-ui text-text">
-            <li className="flex gap-2.5">
-              <span className="text-mute tabular-nums">1.</span>Open Privacy &amp; Security → Microphone
-            </li>
-            <li className="flex gap-2.5">
-              <span className="text-mute tabular-nums">2.</span>Switch Firetower on
-            </li>
-            <li className="flex gap-2.5">
-              <span className="text-mute tabular-nums">3.</span>Come back and press the microphone
-            </li>
+            {(here?.steps ?? ["Allow microphone access for Firetower in your system settings", "Come back and press the microphone"]).map(
+              (step, n) => (
+                <li key={step} className="flex gap-2.5">
+                  <span className="text-mute tabular-nums">{n + 1}.</span>
+                  {step}
+                </li>
+              ),
+            )}
           </ol>
         </Head>
         <Foot>
           <Quiet onClick={onDismiss}>Not now</Quiet>
-          <Loud onClick={() => void openExternal(MIC_SETTINGS)}>Open System Settings</Loud>
+          {/* No button where there is nowhere to send them. An action that
+              does nothing is worse than an instruction that asks them to. */}
+          {here && <Loud onClick={() => void openExternal(here.url)}>Open {here.name}</Loud>}
         </Foot>
       </Card>
     );

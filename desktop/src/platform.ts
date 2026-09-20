@@ -9,6 +9,17 @@
 export type Platform = "macos" | "windows" | "linux";
 
 function detect(): Platform {
+  /* `?platform=windows` draws the app as another desktop would, in
+     development only. A dozen small things differ by platform — the modifier's
+     name, the window buttons, the translucent sidebar, the words in the
+     microphone dialog — and without this the only way to look at any of them
+     is to be on that machine. Overriding the user agent does not work: the
+     answer below comes from `userAgentData`, which a flag cannot forge. */
+  if (import.meta.env.DEV && typeof location !== "undefined") {
+    const asked = new URLSearchParams(location.search).get("platform");
+    if (asked === "macos" || asked === "windows" || asked === "linux") return asked;
+  }
+
   const hint = ((navigator as { userAgentData?: { platform?: string } }).userAgentData?.platform ?? navigator.platform ?? "").toLowerCase();
   if (hint.includes("mac")) return "macos";
   if (hint.includes("win")) return "windows";

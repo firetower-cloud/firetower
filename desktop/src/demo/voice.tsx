@@ -190,6 +190,12 @@ createRoot(document.getElementById("root")!).render(
         />
 
         <State
+          title="Microphone refused — Windows"
+          note="The same state on the other platform. Different words, a different deep link, and a second step macOS does not have: the per-app list sits under a master toggle for desktop applications, and with that off the app never appears in the list at all."
+          voice={blocked({ why: "denied" })}
+        />
+
+        <State
           title="Key rejected"
           note="Not the person's fault and nothing to grant, so a different dialog — and the fix is only offered to somebody who can carry it out."
           voice={blocked({ why: "rejected", detail: "401 Incorrect API key provided", mayConfigure: true })}
