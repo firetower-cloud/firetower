@@ -39,9 +39,16 @@ const NAME: &str = "OPENAI_API_KEY";
 
 /// Which model does the transcribing.
 ///
+/// `gpt-live-transcribe` is the one built for this — OpenAI's own description
+/// is "low-latency speech-to-text model for realtime transcription", against
+/// `gpt-4o-transcribe`'s general-purpose speech-to-text. Latency is the whole
+/// product here: at 400ms behind your voice this reads as alive, at 700ms as
+/// broken, so the specialised model is the right default even though the
+/// general one also works.
+///
 /// Named here rather than made a setting, because the client cannot choose it
 /// — that is half the point of minting. Changing it is a deployment decision.
-const MODEL: &str = "gpt-4o-transcribe";
+const MODEL: &str = "gpt-live-transcribe";
 
 /// Where a ticket is minted.
 ///
@@ -73,6 +80,20 @@ pub struct VoiceTicket {
     /// When it stops being usable, RFC 3339. Only the connection has to happen
     /// before this; the session it opens outlives it.
     pub expires_at: String,
+    /// The `session.update` the client is to send once connected, verbatim.
+    ///
+    /// Handed over rather than left to the client to compose, so that the
+    /// settings stay decided in one place — this file — even though it is the
+    /// browser that sends them. The client echoes; it does not author.
+    ///
+    /// Sent at all because the documented transcription flow configures the
+    /// session after connecting, and whether a pre-configured ephemeral token
+    /// also suffices is not something the documentation commits to. Sending it
+    /// is idempotent and costs one small frame; not sending it risks the
+    /// failure that looks like nothing at all — audio going up, no words
+    /// coming back, every layer apparently healthy.
+    #[schema(value_type = Object)]
+    pub session: serde_json::Value,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -147,6 +168,12 @@ pub(super) async fn set_voice_key(
 /// Every setting a dictation runs under is in here, fixed before the client
 /// ever sees a credential. That is the trade the ticket makes: the browser
 /// gets to connect directly, and gets no say in what it connects as.
+fn update() -> serde_json::Value {
+    let mut frame = session();
+    frame["type"] = serde_json::json!("session.update");
+    frame
+}
+
 fn session() -> serde_json::Value {
     serde_json::json!({
         "session": {
@@ -246,6 +273,7 @@ pub(super) async fn voice_ticket(State(state): State<AppState>) -> ApiResult<Jso
             .unwrap_or_else(chrono::Utc::now)
             .to_rfc3339(),
         value: minted.value,
+        session: update(),
     }))
 }
 
@@ -302,6 +330,16 @@ mod tests {
     #[test]
     fn a_silent_refusal_still_says_something() {
         assert!(!mint_failed("   ").is_empty());
+    }
+
+    #[test]
+    fn the_update_frame_is_the_minted_session_with_a_type_on_it() {
+        // The client echoes this verbatim. If the two ever drift, a session is
+        // configured one way at mint and another way on the wire, and which one
+        // wins is the sort of question nobody wants to be asking.
+        let update = update();
+        assert_eq!(update["type"], "session.update");
+        assert_eq!(update["session"], session()["session"]);
     }
 
     #[test]

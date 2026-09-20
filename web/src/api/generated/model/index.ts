@@ -195,6 +195,7 @@ export * from './userId';
 export * from './vaultView';
 export * from './voiceState';
 export * from './voiceTicket';
+export * from './voiceTicketSession';
 export * from './workspaceId';
 export * from './workspaceSize';
 export * from './workspaceUsage';

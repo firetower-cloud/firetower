@@ -31,7 +31,23 @@ export type Heard =
   /** It will not work, and saying so is the end of this socket. */
   | { t: "failed"; why: string };
 
-const REALTIME = "wss://api.openai.com/v1/realtime?intent=transcription";
+/**
+ * The GA address. Bare — no `?intent=transcription`, no beta subprotocol.
+ *
+ * Both of those were the beta shape, and the beta shape is now refused
+ * outright with `beta_api_shape_disabled`: *"The Realtime Beta API is no
+ * longer supported. Please use /v1/realtime for the GA API."* Confirmed by
+ * connecting with and without the `openai-beta.realtime-v1` subprotocol
+ * against a deliberately invalid token: with it, that refusal; without it,
+ * `Invalid realtime token` — which is the socket getting as far as checking
+ * the credential.
+ *
+ * What kind of session this is no longer travels in the address. It is fixed
+ * when the ticket is minted — `session.type: "transcription"`, in
+ * `crates/ft-server/src/api/voice.rs` — so the token is what says
+ * transcription, and this end only has to connect.
+ */
+const REALTIME = "wss://api.openai.com/v1/realtime";
 
 export type Listening = {
   /** A chunk of PCM16, as it comes off the worklet. */
@@ -55,11 +71,7 @@ function encode(buffer: ArrayBuffer): string {
 }
 
 export function transcribe(ticket: VoiceTicket, onHeard: (heard: Heard) => void): Listening {
-  const ws = new WebSocket(REALTIME, [
-    "realtime",
-    `openai-insecure-api-key.${ticket.value}`,
-    "openai-beta.realtime-v1",
-  ]);
+  const ws = new WebSocket(REALTIME, ["realtime", `openai-insecure-api-key.${ticket.value}`]);
 
   /* Audio that arrives before the socket is open. The worklet starts the
      moment permission is granted, which is deliberately earlier than the
@@ -73,6 +85,10 @@ export function transcribe(ticket: VoiceTicket, onHeard: (heard: Heard) => void)
 
   ws.onopen = () => {
     open = true;
+    /* The server's own session document, echoed before a single sample goes
+       up. First, so that no audio is ever interpreted under a configuration
+       that is not the one Firetower chose. */
+    ws.send(JSON.stringify(ticket.session));
     waiting.forEach(append);
     waiting = [];
   };
@@ -102,6 +118,13 @@ export function transcribe(ticket: VoiceTicket, onHeard: (heard: Heard) => void)
         onHeard({ t: "failed", why: frame.error?.message ?? "OpenAI refused the connection." });
         return;
     }
+
+    /* Named while developing, and nowhere else.
+       This API has already moved once underneath this file, and the way a
+       renamed event shows up is not an error — it is silence: audio goes up,
+       nothing comes back, and every layer looks healthy. Naming the frames
+       being ignored turns that silence into something a console can answer. */
+    if (import.meta.env.DEV && frame.type) console.debug("[voice] ignored frame", frame.type);
   };
 
   /* A close is only worth reporting when nothing has been said yet: after a

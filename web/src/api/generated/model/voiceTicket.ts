@@ -5,6 +5,7 @@
  * The Firetower control plane: API, scheduling, and worker transports.
  * OpenAPI spec version: 0.38.1
  */
+import type { VoiceTicketSession } from './voiceTicketSession';
 
 /**
  * A credential for one connection, with about a minute to use it.
@@ -15,6 +16,21 @@ export interface VoiceTicket {
      * before this; the session it opens outlives it.
      */
   expiresAt: string;
+  /**
+     * The `session.update` the client is to send once connected, verbatim.
+     *
+     * Handed over rather than left to the client to compose, so that the
+     * settings stay decided in one place — this file — even though it is the
+     * browser that sends them. The client echoes; it does not author.
+     *
+     * Sent at all because the documented transcription flow configures the
+     * session after connecting, and whether a pre-configured ephemeral token
+     * also suffices is not something the documentation commits to. Sending it
+     * is idempotent and costs one small frame; not sending it risks the
+     * failure that looks like nothing at all — audio going up, no words
+     * coming back, every layer apparently healthy.
+     */
+  session: VoiceTicketSession;
   /**
      * The ephemeral client secret, `ek_…`. Not the key, and not a secret this
      * install stores: it is minted, handed over and forgotten.

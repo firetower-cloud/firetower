@@ -34,6 +34,9 @@ export const SetVoiceKeyResponse = zod.void()
  */
 export const VoiceTicketResponse = zod.object({
   "expiresAt": zod.string().describe('When it stops being usable, RFC 3339. Only the connection has to happen\nbefore this; the session it opens outlives it.'),
+  "session": zod.looseObject({
+
+}).describe('The `session.update` the client is to send once connected, verbatim.\n\nHanded over rather than left to the client to compose, so that the\nsettings stay decided in one place — this file — even though it is the\nbrowser that sends them. The client echoes; it does not author.\n\nSent at all because the documented transcription flow configures the\nsession after connecting, and whether a pre-configured ephemeral token\nalso suffices is not something the documentation commits to. Sending it\nis idempotent and costs one small frame; not sending it risks the\nfailure that looks like nothing at all — audio going up, no words\ncoming back, every layer apparently healthy.'),
   "value": zod.string().describe('The ephemeral client secret, `ek_…`. Not the key, and not a secret this\ninstall stores: it is minted, handed over and forgotten.')
 }).describe('A credential for one connection, with about a minute to use it.')
 

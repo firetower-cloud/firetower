@@ -248,10 +248,18 @@ export function useVoice({
     const wiring = transcribe(ticket, (heard) => {
       if (!run.current) return;
       switch (heard.t) {
+        /* Words arriving are proof somebody is talking, so they hold off the
+           silence timeout in their own right. Leaving that to the VAD frames
+           alone made `PATIENCE` depend on events the transcription docs do not
+           actually promise — and the failure that buys you is the microphone
+           switching itself off mid-sentence while the transcript is visibly
+           still arriving. */
         case "delta":
+          lastHeard.current = Date.now();
           put(withDelta(run.current, heard.text));
           return;
         case "segment":
+          lastHeard.current = Date.now();
           put(withSegment(run.current, heard.text));
           return;
         case "speech":

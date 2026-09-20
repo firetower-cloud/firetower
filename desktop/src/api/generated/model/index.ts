@@ -195,6 +195,7 @@ export * from './userId.ts';
 export * from './vaultView.ts';
 export * from './voiceState.ts';
 export * from './voiceTicket.ts';
+export * from './voiceTicketSession.ts';
 export * from './workspaceId.ts';
 export * from './workspaceSize.ts';
 export * from './workspaceUsage.ts';
