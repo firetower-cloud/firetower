@@ -77,6 +77,9 @@ pub struct Step {
     pub log: String,
     pub job_id: Option<String>,
     pub was_drained: Option<bool>,
+    /// How many times this step has been started. More than one means the
+    /// control plane was replaced part-way through it and picked it up again.
+    pub attempts: i32,
 }
 
 impl Store {
@@ -278,7 +281,8 @@ impl Store {
 
     pub async fn start_step(&self, run_id: &str, position: i32) -> Result<()> {
         sqlx::query(
-            "UPDATE update_steps SET state = 'running', started_at = $1
+            "UPDATE update_steps SET state = 'running', started_at = $1,
+                    attempts = attempts + 1
               WHERE run_id = $2 AND position = $3",
         )
         .bind(Utc::now())
@@ -303,6 +307,25 @@ impl Store {
         .bind(state.as_db())
         .bind(detail)
         .bind(Utc::now())
+        .bind(run_id)
+        .bind(position)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Put a step that was running back to pending, so the executor walks
+    /// into it again.
+    ///
+    /// The log is kept: it is the history of the attempt that was interrupted,
+    /// and the next attempt writes underneath it. `attempts` is kept too — it
+    /// is what bounds this.
+    pub async fn restart_step(&self, run_id: &str, position: i32) -> Result<()> {
+        sqlx::query(
+            "UPDATE update_steps SET state = 'pending', started_at = NULL,
+                    finished_at = NULL, detail = NULL
+              WHERE run_id = $1 AND position = $2",
+        )
         .bind(run_id)
         .bind(position)
         .execute(&self.pool)
@@ -390,6 +413,7 @@ fn step_from_row(r: sqlx::postgres::PgRow) -> Result<Step> {
         log: r.get("log"),
         job_id: r.get("job_id"),
         was_drained: r.get("was_drained"),
+        attempts: r.get("attempts"),
     })
 }
 

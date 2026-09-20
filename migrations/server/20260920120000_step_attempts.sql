@@ -1,0 +1,13 @@
+-- How many times a step has been walked into.
+--
+-- A run survives the control plane being replaced in the middle of it: the
+-- step that was running is picked up again on the next start. That has always
+-- been true of the control-plane step, which *causes* the restart, and is now
+-- true of the others — every one of them is re-enterable, and failing a whole
+-- upgrade because the process went away during a `pg_dump` threw away a run
+-- for something that had nothing to do with it.
+--
+-- The count is what stops that being unbounded. A control plane that dies
+-- every time it reaches the same step would otherwise retry it on every start
+-- for ever; after a few attempts the run stops and says so.
+alter table update_steps add column attempts integer not null default 0;

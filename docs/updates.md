@@ -9,7 +9,7 @@ and presses one of two buttons. There is no automatic mode.
 | Target | How | Sessions on it |
 | --- | --- | --- |
 | The control plane | The `updater` container beside it pulls the release, rewrites the deployment files the release changed, runs `docker compose up -d firetower` against the deployment's own `firetower.yml`, and waits for `/readyz`. If it does not answer within three minutes, the previous image is put back. A `pg_dump` is written into `backups/` first. | End when it is recreated. Sessions on other machines keep running under tmux and reconnect. |
-| A worker on a machine | The control plane runs the installer over the same ssh connection it already uses, pinned to the version being moved to. The script fetches the build for that machine's own shape and replaces `~/.firetower/worker/bin/firetower-worker`. | End when it is reinstalled. |
+| A worker on a machine | The control plane runs the installer over the same ssh connection it already uses, pinned to the version being moved to. The script fetches the build for that machine's own shape and replaces `~/.firetower/worker/bin/firetower-worker`, and the connection is then dropped — replacing the file does not replace the process holding it open, so the worker has to reconnect for the new binary to be the one serving. | End when it is reinstalled. |
 | `@firetower/cli` on your own machine | Not reachable. The screen says which version the release wants. | — |
 
 The order in a run is fixed: back up, the updater, the control plane, then each
@@ -75,6 +75,14 @@ commands that were run and what they said — redacted, bounded. That is what
 lets the run survive the control plane being recreated in the middle of it:
 the new process finds the step that was waiting, asks the updater how the job
 went, and carries on with the workers.
+
+That holds for any step, not only the one that causes the restart. Every step
+can be walked into again — the preflight only looks, a backup takes another
+dump, the updater step asks the updater what version it is now — so a control
+plane that goes away for its own reasons during an upgrade picks up where it
+was rather than losing the run. A step restarted three times is not tried a
+fourth: at that point it is the control plane that cannot stay up, and the run
+says so.
 
 Every ssh key materialisation for an upgrade is a line in the vault's access
 log, with the run and the machine as its reason.
