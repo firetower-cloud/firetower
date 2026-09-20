@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.12.1](https://github.com/firetower-cloud/firetower/compare/desktop-v0.12.0...desktop-v0.12.1) (2026-09-20)
+
+
+### Bug Fixes
+
+* **island:** the dormant nub is black, not faint ([7edb3b0](https://github.com/firetower-cloud/firetower/commit/7edb3b06f165ebfa4c6532f1fe62561ae1a8275b))
+* **island:** the dormant nub is black, not faint ([6086d64](https://github.com/firetower-cloud/firetower/commit/6086d64f90eaee4a83b93c8059f13f4a2fd56272))
+
 ## [0.12.0](https://github.com/firetower-cloud/firetower/compare/desktop-v0.11.0...desktop-v0.12.0) (2026-09-20)
 
 
