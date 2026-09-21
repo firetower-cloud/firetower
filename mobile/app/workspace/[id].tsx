@@ -197,7 +197,7 @@ function Conversation({ place }: { place: Workspace }) {
                merely long was reported as one that had never happened. An
                empty transcript is only empty once something has come back to
                say so. */
-            <Waiting say="Reading the conversation" bars />
+            <Waiting say="Loading the conversation" />
           ) : bringup.some((l) => l.state !== "pending") ? null : (
             /* Nothing said and nothing coming up: a workspace that is simply
                waiting for you to open the conversation. */

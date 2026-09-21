@@ -70,11 +70,11 @@ import { color, size } from "~/design/tokens.generated";
 /**
  * One line at rest, six before it scrolls.
  *
- * `--text-read` is 18px on a 1.6 lead; 28 is that, rounded to an even number
+ * `--text-read` is 17px on a 1.6 lead; 26 is that, rounded to an even number
  * so six of them is a whole box. A chat box is the one place in the app that
  * is pure reading.
  */
-const LINE = 28;
+const LINE = 26;
 const LINES = 6;
 
 /** What a multiline field needs above and below its text, per platform. */
@@ -324,7 +324,21 @@ export function Composer({
                 backgroundColor: color.raise,
                 marginHorizontal: 12,
                 paddingHorizontal: 8,
-                paddingVertical: 8,
+                /* Roomier at rest, tighter once you are writing in it. The
+                   card grows and the padding gives way at the same time,
+                   which is most of what the morph actually feels like —
+                   `LinearTransition` carries both on the UI thread. */
+                paddingVertical: open ? 8 : 12,
+                /* Lit from above. The desk does this with
+                   `--shadow-raise`'s `inset 0 1px 0 rgb(255 255 255 / 0.04)`;
+                   React Native has no inset shadow, and per-side border
+                   colours say the same thing in one hairline — `--color-line`
+                   on top, `--color-line-soft` around the rest, so the edge
+                   catches the light and the box reads as raised rather than
+                   as a rectangle of a different grey. */
+                borderWidth: 1,
+                borderColor: color["line-soft"],
+                borderTopColor: color.line,
                 shadowColor: "#000",
                 shadowOpacity: open ? 0.5 : 0,
                 shadowRadius: 20,

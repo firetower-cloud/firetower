@@ -1,9 +1,9 @@
 /**
  * Waiting for something, said out loud.
  *
- * Every screen here already had an `ActivityIndicator` in `--color-mute`, and
- * every one of them read as a hang. Three reasons, and the fix is one
- * component because the reasons are the same everywhere:
+ * Every screen here had an `ActivityIndicator` in `--color-mute`, and every
+ * one read as a hang. Three reasons, and the fix is one component because the
+ * reasons are the same everywhere:
  *
  * - **It said nothing.** A spinner names neither what is being fetched nor
  *   whose fault it is if it never comes. `Sheen` is already this app's way of
@@ -19,39 +19,22 @@
  * loading screen, and no amount of animation answers it — only a sentence
  * that appeared *because* time passed can.
  *
- * `bars` draws the transcript's own shape underneath: the agent speaks onto
- * the ground in full-width lines, you get a raised card on the right. A
- * conversation that is slow to arrive is the case people hit hardest, and the
- * shape says *a conversation is coming* before any of the words do.
+ * It drew the transcript's shape in skeleton bars underneath for about a day.
+ * They were the first thing to go once somebody saw them: a skeleton promises
+ * a specific layout is about to appear in a specific place, and next to one
+ * sweeping line that says exactly what is happening, it was scaffolding around
+ * a sentence that did the job alone.
  */
 import { useEffect, useState } from "react";
-import { AccessibilityInfo, Text, View } from "react-native";
-import Animated, {
-  Easing,
-  cancelAnimation,
-  useAnimatedStyle,
-  useSharedValue,
-  withRepeat,
-  withTiming,
-} from "react-native-reanimated";
+import { Text, View } from "react-native";
 import { Sheen } from "~/ui/Sheen";
-import { color } from "~/design/tokens.generated";
 
 /** Under this, a load is not worth telling anybody about. */
 const HOLD = 350;
 /** Past this, somebody is wondering whether it is stuck. */
 const SLOW = 6000;
 
-const PULSE = 1100;
-
-export function Waiting({
-  say,
-  bars = false,
-}: {
-  /** What is being waited for, as a sentence. "Reading the conversation" */
-  say: string;
-  bars?: boolean;
-}) {
+export function Waiting({ say }: { say: string }) {
   const [shown, setShown] = useState(false);
   const [slow, setSlow] = useState(false);
 
@@ -67,59 +50,10 @@ export function Waiting({
   if (!shown) return null;
 
   return (
-    <View className="gap-4 py-2">
-      {bars ? <Shape /> : null}
-      <View className={bars ? "" : "items-center"}>
-        <Sheen text={say} />
-        {/* Said only once enough time has passed for it to be the
-            question somebody is asking. */}
-        {slow ? <Text className="mt-1.5 font-sans text-meta text-mute">Still going.</Text> : null}
-      </View>
-    </View>
-  );
-}
-
-/** The transcript's shape, breathing. */
-function Shape() {
-  const [still, setStill] = useState(false);
-  const pulse = useSharedValue(0);
-
-  useEffect(() => {
-    AccessibilityInfo.isReduceMotionEnabled().then(setStill);
-    const sub = AccessibilityInfo.addEventListener("reduceMotionChanged", setStill);
-    return () => sub.remove();
-  }, []);
-
-  useEffect(() => {
-    if (still) return;
-    pulse.value = 0;
-    pulse.value = withRepeat(withTiming(1, { duration: PULSE, easing: Easing.inOut(Easing.quad) }), -1, true);
-    return () => cancelAnimation(pulse);
-  }, [still, pulse]);
-
-  const breath = useAnimatedStyle(() => ({ opacity: still ? 0.3 : 0.2 + pulse.value * 0.35 }));
-
-  /* Widths that do not divide evenly, so it reads as prose rather than as a
-     progress bar somebody forgot to fill in. */
-  return (
-    <View className="gap-2.5">
-      {[1, 0.94, 0.66].map((w, i) => (
-        <Animated.View
-          key={i}
-          style={[{ height: 12, borderRadius: 6, backgroundColor: color.overlay, width: `${w * 100}%` }, breath]}
-        />
-      ))}
-      <View className="items-end">
-        <Animated.View
-          style={[{ height: 40, borderRadius: 14, backgroundColor: color.raise, width: "58%" }, breath]}
-        />
-      </View>
-      {[0.88, 0.52].map((w, i) => (
-        <Animated.View
-          key={i}
-          style={[{ height: 12, borderRadius: 6, backgroundColor: color.overlay, width: `${w * 100}%` }, breath]}
-        />
-      ))}
+    <View className="items-center gap-1.5 py-6">
+      <Sheen text={say} />
+      {/* Said only once enough time has passed for it to be the question. */}
+      {slow ? <Text className="font-sans text-meta text-mute">Still going.</Text> : null}
     </View>
   );
 }

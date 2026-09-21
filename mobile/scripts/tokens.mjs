@@ -121,12 +121,16 @@ const phone = {
  * different one.
  */
 const phoneText = {
-  display: "30px", // the one heading on a screen
-  title: "19px", // a row title
-  body: "17px", // what somebody reads; iOS Body
-  ui: "16px", // controls and labels
-  meta: "14px", // captions, counts, paths
-  micro: "12.5px", // eyebrows, column headers, a line-number gutter
+  display: "28px", // the one heading on a screen
+  title: "18px", // a row title
+  body: "16px", // what somebody reads
+  ui: "15px", // controls and labels
+  meta: "13px", // captions, counts, paths
+  micro: "12px", // eyebrows, column headers, a line-number gutter
+  /* Mono stays where it was put. The sans came down a point against
+     ChatGPT side by side; the file tree and the diff were the two screens
+     that had been left behind and they are the two nobody has complained
+     about since. */
   code: "15px", // what the machine said
   input: "17px", // iOS Body, and still over the 16px zoom floor
 };
@@ -137,7 +141,7 @@ const phoneText = {
  * The thing people do here longest is read a conversation, and that column is
  * narrow and held close. It is one size, not a seventh voice.
  */
-const reading = { read: ["18px", { lineHeight: "1.6" }] };
+const reading = { read: ["17px", { lineHeight: "1.6" }] };
 
 /** The web's modifiers, kept; only the sizes are ours. */
 const scaled = Object.fromEntries(

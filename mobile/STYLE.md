@@ -128,6 +128,16 @@ Rules that are not negotiable:
   The model looks at a screenshot, so it travels with the turn. The agent has
   its own tools for reading a file, so sending the bytes twice is waste — it
   is attached and then only *named*.
+- **The padding gives way as the box grows.** Roomier at rest, tighter once
+  you are writing in it. The card getting taller while its padding shrinks is
+  most of what the morph actually *feels* like, and both ride the same
+  `LinearTransition` on the UI thread.
+- **The composer's edge is lit from above.** The desk does this with
+  `--shadow-raise`'s `inset 0 1px 0 rgb(255 255 255 / 0.04)`. React Native has
+  no inset shadow, and per-side border colours say the same thing in one
+  hairline: `--color-line` on top, `--color-line-soft` around the rest. The box
+  reads as raised rather than as a rectangle of a slightly different grey, and
+  it needs no gradient and no new native module to do it.
 - **A control that does not know stays quiet.** The model picker is absent
   until the agent says what it is running. "Opus 5" under a session running
   something else is a lie the picker tells until somebody speaks.
@@ -187,9 +197,11 @@ as a hang. One component now, because the reasons were the same everywhere.
 - **Past six seconds, say "Still going."** That is the whole question somebody
   is actually asking, and no amount of animation answers it — only a sentence
   that appeared *because* time passed.
-- **Show the shape where there is one.** The transcript's skeleton is
-  full-width lines with a raised card on the right, which says *a conversation
-  is coming* before any of the words do.
+- **One sentence, and no skeleton.** It drew the transcript's shape in
+  placeholder bars for about a day. A skeleton promises a specific layout is
+  about to appear in a specific place, and next to one sweeping line that says
+  exactly what is happening it was scaffolding around a sentence that did the
+  job alone.
 
 One thing to know if you write another `Sheen`-like effect: a component that
 renders one `Text` per character is a row of one-letter labels to anything
@@ -199,6 +211,13 @@ walking the tree. Carry the whole string on the group and hide the pieces.
 
 Every size moves up roughly a sixth from `globals.css`, and the small end
 moves most. This is one override in `scripts/tokens.mjs`, not a second scale.
+
+It is worth knowing how it got here, because the mistake is easy to repeat:
+when the file tree and the diff still read as small, the scale went up a
+second time — and the scale was not what was wrong with them. They were
+carrying their own hardcoded sizes and reading no token at all. The sans came
+back down a point afterwards; the mono stayed. *Check what a screen actually
+reads before moving the thing it is supposed to read.*
 
 The web's sizes exist to fit a workbench into a browser window: `--text-body`
 is 14px so a three-pane desk survives at 1280px, and `--text-micro` is 10.5px

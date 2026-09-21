@@ -35,39 +35,39 @@ module.exports = {
   },
   "fontSize": {
     "display": [
-      "30px",
+      "28px",
       {
         "lineHeight": "1.2",
         "letterSpacing": "-0.02em"
       }
     ],
     "title": [
-      "19px",
+      "18px",
       {
         "lineHeight": "1.35",
         "letterSpacing": "-0.01em"
       }
     ],
     "body": [
-      "17px",
+      "16px",
       {
         "lineHeight": "1.65"
       }
     ],
     "ui": [
-      "16px",
+      "15px",
       {
         "lineHeight": "1.45"
       }
     ],
     "meta": [
-      "14px",
+      "13px",
       {
         "lineHeight": "1.45"
       }
     ],
     "micro": [
-      "12.5px",
+      "12px",
       {
         "lineHeight": "1.4"
       }
@@ -85,7 +85,7 @@ module.exports = {
       }
     ],
     "read": [
-      "18px",
+      "17px",
       {
         "lineHeight": "1.6"
       }
