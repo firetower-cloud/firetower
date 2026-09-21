@@ -34,15 +34,15 @@ export const color = {
 } as const;
 
 export const size = {
-  "display": 28,
-  "title": 18,
-  "body": 16,
-  "ui": 15,
-  "meta": 13,
-  "micro": 11.5,
-  "code": 14,
+  "display": 30,
+  "title": 19,
+  "body": 17,
+  "ui": 16,
+  "meta": 14,
+  "micro": 12.5,
+  "code": 15,
   "input": 17,
-  "read": 17
+  "read": 18
 } as const;
 
 export const radius = {

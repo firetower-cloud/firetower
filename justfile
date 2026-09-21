@@ -294,7 +294,11 @@ reset:
 check-style:
     #!/usr/bin/env bash
     set -uo pipefail
-    found=$(grep -rnE 'text-\[[0-9.]+px\]|rounded-\[[0-9]+px\]|(bg|text|border)-\[#[0-9a-fA-F]{3,8}\]' \
+    # `fontSize: 11.5` is the same offence as `text-[11.5px]` and it is the
+    # one that got through: the file tree and the diff carried their own sizes
+    # for months, so a phone-wide type scale went up around them and left the
+    # two screens made entirely of text exactly as small as they were.
+    found=$(grep -rnE 'text-\[[0-9.]+px\]|rounded-\[[0-9]+px\]|(bg|text|border)-\[#[0-9a-fA-F]{3,8}\]|fontSize: *[0-9]' \
         web/app web/components web/src mobile/app mobile/src --include='*.tsx' || true)
     if [ -n "$found" ]; then
         echo "$found"

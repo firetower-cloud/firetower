@@ -71,7 +71,7 @@ function Level({
               )}
               <Text
                 numberOfLines={1}
-                className={`min-w-0 flex-1 font-mono text-meta ${entry.directory ? "text-dim" : "text-text"}`}
+                className={`min-w-0 flex-1 font-mono text-code ${entry.directory ? "text-dim" : "text-text"}`}
               >
                 {entry.directory ? `${entry.name}/` : entry.name}
               </Text>

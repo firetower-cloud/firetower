@@ -19,7 +19,8 @@ import { ChevronDown, ChevronRight } from "lucide-react-native";
 import { fromPatch, isNew } from "~/api/patch";
 import type { ChangedFile } from "~/data";
 import { toneOf } from "~/ui/FileGlyph";
-import { color } from "~/design/tokens.generated";
+import { split } from "~/api/paths";
+import { color, size } from "~/design/tokens.generated";
 
 const ROW = 19;
 
@@ -52,7 +53,7 @@ function Hunks({ patch }: { patch: string }) {
           >
             <Text
               className="px-2 font-mono text-right"
-              style={{ fontSize: 10, color: l.kind === "add" ? color.sage : color.mute }}
+              style={{ fontSize: size.micro, color: l.kind === "add" ? color.sage : color.mute }}
             >
               {l.n ?? ""}
             </Text>
@@ -72,7 +73,7 @@ function Hunks({ patch }: { patch: string }) {
                 numberOfLines={1}
                 className="px-2 font-mono"
                 style={{
-                  fontSize: 11.5,
+                  fontSize: size.code,
                   color:
                     l.kind === "hunk"
                       ? color.mute
@@ -101,8 +102,7 @@ export function Diff({ files, onOpen }: { files: ChangedFile[]; onOpen?: (path: 
     <View>
       {files.map((file) => {
         const showing = open === file.path;
-        const name = file.path.slice(file.path.lastIndexOf("/") + 1);
-        const dir = file.path.slice(0, file.path.lastIndexOf("/"));
+        const { name, dir } = split(file.path);
         return (
           <View key={file.path} className="border-b border-line-soft">
             <Pressable
@@ -121,7 +121,7 @@ export function Diff({ files, onOpen }: { files: ChangedFile[]; onOpen?: (path: 
                   {name}
                 </Text>
                 {dir ? (
-                  <Text numberOfLines={1} className="font-mono text-mute" style={{ fontSize: 10 }}>
+                  <Text numberOfLines={1} className="font-mono text-mute" style={{ fontSize: size.micro }}>
                     {dir}
                   </Text>
                 ) : null}

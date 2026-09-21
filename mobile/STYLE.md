@@ -184,10 +184,16 @@ What does not change is the number of voices: six sizes and a mono, exactly as
 on the desk. Line heights are unitless ratios in `globals.css`, so the leading
 follows on its own and the rhythm survives.
 
-The cost is real and worth saying: at `--text-code` 14px a phone holds about
-three fewer characters per line, so code scrolls sooner. That is the right
-trade for a screen whose job is mostly reading prose, and the wrong one to
-extend any further.
+The cost is real and worth saying: at `--text-code` 15px a phone holds about
+five fewer characters per line than the desk's 13px, so code scrolls sooner.
+That is the right trade for a screen whose job is reading.
+
+**A scale only reaches what reads it.** The file tree and the diff carried
+their own hardcoded sizes — `fontSize: 11.5` for code, `fontSize: 10` for the
+gutter — so the first phone-wide bump went up *around* the two screens made
+entirely of text and left them exactly as small as they were. `check-style`
+greps for inline `fontSize:` now, because a literal in a `style` prop is the
+same offence as `text-[11.5px]` and was the one with nothing watching it.
 
 **A bigger scale finds every row that was one word from colliding.** Label-and
 -hint pairs, counts beside titles, anything laid out with `justify-between` and

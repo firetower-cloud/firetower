@@ -15,7 +15,7 @@ import { useDiff, useSession } from "~/data";
 import { addedLines } from "~/api/patch";
 import { TabStrip } from "~/ui/TabStrip";
 import { open as openTab } from "~/workspace/tabs";
-import { color } from "~/design/tokens.generated";
+import { color, size } from "~/design/tokens.generated";
 
 const ROW = 19;
 
@@ -106,7 +106,7 @@ export default function FileScreen() {
                 >
                   <Text
                     className="px-2 text-right font-mono"
-                    style={{ fontSize: 10, color: touched.has(i + 1) ? color.sage : color.mute }}
+                    style={{ fontSize: size.micro, color: touched.has(i + 1) ? color.sage : color.mute }}
                   >
                     {i + 1}
                   </Text>
@@ -123,7 +123,7 @@ export default function FileScreen() {
                     style={{ height: ROW, justifyContent: "center", minWidth: 340 }}
                     className={touched.has(i + 1) ? "bg-sage-tint" : ""}
                   >
-                    <Text numberOfLines={1} className="px-2 font-mono text-text" style={{ fontSize: 11.5 }}>
+                    <Text numberOfLines={1} className="px-2 font-mono text-text" style={{ fontSize: size.code }}>
                       {line || " "}
                     </Text>
                   </View>
