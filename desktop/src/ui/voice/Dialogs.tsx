@@ -14,10 +14,64 @@
  */
 import { useEffect, useState } from "react";
 import { openExternal } from "~/open";
+import { platform } from "~/platform";
 import type { Blocked } from "./state";
 
-/** Straight to the pane, rather than to the top of System Settings. */
-const MIC_SETTINGS = "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone";
+/**
+ * Where a refused microphone is turned back on, per platform.
+ *
+ * All three differ in every part: what is blocking, what the settings
+ * application is called, how many switches there are, and whether a link can
+ * reach the right pane at all. Writing one of them and letting the other two
+ * inherit it is how a Windows user came to read that macOS was blocking the
+ * microphone, under a button that did nothing — the deep link is an Apple URL
+ * scheme, and the opener plugin refuses a scheme outside its scope *silently*.
+ *
+ * `deep` is null where there is nothing honest to link to, and the dialog
+ * then shows no button rather than a dead one.
+ */
+type Refusal = { blocker: string; steps: string[]; deep: string | null; button: string };
+
+/* Exported for the test that checks every scheme here is one the capability
+   file permits. They are two files that have to agree, and when they do not
+   the button fails silently — which is the whole of the bug this table was
+   written for. */
+export const REFUSAL: Record<typeof platform, Refusal> = {
+  // Straight to the pane, rather than to the top of System Settings.
+  macos: {
+    blocker: "macOS is blocking it, and it won't ask again on its own.",
+    steps: ["Open Privacy & Security → Microphone", "Switch Firetower on", "Come back and press the microphone"],
+    deep: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone",
+    button: "Open System Settings",
+  },
+  /* Two switches, and the second one is the whole reason this list has three
+     steps. With "let desktop apps access your microphone" off, the app never
+     appears in the per-app list at all — which reads as Windows not knowing
+     the app rather than as a setting being off, and is where somebody gives
+     up. */
+  windows: {
+    blocker: "Windows is blocking it, and it won't ask again on its own.",
+    steps: [
+      "Open Privacy & security → Microphone",
+      'Turn on "Let desktop apps access your microphone"',
+      "Come back and press the microphone",
+    ],
+    deep: "ms-settings:privacy-microphone",
+    button: "Open Settings",
+  },
+  /* No button. There is no one place to send anyone: it is PulseAudio or
+     PipeWire or the desktop environment's own portal, and a button that
+     opens the wrong one of those is worse than a sentence that admits it. */
+  linux: {
+    blocker: "Your system is blocking it, and it won't ask again on its own.",
+    steps: [
+      "Allow microphone access for Firetower in your desktop's sound or privacy settings",
+      "Come back and press the microphone",
+    ],
+    deep: null,
+    button: "",
+  },
+};
 
 const KEYS = "https://platform.openai.com/api-keys";
 
@@ -117,28 +171,26 @@ export function VoiceDialog({
   }
 
   if (blocked.why === "denied") {
+    const refusal = REFUSAL[platform];
     return (
       <Card onClose={onDismiss}>
         <Head title="Firetower can't hear the microphone">
-          macOS is blocking it, and it won't ask again on its own.
+          {refusal.blocker}
           {/* A numbered list rather than a sentence: this is a procedure in
               another application, and the person reading it is about to leave
               this window and follow it from memory. */}
           <ol className="mt-3 space-y-1.5 text-ui text-text">
-            <li className="flex gap-2.5">
-              <span className="text-mute tabular-nums">1.</span>Open Privacy &amp; Security → Microphone
-            </li>
-            <li className="flex gap-2.5">
-              <span className="text-mute tabular-nums">2.</span>Switch Firetower on
-            </li>
-            <li className="flex gap-2.5">
-              <span className="text-mute tabular-nums">3.</span>Come back and press the microphone
-            </li>
+            {refusal.steps.map((step, i) => (
+              <li key={step} className="flex gap-2.5">
+                <span className="text-mute tabular-nums">{i + 1}.</span>
+                {step}
+              </li>
+            ))}
           </ol>
         </Head>
         <Foot>
           <Quiet onClick={onDismiss}>Not now</Quiet>
-          <Loud onClick={() => void openExternal(MIC_SETTINGS)}>Open System Settings</Loud>
+          {refusal.deep && <Loud onClick={() => void openExternal(refusal.deep!)}>{refusal.button}</Loud>}
         </Foot>
       </Card>
     );

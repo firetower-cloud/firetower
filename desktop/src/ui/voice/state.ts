@@ -7,7 +7,7 @@
  * true at once — which is what the spinner stuck over a live waveform was.
  *
  * The blocked states are separate from the machine on purpose. "The mic is
- * off because macOS says no" is not a phase of listening; it is a thing
+ * off because the system says no" is not a phase of listening; it is a thing
  * standing in front of listening, it wants a dialog rather than a button
  * shape, and it outlives any one attempt to start.
  */
@@ -35,8 +35,8 @@ export type Voice =
  * Something is in the way, and a button cannot say what.
  *
  * Each of these is a dialog because each has an action behind it that is not
- * "press the microphone again" — paste a key, open System Settings, replace a
- * key that was revoked. A refusal you can only acknowledge stays on the
+ * "press the microphone again" — paste a key, open the system's settings,
+ * replace a key that was revoked. A refusal you can only acknowledge stays on the
  * composer's own line instead; see `Composer`'s `refused`.
  */
 export type Blocked =
@@ -51,7 +51,9 @@ export type Blocked =
   | { why: "unsupported" }
   /** Nobody has given this Firetower a key yet. */
   | { why: "unconfigured"; mayConfigure: boolean }
-  /** macOS is refusing, and will not ask again on its own. */
+  /* The operating system is refusing, and will not ask again on its own.
+     Which one, and what it is called, and whether there is a pane worth
+     linking to, is the dialog's business — see `REFUSAL` in `Dialogs`. */
   | { why: "denied" }
   /** The key exists and OpenAI would not take it. */
   | { why: "rejected"; detail: string; mayConfigure: boolean };

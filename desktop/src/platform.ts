@@ -8,7 +8,26 @@
  */
 export type Platform = "macos" | "windows" | "linux";
 
+/**
+ * Pretend to be another platform, while developing.
+ *
+ * `?platform=windows` in the address bar, and only in a dev build. The usual
+ * way to do this — override the user agent — does not work here, because
+ * detection reads `userAgentData`, which a browser flag cannot forge. And the
+ * things that vary by platform are not obscure: the title bar, the modifier
+ * in every shortcut, the sidebar's translucency, and the instructions in the
+ * microphone dialog, which name a different settings application on each one.
+ * None of that was inspectable from a Mac, so none of it was looked at.
+ */
+function asked(): Platform | null {
+  if (!import.meta.env.DEV || typeof location === "undefined") return null;
+  const said = new URLSearchParams(location.search).get("platform");
+  return said === "macos" || said === "windows" || said === "linux" ? said : null;
+}
+
 function detect(): Platform {
+  const pretend = asked();
+  if (pretend) return pretend;
   const hint = ((navigator as { userAgentData?: { platform?: string } }).userAgentData?.platform ?? navigator.platform ?? "").toLowerCase();
   if (hint.includes("mac")) return "macos";
   if (hint.includes("win")) return "windows";

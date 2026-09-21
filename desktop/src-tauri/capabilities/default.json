@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "What the window is allowed to do to itself. Tauri v2 denies every plugin command that is not listed here, and denies it silently \u2014 which is why dragging the title bar did nothing for four attempts, and why the dock badge never appeared. The same is true of a plugin's *scope*: `opener:default` permits `http`, `https`, `mailto` and `tel` and nothing else, so the microphone dialog's deep link into System Settings needs the entry below or it opens nothing and reports nothing.",
+  "description": "What the window is allowed to do to itself. Tauri v2 denies every plugin command that is not listed here, and denies it silently \u2014 which is why dragging the title bar did nothing for four attempts, and why the dock badge never appeared. The same is true of a plugin's *scope*: `opener:default` permits `http`, `https`, `mailto` and `tel` and nothing else, so the microphone dialog's deep link into the system's settings needs the entry below or it opens nothing and reports nothing. Both schemes are listed because the dialog links to whichever one the platform it is running on understands \u2014 `ms-settings:` was missing, which on Windows is a button that does nothing.",
   "windows": [
     "main"
   ],
@@ -19,7 +19,7 @@
     "opener:default",
     {
       "identifier": "opener:allow-open-url",
-      "allow": [{ "url": "x-apple.systempreferences:*" }]
+      "allow": [{ "url": "x-apple.systempreferences:*" }, { "url": "ms-settings:*" }]
     },
     "updater:default",
     "process:default",

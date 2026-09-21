@@ -12,7 +12,7 @@
  * browser's implementations are better than anything reasonable to do here.
  */
 
-/** macOS, or the browser, said no. Its own type so the caller can offer the fix. */
+/** The system, or the browser, said no. Its own type so the caller can offer the fix. */
 export class Refused extends Error {
   constructor() {
     super("the microphone was refused");
