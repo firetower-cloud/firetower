@@ -65,8 +65,12 @@ export default function Connect() {
       /* Enough for the button *under* the field, not just the field. The
          library lifts whatever has focus; the primary action is below it, and
          a Connect button hidden behind the keyboard is a dead end on a screen
-         whose entire job is one action. */
-      bottomOffset={104}
+         whose entire job is one action.
+         
+         iOS needed more than Android did: the same 104 left the button sitting
+         exactly on the keyboard's top edge, which is reachable and looks like
+         a mistake. Sized to clear the button and leave a gap under it. */
+      bottomOffset={132}
       style={{ flex: 1, backgroundColor: color.ground }}
       contentContainerStyle={{
         flexGrow: 1,
