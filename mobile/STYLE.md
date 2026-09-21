@@ -131,6 +131,34 @@ Rules that are not negotiable:
 - **A control that does not know stays quiet.** The model picker is absent
   until the agent says what it is running. "Opus 5" under a session running
   something else is a lie the picker tells until somebody speaks.
+- **Controls are 40pt circles and the box has 8pt of air.** The desk's density
+  is a mouse pointer's density. A phone's chrome has to be hittable without
+  aiming and legible at arm's length, and the difference between a composer
+  that feels like an app and one that feels like a form is almost entirely
+  this — a few points of padding and a few points of radius, everywhere.
+- **The composer sits on the keyboard, not on the home indicator.** The bottom
+  inset is the home indicator's, and the keyboard covers the home indicator.
+  Holding that 34pt open once the keyboard is up leaves a band of nothing
+  between the box and the keys, which is the single clearest tell that a
+  layout was written for a browser.
+- **The box eases to its new height**, on a wrapper, never on the `TextInput`
+  itself — animating a field's own frame moves the caret out from under the
+  finger on Android.
+- **Dictating shows a wave.** A microphone button with no feedback is
+  indistinguishable from one that is broken: you talk, nothing moves, and you
+  stop to check. The wave is a *trail*, not a meter — the newest sample enters
+  at the right and the history slides left, so a pause leaves a visible gap
+  behind it and you can see the shape of what you just said. Real amplitude,
+  on the UI thread, in one shared value.
+- **Menus grow out of the thing you pressed.** `transformOrigin` pins the
+  scale to the `+` button's corner. A panel that fades in centred on nothing
+  is a div; a panel that expands from under your thumb is a menu.
+- **A panel that opens has to close by tapping away from it.** The scrim
+  reaches up over the conversation. A control you can only dismiss by finding
+  the same small button again is one people get stuck in.
+- **Say the surprising half only.** "Camera / Photos / Files" needs one line
+  of explanation and it is on *Files*, because a file going into the workspace
+  rather than into the message is the only thing there you could not guess.
 
 ## Code, diffs and files
 

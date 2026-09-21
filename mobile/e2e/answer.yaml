@@ -41,3 +41,18 @@ appId: com.usefiretower.app
     start: "50%, 40%"
     end: "50%, 90%"
 - takeScreenshot: composer-after-drag
+
+# The `+` is a menu, not three buttons wedged into the composer's width, and
+# the scrim is the half of it that is easy to leave out: a panel you can only
+# close by finding the same small button again is one people get stuck in.
+- tapOn:
+    id: "attach"
+- assertVisible: "Camera"
+- assertVisible: "Photos"
+# Maestro matches the whole accessibility label, and this row has two lines.
+- assertVisible: "Files.*workspace"
+- takeScreenshot: attach-menu
+# Tapping the conversation behind it closes it.
+- tapOn:
+    point: "50%, 25%"
+- assertNotVisible: "Photos"

@@ -6,18 +6,21 @@
  *
  * ## It is two shapes, not one
  *
- * **At rest it is a pill** — one row, compact, inset from both edges. It is
- * furniture; the conversation is the screen and the composer should not take a
- * sixth of it to say nothing.
+ * **At rest it is a pill** — one row, compact. It is furniture; the
+ * conversation is the screen and the composer should not take a sixth of it to
+ * say nothing.
  *
- * **Writing in it, it is a card** — the text gets a line of its own, the
- * controls drop to a second row, corners square off, and it widens toward the
- * edges. The desk says *the composer is the second-heaviest object on the
- * screen*; it is only the second-heaviest while you are using it.
+ * **Writing in it, it is a card** — the text gets lines of its own and the
+ * controls drop to a second row. The desk says *the composer is the
+ * second-heaviest object on the screen*; it is only the second-heaviest while
+ * you are using it.
  *
  * The morph is one layout transition on the UI thread, not two components
  * swapped — the `TextInput` holds the same slot in the tree throughout, so
- * focus, selection and the keyboard never notice it happened.
+ * focus, selection and the keyboard never notice it happened. It keeps the
+ * same inset from both edges in both shapes: sliding the card outward on focus
+ * put two things in motion where one would do, and the extra 8pt bought
+ * nothing you could read.
  *
  * ## Three ways out, because a card you cannot put away is a trap
  *
@@ -29,13 +32,18 @@
  *
  * - **It moves with the keyboard, not after it.** `KeyboardStickyView` reads
  *   the keyboard's real frame every frame on the UI thread.
- * - **It grows to six lines, then scrolls.**
+ * - **It grows with the text**, smoothly — the measured content height drives
+ *   an animated wrapper rather than the field itself, so the box eases open a
+ *   line at a time without the caret ever jumping.
+ * - **Six lines, then it scrolls.**
  * - **Enter is a newline; the button sends.** `⏎ send` is a hardware-keyboard
  *   convention and inverting it on a phone loses half the messages people
  *   write. `⌘⏎` sends when a hardware keyboard is attached.
  * - **Send becomes stop while the agent works** — the same button in the same
  *   place, because reaching for a different one while something is running is
  *   the wrong moment to make somebody aim.
+ * - **Dictating replaces the controls with a wave**, and the words appear
+ *   above it as they are heard. See `Waveform`.
  */
 import { useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Alert, Image, Keyboard, Platform, Pressable, ScrollView, Text, TextInput, View } from "react-native";
@@ -47,26 +55,39 @@ import Animated, {
   withTiming,
 } from "react-native-reanimated";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
-import { KeyboardStickyView } from "react-native-keyboard-controller";
+import { KeyboardStickyView, useReanimatedKeyboardAnimation } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as Haptics from "expo-haptics";
-import { ArrowUp, Camera, ChevronDown, FileText, Image as ImageIcon, Mic, Paperclip, Plus, Square, X } from "lucide-react-native";
+import { ArrowUp, ChevronDown, Mic, Paperclip, Plus, Square, X } from "lucide-react-native";
 import type { Attached } from "~/api/generated/model";
-import { megabytes, pickFiles, pickImages, takePhoto, type Picked } from "~/ui/attach";
+import { megabytes, type Picked } from "~/ui/attach";
+import { AttachMenu } from "~/ui/AttachMenu";
+import { Waveform } from "~/ui/Waveform";
 import { useDictation } from "~/ui/useDictation";
 import { takeDraft } from "~/workspace/draft";
 import { color, size } from "~/design/tokens.generated";
 
-/** One line at rest, six before it scrolls. */
-const LINE = 22;
+/**
+ * One line at rest, six before it scrolls.
+ *
+ * 24 rather than the 22 this started at: `--text-read` is 16px on a 1.6 lead,
+ * and a chat box is the one place in the app that is pure reading.
+ */
+const LINE = 24;
 const MIN = LINE;
 const MAX = LINE * 6;
+
+/** What a multiline field needs above and below its text, per platform. */
+const PAD = Platform.OS === "ios" ? 14 : 18;
 
 /** `--ease-swift`, and the web build's duration — in-content motion. */
 const SWIFT = { duration: 200, easing: Easing.bezier(0.16, 1, 0.3, 1) };
 
-const PILL = 26;
-const CARD = 20;
+const PILL = 28;
+const CARD = 26;
+
+/** Big enough to hit without looking. */
+const TAP = "h-10 w-10 items-center justify-center rounded-full";
 
 export function Composer({
   sessionId,
@@ -98,6 +119,15 @@ export function Composer({
   onInterrupt: () => void;
 }) {
   const insets = useSafeAreaInsets();
+  /* How far the keyboard is up, 0 to 1, on the UI thread. The composer's own
+     bottom padding is the home indicator's — but only while the home
+     indicator is visible. Once the keyboard covers it, holding the space open
+     leaves a 34pt band of nothing between the box and the keys. */
+  const { progress } = useReanimatedKeyboardAnimation();
+  const rest = Math.max(insets.bottom, 8);
+  const skirt = useAnimatedStyle(() => ({
+    paddingBottom: rest - (rest - 8) * progress.value,
+  }));
   const [text, setText] = useState("");
   const [height, setHeight] = useState(MIN);
   const [focused, setFocused] = useState(false);
@@ -108,20 +138,35 @@ export function Composer({
   const [busy, setBusy] = useState(false);
   const [more, setMore] = useState(false);
   const field = useRef<TextInput>(null);
+  /** The draft dictation is sitting on top of, in case you cancel. */
+  const before = useRef("");
 
   const dictation = useDictation();
+  const { listening } = dictation;
 
   const open = !stowed && (focused || text.length > 0 || chips.length > 0);
 
   const shape = useSharedValue(0);
   const skin = useAnimatedStyle(() => ({
     borderRadius: PILL + (CARD - PILL) * shape.value,
-    marginHorizontal: 12 - 4 * shape.value,
   }));
-  const morph = (to: number) => {
-    shape.value = withTiming(to, SWIFT);
-  };
-  useEffect(() => morph(open ? 1 : 0), [open]);
+  useEffect(() => {
+    shape.value = withTiming(open ? 1 : 0, SWIFT);
+  }, [open]);
+
+  /* An empty composer is one line, whatever the last measurement said. */
+  const tall = text.length === 0 ? MIN : height;
+
+  /* The box eases to its new size instead of snapping a line at a time. The
+     animated height is on a wrapper, never on the `TextInput` itself —
+     animating the field's own frame moves the caret out from under the
+     finger on Android. */
+  const box = useSharedValue(LINE + 10);
+  const grown = open ? tall + PAD : LINE + 10;
+  useEffect(() => {
+    box.value = withTiming(grown, SWIFT);
+  }, [grown]);
+  const room = useAnimatedStyle(() => ({ height: box.value }));
 
   /* A workspace started from a task arrives with its issue waiting. Taken
      once, so coming back does not put it on top of what has since been
@@ -134,15 +179,12 @@ export function Composer({
   /* What is being dictated goes into the box as it is heard, so it reads as
      writing rather than as waiting. */
   useEffect(() => {
-    if (dictation.listening && dictation.heard) setText(dictation.heard);
-  }, [dictation.listening, dictation.heard]);
+    if (listening && dictation.heard) setText(dictation.heard);
+  }, [listening, dictation.heard]);
 
   useEffect(() => {
     if (dictation.trouble) Alert.alert("Dictation", dictation.trouble);
   }, [dictation.trouble]);
-
-  /* An empty composer is one line, whatever the last measurement said. */
-  const tall = text.length === 0 ? MIN : height;
 
   const put = () => {
     field.current?.blur();
@@ -176,6 +218,10 @@ export function Composer({
       .map((c) => ({ data: c.data, mediaType: c.mediaType }));
     if (!said && images.length === 0) return;
 
+    /* Stop listening before emptying the box, or the final transcript lands
+       in a composer you have already sent. */
+    if (listening) dictation.cancel();
+
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     onSend(said, images);
     setText("");
@@ -188,9 +234,24 @@ export function Composer({
     setStowed(false);
   };
 
+  const listen = () => {
+    before.current = text;
+    setStowed(false);
+    setMore(false);
+    /* The keyboard is in the way of a wave and of nothing else. */
+    field.current?.blur();
+    Keyboard.dismiss();
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    void dictation.start();
+  };
+
+  const drop = () => {
+    dictation.cancel();
+    setText(before.current);
+  };
+
   /** A file goes to the workspace now and is only named in the message. */
   const carry = async (picked: Picked[]) => {
-    setMore(false);
     if (picked.length === 0) return;
     setBusy(true);
     try {
@@ -205,90 +266,71 @@ export function Composer({
     }
   };
 
+  /**
+   * Rendered by calling these, not as `<Action />`.
+   *
+   * A component declared inside another component is a *new type* on every
+   * render, so React unmounts and remounts its whole subtree. For a button
+   * that is invisible waste; for the wave, whose trail and timer live in the
+   * subtree, it would wipe the history ten times a second.
+   */
   const Action = () =>
     working ? (
-      <Pressable
-        testID="stop"
-        onPress={onInterrupt}
-        className="h-9 w-9 items-center justify-center rounded-full bg-bone"
-        hitSlop={6}
-      >
-        <Square color={color.ground} size={12} fill={color.ground} />
-      </Pressable>
-    ) : dictation.listening ? (
-      /* While it is listening the send control is a stop, because stopping is
-         the only thing anybody wants next. */
-      <Pressable
-        onPress={dictation.stop}
-        className="h-9 w-9 items-center justify-center rounded-full bg-ember"
-        hitSlop={6}
-      >
-        <Square color={color.ground} size={12} fill={color.ground} />
+      <Pressable testID="stop" onPress={onInterrupt} className={`${TAP} bg-bone`} hitSlop={6}>
+        <Square color={color.ground} size={13} fill={color.ground} />
       </Pressable>
     ) : text.trim() || chips.length ? (
-      <Pressable
-        testID="send"
-        onPress={send}
-        className="h-9 w-9 items-center justify-center rounded-full bg-bone"
-        hitSlop={6}
-      >
-        <ArrowUp color={color.ground} size={18} />
+      <Pressable testID="send" onPress={send} className={`${TAP} bg-bone`} hitSlop={6}>
+        <ArrowUp color={color.ground} size={20} />
       </Pressable>
     ) : (
       /* Nothing written: the microphone is what the button is for. Saying
          something is the alternative to typing it, not an extra control
          competing for the same corner. */
-      <Pressable
-        testID="mic"
-        onPress={() => void dictation.start()}
-        className="h-9 w-9 items-center justify-center rounded-full bg-overlay"
-        hitSlop={6}
-      >
-        <Mic color={color.dim} size={17} />
+      <Pressable testID="mic" onPress={listen} className={`${TAP} bg-overlay`} hitSlop={6}>
+        <Mic color={color.dim} size={19} />
       </Pressable>
     );
 
   const Attach = () => (
     <Pressable
       testID="attach"
-      onPress={() => setMore((m) => !m)}
-      className="h-9 w-9 items-center justify-center rounded-full"
+      onPress={() => {
+        Haptics.selectionAsync();
+        setMore((m) => !m);
+      }}
+      className={TAP}
       hitSlop={6}
       disabled={busy}
     >
-      {busy ? <ActivityIndicator color={color.dim} size="small" /> : <Plus color={color.dim} size={20} />}
+      {busy ? <ActivityIndicator color={color.dim} size="small" /> : <Plus color={color.dim} size={22} />}
     </Pressable>
+  );
+
+  /** While it is listening, the controls are the wave and the two ways out. */
+  const Hearing = () => (
+    <View className="flex-row items-center gap-2">
+      <Pressable testID="dictate-cancel" onPress={drop} className={`${TAP} bg-overlay`} hitSlop={6}>
+        <X color={color.dim} size={18} />
+      </Pressable>
+      <Waveform level={dictation.level} />
+      <Pressable testID="dictate-stop" onPress={dictation.stop} className={`${TAP} bg-overlay`} hitSlop={6}>
+        <Square color={color.bone} size={13} fill={color.bone} />
+      </Pressable>
+      {text.trim() ? (
+        <Pressable testID="send" onPress={send} className={`${TAP} bg-bone`} hitSlop={6}>
+          <ArrowUp color={color.ground} size={20} />
+        </Pressable>
+      ) : null}
+    </View>
   );
 
   return (
     <KeyboardStickyView offset={{ closed: 0, opened: 0 }}>
-      <View style={{ paddingTop: 6, paddingBottom: Math.max(insets.bottom, 8) }}>
+      <Animated.View style={[{ paddingTop: 6 }, skirt]}>
         {above}
 
-        {/* What the `+` opens. Three ways in, because a picture and a file go
-            to different places and the choice is the point. */}
-        {more ? (
-          <Animated.View
-            layout={LinearTransition.duration(200)}
-            className="mx-3 mb-2 flex-row gap-2 rounded-xl bg-raise p-2"
-          >
-            {[
-              { id: "photos", label: "Photos", icon: ImageIcon, run: pickImages },
-              { id: "camera", label: "Camera", icon: Camera, run: takePhoto },
-              { id: "files", label: "Files", icon: FileText, run: pickFiles },
-            ].map(({ id, label, icon: Icon, run }) => (
-              <Pressable
-                key={id}
-                onPress={async () => carry(await run())}
-                className="flex-1 items-center gap-1.5 rounded-lg py-3"
-                android_ripple={{ color: color.overlay }}
-              >
-                <Icon color={color.dim} size={18} />
-                <Text className="font-medium text-meta text-dim">{label}</Text>
-              </Pressable>
-            ))}
-          </Animated.View>
-        ) : null}
+        {more ? <AttachMenu onPick={carry} onClose={() => setMore(false)} /> : null}
 
         <GestureDetector gesture={drag}>
           <Animated.View
@@ -296,8 +338,9 @@ export function Composer({
             style={[
               {
                 backgroundColor: color.raise,
-                paddingHorizontal: 6,
-                paddingVertical: 6,
+                marginHorizontal: 12,
+                paddingHorizontal: 8,
+                paddingVertical: 8,
                 shadowColor: "#000",
                 shadowOpacity: open ? 0.5 : 0,
                 shadowRadius: 20,
@@ -312,24 +355,24 @@ export function Composer({
               <ScrollView horizontal showsHorizontalScrollIndicator={false} className="mb-2 px-1">
                 <View className="flex-row gap-2">
                   {chips.map((c, i) => (
-                    <View key={`${c.name}-${i}`} className="flex-row items-center gap-2 rounded-lg bg-overlay py-1.5 pl-1.5 pr-2">
+                    <View key={`${c.name}-${i}`} className="flex-row items-center gap-2 rounded-xl bg-overlay py-1.5 pl-1.5 pr-2.5">
                       {c.kind === "image" ? (
-                        <Image source={{ uri: c.uri }} className="h-7 w-7 rounded-md" />
+                        <Image source={{ uri: c.uri }} className="h-8 w-8 rounded-lg" />
                       ) : (
-                        <View className="h-7 w-7 items-center justify-center rounded-md bg-raise">
-                          <Paperclip color={color.mute} size={13} />
+                        <View className="h-8 w-8 items-center justify-center rounded-lg bg-raise">
+                          <Paperclip color={color.mute} size={14} />
                         </View>
                       )}
                       <View>
-                        <Text numberOfLines={1} className="max-w-[120px] font-sans text-meta text-text">
+                        <Text numberOfLines={1} className="max-w-[120px] font-sans text-ui text-text">
                           {c.name}
                         </Text>
-                        <Text className="font-sans text-mute" style={{ fontSize: 10 }}>
+                        <Text className="font-sans text-micro text-mute">
                           {c.kind === "file" ? "in the workspace" : megabytes(c.bytes)}
                         </Text>
                       </View>
                       <Pressable onPress={() => setChips(chips.filter((_, j) => j !== i))} hitSlop={8}>
-                        <X color={color.mute} size={13} />
+                        <X color={color.mute} size={14} />
                       </Pressable>
                     </View>
                   ))}
@@ -337,78 +380,110 @@ export function Composer({
               </ScrollView>
             ) : null}
 
-            {/* Slot order never changes: the input is always the middle child,
-                so React keeps the same instance and focus survives the morph. */}
-            <View className={`flex-row ${open ? "items-end" : "items-center"}`}>
-              {!open ? <Attach /> : null}
-
-              <TextInput
-                testID="composer"
-                ref={field}
-                multiline
-                value={text}
-                onChangeText={setText}
-                onFocus={() => {
-                  setStowed(false);
-                  setFocused(true);
-                }}
-                onBlur={() => setFocused(false)}
-                onContentSizeChange={(e) => {
-                  if (!text.length) return;
-                  setHeight(Math.min(MAX, Math.max(MIN, e.nativeEvent.contentSize.height)));
-                }}
-                placeholder={dictation.listening ? "Listening…" : "Answer the agent"}
-                placeholderTextColor={dictation.listening ? color.ember : color.mute}
-                selectionColor={color.ember}
-                className="flex-1 font-sans text-bone"
-                /* The asymmetric padding is what a multiline field needs once
-                   it has grown; at rest it is what pushed the placeholder off
-                   the pill's centre line. */
-                style={{
-                  height: open ? tall + (Platform.OS === "ios" ? 14 : 18) : LINE + 8,
-                  paddingHorizontal: 10,
-                  paddingTop: open ? (Platform.OS === "ios" ? 8 : 4) : 0,
-                  paddingBottom: open ? (Platform.OS === "ios" ? 6 : 4) : 0,
-                  fontSize: size.read,
-                  lineHeight: LINE,
-                  textAlignVertical: "center",
-                }}
-                onKeyPress={(e) => {
-                  const native = e.nativeEvent as unknown as { key: string; metaKey?: boolean };
-                  if (native.key === "Enter" && native.metaKey) send();
-                }}
-              />
-
-              {!open ? <Action /> : null}
-            </View>
-
-            {open ? (
-              <Animated.View
-                layout={LinearTransition.duration(200)}
-                className="flex-row items-center gap-1 pt-1"
-              >
-                <Attach />
-                <View className="flex-1" />
-                {model ? (
-                  <Pressable className="flex-row items-center gap-1 px-2 py-2" hitSlop={4}>
-                    <Text numberOfLines={1} className="font-medium text-meta text-dim">
-                      {model}
-                    </Text>
-                    <ChevronDown color={color.mute} size={12} />
-                  </Pressable>
+            {listening ? (
+              <>
+                {/* The words so far, above the wave. Read-only: editing what
+                    is still being revised would fight the recogniser. */}
+                {text ? (
+                  <Text
+                    numberOfLines={6}
+                    className="px-2.5 pb-2 font-sans text-bone"
+                    style={{ fontSize: size.read, lineHeight: LINE }}
+                  >
+                    {text}
+                  </Text>
                 ) : null}
-                {mode ? (
-                  <Pressable className="flex-row items-center gap-1 px-2 py-2" hitSlop={4}>
-                    <Text className="font-medium text-meta text-dim">{mode}</Text>
-                    <ChevronDown color={color.mute} size={12} />
-                  </Pressable>
+                {Hearing()}
+              </>
+            ) : (
+              <>
+                {/* Slot order never changes: the input is always the middle
+                    child, so React keeps the same instance and focus survives
+                    the morph. */}
+                <View className={`flex-row ${open ? "items-end" : "items-center"}`}>
+                  {!open ? Attach() : null}
+
+                  <Animated.View style={[{ flex: 1 }, room]}>
+                    <TextInput
+                      testID="composer"
+                      ref={field}
+                      multiline
+                      value={text}
+                      onChangeText={setText}
+                      onFocus={() => {
+                        setStowed(false);
+                        setFocused(true);
+                      }}
+                      onBlur={() => setFocused(false)}
+                      onContentSizeChange={(e) => {
+                        if (!text.length) return;
+                        setHeight(Math.min(MAX, Math.max(MIN, e.nativeEvent.contentSize.height)));
+                      }}
+                      placeholder="Answer the agent"
+                      placeholderTextColor={color.mute}
+                      selectionColor={color.ember}
+                      className="font-sans text-bone"
+                      style={{
+                        flex: 1,
+                        paddingHorizontal: 10,
+                        paddingTop: open ? (Platform.OS === "ios" ? 8 : 4) : 0,
+                        paddingBottom: open ? (Platform.OS === "ios" ? 6 : 4) : 0,
+                        fontSize: size.read,
+                        lineHeight: LINE,
+                        /* Centred in the pill, where one line has room to sit
+                           low; top-aligned in the card, where the second line
+                           has to land under the first. */
+                        textAlignVertical: open ? "top" : "center",
+                      }}
+                      onKeyPress={(e) => {
+                        const native = e.nativeEvent as unknown as { key: string; metaKey?: boolean };
+                        if (native.key === "Enter" && native.metaKey) send();
+                      }}
+                    />
+                  </Animated.View>
+
+                  {!open ? Action() : null}
+                </View>
+
+                {open ? (
+                  <Animated.View
+                    layout={LinearTransition.duration(200)}
+                    className="flex-row items-center gap-1 pt-1"
+                  >
+                    {Attach()}
+                    <View className="flex-1" />
+                    {model ? (
+                      <Pressable className="flex-row items-center gap-1 px-2 py-2" hitSlop={4}>
+                        <Text
+                          numberOfLines={1}
+                          className="max-w-[140px] font-medium text-ui text-dim"
+                        >
+                          {model.replace(/^claude-/, "")}
+                        </Text>
+                        <ChevronDown color={color.mute} size={13} />
+                      </Pressable>
+                    ) : null}
+                    {mode ? (
+                      <Pressable className="flex-row items-center gap-1 px-2 py-2" hitSlop={4}>
+                        <Text className="font-medium text-ui text-dim">{mode}</Text>
+                        <ChevronDown color={color.mute} size={13} />
+                      </Pressable>
+                    ) : null}
+                    {/* Dictating from the card, where the send button is
+                        already spoken for by the draft. */}
+                    {!text.trim() && !chips.length ? null : (
+                      <Pressable testID="mic-card" onPress={listen} className={TAP} hitSlop={6}>
+                        <Mic color={color.dim} size={19} />
+                      </Pressable>
+                    )}
+                    {Action()}
+                  </Animated.View>
                 ) : null}
-                <Action />
-              </Animated.View>
-            ) : null}
+              </>
+            )}
           </Animated.View>
         </GestureDetector>
-      </View>
+      </Animated.View>
     </KeyboardStickyView>
   );
 }
