@@ -14,10 +14,11 @@
  * - **It appeared instantly**, so a fast load flashed a spinner, which is its
  *   own kind of broken. Nothing shows for the first third of a second.
  *
- * And the one that is not about looks: past `SLOW` it says **"Still going."**
- * That is the whole question somebody is actually asking when they stare at a
- * loading screen, and no amount of animation answers it — only a sentence
- * that appeared *because* time passed can.
+ * It grew a second line after six seconds saying "Still going." for about a
+ * day. The intent was to answer *is this stuck* — but the sweep already
+ * answers that continuously, and a caption that appears on its own is a small
+ * alarm going off. The sentence that is already moving says more than a
+ * second sentence about the first one.
  *
  * It drew the transcript's shape in skeleton bars underneath for about a day.
  * They were the first thing to go once somebody saw them: a skeleton promises
@@ -26,34 +27,39 @@
  * a sentence that did the job alone.
  */
 import { useEffect, useState } from "react";
-import { Text, View } from "react-native";
+import { View } from "react-native";
 import { Sheen } from "~/ui/Sheen";
 
 /** Under this, a load is not worth telling anybody about. */
 const HOLD = 350;
-/** Past this, somebody is wondering whether it is stuck. */
-const SLOW = 6000;
 
-export function Waiting({ say }: { say: string }) {
+export function Waiting({
+  say,
+  /**
+   * Where it sits.
+   *
+   * A screen waiting for its whole contents centres, because the wait *is*
+   * the screen. Something opening inside a list does not: a folder expanding
+   * belongs to the row above it, and a centred word floating over a file tree
+   * reads as a different, larger thing happening.
+   */
+  align = "center",
+}: {
+  say: string;
+  align?: "center" | "left";
+}) {
   const [shown, setShown] = useState(false);
-  const [slow, setSlow] = useState(false);
 
   useEffect(() => {
-    const a = setTimeout(() => setShown(true), HOLD);
-    const b = setTimeout(() => setSlow(true), SLOW);
-    return () => {
-      clearTimeout(a);
-      clearTimeout(b);
-    };
+    const t = setTimeout(() => setShown(true), HOLD);
+    return () => clearTimeout(t);
   }, []);
 
   if (!shown) return null;
 
   return (
-    <View className="items-center gap-1.5 py-6">
+    <View className={align === "center" ? "items-center py-6" : "items-start py-1"}>
       <Sheen text={say} />
-      {/* Said only once enough time has passed for it to be the question. */}
-      {slow ? <Text className="font-sans text-meta text-mute">Still going.</Text> : null}
     </View>
   );
 }

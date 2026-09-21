@@ -16,8 +16,9 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useQueryClient } from "@tanstack/react-query";
 import * as Haptics from "expo-haptics";
 import * as Linking from "expo-linking";
-import { ExternalLink, GitPullRequest, Pencil, RotateCcw, Trash2 } from "lucide-react-native";
+import { ExternalLink, GitPullRequest, Pencil, RotateCcw, Stethoscope, Trash2 } from "lucide-react-native";
 import type { Session } from "~/api/generated/model";
+import type { Conversation } from "~/api/conversation";
 import {
   getGetSessionQueryKey,
   getListSessionsQueryKey,
@@ -39,11 +40,17 @@ type Row = {
 
 export function WorkspaceMenu({
   session,
+  conversation,
+  runs,
   open,
   onClose,
   onEnded,
 }: {
   session: Session;
+  /** For the diagnostics sheet; see `Conversation.delivered`. */
+  conversation?: Conversation;
+  /** Every run of this workspace, not just the one being read. */
+  runs?: { id: string; agent: string; status: string }[];
   open: boolean;
   onClose: () => void;
   onEnded: () => void;
@@ -116,6 +123,38 @@ export function WorkspaceMenu({
           } as Row,
         ]
       : []),
+    {
+      id: "why",
+      label: "Why is this conversation short?",
+      icon: Stethoscope,
+      onPress: () => {
+        /* A transcript that stops part way has two possible causes needing
+           opposite fixes — the control plane sent fewer events than the
+           conversation holds, or it sent them all and this client lost them.
+           Nothing on screen tells those apart, and neither does a report of
+           the symptom. So the app can be asked. */
+        const d = conversation?.delivered;
+        Alert.alert(
+          "This conversation",
+          [
+            `Session  ${session.id}`,
+            `Runs in this workspace  ${runs?.length ?? 1}`,
+            ...(runs && runs.length > 1
+              ? runs.map((r) => `  · ${r.agent} ${r.status} ${r.id}`)
+              : []),
+            "",
+            d?.failed
+              ? "First read  failed, streaming instead"
+              : `First read  ${d ? `${d.events} events, up to line ${d.lastLine}` : "not finished"}`,
+            `Drawn  ${conversation?.items.length ?? 0} items`,
+            `Cursor  line ${conversation?.lastLine ?? 0}`,
+            `Unreadable  ${conversation?.skipped ?? 0}`,
+          ].join("\n"),
+          [{ text: "Done" }],
+        );
+        onClose();
+      },
+    } as Row,
     {
       id: "end",
       label: "End this workspace",

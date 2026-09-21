@@ -104,5 +104,9 @@ export function lead(place: Workspace): Session {
       : what === "waiting"
         ? place.runs.find(needsYou)
         : undefined;
-  return match ?? place.runs[0];
+  /* A workspace is a checkout with several agents in it, and a shell running
+     beside the work — `cargo watch`, a dev server — is not what anybody
+     opened it to read. The desk skips those and this did not, which is one
+     way the two clients could show a different transcript for the same row. */
+  return match ?? place.runs.find((r) => r.agent !== "Shell") ?? place.runs[0];
 }

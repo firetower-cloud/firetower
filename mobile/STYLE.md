@@ -194,9 +194,15 @@ as a hang. One component now, because the reasons were the same everywhere.
   reads as a hang.
 - **Nothing for the first 350ms.** A fast load that flashes a spinner is its
   own kind of broken.
-- **Past six seconds, say "Still going."** That is the whole question somebody
-  is actually asking, and no amount of animation answers it — only a sentence
-  that appeared *because* time passed.
+- **No second caption.** It grew a "Still going." line after six seconds, on
+  the theory that it answered *is this stuck*. The sweep already answers that,
+  continuously — and a caption that appears on its own is a small alarm going
+  off. Removed.
+- **Centre a screen, left-align a row.** A screen waiting for its whole
+  contents centres, because the wait *is* the screen. Something opening inside
+  a list does not: a folder expanding belongs to the row above it, and a
+  centred word floating over a file tree reads as a different and larger thing
+  happening.
 - **One sentence, and no skeleton.** It drew the transcript's shape in
   placeholder bars for about a day. A skeleton promises a specific layout is
   about to appear in a specific place, and next to one sweeping line that says

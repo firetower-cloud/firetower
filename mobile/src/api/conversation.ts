@@ -214,6 +214,16 @@ export type Conversation = {
    * worse than a gap that admits it is one.
    */
   skipped?: number;
+  /**
+   * What the first read actually delivered.
+   *
+   * Only ever read by the diagnostics sheet. A transcript that looks short has
+   * two possible causes and they need completely different fixes — the server
+   * sent fewer events than the conversation has, or it sent them all and this
+   * client lost them. Nothing on the screen distinguishes those, and neither
+   * does a bug report, which is how a day went into guessing.
+   */
+  delivered?: { events: number; lastLine: number; failed?: boolean };
 };
 
 /**
@@ -712,7 +722,12 @@ function start(key: string, sessionId: string, follow: ReturnType<typeof useSock
         // The snapshot's own cursor, not the last line that drew something: a
         // log line can normalise to no events at all, and resuming from the
         // last *drawn* one would ask for those again on every open.
-        put(key, { ...folded, lastLine: Math.max(folded.lastLine, snapshot.lastLine), arrived: true });
+        put(key, {
+          ...folded,
+          lastLine: Math.max(folded.lastLine, snapshot.lastLine),
+          arrived: true,
+          delivered: { events: snapshot.events.length, lastLine: snapshot.lastLine },
+        });
       })
       .catch((e) => {
         // Not fatal, and not worth a banner: the subscription below replays
@@ -721,7 +736,12 @@ function start(key: string, sessionId: string, follow: ReturnType<typeof useSock
         // Streaming from nothing is still a conversation arriving, and a
         // screen left waiting on a promise that already rejected waits for
         // ever.
-        if (!dropped) put(key, { ...read(key), arrived: true });
+        if (!dropped)
+          put(key, {
+            ...read(key),
+            arrived: true,
+            delivered: { events: 0, lastLine: 0, failed: true },
+          });
       })
       .finally(listen);
   }

@@ -34,7 +34,7 @@ function Level({
       <View className="py-3" style={{ paddingLeft: 12 + depth * 14 }}>
         {/* A folder opening, not a screen loading — the word carries the
             indent so it reads as belonging to the row above it. */}
-        <Waiting say={depth === 0 ? "Reading the repository" : "Opening"} />
+        <Waiting say={depth === 0 ? "Reading the repository" : "Opening"} align="left" />
       </View>
     );
   }
