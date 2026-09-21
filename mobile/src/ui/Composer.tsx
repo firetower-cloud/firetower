@@ -74,8 +74,7 @@ import { color, size } from "~/design/tokens.generated";
  * and a chat box is the one place in the app that is pure reading.
  */
 const LINE = 24;
-const MIN = LINE;
-const MAX = LINE * 6;
+const LINES = 6;
 
 /** What a multiline field needs above and below its text, per platform. */
 const PAD = Platform.OS === "ios" ? 14 : 18;
@@ -129,7 +128,6 @@ export function Composer({
     paddingBottom: rest - (rest - 8) * progress.value,
   }));
   const [text, setText] = useState("");
-  const [height, setHeight] = useState(MIN);
   const [focused, setFocused] = useState(false);
   /* Put away on purpose, with words still in the box. Cleared by touching it
      again, so the drag is a dismissal and not a mode. */
@@ -153,20 +151,6 @@ export function Composer({
   useEffect(() => {
     shape.value = withTiming(open ? 1 : 0, SWIFT);
   }, [open]);
-
-  /* An empty composer is one line, whatever the last measurement said. */
-  const tall = text.length === 0 ? MIN : height;
-
-  /* The box eases to its new size instead of snapping a line at a time. The
-     animated height is on a wrapper, never on the `TextInput` itself —
-     animating the field's own frame moves the caret out from under the
-     finger on Android. */
-  const box = useSharedValue(LINE + 10);
-  const grown = open ? tall + PAD : LINE + 10;
-  useEffect(() => {
-    box.value = withTiming(grown, SWIFT);
-  }, [grown]);
-  const room = useAnimatedStyle(() => ({ height: box.value }));
 
   /* A workspace started from a task arrives with its issue waiting. Taken
      once, so coming back does not put it on top of what has since been
@@ -226,7 +210,6 @@ export function Composer({
     onSend(said, images);
     setText("");
     setChips([]);
-    setHeight(MIN);
     /* Sending is the end of your turn, so the composer goes back to being
        furniture rather than sitting open with a keyboard over the reply. */
     field.current?.blur();
@@ -403,44 +386,52 @@ export function Composer({
                 <View className={`flex-row ${open ? "items-end" : "items-center"}`}>
                   {!open ? Attach() : null}
 
-                  <Animated.View style={[{ flex: 1 }, room]}>
-                    <TextInput
-                      testID="composer"
-                      ref={field}
-                      multiline
-                      value={text}
-                      onChangeText={setText}
-                      onFocus={() => {
-                        setStowed(false);
-                        setFocused(true);
-                      }}
-                      onBlur={() => setFocused(false)}
-                      onContentSizeChange={(e) => {
-                        if (!text.length) return;
-                        setHeight(Math.min(MAX, Math.max(MIN, e.nativeEvent.contentSize.height)));
-                      }}
-                      placeholder="Answer the agent"
-                      placeholderTextColor={color.mute}
-                      selectionColor={color.ember}
-                      className="font-sans text-bone"
-                      style={{
-                        flex: 1,
-                        paddingHorizontal: 10,
-                        paddingTop: open ? (Platform.OS === "ios" ? 8 : 4) : 0,
-                        paddingBottom: open ? (Platform.OS === "ios" ? 6 : 4) : 0,
-                        fontSize: size.read,
-                        lineHeight: LINE,
-                        /* Centred in the pill, where one line has room to sit
-                           low; top-aligned in the card, where the second line
-                           has to land under the first. */
-                        textAlignVertical: open ? "top" : "center",
-                      }}
-                      onKeyPress={(e) => {
-                        const native = e.nativeEvent as unknown as { key: string; metaKey?: boolean };
-                        if (native.key === "Enter" && native.metaKey) send();
-                      }}
-                    />
-                  </Animated.View>
+                  {/* The field sizes itself.
+                      It measured its own content and fed the answer back into
+                      its own height until today, which deadlocks: once a
+                      `TextInput` has an explicit height, iOS reports that
+                      height as its `contentSize`, the measurement can never
+                      exceed the box, and the event stops firing entirely. The
+                      box stays two lines and everything past that scrolls out
+                      of sight. Bounds do the same job with no feedback in
+                      them at all — and the wrapper holds `flex` so the field
+                      itself is free to be exactly as tall as its text. */}
+                  <View style={{ flex: 1 }}>
+                  <TextInput
+                    testID="composer"
+                    ref={field}
+                    multiline
+                    value={text}
+                    onChangeText={setText}
+                    onFocus={() => {
+                      setStowed(false);
+                      setFocused(true);
+                    }}
+                    onBlur={() => setFocused(false)}
+                    placeholder="Answer the agent"
+                    placeholderTextColor={color.mute}
+                    selectionColor={color.ember}
+                    className="font-sans text-bone"
+                    style={{
+                      ...(open
+                        ? { minHeight: LINE + PAD, maxHeight: LINE * LINES + PAD }
+                        : { height: LINE + 10 }),
+                      paddingHorizontal: 10,
+                      paddingTop: open ? (Platform.OS === "ios" ? 8 : 4) : 0,
+                      paddingBottom: open ? (Platform.OS === "ios" ? 6 : 4) : 0,
+                      fontSize: size.read,
+                      lineHeight: LINE,
+                      /* Centred in the pill, where one line has room to sit
+                         low; top-aligned in the card, where the second line
+                         has to land under the first. */
+                      textAlignVertical: open ? "top" : "center",
+                    }}
+                    onKeyPress={(e) => {
+                      const native = e.nativeEvent as unknown as { key: string; metaKey?: boolean };
+                      if (native.key === "Enter" && native.metaKey) send();
+                    }}
+                  />
+                  </View>
 
                   {!open ? Action() : null}
                 </View>

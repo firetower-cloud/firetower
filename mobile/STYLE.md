@@ -141,9 +141,14 @@ Rules that are not negotiable:
   Holding that 34pt open once the keyboard is up leaves a band of nothing
   between the box and the keys, which is the single clearest tell that a
   layout was written for a browser.
-- **The box eases to its new height**, on a wrapper, never on the `TextInput`
-  itself — animating a field's own frame moves the caret out from under the
-  finger on Android.
+- **The composer sizes itself; nothing measures it.** A `TextInput` that
+  measures its own content and feeds the answer back into its own height
+  deadlocks: once the field has an explicit height, iOS reports *that height*
+  as its `contentSize`, so the measurement can never exceed the box and the
+  event stops firing. The box stays two lines and everything past that scrolls
+  out of sight. `minHeight` and `maxHeight` do the same job with no feedback
+  loop in them, and the platform animates the growth better than we did.
+  Whatever owns `flex` must not be the thing whose height is in question.
 - **Dictating shows a wave.** A microphone button with no feedback is
   indistinguishable from one that is broken: you talk, nothing moves, and you
   stop to check. The wave is a *trail*, not a meter — the newest sample enters

@@ -35,6 +35,18 @@ appId: com.usefiretower.app
 - assertVisible: "Checking the keyboard behaves."
 - takeScreenshot: composer-focused
 
+# Past two lines, where the box once stopped growing and everything before
+# the last two lines scrolled out of sight.
+#
+# The screenshot is the check, and it has to be said plainly that it is: an
+# `assertVisible` here would pass either way, because Maestro reads the
+# field's text attribute and not the pixels, and a field that is scrolled
+# still holds all of its text. This step exists so the artifact shows a box
+# with a real height in it — a two-line draft looks identical broken or
+# fixed, which is how this shipped once already.
+- inputText: " And this is a much longer draft, long enough to run past the two lines the composer used to lock itself at, so that the beginning has somewhere to go if the box stops growing."
+- takeScreenshot: composer-grown
+
 # Interactive dismissal is the gesture that makes this feel like iMessage
 # rather than a form. Dragging the transcript should put the keyboard away.
 - swipe:
