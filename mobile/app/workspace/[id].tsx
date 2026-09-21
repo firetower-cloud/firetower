@@ -181,6 +181,7 @@ function Conversation({ place }: { place: Workspace }) {
       </Animated.View>
 
       <Composer
+        sessionId={speaker.id}
         working={conversation.working}
         model={conversation.model}
         mode={conversation.mode}

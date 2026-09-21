@@ -37,7 +37,7 @@
  *   place — reaching for a different one while something is running is the
  *   wrong moment to make somebody aim.
  */
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Platform, Pressable, TextInput, View } from "react-native";
 import Animated, {
   Easing,
@@ -50,6 +50,7 @@ import { KeyboardStickyView } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as Haptics from "expo-haptics";
 import { ArrowUp, ChevronDown, Plus, Square } from "lucide-react-native";
+import { takeDraft } from "~/workspace/draft";
 import { color, size } from "~/design/tokens.generated";
 
 /** One line at rest, six before it scrolls. */
@@ -65,6 +66,7 @@ const PILL = 26;
 const CARD = 20;
 
 export function Composer({
+  sessionId,
   working,
   model,
   mode,
@@ -72,6 +74,8 @@ export function Composer({
   onSend,
   onInterrupt,
 }: {
+  /** Whose composer this is — the key a seeded draft was left under. */
+  sessionId: string;
   working: boolean;
   /**
    * What the agent has said it is running.
@@ -100,6 +104,14 @@ export function Composer({
   const [text, setText] = useState("");
   const [height, setHeight] = useState(MIN);
   const [focused, setFocused] = useState(false);
+
+  /* A workspace started from a task arrives with its issue waiting. Taken
+     once, so coming back does not put it on top of what has since been
+     typed. */
+  useEffect(() => {
+    const seeded = takeDraft(sessionId);
+    if (seeded) setText(seeded);
+  }, [sessionId]);
 
   /* Open while you are writing *or* while there is something written: a draft
      collapsed back into a pill and truncated is a message you cannot re-read

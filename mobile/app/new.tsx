@@ -27,17 +27,18 @@
  * with the pickers as panels, and the action pinned to the foot — the same
  * decision as the Commit tab, for the same reason.
  */
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { KeyboardStickyView } from "react-native-keyboard-controller";
 import { router } from "expo-router";
 import * as Haptics from "expo-haptics";
 import { GitBranch, Plus, X } from "lucide-react-native";
-import { useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import { useCreateSession } from "~/api/generated/sessions/sessions";
 import type { Agent, Share } from "~/api/generated/model";
 import { useAccounts, useAgents, useHosts, useRepos, why } from "~/data";
+import { leaveDraft } from "~/workspace/draft";
 import { Field, Picker, Trigger, type Choice } from "~/ui/Picker";
 import { Segmented } from "~/ui/Segmented";
 import { color, size } from "~/design/tokens.generated";
@@ -63,6 +64,22 @@ export default function NewWorkspace() {
   const insets = useSafeAreaInsets();
   const nav = useRouter();
 
+  /**
+   * Started from a task, when it was.
+   *
+   * The title seeds the name, the repository is preselected when this server
+   * has it, and the task's key and address ride along so the workspace knows
+   * what it is for. What the task *says* does not become a prompt — see
+   * `leaveDraft` below.
+   */
+  const seed = useLocalSearchParams<{
+    title?: string;
+    repo?: string;
+    body?: string;
+    taskKey?: string;
+    taskUrl?: string;
+  }>();
+
   /* Everything offered here is what this server actually has. A form that
      lists agents from a constant is a form that offers one somebody removed. */
   const { data: repos } = useRepos();
@@ -72,8 +89,16 @@ export default function NewWorkspace() {
   const create = useCreateSession();
   const [wrong, setWrong] = useState<string | null>(null);
 
-  const [name, setName] = useState("");
+  const [name, setName] = useState(seed.title ?? "");
   const [picked, setPicked] = useState<string[]>([]);
+  /* Preselect the task's repository once the list has arrived, and only while
+     nobody has chosen for themselves. */
+  useEffect(() => {
+    if (!seed.repo || picked.length > 0) return;
+    const match = repos.find((r) => r.slug === seed.repo);
+    if (match) setPicked([match.id]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [repos.length, seed.repo]);
   const [branch, setBranch] = useState("");
   const [touched, setTouched] = useState(false);
   const [hostId, setHostId] = useState("");
@@ -258,9 +283,17 @@ export default function NewWorkspace() {
                     agent: agent as Agent,
                     accountId: accountId || undefined,
                     share,
+                    taskKey: seed.taskKey,
+                    taskUrl: seed.taskUrl,
                     // Never a prompt. See the note at the top of this file.
                   },
                 });
+                /* The task's text goes into the composer, unsent. The agent
+                   starts working when a person decides it should. */
+                if (seed.taskKey || seed.body) {
+                  const lines = [seed.taskUrl, seed.body].filter(Boolean).join("\n\n");
+                  if (lines) leaveDraft(made.id, lines);
+                }
                 nav.replace(`/workspace/${made.workspaceId ?? made.id}`);
               } catch (e) {
                 setWrong(why(e));
