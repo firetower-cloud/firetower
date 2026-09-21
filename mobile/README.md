@@ -107,9 +107,15 @@ SSL_CERT_FILE=/etc/ssl/cert.pem pod install
 
 ## Putting it on somebody's phone
 
-`eas.json` has three profiles. `preview` is the one for handing the app to a
-person: standalone, JS bundled, installable from a link, and it needs neither
-the App Store nor a review — only that their device is registered.
+`eas.json` has three profiles, and the difference between them is **who can
+install the result**. The file itself carries no comments — the schema rejects
+them, including `//` keys — so the explanation is here.
+
+| profile | what it is for |
+|---|---|
+| `development` | a dev client: Metro drives it and Fast Refresh works. How the app is worked on. |
+| `preview` | standalone, JS bundled, installable from a link. What goes to somebody who wants to try it — no App Store, no review, only that their device is registered. |
+| `production` | the store build. TestFlight for iOS, an `.aab` for Play; see `docs/mobile.md` on why TestFlight is a bridge and not a destination. |
 
 ```sh
 eas login

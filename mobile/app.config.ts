@@ -54,6 +54,14 @@ const config: ExpoConfig = {
     ],
   ],
   experiments: { typedRoutes: true },
+
+  /* Written by hand because `eas init` cannot edit a dynamic config. The id
+     is what ties a build to a project on EAS; the owner is whose account it
+     belongs to. */
+  owner: "kevinpiac",
+  extra: { eas: { projectId: "84533dee-c17d-486d-ae4c-66626538f564" } },
+  updates: { url: "https://u.expo.dev/84533dee-c17d-486d-ae4c-66626538f564" },
+  runtimeVersion: { policy: "appVersion" },
 };
 
 export default config;

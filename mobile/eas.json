@@ -2,32 +2,23 @@
   "$schema": "https://raw.githubusercontent.com/expo/eas-cli/main/schema/eas.schema.json",
   "cli": { "version": ">= 16.0.0", "appVersionSource": "local" },
   "build": {
-    "//": "Three profiles, and the difference between them is who can install the result.",
-
     "development": {
-      "//": "A dev client: Metro drives it, Fast Refresh works, and it is how the app is worked on day to day.",
       "developmentClient": true,
       "distribution": "internal",
       "ios": { "simulator": true },
       "android": { "buildType": "apk" }
     },
-
     "preview": {
-      "//": "Standalone, with the JS bundled, installable from a link by anyone whose device is registered. This is what goes to somebody who wants to try it, and it needs no App Store and no review.",
       "distribution": "internal",
       "channel": "preview",
       "ios": { "resourceClass": "m-medium" },
       "android": { "buildType": "apk" }
     },
-
     "production": {
-      "//": "The store build. TestFlight for iOS, an .aab for Play — see docs/mobile.md on why TestFlight is a bridge and not a destination.",
       "channel": "production",
       "autoIncrement": true,
       "android": { "buildType": "app-bundle" }
     }
   },
-  "submit": {
-    "production": {}
-  }
+  "submit": { "production": {} }
 }
