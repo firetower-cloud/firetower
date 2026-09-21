@@ -213,6 +213,24 @@ One thing to know if you write another `Sheen`-like effect: a component that
 renders one `Text` per character is a row of one-letter labels to anything
 walking the tree. Carry the whole string on the group and hide the pieces.
 
+## The socket carries what happens next, never a backlog
+
+A phone closes its socket every time it goes to the background and reopens it
+from each subscription's cursor. The desk never does that, and a phone
+backgrounds constantly — a screenshot, the app switcher, the lock button.
+
+So a stream is a fine way to hear what happens *next* and a bad way to catch
+up on ninety thousand lines: each foreground restarts a replay that is
+interrupted again before it lands, and because the fold advances its cursor as
+those lines arrive, a transcript can stop somewhere in the middle and stay
+there. That is what it did, and it is why the desk never saw it.
+
+**Catch up over HTTP, always.** One request with `sinceLine` either arrives
+whole or not at all, and a failure leaves the cursor where it was. It is tiny
+when there is nothing to catch up on, which is almost always.
+
+Any long backlog on a mobile client wants a request, not a stream.
+
 ## A cached transcript has to be re-readable
 
 `start` skips the snapshot whenever `lastLine > 0`, and `lastLine` comes from

@@ -724,11 +724,31 @@ function start(key: string, sessionId: string, follow: ReturnType<typeof useSock
     });
   };
 
-  if (read(key).lastLine > 0) {
-    // Read once already, and still here. Pick up exactly where that left off.
-    listen();
-  } else {
-    getConversation(sessionId)
+  /**
+   * Catch up over HTTP, always — never over the socket.
+   *
+   * This used to subscribe directly whenever `lastLine > 0`, on the reasoning
+   * that the stream replays from a cursor and would deliver the backlog
+   * itself. It does. But on a phone the socket is **closed every time the app
+   * goes to the background** and reopened from each subscription's cursor —
+   * the desk never does that, and a phone backgrounds constantly: a
+   * screenshot, the app switcher, the lock button.
+   *
+   * On a small conversation the replay finishes between one background and
+   * the next and nobody notices. On a session of ninety thousand lines it
+   * does not, so each foreground restarts a replay that is interrupted again
+   * before it lands — and because `apply` advances `lastLine` as those lines
+   * arrive, a transcript can stop somewhere in the middle and stay there.
+   * Which is exactly what it did, and exactly why the desk was fine.
+   *
+   * One request with `sinceLine` is the same catch-up, atomically: it either
+   * arrives whole or not at all, and a failure leaves the cursor where it
+   * was. The socket is then only ever responsible for what happens *next*,
+   * which is all it was ever good at.
+   */
+  {
+    const from = read(key).lastLine;
+    getConversation(sessionId, from > 0 ? { sinceLine: from } : undefined)
       .then((snapshot) => {
         if (dropped) return;
         const folded = foldAll(read(key), snapshot.events as ConversationEvent[]);
@@ -743,8 +763,8 @@ function start(key: string, sessionId: string, follow: ReturnType<typeof useSock
         });
       })
       .catch((e) => {
-        // Not fatal, and not worth a banner: the subscription below replays
-        // from nothing, which is what this used to do every time.
+        // Not fatal: the subscription below resumes from the cursor, which is
+        // untouched by a failure here.
         console.warn("[firetower] could not read the conversation, streaming it instead", e);
         // Streaming from nothing is still a conversation arriving, and a
         // screen left waiting on a promise that already rejected waits for
