@@ -118,10 +118,17 @@ them, including `//` keys — so the explanation is here.
 | `production` | the store build. TestFlight for iOS, an `.aab` for Play; see `docs/mobile.md` on why TestFlight is a bridge and not a destination. |
 
 ```sh
-eas login
-eas device:create      # a link they open on the phone; registers the UDID
-eas build --profile preview --platform ios
+npx eas-cli@24 login
+npx eas-cli@24 device:create   # a link they open on the phone; registers the UDID
+npx eas-cli@24 build --profile preview --platform ios
 ```
+
+**`eas-cli` is deliberately not a dependency of this project.** It is a tool,
+not something the app builds against, and having it in `devDependencies` drags
+`dtrace-provider` into the lockfile — a native module needing node-gyp, which
+fails on EAS's builder during "Install dependencies" with an error that says
+nothing about where it came from. `cli.version` in `eas.json` pins the version
+instead, which is what EAS itself suggests.
 
 Android needs none of that: `--platform android` gives an APK anybody can
 sideload.

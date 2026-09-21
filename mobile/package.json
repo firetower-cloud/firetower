@@ -48,7 +48,6 @@
   },
   "devDependencies": {
     "@types/react": "~19.2.2",
-    "eas-cli": "^24.7.0",
     "orval": "^8.34.0",
     "prettier-plugin-tailwindcss": "^0.8.1",
     "typescript": "~6.0.3",
