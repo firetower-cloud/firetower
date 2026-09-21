@@ -224,6 +224,15 @@ export type Conversation = {
    * does a bug report, which is how a day went into guessing.
    */
   delivered?: { events: number; lastLine: number; failed?: boolean };
+  /**
+   * The log line the last drawn message came from.
+   *
+   * Next to `delivered.lastLine` this is the whole question. If the control
+   * plane sent lines up to 5000 and the last thing on screen came from 3182,
+   * then everything after 3182 arrived and produced nothing — the loss is
+   * here. If the two are close, nothing was sent and the loss is not.
+   */
+  lastItemLine?: number;
 };
 
 /**
@@ -259,6 +268,9 @@ export function apply(state: Conversation, event: ConversationEvent): Conversati
   state = { ...state, heardAt: Date.now() };
   const items = state.items;
 
+  /** Where the last thing anybody can see came from. See `lastItemLine`. */
+  const drawn = { lastItemLine: event.lineNo };
+
   /** Replace one item in place, leaving the rest alone. */
   const change = (id: string, how: (item: Item) => Item): Conversation => {
     const at = items.findIndex((i) => i.id === id);
@@ -267,7 +279,7 @@ export function apply(state: Conversation, event: ConversationEvent): Conversati
     if (at < 0) return { ...state, lastLine };
     const next = items.slice();
     next[at] = how(next[at]);
-    return { ...state, items: next, lastLine };
+    return { ...state, items: next, lastLine, ...drawn };
   };
 
   switch (event.type) {
@@ -340,6 +352,7 @@ export function apply(state: Conversation, event: ConversationEvent): Conversati
       return {
         ...state,
         lastLine,
+        ...drawn,
         items: [
           ...settled,
           {

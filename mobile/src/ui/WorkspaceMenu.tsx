@@ -16,7 +16,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useQueryClient } from "@tanstack/react-query";
 import * as Haptics from "expo-haptics";
 import * as Linking from "expo-linking";
-import { ExternalLink, GitPullRequest, Pencil, RotateCcw, Stethoscope, Trash2 } from "lucide-react-native";
+import { ExternalLink, GitPullRequest, Pencil, RefreshCw, RotateCcw, Stethoscope, Trash2 } from "lucide-react-native";
 import type { Session } from "~/api/generated/model";
 import type { Conversation } from "~/api/conversation";
 import {
@@ -42,6 +42,7 @@ export function WorkspaceMenu({
   session,
   conversation,
   runs,
+  onReread,
   open,
   onClose,
   onEnded,
@@ -51,6 +52,8 @@ export function WorkspaceMenu({
   conversation?: Conversation;
   /** Every run of this workspace, not just the one being read. */
   runs?: { id: string; agent: string; status: string }[];
+  /** Read the whole transcript again, from nothing. */
+  onReread?: () => void;
   open: boolean;
   onClose: () => void;
   onEnded: () => void;
@@ -118,6 +121,25 @@ export function WorkspaceMenu({
             onPress: () => {
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
               relaunch.mutate({ id: session.id }, { onSettled: freshen });
+              onClose();
+            },
+          } as Row,
+        ]
+      : []),
+    ...(onReread
+      ? [
+          {
+            id: "reread",
+            label: "Read this conversation again",
+            icon: RefreshCw,
+            onPress: () => {
+              /* Here as well as on the pull, because the pull cannot be
+                 reached: a `RefreshControl` only fires at the very top of a
+                 scroll view and a transcript opens pinned to the bottom of
+                 one that may be thousands of messages long. A recovery you
+                 have to scroll for an hour to reach is not one. */
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              onReread();
               onClose();
             },
           } as Row,

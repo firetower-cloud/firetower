@@ -263,6 +263,7 @@ function Conversation({ place }: { place: Workspace }) {
           session={session}
           conversation={conversation}
           runs={place.runs.map((r) => ({ id: r.id, agent: r.agent, status: r.status }))}
+          onReread={reread}
           open={menu}
           onClose={() => setMenu(false)}
           onEnded={() => router.back()}
