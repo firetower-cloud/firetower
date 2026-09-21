@@ -84,6 +84,42 @@ Four things, each written down where it happens:
 - **`app.config.ts`** allows cleartext and local-network addresses on purpose.
   A great many installs are `http://192.168.1.40:4400`.
 
+## iOS, the first time
+
+Xcode 26 ships without the iOS platform, and CocoaPods is still the integration
+point on this SDK — `expo prebuild` generates a `Podfile`, not a
+`Package.swift`. React Native core itself arrives as a prebuilt XCFramework
+(`RCT_USE_PREBUILT_RNCORE`), which is why the first build is minutes rather
+than half an hour.
+
+```sh
+sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+xcodebuild -downloadPlatform iOS        # ~8.5 GB, the simulator runtime
+```
+
+If `pod install` dies with `certificate verify failed (unable to get local
+issuer certificate)`, Homebrew's Ruby cannot find a CA bundle. Point it at the
+system one:
+
+```sh
+SSL_CERT_FILE=/etc/ssl/cert.pem pod install
+```
+
+## Putting it on somebody's phone
+
+`eas.json` has three profiles. `preview` is the one for handing the app to a
+person: standalone, JS bundled, installable from a link, and it needs neither
+the App Store nor a review — only that their device is registered.
+
+```sh
+eas login
+eas device:create      # a link they open on the phone; registers the UDID
+eas build --profile preview --platform ios
+```
+
+Android needs none of that: `--platform android` gives an APK anybody can
+sideload.
+
 ## Tests
 
 ```sh

@@ -1,5 +1,7 @@
 allowBuilds:
+  dtrace-provider: set this to true or false
   esbuild: set this to true or false
+  protobufjs: set this to true or false
 
 # React Native's Metro resolver walks node_modules by path, not by symlink, so
 # a package only reachable through .pnpm is one it cannot find — NativeWind's
