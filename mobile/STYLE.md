@@ -102,6 +102,11 @@ time it gets the floating shadow.
 The morph is one layout transition; the `TextInput` holds the same slot in the
 tree throughout, so focus and selection never notice.
 
+**Three ways out**, because a card you cannot put away is a trap: sending,
+blurring, and dragging it down. The drag is the one people reach for without
+being told, and it keeps whatever is in the box — a draft truncated into the
+pill is still there when you tap it.
+
 Rules that are not negotiable:
 
 - **It moves with the keyboard, not after it.** And so does everything else
@@ -111,6 +116,18 @@ Rules that are not negotiable:
   convention and inverting it on a phone loses half the messages people write.
   `⌘⏎` sends when a hardware keyboard is attached.
 - **Send becomes stop while the agent works** — same button, same place.
+- **The send control is whatever comes next.** Empty, it is the microphone —
+  saying something is the alternative to typing it, not an extra control
+  competing for the same corner. With words in it, send. While the agent
+  works, stop.
+- **Dictation is on-device.** Firetower's whole architecture is that nothing
+  leaves machines you own; a composer that shipped audio to a transcription
+  service to reach an agent running on your own hardware would be the one
+  place that stopped being true.
+- **Pictures go inside the message; everything else goes into the workspace.**
+  The model looks at a screenshot, so it travels with the turn. The agent has
+  its own tools for reading a file, so sending the bytes twice is waste — it
+  is attached and then only *named*.
 - **A control that does not know stays quiet.** The model picker is absent
   until the agent says what it is running. "Opus 5" under a session running
   something else is a lie the picker tells until somebody speaks.

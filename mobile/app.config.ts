@@ -39,6 +39,16 @@ const config: ExpoConfig = {
          saying so here is the difference between a build that submits and one
          that waits on a form. */
       ITSAppUsesNonExemptEncryption: false,
+      /* Said in the app's own words. iOS shows these verbatim in the prompt,
+         and "Firetower would like to access your microphone" with no reason
+         is the kind of ask people decline. */
+      NSMicrophoneUsageDescription:
+        "Dictating a message to an agent, when you press the microphone.",
+      NSSpeechRecognitionUsageDescription:
+        "Turning what you say into text for the composer. It is transcribed on this device.",
+      NSPhotoLibraryUsageDescription:
+        "Attaching a screenshot to a message, so the agent can look at it.",
+      NSCameraUsageDescription: "Taking a picture to attach to a message.",
     },
   },
   android: {
@@ -65,6 +75,7 @@ const config: ExpoConfig = {
        architecture per device. This is for the APK that goes to a person
        directly, where one oversized file beats four they have to choose
        between. */
+    "expo-speech-recognition",
     [
       "expo-build-properties",
       {

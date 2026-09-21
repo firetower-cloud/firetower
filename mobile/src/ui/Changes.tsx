@@ -43,11 +43,19 @@ export function Changes({
       android_ripple={{ color: color.overlay }}
     >
       <FileDiff color={color.dim} size={14} />
-      <Text className="font-sans text-meta text-dim">
-        {files.length} {files.length === 1 ? "file" : "files"}
-      </Text>
-      {added ? <Text className="font-mono text-meta text-sage">+{added}</Text> : null}
-      {removed ? <Text className="font-mono text-meta text-brick">−{removed}</Text> : null}
+      {files.length > 0 ? (
+        <>
+          <Text className="font-sans text-meta text-dim">
+            {files.length} {files.length === 1 ? "file" : "files"}
+          </Text>
+          <Text className="font-mono text-meta text-sage">+{added}</Text>
+          <Text className="font-mono text-meta text-brick">−{removed}</Text>
+        </>
+      ) : (
+        /* Nothing uncommitted is not nothing to look at: the commits, the
+           tree and the pull request are all through here. */
+        <Text className="font-sans text-meta text-dim">Files and commits</Text>
+      )}
       <View className="flex-1" />
       <Text numberOfLines={1} className="font-sans text-meta text-mute">
         {ship.label}

@@ -17,12 +17,13 @@ import { router, useLocalSearchParams } from "expo-router";
 import { ChevronLeft, MoreHorizontal } from "lucide-react-native";
 import { useConversation } from "~/api/conversation";
 import { useListEvents } from "~/api/generated/events/events";
-import type { Event } from "~/api/generated/model";
+import type { Attached, Event } from "~/api/generated/model";
 import { ready, stepLines } from "~/api/steps-bringup";
 import { Bringup } from "~/ui/Bringup";
 import { WorkspaceMenu } from "~/ui/WorkspaceMenu";
 import {
   useAnswerRequest,
+  useAttachFile,
   useInterruptSession,
   useSendTurn,
 } from "~/api/generated/sessions/sessions";
@@ -100,6 +101,7 @@ function Conversation({ place }: { place: Workspace }) {
 
   const { conversation, echo, settle, stopping } = useConversation(speaker.id);
   const send = useSendTurn();
+  const attach = useAttachFile();
   const answer = useAnswerRequest();
   const interrupt = useInterruptSession();
 
@@ -111,10 +113,16 @@ function Conversation({ place }: { place: Workspace }) {
   const room = useAnimatedStyle(() => ({ height: Math.abs(keyboard.height.value) }));
   const strip = useAnimatedStyle(() => ({ opacity: 1 - keyboard.progress.value }));
 
-  const say = (text: string) => {
-    echo(text);
-    send.mutate({ id: speaker.id, data: { text } });
+  const say = (text: string, images: Attached[] = []) => {
+    echo(text, images);
+    send.mutate({ id: speaker.id, data: { text, images } });
     setTimeout(() => scroller.current?.scrollToEnd({ animated: true }), 60);
+  };
+
+  /* A file goes into the workspace rather than into the message: the agent
+     has its own tools for reading one, and sending the bytes twice is waste. */
+  const carry = async (name: string, data: string) => {
+    await attach.mutateAsync({ id: speaker.id, data: { name, data } });
   };
 
   return (
@@ -200,8 +208,11 @@ function Conversation({ place }: { place: Workspace }) {
         </ScrollView>
       </View>
 
+      {/* Always, not only when something is uncommitted. A session that has
+          committed its work has a clean tree, and hiding the strip then left
+          the diff, the files and the pull request with no way in at all. */}
       <Animated.View style={strip}>
-        {session && files.length > 0 ? (
+        {session ? (
           <Changes
             session={session}
             files={files}
@@ -225,6 +236,7 @@ function Conversation({ place }: { place: Workspace }) {
         model={conversation.model}
         mode={conversation.mode}
         onSend={say}
+        onAttach={carry}
         onInterrupt={() => {
           stopping(true);
           interrupt.mutate({ id: speaker.id });
