@@ -9,6 +9,8 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "app": "tauri dev",
+    "mock": "node scripts/mock-server.mjs",
+    "shoot": "node scripts/shoot.mjs",
     "orval": "orval",
     "test": "vitest run"
   },
@@ -36,6 +38,7 @@
     "@types/react-dom": "^19",
     "@vitejs/plugin-react": "^5",
     "orval": "^8.32.0",
+    "playwright-core": "^1.63.0",
     "tailwindcss": "^4",
     "typescript": "^5",
     "vite": "^7",
