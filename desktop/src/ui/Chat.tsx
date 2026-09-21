@@ -29,6 +29,7 @@ import {
   FileText,
   FileUp,
   GitBranch,
+  Loader2,
   Pencil,
   RotateCcw,
   Search,
@@ -38,7 +39,7 @@ import {
   X,
 } from "lucide-react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Icon } from "~/components/ui";
+import { GithubMark, Icon } from "~/components/ui";
 import { Markdown } from "~/components/Markdown";
 import { editFrom } from "~/components/EditCard";
 import { stepLines } from "~/components/Steps";
@@ -47,6 +48,7 @@ import { fold, summarise } from "~/api/steps";
 import type { Decision, Event, ItemKind, PlanStep, RequestKind, Session } from "~/api/generated/model";
 import { useAnswerRequest, useRelaunchSession, getGetSessionQueryKey, sendTurn } from "~/api/generated/sessions/sessions";
 import { asMessage, useNotes, type Note } from "~/api/notes";
+import { forgetCheckout, landed, refused, settled, useCheckouts, type Run } from "~/api/checkouts";
 import { useListEvents } from "~/api/generated/events/events";
 import { elapsed, minutesSince } from "~/api/view";
 import { Composer, TAKES, type Hand } from "~/ui/Composer";
@@ -161,6 +163,9 @@ export function Chat({
 
   const { items, asked, questions, working, stopped } = conversation;
   const answerable = session.status !== "Ended";
+  /* Repositories being checked in, started from the toolbar's panel. Drawn
+     here because this is where what happened to a workspace is written down. */
+  const runs = useCheckouts(session.id);
 
   /* An ended session has no one to read the file and a workspace that is going
      away, so the pane stops offering. Refusing the drag outright is kinder
@@ -288,6 +293,13 @@ export function Chat({
               ),
             )}
           </ol>
+
+          {/* After the transcript, because it is the newest thing that
+              happened here — and the agent's own acknowledgement of it arrives
+              in the turn below. */}
+          {runs.map((run) => (
+            <CheckingIn key={run.id} sessionId={session.id} run={run} />
+          ))}
 
           {working && <Working heardAt={conversation.heardAt} items={items} />}
           {stopped && <Stopped why={stopped} />}
@@ -667,6 +679,111 @@ function Plan({ steps }: { steps: PlanStep[] }) {
 }
 
 /** Fetch → Worktree → Workspace → Setup → Launch, while it is happening. */
+/**
+ * Repositories being checked in, drawn the way the bring-up is.
+ *
+ * Adding a repository to a running workspace is the bring-up's first two steps
+ * done again, so it is said in the same place and in the same shape — one card
+ * in the transcript, a line per repository, a tick or a cross on each. A run of
+ * three used to be three requests reporting only into the popover that started
+ * them, which meant the one that failed was a red line under a panel you had
+ * already closed.
+ *
+ * A run where everything landed folds to a line, like the bring-up. One where
+ * something did not stays open and keeps its crosses, because that is the card
+ * somebody needs to read.
+ */
+function CheckingIn({ sessionId, run }: { sessionId: string; run: Run }) {
+  const over = settled(run);
+  const bad = refused(run);
+  const good = landed(run);
+  const [open, setOpen] = useState(false);
+
+  if (over && bad === 0 && !open) {
+    return (
+      <button
+        onClick={() => setOpen(true)}
+        className="mt-6 flex w-full items-center gap-2.5 rounded-xl border border-line bg-panel px-4 py-2.5 text-left text-ui transition-colors hover:bg-raise/60"
+      >
+        <Check className="h-3.5 w-3.5 shrink-0 text-sage" strokeWidth={2} />
+        <span className="text-text">
+          {good === 1 ? "Repository checked in" : `${good} repositories checked in`}
+        </span>
+        <ChevronRight className="ml-auto h-3.5 w-3.5 text-mute" strokeWidth={2} />
+      </button>
+    );
+  }
+
+  return (
+    <div className={`mt-6 rounded-xl border bg-panel px-4 py-3 ${bad > 0 ? "border-brick-deep" : "border-line"}`}>
+      <div className="flex items-center gap-2.5">
+        {over ? (
+          bad > 0 ? (
+            <X className="h-3.5 w-3.5 shrink-0 text-brick" strokeWidth={2} />
+          ) : (
+            <Check className="h-3.5 w-3.5 shrink-0 text-sage" strokeWidth={2} />
+          )
+        ) : (
+          <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-slate" strokeWidth={2} />
+        )}
+        <span className="text-ui text-text">
+          {over
+            ? bad > 0
+              ? `${good} of ${run.repos.length} checked in`
+              : `${good === 1 ? "Repository" : `${good} repositories`} checked in`
+            : `Checking in ${run.repos.length === 1 ? "a repository" : `${run.repos.length} repositories`}`}
+        </span>
+        {over && (
+          <button
+            onClick={() => (bad > 0 ? forgetCheckout(sessionId, run.id) : setOpen(false))}
+            title={bad > 0 ? "Dismiss" : "Fold it away"}
+            className="ml-auto grid h-6 w-6 place-items-center rounded text-mute transition-colors hover:bg-raise hover:text-bone"
+          >
+            <X className="h-3.5 w-3.5" strokeWidth={2} />
+          </button>
+        )}
+      </div>
+
+      <ol className="mt-2.5 space-y-1.5">
+        {run.repos.map((r) => (
+          <li key={r.slug} className="flex items-start gap-2.5 text-ui">
+            <span className="mt-0.5 grid h-3.5 w-3.5 shrink-0 place-items-center">
+              {r.state === "done" ? (
+                <Check className="h-3.5 w-3.5 text-sage" strokeWidth={2} />
+              ) : r.state === "failed" ? (
+                <X className="h-3.5 w-3.5 text-brick" strokeWidth={2} />
+              ) : r.state === "fetching" ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin text-slate" strokeWidth={2} />
+              ) : (
+                <span className="h-1.5 w-1.5 rounded-full bg-line" />
+              )}
+            </span>
+            <GithubMark size={12} className={`mt-1 ${r.state === "failed" ? "text-brick" : "text-mute"}`} />
+            <span className="min-w-0 flex-1">
+              <span className={`block truncate font-mono ${r.state === "failed" ? "text-brick" : r.state === "waiting" ? "text-mute" : "text-text"}`}>
+                {r.slug}
+              </span>
+              {/* The worker's own sentence where it landed, and the host's
+                  refusal where it did not. Neither is rewritten here. */}
+              {r.detail && (
+                <span className={`block font-mono text-micro ${r.state === "failed" ? "whitespace-pre-wrap text-brick/80" : "truncate text-mute"}`}>
+                  {r.detail}
+                </span>
+              )}
+              {!r.detail && r.state === "fetching" && (
+                <span className="block font-mono text-micro text-mute">fetching and cutting the worktree…</span>
+              )}
+              {!r.detail && r.state === "waiting" && (
+                <span className="block font-mono text-micro text-mute">waiting its turn</span>
+              )}
+            </span>
+          </li>
+        ))}
+      </ol>
+    </div>
+  );
+}
+
 /**
  * The bring-up — fetch, worktree, workspace, setup, launch — drawn while it
  * happens and kept once it has: a record of how the place was made, folded

@@ -16,6 +16,7 @@ import { group } from "~/api/workspaces";
 import type { Backend } from "~/fleet";
 import { useSession, useSessions } from "~/data";
 import { navigate } from "~/shims/next-navigation";
+import { GithubMark } from "~/components/ui";
 import { Chat } from "~/ui/Chat";
 import { FileTab } from "~/ui/FileTab";
 import { ImageTab } from "~/ui/ImageTab";
@@ -23,6 +24,7 @@ import { isImage } from "~/api/text";
 import { PreviewTab } from "~/ui/PreviewTab";
 import { PortPicker } from "~/ui/PortPicker";
 import { AddAgent } from "~/ui/AddAgent";
+import { Repositories } from "~/ui/Repositories";
 import { QuickOpen } from "~/ui/QuickOpen";
 import { TabStrip, type Tab } from "~/ui/Tabs";
 import { Inspector } from "~/ui/Inspector";
@@ -160,6 +162,8 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
 
   /* Another agent in this same workspace. */
   const [adding, setAdding] = useState(false);
+  /* What is checked out here, and checking another one in. */
+  const [repos, setRepos] = useState(false);
 
   /* A preview is a kept tab from the start: nobody skims ports. */
   const [picking, setPicking] = useState(false);
@@ -286,6 +290,9 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
     place.runs.find((r) => r.id === reading) ??
     place.runs.find((r) => r.id === workspace) ??
     primary;
+  /* Checkouts belong to the workspace rather than to whichever agent is being
+     read, so take them from the one the list is freshest on. */
+  const checkouts = run.checkouts ?? [];
 
 
   if (backend.reach === "unreachable") return <Unreachable org={backend.org} />;
@@ -316,6 +323,27 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
             <Pencil className="h-3 w-3 shrink-0 text-mute opacity-0 transition-opacity hover:opacity-100" strokeWidth={1.75} />
           </button>
         )}
+
+        {/* What is checked out. The workspace is one directory with a worktree
+            per repository, and the second and third of them had nowhere to be
+            said — so this names the first, counts the rest, and goes brick
+            when one of them is not there. */}
+        <div className="relative shrink-0">
+          <button
+            onClick={() => setRepos((r) => !r)}
+            title="Repositories in this workspace"
+            className={`control max-w-[13rem] ${repos ? "bg-overlay text-bone" : "text-mute hover:bg-raise hover:text-bone"}`}
+          >
+            <GithubMark size={12} className={checkouts.some((c) => c.trouble) ? "text-brick" : ""} />
+            <span className="min-w-0 truncate font-mono text-meta">
+              {checkouts[0]?.slug ?? "No repository"}
+            </span>
+            {checkouts.length > 1 && (
+              <span className="shrink-0 font-mono text-micro opacity-70">+{checkouts.length - 1}</span>
+            )}
+          </button>
+          {repos && <Repositories session={run} branch={place.branch} onClose={() => setRepos(false)} />}
+        </div>
 
         {/* Which agent you are reading. A count would not do: two of one and
             one of another is a different place from three of one. */}
