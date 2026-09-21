@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { apply, nothing } from "./conversation";
+import { apply, foldAll, nothing } from "./conversation";
 import type { ConversationEvent } from "./generated/model";
 
 const event = (lineNo: number, type: string, extra: Record<string, unknown> = {}) =>
@@ -117,5 +117,35 @@ describe("reading a conversation again", () => {
     // on every open.
     const read = said(3, "message-1", "Hi").reduce(apply, nothing);
     expect(read.lastLine).toBe(3);
+  });
+});
+
+describe("folding a run of events", () => {
+  /* `SessionConfigured` reads `event.commands.length`, so one without them
+     throws — which is the point. Any event the control plane grows a shape
+     for before this client learns it does the same. */
+  const unfoldable = { lineNo: 2, type: "SessionConfigured" } as unknown as ConversationEvent;
+
+  it("keeps going past an event it cannot fold", () => {
+    const out = foldAll(nothing, [
+      event(1, "ItemStarted", { item: "a", kind: "AgentMessage" }),
+      unfoldable,
+      event(3, "ItemStarted", { item: "b", kind: "AgentMessage" }),
+    ]);
+
+    // The one in the middle costs one item, not the rest of the conversation.
+    expect(out.items.map((i) => i.id)).toEqual(["a", "b"]);
+    expect(out.skipped).toBe(1);
+  });
+
+  it("moves the cursor past what it could not fold", () => {
+    // Or the stream is asked for the same unreadable line for ever.
+    expect(foldAll(nothing, [unfoldable]).lastLine).toBe(2);
+  });
+
+  it("counts nothing when everything folds", () => {
+    const out = foldAll(nothing, [event(1, "TurnStarted")]);
+    expect(out.skipped).toBeUndefined();
+    expect(out.working).toBe(true);
   });
 });

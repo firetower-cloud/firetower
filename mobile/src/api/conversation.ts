@@ -206,6 +206,14 @@ export type Conversation = {
    * ever.
    */
   arrived?: boolean;
+  /**
+   * How many events could not be folded. See `foldAll`.
+   *
+   * Kept so the screen can say so. A transcript that quietly stops is the
+   * worst of the three possible outcomes — worse than an error, and much
+   * worse than a gap that admits it is one.
+   */
+  skipped?: number;
 };
 
 /**
@@ -562,6 +570,38 @@ function put(key: string, next: Conversation) {
  * anything with a backlog. Coalescing to a frame keeps live typing at the
  * refresh rate and makes a replay a paint rather than a performance.
  */
+/**
+ * Fold a run of events, surviving one that cannot be folded.
+ *
+ * `events.reduce(apply, state)` is the obvious way to write this and it has a
+ * failure mode that is very hard to see: one event that throws takes the
+ * whole batch with it. `drain` empties `waiting` *before* folding, so the
+ * events are already gone; `put` never runs, so the state stays at the last
+ * good value; nothing is logged where anybody would look. The transcript
+ * stops dead at one line and every later line folds onto a conversation
+ * missing its middle — which reads exactly like a large conversation that
+ * failed to finish loading.
+ *
+ * One bad event should cost one event. The cursor still moves past it, or we
+ * would ask the server for the same unreadable line for ever.
+ */
+export function foldAll(state: Conversation, events: ConversationEvent[]): Conversation {
+  let next = state;
+  for (const event of events) {
+    try {
+      next = apply(next, event);
+    } catch (e) {
+      console.warn("[firetower] could not fold a conversation event", event?.type, e);
+      next = {
+        ...next,
+        lastLine: Math.max(next.lastLine, event?.lineNo ?? next.lastLine),
+        skipped: (next.skipped ?? 0) + 1,
+      };
+    }
+  }
+  return next;
+}
+
 function drain(key: string) {
   const it = held.get(key);
   if (!it) return;
@@ -570,7 +610,7 @@ function drain(key: string) {
   if (!it.waiting.length) return;
   const arrived = it.waiting;
   it.waiting = [];
-  put(key, arrived.reduce(apply, it.state));
+  put(key, foldAll(it.state, arrived));
 }
 
 /** Take a line, to be folded with whatever else lands in the same frame. */
@@ -668,7 +708,7 @@ function start(key: string, sessionId: string, follow: ReturnType<typeof useSock
     getConversation(sessionId)
       .then((snapshot) => {
         if (dropped) return;
-        const folded = (snapshot.events as ConversationEvent[]).reduce(apply, read(key));
+        const folded = foldAll(read(key), snapshot.events as ConversationEvent[]);
         // The snapshot's own cursor, not the last line that drew something: a
         // log line can normalise to no events at all, and resuming from the
         // last *drawn* one would ask for those again on every open.

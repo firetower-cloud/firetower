@@ -204,6 +204,18 @@ function Conversation({ place }: { place: Workspace }) {
             <Text className="mt-2 font-sans text-meta text-mute">Nothing has been said yet.</Text>
           )}
 
+          {/* A gap that admits it is one. Before `foldAll` this was the
+              silent case: the transcript stopped at whatever line could not
+              be folded and said nothing about why, which reads exactly like a
+              long conversation that never finished loading. */}
+          {conversation.skipped ? (
+            <Text className="mt-3 font-sans text-meta text-brick">
+              {conversation.skipped === 1
+                ? "One line of this conversation could not be read."
+                : `${conversation.skipped} lines of this conversation could not be read.`}
+            </Text>
+          ) : null}
+
           {conversation.working ? (
             <View className="mt-3">
               <Sheen text={conversation.stopping ? "Stopping" : "Working"} />
