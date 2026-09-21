@@ -215,6 +215,7 @@ function Where({
       </View>
 
       <Field
+        testID="address"
         autoFocus
         value={typed}
         onChangeText={onTyped}
@@ -406,6 +407,7 @@ function Who({
       ) : (
         <>
           <Field
+            testID="username"
             autoFocus
             value={username}
             onChangeText={setUsername}
@@ -415,6 +417,7 @@ function Who({
           />
           <View className="h-2" />
           <Field
+            testID="password"
             value={password}
             onChangeText={setPassword}
             placeholder="Password"

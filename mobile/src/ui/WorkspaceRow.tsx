@@ -66,6 +66,7 @@ export function WorkspaceRow({ place, onPress }: { place: Workspace; onPress?: (
 
   return (
     <Pressable
+      testID="workspace-row"
       onPress={onPress}
       className={`flex-row items-start gap-1 rounded-lg px-3 py-2.5 ${blocked ? "bg-ember-tint" : ""}`}
       android_ripple={{ color: color.overlay }}

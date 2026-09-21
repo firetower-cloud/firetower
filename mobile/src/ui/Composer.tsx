@@ -195,6 +195,7 @@ export function Composer({
             {!open ? <Attach /> : null}
 
             <TextInput
+              testID="composer"
               multiline
               value={text}
               onChangeText={setText}

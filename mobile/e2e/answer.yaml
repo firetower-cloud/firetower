@@ -1,0 +1,43 @@
+# Opening a workspace and writing to the agent.
+#
+# The composer is the thing this app is judged on, and the two states it has
+# are only distinguishable with a keyboard up: a pill at rest, a card while you
+# write in it. Asserting on the card's second row — the model and mode pickers,
+# which do not exist in the pill — is what makes "it morphed" testable rather
+# than something somebody eyeballs on a screenshot.
+#
+#   maestro test e2e/answer.yaml
+appId: com.usefiretower.app
+---
+- launchApp
+# iOS offers to save the password after the sign-in flow; it sits over the
+# inbox and swallows the first tap.
+- runFlow:
+    when:
+      visible: "Not Now"
+    commands:
+      - tapOn: "Not Now"
+
+- assertVisible: "Inbox"
+- tapOn:
+    id: "workspace-row"
+    index: 0
+
+# The transcript, whatever it says, and the composer at rest.
+- assertVisible: "Answer the agent"
+
+- tapOn:
+    id: "composer"
+- inputText: "Checking the keyboard behaves."
+
+# The card, not the pill: the send control is its own row now, and the text
+# sits on a line of its own above it.
+- assertVisible: "Checking the keyboard behaves."
+- takeScreenshot: composer-focused
+
+# Interactive dismissal is the gesture that makes this feel like iMessage
+# rather than a form. Dragging the transcript should put the keyboard away.
+- swipe:
+    start: "50%, 40%"
+    end: "50%, 90%"
+- takeScreenshot: composer-after-drag

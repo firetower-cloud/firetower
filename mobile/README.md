@@ -135,3 +135,23 @@ pnpm tsc --noEmit
 
 `vitest.config.ts` stubs `react-native` and the two native storage modules.
 Nothing under test touches them; they only have to resolve.
+
+### End to end, on a simulator
+
+```sh
+maestro --device <udid> test e2e/connect.yaml \
+  -e ADDRESS=192.168.1.40:4400 -e USER=admin -e PASS=…
+maestro --device <udid> test e2e/answer.yaml
+```
+
+Two flows, and they are deliberately the only two: connecting, and writing to
+an agent. Both cross the network, the keychain and the socket, which is
+exactly what a unit test would have to pretend about — everything else in
+`pnpm test` is a pure function over the contract precisely so that these can
+stay small.
+
+`maestro` picks the first device it finds, which on a machine with an Android
+emulator running is the wrong one. Pass `--device` with the simulator's UDID
+from `xcrun simctl list devices`.
+
+These need a booted simulator, so they are not in the pull-request workflow.

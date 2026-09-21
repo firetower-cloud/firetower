@@ -1,0 +1,35 @@
+# Connecting to a Firetower, and finding the inbox on the other side.
+#
+# The one flow that is only real end to end: it crosses the network, the
+# keychain and the socket, and every one of those is something a unit test
+# would have to pretend about. Everything else in `pnpm test` is a pure
+# function over the contract precisely so that this can stay small.
+#
+#   maestro test e2e/connect.yaml -e ADDRESS=192.168.50.254:4400 -e USER=admin -e PASS=...
+appId: com.usefiretower.app
+---
+- launchApp:
+    clearState: true
+    # Asked for up front rather than when iOS first resolves a `.local` name,
+    # so the prompt is not sitting over the screen being asserted on.
+    permissions: { all: allow }
+
+- assertVisible: "Connect to a Firetower"
+- tapOn:
+    id: "address"
+- inputText: "${ADDRESS}"
+- tapOn: "Connect"
+
+# `/bootstrap` is unauthenticated, so the organisation is named before anybody
+# is asked for a password. That is the whole reason the address is asked first.
+- assertVisible: "Sign in"
+- tapOn:
+    id: "username"
+- inputText: "${USER}"
+- tapOn:
+    id: "password"
+- inputText: "${PASS}"
+- hideKeyboard
+- tapOn: "Sign in"
+
+- assertVisible: "Inbox"
