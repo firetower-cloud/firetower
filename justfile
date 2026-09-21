@@ -24,6 +24,11 @@ doctor:
     check cargo-watch "cargo-watch --version" "cargo install cargo-watch"
     check docker      "docker --version"      "https://docs.docker.com/get-docker"
     echo
+    echo "  For the phone — only needed if you are working on mobile/:"
+    check xcodebuild  "xcodebuild -version"   "Xcode, from the App Store"
+    check pod         "pod --version"         "brew install cocoapods"
+    check adb         "adb --version"         "Android Studio, or brew install --cask android-commandlinetools"
+    echo
     [ $missing -eq 0 ] || { echo "  Install what's missing, then run just doctor again."; exit 1; }
     echo "  Everything's here. Run: just setup"
 
@@ -32,6 +37,7 @@ setup:
     #!/usr/bin/env bash
     set -euo pipefail
     pnpm --dir web install
+    pnpm --dir mobile install
     cargo fetch
     # Never clobbers an existing one — this is the only place your client id lives.
     if [ ! -f .env ]; then
@@ -97,7 +103,7 @@ dev: db
 
 # Rust types -> contract -> typed client. No pipeline, just this.
 #
-# Two contracts: the control plane's, which both clients are generated
+# Two contracts: the control plane's, which all three clients are generated
 # from, and the updater's, which nothing is generated from — both sides of it
 # compile the same `ft-updater-api` crate — but which is written out so a
 # change to it is a diff somebody reviews.
@@ -106,10 +112,11 @@ gen:
     cargo run --quiet -p ft-updater --bin firetower-updater -- openapi > api/updater.json
     cd web && pnpm orval && pnpm tsc --noEmit
     cd desktop && pnpm orval && pnpm tsc --noEmit
+    cd mobile && pnpm orval && pnpm tokens && pnpm tsc --noEmit
 
 # Fails if the committed contract is stale. What a CI job would run.
 gen-check: gen
-    git diff --exit-code api/ web/src/api/generated desktop/src/api/generated
+    git diff --exit-code api/ web/src/api/generated desktop/src/api/generated mobile/src/api/generated mobile/src/design
 
 # The release artifact. Web first: the Rust build embeds its output.
 build:
@@ -132,11 +139,28 @@ build-worker:
     tar -czf "target/artifacts/firetower-worker-$os-$arch.tar.gz" -C target/release firetower-worker
     echo "  target/artifacts/firetower-worker-$os-$arch.tar.gz"
 
+# The phone. `mobile-ios` and `mobile-android` build and install a dev client;
+# `mobile` alone starts Metro for one that is already installed.
+mobile:
+    cd mobile && pnpm start
+
+mobile-ios:
+    cd mobile && pnpm ios
+
+mobile-android:
+    cd mobile && pnpm android
+
+# The design tokens, from web/app/globals.css. Part of `just gen`; here on its
+# own for when only a colour changed.
+tokens:
+    cd mobile && pnpm tokens
+
 # The database tests need Postgres; `just db` is enough to satisfy them.
 test: db
     cargo test --workspace
     cd web && pnpm tsc --noEmit
     cd desktop && pnpm tsc --noEmit && pnpm test
+    cd mobile && pnpm tsc --noEmit && pnpm test
 
 lint:
     cargo clippy --workspace --all-targets -- -D warnings
@@ -271,7 +295,7 @@ check-style:
     #!/usr/bin/env bash
     set -uo pipefail
     found=$(grep -rnE 'text-\[[0-9.]+px\]|rounded-\[[0-9]+px\]|(bg|text|border)-\[#[0-9a-fA-F]{3,8}\]' \
-        web/app web/components web/src --include='*.tsx' || true)
+        web/app web/components web/src mobile/app mobile/src --include='*.tsx' || true)
     if [ -n "$found" ]; then
         echo "$found"
         echo

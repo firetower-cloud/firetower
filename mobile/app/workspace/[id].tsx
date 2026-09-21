@@ -1,0 +1,208 @@
+/**
+ * A workspace: the conversation, off the stream.
+ *
+ * Everything drawn here comes from `useConversation` in `~/api/conversation` —
+ * the fold from lifecycle events into items, requests, questions, tasks, plan
+ * and mode. That fold is the contract, shared with the other two clients; this
+ * file only decides how each thing looks at phone size.
+ *
+ * The repository is one tap away rather than beside: see `~/ui/Changes`.
+ */
+import { useMemo, useRef, useState } from "react";
+import { ActivityIndicator, Pressable, ScrollView, Text, View } from "react-native";
+import Animated, { useAnimatedStyle } from "react-native-reanimated";
+import { useReanimatedKeyboardAnimation } from "react-native-keyboard-controller";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { router, useLocalSearchParams } from "expo-router";
+import { ChevronLeft, MoreHorizontal } from "lucide-react-native";
+import { useConversation } from "~/api/conversation";
+import {
+  useAnswerRequest,
+  useInterruptSession,
+  useSendTurn,
+} from "~/api/generated/sessions/sessions";
+import { elapsed, minutesSince, STATUS_LABEL } from "~/api/view";
+import { useDiff, useSession, useSessions } from "~/data";
+import { group, lead, type Workspace } from "~/api/workspaces";
+import { AgentMark } from "~/ui/AgentMark";
+import { Approval } from "~/ui/Approval";
+import { Changes } from "~/ui/Changes";
+import { Composer } from "~/ui/Composer";
+import { Sheen } from "~/ui/Sheen";
+import { Signal } from "~/ui/Signal";
+import { Transcript } from "~/ui/Transcript";
+import { color } from "~/design/tokens.generated";
+
+/**
+ * Resolving the address before anything reads it.
+ *
+ * The id in the address is a *workspace*; a transcript belongs to a *session*.
+ * The first run of a workspace carries the workspace's own id, so the list is
+ * what resolves one to the other — and until it has loaded there is no session
+ * to follow.
+ *
+ * Split in two for that reason rather than for tidiness. Hooks cannot be
+ * skipped, so a single component had to call `useConversation("")` while the
+ * list was in flight — which asked the control plane for the conversation of a
+ * session that does not exist and got a 404 on every cold open of a workspace.
+ */
+export default function WorkspaceScreen() {
+  const { id } = useLocalSearchParams<{ id: string }>();
+  const { data: sessions, loading } = useSessions();
+
+  const place = useMemo(() => {
+    const { groups } = group(sessions.filter((s) => s.status !== "Ended"));
+    return groups.flatMap(([, places]) => places).find((p) => p.id === id) ?? null;
+  }, [sessions, id]);
+
+  if (!place) {
+    return (
+      <View className="flex-1 items-center justify-center bg-ground">
+        {loading ? (
+          <ActivityIndicator color={color.mute} />
+        ) : (
+          <Text className="font-sans text-ui text-mute">That workspace is not here any more.</Text>
+        )}
+      </View>
+    );
+  }
+
+  return <Conversation place={place} />;
+}
+
+function Conversation({ place }: { place: Workspace }) {
+  const insets = useSafeAreaInsets();
+  const scroller = useRef<ScrollView>(null);
+  const [atEnd, setAtEnd] = useState(true);
+
+  const speaker = lead(place);
+  const { data: session } = useSession(speaker.id);
+  const { data: files } = useDiff(session);
+
+  const { conversation, echo, settle, stopping } = useConversation(speaker.id);
+  const send = useSendTurn();
+  const answer = useAnswerRequest();
+  const interrupt = useInterruptSession();
+
+  /* The composer rides the keyboard's real frame on the UI thread. The same
+     shared value pads the bottom of the transcript in the same frame — this is
+     the whole difference between a chat that feels native and one that feels
+     like a web page with a fixed footer. */
+  const keyboard = useReanimatedKeyboardAnimation();
+  const room = useAnimatedStyle(() => ({ height: Math.abs(keyboard.height.value) }));
+  const strip = useAnimatedStyle(() => ({ opacity: 1 - keyboard.progress.value }));
+
+  const say = (text: string) => {
+    echo(text);
+    send.mutate({ id: speaker.id, data: { text } });
+    setTimeout(() => scroller.current?.scrollToEnd({ animated: true }), 60);
+  };
+
+  return (
+    <View className="flex-1 bg-ground" style={{ paddingTop: insets.top }}>
+      <View className="flex-row items-center gap-1 border-b border-line-soft px-1 pb-2.5 pt-1">
+        <Pressable onPress={() => router.back()} className="h-10 w-10 items-center justify-center" hitSlop={8}>
+          <ChevronLeft color={color.bone} size={22} />
+        </Pressable>
+
+        <View className="min-w-0 flex-1">
+          <Text numberOfLines={1} className="font-medium text-title text-bone">
+            {place.name}
+          </Text>
+          <View className="mt-0.5 flex-row items-center gap-1.5">
+            <Signal status={speaker.status} size={6} />
+            <Text className="font-sans text-meta text-dim">{STATUS_LABEL[speaker.status]}</Text>
+            <Text className="font-sans text-meta text-mute">·</Text>
+            <Text className="font-sans text-meta text-mute">
+              {elapsed(minutesSince(speaker.updatedAt))}
+            </Text>
+            <View className="ml-1 flex-row items-center gap-1.5">
+              {[...new Set(place.runs.map((r) => r.agent))].map((a) => (
+                <AgentMark key={a} agent={a} size={11} tone={color.mute} />
+              ))}
+            </View>
+          </View>
+        </View>
+
+        <Pressable className="h-10 w-10 items-center justify-center" hitSlop={8}>
+          <MoreHorizontal color={color.dim} size={20} />
+        </Pressable>
+      </View>
+
+      <View className="min-h-0 flex-1">
+        <ScrollView
+          ref={scroller}
+          className="flex-1"
+          contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: 16 }}
+          showsVerticalScrollIndicator={false}
+          keyboardDismissMode="interactive"
+          /* Streaming text appends to the last item. If you are at the bottom
+             you stay pinned; if you have scrolled up to read something you are
+             not yanked back. */
+          onScroll={(e) => {
+            const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
+            setAtEnd(contentOffset.y + layoutMeasurement.height >= contentSize.height - 80);
+          }}
+          scrollEventThrottle={64}
+          onContentSizeChange={() => atEnd && scroller.current?.scrollToEnd({ animated: true })}
+        >
+          <Text className="mb-3 font-mono text-meta text-mute">
+            {speaker.branch ?? place.branch}
+          </Text>
+
+          {conversation.items.length === 0 ? (
+            <Text className="mt-6 font-sans text-meta text-mute">
+              {conversation.trouble ?? "Nothing has been said yet."}
+            </Text>
+          ) : (
+            <Transcript items={conversation.items} />
+          )}
+
+          {conversation.working ? (
+            <View className="mt-3">
+              <Sheen text={conversation.stopping ? "Stopping" : "Working"} />
+            </View>
+          ) : conversation.stopped ? (
+            <Text className="mt-3 font-sans text-meta text-brick">{conversation.stopped}</Text>
+          ) : null}
+
+          <Animated.View style={room} />
+        </ScrollView>
+      </View>
+
+      <Animated.View style={strip}>
+        {session && files.length > 0 ? (
+          <Changes
+            session={session}
+            files={files}
+            onPress={() => router.push({ pathname: "/workspace/repo", params: { id: speaker.id } })}
+          />
+        ) : null}
+      </Animated.View>
+
+      <Composer
+        working={conversation.working}
+        model={conversation.model}
+        mode={conversation.mode}
+        onSend={say}
+        onInterrupt={() => {
+          stopping(true);
+          interrupt.mutate({ id: speaker.id });
+        }}
+        above={conversation.asked.map((a) => (
+          <Approval
+            key={a.req}
+            asked={a}
+            onAnswer={(yes) => {
+              settle(a.req);
+              answer.mutate({
+                id: speaker.id,
+                data: { req: a.req, decision: yes ? { decision: "Allow" } : { decision: "Deny", reason: null } },
+              });
+            }}
+          />
+        ))}
+      />
+    </View>
+  );
+}

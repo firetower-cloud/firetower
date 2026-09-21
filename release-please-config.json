@@ -16,7 +16,8 @@
         }
       ],
       "exclude-paths": [
-        "desktop"
+        "desktop",
+        "mobile"
       ]
     },
     "desktop": {
@@ -34,6 +35,20 @@
         {
           "type": "json",
           "path": "src-tauri/tauri.conf.json",
+          "jsonpath": "$.version"
+        }
+      ],
+      "initial-version": "0.1.0"
+    },
+    "mobile": {
+      "release-type": "simple",
+      "package-name": "firetower-mobile",
+      "component": "mobile",
+      "changelog-path": "CHANGELOG.md",
+      "extra-files": [
+        {
+          "type": "json",
+          "path": "package.json",
           "jsonpath": "$.version"
         }
       ],
