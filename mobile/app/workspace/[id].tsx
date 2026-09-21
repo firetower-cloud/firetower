@@ -16,6 +16,11 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { router, useLocalSearchParams } from "expo-router";
 import { ChevronLeft, MoreHorizontal } from "lucide-react-native";
 import { useConversation } from "~/api/conversation";
+import { useListEvents } from "~/api/generated/events/events";
+import type { Event } from "~/api/generated/model";
+import { ready, stepLines } from "~/api/steps-bringup";
+import { Bringup } from "~/ui/Bringup";
+import { WorkspaceMenu } from "~/ui/WorkspaceMenu";
 import {
   useAnswerRequest,
   useInterruptSession,
@@ -78,6 +83,20 @@ function Conversation({ place }: { place: Workspace }) {
   const speaker = lead(place);
   const { data: session } = useSession(speaker.id);
   const { data: files } = useDiff(session);
+  const [menu, setMenu] = useState(false);
+
+  /* What the workspace did to come up. Read from this session's own events and
+     folded by the same function the desk uses, so "Fetching the repository"
+     means one thing everywhere. Polled while it is still coming up and left
+     alone afterwards — the bring-up happens once. */
+  const events = useListEvents(
+    { sessionId: speaker.id, since: 0 } as Parameters<typeof useListEvents>[0],
+    { query: { refetchInterval: (q) => (ready(stepLines(session ?? speaker, (q.state.data ?? []) as Event[])) ? false : 2000) } },
+  );
+  const bringup = useMemo(
+    () => stepLines(session ?? speaker, (events.data ?? []) as Event[]),
+    [session, speaker, events.data],
+  );
 
   const { conversation, echo, settle, stopping } = useConversation(speaker.id);
   const send = useSendTurn();
@@ -124,7 +143,12 @@ function Conversation({ place }: { place: Workspace }) {
           </View>
         </View>
 
-        <Pressable className="h-10 w-10 items-center justify-center" hitSlop={8}>
+        <Pressable
+          testID="workspace-menu"
+          onPress={() => setMenu(true)}
+          className="h-10 w-10 items-center justify-center"
+          hitSlop={8}
+        >
           <MoreHorizontal color={color.dim} size={20} />
         </Pressable>
       </View>
@@ -150,12 +174,18 @@ function Conversation({ place }: { place: Workspace }) {
             {speaker.branch ?? place.branch}
           </Text>
 
-          {conversation.items.length === 0 ? (
-            <Text className="mt-6 font-sans text-meta text-mute">
-              {conversation.trouble ?? "Nothing has been said yet."}
-            </Text>
-          ) : (
+          {/* The bring-up sits above the transcript and scrolls away once the
+              agent is talking, which is the right amount of attention for it. */}
+          <Bringup lines={bringup} />
+
+          {conversation.items.length > 0 ? (
             <Transcript items={conversation.items} />
+          ) : conversation.trouble ? (
+            <Text className="mt-2 font-sans text-meta text-brick">{conversation.trouble}</Text>
+          ) : bringup.some((l) => l.state !== "pending") ? null : (
+            /* Nothing said and nothing coming up: a workspace that is simply
+               waiting for you to open the conversation. */
+            <Text className="mt-2 font-sans text-meta text-mute">Nothing has been said yet.</Text>
           )}
 
           {conversation.working ? (
@@ -179,6 +209,15 @@ function Conversation({ place }: { place: Workspace }) {
           />
         ) : null}
       </Animated.View>
+
+      {session ? (
+        <WorkspaceMenu
+          session={session}
+          open={menu}
+          onClose={() => setMenu(false)}
+          onEnded={() => router.back()}
+        />
+      ) : null}
 
       <Composer
         sessionId={speaker.id}

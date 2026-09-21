@@ -37,8 +37,8 @@
  *   place — reaching for a different one while something is running is the
  *   wrong moment to make somebody aim.
  */
-import { useEffect, useState } from "react";
-import { Platform, Pressable, TextInput, View } from "react-native";
+import { useEffect, useRef, useState } from "react";
+import { Keyboard, Platform, Pressable, TextInput, View } from "react-native";
 import Animated, {
   Easing,
   LinearTransition,
@@ -104,6 +104,7 @@ export function Composer({
   const [text, setText] = useState("");
   const [height, setHeight] = useState(MIN);
   const [focused, setFocused] = useState(false);
+  const field = useRef<TextInput>(null);
 
   /* A workspace started from a task arrives with its issue waiting. Taken
      once, so coming back does not put it on top of what has since been
@@ -133,6 +134,14 @@ export function Composer({
      box walks itself to the cap on the first layout pass and stays there. */
   const tall = text.length === 0 ? MIN : height;
 
+  /**
+   * Sending is the end of your turn.
+   *
+   * So the composer goes back to being furniture: it blurs, the keyboard goes
+   * away, and the card collapses to the pill. Leaving it open and focused
+   * said "your move" while the agent was working, and kept a keyboard over
+   * the reply you were waiting for.
+   */
   const send = () => {
     const said = text.trim();
     if (!said) return;
@@ -140,6 +149,9 @@ export function Composer({
     onSend(said);
     setText("");
     setHeight(MIN);
+    field.current?.blur();
+    Keyboard.dismiss();
+    morph(0);
   };
 
   const Action = () =>
@@ -153,6 +165,7 @@ export function Composer({
       </Pressable>
     ) : (
       <Pressable
+        testID="send"
         onPress={send}
         disabled={!text.trim()}
         className={`h-9 w-9 items-center justify-center rounded-full ${text.trim() ? "bg-bone" : "bg-overlay"}`}
@@ -191,7 +204,7 @@ export function Composer({
         >
           {/* Slot order never changes: the input is always the middle child,
               so React keeps the same instance and focus survives the morph. */}
-          <View className="flex-row items-end">
+          <View className={`flex-row ${open ? "items-end" : "items-center"}`}>
             {!open ? <Attach /> : null}
 
             <TextInput
@@ -215,13 +228,19 @@ export function Composer({
               placeholderTextColor={color.mute}
               selectionColor={color.ember}
               className="flex-1 font-sans text-bone"
+              /* The asymmetric padding is what a multiline `TextInput` needs
+                 to sit right once it has grown; at rest it is the thing that
+                 pushed the placeholder off the pill's centre line. So the
+                 pill gets neither padding nor extra height — one line, one
+                 line's worth of box, centred by the row. */
               style={{
-                height: tall + (Platform.OS === "ios" ? 14 : 18),
+                height: open ? tall + (Platform.OS === "ios" ? 14 : 18) : LINE + 8,
                 paddingHorizontal: 10,
-                paddingTop: Platform.OS === "ios" ? 8 : 4,
-                paddingBottom: Platform.OS === "ios" ? 6 : 4,
+                paddingTop: open ? (Platform.OS === "ios" ? 8 : 4) : 0,
+                paddingBottom: open ? (Platform.OS === "ios" ? 6 : 4) : 0,
                 fontSize: size.read,
                 lineHeight: LINE,
+                textAlignVertical: "center",
               }}
               onKeyPress={(e) => {
                 const native = e.nativeEvent as unknown as { key: string; metaKey?: boolean };
