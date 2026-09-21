@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.13.0](https://github.com/firetower-cloud/firetower/compare/desktop-v0.12.1...desktop-v0.13.0) (2026-09-21)
+
+
+### Features
+
+* add voice dictation to composer ([7b86f89](https://github.com/firetower-cloud/firetower/commit/7b86f896b69d482dbfb823a6a21385713055c487))
+* implement voice dictation with OpenAI Realtime ([ca0b304](https://github.com/firetower-cloud/firetower/commit/ca0b30421a371f86b56b980e5b6031ccdadd1818))
+* implement voice dictation with OpenAI Realtime ([b9f2163](https://github.com/firetower-cloud/firetower/commit/b9f2163ecd6431a346b5a28cc6a2df1f3e06ba35))
+* implement voice dictation with OpenAI Realtime ([016ad0b](https://github.com/firetower-cloud/firetower/commit/016ad0b3e4ca681cbd6f7b1fad64637491ceda9f))
+* **voice:** add dictation support with OpenAI realtime ([8a2c836](https://github.com/firetower-cloud/firetower/commit/8a2c83663ad08f2c6294ef29bcf2b08ac1ec71e8))
+
+
+### Bug Fixes
+
+* **voice:** the refused-microphone dialog was macOS on every platform ([10de171](https://github.com/firetower-cloud/firetower/commit/10de171871bb7fde2a253716bc366aa502b4841a))
+* **voice:** the refused-microphone dialog was macOS on every platform ([06cd689](https://github.com/firetower-cloud/firetower/commit/06cd68945eaa64042845acddbc79b69a828a538c))
+
 ## [0.12.1](https://github.com/firetower-cloud/firetower/compare/desktop-v0.12.0...desktop-v0.12.1) (2026-09-20)
 
 
