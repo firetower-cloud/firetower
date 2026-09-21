@@ -57,6 +57,23 @@ const config: ExpoConfig = {
       "expo-splash-screen",
       { image: "./assets/splash-icon.png", backgroundColor: "#0b0b0c", resizeMode: "contain", imageWidth: 160 },
     ],
+    /* Release builds are shrunk. Without this a local `assembleRelease` is
+       111 MB — every ABI, unminified — which is fine to sideload once and not
+       something to hand anybody.
+
+       No ABI split here: the store path builds an `.aab` and Play delivers one
+       architecture per device. This is for the APK that goes to a person
+       directly, where one oversized file beats four they have to choose
+       between. */
+    [
+      "expo-build-properties",
+      {
+        android: {
+          enableProguardInReleaseBuilds: true,
+          enableShrinkResourcesInReleaseBuilds: true,
+        },
+      },
+    ],
   ],
   experiments: { typedRoutes: true },
 

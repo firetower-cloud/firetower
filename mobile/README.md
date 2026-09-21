@@ -10,6 +10,11 @@ gesture and keyboard transition is native. The screens are this client's own —
 a phone is not a small Mac — but the *vocabulary* is shared, because there is
 one control plane and it has one idea of what a workspace is doing.
 
+`STYLE.md` is the design guideline — density, motion, the composer, and the
+handful of places where being a phone changes the answer rather than the size.
+It redefines no token; `desktop/STYLE.md` is its sibling and should be read
+first.
+
 ## Running it
 
 ```sh
