@@ -8,7 +8,7 @@
  * bold, inline code, fences and bullets — so the screen can be judged before
  * that lands.
  */
-import { Text, View } from "react-native";
+import { ScrollView, Text, View } from "react-native";
 import { color } from "~/design/tokens.generated";
 
 /** `**bold**` and `` `code` ``, in one pass, order-preserving. */
@@ -81,24 +81,40 @@ export function Prose({ text }: { text: string }) {
 export function Code({ text, tint }: { text: string; tint?: boolean }) {
   return (
     <View className="overflow-hidden rounded-md bg-panel">
-      <View className="px-3 py-2.5">
-        {text.split("\n").map((raw, i) => {
-          const added = raw.startsWith("+");
-          const removed = raw.startsWith("-");
-          return (
-            <Text
-              key={i}
-              numberOfLines={1}
-              className="font-mono text-code"
-              style={{
-                color: tint && added ? color.sage : tint && removed ? color.brick : color.text,
-              }}
-            >
-              {raw || " "}
-            </Text>
-          );
-        })}
-      </View>
+      {/* Code scrolls; it never wraps — and only the second half of that was
+          ever true here. `numberOfLines={1}` kept each line whole,
+          `overflow-hidden` clipped it at the block's width, and nothing
+          carried it sideways: the rest of the line was laid out and then
+          hidden, with no way to reach it.
+
+          One scroller around all of the lines rather than one each, so they
+          move together and stay in their columns — a block whose rows scroll
+          independently is not code any more. */}
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={{ paddingHorizontal: 12, paddingVertical: 10 }}
+      >
+        <View>
+          {text.split("\n").map((raw, i) => {
+            const added = raw.startsWith("+");
+            const removed = raw.startsWith("-");
+            return (
+              <Text
+                key={i}
+                numberOfLines={1}
+                className="font-mono text-code"
+                style={{
+                  color: tint && added ? color.sage : tint && removed ? color.brick : color.text,
+                }}
+              >
+                {raw || " "}
+              </Text>
+            );
+          })}
+        </View>
+      </ScrollView>
     </View>
   );
 }
+

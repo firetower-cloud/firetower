@@ -293,7 +293,11 @@ you have to read.
 Unchanged from the desk, and *more* true at this width:
 
 - **Code scrolls; it never wraps.** A line broken mid-identifier is harder to
-  read on a phone, not easier.
+  read on a phone, not easier — and *both halves of that are a feature*. For
+  a long time only the second was implemented: `numberOfLines={1}` kept each
+  line whole and nothing carried it sideways, so the rest of it was laid out
+  and then clipped, unreachable. A rule that says "scrolls" is not satisfied
+  by a rule that only says "does not wrap".
 - **The gutter is pinned** while the code moves under it. A horizontal scroll
   that carries the line numbers away throws out the one column that says where
   you are.

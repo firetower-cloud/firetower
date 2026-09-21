@@ -235,16 +235,17 @@ export function Composer({
   };
 
   /** A file goes to the workspace now and is only named in the message. */
-  const carry = async (picked: Picked[]) => {
-    if (picked.length === 0) return;
+  const carry = async (run: () => Promise<Picked[]>) => {
     setBusy(true);
     try {
+      const picked = await run();
+      if (picked.length === 0) return;
       for (const one of picked) {
         if (one.kind === "file") await onAttach(one.name, one.data);
       }
       setChips((held) => [...held, ...picked]);
     } catch (e) {
-      Alert.alert("That didn't attach", (e as Error)?.message ?? "The workspace refused it.");
+      Alert.alert("That didn't attach", (e as Error)?.message ?? "It could not be read.");
     } finally {
       setBusy(false);
     }

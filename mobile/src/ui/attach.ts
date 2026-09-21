@@ -12,7 +12,12 @@
  */
 import * as DocumentPicker from "expo-document-picker";
 import * as ImagePicker from "expo-image-picker";
-import * as FileSystem from "expo-file-system";
+/* `expo-file-system`'s top level is `File`/`Directory`/`Paths` as of SDK 57;
+   `readAsStringAsync` lives behind the `/legacy` subpath and nowhere else.
+   Imported from the root, `FileSystem.readAsStringAsync` was `undefined` —
+   so every pick threw `not a function` the moment it tried to read the
+   bytes, and attachments have never once worked on a device. */
+import * as FileSystem from "expo-file-system/legacy";
 
 /** As much as is worth putting in a turn. The desk's numbers. */
 export const BIGGEST_IMAGE = 10 * 1024 * 1024;

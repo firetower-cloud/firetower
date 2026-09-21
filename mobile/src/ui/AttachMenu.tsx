@@ -80,7 +80,16 @@ export function AttachMenu({
   onPick,
   onClose,
 }: {
-  onPick: (picked: Picked[]) => void;
+  /**
+   * Handed the picker itself, not its result.
+   *
+   * `onPick(await run())` reads the same and is not the same: this `onPress`
+   * is `async`, so a picker that threw became an unhandled rejection and the
+   * menu simply closed. Nothing appeared, nothing was said, and a broken
+   * attachment looked exactly like a cancelled one. Awaited where the error
+   * handling already is instead.
+   */
+  onPick: (run: () => Promise<Picked[]>) => void;
   onClose: () => void;
 }) {
   return (
@@ -110,9 +119,9 @@ export function AttachMenu({
           <Pressable
             key={id}
             testID={`attach-${id}`}
-            onPress={async () => {
+            onPress={() => {
               onClose();
-              onPick(await run());
+              onPick(run);
             }}
             className="flex-row items-center gap-3 px-3 py-2.5 active:bg-overlay"
             android_ripple={{ color: color.overlay }}
