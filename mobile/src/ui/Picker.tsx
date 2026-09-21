@@ -31,9 +31,16 @@ export function Field({
 }) {
   return (
     <View className="gap-2">
-      <View className="flex-row items-baseline justify-between">
+      {/* The hint is the one that gives way. Both sides sized naturally and
+          the row was a hair from colliding once the phone scale went up — and
+          the label is the half you have to be able to read. */}
+      <View className="flex-row items-baseline justify-between gap-3">
         <Text className="font-sans text-ui text-dim">{label}</Text>
-        {hint ? <Text className="font-sans text-meta text-mute">{hint}</Text> : null}
+        {hint ? (
+          <Text numberOfLines={1} className="shrink font-sans text-meta text-mute">
+            {hint}
+          </Text>
+        ) : null}
       </View>
       {children}
     </View>

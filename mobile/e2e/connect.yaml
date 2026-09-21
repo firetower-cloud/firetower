@@ -32,4 +32,13 @@ appId: com.usefiretower.app
 - hideKeyboard
 - tapOn: "Sign in"
 
+# iOS offers to save the password the moment the sign-in succeeds, and the
+# sheet lands over the inbox — so the assertion below fails on a flow that
+# worked. `answer.yaml` already steps around this; this is where it starts.
+- runFlow:
+    when:
+      visible: "Not Now"
+    commands:
+      - tapOn: "Not Now"
+
 - assertVisible: "Inbox"

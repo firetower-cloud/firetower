@@ -165,6 +165,35 @@ Rules that are not negotiable:
   of explanation and it is on *Files*, because a file going into the workspace
   rather than into the message is the only thing there you could not guess.
 
+## The type scale is the desk's, spoken louder
+
+Every size moves up roughly a sixth from `globals.css`, and the small end
+moves most. This is one override in `scripts/tokens.mjs`, not a second scale.
+
+The web's sizes exist to fit a workbench into a browser window: `--text-body`
+is 14px so a three-pane desk survives at 1280px, and `--text-micro` is 10.5px
+because a column header beside a mouse pointer can afford to be tiny. None of
+those pressures exist on a phone, and the opposite one does — one column, held
+at arm's length, often in one hand and in motion.
+
+**iOS sets body text at 17pt and Android at 16sp.** An app that comes in three
+points under the platform does not read as denser. It reads as *smaller*,
+which is the thing a reader notices before they notice anything else you did.
+
+What does not change is the number of voices: six sizes and a mono, exactly as
+on the desk. Line heights are unitless ratios in `globals.css`, so the leading
+follows on its own and the rhythm survives.
+
+The cost is real and worth saying: at `--text-code` 14px a phone holds about
+three fewer characters per line, so code scrolls sooner. That is the right
+trade for a screen whose job is mostly reading prose, and the wrong one to
+extend any further.
+
+**A bigger scale finds every row that was one word from colliding.** Label-and
+-hint pairs, counts beside titles, anything laid out with `justify-between` and
+no `shrink` — the fix is to say which half gives way, and it is never the one
+you have to read.
+
 ## Code, diffs and files
 
 Unchanged from the desk, and *more* true at this width:

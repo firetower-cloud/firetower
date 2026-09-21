@@ -96,18 +96,53 @@ const phone = {
 };
 
 /**
- * Reading, sized for a phone.
+ * The type scale, sized for a phone.
  *
- * `--text-body` is 14px because the web scale has to fit a workbench into
- * 390px of browser. The thing people do here longest is read a conversation,
- * and on a phone that column is narrow and held closer, so it gets its own
- * size — the desk made the same move in the other direction with `--text-read`
- * at 15px for a 46rem column on a monitor.
+ * This started as one override for the transcript and should have been the
+ * whole scale from the beginning. The web's sizes exist to fit a workbench
+ * into a browser window: `--text-body` is 14px so that a three-pane desk
+ * survives at 1280px, and `--text-micro` is 10.5px because a column header
+ * beside a mouse pointer can afford to be tiny.
  *
- * It is one size, not a seventh voice: everything that is not the transcript
- * keeps the tokens as they are.
+ * None of those pressures exist here, and the opposite one does. A phone is
+ * one column, held at arm's length, often in one hand and in motion. iOS sets
+ * body text at 17pt and Android at 16sp, and an app that comes in three
+ * points under the platform does not read as denser — it reads as *smaller*,
+ * which is the one thing a reader notices before they notice anything else
+ * you did.
+ *
+ * So every size moves up roughly a sixth, and the small end moves most,
+ * because 10.5px is the size at which text stops being read and starts being
+ * squinted at. The line heights are unitless ratios in `globals.css`, so the
+ * leading follows on its own and the rhythm is unchanged.
+ *
+ * What does *not* change is the number of voices. Six sizes and a mono,
+ * exactly as on the desk — this is the same scale spoken louder, not a
+ * different one.
  */
-const reading = { read: ["16px", { lineHeight: "1.6" }] };
+const phoneText = {
+  display: "28px", // the one heading on a screen; iOS Title1 is 28
+  title: "18px", // a row title
+  body: "16px", // what somebody reads
+  ui: "15px", // controls and labels
+  meta: "13px", // captions, counts, paths — iOS Footnote
+  micro: "11.5px", // eyebrows and column headers
+  code: "14px", // what the machine said
+  input: "17px", // iOS Body, and still over the 16px zoom floor
+};
+
+/**
+ * Reading, which gets its own size even within that.
+ *
+ * The thing people do here longest is read a conversation, and that column is
+ * narrow and held close. It is one size, not a seventh voice.
+ */
+const reading = { read: ["17px", { lineHeight: "1.6" }] };
+
+/** The web's modifiers, kept; only the sizes are ours. */
+const scaled = Object.fromEntries(
+  Object.entries(fontSize).map(([name, [size, mods]]) => [name, [phoneText[name] ?? size, mods]]),
+);
 
 const banner = `/* Generated from web/app/globals.css by scripts/tokens.mjs — do not edit.\n   Run \`just gen\` (or \`pnpm tokens\`) after changing a token there. */\n`;
 
@@ -115,7 +150,7 @@ writeFileSync(
   resolve(here, "../src/design/tokens.generated.js"),
   banner +
     "module.exports = " +
-    JSON.stringify({ colors, fontSize: { ...fontSize, ...reading }, radius, fonts: family, spacing: phone }, null, 2) +
+    JSON.stringify({ colors, fontSize: { ...scaled, ...reading }, radius, fonts: family, spacing: phone }, null, 2) +
     ";\n",
 );
 
@@ -123,7 +158,7 @@ writeFileSync(
   resolve(here, "../src/design/tokens.generated.ts"),
   banner +
     "export const color = " + JSON.stringify(colors, null, 2) + " as const;\n\n" +
-    "export const size = " + JSON.stringify(Object.fromEntries(Object.entries({ ...fontSize, ...reading }).map(([k, v]) => [k, parseFloat(v[0]) * (v[0].endsWith("rem") ? 16 : 1)])), null, 2) + " as const;\n\n" +
+    "export const size = " + JSON.stringify(Object.fromEntries(Object.entries({ ...scaled, ...reading }).map(([k, v]) => [k, parseFloat(v[0]) * (v[0].endsWith("rem") ? 16 : 1)])), null, 2) + " as const;\n\n" +
     "export const radius = " + JSON.stringify(Object.fromEntries(Object.entries(radius).map(([k, v]) => [k, parseFloat(v)])), null, 2) + " as const;\n\n" +
     "export const shadow = " + JSON.stringify(shadows, null, 2) + " as const;\n",
 );

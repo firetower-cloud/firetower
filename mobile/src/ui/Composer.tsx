@@ -70,10 +70,11 @@ import { color, size } from "~/design/tokens.generated";
 /**
  * One line at rest, six before it scrolls.
  *
- * 24 rather than the 22 this started at: `--text-read` is 16px on a 1.6 lead,
- * and a chat box is the one place in the app that is pure reading.
+ * `--text-read` is 17px on a 1.6 lead; 26 is that, rounded to an even number
+ * so six of them is a whole box. A chat box is the one place in the app that
+ * is pure reading.
  */
-const LINE = 24;
+const LINE = 26;
 const LINES = 6;
 
 /** What a multiline field needs above and below its text, per platform. */
