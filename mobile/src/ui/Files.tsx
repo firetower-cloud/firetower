@@ -6,10 +6,11 @@
  * walking it up front is a request nobody asked for.
  */
 import { useState } from "react";
-import { ActivityIndicator, Pressable, Text, View } from "react-native";
+import { Pressable, Text, View } from "react-native";
 import { ChevronDown, ChevronRight } from "lucide-react-native";
 import { useWorkspaceFiles } from "~/data";
 import { toneOf } from "~/ui/FileGlyph";
+import { Waiting } from "~/ui/Waiting";
 import { color } from "~/design/tokens.generated";
 
 function Level({
@@ -31,7 +32,9 @@ function Level({
   if (loading) {
     return (
       <View className="py-3" style={{ paddingLeft: 12 + depth * 14 }}>
-        <ActivityIndicator color={color.mute} size="small" />
+        {/* A folder opening, not a screen loading — the word carries the
+            indent so it reads as belonging to the row above it. */}
+        <Waiting say={depth === 0 ? "Reading the repository" : "Opening"} />
       </View>
     );
   }

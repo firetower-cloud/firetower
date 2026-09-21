@@ -6,7 +6,7 @@
  * the transcript is wired for it — a `read` in the conversation.
  */
 import { useEffect, useMemo } from "react";
-import { ActivityIndicator, Pressable, ScrollView, Text, View } from "react-native";
+import { Pressable, ScrollView, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { router, useLocalSearchParams } from "expo-router";
 import { ChevronLeft } from "lucide-react-native";
@@ -14,6 +14,7 @@ import { useFileText } from "~/api/text";
 import { useDiff, useSession } from "~/data";
 import { addedLines } from "~/api/patch";
 import { TabStrip } from "~/ui/TabStrip";
+import { Waiting } from "~/ui/Waiting";
 import { open as openTab } from "~/workspace/tabs";
 import { color, size } from "~/design/tokens.generated";
 
@@ -76,7 +77,7 @@ export default function FileScreen() {
 
       {file.isPending ? (
         <View className="flex-1 items-center justify-center">
-          <ActivityIndicator color={color.mute} />
+          <Waiting say="Opening this file" />
         </View>
       ) : file.error ? (
         <View className="items-center px-8 py-16">

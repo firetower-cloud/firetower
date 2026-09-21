@@ -12,7 +12,7 @@
  * gesture, and a diff wants every pixel of a 390pt screen.
  */
 import { useMemo, useState } from "react";
-import { ActivityIndicator, Pressable, ScrollView, Text, View } from "react-native";
+import { Pressable, ScrollView, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { router, useLocalSearchParams } from "expo-router";
 import { ChevronLeft } from "lucide-react-native";
@@ -21,6 +21,7 @@ import { Diff } from "~/ui/Diff";
 import { Files } from "~/ui/Files";
 import { Segmented } from "~/ui/Segmented";
 import { Ship } from "~/ui/Ship";
+import { Waiting } from "~/ui/Waiting";
 import { color } from "~/design/tokens.generated";
 
 type TabId = "diff" | "files" | "ship";
@@ -49,7 +50,7 @@ export default function Repo() {
   if (!session) {
     return (
       <View className="flex-1 items-center justify-center bg-ground">
-        <ActivityIndicator color={color.mute} />
+        <Waiting say="Opening the workspace" />
       </View>
     );
   }
@@ -92,7 +93,7 @@ export default function Repo() {
         <ScrollView contentContainerStyle={{ paddingBottom: insets.bottom + 32, flexGrow: 1 }}>
           {loading && files.length === 0 ? (
             <View className="flex-1 items-center justify-center py-20">
-              <ActivityIndicator color={color.mute} />
+              <Waiting say="Reading the changes" />
             </View>
           ) : files.length === 0 ? (
             <View className="items-center px-8 py-20">

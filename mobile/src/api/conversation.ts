@@ -191,6 +191,21 @@ export type Conversation = {
   heardAt?: number;
   /** Set when the stream could not be opened or fell over. */
   trouble?: string;
+  /**
+   * Whether the first read has come back.
+   *
+   * An empty transcript means two different things and a screen cannot tell
+   * them apart without this: a session nobody has spoken to yet, and one whose
+   * snapshot is still crossing the wire. Drawing the first while waiting on
+   * the second is how "Nothing has been said yet." came to sit on top of a
+   * conversation that was merely large — an assertion, made before there was
+   * anything to assert it from.
+   *
+   * Set once the snapshot resolves *or* fails, because the fallback is to
+   * replay off the stream and a screen that waits for certainty would wait for
+   * ever.
+   */
+  arrived?: boolean;
 };
 
 /**
@@ -657,12 +672,16 @@ function start(key: string, sessionId: string, follow: ReturnType<typeof useSock
         // The snapshot's own cursor, not the last line that drew something: a
         // log line can normalise to no events at all, and resuming from the
         // last *drawn* one would ask for those again on every open.
-        put(key, { ...folded, lastLine: Math.max(folded.lastLine, snapshot.lastLine) });
+        put(key, { ...folded, lastLine: Math.max(folded.lastLine, snapshot.lastLine), arrived: true });
       })
       .catch((e) => {
         // Not fatal, and not worth a banner: the subscription below replays
         // from nothing, which is what this used to do every time.
         console.warn("[firetower] could not read the conversation, streaming it instead", e);
+        // Streaming from nothing is still a conversation arriving, and a
+        // screen left waiting on a promise that already rejected waits for
+        // ever.
+        if (!dropped) put(key, { ...read(key), arrived: true });
       })
       .finally(listen);
   }

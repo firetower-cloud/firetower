@@ -165,6 +165,36 @@ Rules that are not negotiable:
   of explanation and it is on *Files*, because a file going into the workspace
   rather than into the message is the only thing there you could not guess.
 
+## Waiting is a thing to say, not a thing to spin
+
+Every screen had an `ActivityIndicator` in `--color-mute` and every one read
+as a hang. One component now, because the reasons were the same everywhere.
+
+- **An empty state is a claim, and a claim needs something to have come back.**
+  "Nothing has been said yet." sat on top of conversations that were merely
+  large, and "Nothing is waiting on you" was printed before the first response
+  arrived. An empty transcript means two different things — nobody has spoken,
+  or the snapshot is still crossing the wire — and a screen cannot tell them
+  apart without being told. That is what `Conversation.arrived` is for.
+- **Say what is being fetched.** A spinner names neither the thing nor whose
+  fault it is if it never comes.
+- **Use `Sheen`, not a spinner.** It is already this app's way of saying *this
+  is not finished yet*, it sweeps per glyph so it is visibly alive, and its own
+  docblock is the argument: a spinner on something that may take four minutes
+  reads as a hang.
+- **Nothing for the first 350ms.** A fast load that flashes a spinner is its
+  own kind of broken.
+- **Past six seconds, say "Still going."** That is the whole question somebody
+  is actually asking, and no amount of animation answers it — only a sentence
+  that appeared *because* time passed.
+- **Show the shape where there is one.** The transcript's skeleton is
+  full-width lines with a raised card on the right, which says *a conversation
+  is coming* before any of the words do.
+
+One thing to know if you write another `Sheen`-like effect: a component that
+renders one `Text` per character is a row of one-letter labels to anything
+walking the tree. Carry the whole string on the group and hide the pieces.
+
 ## The type scale is the desk's, spoken louder
 
 Every size moves up roughly a sixth from `globals.css`, and the small end

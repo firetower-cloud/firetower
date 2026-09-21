@@ -10,7 +10,7 @@
  * `sessions` event into this query's cache as it arrives.
  */
 import { useMemo, useState } from "react";
-import { ActivityIndicator, Pressable, RefreshControl, ScrollView, Text, View } from "react-native";
+import { Pressable, RefreshControl, ScrollView, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { router } from "expo-router";
 import { Plus } from "lucide-react-native";
@@ -23,7 +23,8 @@ import { useServer } from "~/native/current";
 import { Segmented } from "~/ui/Segmented";
 import { ServerChip } from "~/ui/ServerChip";
 import { WorkspaceRow } from "~/ui/WorkspaceRow";
-import { color } from "~/design/tokens.generated";
+import { Waiting } from "~/ui/Waiting";
+import { color, size } from "~/design/tokens.generated";
 
 type Filter = "all" | "waiting" | "working" | "idle";
 const FILTERS: [Filter, string][] = [
@@ -66,6 +67,12 @@ export default function Inbox() {
         <Text className="font-semibold text-display text-bone">Inbox</Text>
         {waiting > 0 ? (
           <Text className="mt-0.5 font-medium text-ui text-ember">{waiting} waiting on you</Text>
+        ) : loading && live.length === 0 ? (
+          /* Nothing has come back, so there is nothing true to say here yet —
+             and "Nothing is waiting on you" is a claim, not a placeholder. The
+             slot keeps its height so the list below does not jump when the
+             line fills in. */
+          <View className="mt-0.5" style={{ height: size.ui * 1.45 }} />
         ) : (
           <Text className="mt-0.5 font-sans text-ui text-dim">Nothing is waiting on you</Text>
         )}
@@ -109,7 +116,7 @@ export default function Inbox() {
             server is unreachable is the lie that costs the most trust. */}
         {loading && live.length === 0 ? (
           <View className="flex-1 items-center justify-center py-20">
-            <ActivityIndicator color={color.mute} />
+            <Waiting say="Reading your workspaces" />
           </View>
         ) : error ? (
           <View className="items-center gap-2 px-8 py-16">

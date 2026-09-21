@@ -9,7 +9,7 @@
  * The repository is one tap away rather than beside: see `~/ui/Changes`.
  */
 import { useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Pressable, ScrollView, Text, View } from "react-native";
+import { Pressable, ScrollView, Text, View } from "react-native";
 import Animated, { useAnimatedStyle } from "react-native-reanimated";
 import { useReanimatedKeyboardAnimation } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -37,6 +37,7 @@ import { Composer } from "~/ui/Composer";
 import { Sheen } from "~/ui/Sheen";
 import { Signal } from "~/ui/Signal";
 import { Transcript } from "~/ui/Transcript";
+import { Waiting } from "~/ui/Waiting";
 import { color } from "~/design/tokens.generated";
 
 /**
@@ -65,7 +66,7 @@ export default function WorkspaceScreen() {
     return (
       <View className="flex-1 items-center justify-center bg-ground">
         {loading ? (
-          <ActivityIndicator color={color.mute} />
+          <Waiting say="Finding this workspace" />
         ) : (
           <Text className="font-sans text-ui text-mute">That workspace is not here any more.</Text>
         )}
@@ -190,6 +191,13 @@ function Conversation({ place }: { place: Workspace }) {
             <Transcript items={conversation.items} />
           ) : conversation.trouble ? (
             <Text className="mt-2 font-sans text-meta text-brick">{conversation.trouble}</Text>
+          ) : !conversation.arrived ? (
+            /* Before this branch existed the fall-through below ran while the
+               snapshot was still crossing the wire, so a conversation that was
+               merely long was reported as one that had never happened. An
+               empty transcript is only empty once something has come back to
+               say so. */
+            <Waiting say="Reading the conversation" bars />
           ) : bringup.some((l) => l.state !== "pending") ? null : (
             /* Nothing said and nothing coming up: a workspace that is simply
                waiting for you to open the conversation. */

@@ -14,7 +14,7 @@
  * unsent. No prompt is ever sent on creation; see `app/new.tsx`.
  */
 import { useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, Pressable, RefreshControl, ScrollView, Text, TextInput, View } from "react-native";
+import { Pressable, RefreshControl, ScrollView, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { router } from "expo-router";
 import { useQueryClient } from "@tanstack/react-query";
@@ -24,6 +24,7 @@ import type { ListTasksParams, TaskKind, TaskState, TrackerStatus } from "~/api/
 import { elapsed, minutesSince } from "~/api/view";
 import { useTasks, useTrackers } from "~/data";
 import { Segmented } from "~/ui/Segmented";
+import { Waiting } from "~/ui/Waiting";
 import { color, size } from "~/design/tokens.generated";
 
 const KIND = { issue: CircleDot, pullRequest: GitPullRequest, ticket: Ticket };
@@ -179,7 +180,7 @@ export default function Tasks() {
       >
         {findingTrackers ? (
           <View className="flex-1 items-center justify-center py-20">
-            <ActivityIndicator color={color.mute} />
+            <Waiting say="Looking for your trackers" />
           </View>
         ) : !source ? (
           <Empty
@@ -195,7 +196,7 @@ export default function Tasks() {
           <Empty title="That didn't work" detail={feed.error} />
         ) : feed.loading && feed.data.length === 0 ? (
           <View className="flex-1 items-center justify-center py-20">
-            <ActivityIndicator color={color.mute} />
+            <Waiting say={`Reading ${source.label}`} />
           </View>
         ) : feed.data.length === 0 ? (
           <Empty title="Nothing here" detail={q ? `Nothing matches “${q}”.` : "No open work on this tracker."} />

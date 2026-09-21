@@ -82,7 +82,16 @@ export function Sheen({ text }: { text: string }) {
 
   const glyphs = [...text];
   return (
-    <View className="flex-row">
+    /* One `Text` per character is how the sweep works and it is not how the
+       word should be *read*: to anything walking the tree — VoiceOver, an
+       automated test — this was twenty-five separate one-letter labels. The
+       group carries the whole word and the glyphs carry none of it. */
+    <View
+      accessible
+      accessibilityLabel={text}
+      importantForAccessibility="yes"
+      className="flex-row"
+    >
       {glyphs.map((ch, i) => (
         <Glyph key={i} ch={ch} at={glyphs.length > 1 ? i / (glyphs.length - 1) : 0} clock={clock} still={still} />
       ))}
