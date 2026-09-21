@@ -8,7 +8,7 @@
  * mean is testable without rendering anything.
  */
 
-import { useCallback, useEffect, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import { useSocket } from "./socket";
 import { currentBackend } from "~/client/http";
 import { getConversation } from "./generated/sessions/sessions";
@@ -771,6 +771,10 @@ export function useConversation(sessionId: string) {
   // provider is keyed on the server, so changing one remounts this anyway.
   const key = `${currentBackend() ?? ""}:${sessionId}`;
 
+  /* Bumping this re-runs the effect below, which is how a re-read restarts
+     the subscription as well as clearing what was held. */
+  const [again, setAgain] = useState(0);
+
   const state = useSyncExternalStore(
     useCallback(
       (fn: () => void) => {
@@ -797,7 +801,7 @@ export function useConversation(sessionId: string) {
       drain(key);
       sweep();
     };
-  }, [key, sessionId, follow]);
+  }, [key, sessionId, follow, again]);
 
   /** Change what is held, with anything buffered folded in first. */
   const change = useCallback(
@@ -866,5 +870,29 @@ export function useConversation(sessionId: string) {
     [change],
   );
 
-  return { conversation: state, echo, settle, remember, stopping };
+  /**
+   * Read the whole thing again, from nothing.
+   *
+   * There was no way to ask for this and it needed one. `start` skips the
+   * snapshot whenever `lastLine > 0` — and `lastLine` is taken from the
+   * *log's* end rather than from what actually folded, so a conversation that
+   * ended up holding less than it should still claims to be up to date. It
+   * then resumes from the end for the life of the process and the missing
+   * middle is never asked for again. Nothing self-heals, and nothing the user
+   * can press did either.
+   *
+   * Emptying first is deliberate: it is what puts `lastLine` back to 0, which
+   * is the only thing `start` reads to decide between a snapshot and a
+   * resume.
+   */
+  const reread = useCallback(() => {
+    const it = entry(key);
+    it.stop?.();
+    it.stop = undefined;
+    it.waiting = [];
+    put(key, nothing);
+    setAgain((n) => n + 1);
+  }, [key]);
+
+  return { conversation: state, echo, settle, remember, stopping, reread };
 }

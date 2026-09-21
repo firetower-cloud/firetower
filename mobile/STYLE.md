@@ -213,6 +213,21 @@ One thing to know if you write another `Sheen`-like effect: a component that
 renders one `Text` per character is a row of one-letter labels to anything
 walking the tree. Carry the whole string on the group and hide the pieces.
 
+## A cached transcript has to be re-readable
+
+`start` skips the snapshot whenever `lastLine > 0`, and `lastLine` comes from
+the *log's* end rather than from what actually folded. So a conversation that
+ended up holding less than the server sent still claims to be up to date: it
+resumes from the end for the rest of the process, never asks for the middle
+again, and no amount of leaving the screen and coming back changes it.
+
+Pull down on a transcript to read it again from nothing. Emptying first is the
+mechanism, not a side effect — putting `lastLine` back to 0 is the only thing
+that makes `start` choose a snapshot over a resume.
+
+Any cache whose staleness cannot be detected from inside needs a way to be
+told from outside.
+
 ## The type scale is the desk's, spoken louder
 
 Every size moves up roughly a sixth from `globals.css`, and the small end

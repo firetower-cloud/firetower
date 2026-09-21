@@ -9,7 +9,7 @@
  * The repository is one tap away rather than beside: see `~/ui/Changes`.
  */
 import { useMemo, useRef, useState } from "react";
-import { Pressable, ScrollView, Text, View } from "react-native";
+import { Pressable, RefreshControl, ScrollView, Text, View } from "react-native";
 import Animated, { useAnimatedStyle } from "react-native-reanimated";
 import { useReanimatedKeyboardAnimation } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -100,7 +100,8 @@ function Conversation({ place }: { place: Workspace }) {
     [session, speaker, events.data],
   );
 
-  const { conversation, echo, settle, stopping } = useConversation(speaker.id);
+  const { conversation, echo, settle, stopping, reread } = useConversation(speaker.id);
+  const [rereading, setRereading] = useState(false);
   const send = useSendTurn();
   const attach = useAttachFile();
   const answer = useAnswerRequest();
@@ -178,6 +179,22 @@ function Conversation({ place }: { place: Workspace }) {
           }}
           scrollEventThrottle={64}
           onContentSizeChange={() => atEnd && scroller.current?.scrollToEnd({ animated: true })}
+          /* Pull to read it again from nothing.
+             A conversation holds on to whatever it first folded and claims to
+             be up to date afterwards, so a transcript that came out short
+             stayed short for the life of the app with nothing to press. This
+             is that something. */
+          refreshControl={
+            <RefreshControl
+              refreshing={rereading}
+              tintColor={color.mute}
+              onRefresh={() => {
+                setRereading(true);
+                reread();
+                setTimeout(() => setRereading(false), 600);
+              }}
+            />
+          }
         >
           <Text className="mb-3 font-mono text-meta text-mute">
             {speaker.branch ?? place.branch}
