@@ -1,8 +1,3 @@
-allowBuilds:
-  dtrace-provider: set this to true or false
-  esbuild: set this to true or false
-  protobufjs: set this to true or false
-
 # React Native's Metro resolver walks node_modules by path, not by symlink, so
 # a package only reachable through .pnpm is one it cannot find — NativeWind's
 # jsx-runtime is the first casualty and nothing renders. pnpm 10 moved this
@@ -12,5 +7,12 @@ nodeLinker: hoisted
 # Same convention as web/ and desktop/: approving a build script means the
 # decision is reviewed and in version control rather than re-prompted on every
 # clone.
-onlyBuiltDependencies:
-  - esbuild
+#
+# It is also not optional. pnpm 11 *fails* an install that has ignored build
+# scripts, and it writes the entries here as `set this to true or false` when
+# it cannot ask — which is a file that installs on a laptop, where somebody
+# answered the prompt once, and fails on a build machine, where nobody can.
+# Three EAS builds died in "Install dependencies" on exactly that.
+allowBuilds:
+  # the bundler Vite runs on, for vitest and orval
+  esbuild: true
