@@ -34,6 +34,11 @@ const config: ExpoConfig = {
       NSLocalNetworkUsageDescription:
         "Firetower connects to control planes you run — including ones on this network.",
       UIBackgroundModes: ["remote-notification"],
+      /* Declared rather than left for App Store Connect to ask about on every
+         upload. Firetower uses TLS and nothing else — that is exempt, and
+         saying so here is the difference between a build that submits and one
+         that waits on a form. */
+      ITSAppUsesNonExemptEncryption: false,
     },
   },
   android: {
