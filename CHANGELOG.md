@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.39.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.38.1...firetower-v0.39.0) (2026-09-21)
+
+
+### Features
+
+* add voice dictation to composer ([7b86f89](https://github.com/firetower-cloud/firetower/commit/7b86f896b69d482dbfb823a6a21385713055c487))
+* implement voice dictation with OpenAI Realtime ([ca0b304](https://github.com/firetower-cloud/firetower/commit/ca0b30421a371f86b56b980e5b6031ccdadd1818))
+* implement voice dictation with OpenAI Realtime ([016ad0b](https://github.com/firetower-cloud/firetower/commit/016ad0b3e4ca681cbd6f7b1fad64637491ceda9f))
+* **voice:** add dictation support with OpenAI realtime ([8a2c836](https://github.com/firetower-cloud/firetower/commit/8a2c83663ad08f2c6294ef29bcf2b08ac1ec71e8))
+
 ## [0.38.1](https://github.com/firetower-cloud/firetower/compare/firetower-v0.38.0...firetower-v0.38.1) (2026-09-20)
 
 
