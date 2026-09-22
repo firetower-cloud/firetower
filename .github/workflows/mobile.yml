@@ -24,6 +24,10 @@ on:
       - "api/openapi.json"
       - "web/app/globals.css"
       - ".github/workflows/mobile.yml"
+      # Its own file is here so that editing the CI re-runs the CI. The
+      # release workflow builds the same app from the same lockfile, so it
+      # wants the same courtesy.
+      - ".github/workflows/mobile-release.yml"
 
 permissions:
   contents: read
