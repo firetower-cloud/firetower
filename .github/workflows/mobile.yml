@@ -66,6 +66,19 @@ jobs:
           pnpm tokens
           git diff --exit-code src/design
 
+      # The iOS project generates on Linux, which is the cheap half of an iOS
+      # build and most of what a pull request can usefully catch: a config
+      # plugin that throws, an `app.config.ts` that will not resolve, a
+      # manifest that comes out wrong. `--no-install` skips CocoaPods, which
+      # is what would need a mac.
+      #
+      # It does not compile anything, so it cannot catch a link error — those
+      # still surface on the release build. A macOS runner is roughly ten
+      # times a Linux one and that is not worth paying on every push to learn
+      # the same thing a day earlier.
+      - name: the iOS project still generates
+        run: pnpm exec expo prebuild --platform ios --no-install
+
   android:
     needs: check
     runs-on: depot-ubuntu-22.04
