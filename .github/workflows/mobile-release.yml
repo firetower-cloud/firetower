@@ -1,0 +1,156 @@
+# The phone's release: an installable APK onto the GitHub Release for a
+# `mobile-v*` tag, and an iOS build submitted to TestFlight.
+#
+# Called by release.yml when release-please cuts the tag, or run by hand for an
+# existing tag when a build has to be redone. Both jobs run in the `release`
+# environment: a reviewer approves the deployment before its secrets are
+# readable, and nothing here prints one. Actions are pinned by commit.
+#
+# ## Why EAS rather than building here
+#
+# The desktop signs on the runner because Tauri's signing is a file and a
+# password. A phone's is not: iOS wants a provisioning profile matched to a
+# certificate matched to a team, and Android wants a keystore that must never
+# be regenerated or every existing install stops updating. EAS holds both and
+# rotates neither by accident, which is the whole reason to hand it the job.
+#
+# ## Why the APK is the release asset and the `aab` is not
+#
+# The point of this channel is that somebody scans a code and installs. An
+# `aab` cannot be installed; it is what Google Play takes in order to produce
+# the APKs itself. If this ever goes to Play, that is a second artifact from
+# the same profile, not a replacement for this one.
+name: mobile release
+
+on:
+  workflow_call:
+    inputs:
+      tag: { required: true, type: string }
+      version: { required: true, type: string }
+      ref: { required: true, type: string }
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "An existing mobile-v* tag to rebuild"
+        required: true
+        type: string
+      platform:
+        description: "Which to build"
+        required: false
+        default: all
+        type: choice
+        options: [all, android, ios]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mobile-release-${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  # Which release the assets go onto.
+  release:
+    runs-on: depot-ubuntu-22.04
+    permissions:
+      contents: write
+    outputs:
+      id: ${{ steps.find.outputs.id }}
+      ref: ${{ inputs.ref || inputs.tag }}
+      version: ${{ inputs.version || steps.find.outputs.version }}
+    steps:
+      - id: find
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          id=$(gh api "repos/${GITHUB_REPOSITORY}/releases?per_page=50" --jq ".[] | select(.tag_name == \"$TAG\") | .id" | head -1)
+          if [ -z "$id" ]; then echo "no release for $TAG" >&2; exit 1; fi
+          echo "id=$id" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#mobile-v}" >> "$GITHUB_OUTPUT"
+
+  # An APK anybody can install, on the release. No gatekeeper, no review.
+  android:
+    needs: release
+    if: ${{ inputs.platform != 'ios' }}
+    environment: release
+    permissions:
+      contents: write
+    runs-on: depot-ubuntu-22.04
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ needs.release.outputs.ref }}
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          version: 11
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: mobile/pnpm-lock.yaml
+      - uses: expo/expo-github-action@eab7a230208c952974db8c3245cfd78402c7b385 # v9
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - run: pnpm install --frozen-lockfile
+
+      # `--local` builds on this runner rather than queueing on EAS: the
+      # credentials still come from EAS, so the keystore is the same one every
+      # previous APK was signed with, but a release does not wait behind a
+      # shared queue.
+      - name: build the APK
+        run: eas build --platform android --profile production --local --non-interactive --output "$RUNNER_TEMP/firetower.apk"
+
+      - name: onto the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+          VERSION: ${{ needs.release.outputs.version }}
+        run: |
+          mv "$RUNNER_TEMP/firetower.apk" "$RUNNER_TEMP/firetower-$VERSION.apk"
+          gh release upload "$TAG" "$RUNNER_TEMP/firetower-$VERSION.apk" --clobber
+
+  # iOS to TestFlight. Apple reviews the first build for external testers;
+  # internal testers get it as soon as processing finishes.
+  ios:
+    needs: release
+    if: ${{ inputs.platform != 'android' }}
+    environment: release
+    runs-on: depot-ubuntu-22.04
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ needs.release.outputs.ref }}
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          version: 11
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: mobile/pnpm-lock.yaml
+      - uses: expo/expo-github-action@eab7a230208c952974db8c3245cfd78402c7b385 # v9
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - run: pnpm install --frozen-lockfile
+
+      # Not `--local`: an iOS build needs macOS, and a hosted mac runner costs
+      # roughly ten times a Linux one. EAS builds it on theirs and this waits.
+      - name: build and submit to TestFlight
+        # `eas.json` reads these three out of the environment rather than
+        # holding them, so they stay secrets rather than repository contents.
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          ASC_APP_ID: ${{ secrets.ASC_APP_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: eas build --platform ios --profile production --non-interactive --auto-submit
