@@ -15,3 +15,4 @@ export * from './stream/stream';
 export * from './tasks/tasks';
 export * from './trackers/trackers';
 export * from './updates/updates';
+export * from './voice/voice';

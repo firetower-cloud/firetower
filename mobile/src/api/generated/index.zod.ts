@@ -15,3 +15,4 @@ export * from './stream/stream.zod';
 export * from './tasks/tasks.zod';
 export * from './trackers/trackers.zod';
 export * from './updates/updates.zod';
+export * from './voice/voice.zod';
