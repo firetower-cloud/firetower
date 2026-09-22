@@ -86,6 +86,17 @@ const SWIFT = { duration: 200, easing: Easing.bezier(0.16, 1, 0.3, 1) };
 const PILL = 28;
 const CARD = 26;
 
+/**
+ * How far it sits from the edges, at rest and open.
+ *
+ * At rest it draws back and becomes an object on the page; writing in it, it
+ * comes forward to meet the edges. That change is most of why the morph reads
+ * as the box *stepping toward you* rather than merely growing — and it costs
+ * nothing, because it rides the same shared value as the corner radius.
+ */
+const INSET_PILL = 30;
+const INSET_CARD = 12;
+
 /** Big enough to hit without looking. */
 const TAP = "h-10 w-10 items-center justify-center rounded-full";
 
@@ -148,6 +159,7 @@ export function Composer({
   const shape = useSharedValue(0);
   const skin = useAnimatedStyle(() => ({
     borderRadius: PILL + (CARD - PILL) * shape.value,
+    marginHorizontal: INSET_PILL + (INSET_CARD - INSET_PILL) * shape.value,
   }));
   useEffect(() => {
     shape.value = withTiming(open ? 1 : 0, SWIFT);
@@ -323,7 +335,6 @@ export function Composer({
             style={[
               {
                 backgroundColor: color.raise,
-                marginHorizontal: 12,
                 paddingHorizontal: 8,
                 /* Roomier at rest, tighter once you are writing in it. The
                    card grows and the padding gives way at the same time,

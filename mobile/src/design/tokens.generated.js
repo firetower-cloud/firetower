@@ -31,7 +31,14 @@ module.exports = {
     "kind-style": "#9a8cc4",
     "kind-media": "#79b58d",
     "kind-store": "#bd79a1",
-    "kind-prose": "#9a9aa4"
+    "kind-prose": "#9a9aa4",
+    "syn-comment": "#6a6a74",
+    "syn-string": "#8fb99a",
+    "syn-keyword": "#9a8cc4",
+    "syn-type": "#7d95b0",
+    "syn-number": "#c2ab63",
+    "syn-fn": "#b8845f",
+    "syn-attr": "#8a8a94"
   },
   "fontSize": {
     "display": [

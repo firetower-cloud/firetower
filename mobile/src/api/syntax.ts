@@ -109,3 +109,19 @@ export function langOf(path: string): string {
   if (/justfile|makefile|\.sh$/i.test(path)) return "make";
   return "text";
 }
+
+/**
+ * The language a fence names, as opposed to one a path implies.
+ *
+ * A fence says `ts` or `bash`; a path says `.tsx` or `justfile`. Same six
+ * highlighters underneath — this is only the other way in.
+ */
+export function langNamed(name: string): string {
+  const n = name.trim().toLowerCase();
+  if (["rs", "rust"].includes(n)) return "rust";
+  if (["ts", "tsx", "js", "jsx", "javascript", "typescript", "json", "jsonc"].includes(n)) return "ts";
+  if (["sql"].includes(n)) return "sql";
+  if (["toml"].includes(n)) return "toml";
+  if (["sh", "bash", "zsh", "shell", "console", "make", "makefile", "just", "justfile"].includes(n)) return "make";
+  return "text";
+}

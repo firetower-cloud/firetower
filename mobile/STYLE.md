@@ -132,6 +132,10 @@ Rules that are not negotiable:
   you are writing in it. The card getting taller while its padding shrinks is
   most of what the morph actually *feels* like, and both ride the same
   `LinearTransition` on the UI thread.
+- **It draws back at rest and comes forward to write.** A wider inset when
+  idle, edge-to-edge when open. That is most of why the morph reads as the box
+  *stepping toward you* rather than merely growing, and it costs nothing — it
+  rides the same shared value as the corner radius.
 - **The composer's edge is lit from above.** The desk does this with
   `--shadow-raise`'s `inset 0 1px 0 rgb(255 255 255 / 0.04)`. React Native has
   no inset shadow, and per-side border colours say the same thing in one

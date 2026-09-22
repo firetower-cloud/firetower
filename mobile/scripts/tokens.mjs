@@ -22,11 +22,43 @@ import { fileURLToPath } from "node:url";
 const here = dirname(fileURLToPath(import.meta.url));
 const source = resolve(here, "../../web/app/globals.css");
 
+/**
+ * And the syntax palette, which lives on the desk.
+ *
+ * `--color-syn-*` is not in the shared `@theme` — highlighting is a viewer's
+ * concern and the desk keeps its own in `styles.css`, with a note about why
+ * those seven are as muted as they are: four hundred lines of code must not
+ * out-shout the one thing on screen that means an agent is waiting on you.
+ *
+ * Read from there rather than copied to here. The rule this file exists to
+ * enforce is that nothing is written twice, and a second palette drifting a
+ * shade away from the first is exactly what it is meant to prevent.
+ */
+const desk = resolve(here, "../../desktop/src/styles.css");
+
 const css = readFileSync(source, "utf8");
+const deskCss = readFileSync(desk, "utf8");
 
 /* The `@theme` block, and only it. Everything after it is components, which
    are Tailwind's business on the web and ours here. */
-const theme = css.slice(css.indexOf("@theme {") + "@theme {".length, css.indexOf("\n}", css.indexOf("@theme {")));
+function themeOf(text) {
+  const at = text.indexOf("@theme");
+  if (at < 0) return "";
+  const open = text.indexOf("{", at);
+  return text.slice(open + 1, text.indexOf("\n}", open));
+}
+
+/* Only `--color-syn-*` from the desk. Its `@theme` also carries a type scale
+   at desk size and colours of its own, and none of that is ours to inherit —
+   taking the whole block would let the desk quietly redefine the shared
+   palette here. */
+const theme =
+  themeOf(css) +
+  "\n" +
+  themeOf(deskCss)
+    .split("\n")
+    .filter((l) => /^\s*--color-syn-/.test(l))
+    .join("\n");
 
 /** `--color-ember: #ff6b2c;` → ["color-ember", "#ff6b2c"] */
 function declarations(block) {
