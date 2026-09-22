@@ -152,6 +152,18 @@ Rules that are not negotiable:
   what an agent may do unsupervised and asks for them to be drawn apart. A
   list where "ask me first" and "never ask me again" look identical is the one
   place in a picker where getting it wrong costs something.
+- **A grabber is a promise.** A bar drawn at the top of a sheet says *pull
+  me* on iOS. Drawing one over a sheet that only closes by tapping the scrim
+  is worse than drawing nothing — it teaches the gesture and then refuses it.
+  The whole sheet follows the finger; past a third of the way, or with any
+  speed, it goes.
+- **What the fold carries, something has to draw.** `Item.images` was in the
+  contract, set by the composer, confirmed by the server and rendered by the
+  desk — and never once drawn here, so a screenshot sent from this app
+  appeared everywhere except the app that sent it. One picture gets the width
+  and is shown whole, because a screenshot is sent to be read and cropping it
+  to a square is the one thing that makes it useless; several share a row as
+  thumbnails, where the point is which ones rather than what is in them.
 - **A dictation is not one result.** A continuous recogniser closes a segment,
   sends it with `isFinal`, then starts numbering again from empty. Assigning
   `results[0]` each time looks right for two sentences and then throws the
@@ -325,6 +337,16 @@ Unchanged from the desk, and *more* true at this width:
   happens the moment the lines and the touched set are counted in two passes.
 - **The tab strip keeps the conversation pinned first**, uncloseable, and a
   single tap still previews in italic.
+
+## The bottom of the screen belongs to the message
+
+What a workspace *is* — its diff, its files, its pull request — goes under the
+header, above the conversation. It is a fact about the workspace, not about
+the message being written, and it sat over the composer for weeks: two rows of
+chrome stacked in the most crowded place on a phone, between the conversation
+and the thing you type into.
+
+Nothing lives under the transcript except the composer and what belongs to it.
 
 ## Gestures replace keycaps
 

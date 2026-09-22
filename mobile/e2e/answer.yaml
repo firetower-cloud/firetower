@@ -78,3 +78,10 @@ appId: com.usefiretower.app
     id: "control-model"
 - assertVisible: "MODEL"
 - takeScreenshot: control-picker
+
+# A grabber drawn on a sheet is a promise. Pulling it down has to close it —
+# teaching the gesture and then refusing it is worse than drawing no handle.
+- swipe:
+    start: "50%, 53%"
+    end: "50%, 95%"
+- assertNotVisible: "MODEL"

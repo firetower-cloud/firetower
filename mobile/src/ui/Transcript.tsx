@@ -13,7 +13,7 @@
  * - **Thinking is collapsed** to a single line. It is context, not the answer.
  */
 import { useState } from "react";
-import { Pressable, Text, View } from "react-native";
+import { Image, Pressable, Text, View } from "react-native";
 import { ChevronDown, ChevronRight, FileDiff, FileText, Search, Terminal } from "lucide-react-native";
 import type { Item } from "~/api/conversation";
 import { fold, type Row } from "~/api/steps";
@@ -96,12 +96,34 @@ function Edit({ item }: { item: Item }) {
 }
 
 function Said({ item }: { item: Item }) {
+  const pictures = item.images ?? [];
   /* A raised card, and it does not run the full width — a message that fills
      the column reads as the agent's, which is the one thing this has to avoid. */
   return (
     <View className="my-2 items-end">
       <View className="max-w-[86%] rounded-lg bg-raise px-3.5 py-2.5">
-        <Text className="font-sans text-read text-bone">{item.text}</Text>
+        {/* The fold has carried these since the beginning and nothing drew
+            them: a screenshot sent from this app appeared on the desk and
+            nowhere in the app that sent it. `base64` straight into `Image`,
+            which is where they already are — there is no URL to fetch. */}
+        {pictures.length > 0 ? (
+          /* One picture gets the width and is shown whole — a screenshot is
+             sent to be read, and cropping it to a square is the one thing
+             that makes it useless. Several share the row as thumbnails,
+             where the point is which ones rather than what is in them. */
+          <View className={`flex-row flex-wrap gap-1.5 ${item.text ? "mb-2" : ""}`}>
+            {pictures.map((picture, i) => (
+              <Image
+                key={i}
+                source={{ uri: `data:${picture.mediaType};base64,${picture.data}` }}
+                resizeMode={pictures.length === 1 ? "contain" : "cover"}
+                className="rounded-md border border-line"
+                style={pictures.length === 1 ? { width: "100%", height: 240 } : { width: 132, height: 132 }}
+              />
+            ))}
+          </View>
+        ) : null}
+        {item.text ? <Text className="font-sans text-read text-bone">{item.text}</Text> : null}
       </View>
     </View>
   );

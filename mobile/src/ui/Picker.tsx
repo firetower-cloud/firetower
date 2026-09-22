@@ -7,7 +7,16 @@
  * from the bottom, it is dismissed by tapping away or by the back gesture, and
  * it never traps you.
  */
+import { useEffect } from "react";
 import { Modal, Pressable, ScrollView, Text, View } from "react-native";
+import { Gesture, GestureDetector } from "react-native-gesture-handler";
+import Animated, {
+  Easing,
+  runOnJS,
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+} from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Check, ChevronDown } from "lucide-react-native";
 import { color } from "~/design/tokens.generated";
@@ -99,16 +108,55 @@ export function Picker({
   const has = (id: string) =>
     Array.isArray(chosen) ? chosen.includes(id) : chosen === id;
 
+  /**
+   * Dragged down to dismiss, because the grabber was a picture of a handle.
+   *
+   * A bar drawn at the top of a sheet is a promise on iOS: it says *pull me*.
+   * Drawing one over a sheet that only closes by tapping the scrim is worse
+   * than drawing nothing — it teaches the gesture and then refuses it.
+   *
+   * The whole sheet moves, not just the handle, and it follows the finger
+   * rather than waiting for the gesture to finish. Let go past a third of the
+   * way, or with any real speed, and it goes.
+   */
+  const down = useSharedValue(0);
+  useEffect(() => {
+    if (open) down.value = 0;
+  }, [open, down]);
+
+  const leave = () => {
+    down.value = withTiming(900, { duration: 180, easing: Easing.in(Easing.quad) });
+    onClose();
+  };
+
+  const drag = Gesture.Pan()
+    .activeOffsetY(8)
+    .onChange((e) => {
+      down.value = Math.max(0, down.value + e.changeY);
+    })
+    .onEnd((e) => {
+      if (e.translationY > 120 || e.velocityY > 700) {
+        down.value = withTiming(900, { duration: 160 });
+        runOnJS(onClose)();
+      } else {
+        down.value = withTiming(0, { duration: 180 });
+      }
+    });
+
+  const slide = useAnimatedStyle(() => ({ transform: [{ translateY: down.value }] }));
+
   return (
     <Modal visible={open} transparent animationType="slide" onRequestClose={onClose}>
-      {/* Tapping away closes it. A panel with only one way out is one people
-          get stuck in. */}
-      <Pressable className="flex-1 bg-black/60" onPress={onClose} />
-      <View
+      {/* Tapping away closes it too. A panel with only one way out is one
+          people get stuck in. */}
+      <Pressable className="flex-1 bg-black/60" onPress={leave} />
+      <GestureDetector gesture={drag}>
+      <Animated.View
         className="rounded-t-2xl border-t border-line bg-panel"
-        style={{ paddingBottom: insets.bottom + 8, maxHeight: "72%" }}
+        style={[{ paddingBottom: insets.bottom + 8, maxHeight: "72%" }, slide]}
       >
-        <View className="items-center pb-1 pt-2.5">
+        {/* A generous target: the bar is 9pt tall and the grab is 28. */}
+        <View className="items-center pb-2 pt-3">
           <View className="h-1 w-9 rounded-full bg-mute" />
         </View>
         <Text className="px-5 pb-2 pt-1 font-narrow text-micro uppercase tracking-[0.18em] text-mute">
@@ -142,7 +190,8 @@ export function Picker({
             </Pressable>
           ))}
         </ScrollView>
-      </View>
+      </Animated.View>
+      </GestureDetector>
     </Modal>
   );
 }

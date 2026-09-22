@@ -113,7 +113,6 @@ function Conversation({ place }: { place: Workspace }) {
      like a web page with a fixed footer. */
   const keyboard = useReanimatedKeyboardAnimation();
   const room = useAnimatedStyle(() => ({ height: Math.abs(keyboard.height.value) }));
-  const strip = useAnimatedStyle(() => ({ opacity: 1 - keyboard.progress.value }));
 
   const say = (text: string, images: Attached[] = []) => {
     echo(text, images);
@@ -162,6 +161,24 @@ function Conversation({ place }: { place: Workspace }) {
           <MoreHorizontal color={color.dim} size={20} />
         </Pressable>
       </View>
+
+      {/* Under the header rather than over the composer.
+          It is a fact about the workspace, not about the message being
+          written, and sitting it on top of the composer put a second bar of
+          chrome between the conversation and the thing you type into — two
+          rows deep at the bottom of the screen, which is the most crowded
+          place on a phone and the one where a message is supposed to be.
+
+          Always here, not only when something is uncommitted: a session that
+          has committed its work has a clean tree, and hiding the strip then
+          left the diff, the files and the pull request with no way in. */}
+      {session ? (
+        <Changes
+          session={session}
+          files={files}
+          onPress={() => router.push({ pathname: "/workspace/repo", params: { id: speaker.id } })}
+        />
+      ) : null}
 
       <View className="min-h-0 flex-1">
         <ScrollView
@@ -244,19 +261,6 @@ function Conversation({ place }: { place: Workspace }) {
           <Animated.View style={room} />
         </ScrollView>
       </View>
-
-      {/* Always, not only when something is uncommitted. A session that has
-          committed its work has a clean tree, and hiding the strip then left
-          the diff, the files and the pull request with no way in at all. */}
-      <Animated.View style={strip}>
-        {session ? (
-          <Changes
-            session={session}
-            files={files}
-            onPress={() => router.push({ pathname: "/workspace/repo", params: { id: speaker.id } })}
-          />
-        ) : null}
-      </Animated.View>
 
       {session ? (
         <WorkspaceMenu
