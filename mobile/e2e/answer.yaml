@@ -68,3 +68,13 @@ appId: com.usefiretower.app
 - tapOn:
     point: "50%, 25%"
 - assertNotVisible: "Photos"
+
+# The pickers were `Pressable`s with no `onPress` for weeks — a picture of a
+# control. What makes them real is that something opens.
+- tapOn:
+    id: "composer"
+- inputText: "x"
+- tapOn:
+    id: "control-model"
+- assertVisible: "MODEL"
+- takeScreenshot: control-picker

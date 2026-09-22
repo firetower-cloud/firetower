@@ -18,6 +18,15 @@ export type Choice = {
   detail?: string;
   /** Shown, but not choosable, and it says why. */
   blocked?: string;
+  /**
+   * Changes what the agent may do unsupervised.
+   *
+   * The contract marks these and says they should be drawn apart. Carried
+   * through rather than flattened away: a list where "ask me first" and
+   * "never ask me again" look identical is the one place in a picker where
+   * getting it wrong costs something.
+   */
+  grave?: boolean;
 };
 
 export function Field({
@@ -117,7 +126,9 @@ export function Picker({
               <View className="min-w-0 flex-1">
                 <Text
                   numberOfLines={1}
-                  className={`font-medium text-title ${c.blocked ? "text-mute" : "text-bone"}`}
+                  className={`font-medium text-title ${
+                    c.blocked ? "text-mute" : c.grave ? "text-ember" : "text-bone"
+                  }`}
                 >
                   {c.label}
                 </Text>

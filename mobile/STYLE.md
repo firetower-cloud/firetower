@@ -142,6 +142,21 @@ Rules that are not negotiable:
   hairline: `--color-line` on top, `--color-line-soft` around the rest. The box
   reads as raised rather than as a rectangle of a slightly different grey, and
   it needs no gradient and no new native module to do it.
+- **Which pickers exist is the session's business, not ours.** They come from
+  `session_controls`: a Codex session offers different ones from a Claude
+  session, and an agent that has not said yet offers none. A hard-coded row is
+  a picture of a control — and for a while that is exactly what these were,
+  `Pressable`s with no `onPress`. The row scrolls, because four pickers do not
+  fit beside a `+`, a microphone and a send button.
+- **`grave` survives the trip.** The contract marks the choices that change
+  what an agent may do unsupervised and asks for them to be drawn apart. A
+  list where "ask me first" and "never ask me again" look identical is the one
+  place in a picker where getting it wrong costs something.
+- **A dictation is not one result.** A continuous recogniser closes a segment,
+  sends it with `isFinal`, then starts numbering again from empty. Assigning
+  `results[0]` each time looks right for two sentences and then throws the
+  whole utterance away. Finished segments accumulate; only the unfinished one
+  is ever replaced.
 - **A control that does not know stays quiet.** The model picker is absent
   until the agent says what it is running. "Opus 5" under a session running
   something else is a lie the picker tells until somebody speaks.

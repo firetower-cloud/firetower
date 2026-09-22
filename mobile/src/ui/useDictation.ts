@@ -49,9 +49,26 @@ const CEILING = 8;
 
 export function useDictation(): Dictation {
   const [listening, setListening] = useState(false);
-  const [heard, setHeard] = useState("");
+  /**
+   * What is finished, and what is still being revised.
+   *
+   * Kept apart because a long dictation is not one result. On iOS a
+   * continuous recogniser closes a segment every so often — it sends that
+   * segment with `isFinal`, then **starts numbering again from empty** for
+   * the next one. Reading `results[0].transcript` each time and assigning it
+   * therefore looks right for a sentence or two and then silently throws the
+   * whole utterance away and starts over, which is what it did: you talk, the
+   * box fills, and then most of it vanishes.
+   *
+   * So the finished segments accumulate here and only the unfinished one is
+   * ever replaced.
+   */
+  const [settled, setSettled] = useState("");
+  const [saying, setSaying] = useState("");
   const [trouble, setTrouble] = useState<string | null>(null);
   const level = useSharedValue(0);
+
+  const heard = settled && saying ? `${settled} ${saying}` : settled || saying;
 
   useSpeechRecognitionEvent("start", () => setListening(true));
   useSpeechRecognitionEvent("end", () => {
@@ -60,7 +77,13 @@ export function useDictation(): Dictation {
   });
   useSpeechRecognitionEvent("result", (e) => {
     const said = e.results?.[0]?.transcript ?? "";
-    if (said) setHeard(said);
+    if (!said) return;
+    if (e.isFinal) {
+      setSettled((held) => (held ? `${held} ${said}` : said));
+      setSaying("");
+    } else {
+      setSaying(said);
+    }
   });
   useSpeechRecognitionEvent("volumechange", (e) => {
     const loud = (e.value - FLOOR) / (CEILING - FLOOR);
@@ -77,7 +100,8 @@ export function useDictation(): Dictation {
 
   const start = useCallback(async () => {
     setTrouble(null);
-    setHeard("");
+    setSettled("");
+    setSaying("");
     const allowed = await ExpoSpeechRecognitionModule.requestPermissionsAsync();
     if (!allowed.granted) {
       setTrouble("Firetower needs the microphone and speech recognition to do this.");
@@ -100,7 +124,8 @@ export function useDictation(): Dictation {
      arrive after we had already put the old draft back. */
   const cancel = useCallback(() => {
     ExpoSpeechRecognitionModule.abort();
-    setHeard("");
+    setSettled("");
+    setSaying("");
   }, []);
 
   return { listening, heard, level, start, stop, cancel, trouble };

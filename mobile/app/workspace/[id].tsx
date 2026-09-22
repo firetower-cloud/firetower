@@ -100,7 +100,7 @@ function Conversation({ place }: { place: Workspace }) {
     [session, speaker, events.data],
   );
 
-  const { conversation, echo, settle, stopping, reread } = useConversation(speaker.id);
+  const { conversation, echo, settle, remember, stopping, reread } = useConversation(speaker.id);
   const [rereading, setRereading] = useState(false);
   const send = useSendTurn();
   const attach = useAttachFile();
@@ -276,6 +276,7 @@ function Conversation({ place }: { place: Workspace }) {
         model={conversation.model}
         mode={conversation.mode}
         onSend={say}
+        onRemember={remember}
         onAttach={carry}
         onInterrupt={() => {
           stopping(true);

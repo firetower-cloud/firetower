@@ -59,7 +59,10 @@ import { KeyboardStickyView, useReanimatedKeyboardAnimation } from "react-native
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as Haptics from "expo-haptics";
 import { ArrowUp, ChevronDown, Mic, Paperclip, Plus, Square, X } from "lucide-react-native";
-import type { Attached } from "~/api/generated/model";
+import type { Attached, Control, ControlKind } from "~/api/generated/model";
+import { getSessionControlsQueryKey, useChooseControl, useSessionControls } from "~/api/generated/conversation/conversation";
+import { Picker } from "~/ui/Picker";
+import { useQueryClient } from "@tanstack/react-query";
 import { megabytes, type Picked } from "~/ui/attach";
 import { AttachMenu } from "~/ui/AttachMenu";
 import { Waveform } from "~/ui/Waveform";
@@ -97,8 +100,15 @@ const CARD = 26;
 const INSET_PILL = 30;
 const INSET_CARD = 12;
 
-/** Big enough to hit without looking. */
+/**
+ * Big enough to hit without looking — and a size smaller at rest.
+ *
+ * The pill is furniture and should not be as tall as the card. Its height is
+ * set by these buttons rather than by the text, so shrinking them by four
+ * points is the only thing that actually shortens it.
+ */
 const TAP = "h-10 w-10 items-center justify-center rounded-full";
+const TAP_REST = "h-9 w-9 items-center justify-center rounded-full";
 
 export function Composer({
   sessionId,
@@ -106,6 +116,7 @@ export function Composer({
   model,
   mode,
   above,
+  onRemember,
   onSend,
   onAttach,
   onInterrupt,
@@ -124,6 +135,8 @@ export function Composer({
   mode?: string;
   /** What rides up with the composer — the approval card. */
   above?: React.ReactNode;
+  /** Show a setting as chosen before the agent confirms it. */
+  onRemember?: (of: "model" | "mode" | "effort", value: string) => void;
   onSend: (text: string, images: Attached[]) => void;
   /** A file for the workspace. Named in the message, not carried in it. */
   onAttach: (name: string, data: string) => Promise<void>;
@@ -150,6 +163,48 @@ export function Composer({
   const field = useRef<TextInput>(null);
   /** The draft dictation is sitting on top of, in case you cancel. */
   const before = useRef("");
+
+  /**
+   * The pickers, from the session rather than from a list kept here.
+   *
+   * Which settings exist is the agent's business — a Codex session offers
+   * different ones from a Claude session, and an agent that has not said yet
+   * offers none. The desk reads `session_controls` for exactly this reason
+   * and so does this; the two rows were hard-coded `Pressable`s with no
+   * `onPress` at all, which is to say they were a picture of a control.
+   */
+  const cache = useQueryClient();
+  const controls = useSessionControls(sessionId);
+  const choose = useChooseControl();
+  const [picking, setPicking] = useState<ControlKind | null>(null);
+  /* What was just chosen, until the list is refetched and agrees. */
+  const [chosen, setChosen] = useState<Partial<Record<string, string>>>({});
+
+  const offered: Control[] = controls.data ?? [];
+  const inForce = (c: Control) =>
+    chosen[c.kind] ??
+    c.current ??
+    (c.kind === "model" ? model : c.kind === "mode" ? mode : undefined) ??
+    undefined;
+
+  const pick = (kind: ControlKind, value: string) => {
+    Haptics.selectionAsync();
+    setChosen((was) => ({ ...was, [kind]: value }));
+    if (kind === "model" || kind === "mode" || kind === "effort") onRemember?.(kind, value);
+    setPicking(null);
+    choose.mutate(
+      { id: sessionId, data: { kind, value } },
+      {
+        onSuccess: () => cache.invalidateQueries({ queryKey: getSessionControlsQueryKey(sessionId) }),
+        onError: (e) => {
+          // Put the label back rather than leave it claiming something the
+          // agent never agreed to.
+          setChosen((was) => ({ ...was, [kind]: undefined }));
+          Alert.alert("That didn't change", e?.message ?? "The agent refused it.");
+        },
+      },
+    );
+  };
 
   const dictation = useDictation();
   const { listening } = dictation;
@@ -271,20 +326,22 @@ export function Composer({
    * that is invisible waste; for the wave, whose trail and timer live in the
    * subtree, it would wipe the history ten times a second.
    */
+  const fit = open ? TAP : TAP_REST;
+
   const Action = () =>
     working ? (
-      <Pressable testID="stop" onPress={onInterrupt} className={`${TAP} bg-bone`} hitSlop={6}>
+      <Pressable testID="stop" onPress={onInterrupt} className={`${fit} bg-bone`} hitSlop={6}>
         <Square color={color.ground} size={13} fill={color.ground} />
       </Pressable>
     ) : text.trim() || chips.length ? (
-      <Pressable testID="send" onPress={send} className={`${TAP} bg-bone`} hitSlop={6}>
+      <Pressable testID="send" onPress={send} className={`${fit} bg-bone`} hitSlop={6}>
         <ArrowUp color={color.ground} size={20} />
       </Pressable>
     ) : (
       /* Nothing written: the microphone is what the button is for. Saying
          something is the alternative to typing it, not an extra control
          competing for the same corner. */
-      <Pressable testID="mic" onPress={listen} className={`${TAP} bg-overlay`} hitSlop={6}>
+      <Pressable testID="mic" onPress={listen} className={`${fit} bg-overlay`} hitSlop={6}>
         <Mic color={color.dim} size={19} />
       </Pressable>
     );
@@ -296,7 +353,7 @@ export function Composer({
         Haptics.selectionAsync();
         setMore((m) => !m);
       }}
-      className={TAP}
+      className={fit}
       hitSlop={6}
       disabled={busy}
     >
@@ -340,7 +397,7 @@ export function Composer({
                    card grows and the padding gives way at the same time,
                    which is most of what the morph actually feels like —
                    `LinearTransition` carries both on the UI thread. */
-                paddingVertical: open ? 8 : 12,
+                paddingVertical: 8,
                 /* Lit from above. The desk does this with
                    `--shadow-raise`'s `inset 0 1px 0 rgb(255 255 255 / 0.04)`;
                    React Native has no inset shadow, and per-side border
@@ -442,7 +499,7 @@ export function Composer({
                     style={{
                       ...(open
                         ? { minHeight: LINE + PAD, maxHeight: LINE * LINES + PAD }
-                        : { height: LINE + 10 }),
+                        : { height: LINE + 6 }),
                       paddingHorizontal: 10,
                       paddingTop: open ? (Platform.OS === "ios" ? 8 : 4) : 0,
                       paddingBottom: open ? (Platform.OS === "ios" ? 6 : 4) : 0,
@@ -469,24 +526,31 @@ export function Composer({
                     className="flex-row items-center gap-1 pt-1"
                   >
                     {Attach()}
-                    <View className="flex-1" />
-                    {model ? (
-                      <Pressable className="flex-row items-center gap-1 px-2 py-2" hitSlop={4}>
-                        <Text
-                          numberOfLines={1}
-                          className="max-w-[140px] font-medium text-ui text-dim"
+                    {/* Scrolls, because a Claude session offers four of these
+                        and a phone has room for about two. Fixed controls
+                        stay put on either side of it. */}
+                    <ScrollView
+                      horizontal
+                      showsHorizontalScrollIndicator={false}
+                      keyboardShouldPersistTaps="handled"
+                      className="flex-1"
+                      contentContainerStyle={{ alignItems: "center", paddingRight: 4 }}
+                    >
+                      {offered.map((c) => (
+                        <Pressable
+                          key={c.kind}
+                          testID={`control-${c.kind}`}
+                          onPress={() => setPicking(c.kind)}
+                          className="flex-row items-center gap-1 px-2 py-2"
+                          hitSlop={4}
                         >
-                          {model.replace(/^claude-/, "")}
-                        </Text>
-                        <ChevronDown color={color.mute} size={13} />
-                      </Pressable>
-                    ) : null}
-                    {mode ? (
-                      <Pressable className="flex-row items-center gap-1 px-2 py-2" hitSlop={4}>
-                        <Text className="font-medium text-ui text-dim">{mode}</Text>
-                        <ChevronDown color={color.mute} size={13} />
-                      </Pressable>
-                    ) : null}
+                          <Text numberOfLines={1} className="max-w-[150px] font-medium text-ui text-dim">
+                            {(inForce(c) ?? c.fallback).replace(/^claude-/, "")}
+                          </Text>
+                          <ChevronDown color={color.mute} size={13} />
+                        </Pressable>
+                      ))}
+                    </ScrollView>
                     {/* Dictating from the card, where the send button is
                         already spoken for by the draft. */}
                     {!text.trim() && !chips.length ? null : (
@@ -501,6 +565,25 @@ export function Composer({
             )}
           </Animated.View>
         </GestureDetector>
+
+        {/* The same sheet the repository picker uses — one shape for "choose
+            one of these" everywhere in the app. */}
+        {offered.map((c) => (
+          <Picker
+            key={c.kind}
+            open={picking === c.kind}
+            title={c.kind}
+            choices={c.choices.map((k) => ({
+              id: k.value,
+              label: k.label,
+              detail: k.note ?? undefined,
+              grave: k.grave,
+            }))}
+            chosen={inForce(c)}
+            onPick={(id) => pick(c.kind, id)}
+            onClose={() => setPicking(null)}
+          />
+        ))}
       </Animated.View>
     </KeyboardStickyView>
   );
