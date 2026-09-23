@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.40.1](https://github.com/firetower-cloud/firetower/compare/firetower-v0.40.0...firetower-v0.40.1) (2026-09-23)
+
+
+### Bug Fixes
+
+* **mobile:** keep build numbers on EAS and read the version from package.json ([df4cfb9](https://github.com/firetower-cloud/firetower/commit/df4cfb961fcce8d0afd73626b69fa35f1621c075))
+
 ## [0.40.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.39.0...firetower-v0.40.0) (2026-09-23)
 
 
