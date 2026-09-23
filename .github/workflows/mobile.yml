@@ -79,9 +79,11 @@ jobs:
       - name: the iOS project still generates
         run: pnpm exec expo prebuild --platform ios --no-install
 
+  # The largest Depot runner: the React Native C++ compile spreads over every
+  # core it is given, and 2 cores meant twenty minutes.
   android:
     needs: check
-    runs-on: depot-ubuntu-22.04
+    runs-on: depot-ubuntu-22.04-32
     defaults:
       run:
         working-directory: mobile
@@ -99,13 +101,16 @@ jobs:
         with:
           distribution: temurin
           java-version: 17
+      - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
 
       - run: pnpm install --frozen-lockfile
       # The native project is generated, not committed: `android/` is whatever
       # app.config.ts and the installed modules currently say it is, so a
       # checkout that has never run prebuild still builds.
       - run: pnpm exec expo prebuild --platform android --no-install
-      - run: ./gradlew assembleDebug --no-daemon
+      # arm64 only: every phone this APK goes to is arm64, and each extra ABI
+      # is another full compile of the native code.
+      - run: ./gradlew assembleDebug --no-daemon -PreactNativeArchitectures=arm64-v8a
         working-directory: mobile/android
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

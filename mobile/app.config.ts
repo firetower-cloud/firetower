@@ -1,5 +1,7 @@
 import type { ExpoConfig } from "expo/config";
 
+import pkg from "./package.json";
+
 /**
  * The phone's shell.
  *
@@ -19,7 +21,8 @@ import type { ExpoConfig } from "expo/config";
 const config: ExpoConfig = {
   name: "Firetower",
   slug: "firetower",
-  version: "0.1.0",
+  /* release-please bumps package.json; the build number is EAS's. */
+  version: pkg.version,
   orientation: "portrait",
   scheme: "firetower",
   userInterfaceStyle: "dark",
