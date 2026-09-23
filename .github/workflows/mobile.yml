@@ -1,0 +1,115 @@
+# The phone on every pull request that touches it: types, lints, tests, and a
+# debug APK as an artifact on the run, so a branch can be installed before it
+# is merged. No secrets, so it is safe for a pull request from a fork; signing
+# and the store live in the release workflow behind a protected environment.
+#
+# There is no iOS job here on purpose. A macOS runner is roughly ten times the
+# cost of a Linux one, and an unsigned simulator build proves less than the
+# Android APK does — an iOS build that anybody can install needs the signing
+# identity, which needs the `release` environment. Types and tests are
+# platform-independent and run once, below.
+#
+# Run it by hand:  gh workflow run mobile.yml   then   gh run download
+name: mobile
+
+on:
+  workflow_dispatch:
+  pull_request:
+    # Not on a release PR: it changes versions and changelogs, nothing a
+    # build would catch.
+    branches-ignore:
+      - "release-please--branches--**"
+    paths:
+      - "mobile/**"
+      - "api/openapi.json"
+      - "web/app/globals.css"
+      - ".github/workflows/mobile.yml"
+      # Its own file is here so that editing the CI re-runs the CI. The
+      # release workflow builds the same app from the same lockfile, so it
+      # wants the same courtesy.
+      - ".github/workflows/mobile-release.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mobile-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    if: ${{ !startsWith(github.head_ref, 'release-please--') }}
+    runs-on: depot-ubuntu-22.04
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          version: 11
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: mobile/pnpm-lock.yaml
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm tsc --noEmit
+      - run: pnpm test
+
+      # The tokens are generated from web/app/globals.css, so a colour changed
+      # there and not regenerated here is drift the build should catch rather
+      # than something somebody notices on a screenshot.
+      - name: the design tokens are not stale
+        run: |
+          pnpm tokens
+          git diff --exit-code src/design
+
+      # The iOS project generates on Linux, which is the cheap half of an iOS
+      # build and most of what a pull request can usefully catch: a config
+      # plugin that throws, an `app.config.ts` that will not resolve, a
+      # manifest that comes out wrong. `--no-install` skips CocoaPods, which
+      # is what would need a mac.
+      #
+      # It does not compile anything, so it cannot catch a link error — those
+      # still surface on the release build. A macOS runner is roughly ten
+      # times a Linux one and that is not worth paying on every push to learn
+      # the same thing a day earlier.
+      - name: the iOS project still generates
+        run: pnpm exec expo prebuild --platform ios --no-install
+
+  android:
+    needs: check
+    runs-on: depot-ubuntu-22.04
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          version: 11
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: mobile/pnpm-lock.yaml
+      - uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - run: pnpm install --frozen-lockfile
+      # The native project is generated, not committed: `android/` is whatever
+      # app.config.ts and the installed modules currently say it is, so a
+      # checkout that has never run prebuild still builds.
+      - run: pnpm exec expo prebuild --platform android --no-install
+      - run: ./gradlew assembleDebug --no-daemon
+        working-directory: mobile/android
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: firetower-android
+          path: mobile/android/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error

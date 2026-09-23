@@ -20,6 +20,9 @@ jobs:
       desktop_released: ${{ steps.release.outputs['desktop--release_created'] }}
       desktop_tag: ${{ steps.release.outputs['desktop--tag_name'] }}
       desktop_version: ${{ steps.release.outputs['desktop--version'] }}
+      mobile_released: ${{ steps.release.outputs['mobile--release_created'] }}
+      mobile_tag: ${{ steps.release.outputs['mobile--tag_name'] }}
+      mobile_version: ${{ steps.release.outputs['mobile--version'] }}
     steps:
       - uses: googleapis/release-please-action@8b8fd2cc23b2e18957157a9d923d75aa0c6f6ad5 # v4
         id: release
@@ -59,6 +62,20 @@ jobs:
     with:
       tag: ${{ needs.please.outputs.desktop_tag }}
       version: ${{ needs.please.outputs.desktop_version }}
+      ref: ${{ github.sha }}
+
+  # The phone, on the same terms: an APK onto the release and a build into
+  # TestFlight, from the `release` environment behind an approval.
+  mobile:
+    needs: please
+    if: needs.please.outputs.mobile_released == 'true'
+    uses: ./.github/workflows/mobile-release.yml
+    permissions:
+      contents: write
+    secrets: inherit
+    with:
+      tag: ${{ needs.please.outputs.mobile_tag }}
+      version: ${{ needs.please.outputs.mobile_version }}
       ref: ${{ github.sha }}
 
   # The worker, as a binary a machine installs: one per shape it runs on, plus

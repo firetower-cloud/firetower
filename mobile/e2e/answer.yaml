@@ -1,0 +1,87 @@
+# Opening a workspace and writing to the agent.
+#
+# The composer is the thing this app is judged on, and the two states it has
+# are only distinguishable with a keyboard up: a pill at rest, a card while you
+# write in it. Asserting on the card's second row — the model and mode pickers,
+# which do not exist in the pill — is what makes "it morphed" testable rather
+# than something somebody eyeballs on a screenshot.
+#
+#   maestro test e2e/answer.yaml
+appId: com.usefiretower.app
+---
+- launchApp
+# iOS offers to save the password after the sign-in flow; it sits over the
+# inbox and swallows the first tap.
+- runFlow:
+    when:
+      visible: "Not Now"
+    commands:
+      - tapOn: "Not Now"
+
+- assertVisible: "Inbox"
+- tapOn:
+    id: "workspace-row"
+    index: 0
+
+# The transcript, whatever it says, and the composer at rest.
+- assertVisible: "Answer the agent"
+
+- tapOn:
+    id: "composer"
+- inputText: "Checking the keyboard behaves."
+
+# The card, not the pill: the send control is its own row now, and the text
+# sits on a line of its own above it.
+- assertVisible: "Checking the keyboard behaves."
+- takeScreenshot: composer-focused
+
+# Past two lines, where the box once stopped growing and everything before
+# the last two lines scrolled out of sight.
+#
+# The screenshot is the check, and it has to be said plainly that it is: an
+# `assertVisible` here would pass either way, because Maestro reads the
+# field's text attribute and not the pixels, and a field that is scrolled
+# still holds all of its text. This step exists so the artifact shows a box
+# with a real height in it — a two-line draft looks identical broken or
+# fixed, which is how this shipped once already.
+- inputText: " And this is a much longer draft, long enough to run past the two lines the composer used to lock itself at, so that the beginning has somewhere to go if the box stops growing."
+- takeScreenshot: composer-grown
+
+# Interactive dismissal is the gesture that makes this feel like iMessage
+# rather than a form. Dragging the transcript should put the keyboard away.
+- swipe:
+    start: "50%, 40%"
+    end: "50%, 90%"
+- takeScreenshot: composer-after-drag
+
+# The `+` is a menu, not three buttons wedged into the composer's width, and
+# the scrim is the half of it that is easy to leave out: a panel you can only
+# close by finding the same small button again is one people get stuck in.
+- tapOn:
+    id: "attach"
+- assertVisible: "Camera"
+- assertVisible: "Photos"
+# Maestro matches the whole accessibility label, and this row has two lines.
+- assertVisible: "Files.*workspace"
+- takeScreenshot: attach-menu
+# Tapping the conversation behind it closes it.
+- tapOn:
+    point: "50%, 25%"
+- assertNotVisible: "Photos"
+
+# The pickers were `Pressable`s with no `onPress` for weeks — a picture of a
+# control. What makes them real is that something opens.
+- tapOn:
+    id: "composer"
+- inputText: "x"
+- tapOn:
+    id: "control-model"
+- assertVisible: "MODEL"
+- takeScreenshot: control-picker
+
+# A grabber drawn on a sheet is a promise. Pulling it down has to close it —
+# teaching the gesture and then refusing it is worse than drawing no handle.
+- swipe:
+    start: "50%, 53%"
+    end: "50%, 95%"
+- assertNotVisible: "MODEL"
