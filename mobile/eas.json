@@ -1,6 +1,6 @@
 {
   "$schema": "https://raw.githubusercontent.com/expo/eas-cli/main/schema/eas.schema.json",
-  "cli": { "version": ">= 16.0.0", "appVersionSource": "local" },
+  "cli": { "version": ">= 16.0.0", "appVersionSource": "remote" },
   "build": {
     "development": {
       "developmentClient": true,

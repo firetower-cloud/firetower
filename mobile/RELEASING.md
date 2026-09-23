@@ -19,8 +19,10 @@ in order to produce APKs itself. If this ever goes to Play, that is a second
 artifact from the same profile rather than a replacement for this one.
 
 `autoIncrement` bumps the build number, which Apple requires to be higher than
-every build it has already seen. The *version* comes from `app.config.ts` and
-is bumped by release-please; this is the number underneath it.
+every build it has already seen. `appVersionSource` is `remote`: EAS holds the
+build number, because it cannot write one back into a dynamic `app.config.ts`.
+The *version* is `package.json`'s, bumped by release-please; the build number
+is the one underneath it.
 
 ## What the release needs
 
