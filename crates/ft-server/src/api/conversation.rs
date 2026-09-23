@@ -254,17 +254,33 @@ pub(super) async fn get_conversation(
         .map_err(|e| ApiError::new(ErrorCode::Internal, format!("{e:#}")))?
         .ok_or_else(|| ApiError::new(ErrorCode::NotFound, "no such session"))?;
 
-    let lines = state
-        .db
-        .agent_lines_since(&id, 0)
+    let normaliser = reader_for(&state, &id).await;
+
+    paged(&state.db, &id, normaliser, &since)
         .await
-        .map_err(|e| ApiError::new(ErrorCode::Internal, format!("{e:#}")))?;
+        .map(Json)
+        .map_err(|e| ApiError::new(ErrorCode::Internal, format!("{e:#}")))
+}
+
+/// Read a session's log, fold it, and cut the page that was asked for.
+///
+/// Split out from the handler so it can be exercised against a real database
+/// holding real agent output. The handler's own half — whose session this is,
+/// and which normaliser the agent needs — is the part that needs an
+/// `AppState`; this is the part that needs lines, and the two tested together
+/// only ever proved that the router works.
+async fn paged(
+    db: &crate::db::Db,
+    id: &SessionId,
+    mut normaliser: Reader,
+    since: &Since,
+) -> anyhow::Result<Conversation> {
+    let lines = db.agent_lines_since(id, 0).await?;
 
     // Always normalised from the beginning, even when only the tail is wanted:
     // a tool result means nothing without the call it answers, and the
     // normaliser holds that. Cheaper than it looks — this is a fold over lines
     // already in memory — and correct, which the alternative is not.
-    let mut normaliser = reader_for(&state, &id).await;
     let mut all: Vec<ConversationEvent> = Vec::new();
     // Where each exchange starts, as an index into `all`.
     let mut opens: Vec<usize> = Vec::new();
@@ -287,7 +303,7 @@ pub(super) async fn get_conversation(
         }
     }
 
-    let (start, end) = window(&all, &opens, &since);
+    let (start, end) = window(&all, &opens, since);
     let keep = carried(&all, start);
     let has_more = start > 0;
     // The window's own first line, not the carried events' — those are older by
@@ -303,12 +319,12 @@ pub(super) async fn get_conversation(
         .filter(|held| held.line_no > since.since_line)
         .collect();
 
-    Ok(Json(Conversation {
+    Ok(Conversation {
         events,
         last_line,
         first_line,
         has_more,
-    }))
+    })
 }
 
 /// Everything a session has said since `resume_from`, and everything it says
@@ -1308,6 +1324,169 @@ mod tests {
         let paged: Vec<u64> = all[start..end].iter().map(|e| e.line_no).collect();
         let whole: Vec<u64> = all.iter().map(|e| e.line_no).collect();
         assert_eq!(paged, whole[whole.len() - paged.len()..]);
+    }
+
+    /* ---- against a real database ------------------------------------- */
+
+    /// Everything above stops at the edge of the database. These go through
+    /// it: real recorded agent output, written to `agent_lines` one row per
+    /// line exactly as a worker writes it, then read back through the same
+    /// function the handler calls.
+    ///
+    /// Worth the Postgres dependency because every interesting thing here is a
+    /// claim about the *pipeline* — that the rows come back in order, that the
+    /// normaliser sees them all, that the cut lands where the pure tests say it
+    /// does — and none of those is testable on a `Vec` we built ourselves.
+    async fn session_holding(name: &str) -> (crate::db::Db, SessionId) {
+        let (db, owner) = crate::db::Db::open_for_test_owned().await.unwrap();
+        let host = db
+            .ensure_host("localhost", ft_core::Compute::Local)
+            .await
+            .unwrap();
+
+        let id = SessionId::new();
+        db.insert_session(
+            &id,
+            &host.id,
+            &owner,
+            Some("acme/backend"),
+            "Reading it back",
+            "read it back",
+            None,
+            Some("main"),
+            "ClaudeCode",
+            ft_core::WorkspaceSize::Medium,
+            ft_core::Share::Equal,
+            &[],
+            None,
+        )
+        .await
+        .unwrap();
+
+        let path = format!(
+            "{}/../ft-core/tests/streams/{name}.ndjson",
+            env!("CARGO_MANIFEST_DIR")
+        );
+        let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("reading {path}: {e}"));
+        for (at, line) in text.lines().enumerate() {
+            db.record_agent_line(&id, at as i64 + 1, line)
+                .await
+                .unwrap();
+        }
+
+        (db, id)
+    }
+
+    fn claude() -> Reader {
+        Reader::for_agent(ft_core::Agent::ClaudeCode)
+    }
+
+    /// The request every client made before this change, against real stored
+    /// output. If this ever stops matching, the compatibility promise is
+    /// broken and an app nobody updated stops working.
+    #[tokio::test]
+    async fn an_unpaged_read_is_the_whole_stored_conversation() {
+        let (db, id) = session_holding("subagent").await;
+
+        let whole = paged(&db, &id, claude(), &want(None, None)).await.unwrap();
+
+        assert!(
+            !whole.events.is_empty(),
+            "the session normalised to nothing"
+        );
+        assert!(!whole.has_more, "an unpaged read has nothing before it");
+        assert_eq!(whole.last_line, 43, "every line of the fixture was read");
+    }
+
+    /// And the paged one, through the database, end to end.
+    #[tokio::test]
+    async fn a_paged_read_is_a_suffix_of_the_unpaged_one() {
+        let (db, id) = session_holding("subagent").await;
+
+        let whole = paged(&db, &id, claude(), &want(None, None)).await.unwrap();
+        let tail = paged(&db, &id, claude(), &want(Some(1), None))
+            .await
+            .unwrap();
+
+        assert!(tail.events.len() <= whole.events.len());
+        // The same cursor either way: a client that read one page still knows
+        // where the log ends, which is what it resumes the socket from.
+        assert_eq!(tail.last_line, whole.last_line);
+        assert!(tail.first_line > 0);
+    }
+
+    /// The reason any of this exists. Not a correctness property — a size one.
+    #[tokio::test]
+    async fn a_page_is_smaller_on_the_wire_than_the_whole_thing() {
+        let (db, id) = session_holding("bash").await;
+
+        let whole = paged(&db, &id, claude(), &want(None, None)).await.unwrap();
+        let tail = paged(&db, &id, claude(), &want(Some(1), Some(20)))
+            .await
+            .unwrap();
+
+        let big = serde_json::to_string(&whole).unwrap().len();
+        let small = serde_json::to_string(&tail).unwrap().len();
+        assert!(
+            small < big,
+            "a page of {small} bytes saved nothing against {big}"
+        );
+    }
+
+    /// Reading backwards, through the database, arriving at the beginning.
+    #[tokio::test]
+    async fn paging_back_reaches_the_beginning_and_says_so() {
+        let (db, id) = session_holding("subagent").await;
+
+        let mut page = paged(&db, &id, claude(), &want(Some(1), None))
+            .await
+            .unwrap();
+        let mut reads = 1;
+        while page.has_more {
+            page = paged(&db, &id, claude(), &want(Some(1), Some(page.first_line)))
+                .await
+                .unwrap();
+            reads += 1;
+            assert!(reads < 20, "paging back did not terminate");
+        }
+
+        assert!(!page.has_more, "the last page admits it is the last");
+    }
+
+    /// A session nobody has spoken to is not an error, and not a page.
+    #[tokio::test]
+    async fn an_empty_session_pages_to_nothing() {
+        let (db, owner) = crate::db::Db::open_for_test_owned().await.unwrap();
+        let host = db
+            .ensure_host("localhost", ft_core::Compute::Local)
+            .await
+            .unwrap();
+        let id = SessionId::new();
+        db.insert_session(
+            &id,
+            &host.id,
+            &owner,
+            None,
+            "Nothing said",
+            "nothing",
+            None,
+            None,
+            "ClaudeCode",
+            ft_core::WorkspaceSize::Medium,
+            ft_core::Share::Equal,
+            &[],
+            None,
+        )
+        .await
+        .unwrap();
+
+        let page = paged(&db, &id, claude(), &want(Some(8), None))
+            .await
+            .unwrap();
+
+        assert!(page.events.is_empty());
+        assert!(!page.has_more);
+        assert_eq!(page.last_line, 0);
     }
 
     /// Mobile catches up with `sinceLine` and no window at all. That path is
