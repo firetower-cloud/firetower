@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.1](https://github.com/firetower-cloud/firetower/compare/mobile-v0.2.0...mobile-v0.2.1) (2026-09-23)
+
+
+### Bug Fixes
+
+* **mobile:** keep build numbers on EAS and read the version from package.json ([df4cfb9](https://github.com/firetower-cloud/firetower/commit/df4cfb961fcce8d0afd73626b69fa35f1621c075))
+* **mobile:** keep build numbers on EAS and read the version from package.json ([638b2e6](https://github.com/firetower-cloud/firetower/commit/638b2e6076d66429e9e77c3bbb59233a3789be7e))
+
 ## [0.2.0](https://github.com/firetower-cloud/firetower/compare/mobile-v0.1.0...mobile-v0.2.0) (2026-09-23)
 
 
