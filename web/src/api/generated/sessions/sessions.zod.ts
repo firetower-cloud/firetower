@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.38.1
+ * OpenAPI spec version: 0.39.0
  */
 import * as zod from 'zod';
 
@@ -495,7 +495,27 @@ export const CommitSessionResponse = zod.object({
  * — which a screen following the end of a transcript draws as the whole
  * conversation being typed out again. The stream is what carries it from
  * there, resumed at `lastLine`.
- * @summary Everything the agent has said so far.
+ *
+ * ## Why the window is on the way out rather than in the query
+ *
+ * The obvious pagination is `LIMIT`, and it cannot be done here. What is
+ * stored is the agent's raw log, one row per line; an exchange is tens to
+ * thousands of those, a line normalises into zero or more events, and the
+ * normaliser has to have seen every line before a given one to be right about
+ * it. There is no row anybody can point at and call the twentieth message
+ * from the end without having read everything in front of it.
+ *
+ * So the read and the fold are unchanged, and only what is *serialised* is
+ * cut. That leaves the cost where it is cheap — a local table and a fold in
+ * this process — and takes it off the wire, which for a phone on a mobile
+ * network is the part measured in seconds. A session whose transcript carries
+ * a year of pasted screenshots sends the last two exchanges of them.
+ *
+ * If the fold itself ever becomes the cost, the answer is a derived index of
+ * where each exchange starts, and a normaliser seeded to that point. That is
+ * a migration, a backfill and a new way for the index to disagree with the
+ * log, so it wants a measurement first.
+ * @summary Everything the agent has said so far — or the last few exchanges of it.
  */
 export const GetConversationParams = zod.object({
   "id": zod.string().describe('Session id')
@@ -503,10 +523,19 @@ export const GetConversationParams = zod.object({
 
 export const getConversationQuerySinceLineMin = 0;
 
+export const getConversationQueryTailMin = 0;
+
+export const getConversationQueryBeforeMin = 0;
+
+export const getConversationQueryMaxEventsMin = 0;
+
 
 
 export const GetConversationQueryParams = zod.object({
-  "sinceLine": zod.int().min(getConversationQuerySinceLineMin).optional().describe('Continue from this line')
+  "sinceLine": zod.int().min(getConversationQuerySinceLineMin).optional().describe('Continue from this line'),
+  "tail": zod.int().min(getConversationQueryTailMin).optional().describe('Only the last N exchanges. Absent means all of them.'),
+  "before": zod.int().min(getConversationQueryBeforeMin).optional().describe('The N exchanges before this line, rather than the last N'),
+  "maxEvents": zod.int().min(getConversationQueryMaxEventsMin).optional().describe('Ceiling on events in one reply. 4000 by default.')
 })
 
 export const getConversationResponseEventsItemOneThreeUsageTwoCacheReadTokensMin = 0;
@@ -540,6 +569,8 @@ export const getConversationResponseEventsItemOneThreeUsageTwoThinkingTokensMin 
 export const getConversationResponseEventsItemOneOnethreeUsedPercentMin = 0;
 
 export const getConversationResponseEventsItemTwoLineNoMin = 0;
+
+export const getConversationResponseFirstLineMin = 0;
 
 export const getConversationResponseLastLineMin = 0;
 
@@ -674,6 +705,8 @@ export const GetConversationResponse = zod.object({
 }).describe('A line we kept but could not name.\n\nOnly for what nothing else matched — the complete raw log is already\nwhat Firetower stores, so repeating every mapped line here would double\nthe volume to say nothing new. This is the marker for \"an agent said\nsomething in a shape we have never seen\", which is how a version that\ngrew a new message type shows up as a gap to fill rather than as\nsilence.')]).describe('Something an agent said or did.\n\nThe vocabulary the interface draws, and the only thing that crosses out of\nthe normaliser.').and(zod.object({
   "lineNo": zod.int().min(getConversationResponseEventsItemTwoLineNoMin)
 })).describe('One thing that happened, and where in the log it was said.\n\nThe line number travels with the event because several events can come from\none line, and a client\'s cursor has to be a position in the agent\'s log\nrather than a count of what it drew.')),
+  "firstLine": zod.int().min(getConversationResponseFirstLineMin).describe('The first line this reply covers.\n\nHand it back as `before` to read the exchange in front of it. Equal to\nthe log\'s own first line when there is nothing earlier, which is also\nwhen `hasMore` is false.'),
+  "hasMore": zod.boolean().describe('Whether there is anything before `firstLine` still to read.\n\nAlways false when neither `tail` nor `before` was asked for, because\nthen this reply is the whole conversation.'),
   "lastLine": zod.int().min(getConversationResponseLastLineMin).describe('How far this reply got. Hand it back as `sinceLine` to continue.')
 })
 

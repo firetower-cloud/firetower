@@ -181,6 +181,26 @@ export type Conversation = {
   /** How far we have read. The resume cursor. */
   lastLine: number;
   /**
+   * The oldest line this client has drawn, and the cursor for reading back.
+   *
+   * The other end of `lastLine`. A transcript now opens on its last few
+   * exchanges rather than on all of them, so there are two edges to keep
+   * rather than one: the end, where new lines arrive, and the beginning,
+   * which moves backwards as somebody scrolls up.
+   */
+  firstLine: number;
+  /**
+   * Whether there is any conversation before `firstLine` left to read.
+   *
+   * False on a control plane too old to know about paging, because it sends
+   * the whole conversation and says nothing about `hasMore` — which is
+   * exactly right. There is nothing more to fetch, and the spinner should
+   * never appear.
+   */
+  hasMore: boolean;
+  /** A page of history is on its way. Draws the spinner at the top. */
+  loadingOlder?: boolean;
+  /**
    * When the agent last said anything, as a local clock reading.
    *
    * An agent heads-down in a ten-minute command looks exactly like a dead one:
@@ -252,7 +272,21 @@ export const nothing: Conversation = {
   commands: [],
   working: false,
   lastLine: 0,
+  firstLine: 0,
+  hasMore: false,
 };
+
+/**
+ * How many exchanges a read asks for, first and every time somebody scrolls
+ * back.
+ *
+ * An exchange is one thing somebody said and everything the agent did about
+ * it, so this is not eight messages — it is eight of them plus every tool call
+ * between. Small because this is a phone and because the cost being avoided is
+ * the first paint: eight exchanges arrive in a fraction of the time ninety
+ * thousand lines did, and the ninth is one scroll away.
+ */
+const PAGE = 8;
 
 /**
  * Apply one event.
@@ -748,7 +782,12 @@ function start(key: string, sessionId: string, follow: ReturnType<typeof useSock
    */
   {
     const from = read(key).lastLine;
-    getConversation(sessionId, from > 0 ? { sinceLine: from } : undefined)
+    // Catching up is a different question from opening, and asks a different
+    // one. `sinceLine` wants everything missed since the cursor, however far
+    // back that is — the app was backgrounded, not reopened. `tail` is for a
+    // conversation being read for the first time, where everything before the
+    // last few exchanges is history nobody has scrolled to yet.
+    getConversation(sessionId, from > 0 ? { sinceLine: from } : { tail: PAGE })
       .then((snapshot) => {
         if (dropped) return;
         const folded = foldAll(read(key), snapshot.events as ConversationEvent[]);
@@ -758,6 +797,12 @@ function start(key: string, sessionId: string, follow: ReturnType<typeof useSock
         put(key, {
           ...folded,
           lastLine: Math.max(folded.lastLine, snapshot.lastLine),
+          // Only an opening read establishes where the drawn transcript
+          // begins. A catch-up added to the end and moved neither edge, and
+          // taking its `firstLine` would claim the history had been read.
+          ...(from > 0
+            ? {}
+            : { firstLine: snapshot.firstLine ?? 0, hasMore: snapshot.hasMore ?? false }),
           arrived: true,
           delivered: { events: snapshot.events.length, lastLine: snapshot.lastLine },
         });
@@ -783,6 +828,82 @@ function start(key: string, sessionId: string, follow: ReturnType<typeof useSock
     dropped = true;
     stop?.();
   };
+}
+
+/** A page of history, as the control plane sends it. */
+type Page = {
+  events: ConversationEvent[];
+  /** Absent on a control plane too old to page, which sent everything. */
+  firstLine?: number;
+  hasMore?: boolean;
+};
+
+/**
+ * Put a page of history on the front of a conversation.
+ *
+ * Pure, and exported for the tests: this is where reading backwards is either
+ * right or subtly wrong, and the wrongness is the kind that only shows up on
+ * somebody's month-old session.
+ */
+export function prepend(now: Conversation, page: Page): Conversation {
+  const older = foldAll(nothing, page.events).items;
+  // What is drawn wins. The configuration carried onto every page, and a turn
+  // that straddles the cut, can both come back twice — and React keys the
+  // transcript on these ids, so a duplicate is a visible fault rather than a
+  // harmless one.
+  const drawn = new Set(now.items.map((i) => i.id));
+
+  return {
+    ...now,
+    items: [...older.filter((i) => !drawn.has(i.id)), ...now.items],
+    firstLine: page.firstLine ?? now.firstLine,
+    // Absent means a control plane that does not page and has therefore
+    // already sent everything. Not "ask again".
+    hasMore: page.hasMore ?? false,
+    loadingOlder: false,
+  };
+}
+
+/**
+ * Read the exchanges before the ones already drawn, and put them on the front.
+ *
+ * ## Why an old page is folded on its own
+ *
+ * Into an empty conversation, and only the `items` are taken out of the
+ * result. A page of history describes the session *as it was* — the plan it
+ * had then, the model it was running, whether a turn was in flight — and
+ * folding it onto the held state would restate every one of those as though
+ * they were now. Scrolling up would set the composer working on a turn that
+ * finished last Tuesday. The transcript is the only part of an old page that
+ * is still true, so it is the only part that is kept.
+ *
+ * `lastLine` is untouched for the same reason, and it matters more than the
+ * rest: it is the socket's resume cursor. Moving it backwards would ask the
+ * control plane to replay everything since, and `ContentDelta` appends — the
+ * agent would appear to say the last hour again.
+ */
+async function earlier(key: string, sessionId: string) {
+  drain(key);
+  const held = read(key);
+  // Nothing to read, already reading, or a control plane too old to have said
+  // whether there is more — in which case it already sent everything.
+  if (held.loadingOlder || !held.hasMore || !held.firstLine) return;
+  put(key, { ...held, loadingOlder: true });
+
+  try {
+    const page = await getConversation(sessionId, { before: held.firstLine, tail: PAGE });
+    // Read again rather than reusing `held`: lines arrive on the socket while
+    // this is in flight, and they have already been folded into what is here.
+    drain(key);
+    put(key, prepend(read(key), page));
+  } catch (e) {
+    // Left exactly as it was, with the spinner off. Scrolling to the top
+    // again is the retry, and that is a better offer than a banner over a
+    // transcript somebody is reading.
+    console.warn("[firetower] could not read further back", e);
+    drain(key);
+    put(key, { ...read(key), loadingOlder: false });
+  }
 }
 
 /**
@@ -927,5 +1048,14 @@ export function useConversation(sessionId: string) {
     setAgain((n) => n + 1);
   }, [key]);
 
-  return { conversation: state, echo, settle, remember, stopping, reread };
+  /**
+   * Read further back, for a screen that has been scrolled to the top.
+   *
+   * Safe to call on every scroll event: `earlier` refuses when a page is
+   * already in flight or when there is nothing before what is drawn, so the
+   * threshold on the screen does not have to be careful.
+   */
+  const older = useCallback(() => void earlier(key, sessionId), [key, sessionId]);
+
+  return { conversation: state, echo, settle, remember, stopping, reread, older };
 }

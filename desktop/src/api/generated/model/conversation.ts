@@ -3,12 +3,28 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.38.1
+ * OpenAPI spec version: 0.39.0
  */
 import type { ConversationEvent } from './conversationEvent.ts';
 
 export interface Conversation {
   events: ConversationEvent[];
+  /**
+     * The first line this reply covers.
+     *
+     * Hand it back as `before` to read the exchange in front of it. Equal to
+     * the log's own first line when there is nothing earlier, which is also
+     * when `hasMore` is false.
+     * @minimum 0
+     */
+  firstLine: number;
+  /**
+     * Whether there is anything before `firstLine` still to read.
+     *
+     * Always false when neither `tail` nor `before` was asked for, because
+     * then this reply is the whole conversation.
+     */
+  hasMore: boolean;
   /**
      * How far this reply got. Hand it back as `sinceLine` to continue.
      * @minimum 0

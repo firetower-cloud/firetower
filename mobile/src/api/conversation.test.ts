@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { apply, foldAll, nothing } from "./conversation";
+import { apply, foldAll, nothing, prepend } from "./conversation";
 import type { ConversationEvent } from "./generated/model";
 
 const event = (lineNo: number, type: string, extra: Record<string, unknown> = {}) =>
@@ -147,5 +147,128 @@ describe("folding a run of events", () => {
     const out = foldAll(nothing, [event(1, "TurnStarted")]);
     expect(out.skipped).toBeUndefined();
     expect(out.working).toBe(true);
+  });
+});
+
+/**
+ * Reading backwards.
+ *
+ * A transcript now opens on its last few exchanges and grows at the top as
+ * somebody scrolls. The property that matters is that a conversation read in
+ * pages is the same conversation read whole — anything else is a transcript
+ * that quietly disagrees with itself depending on how it was opened.
+ */
+describe("a page of history", () => {
+  /** One exchange, as the control plane's own cut produces it. */
+  const exchange = (nth: number) => [
+    event(nth * 10, "TurnStarted", { turn: `turn-${nth}` }),
+    event(nth * 10, "ItemStarted", { item: `msg-${nth}`, kind: "UserMessage" }),
+    event(nth * 10, "ContentDelta", { item: `msg-${nth}`, stream: "UserText", delta: `ask ${nth}` }),
+    event(nth * 10, "ItemCompleted", { item: `msg-${nth}`, status: "Completed" }),
+    event(nth * 10 + 1, "ItemStarted", { item: `said-${nth}`, kind: "AssistantMessage" }),
+    event(nth * 10 + 2, "ContentDelta", {
+      item: `said-${nth}`,
+      stream: "AssistantText",
+      delta: `answer ${nth}`,
+    }),
+    event(nth * 10 + 3, "TurnCompleted", { turn: `turn-${nth}`, status: "Completed" }),
+  ];
+
+  const configured = event(1, "SessionConfigured", {
+    model: "opus",
+    mode: "acceptEdits",
+    tools: [],
+    commands: [],
+  });
+
+  it("reads the same as the conversation read whole", () => {
+    const whole = foldAll(nothing, [configured, ...exchange(1), ...exchange(2), ...exchange(3)]);
+
+    // What the two requests actually return: the tail, then the page before
+    // it — each carrying the configuration, as the control plane does.
+    const tail = foldAll(nothing, [configured, ...exchange(3)]);
+    const paged = prepend({ ...tail, firstLine: 30, hasMore: true }, {
+      events: [configured, ...exchange(1), ...exchange(2)],
+      firstLine: 10,
+      hasMore: false,
+    });
+
+    expect(paged.items.map((i) => i.id)).toEqual(whole.items.map((i) => i.id));
+    expect(paged.items.map((i) => i.text)).toEqual(whole.items.map((i) => i.text));
+  });
+
+  it("puts the older exchanges in front, not behind", () => {
+    const tail = foldAll(nothing, exchange(3));
+    const paged = prepend({ ...tail, firstLine: 30, hasMore: true }, {
+      events: exchange(2),
+      firstLine: 20,
+      hasMore: true,
+    });
+
+    expect(paged.items.map((i) => i.id)).toEqual(["msg-2", "said-2", "msg-3", "said-3"]);
+  });
+
+  /* The configuration is carried onto every page, so the item that opens the
+     page is one the tail already drew. React keys on these ids. */
+  it("draws nothing twice when a page overlaps what is already here", () => {
+    const tail = foldAll(nothing, exchange(3));
+    const paged = prepend({ ...tail, firstLine: 30, hasMore: true }, {
+      events: [...exchange(2), ...exchange(3)],
+      firstLine: 20,
+      hasMore: true,
+    });
+
+    const ids = paged.items.map((i) => i.id);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  /**
+   * The resume cursor belongs to the end of the conversation. Moved backwards
+   * by a page of history, the socket would replay everything since — and
+   * `ContentDelta` appends, so the agent would say the last hour again.
+   */
+  it("leaves the resume cursor alone", () => {
+    const tail = { ...foldAll(nothing, exchange(9)), firstLine: 90, hasMore: true };
+    const paged = prepend(tail, { events: exchange(1), firstLine: 10, hasMore: false });
+
+    expect(paged.lastLine).toBe(tail.lastLine);
+    expect(paged.firstLine).toBe(10);
+    expect(paged.hasMore).toBe(false);
+  });
+
+  /**
+   * An old page describes the session as it was. Folding it onto the held
+   * state would restate all of it as now — and a turn that ended last week
+   * would set the composer working.
+   */
+  it("does not let an old turn make the agent look busy", () => {
+    const working = foldAll(nothing, [
+      ...exchange(5),
+      event(60, "TurnStarted", { turn: "turn-6" }),
+    ]);
+    expect(working.working).toBe(true);
+
+    // A page whose last turn completed. Folded onto the present it would
+    // clear `working`; folded on its own it cannot.
+    const paged = prepend({ ...working, firstLine: 50, hasMore: true }, {
+      events: exchange(1),
+      firstLine: 10,
+      hasMore: false,
+    });
+
+    expect(paged.working).toBe(true);
+  });
+
+  /**
+   * A control plane that does not know about paging answers the same request
+   * with the whole conversation and says nothing about `hasMore`. Treating
+   * that silence as "there is more" would spin for ever at the top.
+   */
+  it("stops asking when the control plane does not page", () => {
+    const tail = { ...foldAll(nothing, exchange(1)), firstLine: 10, hasMore: true };
+    const paged = prepend(tail, { events: [] });
+
+    expect(paged.hasMore).toBe(false);
+    expect(paged.loadingOlder).toBe(false);
   });
 });

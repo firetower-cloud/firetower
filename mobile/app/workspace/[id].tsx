@@ -9,7 +9,7 @@
  * The repository is one tap away rather than beside: see `~/ui/Changes`.
  */
 import { useMemo, useRef, useState } from "react";
-import { Pressable, RefreshControl, ScrollView, Text, View } from "react-native";
+import { ActivityIndicator, Pressable, RefreshControl, ScrollView, Text, View } from "react-native";
 import Animated, { useAnimatedStyle } from "react-native-reanimated";
 import { useReanimatedKeyboardAnimation } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -100,7 +100,7 @@ function Conversation({ place }: { place: Workspace }) {
     [session, speaker, events.data],
   );
 
-  const { conversation, echo, settle, remember, stopping, reread } = useConversation(speaker.id);
+  const { conversation, echo, settle, remember, stopping, reread, older } = useConversation(speaker.id);
   const [rereading, setRereading] = useState(false);
   const send = useSendTurn();
   const attach = useAttachFile();
@@ -193,8 +193,23 @@ function Conversation({ place }: { place: Workspace }) {
           onScroll={(e) => {
             const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
             setAtEnd(contentOffset.y + layoutMeasurement.height >= contentSize.height - 80);
+            /* And the other edge. A transcript opens on its last few
+               exchanges, so reaching the top is a request for the ones before
+               them rather than the beginning of the conversation. Asked for
+               early — a screen's height from the top — so the page is usually
+               there before the scroll arrives. `older` refuses when there is
+               nothing to read or a page is already coming, so this does not
+               have to be careful. */
+            if (contentOffset.y < layoutMeasurement.height) older();
           }}
           scrollEventThrottle={64}
+          /* Prepending to a scrolled list moves everything below it down, and
+             what somebody was reading goes with it. This pins the content
+             instead of the offset, which is the one thing that makes reading
+             backwards feel like reading rather than like fighting the list.
+             Native on both platforms; there is no JS frame in which the jump
+             could be visible. */
+          maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
           onContentSizeChange={() => atEnd && scroller.current?.scrollToEnd({ animated: true })}
           /* Pull to read it again from nothing.
              A conversation holds on to whatever it first folded and claims to
@@ -220,6 +235,16 @@ function Conversation({ place }: { place: Workspace }) {
           {/* The bring-up sits above the transcript and scrolls away once the
               agent is talking, which is the right amount of attention for it. */}
           <Bringup lines={bringup} />
+
+          {/* The history arriving. Sits above the transcript because that is
+              where it is going, and says nothing when there is nothing left to
+              read — a conversation short enough to arrive whole should never
+              show a hint that it was cut. */}
+          {conversation.loadingOlder ? (
+            <View className="items-center py-3">
+              <ActivityIndicator size="small" color={color.mute} />
+            </View>
+          ) : null}
 
           {conversation.items.length > 0 ? (
             <Transcript items={conversation.items} />

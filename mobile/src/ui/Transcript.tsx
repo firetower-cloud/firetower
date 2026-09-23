@@ -154,12 +154,24 @@ function Line({ row }: { row: Row }) {
   }
 }
 
+/**
+ * A fragment rather than a `View`, and that is load-bearing.
+ *
+ * The transcript now grows at the top as well as the bottom, and the scroller
+ * above it keeps somebody's place through that with
+ * `maintainVisibleContentPosition` — which pins the first *direct subview* of
+ * the scroll content. Wrapped in a `View`, every row was one subview's
+ * children rather than subviews, so prepending moved everything inside a box
+ * whose own origin never changed: nothing to pin to, and the reader was thrown
+ * down the page by a page they had asked for. Flattened, each row is its own
+ * subview and the pinning has something to hold.
+ */
 export function Transcript({ items }: { items: Item[] }) {
   return (
-    <View>
+    <>
       {fold(items).map((row) => (
         <Line key={row.type === "group" ? row.id : row.item.id} row={row} />
       ))}
-    </View>
+    </>
   );
 }
