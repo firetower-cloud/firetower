@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.40.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.39.0...firetower-v0.40.0) (2026-09-23)
+
+
+### Features
+
+* **mobile:** a React Native client, against a real control plane ([c0e8fe7](https://github.com/firetower-cloud/firetower/commit/c0e8fe72a7300d52fcc9c5a0edf008d85b9f4733))
+* **mobile:** the type scale reaches the screens made of text ([533bcd4](https://github.com/firetower-cloud/firetower/commit/533bcd441a14961a980352d8556d8d52c036db0e))
+* paginate conversation on initial load and backward scroll ([9aae01f](https://github.com/firetower-cloud/firetower/commit/9aae01f3b7afad8e01a3659af54f333835d36ab9))
+* paginate conversation on initial load and backward scroll ([8cc599a](https://github.com/firetower-cloud/firetower/commit/8cc599aa8b35f4eddb82134ff92c315e5a86dd25))
+* paginate conversation on initial load and backward scroll ([5fc9785](https://github.com/firetower-cloud/firetower/commit/5fc97857cb155d5ca40e54c4d880376a989dfc1a))
+
 ## [0.39.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.38.1...firetower-v0.39.0) (2026-09-21)
 
 

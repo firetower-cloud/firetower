@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.14.0](https://github.com/firetower-cloud/firetower/compare/desktop-v0.13.0...desktop-v0.14.0) (2026-09-23)
+
+
+### Features
+
+* **desktop:** a workspace can gain a repository after it has started ([b56dfa6](https://github.com/firetower-cloud/firetower/commit/b56dfa68ee4033d10eb985d8777e55e1f3af5022))
+* **desktop:** restore workspace repository management ([b288792](https://github.com/firetower-cloud/firetower/commit/b28879291775ec2c8394ec4dcc5e302910b0f8b3))
+* paginate conversation on initial load and backward scroll ([9aae01f](https://github.com/firetower-cloud/firetower/commit/9aae01f3b7afad8e01a3659af54f333835d36ab9))
+* paginate conversation on initial load and backward scroll ([5fc9785](https://github.com/firetower-cloud/firetower/commit/5fc97857cb155d5ca40e54c4d880376a989dfc1a))
+
 ## [0.13.0](https://github.com/firetower-cloud/firetower/compare/desktop-v0.12.1...desktop-v0.13.0) (2026-09-21)
 
 
