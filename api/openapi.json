@@ -10,7 +10,7 @@
       "name": "AGPL-3.0-only",
       "identifier": "AGPL-3.0-only"
     },
-    "version": "0.38.1"
+    "version": "0.39.0"
   },
   "paths": {
     "/api/v1/agent-accounts": {
@@ -2830,8 +2830,8 @@
         "tags": [
           "sessions"
         ],
-        "summary": "Everything the agent has said so far.",
-        "description": "A snapshot, and what a client opens a session with: one request, folded in\none pass, rather than a backlog arriving down the stream an event at a time\n— which a screen following the end of a transcript draws as the whole\nconversation being typed out again. The stream is what carries it from\nthere, resumed at `lastLine`.",
+        "summary": "Everything the agent has said so far — or the last few exchanges of it.",
+        "description": "A snapshot, and what a client opens a session with: one request, folded in\none pass, rather than a backlog arriving down the stream an event at a time\n— which a screen following the end of a transcript draws as the whole\nconversation being typed out again. The stream is what carries it from\nthere, resumed at `lastLine`.\n\n## Why the window is on the way out rather than in the query\n\nThe obvious pagination is `LIMIT`, and it cannot be done here. What is\nstored is the agent's raw log, one row per line; an exchange is tens to\nthousands of those, a line normalises into zero or more events, and the\nnormaliser has to have seen every line before a given one to be right about\nit. There is no row anybody can point at and call the twentieth message\nfrom the end without having read everything in front of it.\n\nSo the read and the fold are unchanged, and only what is *serialised* is\ncut. That leaves the cost where it is cheap — a local table and a fold in\nthis process — and takes it off the wire, which for a phone on a mobile\nnetwork is the part measured in seconds. A session whose transcript carries\na year of pasted screenshots sends the last two exchanges of them.\n\nIf the fold itself ever becomes the cost, the answer is a derived index of\nwhere each exchange starts, and a normaliser seeded to that point. That is\na migration, a backfill and a new way for the index to disagree with the\nlog, so it wants a measurement first.",
         "operationId": "get_conversation",
         "parameters": [
           {
@@ -2851,6 +2851,39 @@
             "schema": {
               "type": "integer",
               "format": "int64",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "tail",
+            "in": "query",
+            "description": "Only the last N exchanges. Absent means all of them.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "description": "The N exchanges before this line, rather than the last N",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "maxEvents",
+            "in": "query",
+            "description": "Ceiling on events in one reply. 4000 by default.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
               "minimum": 0
             }
           }
@@ -6277,7 +6310,9 @@
         "type": "object",
         "required": [
           "events",
-          "lastLine"
+          "lastLine",
+          "firstLine",
+          "hasMore"
         ],
         "properties": {
           "events": {
@@ -6285,6 +6320,16 @@
             "items": {
               "$ref": "#/components/schemas/ConversationEvent"
             }
+          },
+          "firstLine": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The first line this reply covers.\n\nHand it back as `before` to read the exchange in front of it. Equal to\nthe log's own first line when there is nothing earlier, which is also\nwhen `hasMore` is false.",
+            "minimum": 0
+          },
+          "hasMore": {
+            "type": "boolean",
+            "description": "Whether there is anything before `firstLine` still to read.\n\nAlways false when neither `tail` nor `before` was asked for, because\nthen this reply is the whole conversation."
           },
           "lastLine": {
             "type": "integer",

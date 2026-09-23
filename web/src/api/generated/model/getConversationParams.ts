@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.38.1
+ * OpenAPI spec version: 0.39.0
  */
 
 export type GetConversationParams = {
@@ -12,4 +12,19 @@ export type GetConversationParams = {
  * @minimum 0
  */
 sinceLine?: number;
+/**
+ * Only the last N exchanges. Absent means all of them.
+ * @minimum 0
+ */
+tail?: number;
+/**
+ * The N exchanges before this line, rather than the last N
+ * @minimum 0
+ */
+before?: number;
+/**
+ * Ceiling on events in one reply. 4000 by default.
+ * @minimum 0
+ */
+maxEvents?: number;
 };

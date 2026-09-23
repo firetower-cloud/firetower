@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.38.1
+ * OpenAPI spec version: 0.39.0
  */
 import {
   useMutation,
@@ -1161,7 +1161,27 @@ export const useCommitSession = <TError = ApiError,
  * — which a screen following the end of a transcript draws as the whole
  * conversation being typed out again. The stream is what carries it from
  * there, resumed at `lastLine`.
- * @summary Everything the agent has said so far.
+ *
+ * ## Why the window is on the way out rather than in the query
+ *
+ * The obvious pagination is `LIMIT`, and it cannot be done here. What is
+ * stored is the agent's raw log, one row per line; an exchange is tens to
+ * thousands of those, a line normalises into zero or more events, and the
+ * normaliser has to have seen every line before a given one to be right about
+ * it. There is no row anybody can point at and call the twentieth message
+ * from the end without having read everything in front of it.
+ *
+ * So the read and the fold are unchanged, and only what is *serialised* is
+ * cut. That leaves the cost where it is cheap — a local table and a fold in
+ * this process — and takes it off the wire, which for a phone on a mobile
+ * network is the part measured in seconds. A session whose transcript carries
+ * a year of pasted screenshots sends the last two exchanges of them.
+ *
+ * If the fold itself ever becomes the cost, the answer is a derived index of
+ * where each exchange starts, and a normaliser seeded to that point. That is
+ * a migration, a backfill and a new way for the index to disagree with the
+ * log, so it wants a measurement first.
+ * @summary Everything the agent has said so far — or the last few exchanges of it.
  */
 export const getConversation = async (id: string,
     params?: GetConversationParams, options?: Parameters<typeof http>[1]): Promise<Conversation> => {
@@ -1238,7 +1258,7 @@ export function useGetConversation<TData = Awaited<ReturnType<typeof getConversa
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 /**
- * @summary Everything the agent has said so far.
+ * @summary Everything the agent has said so far — or the last few exchanges of it.
  */
 
 export function useGetConversation<TData = Awaited<ReturnType<typeof getConversation>>, TError = ApiError>(
@@ -1257,7 +1277,7 @@ export function useGetConversation<TData = Awaited<ReturnType<typeof getConversa
 
 
 /**
- * @summary Everything the agent has said so far.
+ * @summary Everything the agent has said so far — or the last few exchanges of it.
  */
 export const useSetGetConversationQueryData = () => {
   const queryClient = useQueryClient();
@@ -1268,7 +1288,7 @@ export const useSetGetConversationQueryData = () => {
 }
 
 /**
- * @summary Everything the agent has said so far.
+ * @summary Everything the agent has said so far — or the last few exchanges of it.
  */
 export const useGetGetConversationQueryData = () => {
   const queryClient = useQueryClient();

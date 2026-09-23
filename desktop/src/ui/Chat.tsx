@@ -114,10 +114,19 @@ export function Chat({
   session: Session;
   branch?: string;
 } & Open) {
-  const { conversation, echo, settle, remember, stopping } = useConversation(session.id);
+  const { conversation, echo, settle, remember, stopping, older } = useConversation(session.id);
   const scroller = useRef<HTMLDivElement>(null);
   const body = useRef<HTMLDivElement>(null);
   const following = useRef(true);
+  /* The sentinel above the transcript. Seeing it is a request for the
+     exchanges before the ones drawn. */
+  const earlier = useRef<HTMLDivElement>(null);
+  /* How far the content extended below the viewport before a page of history
+     landed. Restoring *that* rather than the scroll offset is what keeps the
+     line somebody was reading under their eye: prepending moves everything
+     down by the new page's height, and the distance to the bottom is the one
+     measurement that height does not change. */
+  const held = useRef<number | null>(null);
 
   /* Dropped files are the composer's business — it owns the size rules, the
      chips and the refusal line — but the composer is a strip at the bottom and
@@ -216,6 +225,44 @@ export function Chat({
     if (el && following.current) el.scrollTop = el.scrollHeight;
   }, [rows.length, working, asked.length, questions.length]);
 
+  /* The top of the transcript coming into view is a request for the exchanges
+     before it. An observer rather than the scroll handler below, because this
+     has to fire when the content moves under a still cursor as well as when
+     the cursor moves — and because `older` is already safe to call repeatedly,
+     the observer needs no debounce of its own. */
+  useEffect(() => {
+    const el = scroller.current;
+    const mark = earlier.current;
+    if (!el || !mark || !conversation.hasMore) return;
+    const watch = new IntersectionObserver((seen) => seen.some((e) => e.isIntersecting) && older(), {
+      root: el,
+      // A screen early, so the page is usually there before the scroll is.
+      rootMargin: `${el.clientHeight}px 0px 0px 0px`,
+    });
+    watch.observe(mark);
+    return () => watch.disconnect();
+  }, [conversation.hasMore, older]);
+
+  /* Keeping somebody's place through a prepend.
+     Recorded when a page is asked for and restored when it lands; in between,
+     the browser has put the older exchanges above the viewport and pushed
+     everything down by their height. The distance to the *bottom* is what is
+     kept rather than the offset from the top, because that is the one
+     measurement a prepend does not change.
+     Skipped while following the end, where there is nothing to preserve and
+     the effects above are already doing the right thing. */
+  useLayoutEffect(() => {
+    const el = scroller.current;
+    if (!el) return;
+    if (conversation.loadingOlder) {
+      held.current = el.scrollHeight - el.scrollTop;
+      return;
+    }
+    if (held.current === null) return;
+    if (!following.current) el.scrollTop = el.scrollHeight - held.current;
+    held.current = null;
+  }, [conversation.loadingOlder, conversation.items.length]);
+
   /* While the agent is talking, the end is checked every frame. A resize
      observer reports after layout and can trail a fast stream by a few
      frames, which reads as the page lagging behind the words and then
@@ -282,6 +329,16 @@ export function Chat({
             <p className="mt-10 text-read text-mute">
               {conversation.trouble ?? "Nothing said yet. The agent is here and waiting for you."}
             </p>
+          )}
+
+          {/* The top of what has been read, and the request for what is above
+              it. Nothing at all when the conversation arrived whole, which is
+              most of them — a transcript that was never cut should carry no
+              hint that it might have been. */}
+          {conversation.hasMore && (
+            <div ref={earlier} className="mt-9 flex h-8 items-center justify-center">
+              <Loader2 className="h-3.5 w-3.5 animate-spin text-mute" strokeWidth={2} />
+            </div>
           )}
 
           <ol className="mt-9 space-y-7">
