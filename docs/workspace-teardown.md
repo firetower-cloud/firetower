@@ -1,6 +1,20 @@
 # Workspace teardown must reclaim its data
 
-**Status:** planned, not built. Written for handoff.
+**Status:** built. `20260924120000_workspace_teardown.sql` and
+`crates/ft-server/src/reclaim.rs`.
+
+What landed differs from the plan below in one place worth knowing about. The
+trigger is not `cleaned_at`: that column is only ever written on the reconnect
+path, so on an ordinary teardown it is never set at all and nothing would have
+fired. The sweep asks instead whether every session in a workspace has ended,
+which is true however the workspace finished — the last agent reporting it, a
+host saying so on reconnect, or somebody force-removing a machine that is not
+coming back.
+
+The batched backfill is the sweep itself: on its first run it finds every
+workspace that was already finished and works through them fifty at a time,
+which is the backlog. Only the orphaned `events` are deleted in the migration,
+because the foreign key cannot be trusted until they are gone.
 
 ## The problem
 
