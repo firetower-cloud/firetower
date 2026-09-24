@@ -40,7 +40,7 @@ pub fn request_key(epoch: &str, id: &Value) -> String {
 pub fn permission_outcome(options: &Value, decision: &Decision) -> Value {
     let kinds: &[&str] = match decision {
         Decision::Allow => &["allow_once"],
-        Decision::AllowAlways => &["allow_always", "allow_once"],
+        Decision::AllowAlways => &["allow_always"],
         Decision::Deny { .. } => &["reject_once", "reject_always"],
         Decision::Answered { .. } => &[],
     };
@@ -254,7 +254,14 @@ impl AcpNormaliser {
                     item: item.clone(),
                     data: update.clone(),
                 });
-                if let Some(contents) = update["content"].as_array() {
+                // ACP tool content is a replacement snapshot, not a delta.
+                // Kimi streams growing argument snapshots here; only the
+                // terminal snapshot belongs in the append-only output stream.
+                // Intermediate activity remains available in ItemUpdated.
+                if let Some(contents) = update["content"]
+                    .as_array()
+                    .filter(|_| matches!(update["status"].as_str(), Some("completed" | "failed")))
+                {
                     for content in contents {
                         let text = match content["type"].as_str() {
                             Some("content") => {

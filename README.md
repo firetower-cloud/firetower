@@ -109,7 +109,7 @@ Native execution is also supported on the control-plane machine and remote machi
 | OpenCode | Planned |
 | Grok| Planned |
 | Cursor | Planned |
-| Kimi | Planned |
+| Kimi | Experimental (ACP) |
 | Hermes | Planned |
 
 ## Contributing

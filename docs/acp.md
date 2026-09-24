@@ -16,6 +16,8 @@ Firetower user, transfer credentials, install Kimi, or participate in account
 and quota fallback. People allowed to start sessions must also be authorized
 to use the worker's Kimi account. Authentication is reported as unknown until
 a session runs; detecting an installed binary does not verify authentication.
+An installed binary allows attempting a session; it is not proof of authenticated
+readiness. Login failures are surfaced by the session startup.
 
 Select **Kimi Code** when creating a workspace or adding an agent. No account
 needs to be connected in Firetower. Model and permission mode come from Kimi's
