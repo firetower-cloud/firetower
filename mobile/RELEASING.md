@@ -32,12 +32,13 @@ environment, which requires a reviewer's approval before any job can read one.
 | Secret | What it is |
 | --- | --- |
 | `EXPO_TOKEN` | A robot access token from expo.dev. Lets CI build and submit as the account that owns the credentials. |
-| `APPLE_ID` | The Apple account email that owns the App Store Connect app. |
-| `ASC_APP_ID` | The App Store Connect app's numeric id — from the app's URL in App Store Connect. |
-| `APPLE_TEAM_ID` | The ten-character team id, from the Apple Developer membership page. |
 
-`$VAR` in `eas.json` is read from the environment, so those three Apple values
-are ordinary secrets rather than anything written into the repository.
+Everything else is on EAS: the distribution certificate, the App Store
+provisioning profile, and the App Store Connect API key `eas submit` uploads
+with. `eas credentials --platform ios` sets them up, once, with an Apple login.
+
+`eas.json` does not read environment variables, so `ascAppId` is written in it.
+It is the app's public id, not a secret.
 
 ## Apple's review
 

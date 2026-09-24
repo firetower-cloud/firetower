@@ -92,6 +92,12 @@ jobs:
           node-version: 22
           cache: pnpm
           cache-dependency-path: mobile/pnpm-lock.yaml
+      # `--local` runs Gradle here, and Gradle needs 17; the runner's default
+      # Java is 11.
+      - uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4
+        with:
+          distribution: temurin
+          java-version: 17
       - uses: expo/expo-github-action@eab7a230208c952974db8c3245cfd78402c7b385 # v9
         with:
           eas-version: latest
@@ -147,10 +153,4 @@ jobs:
       # Not `--local`: an iOS build needs macOS, and a hosted mac runner costs
       # roughly ten times a Linux one. EAS builds it on theirs and this waits.
       - name: build and submit to TestFlight
-        # `eas.json` reads these three out of the environment rather than
-        # holding them, so they stay secrets rather than repository contents.
-        env:
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          ASC_APP_ID: ${{ secrets.ASC_APP_ID }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: eas build --platform ios --profile production --non-interactive --auto-submit
