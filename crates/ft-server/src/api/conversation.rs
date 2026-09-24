@@ -426,40 +426,7 @@ pub(crate) async fn conversation_events(
     // long command does not echo for as long as that command runs.
     state.fleet.echoed(id, &echoed).await;
     for pending in state.fleet.typed(id).await {
-        replayed += 1;
-        let item = ft_core::turn::ItemId::new(format!("pending-{}", pending.at.timestamp_millis()));
-        // The three together, as one line: the delta is the message's whole
-        // text, so a client that took the start and missed this would show an
-        // empty bubble, and one that took it twice would show it twice.
-        deliver(
-            &mut backlog,
-            vec![
-                ConversationEvent {
-                    line_no: replayed,
-                    event: ft_core::TurnEvent::ItemStarted {
-                        item: item.clone(),
-                        kind: ft_core::turn::ItemKind::UserMessage,
-                        title: None,
-                        task: None,
-                    },
-                },
-                ConversationEvent {
-                    line_no: replayed,
-                    event: ft_core::TurnEvent::ContentDelta {
-                        item: item.clone(),
-                        stream: ft_core::turn::StreamKind::UserText,
-                        delta: pending.text.clone(),
-                    },
-                },
-                ConversationEvent {
-                    line_no: replayed,
-                    event: ft_core::TurnEvent::ItemCompleted {
-                        item,
-                        status: ft_core::turn::ItemStatus::Completed,
-                    },
-                },
-            ],
-        );
+        deliver(&mut backlog, pending_echo(replayed, pending));
     }
 
     let asking: Vec<ConversationEvent> = waiting
@@ -509,6 +476,38 @@ pub(crate) async fn conversation_events(
         });
 
     futures::stream::iter(backlog).chain(following)
+}
+
+/// Pending echoes are not durable log lines. They must not consume the cursor
+/// of the next real line, which can be the ACP prompt opening a turn.
+fn pending_echo(line_no: u64, pending: crate::fleet::Typed) -> Vec<ConversationEvent> {
+    let item = ft_core::turn::ItemId::new(format!("pending-{}", pending.at.timestamp_millis()));
+    vec![
+        ConversationEvent {
+            line_no,
+            event: ft_core::TurnEvent::ItemStarted {
+                item: item.clone(),
+                kind: ft_core::turn::ItemKind::UserMessage,
+                title: None,
+                task: None,
+            },
+        },
+        ConversationEvent {
+            line_no,
+            event: ft_core::TurnEvent::ContentDelta {
+                item: item.clone(),
+                stream: ft_core::turn::StreamKind::UserText,
+                delta: pending.text.clone(),
+            },
+        },
+        ConversationEvent {
+            line_no,
+            event: ft_core::TurnEvent::ItemCompleted {
+                item,
+                status: ft_core::turn::ItemStatus::Completed,
+            },
+        },
+    ]
 }
 
 /// Add a line's events to the backlog, keeping one batch per line number.
@@ -919,6 +918,23 @@ async fn host_of(
 mod tests {
     use super::*;
     use ft_core::turn::{ItemId, ItemKind, ItemStatus, StreamKind, TurnId};
+
+    #[test]
+    fn pending_echo_does_not_consume_the_next_durable_line() {
+        let last_stored = 10;
+        let pending = pending_echo(
+            last_stored,
+            crate::fleet::Typed {
+                text: "waiting message".into(),
+                at: chrono::Utc::now(),
+            },
+        );
+        let resume_cursor = pending.iter().map(|e| e.line_no).max().unwrap();
+        assert_eq!(
+            resume_cursor, last_stored,
+            "an optimistic echo must not make a reconnect skip the next ACP prompt"
+        );
+    }
 
     /// What `get_conversation` builds before it windows: every event of a
     /// folded log, and where each exchange starts.
