@@ -303,6 +303,23 @@ impl Db {
         .await
         .context("forgetting a workspace")?;
 
+        // The agent is still running over there, in a worktree that still
+        // exists, and this row is what makes sure it is told when the machine
+        // comes back. In the same transaction as the forgetting, because a
+        // removal recorded without its debt is the leak this prevents.
+        sqlx::query(
+            "INSERT INTO owed_teardowns (host_id, session_id, forgotten_at)
+             SELECT w.host_id, s.id, $1
+               FROM sessions s JOIN workspaces w ON w.id = s.workspace_id
+              WHERE s.id = $2
+             ON CONFLICT DO NOTHING",
+        )
+        .bind(now)
+        .bind(id.as_str())
+        .execute(&mut *tx)
+        .await
+        .context("recording the teardown this host still owes")?;
+
         tx.commit().await?;
         Ok(())
     }
@@ -314,21 +331,112 @@ impl Db {
     /// listening. This is the debt: when the machine comes back, it still gets
     /// torn down.
     pub async fn owed_cleanup_on(&self, host: &HostId) -> Result<Vec<SessionId>> {
-        let rows = sqlx::query(
-            "SELECT s.id FROM sessions s
-                JOIN workspaces w ON w.id = s.workspace_id
-               WHERE w.host_id = $1 AND w.forgotten_at IS NOT NULL AND w.cleaned_at IS NULL
-               ORDER BY w.forgotten_at",
+        // Read from `owed_teardowns` rather than from the workspace, because
+        // the workspace is about to stop existing: its data is reclaimed once
+        // the work in it has ended, and a debt that lives on the row being
+        // deleted is one that gets forgotten exactly when it matters.
+        let rows = sqlx::query_scalar::<_, String>(
+            "SELECT session_id FROM owed_teardowns
+              WHERE host_id = $1 ORDER BY forgotten_at",
         )
         .bind(host.as_str())
         .fetch_all(&self.pool)
         .await
         .context("listing sessions still owed a teardown")?;
 
-        Ok(rows
-            .into_iter()
-            .map(|r| SessionId::from_stored(r.get::<String, _>("id")))
-            .collect())
+        Ok(rows.into_iter().map(SessionId::from_stored).collect())
+    }
+
+    /* ── Reclaiming what a torn-down workspace held ───────────────────── */
+
+    /// Workspaces whose work is over, and whose rows are now dead weight.
+    ///
+    /// Every session in one of these has ended: the worktree is gone or going,
+    /// the agent is not coming back, and nothing here will be read again.
+    ///
+    /// A workspace with *no* sessions at all is deliberately not one of them.
+    /// That is a workspace being brought up which has not made its first
+    /// session yet, and `NOT EXISTS` over an empty set is true — so without
+    /// this, the sweep would delete every workspace in the seconds between
+    /// creating it and starting anything in it.
+    ///
+    /// Oldest first, so a backlog is worked through in the order it built up
+    /// rather than starving on whatever sorts lowest.
+    pub async fn workspaces_to_purge(&self, limit: i64) -> Result<Vec<WorkspaceId>> {
+        let rows = sqlx::query_scalar::<_, String>(
+            "SELECT w.id FROM workspaces w
+              WHERE EXISTS (SELECT 1 FROM sessions s WHERE s.workspace_id = w.id)
+                AND NOT EXISTS (
+                      SELECT 1 FROM sessions s
+                       WHERE s.workspace_id = w.id AND s.status <> 'Ended')
+              ORDER BY w.updated_at
+              LIMIT $1",
+        )
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await
+        .context("listing workspaces whose data can go")?;
+
+        Ok(rows.into_iter().map(WorkspaceId::from_stored).collect())
+    }
+
+    /// Everything this workspace held, gone.
+    ///
+    /// One statement, because the cascades already describe what belongs to a
+    /// workspace: its sessions, and through them the agent's whole raw log,
+    /// its checkouts, its controls, its annotations, its presence and its
+    /// account switches. Anything added later that belongs to a session wants
+    /// `on delete cascade` and then it is covered here too, which is the point
+    /// of doing it this way rather than listing tables.
+    pub async fn purge_workspace(&self, workspace_id: &WorkspaceId) -> Result<u64> {
+        let done = sqlx::query("DELETE FROM workspaces WHERE id = $1")
+            .bind(workspace_id.as_str())
+            .execute(&self.pool)
+            .await
+            .context("purging a workspace")?;
+        Ok(done.rows_affected())
+    }
+
+    /// How much this workspace is holding, before deciding to let go of it.
+    ///
+    /// Only the log, because only the log is ever large enough to be worth
+    /// saying out loud. Reported by the sweep so the reclaim is visible in a
+    /// log file rather than only in a disk graph.
+    pub async fn workspace_weight(&self, workspace_id: &WorkspaceId) -> Result<i64> {
+        sqlx::query_scalar::<_, Option<i64>>(
+            "SELECT sum(pg_column_size(al.line))::bigint
+               FROM agent_lines al
+               JOIN sessions s ON s.id = al.session_id
+              WHERE s.workspace_id = $1",
+        )
+        .bind(workspace_id.as_str())
+        .fetch_one(&self.pool)
+        .await
+        .map(|bytes| bytes.unwrap_or(0))
+        .context("weighing a workspace")
+    }
+
+    /* ── Teardown owed to a machine that is not answering ─────────────── */
+
+    /// Remember that this session still has to be torn down over there.
+    ///
+    /// Recorded in the terms the worker is told in — a session id, which is
+    /// what `Destroy` takes — and kept apart from `sessions` on purpose:
+    /// outliving that row is the whole reason it exists. Without it, purging a
+    /// workspace that was removed here while its host was away would lose the
+    /// debt, and that machine would keep a live agent and its directory for
+    /// good.
+    pub async fn owe_teardown(&self, host: &HostId, session_id: &SessionId) -> Result<()> {
+        sqlx::query(
+            "INSERT INTO owed_teardowns (host_id, session_id)
+             VALUES ($1, $2) ON CONFLICT DO NOTHING",
+        )
+        .bind(host.as_str())
+        .bind(session_id.as_str())
+        .execute(&self.pool)
+        .await
+        .context("recording a teardown still owed")?;
+        Ok(())
     }
 
     /// The machine has been told to tear this one down, so stop asking.
@@ -342,6 +450,15 @@ impl Db {
         .execute(&self.pool)
         .await
         .context("recording a teardown")?;
+
+        // Told, so stop asking — asking twice would kill a session somebody
+        // started since. Keyed on the session rather than reached through the
+        // workspace, which by now may already have been purged.
+        sqlx::query("DELETE FROM owed_teardowns WHERE session_id = $1")
+            .bind(id.as_str())
+            .execute(&self.pool)
+            .await
+            .context("clearing a teardown that has been told")?;
         Ok(())
     }
 
@@ -3164,6 +3281,218 @@ mod tests {
             "nothing escapes the terminal state"
         );
         assert_eq!(still.note, None);
+    }
+
+    /// A session, ready to be finished and swept.
+    async fn a_run(db: &Db, host: &HostId, owner: &str) -> SessionId {
+        let id = SessionId::new();
+        db.insert_session(
+            &id,
+            host,
+            owner,
+            None,
+            "Ask me anything",
+            "ask me anything",
+            None,
+            None,
+            "ClaudeCode",
+            WorkspaceSize::Medium,
+            ft_core::Share::Equal,
+            &[],
+            None,
+        )
+        .await
+        .unwrap();
+        id
+    }
+
+    /// The workspace a run belongs to.
+    async fn workspace_of(db: &Db, id: &SessionId) -> WorkspaceId {
+        db.session(id)
+            .await
+            .unwrap()
+            .unwrap()
+            .workspace_id
+            .expect("a run always belongs to a workspace")
+    }
+
+    async fn lines_held(db: &Db, id: &SessionId) -> i64 {
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM agent_lines WHERE session_id = $1")
+            .bind(id.as_str())
+            .fetch_one(&db.pool)
+            .await
+            .unwrap()
+    }
+
+    /// The whole point: a workspace that is over stops costing anything.
+    #[tokio::test]
+    async fn a_finished_workspace_gives_back_what_it_was_holding() {
+        let (db, owner) = db_with_user().await;
+        let host = db.ensure_host("fire-01", Compute::Local).await.unwrap();
+        let id = a_run(&db, &host.id, &owner).await;
+
+        db.record_agent_line(&id, 1, r#"{"type":"assistant"}"#)
+            .await
+            .unwrap();
+        assert_eq!(lines_held(&db, &id).await, 1);
+
+        set_status(&db, &id, ft_core::SessionStatus::Ended, None).await;
+
+        let workspace = workspace_of(&db, &id).await;
+        assert_eq!(
+            db.workspaces_to_purge(10).await.unwrap(),
+            vec![workspace.clone()],
+            "every run in it has ended, so there is nothing left to read"
+        );
+
+        assert_eq!(db.purge_workspace(&workspace).await.unwrap(), 1);
+        assert_eq!(lines_held(&db, &id).await, 0, "the log goes with it");
+        assert!(db.session(&id).await.unwrap().is_none());
+    }
+
+    /// The one that matters most. Everything else here is recoverable; this is
+    /// somebody's work being deleted while they are doing it.
+    #[tokio::test]
+    async fn a_workspace_still_working_is_left_alone() {
+        let (db, owner) = db_with_user().await;
+        let host = db.ensure_host("fire-01", Compute::Local).await.unwrap();
+        let id = a_run(&db, &host.id, &owner).await;
+
+        set_status(&db, &id, ft_core::SessionStatus::Working, None).await;
+        assert!(
+            db.workspaces_to_purge(10).await.unwrap().is_empty(),
+            "a run in flight is not rubbish"
+        );
+
+        // And one ended run beside a live one does not settle it either.
+        let second = a_run(&db, &host.id, &owner).await;
+        set_status(&db, &second, ft_core::SessionStatus::Ended, None).await;
+        let live = workspace_of(&db, &id).await;
+        assert!(
+            !db.workspaces_to_purge(10).await.unwrap().contains(&live),
+            "the workspace is over when all of its work is, not when some is"
+        );
+    }
+
+    /// `NOT EXISTS` over an empty set is true, which would make every
+    /// workspace rubbish for the seconds between making it and starting
+    /// anything in it.
+    #[tokio::test]
+    async fn a_workspace_with_nothing_in_it_yet_is_not_swept_away() {
+        let (db, owner) = db_with_user().await;
+        let host = db.ensure_host("fire-01", Compute::Local).await.unwrap();
+
+        let empty = WorkspaceId::new();
+        sqlx::query(
+            "INSERT INTO workspaces (id, user_id, host_id, name) VALUES ($1,$2,$3,'coming up')",
+        )
+        .bind(empty.as_str())
+        .bind(&owner)
+        .bind(host.id.as_str())
+        .execute(&db.pool)
+        .await
+        .unwrap();
+
+        assert!(
+            !db.workspaces_to_purge(10).await.unwrap().contains(&empty),
+            "a workspace being brought up has simply not started yet"
+        );
+    }
+
+    /// Two passes can see the same workspace; the second must be uneventful.
+    #[tokio::test]
+    async fn purging_the_same_workspace_twice_is_not_an_error() {
+        let (db, owner) = db_with_user().await;
+        let host = db.ensure_host("fire-01", Compute::Local).await.unwrap();
+        let id = a_run(&db, &host.id, &owner).await;
+        set_status(&db, &id, ft_core::SessionStatus::Ended, None).await;
+
+        let workspace = workspace_of(&db, &id).await;
+        assert_eq!(db.purge_workspace(&workspace).await.unwrap(), 1);
+        assert_eq!(db.purge_workspace(&workspace).await.unwrap(), 0);
+    }
+
+    /// `events.session_id` had no reference at all, so every control-plane
+    /// event outlived the session it was about — forever, because nothing
+    /// else would ever match it either.
+    #[tokio::test]
+    async fn no_event_outlives_the_session_it_was_about() {
+        let (db, owner) = db_with_user().await;
+        let host = db.ensure_host("fire-01", Compute::Local).await.unwrap();
+        let id = a_run(&db, &host.id, &owner).await;
+
+        set_status(&db, &id, ft_core::SessionStatus::Ended, None).await;
+        let left =
+            sqlx::query_scalar::<_, i64>("SELECT count(*) FROM events WHERE session_id = $1")
+                .bind(id.as_str())
+                .fetch_one(&db.pool)
+                .await
+                .unwrap();
+        assert!(left > 0, "the status change is an event; this proves it");
+
+        let workspace = workspace_of(&db, &id).await;
+        db.purge_workspace(&workspace).await.unwrap();
+
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>("SELECT count(*) FROM events WHERE session_id = $1")
+                .bind(id.as_str())
+                .fetch_one(&db.pool)
+                .await
+                .unwrap(),
+            0,
+            "they go with it now"
+        );
+    }
+
+    /// `next_session_id` was declared with no `ON DELETE`, so a switch
+    /// pointing at a session refused to let that session be deleted — which
+    /// took the whole purge down with it, and `DELETE FROM hosts` before that.
+    #[tokio::test]
+    async fn a_switch_pointing_at_a_run_does_not_refuse_to_let_it_go() {
+        let (db, owner) = db_with_user().await;
+        let host = db.ensure_host("fire-01", Compute::Local).await.unwrap();
+        let from = a_run(&db, &host.id, &owner).await;
+        let to = a_run(&db, &host.id, &owner).await;
+
+        let account = format!("aa_{}", SessionId::new());
+        sqlx::query(
+            "INSERT INTO agent_accounts(id,user_id,kind,name,mode,credential_key,state)
+             VALUES($1,$2,'ClaudeCode','Acme','Subscription',$1,'ready')",
+        )
+        .bind(&account)
+        .bind(&owner)
+        .execute(&db.pool)
+        .await
+        .unwrap();
+
+        sqlx::query(
+            "INSERT INTO agent_account_switches(session_id,to_account_id,next_session_id,after_line)
+             VALUES($1,$2,$3,0)",
+        )
+        .bind(from.as_str())
+        .bind(&account)
+        .bind(to.as_str())
+        .execute(&db.pool)
+        .await
+        .unwrap();
+
+        set_status(&db, &to, ft_core::SessionStatus::Ended, None).await;
+        let workspace = workspace_of(&db, &to).await;
+
+        db.purge_workspace(&workspace)
+            .await
+            .expect("a switch with nowhere to go is a null, not a refusal");
+
+        assert_eq!(
+            sqlx::query_scalar::<_, Option<String>>(
+                "SELECT next_session_id FROM agent_account_switches WHERE session_id = $1"
+            )
+            .bind(from.as_str())
+            .fetch_one(&db.pool)
+            .await
+            .unwrap(),
+            None
+        );
     }
 
     /// Removing it here leaves a teardown owed on the machine.

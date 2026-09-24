@@ -1045,6 +1045,31 @@ pub(super) async fn destroy_session(
 
         // Removed here, and owed a teardown there. The debt is paid the next
         // time that host connects; see `Fleet`'s reconnect.
+        //
+        // Ending the workspace's own session ends the workspace, and that has
+        // to hold whether or not the machine is answering. On the connected
+        // path below the others are destroyed; here they are forgotten, so
+        // that the workspace really is finished — otherwise a sibling left
+        // running keeps it alive in the database for good, and the data it
+        // was removed to reclaim is never reclaimed.
+        if session
+            .workspace_id
+            .as_ref()
+            .is_some_and(|w| w.as_str() == session.id.as_str())
+        {
+            for run in state
+                .db
+                .live_runs_beside(
+                    owner(&principal)?,
+                    session.workspace_id.as_ref().expect("checked just above"),
+                    &id,
+                )
+                .await?
+            {
+                state.db.forget_session(&run).await?;
+            }
+        }
+
         state.db.forget_session(&id).await?;
         return Ok(StatusCode::ACCEPTED);
     }

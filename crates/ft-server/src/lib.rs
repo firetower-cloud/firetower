@@ -20,6 +20,7 @@ pub mod notify;
 pub mod oauth;
 pub mod preview;
 pub mod providers;
+pub mod reclaim;
 pub mod sshkey;
 pub mod tasks;
 pub mod trackers;
@@ -214,6 +215,9 @@ pub async fn run(config: Config) -> Result<()> {
     // progress when this process was last replaced — which, for the run that
     // recreates the control plane, is the ordinary way it ends.
     tokio::spawn(updates::status::watch(state.clone()));
+    // What finished workspaces were holding. Also the first thing that clears
+    // whatever built up before there was anything to clear it.
+    tokio::spawn(reclaim::watch(state.clone()));
     tokio::spawn(updates::runs::resume(state.clone()));
 
     announce(&policy, admin.as_ref(), &ssh_identity, &config);
