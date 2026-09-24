@@ -59,6 +59,13 @@ fn permissions_use_the_offered_ids_and_never_upgrade_a_one_off_allow() {
         permission_outcome(&options, &Decision::Deny { reason: None }),
         json!({"outcome":"selected","optionId":"no"})
     );
+    assert_eq!(
+        permission_outcome(
+            &json!([{"kind":"allow_once","optionId":"once"}]),
+            &Decision::AllowAlways
+        ),
+        json!({"outcome":"cancelled"})
+    );
 }
 
 #[test]
@@ -80,4 +87,42 @@ fn replay_does_not_duplicate_history_and_failed_start_is_visible() {
     assert!(
         matches!(failed.last(), Some(TurnEvent::TurnCompleted { status: TurnStatus::Failed, detail: Some(detail), .. }) if detail.contains("Authentication"))
     );
+}
+
+#[test]
+fn tool_content_snapshots_do_not_repeat_partial_arguments_as_output() {
+    let mut reader = AcpNormaliser::default();
+    for record in [
+        Record::Started { epoch: "e".into() },
+        Record::Ready {
+            session: "s".into(),
+        },
+        Record::Sent {
+            message: json!({"id":4,"method":"session/prompt","params":{"prompt":[]}}),
+        },
+    ] {
+        reader.push(&serde_json::to_string(&record).unwrap());
+    }
+    let mut output = String::new();
+    for (kind, status, text) in [
+        ("tool_call", "pending", "{"),
+        ("tool_call_update", "in_progress", "{\"command\":"),
+        ("tool_call_update", "completed", "done"),
+    ] {
+        let record = Record::Received {
+            message: json!({"method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":kind,"toolCallId":"tool","status":status,"content":[{"type":"content","content":{"type":"text","text":text}}]}}}),
+            replay: false,
+        };
+        for event in reader.push(&serde_json::to_string(&record).unwrap()) {
+            if let TurnEvent::ContentDelta {
+                stream: StreamKind::ToolOutput,
+                delta,
+                ..
+            } = event
+            {
+                output.push_str(&delta);
+            }
+        }
+    }
+    assert_eq!(output, "done");
 }
