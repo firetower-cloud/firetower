@@ -54,6 +54,9 @@ export function AgentMark({
        that at sixty degrees, six times, which is the geometry of the thing —
        kept here rather than flattened, so it is the real shape and not a
        tracing of one. */
+    case "KimiCode":
+      return <svg {...common} viewBox="0 0 16 16" fill="none" stroke="currentColor"><path d="M4 3v10M12 3L5 8l7 5" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>;
+
     case "Codex":
       return (
         <svg {...common} viewBox="0 0 2406 2406">
@@ -88,6 +91,7 @@ export function AgentMark({
 export const AGENT_LABEL: Record<Agent, string> = {
   ClaudeCode: "Claude Code",
   Codex: "Codex",
+  KimiCode: "Kimi Code",
   Shell: "Shell",
 };
 
@@ -95,5 +99,6 @@ export const AGENT_LABEL: Record<Agent, string> = {
 export const AGENT_SHORT: Record<Agent, string> = {
   ClaudeCode: "claude",
   Codex: "codex",
+  KimiCode: "kimi",
   Shell: "shell",
 };

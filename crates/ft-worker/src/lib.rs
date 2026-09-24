@@ -52,6 +52,7 @@ const MAX_DOWNLOAD: u64 = 100 * 1_048_576;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::{mpsc, Mutex};
 
+pub mod acp;
 pub mod agentd;
 pub mod agents;
 pub mod approver;

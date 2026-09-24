@@ -297,7 +297,7 @@ export function NewWorkspace({
       {addingMachine && <AddCompute onClose={() => setAddingMachine(false)} />}
 
       <Row label="Account">
-        <select
+        {chosenKind === "KimiCode" ? <p className="text-meta text-dim">Uses the worker’s Kimi login. Run <code>kimi login</code> as the worker user first; authentication is checked when the session starts.</p> : <select
           aria-label="Account"
           value={
             accounts.data?.some((a) => a.id === accountId && a.kind === chosenKind) ? accountId : ""
@@ -317,7 +317,7 @@ export function NewWorkspace({
                 {a.isDefault ? " · Default" : ""}
               </option>
             ))}
-        </select>
+        </select>}
       </Row>
       <ShareRow share={share} onChange={setShare} host={host} busy={busyHere} />
 

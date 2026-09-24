@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.39.0
+ * OpenAPI spec version: 0.40.2
  */
 import * as zod from 'zod';
 
@@ -29,7 +29,7 @@ export const ListAccountsResponseItem = zod.object({
 export const ListAccountsResponse = zod.array(ListAccountsResponseItem)
 
 export const CreateAccountBody = zod.object({
-  "kind": zod.enum(['ClaudeCode', 'Codex', 'Shell']).describe('Which agent runs inside a workspace.\n\nSerialised as the variant name — see the wire conventions in the brief: a\nfield takes the consumer\'s casing, an enum value stays the symbol it is.'),
+  "kind": zod.enum(['ClaudeCode', 'Codex', 'KimiCode', 'Shell']).describe('Which agent runs inside a workspace.\n\nSerialised as the variant name — see the wire conventions in the brief: a\nfield takes the consumer\'s casing, an enum value stays the symbol it is.'),
   "mode": zod.enum(['Subscription', 'ApiKey', 'NotNeeded']).describe('How an agent proves who it is.'),
   "name": zod.string(),
   "secret": zod.string().nullish()

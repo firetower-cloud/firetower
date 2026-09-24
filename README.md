@@ -93,7 +93,7 @@ Everything after that happens in the desktop app: adding workers, connecting rep
 | OpenCode | Looking for contributions |
 | Grok| Looking for contributions |
 | Cursor | Looking for contributions |
-| Kimi | Looking for contributions |
+| Kimi | Experimental (ACP) |
 | Hermes | Looking for contributions |
 
 ## Licence
@@ -103,3 +103,5 @@ AGPL-3.0-only. Copyright © Westlabs LLC.
 We chose the AGPL mainly so that an outside company can't take the community's work, repackage it under its own brand and sell it — not without publishing its sources along with it. What goes into this has worth, and we want to protect it.
 
 None of that is aimed at you. Use Firetower, run it on your own servers, fork it and change it — for yourself, your team or your company — however you want.
+
+For experimental Kimi Code support, see [Kimi through ACP](docs/acp.md).
