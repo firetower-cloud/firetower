@@ -1,139 +1,282 @@
 /**
- * Just enough markdown to read an agent by.
+ * What the agent wrote, drawn.
  *
- * A placeholder with a deadline: Phase 2 replaces this with a walk over the
- * same mdast `remark-parse` and `remark-gfm` produce on the other two clients,
- * so that all three agree about what a nested list or a fenced block *is*.
- * What is here handles the four things that turn up in every other sentence —
- * bold, inline code, fences and bullets — so the screen can be judged before
- * that lands.
+ * A walk over the mdast `remark-parse` and `remark-gfm` produce, which is the
+ * same tree the desk and the web render — so a nested list, a fenced block or
+ * a table means the same thing on all three clients rather than whatever each
+ * one's own parser happened to do.
+ *
+ * What was here before handled four constructs and printed the rest as typed.
+ * A heading arrived as `## Heading`, a link kept its brackets, and a table was
+ * a wall of pipes — on the client where the screen is smallest and a wall of
+ * pipes is least readable.
+ *
+ * Two rules worth keeping in mind while reading this:
+ *
+ * - **Anything with a picture in it becomes a column.** An `Image` inside a
+ *   `Text` is laid out as a glyph on the line, which is not what a screenshot
+ *   is.
+ * - **Tables scroll rather than wrap.** A phone is narrower than any table
+ *   worth drawing, and a wrapped cell stops being a row you can read across.
  */
 import { useState } from "react";
-import { Clipboard, Image, Pressable, ScrollView, Text, View } from "react-native";
+import { Clipboard, Image, Linking, Pressable, ScrollView, Text, View } from "react-native";
 import * as Haptics from "expo-haptics";
 import { Check, Copy } from "lucide-react-native";
 import { highlight, langNamed, TONE } from "~/api/syntax";
 import { color } from "~/design/tokens.generated";
 import { isWorkspaceSrc, WorkspaceImage } from "~/ui/WorkspaceImage";
+import { columns, flatten, parse, type PhrasingContent, type RootContent } from "~/ui/markdown";
+
+/** A heading's size. `display` is for a page; this is somebody talking. */
+const HEADING = ["text-title", "text-title", "text-body", "text-read", "text-read", "text-read"];
 
 /**
- * `![alt](src)` — the one piece of markdown worth more on a phone than on a
- * desk, and the one this drew as raw syntax for longest. An agent that
- * captures a screenshot says so with this, and six characters of punctuation
- * where the picture should be is the whole of what the phone showed.
+ * A run of inline nodes, as things that can sit inside one `Text`.
  *
- * Not `[text](url)`: the leading `!` is what makes it a picture, and a link
- * without one is still text as far as this goes.
+ * Images are not among them — a paragraph carrying one is split by `Blocks`
+ * before it gets here, so anything reaching this point is text-shaped.
  */
-const IMAGE = /!\[([^\]]*)\]\(([^)\s]+)\)/g;
-
-/** A paragraph as its pictures and the runs of text between them. */
-function pieces(block: string) {
-  const out: ({ text: string } | { alt: string; src: string })[] = [];
-  let at = 0;
-  for (const m of block.matchAll(IMAGE)) {
-    const start = m.index ?? 0;
-    if (start > at) out.push({ text: block.slice(at, start) });
-    out.push({ alt: m[1], src: m[2] });
-    at = start + m[0].length;
-  }
-  if (at < block.length) out.push({ text: block.slice(at) });
-  return out;
+function inline(nodes: PhrasingContent[], key: string): React.ReactNode[] {
+  return nodes.map((node, i) => {
+    const at = `${key}-${i}`;
+    switch (node.type) {
+      case "text":
+        return node.value;
+      case "strong":
+        return (
+          <Text key={at} className="font-semibold text-bone">
+            {inline(node.children, at)}
+          </Text>
+        );
+      case "emphasis":
+        return (
+          <Text key={at} className="italic">
+            {inline(node.children, at)}
+          </Text>
+        );
+      case "delete":
+        return (
+          <Text key={at} className="text-mute line-through">
+            {inline(node.children, at)}
+          </Text>
+        );
+      case "inlineCode":
+        return (
+          <Text key={at} className="font-mono text-code text-kind-source">
+            {node.value}
+          </Text>
+        );
+      case "link":
+        /* `onPress` on the `Text` itself rather than a `Pressable` around it:
+           a link is usually mid-sentence, and a pressable wrapping part of a
+           line breaks the line where it starts. */
+        return (
+          <Text
+            key={at}
+            className="text-kind-source underline"
+            onPress={() => void Linking.openURL(node.url).catch(() => {})}
+          >
+            {inline(node.children, at)}
+          </Text>
+        );
+      case "break":
+        return "\n";
+      case "image":
+        // Only reachable for an image the splitter left behind — its alt text
+        // is the honest thing to show.
+        return node.alt ?? "";
+      default:
+        return flatten([node]);
+    }
+  });
 }
 
-/** `**bold**` and `` `code` ``, in one pass, order-preserving. */
-function inline(text: string, key: string) {
+/** Whether this run has a picture in it, and so has to be laid out as a column. */
+const pictorial = (nodes: PhrasingContent[]) => nodes.some((n) => n.type === "image");
+
+/** A picture, from wherever it is. */
+function Picture({ src, alt }: { src: string; alt?: string }) {
+  if (isWorkspaceSrc(src)) return <WorkspaceImage src={src} alt={alt} />;
+  return (
+    <Image
+      source={{ uri: src }}
+      resizeMode="contain"
+      className="my-2 w-full rounded-md border border-line"
+      style={{ aspectRatio: 16 / 10 }}
+    />
+  );
+}
+
+/**
+ * A paragraph with pictures in it: the pictures, and the text between them.
+ *
+ * The runs either side keep their formatting, which is why this splits the
+ * node list rather than the source text.
+ */
+function Mixed({ nodes, at }: { nodes: PhrasingContent[]; at: string }) {
   const out: React.ReactNode[] = [];
-  const pattern = /(\*\*[^*]+\*\*|`[^`]+`)/g;
-  let at = 0;
-  let m: RegExpExecArray | null;
-  while ((m = pattern.exec(text))) {
-    if (m.index > at) out.push(text.slice(at, m.index));
-    const piece = m[0];
-    if (piece.startsWith("**")) {
+  let run: PhrasingContent[] = [];
+  const flush = (key: string) => {
+    if (run.length === 0) return;
+    if (flatten(run).trim()) {
       out.push(
-        <Text key={`${key}-b${m.index}`} className="font-semibold text-bone">
-          {piece.slice(2, -2)}
-        </Text>,
-      );
-    } else {
-      out.push(
-        <Text key={`${key}-c${m.index}`} className="font-mono text-code text-kind-source">
-          {piece.slice(1, -1)}
+        <Text key={key} className="font-sans text-read text-text">
+          {inline(run, key)}
         </Text>,
       );
     }
-    at = m.index + piece.length;
+    run = [];
+  };
+  nodes.forEach((node, i) => {
+    if (node.type === "image") {
+      flush(`${at}-t${i}`);
+      out.push(<Picture key={`${at}-i${i}`} src={node.url} alt={node.alt ?? undefined} />);
+    } else {
+      run.push(node);
+    }
+  });
+  flush(`${at}-end`);
+  return <View className="gap-1">{out}</View>;
+}
+
+/**
+ * How wide one character of the table's font is.
+ *
+ * `text-code` is 15px and the face is JetBrains Mono, whose advance is 0.6em
+ * — so 9px, with a little over for the medium weight the header row is set
+ * in. Estimated rather than measured because measuring text means a round
+ * trip to the UI thread per cell, and the cost of being slightly generous
+ * here is a few pixels of padding on a table that already scrolls.
+ */
+const CHAR = 9.4;
+
+/** The padding either side of a cell, which `px-2` puts there. */
+const CELL_PAD = 16;
+
+/** A table, as one grid that scrolls sideways. */
+function Table({ rows, at }: { rows: string[][]; at: string }) {
+  const width = columns(rows);
+  const [head, ...body] = rows;
+  if (!head) return null;
+
+  const Row = ({ cells, header }: { cells: string[]; header?: boolean }) => (
+    <View className="flex-row">
+      {width.map((w, i) => (
+        <Text
+          key={i}
+          numberOfLines={1}
+          className={`px-2 py-1 font-mono text-code ${header ? "font-mono-medium text-bone" : "text-text"}`}
+          style={{ width: Math.ceil(w * CHAR) + CELL_PAD }}
+        >
+          {cells[i] ?? ""}
+        </Text>
+      ))}
+    </View>
+  );
+
+  return (
+    <View className="overflow-hidden rounded-md border border-line">
+      <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+        <View>
+          <View className="border-b" style={{ borderColor: color.line }}>
+            <Row cells={head} header />
+          </View>
+          {body.map((cells, i) => (
+            <View
+              key={`${at}-r${i}`}
+              className={i > 0 ? "border-t" : undefined}
+              style={i > 0 ? { borderColor: color["line-soft"] } : undefined}
+            >
+              <Row cells={cells} />
+            </View>
+          ))}
+        </View>
+      </ScrollView>
+    </View>
+  );
+}
+
+/** One block, whatever kind it is. */
+function Block({ node, at }: { node: RootContent; at: string }): React.ReactElement | null {
+  switch (node.type) {
+    case "heading":
+      return (
+        <Text className={`font-sans font-semibold text-bone ${HEADING[node.depth - 1]}`}>
+          {inline(node.children, at)}
+        </Text>
+      );
+
+    case "paragraph":
+      return pictorial(node.children) ? (
+        <Mixed nodes={node.children} at={at} />
+      ) : (
+        <Text className="font-sans text-read text-text">{inline(node.children, at)}</Text>
+      );
+
+    case "code":
+      return <Code text={node.value} fence={node.lang ?? undefined} />;
+
+    case "blockquote":
+      return (
+        <View className="border-l pl-3" style={{ borderColor: color.line }}>
+          <Blocks nodes={node.children} at={at} />
+        </View>
+      );
+
+    case "list":
+      return (
+        <View className="gap-1.5">
+          {node.children.map((item, i) => (
+            <View key={`${at}-${i}`} className="flex-row gap-2">
+              <Text className="font-sans text-read text-mute">
+                {node.ordered ? `${(node.start ?? 1) + i}.` : "\u2022"}
+              </Text>
+              <View className="flex-1">
+                <Blocks nodes={item.children} at={`${at}-${i}`} tight />
+              </View>
+            </View>
+          ))}
+        </View>
+      );
+
+    case "table": {
+      const rows = node.children.map((row) =>
+        row.children.map((cell) => flatten(cell.children as PhrasingContent[])),
+      );
+      return <Table rows={rows} at={at} />;
+    }
+
+    case "thematicBreak":
+      return <View className="my-1 h-px" style={{ backgroundColor: color.line }} />;
+
+    // `html` is the one thing deliberately dropped rather than shown. An agent
+    // writing a raw tag means it to be markup, and the characters of it are
+    // noise on a phone.
+    case "html":
+      return null;
+
+    default:
+      return null;
   }
-  if (at < text.length) out.push(text.slice(at));
-  return out;
+}
+
+function Blocks({ nodes, at, tight }: { nodes: RootContent[]; at: string; tight?: boolean }) {
+  return (
+    <View className={tight ? "gap-1" : "gap-3"}>
+      {nodes.map((node, i) => (
+        <Block key={`${at}-${i}`} node={node} at={`${at}-${i}`} />
+      ))}
+    </View>
+  );
 }
 
 export function Prose({ text }: { text: string }) {
-  const blocks = text.split("\n\n");
-  return (
-    <View className="gap-3">
-      {blocks.map((block, i) => {
-        if (block.startsWith("```")) {
-          // The fence's own word, which is the only thing that says what
-          // language this is.
-          const named = block.slice(3, block.indexOf("\n") < 0 ? 3 : block.indexOf("\n"));
-          const body = block.replace(/^```[a-zA-Z]*\n?/, "").replace(/```$/, "");
-          return <Code key={i} text={body} fence={named} />;
-        }
-        if (/^[-*] /m.test(block)) {
-          return (
-            <View key={i} className="gap-1.5">
-              {block.split("\n").map((li, j) => (
-                <View key={j} className="flex-row gap-2">
-                  <Text className="font-sans text-body text-mute">•</Text>
-                  <Text className="flex-1 font-sans text-read text-text">
-                    {inline(li.replace(/^[-*] /, ""), `${i}-${j}`)}
-                  </Text>
-                </View>
-              ))}
-            </View>
-          );
-        }
-        /* A paragraph that carries a picture is laid out as a column: an
-           `Image` inside a `Text` is a glyph on the line, which is not what a
-           screenshot is. Blocks with no picture keep the single `Text` they
-           always had. */
-        const parts = pieces(block);
-        if (parts.some((p) => "src" in p)) {
-          return (
-            <View key={i} className="gap-1">
-              {parts.map((part, j) =>
-                "src" in part ? (
-                  isWorkspaceSrc(part.src) ? (
-                    <WorkspaceImage key={j} src={part.src} alt={part.alt} />
-                  ) : (
-                    <Image
-                      key={j}
-                      source={{ uri: part.src }}
-                      resizeMode="contain"
-                      className="my-2 w-full rounded-md border border-line"
-                      style={{ aspectRatio: 16 / 10 }}
-                    />
-                  )
-                ) : part.text.trim() ? (
-                  <Text key={j} className="font-sans text-read text-text">
-                    {inline(part.text.trim(), `${i}-${j}`)}
-                  </Text>
-                ) : null,
-              )}
-            </View>
-          );
-        }
-
-        return (
-          <Text key={i} className="font-sans text-read text-text">
-            {inline(block, String(i))}
-          </Text>
-        );
-      })}
-    </View>
-  );
+  /* Reparsed on every delta of a streaming turn, which sounds worse than it
+     is: remark is fast, the turns are short, and the alternative — diffing
+     half-written markdown — is how a parser starts disagreeing with itself
+     about a fence that has not been closed yet. */
+  return <Blocks nodes={parse(text).children} at="b" />;
 }
 
 /**
