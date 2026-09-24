@@ -105,11 +105,23 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
+      # The generated gradle.properties caps the daemon at 2 GiB heap and
+      # 512 MiB metaspace, which 32 parallel workers exhaust. The user-home
+      # file takes precedence over the project's.
+      - name: give Gradle room
+        run: |
+          mkdir -p ~/.gradle
+          echo "org.gradle.jvmargs=-Xmx12g -XX:MaxMetaspaceSize=4g" >> ~/.gradle/gradle.properties
+
       # `--local` builds on this runner rather than queueing on EAS: the
       # credentials still come from EAS, so the keystore is the same one every
       # previous APK was signed with, but a release does not wait behind a
       # shared queue.
+      #
+      # The timeout is there because a failed Gradle build can leave it
+      # waiting forever.
       - name: build the APK
+        timeout-minutes: 30
         run: eas build --platform android --profile production --local --non-interactive --output "$RUNNER_TEMP/firetower.apk"
 
       - name: onto the release
