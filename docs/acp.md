@@ -73,5 +73,9 @@ turns, a harmless tool action with approval and rejection, cancellation,
 reconnect and agent restart. Inspect both the authenticated conversation API
 and the UI. A handshake or fixture run is not a substitute for live acceptance.
 
-Upgrade workers with the control plane: the worker protocol version is bumped
-because older workers cannot deserialize the new agent variant.
+Upgrade workers and clients with the control plane: the worker protocol version
+is bumped because older workers cannot deserialize the new agent variant.
+The released desktop client also rejects ACP conversation frames under its old
+schema, leaving a session apparently working after the agent has replied. For
+this prototype, build the desktop client from the same branch; installing the
+server alone is not enough.
