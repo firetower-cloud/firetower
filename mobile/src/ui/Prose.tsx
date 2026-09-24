@@ -9,11 +9,37 @@
  * that lands.
  */
 import { useState } from "react";
-import { Clipboard, Pressable, ScrollView, Text, View } from "react-native";
+import { Clipboard, Image, Pressable, ScrollView, Text, View } from "react-native";
 import * as Haptics from "expo-haptics";
 import { Check, Copy } from "lucide-react-native";
 import { highlight, langNamed, TONE } from "~/api/syntax";
 import { color } from "~/design/tokens.generated";
+import { isWorkspaceSrc, WorkspaceImage } from "~/ui/WorkspaceImage";
+
+/**
+ * `![alt](src)` — the one piece of markdown worth more on a phone than on a
+ * desk, and the one this drew as raw syntax for longest. An agent that
+ * captures a screenshot says so with this, and six characters of punctuation
+ * where the picture should be is the whole of what the phone showed.
+ *
+ * Not `[text](url)`: the leading `!` is what makes it a picture, and a link
+ * without one is still text as far as this goes.
+ */
+const IMAGE = /!\[([^\]]*)\]\(([^)\s]+)\)/g;
+
+/** A paragraph as its pictures and the runs of text between them. */
+function pieces(block: string) {
+  const out: ({ text: string } | { alt: string; src: string })[] = [];
+  let at = 0;
+  for (const m of block.matchAll(IMAGE)) {
+    const start = m.index ?? 0;
+    if (start > at) out.push({ text: block.slice(at, start) });
+    out.push({ alt: m[1], src: m[2] });
+    at = start + m[0].length;
+  }
+  if (at < block.length) out.push({ text: block.slice(at) });
+  return out;
+}
 
 /** `**bold**` and `` `code` ``, in one pass, order-preserving. */
 function inline(text: string, key: string) {
@@ -69,6 +95,37 @@ export function Prose({ text }: { text: string }) {
             </View>
           );
         }
+        /* A paragraph that carries a picture is laid out as a column: an
+           `Image` inside a `Text` is a glyph on the line, which is not what a
+           screenshot is. Blocks with no picture keep the single `Text` they
+           always had. */
+        const parts = pieces(block);
+        if (parts.some((p) => "src" in p)) {
+          return (
+            <View key={i} className="gap-1">
+              {parts.map((part, j) =>
+                "src" in part ? (
+                  isWorkspaceSrc(part.src) ? (
+                    <WorkspaceImage key={j} src={part.src} alt={part.alt} />
+                  ) : (
+                    <Image
+                      key={j}
+                      source={{ uri: part.src }}
+                      resizeMode="contain"
+                      className="my-2 w-full rounded-md border border-line"
+                      style={{ aspectRatio: 16 / 10 }}
+                    />
+                  )
+                ) : part.text.trim() ? (
+                  <Text key={j} className="font-sans text-read text-text">
+                    {inline(part.text.trim(), `${i}-${j}`)}
+                  </Text>
+                ) : null,
+              )}
+            </View>
+          );
+        }
+
         return (
           <Text key={i} className="font-sans text-read text-text">
             {inline(block, String(i))}

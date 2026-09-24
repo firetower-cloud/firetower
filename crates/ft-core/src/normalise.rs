@@ -642,6 +642,21 @@ impl ClaudeNormaliser {
             .collect();
 
         if results.is_empty() {
+            // Injected by the harness rather than typed by anybody. The note
+            // that follows a downscaled screenshot — "[Image: original
+            // 2880x1800, displayed at 2000x1250 …]" — is addressed to the
+            // model, and it arrives in the shape of a user message: drawn
+            // as one, it puts words in somebody's mouth.
+            //
+            // The flag decides this, never the text. Somebody quoting that
+            // same sentence back — asking what produces it — is a real
+            // message, and a content match would swallow the question being
+            // asked. An agent that stops setting the flag goes back to the
+            // old behaviour rather than losing anything.
+            if v.get("isSynthetic").and_then(Value::as_bool) == Some(true) {
+                return;
+            }
+
             // Two different things arrive in this shape. One is our own turn,
             // echoed back — worth keeping, because it is what makes the stored
             // log the whole conversation rather than half of it. The other is
@@ -712,6 +727,26 @@ impl ClaudeNormaliser {
                     delta: text,
                 });
             }
+            // The picture a tool handed back — the screenshot an agent just
+            // captured, the chart it just drew. Carried on the tool's own
+            // item, the way a message carries the pictures sent with it, and
+            // through the same `attached`: base64 sources only, so a tool
+            // reporting a URL cannot turn into a request the interface makes.
+            //
+            // A result that is a plain string, or one carrying no picture,
+            // produces no event and the card stays exactly what it was.
+            let images = result
+                .get("content")
+                .and_then(Value::as_array)
+                .map(|blocks| attached(blocks))
+                .unwrap_or_default();
+            if !images.is_empty() {
+                out.push(TurnEvent::ItemUpdated {
+                    item: ItemId::new(id),
+                    data: serde_json::json!({ "images": images }),
+                });
+            }
+
             self.open_tools.remove(id);
             out.push(TurnEvent::ItemCompleted {
                 item: ItemId::new(id),

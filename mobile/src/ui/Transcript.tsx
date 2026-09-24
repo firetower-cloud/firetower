@@ -30,12 +30,31 @@ const GLYPH = {
 /** A verb and an argument. What a tool call is, in one line. */
 function Tool({ item }: { item: Item }) {
   const Icon = GLYPH[item.kind as keyof typeof GLYPH] ?? Terminal;
+  const pictures = item.images ?? [];
   return (
-    <View className="flex-row items-center gap-2 py-1">
-      <Icon color={color.mute} size={12} />
-      <Text numberOfLines={1} className="flex-1 font-mono text-meta text-dim">
-        {item.title}
-      </Text>
+    <View className="py-1">
+      <View className="flex-row items-center gap-2">
+        <Icon color={color.mute} size={12} />
+        <Text numberOfLines={1} className="flex-1 font-mono text-meta text-dim">
+          {item.title}
+        </Text>
+      </View>
+      {/* What the step handed back, when it handed back a picture. Shown
+          whole rather than cropped — a screenshot is captured to be read,
+          and a square of the middle of one says nothing. */}
+      {pictures.length > 0 ? (
+        <View className="mt-1.5 gap-1.5">
+          {pictures.map((picture, i) => (
+            <Image
+              key={i}
+              source={{ uri: `data:${picture.mediaType};base64,${picture.data}` }}
+              resizeMode="contain"
+              className="w-full rounded-md border border-line"
+              style={{ height: 200 }}
+            />
+          ))}
+        </View>
+      ) : null}
     </View>
   );
 }

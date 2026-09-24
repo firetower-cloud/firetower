@@ -7,8 +7,12 @@
  * opens some unrelated file that happens to share a name. So the negatives
  * below are as load-bearing as the positives.
  */
-import { describe, expect, it } from "vitest";
-import { findPaths } from "./paths";
+import { describe, expect, it, vi } from "vitest";
+import { findPaths, resolvePath, resolvedPath } from "./paths";
+
+vi.mock("~/api/generated/sessions/sessions", () => ({
+  findFiles: vi.fn(async () => ["docs/shot.png"]),
+}));
 
 const found = (text: string) => findPaths(text).map((f) => f.path);
 
@@ -63,5 +67,29 @@ describe("findPaths", () => {
     const text = "open src/ui/Tabs.tsx now";
     const [hit] = findPaths(text);
     expect(text.slice(hit.start, hit.end)).toBe("src/ui/Tabs.tsx");
+  });
+});
+
+/**
+ * A resolved path has to be readable without awaiting.
+ *
+ * The picture in a streaming turn remounts on every delta, and a remount that
+ * has to await even an already-settled promise renders one frame of "looking
+ * for it…" first. That frame is a 420px image collapsing to a single line and
+ * coming back — the transcript jumping under somebody trying to read it.
+ */
+describe("resolvedPath", () => {
+  it("knows nothing before the first look", () => {
+    expect(resolvedPath("s_9", "docs/shot.png")).toBeUndefined();
+  });
+
+  it("answers synchronously once the look has finished", async () => {
+    await resolvePath("s_1", "docs/shot.png");
+    expect(resolvedPath("s_1", "docs/shot.png")).toBe("docs/shot.png");
+  });
+
+  it("keeps sessions apart", async () => {
+    await resolvePath("s_2", "docs/shot.png");
+    expect(resolvedPath("s_3", "docs/shot.png")).toBeUndefined();
   });
 });

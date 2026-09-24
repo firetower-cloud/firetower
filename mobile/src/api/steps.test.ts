@@ -19,6 +19,11 @@ const broke = (id: string) => item(id, "CommandExecution", "Failed");
 const running = (id: string) => item(id, "CommandExecution", undefined);
 const read = (id: string) => item(id, "FileRead", "Completed");
 const said = (id: string) => item(id, "AssistantMessage", "Completed");
+/** A read that handed back a screenshot. */
+const shot = (id: string): Item => ({
+  ...item(id, "FileRead", "Completed"),
+  images: [{ mediaType: "image/png", data: "AAAA" }],
+});
 /** A reasoning block with its text left out, which is what models send. */
 const mused = (id: string) => item(id, "Reasoning", "Completed");
 
@@ -32,6 +37,19 @@ describe("fold", () => {
     const rows = fold([ran("a"), ran("b"), ran("c")]);
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ type: "group", id: "a" });
+  });
+
+  test("a step that handed back a picture never folds away", () => {
+    // The whole reason the picture is carried: folded into "4 steps" it is
+    // behind a click, which is indistinguishable from not being there.
+    const rows = fold([ran("a"), ran("b"), shot("s"), ran("c")]);
+    expect(rows.map((r) => r.type)).toEqual(["item", "item", "item", "item"]);
+    expect(rows[2]).toMatchObject({ type: "item", item: { id: "s" } });
+  });
+
+  test("a picture breaks a run the way prose does", () => {
+    const rows = fold([ran("a"), ran("b"), ran("c"), shot("s"), ran("d"), ran("e"), ran("f")]);
+    expect(rows.map((r) => r.type)).toEqual(["group", "item", "group"]);
   });
 
   test("prose breaks a run in two", () => {
