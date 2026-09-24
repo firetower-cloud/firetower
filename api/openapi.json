@@ -10,7 +10,7 @@
       "name": "AGPL-3.0-only",
       "identifier": "AGPL-3.0-only"
     },
-    "version": "0.39.0"
+    "version": "0.40.2"
   },
   "paths": {
     "/api/v1/agent-accounts": {
@@ -5400,6 +5400,7 @@
         "enum": [
           "ClaudeCode",
           "Codex",
+          "KimiCode",
           "Shell"
         ]
       },
@@ -8308,7 +8309,8 @@
         "description": "Which agent's output a raw frame came from.\n\nCarried so that a frame kept for later is still interpretable later: the\nbytes alone do not say whose they are.",
         "enum": [
           "ClaudeStreamJson",
-          "CodexAppServer"
+          "CodexAppServer",
+          "Acp"
         ]
       },
       "Reached": {

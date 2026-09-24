@@ -42,7 +42,8 @@ use serde::{Deserialize, Serialize};
 /// older worker cannot read `TunnelOpen`, and a preview against one would take
 /// the connection down rather than answering "I can't".
 /// 13 — acknowledged agent launches and isolated per-run authentication.
-pub const PROTOCOL_VERSION: u32 = 14;
+/// 15 — KimiCode and its ACP journal require an ACP-aware worker.
+pub const PROTOCOL_VERSION: u32 = 15;
 
 mod codec;
 pub use codec::{Codec, CodecError, FrameReader, FrameWriter};

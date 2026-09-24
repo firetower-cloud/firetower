@@ -245,7 +245,7 @@ pub fn for_agent(agent: crate::Agent, models: Vec<Choice>, efforts: Vec<Choice>)
             controls
         }
         // Nothing to change about a shell.
-        crate::Agent::Shell => Vec::new(),
+        crate::Agent::KimiCode | crate::Agent::Shell => Vec::new(),
     }
 }
 
@@ -268,7 +268,7 @@ pub fn put(agent: crate::Agent, kind: ControlKind, value: &str) -> Option<serde_
             // It has no such thing.
             ControlKind::Sandbox => None,
         },
-        crate::Agent::Codex | crate::Agent::Shell => None,
+        crate::Agent::Codex | crate::Agent::KimiCode | crate::Agent::Shell => None,
     }
 }
 

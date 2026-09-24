@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.39.0
+ * OpenAPI spec version: 0.40.2
  */
 import * as zod from 'zod';
 
@@ -21,7 +21,7 @@ export const ListAgentsResponseItem = zod.object({
   "loggedIn": zod.boolean().nullish().describe('`None` when this agent can\'t be asked without being started, which is\nnot the same as being signed out.'),
   "version": zod.string().nullish()
 })),
-  "kind": zod.enum(['ClaudeCode', 'Codex', 'Shell']).describe('Which agent runs inside a workspace.\n\nSerialised as the variant name — see the wire conventions in the brief: a\nfield takes the consumer\'s casing, an enum value stays the symbol it is.'),
+  "kind": zod.enum(['ClaudeCode', 'Codex', 'KimiCode', 'Shell']).describe('Which agent runs inside a workspace.\n\nSerialised as the variant name — see the wire conventions in the brief: a\nfield takes the consumer\'s casing, an enum value stays the symbol it is.'),
   "label": zod.string(),
   "mode": zod.union([zod.null(),zod.enum(['Subscription', 'ApiKey', 'NotNeeded']).describe('`None` until someone configures it.')]).optional(),
   "needsCredential": zod.boolean().describe('True when nothing needs configuring, which is only the plain shell.'),
@@ -49,7 +49,7 @@ export const CheckAgentsResponseItem = zod.object({
   "loggedIn": zod.boolean().nullish().describe('`None` when this agent can\'t be asked without being started, which is\nnot the same as being signed out.'),
   "version": zod.string().nullish()
 })),
-  "kind": zod.enum(['ClaudeCode', 'Codex', 'Shell']).describe('Which agent runs inside a workspace.\n\nSerialised as the variant name — see the wire conventions in the brief: a\nfield takes the consumer\'s casing, an enum value stays the symbol it is.'),
+  "kind": zod.enum(['ClaudeCode', 'Codex', 'KimiCode', 'Shell']).describe('Which agent runs inside a workspace.\n\nSerialised as the variant name — see the wire conventions in the brief: a\nfield takes the consumer\'s casing, an enum value stays the symbol it is.'),
   "label": zod.string(),
   "mode": zod.union([zod.null(),zod.enum(['Subscription', 'ApiKey', 'NotNeeded']).describe('`None` until someone configures it.')]).optional(),
   "needsCredential": zod.boolean().describe('True when nothing needs configuring, which is only the plain shell.'),
@@ -115,7 +115,7 @@ export const InstallAgentResponseItem = zod.object({
   "loggedIn": zod.boolean().nullish().describe('`None` when this agent can\'t be asked without being started, which is\nnot the same as being signed out.'),
   "version": zod.string().nullish()
 })),
-  "kind": zod.enum(['ClaudeCode', 'Codex', 'Shell']).describe('Which agent runs inside a workspace.\n\nSerialised as the variant name — see the wire conventions in the brief: a\nfield takes the consumer\'s casing, an enum value stays the symbol it is.'),
+  "kind": zod.enum(['ClaudeCode', 'Codex', 'KimiCode', 'Shell']).describe('Which agent runs inside a workspace.\n\nSerialised as the variant name — see the wire conventions in the brief: a\nfield takes the consumer\'s casing, an enum value stays the symbol it is.'),
   "label": zod.string(),
   "mode": zod.union([zod.null(),zod.enum(['Subscription', 'ApiKey', 'NotNeeded']).describe('`None` until someone configures it.')]).optional(),
   "needsCredential": zod.boolean().describe('True when nothing needs configuring, which is only the plain shell.'),

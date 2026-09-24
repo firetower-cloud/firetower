@@ -119,3 +119,5 @@ Due to the early stage of the project, we don't accept contributions at the mome
 ## Licence
 
 AGPL-3.0-only. Copyright © Westlabs LLC.
+
+For experimental Kimi Code support, see [Kimi through ACP](docs/acp.md).

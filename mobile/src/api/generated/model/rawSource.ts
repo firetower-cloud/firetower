@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.39.0
+ * OpenAPI spec version: 0.40.2
  */
 
 /**
@@ -18,4 +18,5 @@ export type RawSource = typeof RawSource[keyof typeof RawSource];
 export const RawSource = {
   ClaudeStreamJson: 'ClaudeStreamJson',
   CodexAppServer: 'CodexAppServer',
+  Acp: 'Acp',
 } as const;

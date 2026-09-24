@@ -32,6 +32,21 @@ pub async fn run_agent(session: &str, workspace: PathBuf, agent: &str) -> Result
     };
 
     let launch = |start| {
+        if kind == ft_core::Agent::KimiCode {
+            return Ok(crate::agentd::Launch {
+                session_id: session.to_string(),
+                workspace: workspace.clone(),
+                env: vec![],
+                argv: vec![
+                    std::env::current_exe()?.to_string_lossy().into_owned(),
+                    "acp-run".into(),
+                    "--session".into(),
+                    session.into(),
+                    "--workspace".into(),
+                    workspace.to_string_lossy().into_owned(),
+                ],
+            });
+        }
         kind.launch_headless(session, &asking, start)
             .map(|argv| crate::agentd::Launch {
                 session_id: session.to_string(),

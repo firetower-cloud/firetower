@@ -44,7 +44,7 @@ export function Agents({ live }: { live: boolean }) {
                   <span className="block text-ui text-bone">{a.label}</span>
                   <span className="block text-micro text-mute">{a.hosts.filter((h) => h.installed).length} of {a.hosts.length} host{a.hosts.length === 1 ? "" : "s"} · {accounts.data.filter((x) => x.kind === a.kind).length} account{accounts.data.filter((x) => x.kind === a.kind).length === 1 ? "" : "s"}</span>
                 </span>
-                {a.credentialSet ? <span className="flex items-center gap-1.5 text-meta text-sage"><Icon of={Check} size={12} />signed in</span> : a.needsCredential ? <span className="text-meta text-kind-data">needs an account</span> : <span className="text-meta text-mute">no credential needed</span>}
+                {a.kind === "KimiCode" ? <span className="text-meta text-mute">worker login required</span> : a.credentialSet ? <span className="flex items-center gap-1.5 text-meta text-sage"><Icon of={Check} size={12} />signed in</span> : a.needsCredential ? <span className="text-meta text-kind-data">needs an account</span> : <span className="text-meta text-mute">no credential needed</span>}
                 <ChevronDown className={`h-3.5 w-3.5 text-mute transition-transform ${open === a.kind ? "rotate-180" : ""}`} strokeWidth={2} />
               </button>
               {open === a.kind && live && <AgentDetail agent={a} accounts={accounts.data.filter((x) => x.kind === a.kind)} onConnect={(account) => setConnecting({ agent: a, account })} />}
@@ -79,7 +79,7 @@ function AgentDetail({ agent, accounts, onConnect }: { agent: AgentView; account
               <div key={h.id} className="flex items-center gap-2 rounded-md bg-ground px-2.5 py-1.5 text-ui">
                 <span className="min-w-0 flex-1 truncate text-text">{h.name}</span>
                 <span className="font-mono text-micro text-mute">{on?.installed ? (on.version ?? "installed") : "not installed"}{on?.loggedIn ? " · signed in" : ""}</span>
-                <button disabled={install.isPending || !agent.supported} onClick={() => install.mutate({ kind: agent.kind, data: { hostId: h.id } }, { onSuccess: refresh })} className="control h-6 border border-line bg-raise text-micro text-bone hover:bg-overlay disabled:text-mute"><Icon of={Download} size={12} />{on?.installed ? "Reinstall" : "Install"}</button>
+                <button disabled={install.isPending || !agent.supported || agent.kind === "KimiCode"} onClick={() => install.mutate({ kind: agent.kind, data: { hostId: h.id } }, { onSuccess: refresh })} className="control h-6 border border-line bg-raise text-micro text-bone hover:bg-overlay disabled:text-mute"><Icon of={Download} size={12} />{on?.installed ? "Reinstall" : "Install"}</button>
               </div>
             );
           })}
@@ -87,7 +87,8 @@ function AgentDetail({ agent, accounts, onConnect }: { agent: AgentView; account
         </div>
       </div>
 
-      {agent.needsCredential && (
+      {agent.kind === "KimiCode" && <p className="text-meta text-dim">Install Kimi Code on the worker and run <code>kimi login</code> as its operating-system user. Firetower uses that login; authentication is checked when a session starts. Automatic installation and account switching are not available yet.</p>}
+      {agent.needsCredential && agent.kind !== "KimiCode" && (
         <div>
           <div className="flex items-center gap-2">
             <span className="text-meta text-dim">Accounts</span>

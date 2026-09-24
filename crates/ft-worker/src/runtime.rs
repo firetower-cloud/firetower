@@ -148,7 +148,7 @@ pub async fn install(state: &Path, kind: Agent, version: Option<&str>) -> Result
     let fetched = match kind {
         Agent::ClaudeCode => fetch_claude(&bin, &platform, version).await,
         Agent::Codex => fetch_codex(&bin, &platform, version).await,
-        Agent::Shell => unreachable!("refused above"),
+        Agent::KimiCode | Agent::Shell => unreachable!("refused above"),
     };
     if let Err(e) = fetched {
         let _ = tokio::fs::remove_dir_all(&staging).await;
@@ -193,6 +193,7 @@ fn directory(kind: Agent) -> &'static str {
         Agent::ClaudeCode => "claude-code",
         Agent::Codex => "codex",
         Agent::Shell => "shell",
+        Agent::KimiCode => "kimi",
     }
 }
 

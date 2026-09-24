@@ -44,7 +44,7 @@ export function unavailable(
 
   const here = agent.hosts.find((h) => h.hostId === hostId);
   if (!here?.installed) return `not installed on ${hostName ?? "that machine"}`;
-  if (!agent.needsCredential) return undefined;
+  if (agent.kind === "KimiCode" || !agent.needsCredential) return undefined;
   if (agent.credentialSet) return undefined;
   return "no account connected for it";
 }
