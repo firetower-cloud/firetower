@@ -43,7 +43,8 @@ use serde::{Deserialize, Serialize};
 /// the connection down rather than answering "I can't".
 /// 13 — acknowledged agent launches and isolated per-run authentication.
 /// 15 — KimiCode and its ACP journal require an ACP-aware worker.
-pub const PROTOCOL_VERSION: u32 = 15;
+/// 16 — ACP configuration commands require a worker that can apply them.
+pub const PROTOCOL_VERSION: u32 = 16;
 
 mod codec;
 pub use codec::{Codec, CodecError, FrameReader, FrameWriter};

@@ -286,6 +286,7 @@ where
     let mut input = input.lines();
     let mut next_id = 4;
     let mut active: Option<u64> = None;
+    let mut configuring: Option<Value> = None;
     let mut pending: HashMap<String, Value> = HashMap::new();
     let mut cancel_deadline = None;
     let mut queued = VecDeque::new();
@@ -337,6 +338,17 @@ where
                         }
                         // Stale answers cannot authorize a reused wire ID.
                     }
+                    Input::Configure { id, config_id, value } => {
+                        if configuring.is_some() {
+                            record(out, Record::ConfigurationRejected { id, detail: "Another setting change is still awaiting Kimi's response".into() }).await?;
+                            continue;
+                        }
+                        configuring = Some(json!(id));
+                        // A configuration response is journalled like every
+                        // other RPC. Keep reading prompts and permissions while
+                        // it is outstanding; it is not a conversation turn.
+                        send(stdin, out, json!({"jsonrpc":"2.0", "id":id, "method":"session/set_config_option", "params":{"sessionId":saved.session, "configId":config_id, "value":value}})).await?;
+                    }
                 }
             }
             message = next(stdout) => {
@@ -352,6 +364,9 @@ where
                     }
                 }
                 record(out, Record::Received { message: message.clone(), replay: false }).await?;
+                if message.get("method").is_none() && configuring.as_ref().is_some_and(|id| *id == message["id"]) {
+                    configuring = None;
+                }
                 if message.get("method").is_none() && active.is_some_and(|id| message["id"] == id) {
                     active = None;
                     cancel_deadline = None;

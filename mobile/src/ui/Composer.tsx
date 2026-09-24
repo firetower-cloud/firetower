@@ -112,6 +112,7 @@ const TAP_REST = "h-9 w-9 items-center justify-center rounded-full";
 
 export function Composer({
   sessionId,
+  acp = false,
   working,
   model,
   mode,
@@ -123,6 +124,7 @@ export function Composer({
 }: {
   /** Whose composer this is — the key a seeded draft was left under. */
   sessionId: string;
+  acp?: boolean;
   working: boolean;
   /**
    * What the agent has said it is running.
@@ -174,7 +176,7 @@ export function Composer({
    * `onPress` at all, which is to say they were a picture of a control.
    */
   const cache = useQueryClient();
-  const controls = useSessionControls(sessionId);
+  const controls = useSessionControls(sessionId, { query: { refetchInterval: acp ? 2000 : false } });
   const choose = useChooseControl();
   const [picking, setPicking] = useState<ControlKind | null>(null);
   /* What was just chosen, until the list is refetched and agrees. */
@@ -182,12 +184,22 @@ export function Composer({
 
   const offered: Control[] = controls.data ?? [];
   const inForce = (c: Control) =>
-    chosen[c.kind] ??
+    (acp ? undefined : chosen[c.kind]) ??
     c.current ??
     (c.kind === "model" ? model : c.kind === "mode" ? mode : undefined) ??
     undefined;
 
   const pick = (kind: ControlKind, value: string) => {
+    if (choose.isPending) return;
+    if (acp) {
+      Haptics.selectionAsync();
+      setPicking(null);
+      choose.mutate({ id: sessionId, data: { kind, value } }, {
+        onError: (e) => Alert.alert("Setting not confirmed", e?.message ?? "Refresh the current configuration before retrying."),
+        onSettled: () => cache.invalidateQueries({ queryKey: getSessionControlsQueryKey(sessionId) }),
+      });
+      return;
+    }
     Haptics.selectionAsync();
     setChosen((was) => ({ ...was, [kind]: value }));
     if (kind === "model" || kind === "mode" || kind === "effort") onRemember?.(kind, value);

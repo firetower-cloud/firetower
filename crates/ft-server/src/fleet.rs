@@ -194,6 +194,9 @@ impl Progress {
 
     /// The pickers this session has, and what is in each.
     fn controls(&self) -> Vec<ft_core::controls::Control> {
+        if let ft_core::normalise::Reader::Acp(reader) = &self.reader {
+            return reader.controls();
+        }
         let (models, efforts, reported) = match &self.reader {
             ft_core::normalise::Reader::Codex(reader) => (
                 reader.models().to_vec(),
@@ -247,6 +250,12 @@ impl Progress {
         kind: ft_core::controls::ControlKind,
         value: &str,
     ) -> Result<Option<serde_json::Value>> {
+        if let ft_core::normalise::Reader::Acp(reader) = &self.reader {
+            return reader
+                .configure(kind, value)
+                .context("Kimi has not offered this setting or value")
+                .map(Some);
+        }
         // The agent that is told. Nothing to remember: it says what it is
         // running at the start of every turn, and that is what the picker then
         // shows.
@@ -2734,6 +2743,22 @@ impl Fleet {
                 .with_context(|| format!("writing down {kind:?} for {session_id}"));
         };
 
+        // Unlike Codex's next-turn settings, ACP applies a change by RPC.
+        // Subscribe before sending so even an immediate refusal is observed.
+        let confirmation = if message["acp"] == "Configure" {
+            Some((
+                message["id"].clone(),
+                self.watch_agent(
+                    host_id,
+                    session_id,
+                    self.db.last_agent_line(session_id).await?.max(0) as u64,
+                )
+                .await?,
+            ))
+        } else {
+            None
+        };
+
         self.send(
             host_id,
             ToWorker::SendTurn {
@@ -2741,7 +2766,32 @@ impl Fleet {
                 message,
             },
         )
-        .await
+        .await?;
+
+        if let Some((id, mut speech)) = confirmation {
+            tokio::time::timeout(std::time::Duration::from_secs(30), async {
+                loop {
+                    match speech.recv().await? {
+                        AgentSpeech::Line { line, .. } => {
+                            match serde_json::from_str(&line) {
+                                Ok(ft_core::acp::Record::ConfigurationRejected { id: rejected, detail }) if id == rejected => anyhow::bail!("{detail}"),
+                                Ok(ft_core::acp::Record::Received { message, .. }) if message.get("method").is_none() && message["id"] == id => {
+                                    if let Some(error) = message.get("error") {
+                                        anyhow::bail!("Kimi refused the setting: {error}");
+                                    }
+                                    anyhow::ensure!(message["result"]["configOptions"].is_array(), "Kimi did not confirm its configuration");
+                                    return Ok(());
+                                }
+                                _ => {}
+                            }
+                        }
+                        AgentSpeech::Closed => anyhow::bail!("Kimi stopped before confirming the setting"),
+                        _ => {}
+                    }
+                }
+            }).await.context("Kimi did not confirm the setting in time; refresh its current configuration before retrying")??;
+        }
+        Ok(())
     }
 
     /// One message for the agent, in whatever shape that agent takes.

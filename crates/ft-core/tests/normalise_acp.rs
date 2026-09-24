@@ -3,6 +3,76 @@ use ft_core::turn::{StreamKind, TurnEvent, TurnStatus};
 use serde_json::json;
 
 #[test]
+fn session_configuration_is_discovered_on_load_and_replaced_while_idle() {
+    use ft_core::controls::ControlKind;
+    let mut reader = AcpNormaliser::default();
+    let options = json!([
+        {"id":"provider-model","category":"model","name":"Model","type":"select","currentValue":"a","options":[{"value":"a","name":"Alpha"},{"value":"b","name":"Beta"}]},
+        {"id":"thinking","category":"thought_level","name":"Thinking","type":"select","currentValue":"high","options":[{"value":"high","name":"High"}]},
+        {"id":"permissions","category":"mode","name":"Mode","type":"select","currentValue":"auto","options":[{"value":"auto","name":"Auto"}]}
+    ]);
+    for record in [
+        Record::Started { epoch: "e".into() },
+        Record::Sent {
+            message: json!({"id":2,"method":"session/load","params":{"sessionId":"s"}}),
+        },
+        Record::Received {
+            message: json!({"id":2,"result":{"configOptions":options}}),
+            replay: true,
+        },
+        Record::Ready {
+            session: "s".into(),
+        },
+    ] {
+        reader.push(&serde_json::to_string(&record).unwrap());
+    }
+    let controls = reader.controls();
+    assert_eq!(controls.len(), 2, "only model and effort are in scope");
+    assert_eq!(controls[0].kind, ControlKind::Model);
+    assert_eq!(controls[0].choices[1].label, "Beta");
+    assert_eq!(controls[0].current.as_deref(), Some("a"));
+    assert_eq!(controls[1].kind, ControlKind::Effort);
+    let change = reader.configure(ControlKind::Effort, "high").unwrap();
+    assert_eq!(
+        change["config_id"], "thinking",
+        "route by the advertised ID, not category"
+    );
+    assert!(reader.configure(ControlKind::Model, "invented").is_none());
+    assert!(reader.configure(ControlKind::Mode, "auto").is_none());
+    reader.push(
+        &serde_json::to_string(&Record::Sent {
+            message: json!({"id":"change","method":"session/set_config_option"}),
+        })
+        .unwrap(),
+    );
+    reader.push(
+        &serde_json::to_string(&Record::Received {
+            message: json!({"id":"change","error":{"code":-32602,"message":"unavailable"}}),
+            replay: false,
+        })
+        .unwrap(),
+    );
+    assert_eq!(
+        reader.controls(),
+        controls,
+        "a refusal keeps the accepted configuration"
+    );
+    let update = Record::Received {
+        message: json!({"method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"config_option_update","configOptions":[]}}}),
+        replay: false,
+    };
+    reader.push(&serde_json::to_string(&update).unwrap());
+    assert!(
+        reader.controls().is_empty(),
+        "the full list replaces stale choices"
+    );
+    assert!(
+        !reader.working(),
+        "configuration must not start a conversation turn"
+    );
+}
+
+#[test]
 fn a_prompt_streams_and_only_its_own_response_completes_it() {
     let mut reader = AcpNormaliser::default();
     let records = [
@@ -125,4 +195,49 @@ fn tool_content_snapshots_do_not_repeat_partial_arguments_as_output() {
         }
     }
     assert_eq!(output, "done");
+}
+
+#[test]
+fn accepted_model_change_replaces_efforts_without_starting_or_finishing_a_turn() {
+    use ft_core::controls::ControlKind;
+    let mut reader = AcpNormaliser::default();
+    let mut feed = |record| reader.push(&serde_json::to_string(&record).unwrap());
+    feed(Record::Started { epoch: "e".into() });
+    feed(Record::Ready {
+        session: "s".into(),
+    });
+    feed(Record::Sent {
+        message: json!({"id":4,"method":"session/prompt","params":{"prompt":[]}}),
+    });
+    feed(Record::Sent {
+        message: json!({"id":"choice","method":"session/set_config_option"}),
+    });
+    let events = feed(Record::Received {
+        message: json!({"id":"choice","result":{"configOptions":[
+            {"id":"model-id","category":"model","name":"Model","type":"select","currentValue":"b","options":[{"group":"family","name":"Family","options":[{"value":"b","name":"Beta"}]}]},
+            {"id":"effort-id","category":"thought_level","name":"Effort","type":"select","currentValue":"low","options":[{"value":"low","name":"Low"}]}
+        ]}}),
+        replay: false,
+    });
+    assert!(reader.working());
+    assert!(!events.iter().any(|e| matches!(
+        e,
+        TurnEvent::TurnCompleted { .. } | TurnEvent::TurnStarted { .. }
+    )));
+    assert_eq!(reader.controls()[0].current.as_deref(), Some("b"));
+    assert_eq!(reader.controls()[0].choices[0].label, "Beta");
+    assert!(reader.configure(ControlKind::Effort, "high").is_none());
+    assert!(reader.configure(ControlKind::Effort, "low").is_some());
+    reader.push(&serde_json::to_string(&Record::Received { message:json!({"method":"session/update","params":{"sessionId":"other","update":{"sessionUpdate":"config_option_update","configOptions":[]}}}), replay:false }).unwrap());
+    assert_eq!(reader.controls().len(), 2);
+    reader.push(
+        &serde_json::to_string(&Record::Started {
+            epoch: "restarted".into(),
+        })
+        .unwrap(),
+    );
+    assert!(
+        reader.controls().is_empty(),
+        "do not advertise stale choices during restart"
+    );
 }
