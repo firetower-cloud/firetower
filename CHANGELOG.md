@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.40.2](https://github.com/firetower-cloud/firetower/compare/firetower-v0.40.1...firetower-v0.40.2) (2026-09-24)
+
+
+### Bug Fixes
+
+* **mobile:** submit to TestFlight with the EAS API key and a literal ascAppId ([e8f071a](https://github.com/firetower-cloud/firetower/commit/e8f071a20bdca040d627ae41d1810b1ced8a61d3))
+
 ## [0.40.1](https://github.com/firetower-cloud/firetower/compare/firetower-v0.40.0...firetower-v0.40.1) (2026-09-23)
 
 
