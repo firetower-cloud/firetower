@@ -306,6 +306,7 @@ function Conversation({ place }: { place: Workspace }) {
 
       <Composer
         sessionId={speaker.id}
+        acp={speaker.agent === "KimiCode"}
         working={conversation.working}
         model={conversation.model}
         mode={conversation.mode}

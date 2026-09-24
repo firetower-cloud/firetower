@@ -156,7 +156,8 @@ export function Composer({
   const attach = useAttachFile();
   const interrupt = useInterruptSession();
   const choose = useChooseControl();
-  const controls = useSessionControls(session.id);
+  const acp = session.agent === "KimiCode";
+  const controls = useSessionControls(session.id, { query: { refetchInterval: acp ? 2000 : false } });
 
   // What a session can be asked to change is not known when it opens: an
   // agent that lists its own models answers a moment later. Saying which model
@@ -363,6 +364,15 @@ export function Composer({
   };
 
   const set = (kind: ControlKind, value: string) => {
+    if (acp) {
+      if (choose.isPending) return;
+      setRefused(null);
+      choose.mutate({ id: session.id, data: { kind, value } }, {
+        onError: (e) => setRefused(`The setting could not be confirmed. ${e instanceof Error ? e.message : ""}`.trim()),
+        onSettled: () => controls.refetch(),
+      });
+      return;
+    }
     if (kind === "model" || kind === "mode" || kind === "effort") onRemember(kind, value);
     setChosen((was) => ({ ...was, [kind]: value }));
     choose.mutate({ id: session.id, data: { kind, value } }, { onSuccess: () => controls.refetch() });
@@ -482,7 +492,8 @@ export function Composer({
               <Picker
                 key={c.kind}
                 control={c}
-                value={chosen[c.kind] ?? c.current ?? (c.kind === "model" ? conversation.model : c.kind === "mode" ? conversation.mode : undefined)}
+                disabled={acp && choose.isPending}
+                value={(acp ? c.current : chosen[c.kind] ?? c.current) ?? (c.kind === "model" ? conversation.model : c.kind === "mode" ? conversation.mode : undefined)}
                 onPick={(v) => set(c.kind, v)}
               />
             ))}
@@ -553,12 +564,12 @@ export function Composer({
   );
 }
 
-function Picker({ control, value, onPick }: { control: Control; value?: string; onPick: (v: string) => void }) {
+function Picker({ control, value, onPick, disabled = false }: { control: Control; value?: string; onPick: (v: string) => void; disabled?: boolean }) {
   const [open, setOpen] = useState(false);
   const here = control.choices.find((c) => c.value === value);
   return (
     <div className="relative">
-      <button onClick={() => setOpen(!open)} className="control text-mute hover:bg-raise hover:text-bone">
+      <button disabled={disabled} onClick={() => setOpen(!open)} className="control text-mute hover:bg-raise hover:text-bone">
         {here?.label ?? control.fallback}
         <ChevronDown className="h-3 w-3" strokeWidth={2} />
       </button>
@@ -569,6 +580,7 @@ function Picker({ control, value, onPick }: { control: Control; value?: string; 
             {control.choices.map((c) => (
               <button
                 key={c.value}
+                disabled={disabled}
                 onClick={() => {
                   onPick(c.value);
                   setOpen(false);

@@ -39,6 +39,13 @@ for line in sys.stdin:
     elif method == "session/cancel":
         emit({"id":active,"result":{"stopReason":"cancelled"}})
         active = None
+    elif method == "session/set_config_option":
+        if scenario == "configure-hold":
+            continue
+        if m["params"]["value"] == "refused":
+            emit({"id":m["id"], "error":{"code":-32602,"message":"Model unavailable"}})
+        else:
+            emit({"id":m["id"], "result":{"configOptions":[{"id":"thinking","category":"thought_level","name":"Thinking","type":"select","currentValue":m["params"]["value"],"options":[{"value":"low","name":"Low"}]}]}})
     elif method is None and m.get("id") == "permit-1":
         emit({"id":active,"result":{"stopReason":"end_turn"}})
         active = None

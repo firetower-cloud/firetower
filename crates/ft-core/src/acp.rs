@@ -3,6 +3,7 @@
 //! The durable worker owns the connection. It journals both directions because
 //! ACP does not echo prompts or name turns. Request IDs plus the process epoch
 //! make those identities stable when the same journal is read again.
+use crate::controls::{Choice, Control, ControlKind};
 use crate::turn::*;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -16,15 +17,26 @@ pub enum Record {
     Received { message: Value, replay: bool },
     Ready { session: String },
     Failed { detail: String },
+    ConfigurationRejected { id: String, detail: String },
 }
 
 /// Commands from Firetower to the ACP connection, not ACP wire methods.
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "acp")]
 pub enum Input {
-    Prompt { text: String },
+    Prompt {
+        text: String,
+    },
     Cancel,
-    Decide { req: String, decision: Decision },
+    Decide {
+        req: String,
+        decision: Decision,
+    },
+    Configure {
+        id: String,
+        config_id: String,
+        value: String,
+    },
 }
 
 pub fn prompt(text: &str) -> Value {
@@ -64,9 +76,88 @@ pub struct AcpNormaliser {
     session: Option<String>,
     items: BTreeSet<ItemId>,
     requests: BTreeSet<String>,
+    configuration_requests: BTreeSet<String>,
+    configuration: Vec<(String, Control)>,
 }
 
 impl AcpNormaliser {
+    pub fn controls(&self) -> Vec<Control> {
+        self.configuration
+            .iter()
+            .map(|(_, control)| control.clone())
+            .collect()
+    }
+
+    pub fn configure(&self, kind: ControlKind, value: &str) -> Option<Value> {
+        let (id, _) = self.configuration.iter().find(|(_, c)| {
+            c.kind == kind && c.choices.iter().any(|choice| choice.value == value)
+        })?;
+        serde_json::to_value(Input::Configure {
+            id: crate::SessionId::new().to_string(),
+            config_id: id.clone(),
+            value: value.into(),
+        })
+        .ok()
+    }
+
+    fn configured(&mut self, options: &Value, events: &mut Vec<TurnEvent>) {
+        let Some(options) = options.as_array() else {
+            return;
+        };
+        self.configuration = options
+            .iter()
+            .filter_map(|option| {
+                let kind = match option["category"].as_str()? {
+                    "model" => ControlKind::Model,
+                    "thought_level" => ControlKind::Effort,
+                    _ => return None,
+                };
+                if option["type"] != "select" {
+                    return None;
+                }
+                let mut choices = Vec::new();
+                for entry in option["options"].as_array()? {
+                    let entries = entry
+                        .get("options")
+                        .and_then(Value::as_array)
+                        .map(Vec::as_slice)
+                        .unwrap_or_else(|| std::slice::from_ref(entry));
+                    for choice in entries {
+                        if let (Some(value), Some(name)) =
+                            (choice["value"].as_str(), choice["name"].as_str())
+                        {
+                            choices.push(Choice::of(
+                                name,
+                                value,
+                                choice["description"].as_str().unwrap_or(""),
+                            ));
+                        }
+                    }
+                }
+                Some((
+                    option["id"].as_str()?.to_owned(),
+                    Control {
+                        kind,
+                        fallback: option["name"].as_str().unwrap_or("Setting").into(),
+                        choices,
+                        current: option["currentValue"].as_str().map(str::to_owned),
+                    },
+                ))
+            })
+            .collect();
+        events.push(TurnEvent::SessionConfigured {
+            model: self
+                .configuration
+                .iter()
+                .find(|(_, c)| c.kind == ControlKind::Model)
+                .and_then(|(_, c)| c.current.clone())
+                .unwrap_or_default(),
+            mode: String::new(),
+            tools: Vec::new(),
+            commands: Vec::new(),
+        });
+    }
+
     pub fn working(&self) -> bool {
         self.active.is_some()
     }
@@ -77,6 +168,7 @@ impl AcpNormaliser {
         };
         let mut events = Vec::new();
         match record {
+            Record::ConfigurationRejected { .. } => {}
             Record::Started { epoch } => {
                 self.finish(
                     TurnStatus::Interrupted,
@@ -85,6 +177,8 @@ impl AcpNormaliser {
                 );
                 self.epoch = epoch;
                 self.session = None;
+                self.configuration.clear();
+                self.configuration_requests.clear();
             }
             Record::Ready { session } => self.session = Some(session),
             Record::Failed { detail } => {
@@ -95,6 +189,13 @@ impl AcpNormaliser {
                 self.finish(TurnStatus::Failed, Some(detail), &mut events);
             }
             Record::Sent { message } => {
+                if matches!(
+                    message["method"].as_str(),
+                    Some("session/new" | "session/load" | "session/set_config_option")
+                ) {
+                    self.configuration_requests
+                        .insert(message["id"].to_string());
+                }
                 if message["method"] == "session/prompt" {
                     let key = request_key(&self.epoch, &message["id"]);
                     let turn = TurnId::new(&key);
@@ -133,6 +234,23 @@ impl AcpNormaliser {
                 }
             }
             Record::Received { message, replay } => {
+                // Loading suppresses historical conversation, not the current
+                // session configuration returned by the agent.
+                if message.get("method").is_none()
+                    && self
+                        .configuration_requests
+                        .remove(&message["id"].to_string())
+                    && message.get("error").is_none()
+                {
+                    self.configured(&message["result"]["configOptions"], &mut events);
+                }
+                if message["method"] == "session/update"
+                    && self.session.as_deref() == message["params"]["sessionId"].as_str()
+                    && message["params"]["update"]["sessionUpdate"] == "config_option_update"
+                {
+                    self.configured(&message["params"]["update"]["configOptions"], &mut events);
+                    return events;
+                }
                 // The journal already has this history. A load replays it for
                 // the agent/client handshake, not as new user-visible work.
                 if replay {

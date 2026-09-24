@@ -306,3 +306,69 @@ async fn malformed_output_and_process_exit_are_visible_failures_not_retries() {
         assert!(peer.task.await.unwrap().is_err());
     }
 }
+
+#[tokio::test]
+async fn configuration_replies_keep_their_ids_and_refusal_does_not_end_the_session() {
+    let mut peer = Peer::start("normal", false).await;
+    peer.ready().await;
+    for value in ["refused", "low"] {
+        peer.send(Input::Configure {
+            id: format!("setting-{value}"),
+            config_id: "thinking".into(),
+            value: value.into(),
+        })
+        .await;
+        let sent = peer.sent("session/set_config_option").await;
+        assert_eq!(sent["params"]["configId"], "thinking");
+        assert_eq!(sent["params"]["sessionId"], "fixture-session");
+        loop {
+            if let Record::Received { message, .. } = peer.record().await {
+                if message["id"] == sent["id"] {
+                    if value == "refused" {
+                        assert_eq!(message["error"]["code"], -32602);
+                    } else {
+                        assert_eq!(message["result"]["configOptions"][0]["currentValue"], "low");
+                    }
+                    break;
+                }
+            }
+        }
+    }
+    peer.send(Input::Prompt {
+        text: "still usable".into(),
+    })
+    .await;
+    assert_eq!(
+        peer.sent("session/prompt").await["params"]["sessionId"],
+        "fixture-session"
+    );
+    peer.finish().await;
+}
+
+#[tokio::test]
+async fn a_second_configuration_is_rejected_until_the_first_has_a_response() {
+    let mut peer = Peer::start("configure-hold", false).await;
+    peer.ready().await;
+    for id in ["first", "second"] {
+        peer.send(Input::Configure {
+            id: id.into(),
+            config_id: "model".into(),
+            value: "a".into(),
+        })
+        .await;
+    }
+    assert_eq!(peer.sent("session/set_config_option").await["id"], "first");
+    match peer.record().await {
+        Record::ConfigurationRejected { id, detail } => {
+            assert_eq!(id, "second");
+            assert!(detail.contains("awaiting"));
+        }
+        other => panic!("second setting must not reach the agent: {other:?}"),
+    }
+    peer.send(Input::Prompt {
+        text: "still responsive".into(),
+    })
+    .await;
+    peer.sent("session/prompt").await;
+    peer.finish().await;
+}

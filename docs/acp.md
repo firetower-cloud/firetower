@@ -20,15 +20,33 @@ An installed binary allows attempting a session; it is not proof of authenticate
 readiness. Login failures are surfaced by the session startup.
 
 Select **Kimi Code** when creating a workspace or adding an agent. No account
-needs to be connected in Firetower. Model and permission mode come from Kimi's
+needs to be connected in Firetower. Model and thinking selectors use Kimi's
+advertised ACP session configuration; permission mode comes from Kimi's
 configuration. Requests Kimi sends appear in Firetower's existing approval UI;
 Firetower does not override the agent's existing permission rules. Images,
-agent setting controls, automatic PR descriptions and automatic installation
+permission-mode controls, automatic PR descriptions and automatic installation
 are not supported yet.
 
 Kimi 2.0.2 negotiated ACP v1 and `loadSession` in the live compatibility check.
 It runs with its own filesystem/terminal tools. This client advertises neither
 optional host capability and explicitly rejects unsupported reverse requests.
+
+## Model and thinking controls
+
+The existing Firetower pickers expose only the model and thought-level options
+announced by Kimi in `configOptions`. Lists, labels, current values and RPC IDs
+come from the agent; Firetower does not maintain a model catalogue. Changes use
+`session/set_config_option`, and return success only after Kimi replies with its
+configuration. A refusal leaves the last accepted value visible. A timeout is
+reported as unconfirmed, since the agent may still complete the change. A second
+change is rejected while the first is awaiting a reply, including across clients.
+
+Full configuration responses and `config_option_update` notifications replace
+the previous options, including any model-dependent thinking levels. On restart,
+Firetower reads the configuration returned by `session/load` rather than applying
+cached defaults. Kimi owns persistence of its settings. Model selection was
+verified on Kimi Code 2.0.2; older Python `kimi-cli` versions can have different
+configuration and persistence behavior.
 
 ## Session behavior
 
@@ -74,7 +92,8 @@ reconnect and agent restart. Inspect both the authenticated conversation API
 and the UI. A handshake or fixture run is not a substitute for live acceptance.
 
 Upgrade workers and clients with the control plane: the worker protocol version
-is bumped because older workers cannot deserialize the new agent variant.
+is 16 because older workers cannot deserialize the new agent variant or its
+configuration command.
 The released desktop client also rejects ACP conversation frames under its old
 schema, leaving a session apparently working after the agent has replied. For
 this prototype, build the desktop client from the same branch; installing the
