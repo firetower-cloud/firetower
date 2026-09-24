@@ -4,12 +4,43 @@ Firetower can drive a preinstalled Kimi Code CLI through `kimi acp`. This is
 an additional transport; Claude Code retains stream-json and Codex retains
 its app-server. The initial integration accepts text prompts only.
 
-## Prepare the worker
+## Connect Kimi Code
 
-Install Kimi Code on the worker machine and put `kimi` on its `PATH`. Run
-`kimi login` as the worker's operating-system user. Preserve that user's Kimi
-configuration and session storage across restarts. A laptop login does not
-authenticate a remote worker.
+1. Use a Firetower server, worker and client built from this ACP-enabled branch.
+   A server update alone is not enough; see the compatibility note below.
+2. Install Kimi Code CLI on the **worker machine that will run the agent**.
+   For a remote worker, run the following steps there, not on your laptop.
+3. As the **same operating-system user that runs the Firetower worker**, check
+   that Kimi is available and sign in:
+
+   ```sh
+   command -v kimi
+   kimi --version
+   kimi login
+   ```
+
+   Complete the authentication flow opened by `kimi login`. The tested CLI
+   version is Kimi Code 2.0.2. The worker process must have `kimi` on its own
+   `PATH`, including when it is started by a service manager. In a container,
+   install and authenticate Kimi inside the worker's runtime environment.
+4. In Firetower, create a workspace or add an agent to an existing workspace,
+   select that worker, then choose **Kimi Code**.
+5. Once Kimi starts, use the existing **Model** and **Thinking** pickers under
+   the message field. Their choices come from Kimi and can vary by model.
+6. Send a short message and check that a reply appears and the turn finishes.
+   Detecting the executable or displaying a model list alone does not verify
+   that the worker's login and quota permit a conversation.
+
+There is no separate **Connect Kimi account** flow or API-key field in Firetower
+in this version. It uses the worker user's existing Kimi login. The **no account**
+label refers to Firetower-managed accounts; it does not mean that Kimi is signed
+out. Preserve that user's Kimi configuration and session storage across worker
+restarts. A laptop login does not authenticate a remote worker.
+
+If Kimi is missing, check the worker process's `PATH`. If startup reports an
+authentication failure, run `kimi login` as that worker user and start the agent
+again. If the model selectors are missing, check that both the worker and the
+client include this integration and that the Kimi session has started.
 
 This prototype uses that worker login. It does not isolate Kimi accounts per
 Firetower user, transfer credentials, install Kimi, or participate in account
