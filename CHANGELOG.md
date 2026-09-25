@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.41.1](https://github.com/firetower-cloud/firetower/compare/firetower-v0.41.0...firetower-v0.41.1) (2026-09-25)
+
+
+### Bug Fixes
+
+* **kimi:** install the published binary, and read the login off stderr ([103af07](https://github.com/firetower-cloud/firetower/commit/103af07d55ee58a355c85e59bcdb86265d536ed7))
+* **kimi:** let the reason a sign-in failed reach the person ([696430e](https://github.com/firetower-cloud/firetower/commit/696430ebaef040a9ede85b6a4f33a4c04f81b9fa))
+* **kimi:** use published binary instead of npm, fix login stderr ([d264fdd](https://github.com/firetower-cloud/firetower/commit/d264fddac10e6cb53fc8cb6aa0dfd86b5de1883a))
+
 ## [0.41.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.40.2...firetower-v0.41.0) (2026-09-25)
 
 
