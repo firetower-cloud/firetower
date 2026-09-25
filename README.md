@@ -68,12 +68,6 @@ The workers can run locally or on any remote server as well. Their only job is t
 
 The control plane and the worker communicate entirely through SSH, and you can close and reopen the connection at any time.
 
-<div align="center">
-
-[![Read how it works](https://img.shields.io/badge/Read_how_it_works-525252?style=for-the-badge&logo=readthedocs&logoColor=white&labelColor=525252)](https://usefiretower.com/docs/self-hosting)
-
-</div>
-
 ## Running it
 
 To install the control plane, on a Linux server:
