@@ -15,6 +15,20 @@ Running Firetower needs Docker and one compose file — that is the
 > answer — often the better fix is a smaller one, or none at all — and that is
 > a much easier conversation to have before the code exists than after.
 
+### Request for contribution
+
+These are the areas where help is worth the most right now.
+
+- **The website and the documentation.** Improving the site for SEO, adding translations, working on the brand identity (only if you're f*cking talented for this), and making sure the docs cover their blind spots.
+- **Support for more AI providers.** Hermes, OpenCode, and more. Ideally one you use every day, so you can test it thoughtfully against a real workload instead of a hello world.
+- **Support for other git providers.** GitLab, Gitea, and the rest — today a repository means GitHub.
+- **Support for more task trackers.** GitHub and Linear are the two we read work from. More of them, or anything else that makes the development workflow around a session better.
+- **Memory management.** Workers run on Macs and on Linux servers. Per-workspace memory management, reporting usage, and the like are going to matter as the project grows. Only take one of these on if you know what you're doing.
+
+Each of these is bigger than a single pull request, so we want to organise them into working groups in the community — one per area, so that the people working on the same thing are talking to each other rather than building it twice. Tell us which one interests you when you join.
+
+For everything else, come and talk to us in the [community](https://discord.gg/uVa8wsYym).
+
 ## Requirements
 
 | | Why |
