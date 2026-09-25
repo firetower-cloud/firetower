@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.15.0](https://github.com/firetower-cloud/firetower/compare/desktop-v0.14.0...desktop-v0.15.0) (2026-09-25)
+
+
+### Features
+
+* add an experimental ACP transport with Kimi Code ([#101](https://github.com/firetower-cloud/firetower/issues/101)) ([5d84e48](https://github.com/firetower-cloud/firetower/commit/5d84e48a35bf410958d04004c4c5428bd4a38fc0))
+* **conversation:** show the pictures an agent hands back ([27431b9](https://github.com/firetower-cloud/firetower/commit/27431b94757fa1644c35dbf7641e14908ffb4bde))
+* **kimi:** connect an account from the control plane, and install it ([fde88f0](https://github.com/firetower-cloud/firetower/commit/fde88f04ad7eb1f6bdc7acea8fb6f7435aaa7a75))
+* reuse model and effort controls for Kimi ACP ([e2d1c7c](https://github.com/firetower-cloud/firetower/commit/e2d1c7c06c48ed2f359ba6a27a5a7496b8c05d13))
+* show agent screenshots and reclaim finished workspaces ([b5a766b](https://github.com/firetower-cloud/firetower/commit/b5a766b3755cfb6d1fc59e7ae5868cdc88823220))
+
 ## [0.14.0](https://github.com/firetower-cloud/firetower/compare/desktop-v0.13.0...desktop-v0.14.0) (2026-09-23)
 
 
