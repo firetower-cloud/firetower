@@ -3,6 +3,18 @@
 Running Firetower needs Docker and one compose file — that is the
 [README](README.md). Building it needs a toolchain, and that is this.
 
+## Before you start
+
+> [!WARNING]
+> **Talk to us before you write anything beyond a small fix.**
+> [Join the Discord](https://discord.gg/uVa8wsYym) or open an issue first.
+>
+> We accept contributions, but the project is still moving quickly and we don't
+> want you to spend a weekend on something that is about to change underneath
+> you, or that we won't merge. Adding a feature also isn't always the right
+> answer — often the better fix is a smaller one, or none at all — and that is
+> a much easier conversation to have before the code exists than after.
+
 ## Requirements
 
 | | Why |
