@@ -35,6 +35,7 @@ export function usable(account: Account): boolean {
   return account.enabled && account.state === "connected" && account.credentialSet;
 }
 
+
 /** `five_hour` → `5h`: the window, said the short way. */
 function window(scope: string): string {
   return scope.replace(/^(five|5)_hour$/, "5h").replace(/^(seven|7)_day$/, "7d").replace(/_/g, " ");

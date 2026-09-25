@@ -117,6 +117,7 @@ pub enum Reader {
     // to be smaller today would still pay for the other.
     Claude(Box<ClaudeNormaliser>),
     Codex(Box<crate::codex::CodexNormaliser>),
+    Acp(Box<crate::acp::AcpNormaliser>),
 }
 
 impl Reader {
@@ -131,6 +132,7 @@ impl Reader {
                 reader.sent_model_list(crate::codex::MODEL_LIST_ID);
                 Reader::Codex(Box::new(reader))
             }
+            crate::Agent::KimiCode => Reader::Acp(Box::default()),
             _ => Reader::Claude(Box::new(ClaudeNormaliser::new())),
         }
     }
@@ -140,13 +142,14 @@ impl Reader {
         match self {
             Reader::Claude(reader) => reader.push(line),
             Reader::Codex(reader) => reader.push(line),
+            Reader::Acp(reader) => reader.push(line),
         }
     }
 
     /// The Codex thread this conversation is in, when there is one.
     pub fn thread(&self) -> Option<&str> {
         match self {
-            Reader::Claude(_) => None,
+            Reader::Claude(_) | Reader::Acp(_) => None,
             Reader::Codex(reader) => reader.thread(),
         }
     }
@@ -154,7 +157,7 @@ impl Reader {
     /// The turn now running, for the agents that need one named to stop it.
     pub fn active_turn(&self) -> Option<&str> {
         match self {
-            Reader::Claude(_) => None,
+            Reader::Claude(_) | Reader::Acp(_) => None,
             Reader::Codex(reader) => reader.active_turn(),
         }
     }
@@ -170,6 +173,7 @@ impl Reader {
         match self {
             Reader::Claude(reader) => reader.working(),
             Reader::Codex(reader) => reader.active_turn().is_some(),
+            Reader::Acp(reader) => reader.working(),
         }
     }
 }

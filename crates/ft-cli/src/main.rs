@@ -171,6 +171,14 @@ enum Command {
         agent: String,
     },
 
+    /// Hold one ACP connection beneath the session supervisor.
+    #[command(hide = true)]
+    AcpRun {
+        #[arg(long)]
+        session: String,
+        #[arg(long)]
+        workspace: std::path::PathBuf,
+    },
     /// Answer the agent's permission prompts. Run by the agent, never by hand.
     ///
     /// Here as well as on `firetower-worker` for the same reason `agent-run`
@@ -248,6 +256,9 @@ async fn main() -> Result<()> {
             ft_worker::entry::run_agent(&session, workspace, &agent).await
         }
 
+        Some(Command::AcpRun { session, workspace }) => {
+            return ft_worker::acp::run(&session, &workspace).await;
+        }
         Some(Command::McpApprove { session, workspace }) => {
             // No tracing anywhere near this: stdout carries the protocol, and
             // a stray log line would be read as a malformed frame.

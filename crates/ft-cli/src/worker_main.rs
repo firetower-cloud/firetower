@@ -155,6 +155,14 @@ enum Command {
         #[arg(long, default_value = "ClaudeCode")]
         agent: String,
     },
+    /// Hold one ACP connection beneath the session supervisor.
+    #[command(hide = true)]
+    AcpRun {
+        #[arg(long)]
+        session: String,
+        #[arg(long)]
+        workspace: std::path::PathBuf,
+    },
     /// Answer the agent's permission prompts. Run by the agent, never by hand.
     ///
     /// An MCP server the agent starts for itself, from the configuration the
@@ -240,6 +248,9 @@ async fn main() -> Result<()> {
                 .init();
 
             return ft_worker::entry::run_agent(&session, workspace, &agent).await;
+        }
+        Some(Command::AcpRun { session, workspace }) => {
+            return ft_worker::acp::run(&session, &workspace).await;
         }
         Some(Command::McpApprove { session, workspace }) => {
             return ft_worker::approver::serve(&session, &workspace).await;
@@ -432,6 +443,7 @@ fn directory_name(kind: ft_core::Agent) -> &'static str {
     match kind {
         ft_core::Agent::ClaudeCode => "claude-code",
         ft_core::Agent::Codex => "codex",
+        ft_core::Agent::KimiCode => "kimi",
         ft_core::Agent::Shell => "shell",
     }
 }

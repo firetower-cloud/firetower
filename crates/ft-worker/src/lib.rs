@@ -52,6 +52,7 @@ const MAX_DOWNLOAD: u64 = 100 * 1_048_576;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::{mpsc, Mutex};
 
+pub mod acp;
 pub mod agentd;
 pub mod agents;
 pub mod approver;
@@ -68,6 +69,7 @@ pub mod first_run;
 pub mod git;
 pub mod history;
 pub mod hooks;
+pub mod kimi;
 pub mod path;
 pub mod readiness;
 pub mod runtime;
@@ -525,33 +527,55 @@ impl Worker {
             // Two answers, minutes apart: the code to show, and then whatever
             // came of somebody approving it. The waiting is a task rather than
             // this function, which has a whole worker's other frames to carry.
-            ToWorker::CodexLoginStart { req } => {
-                let home = self.root.join("codex-login").join(&req);
-                let started = codex::start(&self.root, &home).await;
+            ToWorker::AgentLoginStart { req, agent, region } => {
+                /// Two agents, one shape: a code to show now and a credential
+                /// later. They share nothing else, so the waiting stays typed.
+                enum Signing {
+                    Codex(codex::Waiting),
+                    Kimi(kimi::Waiting),
+                }
+
+                let home = self.root.join("agent-login").join(&req);
+                let started = match agent {
+                    ft_core::Agent::Codex => codex::start(&self.root, &home)
+                        .await
+                        .map(|(p, w)| (p.user_code, p.verification_url, Signing::Codex(w))),
+                    ft_core::Agent::KimiCode => {
+                        kimi::start(&self.root, &home, region.as_deref().unwrap_or("global"))
+                            .await
+                            .map(|(p, w)| (p.user_code, p.verification_url, Signing::Kimi(w)))
+                    }
+                    other => Err(anyhow::anyhow!(
+                        "{} does not sign in with a code",
+                        other.label()
+                    )),
+                };
 
                 match started {
                     Err(e) => {
-                        out.send(ToServer::CodexLoginPending {
+                        out.send(ToServer::AgentLoginPending {
                             req,
                             result: Err(format!("{e:#}")),
                         })
                         .await?;
                     }
-                    Ok((pending, waiting)) => {
-                        out.send(ToServer::CodexLoginPending {
+                    Ok((user_code, verification_url, waiting)) => {
+                        out.send(ToServer::AgentLoginPending {
                             req: req.clone(),
-                            result: Ok(ft_proto::CodexPending {
-                                user_code: pending.user_code,
-                                verification_url: pending.verification_url,
+                            result: Ok(ft_proto::LoginPending {
+                                user_code,
+                                verification_url,
                             }),
                         })
                         .await?;
 
                         let out = out.clone();
                         tokio::spawn(async move {
-                            let result = waiting
-                                .finish()
-                                .await
+                            let finished = match waiting {
+                                Signing::Codex(w) => w.finish().await,
+                                Signing::Kimi(w) => w.finish().await,
+                            };
+                            let result = finished
                                 .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
                                 .map_err(|e| format!("{e:#}"));
 
@@ -561,7 +585,7 @@ impl Worker {
                             // exists to avoid.
                             let _ = tokio::fs::remove_dir_all(&home).await;
 
-                            let _ = out.send(ToServer::CodexLoginFinished { req, result }).await;
+                            let _ = out.send(ToServer::AgentLoginFinished { req, result }).await;
                         });
                     }
                 }
@@ -2822,7 +2846,7 @@ fn takes_a_while(frame: &ToWorker) -> bool {
             // Starting a login is two round trips to a process this has to
             // spawn first. The waiting after that is its own task; getting as
             // far as a code is still too slow to do on the loop.
-            | ToWorker::CodexLoginStart { .. }
+            | ToWorker::AgentLoginStart { .. }
             // Not because replaying is slow, but because it is unbounded: a
             // worker with a long history sends more events than the outbound
             // channel holds. Handled on the loop, the send that fills the

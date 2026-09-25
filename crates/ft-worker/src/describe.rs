@@ -99,6 +99,10 @@ const ENOUGH_ISSUE: usize = 4_000;
 /// could think of a name for it, and the review sheet works perfectly well with
 /// an empty box.
 pub async fn propose(about: About<'_>) -> Result<Proposal> {
+    anyhow::ensure!(
+        about.agent != ft_core::Agent::KimiCode,
+        "Automatic change descriptions are not supported for ACP sessions yet"
+    );
     let diff = about.diff.trim();
     anyhow::ensure!(
         !diff.is_empty(),
@@ -318,6 +322,7 @@ fn invocation(
         }
         // Not offered, and has no answer to give. Reached only by a session
         // recorded before `Shell` stopped being startable.
+        ft_core::Agent::KimiCode => unreachable!("ACP descriptions are rejected before invocation"),
         ft_core::Agent::Shell => {
             command.args(["-c", "exit 1"]);
         }

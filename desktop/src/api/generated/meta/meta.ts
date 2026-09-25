@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.39.0
+ * OpenAPI spec version: 0.40.2
  */
 import {
   useQuery,
@@ -140,8 +140,8 @@ export function useBootstrap<TData = Awaited<ReturnType<typeof bootstrap>>, TErr
 
 export const useSetBootstrapQueryData = () => {
   const queryClient = useQueryClient();
-  return (updater: Awaited<ReturnType<typeof bootstrap>> | undefined | ((old: Awaited<ReturnType<typeof bootstrap>> | undefined) => Awaited<ReturnType<typeof bootstrap>> | undefined)) => {
-    queryClient.setQueriesData<Awaited<ReturnType<typeof bootstrap>>>({ queryKey: getBootstrapQueryKey() }, updater);
+  return (updater: Awaited<ReturnType<typeof bootstrap>> | undefined | ((old: Awaited<ReturnType<typeof bootstrap>> | undefined) => Awaited<ReturnType<typeof bootstrap>> | undefined), $exactMatch: boolean = true) => {
+    queryClient.setQueriesData<Awaited<ReturnType<typeof bootstrap>>>({ exact: $exactMatch, queryKey: getBootstrapQueryKey() }, updater);
   };
 }
 

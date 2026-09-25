@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.39.0
+ * OpenAPI spec version: 0.40.2
  */
 import {
   useMutation,
@@ -148,8 +148,8 @@ export function useListTrackers<TData = Awaited<ReturnType<typeof listTrackers>>
 
 export const useSetListTrackersQueryData = () => {
   const queryClient = useQueryClient();
-  return (updater: Awaited<ReturnType<typeof listTrackers>> | undefined | ((old: Awaited<ReturnType<typeof listTrackers>> | undefined) => Awaited<ReturnType<typeof listTrackers>> | undefined)) => {
-    queryClient.setQueriesData<Awaited<ReturnType<typeof listTrackers>>>({ queryKey: getListTrackersQueryKey() }, updater);
+  return (updater: Awaited<ReturnType<typeof listTrackers>> | undefined | ((old: Awaited<ReturnType<typeof listTrackers>> | undefined) => Awaited<ReturnType<typeof listTrackers>> | undefined), $exactMatch: boolean = true) => {
+    queryClient.setQueriesData<Awaited<ReturnType<typeof listTrackers>>>({ exact: $exactMatch, queryKey: getListTrackersQueryKey() }, updater);
   };
 }
 
@@ -423,8 +423,8 @@ export function useListTrackerScopes<TData = Awaited<ReturnType<typeof listTrack
  */
 export const useSetListTrackerScopesQueryData = () => {
   const queryClient = useQueryClient();
-  return (id: string,updater: Awaited<ReturnType<typeof listTrackerScopes>> | undefined | ((old: Awaited<ReturnType<typeof listTrackerScopes>> | undefined) => Awaited<ReturnType<typeof listTrackerScopes>> | undefined)) => {
-    queryClient.setQueriesData<Awaited<ReturnType<typeof listTrackerScopes>>>({ queryKey: getListTrackerScopesQueryKey(id) }, updater);
+  return (id: string,updater: Awaited<ReturnType<typeof listTrackerScopes>> | undefined | ((old: Awaited<ReturnType<typeof listTrackerScopes>> | undefined) => Awaited<ReturnType<typeof listTrackerScopes>> | undefined), $exactMatch: boolean = true) => {
+    queryClient.setQueriesData<Awaited<ReturnType<typeof listTrackerScopes>>>({ exact: $exactMatch, queryKey: getListTrackerScopesQueryKey(id) }, updater);
   };
 }
 

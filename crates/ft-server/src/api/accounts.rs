@@ -144,9 +144,11 @@ pub(super) async fn create_account(
 ) -> ApiResult<Json<Account>> {
     let owner = owner(&p)?;
     let label = name(&req.name)?;
-    if !matches!(req.kind, Agent::ClaudeCode | Agent::Codex) || req.mode == AgentMode::NotNeeded {
+    if !matches!(req.kind, Agent::ClaudeCode | Agent::Codex | Agent::KimiCode)
+        || req.mode == AgentMode::NotNeeded
+    {
         return Err(invalid(
-            "choose Claude Code or Codex and an authentication method",
+            "choose Claude Code, Codex or Kimi Code and an authentication method",
         ));
     }
     let secret = req
@@ -158,7 +160,7 @@ pub(super) async fn create_account(
     {
         return Err(invalid("paste the subscription token or API key"));
     }
-    if req.kind == Agent::Codex && req.mode == AgentMode::Subscription && secret.is_some() {
+    if req.kind.signs_in_with_a_code() && req.mode == AgentMode::Subscription && secret.is_some() {
         return Err(invalid("connect this subscription using device sign-in"));
     }
     let id = ulid::Ulid::new().to_string();

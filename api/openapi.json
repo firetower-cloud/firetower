@@ -10,7 +10,7 @@
       "name": "AGPL-3.0-only",
       "identifier": "AGPL-3.0-only"
     },
-    "version": "0.39.0"
+    "version": "0.40.2"
   },
   "paths": {
     "/api/v1/agent-accounts": {
@@ -5400,6 +5400,7 @@
         "enum": [
           "ClaudeCode",
           "Codex",
+          "KimiCode",
           "Shell"
         ]
       },
@@ -8308,7 +8309,8 @@
         "description": "Which agent's output a raw frame came from.\n\nCarried so that a frame kept for later is still interpretable later: the\nbytes alone do not say whose they are.",
         "enum": [
           "ClaudeStreamJson",
-          "CodexAppServer"
+          "CodexAppServer",
+          "Acp"
         ]
       },
       "Reached": {
@@ -9136,6 +9138,13 @@
               "null"
             ],
             "description": "Which host should do it. Any that has the agent, by default.\n\nIt matters only in that OpenAI delivers the credential to whichever\nmachine asked for the code — and that machine hands it straight to us,\nso which one it was stops mattering the moment it lands."
+          },
+          "region": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Which Kimi the account lives on: `global` for kimi.ai, `mainland-cn`\nfor kimi.com. Omit for the default, and for every other agent.\n\nThey are separate account namespaces rather than mirrors, so picking\nthe wrong one signs a different person in and reports success."
           }
         }
       },

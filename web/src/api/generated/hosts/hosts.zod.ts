@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.39.0
+ * OpenAPI spec version: 0.40.2
  */
 import * as zod from 'zod';
 
@@ -387,7 +387,7 @@ export const HostReadinessParams = zod.object({
 })
 
 export const HostReadinessQueryParams = zod.object({
-  "agent": zod.enum(['ClaudeCode', 'Codex', 'Shell']).optional()
+  "agent": zod.enum(['ClaudeCode', 'Codex', 'KimiCode', 'Shell']).optional()
 })
 
 export const HostReadinessResponse = zod.object({

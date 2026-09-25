@@ -20,6 +20,9 @@ export function AgentMark({ agent, size = 14, tone }: { agent: Agent; size?: num
 
     /* OpenAI's mark. The published file draws one sixth of it and repeats that
        at sixty degrees, six times, which is the geometry of the thing. */
+    case "KimiCode":
+      return <Svg width={size} height={size} viewBox="0 0 16 16"><Path d="M4 3v10M12 3L5 8l7 5" fill="none" stroke={tone} strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" /></Svg>;
+
     case "Codex":
       return (
         <Svg width={size} height={size} viewBox="0 0 2406 2406">

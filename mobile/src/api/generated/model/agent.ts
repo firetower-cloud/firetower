@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.39.0
+ * OpenAPI spec version: 0.40.2
  */
 
 /**
@@ -18,5 +18,6 @@ export type Agent = typeof Agent[keyof typeof Agent];
 export const Agent = {
   ClaudeCode: 'ClaudeCode',
   Codex: 'Codex',
+  KimiCode: 'KimiCode',
   Shell: 'Shell',
 } as const;

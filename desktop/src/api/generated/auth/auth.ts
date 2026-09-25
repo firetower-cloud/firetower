@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.39.0
+ * OpenAPI spec version: 0.40.2
  */
 import {
   useMutation,
@@ -297,8 +297,8 @@ export function useMe<TData = Awaited<ReturnType<typeof me>>, TError = unknown>(
 
 export const useSetMeQueryData = () => {
   const queryClient = useQueryClient();
-  return (updater: Awaited<ReturnType<typeof me>> | undefined | ((old: Awaited<ReturnType<typeof me>> | undefined) => Awaited<ReturnType<typeof me>> | undefined)) => {
-    queryClient.setQueriesData<Awaited<ReturnType<typeof me>>>({ queryKey: getMeQueryKey() }, updater);
+  return (updater: Awaited<ReturnType<typeof me>> | undefined | ((old: Awaited<ReturnType<typeof me>> | undefined) => Awaited<ReturnType<typeof me>> | undefined), $exactMatch: boolean = true) => {
+    queryClient.setQueriesData<Awaited<ReturnType<typeof me>>>({ exact: $exactMatch, queryKey: getMeQueryKey() }, updater);
   };
 }
 

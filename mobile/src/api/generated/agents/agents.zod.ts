@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.39.0
+ * OpenAPI spec version: 0.40.2
  */
 import * as zod from 'zod';
 
@@ -21,7 +21,7 @@ export const ListAgentsResponseItem = zod.object({
   "loggedIn": zod.boolean().nullish().describe('`None` when this agent can\'t be asked without being started, which is\nnot the same as being signed out.'),
   "version": zod.string().nullish()
 })),
-  "kind": zod.enum(['ClaudeCode', 'Codex', 'Shell']).describe('Which agent runs inside a workspace.\n\nSerialised as the variant name — see the wire conventions in the brief: a\nfield takes the consumer\'s casing, an enum value stays the symbol it is.'),
+  "kind": zod.enum(['ClaudeCode', 'Codex', 'KimiCode', 'Shell']).describe('Which agent runs inside a workspace.\n\nSerialised as the variant name — see the wire conventions in the brief: a\nfield takes the consumer\'s casing, an enum value stays the symbol it is.'),
   "label": zod.string(),
   "mode": zod.union([zod.null(),zod.enum(['Subscription', 'ApiKey', 'NotNeeded']).describe('`None` until someone configures it.')]).optional(),
   "needsCredential": zod.boolean().describe('True when nothing needs configuring, which is only the plain shell.'),
@@ -49,7 +49,7 @@ export const CheckAgentsResponseItem = zod.object({
   "loggedIn": zod.boolean().nullish().describe('`None` when this agent can\'t be asked without being started, which is\nnot the same as being signed out.'),
   "version": zod.string().nullish()
 })),
-  "kind": zod.enum(['ClaudeCode', 'Codex', 'Shell']).describe('Which agent runs inside a workspace.\n\nSerialised as the variant name — see the wire conventions in the brief: a\nfield takes the consumer\'s casing, an enum value stays the symbol it is.'),
+  "kind": zod.enum(['ClaudeCode', 'Codex', 'KimiCode', 'Shell']).describe('Which agent runs inside a workspace.\n\nSerialised as the variant name — see the wire conventions in the brief: a\nfield takes the consumer\'s casing, an enum value stays the symbol it is.'),
   "label": zod.string(),
   "mode": zod.union([zod.null(),zod.enum(['Subscription', 'ApiKey', 'NotNeeded']).describe('`None` until someone configures it.')]).optional(),
   "needsCredential": zod.boolean().describe('True when nothing needs configuring, which is only the plain shell.'),
@@ -115,7 +115,7 @@ export const InstallAgentResponseItem = zod.object({
   "loggedIn": zod.boolean().nullish().describe('`None` when this agent can\'t be asked without being started, which is\nnot the same as being signed out.'),
   "version": zod.string().nullish()
 })),
-  "kind": zod.enum(['ClaudeCode', 'Codex', 'Shell']).describe('Which agent runs inside a workspace.\n\nSerialised as the variant name — see the wire conventions in the brief: a\nfield takes the consumer\'s casing, an enum value stays the symbol it is.'),
+  "kind": zod.enum(['ClaudeCode', 'Codex', 'KimiCode', 'Shell']).describe('Which agent runs inside a workspace.\n\nSerialised as the variant name — see the wire conventions in the brief: a\nfield takes the consumer\'s casing, an enum value stays the symbol it is.'),
   "label": zod.string(),
   "mode": zod.union([zod.null(),zod.enum(['Subscription', 'ApiKey', 'NotNeeded']).describe('`None` until someone configures it.')]).optional(),
   "needsCredential": zod.boolean().describe('True when nothing needs configuring, which is only the plain shell.'),
@@ -140,7 +140,8 @@ export const SignAgentInParams = zod.object({
 
 export const SignAgentInBody = zod.object({
   "accountId": zod.string().nullish().describe('The named account to authenticate. Made first with `create_account`.'),
-  "hostId": zod.string().nullish().describe('Which host should do it. Any that has the agent, by default.\n\nIt matters only in that OpenAI delivers the credential to whichever\nmachine asked for the code — and that machine hands it straight to us,\nso which one it was stops mattering the moment it lands.')
+  "hostId": zod.string().nullish().describe('Which host should do it. Any that has the agent, by default.\n\nIt matters only in that OpenAI delivers the credential to whichever\nmachine asked for the code — and that machine hands it straight to us,\nso which one it was stops mattering the moment it lands.'),
+  "region": zod.string().nullish().describe('Which Kimi the account lives on: `global` for kimi.ai, `mainland-cn`\nfor kimi.com. Omit for the default, and for every other agent.\n\nThey are separate account namespaces rather than mirrors, so picking\nthe wrong one signs a different person in and reports success.')
 }).describe('What a sign-in needs from the caller.')
 
 export const SignAgentInResponse = zod.object({

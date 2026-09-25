@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.39.0
+ * OpenAPI spec version: 0.40.2
  */
 
 /**
@@ -24,4 +24,13 @@ export interface SignIn {
      * @nullable
      */
   hostId?: string | null;
+  /**
+     * Which Kimi the account lives on: `global` for kimi.ai, `mainland-cn`
+     * for kimi.com. Omit for the default, and for every other agent.
+     *
+     * They are separate account namespaces rather than mirrors, so picking
+     * the wrong one signs a different person in and reports success.
+     * @nullable
+     */
+  region?: string | null;
 }

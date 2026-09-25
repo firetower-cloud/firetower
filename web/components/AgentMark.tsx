@@ -49,6 +49,9 @@ export function AgentMark({
 
     // A ring with a gap, on its side. Distinct from the burst in silhouette,
     // which is the only property that matters in a list.
+    case "KimiCode":
+      return <svg {...common} viewBox="0 0 16 16" fill="none" stroke="currentColor"><path d="M4 3v10M12 3L5 8l7 5" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>;
+
     case "Codex":
       return (
         <svg {...common}>
@@ -81,6 +84,7 @@ export function AgentMark({
 export const AGENT_LABEL: Record<Agent, string> = {
   ClaudeCode: "Claude Code",
   Codex: "Codex",
+  KimiCode: "Kimi Code",
   Shell: "Shell",
 };
 
@@ -88,5 +92,6 @@ export const AGENT_LABEL: Record<Agent, string> = {
 export const AGENT_SHORT: Record<Agent, string> = {
   ClaudeCode: "claude",
   Codex: "codex",
+  KimiCode: "kimi",
   Shell: "shell",
 };

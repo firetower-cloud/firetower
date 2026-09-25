@@ -122,6 +122,7 @@ struct Read {
     /// same pipe it says everything else on, which makes a line the only thing
     /// that can report it.
     asks: Vec<AgentSpeech>,
+    resolved: Vec<String>,
 }
 
 /// One session's lines, read for what they say about the session.
@@ -193,13 +194,16 @@ impl Progress {
 
     /// The pickers this session has, and what is in each.
     fn controls(&self) -> Vec<ft_core::controls::Control> {
+        if let ft_core::normalise::Reader::Acp(reader) = &self.reader {
+            return reader.controls();
+        }
         let (models, efforts, reported) = match &self.reader {
             ft_core::normalise::Reader::Codex(reader) => (
                 reader.models().to_vec(),
                 reader.efforts().to_vec(),
                 reader.reported().clone(),
             ),
-            ft_core::normalise::Reader::Claude(_) => {
+            ft_core::normalise::Reader::Claude(_) | ft_core::normalise::Reader::Acp(_) => {
                 (Vec::new(), Vec::new(), ft_core::codex::Settings::default())
             }
         };
@@ -246,6 +250,12 @@ impl Progress {
         kind: ft_core::controls::ControlKind,
         value: &str,
     ) -> Result<Option<serde_json::Value>> {
+        if let ft_core::normalise::Reader::Acp(reader) = &self.reader {
+            return reader
+                .configure(kind, value)
+                .context("Kimi has not offered this setting or value")
+                .map(Some);
+        }
         // The agent that is told. Nothing to remember: it says what it is
         // running at the start of every turn, and that is what the picker then
         // shows.
@@ -297,6 +307,7 @@ impl Progress {
 
         let mut moved = None;
         let mut asks = Vec::new();
+        let mut resolved = Vec::new();
         for event in self.reader.push(line) {
             match event {
                 // Assistant text only. A tool's output is not the agent
@@ -317,8 +328,9 @@ impl Progress {
                     self.said.clear();
                     moved = Some((SessionStatus::Working, None));
                 }
-                E::TurnCompleted { status, .. } => {
-                    let note = summarise(&self.said);
+                E::RequestResolved { req, .. } => resolved.push(req.to_string()),
+                E::TurnCompleted { status, detail, .. } => {
+                    let note = detail.or_else(|| summarise(&self.said));
                     // A turn we stopped is not a turn that broke, whatever the
                     // agent calls it on the way out.
                     let asked_for = std::mem::take(&mut self.stopped);
@@ -371,12 +383,24 @@ impl Progress {
             self.opening_prompt = None;
         }
 
-        Read { moved, send, asks }
+        Read {
+            moved,
+            send,
+            asks,
+            resolved,
+        }
     }
 
     /// How this agent is stopped.
     fn stop(&mut self) -> Stop {
         match &self.reader {
+            ft_core::normalise::Reader::Acp(reader) => {
+                if reader.working() {
+                    Stop::Ask(serde_json::json!(ft_core::acp::Input::Cancel))
+                } else {
+                    Stop::Nothing
+                }
+            }
             // Asked, down the same pipe it takes turns on. It used to be
             // signalled instead, and `SIGINT` ended the turn and then the
             // process with it — see [`ft_core::turn::interrupt`].
@@ -409,6 +433,13 @@ impl Progress {
         images: &[ft_core::turn::Attached],
     ) -> Result<serde_json::Value> {
         match &self.reader {
+            ft_core::normalise::Reader::Acp(_) => {
+                anyhow::ensure!(
+                    images.is_empty(),
+                    "This ACP integration currently accepts text only"
+                );
+                Ok(ft_core::acp::prompt(text))
+            }
             ft_core::normalise::Reader::Claude(_) => {
                 Ok(ft_core::turn::user_message_with(text, images))
             }
@@ -713,8 +744,8 @@ enum Waiting {
     ///
     /// Two channels for one request, like a file, and for the same reason —
     /// the first answer is due in seconds and the second waits on a person.
-    CodexLogin {
-        started: Option<oneshot::Sender<Result<ft_proto::CodexPending, String>>>,
+    AgentLogin {
+        started: Option<oneshot::Sender<Result<ft_proto::LoginPending, String>>>,
         finished: Option<oneshot::Sender<Result<String, String>>>,
     },
     Action(oneshot::Sender<Result<String, String>>),
@@ -1859,6 +1890,11 @@ impl Fleet {
                             // has to land where one asked through a tool of
                             // its own does, or the browser shows a session
                             // that stopped for no visible reason.
+                            if !read.resolved.is_empty() {
+                                if let Some(waiting) = asked.write().await.get_mut(session_id.as_str()) {
+                                    waiting.retain(|q| !matches!(q, AgentSpeech::Asks { req, .. } if read.resolved.contains(req)));
+                                }
+                            }
                             for question in read.asks {
                                 blocked(
                                     &db, &events, &notify, &asked, &conversations,
@@ -2121,11 +2157,11 @@ impl Fleet {
                                 None => tracing::debug!("an install answered after its request gave up"),
                             }
                         }
-                        Ok(ToServer::CodexLoginPending { req, result }) => {
+                        Ok(ToServer::AgentLoginPending { req, result }) => {
                             // The entry stays: the credential arrives under
                             // the same id, minutes later.
                             let mut held = probes.write().await;
-                            if let Some(Asked { waiting: Waiting::CodexLogin { started, .. }, .. }) = held.get_mut(&req) {
+                            if let Some(Asked { waiting: Waiting::AgentLogin { started, .. }, .. }) = held.get_mut(&req) {
                                 if let Some(tell) = started.take() {
                                     let _ = tell.send(result);
                                     continue;
@@ -2133,10 +2169,10 @@ impl Fleet {
                             }
                             tracing::debug!("a Codex sign-in answered after its request gave up");
                         }
-                        Ok(ToServer::CodexLoginFinished { req, result }) => {
+                        Ok(ToServer::AgentLoginFinished { req, result }) => {
                             let mut held = probes.write().await;
                             match held.remove(&req) {
-                                Some(Asked { waiting: Waiting::CodexLogin { finished, .. }, .. }) => {
+                                Some(Asked { waiting: Waiting::AgentLogin { finished, .. }, .. }) => {
                                     if let Some(tell) = finished { let _ = tell.send(result); }
                                 }
                                 Some(other) => { held.insert(req, other); }
@@ -2235,7 +2271,7 @@ impl Fleet {
                     // other host can be told to collect it. Losing the
                     // connection loses the attempt, and saying so beats a
                     // browser waiting out the full fifteen minutes.
-                    Waiting::CodexLogin { started, finished } => {
+                    Waiting::AgentLogin { started, finished } => {
                         if let Some(tell) = started {
                             let _ = tell.send(Err("the host stopped answering".into()));
                         }
@@ -2409,11 +2445,13 @@ impl Fleet {
     /// whenever somebody approves the code, which may be a quarter of an hour.
     /// Waiting on it is the caller's business; this returns as soon as there is
     /// something to put on a screen.
-    pub async fn codex_login(
+    pub async fn agent_login(
         &self,
         host_id: &HostId,
+        agent: ft_core::Agent,
+        region: Option<String>,
     ) -> Result<(
-        ft_proto::CodexPending,
+        ft_proto::LoginPending,
         oneshot::Receiver<Result<String, String>>,
     )> {
         let req = ulid::Ulid::new().to_string();
@@ -2424,7 +2462,7 @@ impl Fleet {
             req.clone(),
             Asked {
                 host: host_id.to_string(),
-                waiting: Waiting::CodexLogin {
+                waiting: Waiting::AgentLogin {
                     started: Some(started),
                     finished: Some(finished),
                 },
@@ -2432,7 +2470,14 @@ impl Fleet {
         );
 
         if let Err(e) = self
-            .send(host_id, ToWorker::CodexLoginStart { req: req.clone() })
+            .send(
+                host_id,
+                ToWorker::AgentLoginStart {
+                    req: req.clone(),
+                    agent,
+                    region,
+                },
+            )
             .await
         {
             self.probes.write().await.remove(&req);
@@ -2707,6 +2752,22 @@ impl Fleet {
                 .with_context(|| format!("writing down {kind:?} for {session_id}"));
         };
 
+        // Unlike Codex's next-turn settings, ACP applies a change by RPC.
+        // Subscribe before sending so even an immediate refusal is observed.
+        let confirmation = if message["acp"] == "Configure" {
+            Some((
+                message["id"].clone(),
+                self.watch_agent(
+                    host_id,
+                    session_id,
+                    self.db.last_agent_line(session_id).await?.max(0) as u64,
+                )
+                .await?,
+            ))
+        } else {
+            None
+        };
+
         self.send(
             host_id,
             ToWorker::SendTurn {
@@ -2714,7 +2775,32 @@ impl Fleet {
                 message,
             },
         )
-        .await
+        .await?;
+
+        if let Some((id, mut speech)) = confirmation {
+            tokio::time::timeout(std::time::Duration::from_secs(30), async {
+                loop {
+                    match speech.recv().await? {
+                        AgentSpeech::Line { line, .. } => {
+                            match serde_json::from_str(&line) {
+                                Ok(ft_core::acp::Record::ConfigurationRejected { id: rejected, detail }) if id == rejected => anyhow::bail!("{detail}"),
+                                Ok(ft_core::acp::Record::Received { message, .. }) if message.get("method").is_none() && message["id"] == id => {
+                                    if let Some(error) = message.get("error") {
+                                        anyhow::bail!("Kimi refused the setting: {error}");
+                                    }
+                                    anyhow::ensure!(message["result"]["configOptions"].is_array(), "Kimi did not confirm its configuration");
+                                    return Ok(());
+                                }
+                                _ => {}
+                            }
+                        }
+                        AgentSpeech::Closed => anyhow::bail!("Kimi stopped before confirming the setting"),
+                        _ => {}
+                    }
+                }
+            }).await.context("Kimi did not confirm the setting in time; refresh its current configuration before retrying")??;
+        }
+        Ok(())
     }
 
     /// One message for the agent, in whatever shape that agent takes.
@@ -2823,6 +2909,24 @@ impl Fleet {
         req: String,
         decision: &ft_core::turn::Decision,
     ) -> Result<()> {
+        self.ensure_reader(session_id).await;
+        let acp = {
+            let readers = self.progress.read().await;
+            matches!(
+                readers.get(session_id.as_str()).map(|p| &p.reader),
+                Some(ft_core::normalise::Reader::Acp(_))
+            )
+        };
+        if acp {
+            let held = self.asked.read().await;
+            anyhow::ensure!(
+                held.get(session_id.as_str())
+                    .is_some_and(|questions| questions
+                        .iter()
+                        .any(|q| matches!(q, AgentSpeech::Asks { req: seen, .. } if *seen == req))),
+                "This ACP permission request is no longer pending"
+            );
+        }
         // Forgotten here rather than when the agent acknowledges, because it
         // does not acknowledge — it simply carries on, and the next thing it
         // says is the proof.
@@ -2854,7 +2958,15 @@ impl Fleet {
             )
         };
 
-        let frame = if codex {
+        let frame = if acp {
+            ToWorker::SendTurn {
+                session_id: session_id.clone(),
+                message: serde_json::json!(ft_core::acp::Input::Decide {
+                    req,
+                    decision: decision.clone()
+                }),
+            }
+        } else if codex {
             let message = ft_core::codex::reply(&req, decision)
                 .with_context(|| format!("{req} is not a request Codex is waiting on"))?;
             ToWorker::SendTurn {

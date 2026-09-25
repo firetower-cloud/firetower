@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { WhereItRuns, resolve, type Where } from "./WhereItRuns";
+import { WhereItRuns, resolve, canRun, type Where } from "./WhereItRuns";
 import { getHostReadinessQueryKey } from "~/api/generated/hosts/hosts";
 import type { AgentView, Host, Readiness } from "~/api/generated/model";
 
@@ -112,4 +112,15 @@ describe("an environment that goes away", () => {
     expect(resolve(hosts, where({ machine: "ssh:video-vm:22" })).host).toBeUndefined();
     expect(resolve(hosts, where()).host?.id).toBe("local");
   });
+});
+
+
+it("Kimi needs a connected account, like every other agent that has a login", () => {
+  // It used to run on whatever `kimi login` had left on the worker. Its
+  // credential is Firetower's to hold now, so an agent without one cannot
+  // start — the same rule Claude and Codex have always had.
+  const kimi: AgentView = { ...claude, kind: "KimiCode", needsCredential: true, credentialSet: false, hosts: [{ hostId: "local", hostName: "Local", installed: true, coveredByToken: false, loggedIn: null }] };
+  expect(canRun(kimi, "local")).toBe(false);
+  expect(canRun({ ...kimi, credentialSet: true }, "local")).toBe(true);
+  expect(canRun({ ...kimi, credentialSet: true }, "absent")).toBe(false);
 });

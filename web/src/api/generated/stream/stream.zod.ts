@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.39.0
+ * OpenAPI spec version: 0.40.2
  */
 import * as zod from 'zod';
 
@@ -107,7 +107,7 @@ export const StreamResponse = zod.union([zod.object({
   "name": zod.string(),
   "type": zod.enum(['TmuxOpened'])
 }),zod.object({
-  "agent": zod.enum(['ClaudeCode', 'Codex', 'Shell']).describe('Which agent runs inside a workspace.\n\nSerialised as the variant name — see the wire conventions in the brief: a\nfield takes the consumer\'s casing, an enum value stays the symbol it is.'),
+  "agent": zod.enum(['ClaudeCode', 'Codex', 'KimiCode', 'Shell']).describe('Which agent runs inside a workspace.\n\nSerialised as the variant name — see the wire conventions in the brief: a\nfield takes the consumer\'s casing, an enum value stays the symbol it is.'),
   "type": zod.enum(['AgentLaunched'])
 }),zod.object({
   "note": zod.string().nullish().describe('Why, when whatever changed it knows.\n\nThe agent\'s own words: the permission it is asking for, the last\nthing it said before finishing, the error that stopped it. Without\nthis a blocked session is a red dot you have to open a terminal to\nunderstand, which is most of the cost of being interrupted.'),
@@ -246,7 +246,7 @@ export const StreamResponse = zod.union([zod.object({
   "type": zod.enum(['TaskCompleted'])
 }),zod.object({
   "payload": zod.unknown(),
-  "source": zod.enum(['ClaudeStreamJson', 'CodexAppServer']).describe('Which agent\'s output a raw frame came from.\n\nCarried so that a frame kept for later is still interpretable later: the\nbytes alone do not say whose they are.'),
+  "source": zod.enum(['ClaudeStreamJson', 'CodexAppServer', 'Acp']).describe('Which agent\'s output a raw frame came from.\n\nCarried so that a frame kept for later is still interpretable later: the\nbytes alone do not say whose they are.'),
   "type": zod.enum(['Raw'])
 }).describe('A line we kept but could not name.\n\nOnly for what nothing else matched — the complete raw log is already\nwhat Firetower stores, so repeating every mapped line here would double\nthe volume to say nothing new. This is the marker for \"an agent said\nsomething in a shape we have never seen\", which is how a version that\ngrew a new message type shows up as a gap to fill rather than as\nsilence.')]).describe('Something an agent said or did.\n\nThe vocabulary the interface draws, and the only thing that crosses out of\nthe normaliser.').and(zod.object({
   "lineNo": zod.int().min(streamResponseThreeEventsItemTwoLineNoMin)

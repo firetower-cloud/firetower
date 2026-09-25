@@ -125,9 +125,9 @@ pub(super) async fn agent_home(
     session: &SessionId,
     owner: &str,
 ) -> Result<Vec<(String, String)>, ApiError> {
-    let Some(file) = kind.credential_file() else {
+    if kind.credential_file().is_none() && !kind.credential_bundle() {
         return Ok(Vec::new());
-    };
+    }
 
     let Some(account) = super::accounts::selected(&state.db, owner, session).await? else {
         return Ok(Vec::new());
@@ -147,6 +147,26 @@ pub(super) async fn agent_home(
         return Ok(Vec::new());
     };
 
+    if kind.credential_bundle() {
+        // Path to contents, exactly as the sign-in collected it. A bundle that
+        // will not parse is a credential we cannot write out, and guessing at
+        // half of it would start the agent as nobody.
+        let files: std::collections::BTreeMap<String, String> =
+            serde_json::from_str(secret.to_string().as_str()).map_err(|e| {
+                ApiError::new(
+                    ErrorCode::InvalidRequest,
+                    format!(
+                        "the stored {} credential is not readable: {e}",
+                        kind.label()
+                    ),
+                )
+            })?;
+        return Ok(files.into_iter().collect());
+    }
+
+    let file = kind
+        .credential_file()
+        .expect("checked above: not a bundle, so it names a file");
     Ok(vec![(file.to_string(), secret.to_string())])
 }
 
@@ -429,6 +449,12 @@ pub struct SignIn {
     /// machine asked for the code — and that machine hands it straight to us,
     /// so which one it was stops mattering the moment it lands.
     pub host_id: Option<String>,
+    /// Which Kimi the account lives on: `global` for kimi.ai, `mainland-cn`
+    /// for kimi.com. Omit for the default, and for every other agent.
+    ///
+    /// They are separate account namespaces rather than mirrors, so picking
+    /// the wrong one signs a different person in and reports success.
+    pub region: Option<String>,
 }
 
 /// Sign an agent in with a device code, on a host.
@@ -500,7 +526,7 @@ pub(super) async fn sign_agent_in(
 
     let (pending, finished) = state
         .fleet
-        .codex_login(&host)
+        .agent_login(&host, kind, req.region.clone())
         .await
         .map_err(|e| ApiError::new(ErrorCode::HostUnreachable, format!("{e:#}")))?;
 

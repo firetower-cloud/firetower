@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.39.0
+ * OpenAPI spec version: 0.40.2
  */
 import {
   useMutation,
@@ -150,8 +150,8 @@ export function useListAccounts<TData = Awaited<ReturnType<typeof listAccounts>>
 
 export const useSetListAccountsQueryData = () => {
   const queryClient = useQueryClient();
-  return (updater: Awaited<ReturnType<typeof listAccounts>> | undefined | ((old: Awaited<ReturnType<typeof listAccounts>> | undefined) => Awaited<ReturnType<typeof listAccounts>> | undefined)) => {
-    queryClient.setQueriesData<Awaited<ReturnType<typeof listAccounts>>>({ queryKey: getListAccountsQueryKey() }, updater);
+  return (updater: Awaited<ReturnType<typeof listAccounts>> | undefined | ((old: Awaited<ReturnType<typeof listAccounts>> | undefined) => Awaited<ReturnType<typeof listAccounts>> | undefined), $exactMatch: boolean = true) => {
+    queryClient.setQueriesData<Awaited<ReturnType<typeof listAccounts>>>({ exact: $exactMatch, queryKey: getListAccountsQueryKey() }, updater);
   };
 }
 
@@ -418,8 +418,8 @@ export function useSessionAccount<TData = Awaited<ReturnType<typeof sessionAccou
 
 export const useSetSessionAccountQueryData = () => {
   const queryClient = useQueryClient();
-  return (id: string,updater: Awaited<ReturnType<typeof sessionAccount>> | undefined | ((old: Awaited<ReturnType<typeof sessionAccount>> | undefined) => Awaited<ReturnType<typeof sessionAccount>> | undefined)) => {
-    queryClient.setQueriesData<Awaited<ReturnType<typeof sessionAccount>>>({ queryKey: getSessionAccountQueryKey(id) }, updater);
+  return (id: string,updater: Awaited<ReturnType<typeof sessionAccount>> | undefined | ((old: Awaited<ReturnType<typeof sessionAccount>> | undefined) => Awaited<ReturnType<typeof sessionAccount>> | undefined), $exactMatch: boolean = true) => {
+    queryClient.setQueriesData<Awaited<ReturnType<typeof sessionAccount>>>({ exact: $exactMatch, queryKey: getSessionAccountQueryKey(id) }, updater);
   };
 }
 
@@ -605,8 +605,8 @@ export function useGetFallback<TData = Awaited<ReturnType<typeof getFallback>>, 
 
 export const useSetGetFallbackQueryData = () => {
   const queryClient = useQueryClient();
-  return (id: string,updater: Awaited<ReturnType<typeof getFallback>> | undefined | ((old: Awaited<ReturnType<typeof getFallback>> | undefined) => Awaited<ReturnType<typeof getFallback>> | undefined)) => {
-    queryClient.setQueriesData<Awaited<ReturnType<typeof getFallback>>>({ queryKey: getGetFallbackQueryKey(id) }, updater);
+  return (id: string,updater: Awaited<ReturnType<typeof getFallback>> | undefined | ((old: Awaited<ReturnType<typeof getFallback>> | undefined) => Awaited<ReturnType<typeof getFallback>> | undefined), $exactMatch: boolean = true) => {
+    queryClient.setQueriesData<Awaited<ReturnType<typeof getFallback>>>({ exact: $exactMatch, queryKey: getGetFallbackQueryKey(id) }, updater);
   };
 }
 

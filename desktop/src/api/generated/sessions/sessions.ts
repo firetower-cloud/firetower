@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.39.0
+ * OpenAPI spec version: 0.40.2
  */
 import {
   useMutation,
@@ -200,8 +200,8 @@ export function useListSessions<TData = Awaited<ReturnType<typeof listSessions>>
  */
 export const useSetListSessionsQueryData = () => {
   const queryClient = useQueryClient();
-  return (params: ListSessionsParams | undefined,updater: Awaited<ReturnType<typeof listSessions>> | undefined | ((old: Awaited<ReturnType<typeof listSessions>> | undefined) => Awaited<ReturnType<typeof listSessions>> | undefined)) => {
-    queryClient.setQueriesData<Awaited<ReturnType<typeof listSessions>>>({ queryKey: getListSessionsQueryKey(params) }, updater);
+  return (params: ListSessionsParams | undefined,updater: Awaited<ReturnType<typeof listSessions>> | undefined | ((old: Awaited<ReturnType<typeof listSessions>> | undefined) => Awaited<ReturnType<typeof listSessions>> | undefined), $exactMatch: boolean = true) => {
+    queryClient.setQueriesData<Awaited<ReturnType<typeof listSessions>>>({ exact: $exactMatch, queryKey: getListSessionsQueryKey(params) }, updater);
   };
 }
 
@@ -483,8 +483,8 @@ export function useGetSession<TData = Awaited<ReturnType<typeof getSession>>, TE
 
 export const useSetGetSessionQueryData = () => {
   const queryClient = useQueryClient();
-  return (id: string,updater: Awaited<ReturnType<typeof getSession>> | undefined | ((old: Awaited<ReturnType<typeof getSession>> | undefined) => Awaited<ReturnType<typeof getSession>> | undefined)) => {
-    queryClient.setQueriesData<Awaited<ReturnType<typeof getSession>>>({ queryKey: getGetSessionQueryKey(id) }, updater);
+  return (id: string,updater: Awaited<ReturnType<typeof getSession>> | undefined | ((old: Awaited<ReturnType<typeof getSession>> | undefined) => Awaited<ReturnType<typeof getSession>> | undefined), $exactMatch: boolean = true) => {
+    queryClient.setQueriesData<Awaited<ReturnType<typeof getSession>>>({ exact: $exactMatch, queryKey: getGetSessionQueryKey(id) }, updater);
   };
 }
 
@@ -755,8 +755,8 @@ export function useListAnnotations<TData = Awaited<ReturnType<typeof listAnnotat
 
 export const useSetListAnnotationsQueryData = () => {
   const queryClient = useQueryClient();
-  return (id: string,updater: Awaited<ReturnType<typeof listAnnotations>> | undefined | ((old: Awaited<ReturnType<typeof listAnnotations>> | undefined) => Awaited<ReturnType<typeof listAnnotations>> | undefined)) => {
-    queryClient.setQueriesData<Awaited<ReturnType<typeof listAnnotations>>>({ queryKey: getListAnnotationsQueryKey(id) }, updater);
+  return (id: string,updater: Awaited<ReturnType<typeof listAnnotations>> | undefined | ((old: Awaited<ReturnType<typeof listAnnotations>> | undefined) => Awaited<ReturnType<typeof listAnnotations>> | undefined), $exactMatch: boolean = true) => {
+    queryClient.setQueriesData<Awaited<ReturnType<typeof listAnnotations>>>({ exact: $exactMatch, queryKey: getListAnnotationsQueryKey(id) }, updater);
   };
 }
 
@@ -1438,8 +1438,8 @@ export function useGetConversation<TData = Awaited<ReturnType<typeof getConversa
 export const useSetGetConversationQueryData = () => {
   const queryClient = useQueryClient();
   return (id: string,
-    params: GetConversationParams | undefined,updater: Awaited<ReturnType<typeof getConversation>> | undefined | ((old: Awaited<ReturnType<typeof getConversation>> | undefined) => Awaited<ReturnType<typeof getConversation>> | undefined)) => {
-    queryClient.setQueriesData<Awaited<ReturnType<typeof getConversation>>>({ queryKey: getGetConversationQueryKey(id,params) }, updater);
+    params: GetConversationParams | undefined,updater: Awaited<ReturnType<typeof getConversation>> | undefined | ((old: Awaited<ReturnType<typeof getConversation>> | undefined) => Awaited<ReturnType<typeof getConversation>> | undefined), $exactMatch: boolean = true) => {
+    queryClient.setQueriesData<Awaited<ReturnType<typeof getConversation>>>({ exact: $exactMatch, queryKey: getGetConversationQueryKey(id,params) }, updater);
   };
 }
 
@@ -1560,8 +1560,8 @@ export function useStreamConversation<TData = Awaited<ReturnType<typeof streamCo
  */
 export const useSetStreamConversationQueryData = () => {
   const queryClient = useQueryClient();
-  return (id: string,updater: Awaited<ReturnType<typeof streamConversation>> | undefined | ((old: Awaited<ReturnType<typeof streamConversation>> | undefined) => Awaited<ReturnType<typeof streamConversation>> | undefined)) => {
-    queryClient.setQueriesData<Awaited<ReturnType<typeof streamConversation>>>({ queryKey: getStreamConversationQueryKey(id) }, updater);
+  return (id: string,updater: Awaited<ReturnType<typeof streamConversation>> | undefined | ((old: Awaited<ReturnType<typeof streamConversation>> | undefined) => Awaited<ReturnType<typeof streamConversation>> | undefined), $exactMatch: boolean = true) => {
+    queryClient.setQueriesData<Awaited<ReturnType<typeof streamConversation>>>({ exact: $exactMatch, queryKey: getStreamConversationQueryKey(id) }, updater);
   };
 }
 
@@ -1773,8 +1773,8 @@ export function useSessionDiff<TData = Awaited<ReturnType<typeof sessionDiff>>, 
 export const useSetSessionDiffQueryData = () => {
   const queryClient = useQueryClient();
   return (id: string,
-    params: SessionDiffParams | undefined,updater: Awaited<ReturnType<typeof sessionDiff>> | undefined | ((old: Awaited<ReturnType<typeof sessionDiff>> | undefined) => Awaited<ReturnType<typeof sessionDiff>> | undefined)) => {
-    queryClient.setQueriesData<Awaited<ReturnType<typeof sessionDiff>>>({ queryKey: getSessionDiffQueryKey(id,params) }, updater);
+    params: SessionDiffParams | undefined,updater: Awaited<ReturnType<typeof sessionDiff>> | undefined | ((old: Awaited<ReturnType<typeof sessionDiff>> | undefined) => Awaited<ReturnType<typeof sessionDiff>> | undefined), $exactMatch: boolean = true) => {
+    queryClient.setQueriesData<Awaited<ReturnType<typeof sessionDiff>>>({ exact: $exactMatch, queryKey: getSessionDiffQueryKey(id,params) }, updater);
   };
 }
 
@@ -1910,8 +1910,8 @@ export function useDownloadFile<TData = Awaited<ReturnType<typeof downloadFile>>
 export const useSetDownloadFileQueryData = () => {
   const queryClient = useQueryClient();
   return (id: string,
-    params: DownloadFileParams | undefined,updater: Awaited<ReturnType<typeof downloadFile>> | undefined | ((old: Awaited<ReturnType<typeof downloadFile>> | undefined) => Awaited<ReturnType<typeof downloadFile>> | undefined)) => {
-    queryClient.setQueriesData<Awaited<ReturnType<typeof downloadFile>>>({ queryKey: getDownloadFileQueryKey(id,params) }, updater);
+    params: DownloadFileParams | undefined,updater: Awaited<ReturnType<typeof downloadFile>> | undefined | ((old: Awaited<ReturnType<typeof downloadFile>> | undefined) => Awaited<ReturnType<typeof downloadFile>> | undefined), $exactMatch: boolean = true) => {
+    queryClient.setQueriesData<Awaited<ReturnType<typeof downloadFile>>>({ exact: $exactMatch, queryKey: getDownloadFileQueryKey(id,params) }, updater);
   };
 }
 
@@ -2047,8 +2047,8 @@ export function useListFiles<TData = Awaited<ReturnType<typeof listFiles>>, TErr
 export const useSetListFilesQueryData = () => {
   const queryClient = useQueryClient();
   return (id: string,
-    params: ListFilesParams | undefined,updater: Awaited<ReturnType<typeof listFiles>> | undefined | ((old: Awaited<ReturnType<typeof listFiles>> | undefined) => Awaited<ReturnType<typeof listFiles>> | undefined)) => {
-    queryClient.setQueriesData<Awaited<ReturnType<typeof listFiles>>>({ queryKey: getListFilesQueryKey(id,params) }, updater);
+    params: ListFilesParams | undefined,updater: Awaited<ReturnType<typeof listFiles>> | undefined | ((old: Awaited<ReturnType<typeof listFiles>> | undefined) => Awaited<ReturnType<typeof listFiles>> | undefined), $exactMatch: boolean = true) => {
+    queryClient.setQueriesData<Awaited<ReturnType<typeof listFiles>>>({ exact: $exactMatch, queryKey: getListFilesQueryKey(id,params) }, updater);
   };
 }
 
@@ -2185,8 +2185,8 @@ export function useFindFiles<TData = Awaited<ReturnType<typeof findFiles>>, TErr
 export const useSetFindFilesQueryData = () => {
   const queryClient = useQueryClient();
   return (id: string,
-    params: FindFilesParams | undefined,updater: Awaited<ReturnType<typeof findFiles>> | undefined | ((old: Awaited<ReturnType<typeof findFiles>> | undefined) => Awaited<ReturnType<typeof findFiles>> | undefined)) => {
-    queryClient.setQueriesData<Awaited<ReturnType<typeof findFiles>>>({ queryKey: getFindFilesQueryKey(id,params) }, updater);
+    params: FindFilesParams | undefined,updater: Awaited<ReturnType<typeof findFiles>> | undefined | ((old: Awaited<ReturnType<typeof findFiles>> | undefined) => Awaited<ReturnType<typeof findFiles>> | undefined), $exactMatch: boolean = true) => {
+    queryClient.setQueriesData<Awaited<ReturnType<typeof findFiles>>>({ exact: $exactMatch, queryKey: getFindFilesQueryKey(id,params) }, updater);
   };
 }
 
@@ -2303,8 +2303,8 @@ export function useListForwards<TData = Awaited<ReturnType<typeof listForwards>>
  */
 export const useSetListForwardsQueryData = () => {
   const queryClient = useQueryClient();
-  return (id: string,updater: Awaited<ReturnType<typeof listForwards>> | undefined | ((old: Awaited<ReturnType<typeof listForwards>> | undefined) => Awaited<ReturnType<typeof listForwards>> | undefined)) => {
-    queryClient.setQueriesData<Awaited<ReturnType<typeof listForwards>>>({ queryKey: getListForwardsQueryKey(id) }, updater);
+  return (id: string,updater: Awaited<ReturnType<typeof listForwards>> | undefined | ((old: Awaited<ReturnType<typeof listForwards>> | undefined) => Awaited<ReturnType<typeof listForwards>> | undefined), $exactMatch: boolean = true) => {
+    queryClient.setQueriesData<Awaited<ReturnType<typeof listForwards>>>({ exact: $exactMatch, queryKey: getListForwardsQueryKey(id) }, updater);
   };
 }
 
@@ -2679,8 +2679,8 @@ export function usePreviewAddress<TData = Awaited<ReturnType<typeof previewAddre
 export const useSetPreviewAddressQueryData = () => {
   const queryClient = useQueryClient();
   return (id: string,
-    params: PreviewAddressParams | undefined,updater: Awaited<ReturnType<typeof previewAddress>> | undefined | ((old: Awaited<ReturnType<typeof previewAddress>> | undefined) => Awaited<ReturnType<typeof previewAddress>> | undefined)) => {
-    queryClient.setQueriesData<Awaited<ReturnType<typeof previewAddress>>>({ queryKey: getPreviewAddressQueryKey(id,params) }, updater);
+    params: PreviewAddressParams | undefined,updater: Awaited<ReturnType<typeof previewAddress>> | undefined | ((old: Awaited<ReturnType<typeof previewAddress>> | undefined) => Awaited<ReturnType<typeof previewAddress>> | undefined), $exactMatch: boolean = true) => {
+    queryClient.setQueriesData<Awaited<ReturnType<typeof previewAddress>>>({ exact: $exactMatch, queryKey: getPreviewAddressQueryKey(id,params) }, updater);
   };
 }
 
@@ -2818,8 +2818,8 @@ export function useSessionPty<TData = Awaited<ReturnType<typeof sessionPty>>, TE
 export const useSetSessionPtyQueryData = () => {
   const queryClient = useQueryClient();
   return (id: string,
-    params: SessionPtyParams | undefined,updater: Awaited<ReturnType<typeof sessionPty>> | undefined | ((old: Awaited<ReturnType<typeof sessionPty>> | undefined) => Awaited<ReturnType<typeof sessionPty>> | undefined)) => {
-    queryClient.setQueriesData<Awaited<ReturnType<typeof sessionPty>>>({ queryKey: getSessionPtyQueryKey(id,params) }, updater);
+    params: SessionPtyParams | undefined,updater: Awaited<ReturnType<typeof sessionPty>> | undefined | ((old: Awaited<ReturnType<typeof sessionPty>> | undefined) => Awaited<ReturnType<typeof sessionPty>> | undefined), $exactMatch: boolean = true) => {
+    queryClient.setQueriesData<Awaited<ReturnType<typeof sessionPty>>>({ exact: $exactMatch, queryKey: getSessionPtyQueryKey(id,params) }, updater);
   };
 }
 
@@ -3533,8 +3533,8 @@ export function useSessionWork<TData = Awaited<ReturnType<typeof sessionWork>>, 
  */
 export const useSetSessionWorkQueryData = () => {
   const queryClient = useQueryClient();
-  return (id: string,updater: Awaited<ReturnType<typeof sessionWork>> | undefined | ((old: Awaited<ReturnType<typeof sessionWork>> | undefined) => Awaited<ReturnType<typeof sessionWork>> | undefined)) => {
-    queryClient.setQueriesData<Awaited<ReturnType<typeof sessionWork>>>({ queryKey: getSessionWorkQueryKey(id) }, updater);
+  return (id: string,updater: Awaited<ReturnType<typeof sessionWork>> | undefined | ((old: Awaited<ReturnType<typeof sessionWork>> | undefined) => Awaited<ReturnType<typeof sessionWork>> | undefined), $exactMatch: boolean = true) => {
+    queryClient.setQueriesData<Awaited<ReturnType<typeof sessionWork>>>({ exact: $exactMatch, queryKey: getSessionWorkQueryKey(id) }, updater);
   };
 }
 

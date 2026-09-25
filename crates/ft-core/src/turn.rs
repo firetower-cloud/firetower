@@ -322,6 +322,7 @@ pub struct SlashCommand {
 pub enum RawSource {
     ClaudeStreamJson,
     CodexAppServer,
+    Acp,
 }
 
 /// Something an agent said or did.

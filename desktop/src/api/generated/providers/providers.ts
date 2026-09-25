@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.39.0
+ * OpenAPI spec version: 0.40.2
  */
 import {
   useMutation,
@@ -150,8 +150,8 @@ export function useListProviders<TData = Awaited<ReturnType<typeof listProviders
 
 export const useSetListProvidersQueryData = () => {
   const queryClient = useQueryClient();
-  return (updater: Awaited<ReturnType<typeof listProviders>> | undefined | ((old: Awaited<ReturnType<typeof listProviders>> | undefined) => Awaited<ReturnType<typeof listProviders>> | undefined)) => {
-    queryClient.setQueriesData<Awaited<ReturnType<typeof listProviders>>>({ queryKey: getListProvidersQueryKey() }, updater);
+  return (updater: Awaited<ReturnType<typeof listProviders>> | undefined | ((old: Awaited<ReturnType<typeof listProviders>> | undefined) => Awaited<ReturnType<typeof listProviders>> | undefined), $exactMatch: boolean = true) => {
+    queryClient.setQueriesData<Awaited<ReturnType<typeof listProviders>>>({ exact: $exactMatch, queryKey: getListProvidersQueryKey() }, updater);
   };
 }
 
@@ -513,8 +513,8 @@ export function useGetIdentity<TData = Awaited<ReturnType<typeof getIdentity>>, 
  */
 export const useSetGetIdentityQueryData = () => {
   const queryClient = useQueryClient();
-  return (id: string,updater: Awaited<ReturnType<typeof getIdentity>> | undefined | ((old: Awaited<ReturnType<typeof getIdentity>> | undefined) => Awaited<ReturnType<typeof getIdentity>> | undefined)) => {
-    queryClient.setQueriesData<Awaited<ReturnType<typeof getIdentity>>>({ queryKey: getGetIdentityQueryKey(id) }, updater);
+  return (id: string,updater: Awaited<ReturnType<typeof getIdentity>> | undefined | ((old: Awaited<ReturnType<typeof getIdentity>> | undefined) => Awaited<ReturnType<typeof getIdentity>> | undefined), $exactMatch: boolean = true) => {
+    queryClient.setQueriesData<Awaited<ReturnType<typeof getIdentity>>>({ exact: $exactMatch, queryKey: getGetIdentityQueryKey(id) }, updater);
   };
 }
 
@@ -794,8 +794,8 @@ export function useListProviderRepos<TData = Awaited<ReturnType<typeof listProvi
  */
 export const useSetListProviderReposQueryData = () => {
   const queryClient = useQueryClient();
-  return (id: string,updater: Awaited<ReturnType<typeof listProviderRepos>> | undefined | ((old: Awaited<ReturnType<typeof listProviderRepos>> | undefined) => Awaited<ReturnType<typeof listProviderRepos>> | undefined)) => {
-    queryClient.setQueriesData<Awaited<ReturnType<typeof listProviderRepos>>>({ queryKey: getListProviderReposQueryKey(id) }, updater);
+  return (id: string,updater: Awaited<ReturnType<typeof listProviderRepos>> | undefined | ((old: Awaited<ReturnType<typeof listProviderRepos>> | undefined) => Awaited<ReturnType<typeof listProviderRepos>> | undefined), $exactMatch: boolean = true) => {
+    queryClient.setQueriesData<Awaited<ReturnType<typeof listProviderRepos>>>({ exact: $exactMatch, queryKey: getListProviderReposQueryKey(id) }, updater);
   };
 }
 

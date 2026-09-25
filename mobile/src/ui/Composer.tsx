@@ -62,6 +62,7 @@ import { ArrowUp, ChevronDown, Mic, Paperclip, Plus, Square, X } from "lucide-re
 import type { Attached, Control, ControlKind } from "~/api/generated/model";
 import { getSessionControlsQueryKey, useChooseControl, useSessionControls } from "~/api/generated/conversation/conversation";
 import { Picker } from "~/ui/Picker";
+import { planPick, shownValue } from "~/ui/controls";
 import { useQueryClient } from "@tanstack/react-query";
 import { megabytes, type Picked } from "~/ui/attach";
 import { AttachMenu } from "~/ui/AttachMenu";
@@ -112,6 +113,7 @@ const TAP_REST = "h-9 w-9 items-center justify-center rounded-full";
 
 export function Composer({
   sessionId,
+  acp = false,
   working,
   model,
   mode,
@@ -123,6 +125,7 @@ export function Composer({
 }: {
   /** Whose composer this is — the key a seeded draft was left under. */
   sessionId: string;
+  acp?: boolean;
   working: boolean;
   /**
    * What the agent has said it is running.
@@ -174,23 +177,30 @@ export function Composer({
    * `onPress` at all, which is to say they were a picture of a control.
    */
   const cache = useQueryClient();
-  const controls = useSessionControls(sessionId);
+  const controls = useSessionControls(sessionId, { query: { refetchInterval: acp ? 2000 : false } });
   const choose = useChooseControl();
   const [picking, setPicking] = useState<ControlKind | null>(null);
   /* What was just chosen, until the list is refetched and agrees. */
   const [chosen, setChosen] = useState<Partial<Record<string, string>>>({});
 
   const offered: Control[] = controls.data ?? [];
-  const inForce = (c: Control) =>
-    chosen[c.kind] ??
-    c.current ??
-    (c.kind === "model" ? model : c.kind === "mode" ? mode : undefined) ??
-    undefined;
+  const inForce = (c: Control) => shownValue({ acp, control: c, chosen, model, mode });
 
   const pick = (kind: ControlKind, value: string) => {
+    const plan = planPick({ acp, pending: choose.isPending, kind });
+    if (plan.act === "ignore") return;
+    if (acp) {
+      Haptics.selectionAsync();
+      setPicking(null);
+      choose.mutate({ id: sessionId, data: { kind, value } }, {
+        onError: (e) => Alert.alert("Setting not confirmed", e?.message ?? "Refresh the current configuration before retrying."),
+        onSettled: () => cache.invalidateQueries({ queryKey: getSessionControlsQueryKey(sessionId) }),
+      });
+      return;
+    }
     Haptics.selectionAsync();
-    setChosen((was) => ({ ...was, [kind]: value }));
-    if (kind === "model" || kind === "mode" || kind === "effort") onRemember?.(kind, value);
+    if (plan.optimistic) setChosen((was) => ({ ...was, [kind]: value }));
+    if (plan.remember) onRemember?.(plan.remember, value);
     setPicking(null);
     choose.mutate(
       { id: sessionId, data: { kind, value } },

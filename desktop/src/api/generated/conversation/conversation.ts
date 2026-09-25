@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.39.0
+ * OpenAPI spec version: 0.40.2
  */
 import {
   useMutation,
@@ -166,8 +166,8 @@ export function useSessionControls<TData = Awaited<ReturnType<typeof sessionCont
  */
 export const useSetSessionControlsQueryData = () => {
   const queryClient = useQueryClient();
-  return (id: string,updater: Awaited<ReturnType<typeof sessionControls>> | undefined | ((old: Awaited<ReturnType<typeof sessionControls>> | undefined) => Awaited<ReturnType<typeof sessionControls>> | undefined)) => {
-    queryClient.setQueriesData<Awaited<ReturnType<typeof sessionControls>>>({ queryKey: getSessionControlsQueryKey(id) }, updater);
+  return (id: string,updater: Awaited<ReturnType<typeof sessionControls>> | undefined | ((old: Awaited<ReturnType<typeof sessionControls>> | undefined) => Awaited<ReturnType<typeof sessionControls>> | undefined), $exactMatch: boolean = true) => {
+    queryClient.setQueriesData<Awaited<ReturnType<typeof sessionControls>>>({ exact: $exactMatch, queryKey: getSessionControlsQueryKey(id) }, updater);
   };
 }
 

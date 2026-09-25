@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.39.0
+ * OpenAPI spec version: 0.40.2
  */
 import {
   useMutation,
@@ -247,8 +247,8 @@ export function useListUsers<TData = Awaited<ReturnType<typeof listUsers>>, TErr
  */
 export const useSetListUsersQueryData = () => {
   const queryClient = useQueryClient();
-  return (updater: Awaited<ReturnType<typeof listUsers>> | undefined | ((old: Awaited<ReturnType<typeof listUsers>> | undefined) => Awaited<ReturnType<typeof listUsers>> | undefined)) => {
-    queryClient.setQueriesData<Awaited<ReturnType<typeof listUsers>>>({ queryKey: getListUsersQueryKey() }, updater);
+  return (updater: Awaited<ReturnType<typeof listUsers>> | undefined | ((old: Awaited<ReturnType<typeof listUsers>> | undefined) => Awaited<ReturnType<typeof listUsers>> | undefined), $exactMatch: boolean = true) => {
+    queryClient.setQueriesData<Awaited<ReturnType<typeof listUsers>>>({ exact: $exactMatch, queryKey: getListUsersQueryKey() }, updater);
   };
 }
 

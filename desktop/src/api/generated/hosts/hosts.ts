@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.39.0
+ * OpenAPI spec version: 0.40.2
  */
 import {
   useMutation,
@@ -154,8 +154,8 @@ export function useListHosts<TData = Awaited<ReturnType<typeof listHosts>>, TErr
 
 export const useSetListHostsQueryData = () => {
   const queryClient = useQueryClient();
-  return (updater: Awaited<ReturnType<typeof listHosts>> | undefined | ((old: Awaited<ReturnType<typeof listHosts>> | undefined) => Awaited<ReturnType<typeof listHosts>> | undefined)) => {
-    queryClient.setQueriesData<Awaited<ReturnType<typeof listHosts>>>({ queryKey: getListHostsQueryKey() }, updater);
+  return (updater: Awaited<ReturnType<typeof listHosts>> | undefined | ((old: Awaited<ReturnType<typeof listHosts>> | undefined) => Awaited<ReturnType<typeof listHosts>> | undefined), $exactMatch: boolean = true) => {
+    queryClient.setQueriesData<Awaited<ReturnType<typeof listHosts>>>({ exact: $exactMatch, queryKey: getListHostsQueryKey() }, updater);
   };
 }
 
@@ -816,8 +816,8 @@ export function useHostReadiness<TData = Awaited<ReturnType<typeof hostReadiness
 export const useSetHostReadinessQueryData = () => {
   const queryClient = useQueryClient();
   return (id: string,
-    params: HostReadinessParams | undefined,updater: Awaited<ReturnType<typeof hostReadiness>> | undefined | ((old: Awaited<ReturnType<typeof hostReadiness>> | undefined) => Awaited<ReturnType<typeof hostReadiness>> | undefined)) => {
-    queryClient.setQueriesData<Awaited<ReturnType<typeof hostReadiness>>>({ queryKey: getHostReadinessQueryKey(id,params) }, updater);
+    params: HostReadinessParams | undefined,updater: Awaited<ReturnType<typeof hostReadiness>> | undefined | ((old: Awaited<ReturnType<typeof hostReadiness>> | undefined) => Awaited<ReturnType<typeof hostReadiness>> | undefined), $exactMatch: boolean = true) => {
+    queryClient.setQueriesData<Awaited<ReturnType<typeof hostReadiness>>>({ exact: $exactMatch, queryKey: getHostReadinessQueryKey(id,params) }, updater);
   };
 }
 
@@ -1021,8 +1021,8 @@ a worker with it.
  */
 export const useSetSshKeyQueryData = () => {
   const queryClient = useQueryClient();
-  return (updater: Awaited<ReturnType<typeof sshKey>> | undefined | ((old: Awaited<ReturnType<typeof sshKey>> | undefined) => Awaited<ReturnType<typeof sshKey>> | undefined)) => {
-    queryClient.setQueriesData<Awaited<ReturnType<typeof sshKey>>>({ queryKey: getSshKeyQueryKey() }, updater);
+  return (updater: Awaited<ReturnType<typeof sshKey>> | undefined | ((old: Awaited<ReturnType<typeof sshKey>> | undefined) => Awaited<ReturnType<typeof sshKey>> | undefined), $exactMatch: boolean = true) => {
+    queryClient.setQueriesData<Awaited<ReturnType<typeof sshKey>>>({ exact: $exactMatch, queryKey: getSshKeyQueryKey() }, updater);
   };
 }
 

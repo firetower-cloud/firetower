@@ -10,6 +10,7 @@ pub use readiness::{Readiness, Requirement};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
+pub mod acp;
 pub mod codex;
 pub mod controls;
 pub mod dotenv;
@@ -45,6 +46,7 @@ pub const WORKER_ROOT_ENV: &str = "FIRETOWER_WORKER_ROOT";
 pub enum Agent {
     ClaudeCode,
     Codex,
+    KimiCode,
     /// A plain shell. Not offered — see [`Agent::all`].
     Shell,
 }
@@ -63,8 +65,8 @@ impl Agent {
     /// network, and a session row that already says `Shell` still decodes.
     ///
     /// [`Shell`]: Agent::Shell
-    pub fn all() -> [Agent; 2] {
-        [Agent::ClaudeCode, Agent::Codex]
+    pub fn all() -> [Agent; 3] {
+        [Agent::ClaudeCode, Agent::Codex, Agent::KimiCode]
     }
 
     /// What it's called in the interface.
@@ -72,6 +74,7 @@ impl Agent {
         match self {
             Agent::ClaudeCode => "Claude Code",
             Agent::Codex => "Codex",
+            Agent::KimiCode => "Kimi Code",
             Agent::Shell => "Shell",
         }
     }
@@ -86,6 +89,7 @@ impl Agent {
         match self {
             Agent::ClaudeCode => "claude",
             Agent::Codex => "codex",
+            Agent::KimiCode => "kimi",
             Agent::Shell => "bash",
         }
     }
@@ -97,7 +101,7 @@ impl Agent {
     /// one, and fetching it would be absurd.
     pub fn installable(&self) -> bool {
         match self {
-            Agent::ClaudeCode | Agent::Codex => true,
+            Agent::ClaudeCode | Agent::Codex | Agent::KimiCode => true,
             Agent::Shell => false,
         }
     }
@@ -207,6 +211,7 @@ impl Agent {
             // Claude Code takes as switches — the model, how it may ask — is
             // in `thread/start` here, which is why this is so short.
             Agent::Codex => Some(vec![self.command().to_string(), "app-server".to_string()]),
+            Agent::KimiCode => Some(vec!["kimi".into(), "acp".into()]),
             Agent::Shell => None,
         }
     }
@@ -227,6 +232,13 @@ impl Agent {
                 }
             }
             Agent::Codex => crate::codex::opening(cwd),
+            Agent::KimiCode => {
+                if prompt.trim().is_empty() {
+                    Vec::new()
+                } else {
+                    vec![crate::acp::prompt(prompt)]
+                }
+            }
             Agent::Shell => Vec::new(),
         }
     }
@@ -244,8 +256,13 @@ impl Agent {
     /// [`all`](Agent::all) must not turn an old row into an error.
     ///
     /// [`Shell`]: Agent::Shell
-    pub fn every() -> [Agent; 3] {
-        [Agent::ClaudeCode, Agent::Codex, Agent::Shell]
+    pub fn every() -> [Agent; 4] {
+        [
+            Agent::ClaudeCode,
+            Agent::Codex,
+            Agent::KimiCode,
+            Agent::Shell,
+        ]
     }
 
     /// Parsed back from how it is stored and sent.
@@ -985,7 +1002,7 @@ impl Agent {
     pub fn auth_status_command(&self) -> Option<&'static [&'static str]> {
         match self {
             Agent::ClaudeCode => Some(&["auth", "status"]),
-            Agent::Codex | Agent::Shell => None,
+            Agent::Codex | Agent::KimiCode | Agent::Shell => None,
         }
     }
 
@@ -998,7 +1015,7 @@ impl Agent {
     pub fn token_setup(&self) -> Option<(&'static str, &'static str)> {
         match self {
             Agent::ClaudeCode => Some(("claude setup-token", "CLAUDE_CODE_OAUTH_TOKEN")),
-            Agent::Codex | Agent::Shell => None,
+            Agent::Codex | Agent::KimiCode | Agent::Shell => None,
         }
     }
 
@@ -1014,7 +1031,7 @@ impl Agent {
     /// there is a driver to use it — it is the longer half of the setup, and
     /// nothing about it depends on being able to start a session yet.
     pub fn signs_in_with_a_code(&self) -> bool {
-        matches!(self, Agent::Codex)
+        matches!(self, Agent::Codex | Agent::KimiCode)
     }
 
     /// The file this agent keeps its credential in, for the ones that use a
@@ -1025,10 +1042,21 @@ impl Agent {
     /// A file rather than a variable is not a worse arrangement, only a
     /// different one: it still travels from the vault per session and is still
     /// gone when the workspace is.
+    /// Whether the stored credential is a set of files rather than one.
+    ///
+    /// Codex keeps everything in `auth.json`, so one file round-trips it. Kimi
+    /// splits the same thing in two — `config.toml` names the provider and
+    /// `credentials/<hash>.json` holds the tokens — and the hash is not a name
+    /// anything can predict. So it travels as a JSON object of path to
+    /// contents, written back out under the agent's home exactly as found.
+    pub fn credential_bundle(&self) -> bool {
+        matches!(self, Agent::KimiCode)
+    }
+
     pub fn credential_file(&self) -> Option<&'static str> {
         match self {
             Agent::Codex => Some("auth.json"),
-            Agent::ClaudeCode | Agent::Shell => None,
+            Agent::ClaudeCode | Agent::KimiCode | Agent::Shell => None,
         }
     }
 
@@ -1039,6 +1067,7 @@ impl Agent {
     pub fn home_var(&self) -> Option<&'static str> {
         match self {
             Agent::Codex => Some("CODEX_HOME"),
+            Agent::KimiCode => Some("KIMI_CODE_HOME"),
             Agent::ClaudeCode | Agent::Shell => None,
         }
     }
@@ -1048,7 +1077,7 @@ impl Agent {
         match self {
             Agent::ClaudeCode => Some("ANTHROPIC_API_KEY"),
             Agent::Codex => Some("OPENAI_API_KEY"),
-            Agent::Shell => None,
+            Agent::KimiCode | Agent::Shell => None,
         }
     }
 
@@ -1091,7 +1120,7 @@ impl Agent {
             }),
             // Not because they don't have one, but because nobody has worked
             // out what it wants. An unanswered first run costs a keypress.
-            Agent::Codex | Agent::Shell => None,
+            Agent::Codex | Agent::KimiCode | Agent::Shell => None,
         }
     }
 
@@ -1127,7 +1156,7 @@ impl Agent {
             ],
             // No hooks. See `status_for` — nothing will move these off
             // `Working` and the interface should admit that.
-            Agent::Codex | Agent::Shell => &[],
+            Agent::Codex | Agent::KimiCode | Agent::Shell => &[],
         }
     }
 
@@ -1135,7 +1164,7 @@ impl Agent {
     pub fn hooks_file(&self) -> Option<&'static str> {
         match self {
             Agent::ClaudeCode => Some(".claude/settings.json"),
-            Agent::Codex | Agent::Shell => None,
+            Agent::Codex | Agent::KimiCode | Agent::Shell => None,
         }
     }
 }
