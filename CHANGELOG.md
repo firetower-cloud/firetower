@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.41.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.40.2...firetower-v0.41.0) (2026-09-25)
+
+
+### Features
+
+* add an experimental ACP transport with Kimi Code ([#101](https://github.com/firetower-cloud/firetower/issues/101)) ([5d84e48](https://github.com/firetower-cloud/firetower/commit/5d84e48a35bf410958d04004c4c5428bd4a38fc0))
+* add mobile app QR codes to Get the app page ([6388a3f](https://github.com/firetower-cloud/firetower/commit/6388a3fbea9b54cb2f5b8a7196cb3cefcc0812a9))
+* **conversation:** show the pictures an agent hands back ([27431b9](https://github.com/firetower-cloud/firetower/commit/27431b94757fa1644c35dbf7641e14908ffb4bde))
+* **kimi:** connect an account from the control plane, and install it ([fde88f0](https://github.com/firetower-cloud/firetower/commit/fde88f04ad7eb1f6bdc7acea8fb6f7435aaa7a75))
+* reuse model and effort controls for Kimi ACP ([e2d1c7c](https://github.com/firetower-cloud/firetower/commit/e2d1c7c06c48ed2f359ba6a27a5a7496b8c05d13))
+* **server:** reclaim what a finished workspace was holding ([ee4a961](https://github.com/firetower-cloud/firetower/commit/ee4a961925727a7351bbbea4bd3b7c207c155e16))
+* show agent screenshots and reclaim finished workspaces ([b5a766b](https://github.com/firetower-cloud/firetower/commit/b5a766b3755cfb6d1fc59e7ae5868cdc88823220))
+* **web:** hand out the phone app with a code to scan ([3c385e8](https://github.com/firetower-cloud/firetower/commit/3c385e85c1b2977a38fb850e31d4693651dc06ad))
+
+
+### Bug Fixes
+
+* keep pending echoes from skipping the next ACP turn ([9032565](https://github.com/firetower-cloud/firetower/commit/90325651d80e81617d385bade11b094ec4189cfa))
+* preserve ACP tool snapshots and exact approval semantics ([da54972](https://github.com/firetower-cloud/firetower/commit/da5497266d5b034db1a6134ccc9f935e894d85f1))
+
 ## [0.40.2](https://github.com/firetower-cloud/firetower/compare/firetower-v0.40.1...firetower-v0.40.2) (2026-09-24)
 
 
