@@ -50,6 +50,23 @@ export function findPaths(text: string): Found[] {
 
 const known = new Map<string, Promise<string | null>>();
 
+/**
+ * The same answers, readable without waiting.
+ *
+ * `known` holds promises, and awaiting one costs a turn of the microtask queue
+ * even when it settled long ago. That turn is a rendered frame: a picture
+ * whose component remounts — which is every delta of a streaming turn, because
+ * the markdown is reparsed — draws "looking for it…" and then the image again,
+ * and a 420px block collapsing to one line and back is the transcript jumping
+ * under somebody reading it.
+ */
+const settled = new Map<string, string | null>();
+
+/** What a written path already resolved to, or `undefined` if not yet. */
+export function resolvedPath(sessionId: string, written: string): string | null | undefined {
+  return settled.get(`${sessionId}\n${written}`);
+}
+
 /** The workspace path a written one means, or nothing if it is not there. */
 export function resolvePath(sessionId: string, written: string): Promise<string | null> {
   const key = `${sessionId}\n${written}`;
@@ -64,7 +81,11 @@ export function resolvePath(sessionId: string, written: string): Promise<string 
         const same = paths.filter((p) => p.split("/").pop() === name);
         return same.length === 1 ? same[0] : null;
       })
-      .catch(() => null);
+      .catch(() => null)
+      .then((found) => {
+        settled.set(key, found);
+        return found;
+      });
     known.set(key, hit);
   }
   return hit;

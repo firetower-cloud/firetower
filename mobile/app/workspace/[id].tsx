@@ -37,6 +37,7 @@ import { Composer } from "~/ui/Composer";
 import { Sheen } from "~/ui/Sheen";
 import { Signal } from "~/ui/Signal";
 import { Transcript } from "~/ui/Transcript";
+import { ImagesFrom } from "~/ui/WorkspaceImage";
 import { Waiting } from "~/ui/Waiting";
 import { color } from "~/design/tokens.generated";
 
@@ -247,7 +248,11 @@ function Conversation({ place }: { place: Workspace }) {
           ) : null}
 
           {conversation.items.length > 0 ? (
-            <Transcript items={conversation.items} />
+            /* Which workspace the pictures in the agent's prose are read from.
+               Without this a `![shot](docs/shot.png)` has nowhere to look. */
+            <ImagesFrom.Provider value={{ session: speaker.id }}>
+              <Transcript items={conversation.items} />
+            </ImagesFrom.Provider>
           ) : conversation.trouble ? (
             <Text className="mt-2 font-sans text-meta text-brick">{conversation.trouble}</Text>
           ) : !conversation.arrived ? (

@@ -15,7 +15,7 @@
 import { createContext, useContext, useEffect, useState } from "react";
 import { ImageOff } from "lucide-react";
 import { useFileText } from "~/api/text";
-import { resolvePath } from "~/paths";
+import { resolvePath, resolvedPath } from "~/paths";
 import { why } from "~/data";
 
 /**
@@ -40,11 +40,27 @@ export function isWorkspaceSrc(src: string | undefined): src is string {
 export function WorkspaceImage({ src, alt }: { src: string; alt?: string }) {
   const { session } = useContext(ImagesFrom);
   /* `undefined` while it is being looked for, `null` once it is known not to
-     be there — the two need different words on screen. */
-  const [path, setPath] = useState<string | null | undefined>(undefined);
+     be there — the two need different words on screen.
+ 
+     Seeded from what is already known rather than starting undecided. This
+     component remounts on every delta of a streaming turn, because the
+     markdown around it is reparsed each time, and a remount that begins
+     undecided draws the caption before drawing the image again: a 420px
+     block collapsing to one line and back, over and over, while the agent
+     is still talking. */
+  const [path, setPath] = useState<string | null | undefined>(() =>
+    session ? resolvedPath(session, src) : undefined,
+  );
 
   useEffect(() => {
     if (!session) return;
+    // Known already — including on a remount, and including when `src`
+    // changes on an instance that is being reused.
+    const cached = resolvedPath(session, src);
+    if (cached !== undefined) {
+      setPath(cached);
+      return;
+    }
     let live = true;
     resolvePath(session, src).then((found) => live && setPath(found));
     return () => {

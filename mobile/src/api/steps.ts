@@ -90,6 +90,11 @@ function foldable(item: Item): boolean {
   // how somebody can tell the session has not hung — a group that swallows the
   // step in flight makes a working agent look like a frozen one.
   if (item.status === undefined) return false;
+  // A step that handed back a picture is not scaffolding, for the same reason
+  // an edit is not: the screenshot is what somebody is scrolling towards, and
+  // "4 steps" puts it behind a click. The same decision `FileChange`'s absence
+  // from the list above records.
+  if (item.images?.length) return false;
   return FOLDS.includes(item.kind);
 }
 

@@ -617,6 +617,17 @@ function ToolRow({ item, onOpenDiff, onOpenFile }: { item: Item } & Open) {
         {!item.status && <span className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-slate" />}
       </div>
       {notice && <p className="px-2 pb-1 text-meta text-mute">{notice}</p>}
+      {/* Outside the fold on purpose. A screenshot is the thing you came to
+          look at, and one behind a disclosure triangle is one nobody sees —
+          which is the whole complaint this answers. Smaller than a picture in
+          prose: this is a step, not the point being made. */}
+      {item.images && item.images.length > 0 && (
+        <div className="flex flex-wrap gap-1.5 px-2 pb-1.5">
+          {item.images.map((image, i) => (
+            <img key={i} src={`data:${image.mediaType};base64,${image.data}`} alt="" className="max-h-64 max-w-full rounded-md border border-line object-contain" />
+          ))}
+        </div>
+      )}
       {open && (
         <div className="mb-1 space-y-1.5 px-2">
           {item.input !== undefined && <pre className="scroll-slim max-h-40 overflow-auto rounded-md bg-panel px-3 py-2 font-mono text-micro whitespace-pre-wrap text-mute">{JSON.stringify(item.input, null, 2)}</pre>}

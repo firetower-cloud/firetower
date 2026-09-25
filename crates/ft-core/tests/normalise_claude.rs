@@ -244,6 +244,109 @@ fn a_picture_from_somebody_elses_server_is_not_drawn() {
 }
 
 #[test]
+fn a_picture_a_tool_handed_back_is_in_the_transcript() {
+    // The screenshot case. An agent captures one, reads it, and the result
+    // comes back as an image block with no text beside it — so a normaliser
+    // that keeps only the text of a result drops the picture entirely and
+    // leaves a card that says nothing.
+    let mut normaliser = ClaudeNormaliser::new();
+    let events = normaliser.push(
+        r#"{"type":"user","message":{"role":"user","content":[
+             {"type":"tool_result","tool_use_id":"t1","content":[
+               {"type":"image","source":{"type":"base64","media_type":"image/png","data":"BBBB"}}]}]}}"#,
+    );
+
+    let carried = events
+        .iter()
+        .find_map(|e| match e {
+            TurnEvent::ItemUpdated { item, data } if item.as_str() == "t1" => {
+                data.get("images").cloned()
+            }
+            _ => None,
+        })
+        .expect("the picture should travel with the tool call");
+
+    assert_eq!(carried[0]["mediaType"], "image/png");
+    assert_eq!(carried[0]["data"], "BBBB");
+}
+
+#[test]
+fn a_tool_result_carrying_no_picture_is_exactly_what_it_was() {
+    // The fallback, named so it cannot be broken quietly: the ordinary result
+    // is a plain string, and looking for pictures in one must not invent an
+    // event or cost the output its card.
+    let mut normaliser = ClaudeNormaliser::new();
+    let events = normaliser.push(
+        r#"{"type":"user","message":{"role":"user","content":[
+             {"type":"tool_result","tool_use_id":"t2","content":"ok, 3 files"}]}}"#,
+    );
+
+    assert!(
+        !events
+            .iter()
+            .any(|e| matches!(e, TurnEvent::ItemUpdated { .. })),
+        "nothing to carry, so nothing is sent"
+    );
+    assert!(text_of(&events, StreamKind::ToolOutput).contains("ok, 3 files"));
+}
+
+#[test]
+fn a_tool_result_pointing_somewhere_else_is_not_drawn() {
+    // The same rule the composer's pictures follow: only base64 sources. A
+    // tool that reports a URL must not become a request this interface makes.
+    let mut normaliser = ClaudeNormaliser::new();
+    let events = normaliser.push(
+        r#"{"type":"user","message":{"role":"user","content":[
+             {"type":"tool_result","tool_use_id":"t3","content":[
+               {"type":"image","source":{"type":"url","url":"https://elsewhere/x.png"}}]}]}}"#,
+    );
+    assert!(
+        !events
+            .iter()
+            .any(|e| matches!(e, TurnEvent::ItemUpdated { .. })),
+        "a remote source is not carried"
+    );
+}
+
+#[test]
+fn the_harness_note_about_a_downscaled_picture_is_not_a_message() {
+    // Claude Code shrinks a large screenshot to fit its own limit and says so
+    // in a message of its own — addressed to the model, in the shape of one
+    // from a person. Drawn as sent, the transcript shows somebody saying a
+    // sentence about pixel dimensions that they never said.
+    let mut normaliser = ClaudeNormaliser::new();
+    let events = normaliser.push(
+        r#"{"type":"user","isSynthetic":true,"uuid":"s1","message":{"role":"user","content":[
+             {"type":"text","text":"[Image: original 2880x1800, displayed at 2000x1250.]"}]}}"#,
+    );
+
+    assert!(
+        events.is_empty(),
+        "a message nobody typed is not in the transcript: {events:?}"
+    );
+}
+
+#[test]
+fn the_same_sentence_from_a_person_is_still_a_message() {
+    // The reason the flag decides and the text never does. Somebody asking
+    // what produces that note types the note; matching on the words would
+    // swallow exactly the question being asked.
+    let mut normaliser = ClaudeNormaliser::new();
+    let events = normaliser.push(
+        r#"{"type":"user","uuid":"u3","message":{"role":"user","content":[
+             {"type":"text","text":"what makes [Image: original 2880x1800, displayed at 2000x1250.]?"}]}}"#,
+    );
+
+    assert!(
+        started(&events)
+            .iter()
+            .any(|(kind, _)| *kind == ItemKind::UserMessage),
+        "an unflagged message is somebody talking"
+    );
+    assert!(text_of(&events, StreamKind::UserText).contains("what makes"));
+}
+
+#[test]
 fn what_we_typed_is_not_mistaken_for_what_the_agent_said() {
     // They shared a stream kind once, and the inbox note for a finished
     // session came out as the prompt with the reply stuck on the end.
