@@ -160,8 +160,8 @@ export function useVoiceState<TData = Awaited<ReturnType<typeof voiceState>>, TE
  */
 export const useSetVoiceStateQueryData = () => {
   const queryClient = useQueryClient();
-  return (updater: Awaited<ReturnType<typeof voiceState>> | undefined | ((old: Awaited<ReturnType<typeof voiceState>> | undefined) => Awaited<ReturnType<typeof voiceState>> | undefined)) => {
-    queryClient.setQueriesData<Awaited<ReturnType<typeof voiceState>>>({ queryKey: getVoiceStateQueryKey() }, updater);
+  return (updater: Awaited<ReturnType<typeof voiceState>> | undefined | ((old: Awaited<ReturnType<typeof voiceState>> | undefined) => Awaited<ReturnType<typeof voiceState>> | undefined), $exactMatch: boolean = true) => {
+    queryClient.setQueriesData<Awaited<ReturnType<typeof voiceState>>>({ exact: $exactMatch, queryKey: getVoiceStateQueryKey() }, updater);
   };
 }
 

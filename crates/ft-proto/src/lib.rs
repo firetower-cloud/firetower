@@ -44,7 +44,8 @@ use serde::{Deserialize, Serialize};
 /// 13 — acknowledged agent launches and isolated per-run authentication.
 /// 15 — KimiCode and its ACP journal require an ACP-aware worker.
 /// 16 — ACP configuration commands require a worker that can apply them.
-pub const PROTOCOL_VERSION: u32 = 16;
+/// 17 — signing in names its agent, so Kimi can use the device flow too.
+pub const PROTOCOL_VERSION: u32 = 17;
 
 mod codec;
 pub use codec::{Codec, CodecError, FrameReader, FrameWriter};
@@ -379,8 +380,8 @@ pub enum ToWorker {
     /// whoever asked for the code, and nothing about it travels through a
     /// browser or through us on the way there.
     ///
-    /// Answered twice — [`ToServer::CodexLoginPending`] with the code to show,
-    /// then [`ToServer::CodexLoginFinished`] whenever somebody gets around to
+    /// Answered twice — [`ToServer::AgentLoginPending`] with the code to show,
+    /// then [`ToServer::AgentLoginFinished`] whenever somebody gets around to
     /// approving it.
     /// Start another agent in a workspace that is already there.
     ///
@@ -388,8 +389,16 @@ pub enum ToWorker {
     /// launch and nothing else, and a worker that received one meaning the
     /// other would clone over a checkout somebody is working in.
     StartAgent(Box<StartAgent>),
-    CodexLoginStart {
+    AgentLoginStart {
         req: ReqId,
+        /// Which agent is being signed in. Codex and Kimi both hand a device
+        /// code to whoever asked for it; they agree on nothing else about how.
+        agent: ft_core::Agent,
+        /// Which Kimi an account lives on — `global` for kimi.ai,
+        /// `mainland-cn` for kimi.com. Ignored by every other agent. They are
+        /// separate account namespaces, so the wrong one signs the wrong
+        /// person in and says it worked.
+        region: Option<String>,
     },
     /// Can this host reach this repository, and what is its default branch?
     ///
@@ -943,18 +952,20 @@ pub enum ToServer {
         req: ReqId,
         result: Result<String, String>,
     },
-    /// The code to show for a [`ToWorker::CodexLoginStart`], or why there is
+    /// The code to show for a [`ToWorker::AgentLoginStart`], or why there is
     /// none.
-    CodexLoginPending {
+    AgentLoginPending {
         req: ReqId,
-        result: Result<CodexPending, String>,
+        result: Result<LoginPending, String>,
     },
     /// How that sign-in ended: the credential Codex was given, or why not.
     ///
     /// Minutes after the code, because that is how long a person takes.
-    CodexLoginFinished {
+    AgentLoginFinished {
         req: ReqId,
-        /// The contents of `auth.json`, as Codex wrote it.
+        /// What the agent wrote: `auth.json` for Codex, and for an agent
+        /// whose credential is a bundle, the JSON object of path to contents
+        /// described on [`ft_core::Agent::credential_bundle`].
         result: Result<String, String>,
     },
     /// The answer to [`ToWorker::ProbeRemote`].
@@ -976,7 +987,7 @@ pub enum ToServer {
 /// The two things worth showing and nothing else: this is what a person reads
 /// off a screen and types somewhere else.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CodexPending {
+pub struct LoginPending {
     /// The short code. Shown, not clicked.
     pub user_code: String,
     /// Where to type it.

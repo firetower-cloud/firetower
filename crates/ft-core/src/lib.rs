@@ -101,8 +101,8 @@ impl Agent {
     /// one, and fetching it would be absurd.
     pub fn installable(&self) -> bool {
         match self {
-            Agent::ClaudeCode | Agent::Codex => true,
-            Agent::KimiCode | Agent::Shell => false,
+            Agent::ClaudeCode | Agent::Codex | Agent::KimiCode => true,
+            Agent::Shell => false,
         }
     }
 
@@ -1031,7 +1031,7 @@ impl Agent {
     /// there is a driver to use it — it is the longer half of the setup, and
     /// nothing about it depends on being able to start a session yet.
     pub fn signs_in_with_a_code(&self) -> bool {
-        matches!(self, Agent::Codex)
+        matches!(self, Agent::Codex | Agent::KimiCode)
     }
 
     /// The file this agent keeps its credential in, for the ones that use a
@@ -1042,6 +1042,17 @@ impl Agent {
     /// A file rather than a variable is not a worse arrangement, only a
     /// different one: it still travels from the vault per session and is still
     /// gone when the workspace is.
+    /// Whether the stored credential is a set of files rather than one.
+    ///
+    /// Codex keeps everything in `auth.json`, so one file round-trips it. Kimi
+    /// splits the same thing in two — `config.toml` names the provider and
+    /// `credentials/<hash>.json` holds the tokens — and the hash is not a name
+    /// anything can predict. So it travels as a JSON object of path to
+    /// contents, written back out under the agent's home exactly as found.
+    pub fn credential_bundle(&self) -> bool {
+        matches!(self, Agent::KimiCode)
+    }
+
     pub fn credential_file(&self) -> Option<&'static str> {
         match self {
             Agent::Codex => Some("auth.json"),
@@ -1056,7 +1067,8 @@ impl Agent {
     pub fn home_var(&self) -> Option<&'static str> {
         match self {
             Agent::Codex => Some("CODEX_HOME"),
-            Agent::ClaudeCode | Agent::KimiCode | Agent::Shell => None,
+            Agent::KimiCode => Some("KIMI_CODE_HOME"),
+            Agent::ClaudeCode | Agent::Shell => None,
         }
     }
 

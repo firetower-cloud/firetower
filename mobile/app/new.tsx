@@ -236,11 +236,11 @@ export default function NewWorkspace() {
         </Field>
 
         <Field label="Account" hint="Whose subscription this runs on">
-          {agent === "KimiCode" ? <Text className="text-sm text-dim">Uses the worker’s Kimi login. Run kimi login as the worker user first; authentication is checked at launch.</Text> : <Trigger
+          <Trigger
             value={account?.name}
             placeholder={agent ? "Choose an account" : "Pick an agent first"}
             onPress={() => agent && setOpen("account")}
-          />}
+          />
         </Field>
 
         <Field label="When the machine is busy">

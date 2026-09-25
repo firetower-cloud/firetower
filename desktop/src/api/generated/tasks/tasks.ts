@@ -164,8 +164,8 @@ export function useListTasks<TData = Awaited<ReturnType<typeof listTasks>>, TErr
  */
 export const useSetListTasksQueryData = () => {
   const queryClient = useQueryClient();
-  return (params: ListTasksParams | undefined,updater: Awaited<ReturnType<typeof listTasks>> | undefined | ((old: Awaited<ReturnType<typeof listTasks>> | undefined) => Awaited<ReturnType<typeof listTasks>> | undefined)) => {
-    queryClient.setQueriesData<Awaited<ReturnType<typeof listTasks>>>({ queryKey: getListTasksQueryKey(params) }, updater);
+  return (params: ListTasksParams | undefined,updater: Awaited<ReturnType<typeof listTasks>> | undefined | ((old: Awaited<ReturnType<typeof listTasks>> | undefined) => Awaited<ReturnType<typeof listTasks>> | undefined), $exactMatch: boolean = true) => {
+    queryClient.setQueriesData<Awaited<ReturnType<typeof listTasks>>>({ exact: $exactMatch, queryKey: getListTasksQueryKey(params) }, updater);
   };
 }
 
@@ -295,8 +295,8 @@ export function useGetTask<TData = Awaited<ReturnType<typeof getTask>>, TError =
  */
 export const useSetGetTaskQueryData = () => {
   const queryClient = useQueryClient();
-  return (params: GetTaskParams | undefined,updater: Awaited<ReturnType<typeof getTask>> | undefined | ((old: Awaited<ReturnType<typeof getTask>> | undefined) => Awaited<ReturnType<typeof getTask>> | undefined)) => {
-    queryClient.setQueriesData<Awaited<ReturnType<typeof getTask>>>({ queryKey: getGetTaskQueryKey(params) }, updater);
+  return (params: GetTaskParams | undefined,updater: Awaited<ReturnType<typeof getTask>> | undefined | ((old: Awaited<ReturnType<typeof getTask>> | undefined) => Awaited<ReturnType<typeof getTask>> | undefined), $exactMatch: boolean = true) => {
+    queryClient.setQueriesData<Awaited<ReturnType<typeof getTask>>>({ exact: $exactMatch, queryKey: getGetTaskQueryKey(params) }, updater);
   };
 }
 

@@ -158,8 +158,8 @@ export function useGetUpdates<TData = Awaited<ReturnType<typeof getUpdates>>, TE
  */
 export const useSetGetUpdatesQueryData = () => {
   const queryClient = useQueryClient();
-  return (updater: Awaited<ReturnType<typeof getUpdates>> | undefined | ((old: Awaited<ReturnType<typeof getUpdates>> | undefined) => Awaited<ReturnType<typeof getUpdates>> | undefined)) => {
-    queryClient.setQueriesData<Awaited<ReturnType<typeof getUpdates>>>({ queryKey: getGetUpdatesQueryKey() }, updater);
+  return (updater: Awaited<ReturnType<typeof getUpdates>> | undefined | ((old: Awaited<ReturnType<typeof getUpdates>> | undefined) => Awaited<ReturnType<typeof getUpdates>> | undefined), $exactMatch: boolean = true) => {
+    queryClient.setQueriesData<Awaited<ReturnType<typeof getUpdates>>>({ exact: $exactMatch, queryKey: getGetUpdatesQueryKey() }, updater);
   };
 }
 
@@ -515,8 +515,8 @@ export function useListRuns<TData = Awaited<ReturnType<typeof listRuns>>, TError
  */
 export const useSetListRunsQueryData = () => {
   const queryClient = useQueryClient();
-  return (updater: Awaited<ReturnType<typeof listRuns>> | undefined | ((old: Awaited<ReturnType<typeof listRuns>> | undefined) => Awaited<ReturnType<typeof listRuns>> | undefined)) => {
-    queryClient.setQueriesData<Awaited<ReturnType<typeof listRuns>>>({ queryKey: getListRunsQueryKey() }, updater);
+  return (updater: Awaited<ReturnType<typeof listRuns>> | undefined | ((old: Awaited<ReturnType<typeof listRuns>> | undefined) => Awaited<ReturnType<typeof listRuns>> | undefined), $exactMatch: boolean = true) => {
+    queryClient.setQueriesData<Awaited<ReturnType<typeof listRuns>>>({ exact: $exactMatch, queryKey: getListRunsQueryKey() }, updater);
   };
 }
 
@@ -710,8 +710,8 @@ export function useGetRun<TData = Awaited<ReturnType<typeof getRun>>, TError = A
 
 export const useSetGetRunQueryData = () => {
   const queryClient = useQueryClient();
-  return (id: string,updater: Awaited<ReturnType<typeof getRun>> | undefined | ((old: Awaited<ReturnType<typeof getRun>> | undefined) => Awaited<ReturnType<typeof getRun>> | undefined)) => {
-    queryClient.setQueriesData<Awaited<ReturnType<typeof getRun>>>({ queryKey: getGetRunQueryKey(id) }, updater);
+  return (id: string,updater: Awaited<ReturnType<typeof getRun>> | undefined | ((old: Awaited<ReturnType<typeof getRun>> | undefined) => Awaited<ReturnType<typeof getRun>> | undefined), $exactMatch: boolean = true) => {
+    queryClient.setQueriesData<Awaited<ReturnType<typeof getRun>>>({ exact: $exactMatch, queryKey: getGetRunQueryKey(id) }, updater);
   };
 }
 

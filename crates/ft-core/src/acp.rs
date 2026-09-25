@@ -110,6 +110,10 @@ impl AcpNormaliser {
                 let kind = match option["category"].as_str()? {
                     "model" => ControlKind::Model,
                     "thought_level" => ControlKind::Effort,
+                    // How much the agent may do unasked. Kimi offers this
+                    // alongside the other two and Firetower already has a
+                    // picker for it, so dropping it hid a control that works.
+                    "mode" => ControlKind::Mode,
                     _ => return None,
                 };
                 if option["type"] != "select" {
@@ -152,7 +156,12 @@ impl AcpNormaliser {
                 .find(|(_, c)| c.kind == ControlKind::Model)
                 .and_then(|(_, c)| c.current.clone())
                 .unwrap_or_default(),
-            mode: String::new(),
+            mode: self
+                .configuration
+                .iter()
+                .find(|(_, c)| c.kind == ControlKind::Mode)
+                .and_then(|(_, c)| c.current.clone())
+                .unwrap_or_default(),
             tools: Vec::new(),
             commands: Vec::new(),
         });

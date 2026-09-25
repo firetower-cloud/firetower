@@ -116,7 +116,7 @@ export function NewWorkspace({
   // The same readout the panel shows, for this machine and this agent, so a
   // missing agent is an Install button here and not a refusal after Start.
   const readiness = useHostReadiness(host?.id ?? "", { agent: kind }, { query: { enabled: !!host && !!kind, retry: false, staleTime: 5000 } });
-  const ready = !!name.trim() && checkouts.length > 0 && !!host && !!kind && (kind === "KimiCode" || !!account) && isReady(readiness.data) && !create.isPending;
+  const ready = !!name.trim() && checkouts.length > 0 && !!host && !!kind && !!account && isReady(readiness.data) && !create.isPending;
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -128,7 +128,7 @@ export function NewWorkspace({
   });
 
   const go = () => {
-    if (!ready || !kind || (kind !== "KimiCode" && !account)) return;
+    if (!ready || !kind || !account) return;
     create.mutate(
       {
         data: {
@@ -138,7 +138,7 @@ export function NewWorkspace({
           workspaceId: seed?.workspaceId as never,
           repos: checkouts.map((c) => ({ repoId: c.id, base: c.base })),
           agent: kind,
-          accountId: account?.id,
+          accountId: account.id,
           branch: shown.trim() || undefined,
           hostId: host?.id,
           share,
@@ -368,7 +368,7 @@ export function NewWorkspace({
           </Field>
 
           <Field label="Account" hint="Whose subscription this runs on">
-            {kind === "KimiCode" ? <p className="text-ui text-dim">Uses the worker’s Kimi login. Run <code>kimi login</code> as the worker user before starting; authentication has not been verified here.</p> : mine.length > 0 ? (
+            {mine.length > 0 ? (
               <div className="relative">
                 <select
                   value={account?.id ?? ""}

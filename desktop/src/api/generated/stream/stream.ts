@@ -171,8 +171,8 @@ export function useStream<TData = Awaited<ReturnType<typeof stream>>, TError = u
  */
 export const useSetStreamQueryData = () => {
   const queryClient = useQueryClient();
-  return (clientFrame: ClientFrame | undefined,updater: Awaited<ReturnType<typeof stream>> | undefined | ((old: Awaited<ReturnType<typeof stream>> | undefined) => Awaited<ReturnType<typeof stream>> | undefined)) => {
-    queryClient.setQueriesData<Awaited<ReturnType<typeof stream>>>({ queryKey: getStreamQueryKey(clientFrame) }, updater);
+  return (clientFrame: ClientFrame | undefined,updater: Awaited<ReturnType<typeof stream>> | undefined | ((old: Awaited<ReturnType<typeof stream>> | undefined) => Awaited<ReturnType<typeof stream>> | undefined), $exactMatch: boolean = true) => {
+    queryClient.setQueriesData<Awaited<ReturnType<typeof stream>>>({ exact: $exactMatch, queryKey: getStreamQueryKey(clientFrame) }, updater);
   };
 }
 

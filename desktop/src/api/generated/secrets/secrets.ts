@@ -158,8 +158,8 @@ export function useListSecrets<TData = Awaited<ReturnType<typeof listSecrets>>, 
  */
 export const useSetListSecretsQueryData = () => {
   const queryClient = useQueryClient();
-  return (updater: Awaited<ReturnType<typeof listSecrets>> | undefined | ((old: Awaited<ReturnType<typeof listSecrets>> | undefined) => Awaited<ReturnType<typeof listSecrets>> | undefined)) => {
-    queryClient.setQueriesData<Awaited<ReturnType<typeof listSecrets>>>({ queryKey: getListSecretsQueryKey() }, updater);
+  return (updater: Awaited<ReturnType<typeof listSecrets>> | undefined | ((old: Awaited<ReturnType<typeof listSecrets>> | undefined) => Awaited<ReturnType<typeof listSecrets>> | undefined), $exactMatch: boolean = true) => {
+    queryClient.setQueriesData<Awaited<ReturnType<typeof listSecrets>>>({ exact: $exactMatch, queryKey: getListSecretsQueryKey() }, updater);
   };
 }
 

@@ -744,8 +744,8 @@ enum Waiting {
     ///
     /// Two channels for one request, like a file, and for the same reason —
     /// the first answer is due in seconds and the second waits on a person.
-    CodexLogin {
-        started: Option<oneshot::Sender<Result<ft_proto::CodexPending, String>>>,
+    AgentLogin {
+        started: Option<oneshot::Sender<Result<ft_proto::LoginPending, String>>>,
         finished: Option<oneshot::Sender<Result<String, String>>>,
     },
     Action(oneshot::Sender<Result<String, String>>),
@@ -2157,11 +2157,11 @@ impl Fleet {
                                 None => tracing::debug!("an install answered after its request gave up"),
                             }
                         }
-                        Ok(ToServer::CodexLoginPending { req, result }) => {
+                        Ok(ToServer::AgentLoginPending { req, result }) => {
                             // The entry stays: the credential arrives under
                             // the same id, minutes later.
                             let mut held = probes.write().await;
-                            if let Some(Asked { waiting: Waiting::CodexLogin { started, .. }, .. }) = held.get_mut(&req) {
+                            if let Some(Asked { waiting: Waiting::AgentLogin { started, .. }, .. }) = held.get_mut(&req) {
                                 if let Some(tell) = started.take() {
                                     let _ = tell.send(result);
                                     continue;
@@ -2169,10 +2169,10 @@ impl Fleet {
                             }
                             tracing::debug!("a Codex sign-in answered after its request gave up");
                         }
-                        Ok(ToServer::CodexLoginFinished { req, result }) => {
+                        Ok(ToServer::AgentLoginFinished { req, result }) => {
                             let mut held = probes.write().await;
                             match held.remove(&req) {
-                                Some(Asked { waiting: Waiting::CodexLogin { finished, .. }, .. }) => {
+                                Some(Asked { waiting: Waiting::AgentLogin { finished, .. }, .. }) => {
                                     if let Some(tell) = finished { let _ = tell.send(result); }
                                 }
                                 Some(other) => { held.insert(req, other); }
@@ -2271,7 +2271,7 @@ impl Fleet {
                     // other host can be told to collect it. Losing the
                     // connection loses the attempt, and saying so beats a
                     // browser waiting out the full fifteen minutes.
-                    Waiting::CodexLogin { started, finished } => {
+                    Waiting::AgentLogin { started, finished } => {
                         if let Some(tell) = started {
                             let _ = tell.send(Err("the host stopped answering".into()));
                         }
@@ -2445,11 +2445,13 @@ impl Fleet {
     /// whenever somebody approves the code, which may be a quarter of an hour.
     /// Waiting on it is the caller's business; this returns as soon as there is
     /// something to put on a screen.
-    pub async fn codex_login(
+    pub async fn agent_login(
         &self,
         host_id: &HostId,
+        agent: ft_core::Agent,
+        region: Option<String>,
     ) -> Result<(
-        ft_proto::CodexPending,
+        ft_proto::LoginPending,
         oneshot::Receiver<Result<String, String>>,
     )> {
         let req = ulid::Ulid::new().to_string();
@@ -2460,7 +2462,7 @@ impl Fleet {
             req.clone(),
             Asked {
                 host: host_id.to_string(),
-                waiting: Waiting::CodexLogin {
+                waiting: Waiting::AgentLogin {
                     started: Some(started),
                     finished: Some(finished),
                 },
@@ -2468,7 +2470,14 @@ impl Fleet {
         );
 
         if let Err(e) = self
-            .send(host_id, ToWorker::CodexLoginStart { req: req.clone() })
+            .send(
+                host_id,
+                ToWorker::AgentLoginStart {
+                    req: req.clone(),
+                    agent,
+                    region,
+                },
+            )
             .await
         {
             self.probes.write().await.remove(&req);

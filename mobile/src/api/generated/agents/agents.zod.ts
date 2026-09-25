@@ -140,7 +140,8 @@ export const SignAgentInParams = zod.object({
 
 export const SignAgentInBody = zod.object({
   "accountId": zod.string().nullish().describe('The named account to authenticate. Made first with `create_account`.'),
-  "hostId": zod.string().nullish().describe('Which host should do it. Any that has the agent, by default.\n\nIt matters only in that OpenAI delivers the credential to whichever\nmachine asked for the code — and that machine hands it straight to us,\nso which one it was stops mattering the moment it lands.')
+  "hostId": zod.string().nullish().describe('Which host should do it. Any that has the agent, by default.\n\nIt matters only in that OpenAI delivers the credential to whichever\nmachine asked for the code — and that machine hands it straight to us,\nso which one it was stops mattering the moment it lands.'),
+  "region": zod.string().nullish().describe('Which Kimi the account lives on: `global` for kimi.ai, `mainland-cn`\nfor kimi.com. Omit for the default, and for every other agent.\n\nThey are separate account namespaces rather than mirrors, so picking\nthe wrong one signs a different person in and reports success.')
 }).describe('What a sign-in needs from the caller.')
 
 export const SignAgentInResponse = zod.object({

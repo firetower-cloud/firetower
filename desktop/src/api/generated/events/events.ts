@@ -160,8 +160,8 @@ refresh, and the fallback when a stream can't be held open.
  */
 export const useSetListEventsQueryData = () => {
   const queryClient = useQueryClient();
-  return (params: ListEventsParams | undefined,updater: Awaited<ReturnType<typeof listEvents>> | undefined | ((old: Awaited<ReturnType<typeof listEvents>> | undefined) => Awaited<ReturnType<typeof listEvents>> | undefined)) => {
-    queryClient.setQueriesData<Awaited<ReturnType<typeof listEvents>>>({ queryKey: getListEventsQueryKey(params) }, updater);
+  return (params: ListEventsParams | undefined,updater: Awaited<ReturnType<typeof listEvents>> | undefined | ((old: Awaited<ReturnType<typeof listEvents>> | undefined) => Awaited<ReturnType<typeof listEvents>> | undefined), $exactMatch: boolean = true) => {
+    queryClient.setQueriesData<Awaited<ReturnType<typeof listEvents>>>({ exact: $exactMatch, queryKey: getListEventsQueryKey(params) }, updater);
   };
 }
 
@@ -283,8 +283,8 @@ export function useStreamEvents<TData = Awaited<ReturnType<typeof streamEvents>>
  */
 export const useSetStreamEventsQueryData = () => {
   const queryClient = useQueryClient();
-  return (updater: Awaited<ReturnType<typeof streamEvents>> | undefined | ((old: Awaited<ReturnType<typeof streamEvents>> | undefined) => Awaited<ReturnType<typeof streamEvents>> | undefined)) => {
-    queryClient.setQueriesData<Awaited<ReturnType<typeof streamEvents>>>({ queryKey: getStreamEventsQueryKey() }, updater);
+  return (updater: Awaited<ReturnType<typeof streamEvents>> | undefined | ((old: Awaited<ReturnType<typeof streamEvents>> | undefined) => Awaited<ReturnType<typeof streamEvents>> | undefined), $exactMatch: boolean = true) => {
+    queryClient.setQueriesData<Awaited<ReturnType<typeof streamEvents>>>({ exact: $exactMatch, queryKey: getStreamEventsQueryKey() }, updater);
   };
 }
 

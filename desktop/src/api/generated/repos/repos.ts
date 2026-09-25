@@ -152,8 +152,8 @@ export function useListRepos<TData = Awaited<ReturnType<typeof listRepos>>, TErr
 
 export const useSetListReposQueryData = () => {
   const queryClient = useQueryClient();
-  return (updater: Awaited<ReturnType<typeof listRepos>> | undefined | ((old: Awaited<ReturnType<typeof listRepos>> | undefined) => Awaited<ReturnType<typeof listRepos>> | undefined)) => {
-    queryClient.setQueriesData<Awaited<ReturnType<typeof listRepos>>>({ queryKey: getListReposQueryKey() }, updater);
+  return (updater: Awaited<ReturnType<typeof listRepos>> | undefined | ((old: Awaited<ReturnType<typeof listRepos>> | undefined) => Awaited<ReturnType<typeof listRepos>> | undefined), $exactMatch: boolean = true) => {
+    queryClient.setQueriesData<Awaited<ReturnType<typeof listRepos>>>({ exact: $exactMatch, queryKey: getListReposQueryKey() }, updater);
   };
 }
 
@@ -598,8 +598,8 @@ export function useRepoBranches<TData = Awaited<ReturnType<typeof repoBranches>>
  */
 export const useSetRepoBranchesQueryData = () => {
   const queryClient = useQueryClient();
-  return (id: string,updater: Awaited<ReturnType<typeof repoBranches>> | undefined | ((old: Awaited<ReturnType<typeof repoBranches>> | undefined) => Awaited<ReturnType<typeof repoBranches>> | undefined)) => {
-    queryClient.setQueriesData<Awaited<ReturnType<typeof repoBranches>>>({ queryKey: getRepoBranchesQueryKey(id) }, updater);
+  return (id: string,updater: Awaited<ReturnType<typeof repoBranches>> | undefined | ((old: Awaited<ReturnType<typeof repoBranches>> | undefined) => Awaited<ReturnType<typeof repoBranches>> | undefined), $exactMatch: boolean = true) => {
+    queryClient.setQueriesData<Awaited<ReturnType<typeof repoBranches>>>({ exact: $exactMatch, queryKey: getRepoBranchesQueryKey(id) }, updater);
   };
 }
 
@@ -717,8 +717,8 @@ export function useListRepoEnv<TData = Awaited<ReturnType<typeof listRepoEnv>>, 
  */
 export const useSetListRepoEnvQueryData = () => {
   const queryClient = useQueryClient();
-  return (id: string,updater: Awaited<ReturnType<typeof listRepoEnv>> | undefined | ((old: Awaited<ReturnType<typeof listRepoEnv>> | undefined) => Awaited<ReturnType<typeof listRepoEnv>> | undefined)) => {
-    queryClient.setQueriesData<Awaited<ReturnType<typeof listRepoEnv>>>({ queryKey: getListRepoEnvQueryKey(id) }, updater);
+  return (id: string,updater: Awaited<ReturnType<typeof listRepoEnv>> | undefined | ((old: Awaited<ReturnType<typeof listRepoEnv>> | undefined) => Awaited<ReturnType<typeof listRepoEnv>> | undefined), $exactMatch: boolean = true) => {
+    queryClient.setQueriesData<Awaited<ReturnType<typeof listRepoEnv>>>({ exact: $exactMatch, queryKey: getListRepoEnvQueryKey(id) }, updater);
   };
 }
 

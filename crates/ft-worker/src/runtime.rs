@@ -148,7 +148,8 @@ pub async fn install(state: &Path, kind: Agent, version: Option<&str>) -> Result
     let fetched = match kind {
         Agent::ClaudeCode => fetch_claude(&bin, &platform, version).await,
         Agent::Codex => fetch_codex(&bin, &platform, version).await,
-        Agent::KimiCode | Agent::Shell => unreachable!("refused above"),
+        Agent::KimiCode => fetch_kimi(&bin, version).await,
+        Agent::Shell => unreachable!("refused above"),
     };
     if let Err(e) = fetched {
         let _ = tokio::fs::remove_dir_all(&staging).await;
@@ -275,6 +276,64 @@ impl Platform {
 /// a version, `<version>/manifest.json` carries a checksum per platform, and
 /// the binary is at `<version>/<platform>/claude`.
 const CLAUDE_RELEASES: &str = "https://downloads.claude.ai/claude-code-releases";
+/// Kimi Code ships as a package rather than a per-platform binary.
+const KIMI_PACKAGE: &str = "@moonshot-ai/kimi-code";
+
+/// Kimi Code, from npm.
+///
+/// The odd one out: Claude and Codex publish a binary per platform, and Kimi
+/// publishes a package. So this shells out to npm with a prefix of its own
+/// rather than downloading and unpacking — which lands `bin/kimi` and
+/// `lib/node_modules` side by side, exactly where the rename expects them.
+///
+/// npm writes its shims with relative paths, so moving the staging directory
+/// into its version directory afterwards leaves a launcher that still works.
+async fn fetch_kimi(bin: &Path, version: Option<&str>) -> Result<()> {
+    let prefix = bin
+        .parent()
+        .context("the staging directory has no parent")?
+        .to_path_buf();
+    let package = match version {
+        Some(v) => format!("{KIMI_PACKAGE}@{v}"),
+        None => KIMI_PACKAGE.to_string(),
+    };
+
+    let out = tokio::process::Command::new("npm")
+        .arg("install")
+        .arg("--global")
+        .arg("--prefix")
+        .arg(&prefix)
+        // Its own noise is not ours to relay, and a release that prints a
+        // funding notice is not a release that failed.
+        .arg("--no-fund")
+        .arg("--no-audit")
+        .arg(&package)
+        .output()
+        .await
+        .context("running npm — Kimi Code is an npm package, so the worker needs Node")?;
+
+    if !out.status.success() {
+        let said = String::from_utf8_lossy(&out.stderr);
+        let said = said.trim();
+        bail!(
+            "npm could not install {package}: {}",
+            if said.is_empty() {
+                "it said nothing"
+            } else {
+                said
+            }
+        );
+    }
+
+    anyhow::ensure!(
+        tokio::fs::try_exists(bin.join(ft_core::Agent::KimiCode.command()))
+            .await
+            .unwrap_or(false),
+        "npm installed {package} but left no kimi in {}",
+        bin.display()
+    );
+    Ok(())
+}
 
 async fn fetch_claude(bin: &Path, platform: &Platform, version: Option<&str>) -> Result<()> {
     let version = match version {

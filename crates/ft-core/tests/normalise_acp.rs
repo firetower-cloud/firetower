@@ -27,18 +27,27 @@ fn session_configuration_is_discovered_on_load_and_replaced_while_idle() {
         reader.push(&serde_json::to_string(&record).unwrap());
     }
     let controls = reader.controls();
-    assert_eq!(controls.len(), 2, "only model and effort are in scope");
+    assert_eq!(
+        controls.len(),
+        3,
+        "model, effort and the permission mode are all pickers we have"
+    );
     assert_eq!(controls[0].kind, ControlKind::Model);
     assert_eq!(controls[0].choices[1].label, "Beta");
     assert_eq!(controls[0].current.as_deref(), Some("a"));
     assert_eq!(controls[1].kind, ControlKind::Effort);
+    assert_eq!(controls[2].kind, ControlKind::Mode);
     let change = reader.configure(ControlKind::Effort, "high").unwrap();
     assert_eq!(
         change["config_id"], "thinking",
         "route by the advertised ID, not category"
     );
+    // The mode is routed the same way, by the ID the agent gave it rather
+    // than by the category it fell under.
+    let mode = reader.configure(ControlKind::Mode, "auto").unwrap();
+    assert_eq!(mode["config_id"], "permissions");
     assert!(reader.configure(ControlKind::Model, "invented").is_none());
-    assert!(reader.configure(ControlKind::Mode, "auto").is_none());
+    assert!(reader.configure(ControlKind::Mode, "invented").is_none());
     reader.push(
         &serde_json::to_string(&Record::Sent {
             message: json!({"id":"change","method":"session/set_config_option"}),

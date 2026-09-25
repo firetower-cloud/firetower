@@ -115,9 +115,12 @@ describe("an environment that goes away", () => {
 });
 
 
-it("Kimi uses the installed worker login without requiring a stored account", () => {
+it("Kimi needs a connected account, like every other agent that has a login", () => {
+  // It used to run on whatever `kimi login` had left on the worker. Its
+  // credential is Firetower's to hold now, so an agent without one cannot
+  // start — the same rule Claude and Codex have always had.
   const kimi: AgentView = { ...claude, kind: "KimiCode", needsCredential: true, credentialSet: false, hosts: [{ hostId: "local", hostName: "Local", installed: true, coveredByToken: false, loggedIn: null }] };
-  expect(canRun(kimi, "local")).toBe(true);
-  expect(canRun(kimi, "absent")).toBe(false);
-  expect(canRun({ ...kimi, kind: "ClaudeCode" }, "local")).toBe(false);
+  expect(canRun(kimi, "local")).toBe(false);
+  expect(canRun({ ...kimi, credentialSet: true }, "local")).toBe(true);
+  expect(canRun({ ...kimi, credentialSet: true }, "absent")).toBe(false);
 });

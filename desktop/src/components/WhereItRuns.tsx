@@ -166,7 +166,7 @@ function Line({ label, children }: { label: string; children: React.ReactNode })
 export function canRun(agent: AgentView, hostId: string) {
   const here = agent.hosts.find((h) => h.hostId === hostId);
   if (!here?.installed) return false;
-  if (agent.kind === "KimiCode" || !agent.needsCredential) return true;
+  if (!agent.needsCredential) return true;
   return agent.credentialSet;
 }
 
