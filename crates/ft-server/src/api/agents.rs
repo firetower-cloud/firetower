@@ -661,8 +661,9 @@ pub struct InstallAgent {
 /// Firetower is running inside. The work happens on the host either way — this
 /// only means nobody has to reach it by hand.
 ///
-/// Slow on purpose: the request is held until npm is done, because the answer
-/// somebody wants is which version they now have.
+/// Slow on purpose: the request is held until the download is done, because
+/// the answer somebody wants is which version they now have. A minute is
+/// normal — these are binaries of a few hundred megabytes.
 #[utoipa::path(
     post, path = "/api/v1/agents/{kind}/install", tag = "agents",
     params(("kind" = String, Path, description = "Agent kind")),
