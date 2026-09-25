@@ -10,3 +10,4 @@ export { Avatar } from "./Avatar";
 export { Panel, PageHead } from "./Panel";
 export { Card, CardHead } from "./Card";
 export { CopyButton, Copyable } from "./Copy";
+export { QrCode } from "./QrCode";
