@@ -20,7 +20,7 @@ use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, BufReader, Lines};
-use tokio::process::{Child, ChildStdout, Command};
+use tokio::process::{Child, ChildStderr, Command};
 
 /// How long a device code is good for. Kimi says 1800s; the wait is bounded
 /// here so an abandoned sign-in cannot hold a process open forever.
@@ -43,7 +43,7 @@ pub struct Pending {
 /// A sign-in that has a code out and is waiting on a person.
 pub struct Waiting {
     child: Child,
-    lines: Lines<BufReader<ChildStdout>>,
+    lines: Lines<BufReader<ChildStderr>>,
     home: PathBuf,
 }
 
@@ -65,8 +65,12 @@ pub async fn start(state: &Path, home: &Path, region: &str) -> Result<(Pending, 
         .arg(region)
         .env("KIMI_CODE_HOME", home)
         .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
+        // **stderr, not stdout.** Kimi prints the device code, the URL and the
+        // word it finishes on to stderr and leaves stdout empty — stdout is
+        // for the ACP stream this invocation never gets as far as. Reading the
+        // other one meant waiting out the timeout on every single sign-in.
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
         // An abandoned login must not leave a process polling Kimi for half an
         // hour. Dropping the handle is how giving up is spelled here.
         .kill_on_drop(true);
@@ -75,8 +79,8 @@ pub async fn start(state: &Path, home: &Path, region: &str) -> Result<(Pending, 
     let mut child = command
         .spawn()
         .context("starting the Kimi device login — is Kimi Code installed on this host?")?;
-    let stdout = child.stdout.take().context("kimi login has no stdout")?;
-    let mut lines = BufReader::new(stdout).lines();
+    let stderr = child.stderr.take().context("kimi login has no stderr")?;
+    let mut lines = BufReader::new(stderr).lines();
 
     let pending = match tokio::time::timeout(TO_CODE, read_code(&mut lines)).await {
         Ok(found) => found?,
@@ -271,6 +275,38 @@ mod tests {
         assert_eq!(bundle.len(), 2, "the log is not part of the credential");
         assert_eq!(bundle["config.toml"], "default_model = \"x\"");
         assert_eq!(bundle["credentials/kimi-code-env-abc.json"], "{\"a\":1}");
+    }
+
+    /// The one thing the unit tests above cannot catch: *which stream* a real
+    /// Kimi prints the code on. Parsing was never the bug — reading stdout
+    /// while Kimi wrote to stderr was, and no amount of feeding strings to
+    /// `read_code` would have said so.
+    ///
+    /// Ignored because it needs `kimi` on `PATH` and reaches Moonshot's device
+    /// endpoint. Run it against a real install after touching this file:
+    /// `cargo test -p ft-worker kimi -- --ignored --nocapture`
+    #[tokio::test]
+    #[ignore = "needs a real kimi on PATH and the network"]
+    async fn a_real_kimi_prints_its_code_where_we_read() {
+        let state = tempfile::tempdir().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let (pending, waiting) = start(state.path(), home.path(), "global")
+            .await
+            .expect("kimi should print a device code");
+
+        assert!(
+            pending.verification_url.starts_with("https://"),
+            "{}",
+            pending.verification_url
+        );
+        assert!(
+            pending.user_code.len() >= 4,
+            "a code, not an empty string: {:?}",
+            pending.user_code
+        );
+        // Nobody is going to approve it, and leaving it polling for half an
+        // hour is not this test's business.
+        waiting.cancel().await.unwrap();
     }
 
     #[tokio::test]

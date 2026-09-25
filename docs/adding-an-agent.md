@@ -51,9 +51,17 @@ remember to prepare.
 - Check the copy that runs is the copy that was installed: build a `PATH` with
   no global copy on it and start a session. It must land in
   `agents/<name>/<version>/bin/` and survive the staging rename.
-- Note any new host dependency. Claude and Codex download a binary; Kimi comes
-  from npm, which makes it the one agent whose host needs Node. That belongs in
-  the agent's own documentation, not in somebody's memory.
+- **Take the binary, not the package.** Every agent so far publishes an npm
+  package as well as a per-platform binary, and the package is the easier one
+  to reach for — `npm install --global --prefix` is four lines and works on
+  your laptop. It then fails on the machines that matter: a worker started by
+  launchd or sshd has the login shell's `PATH` and not the interactive one, so
+  the Node somebody installed through a version manager is invisible to it and
+  the install dies with `No such file or directory (os error 2)`. Kimi shipped
+  this way once and this is what it did. Look for the publisher's `install.sh`
+  and read what it fetches; that is the URL you want.
+- Note any new host dependency, and treat needing one as a reason to look
+  harder. `curl` and `tar` are the budget.
 - Add the directory name in both `runtime.rs` and `worker_main.rs` —
   `agents add <name>` resolves through it.
 
@@ -68,6 +76,13 @@ remember to prepare.
 - Bound the wait for the *code* separately from the wait for *approval*.
   Getting a code is seconds and a failure is worth reporting; approval is a
   person and can take a quarter of an hour.
+- **Check which stream the code comes out on**, by running the real login and
+  looking — not by reasoning about it. Kimi puts the code, the URL and its
+  final verdict on *stderr* and leaves stdout empty, because stdout is
+  reserved for the ACP stream. Reading the wrong one is invisible to any test
+  that feeds strings to the parser: parsing is fine, the pipe is empty, and
+  every sign-in fails by timing out. Keep an `#[ignore]`d test that starts a
+  real login and asserts a code came back.
 - An abandoned sign-in must die — `kill_on_drop` and a hard expiry. Nothing
   should still be polling a provider after the dialog was closed.
 - Ask whether accounts are regional. Kimi's `global` and `mainland-cn` are

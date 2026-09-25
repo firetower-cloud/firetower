@@ -14,8 +14,9 @@ remember to log into.
 1. Use a server, worker and client built from this branch. A server update
    alone is not enough; see the compatibility note below.
 2. **Configuration → Agents → Kimi Code → Install** puts the CLI on a host.
-   It comes from npm (`@moonshot-ai/kimi-code`), so the host needs Node; every
-   other agent downloads a binary and this one does not.
+   Like every other agent it is a single downloaded binary — the one Kimi's own
+   `install.sh` fetches, checked against the checksum in its published
+   manifest. The host needs `curl` and `tar` and nothing else. **Not Node.**
 3. **Connect a Kimi Code account.** Firetower runs `kimi acp --login` on a host
    and shows the device code. Approve it in a browser, wherever you are.
 4. Create a workspace, choose **Kimi Code**, and choose that account — the same
@@ -34,8 +35,13 @@ What travels is a *bundle*, not a file — Kimi splits its credential between
 anything can predict. Both are stored together and written back out exactly as
 they were found. See [`Agent::credential_bundle`].
 
-If a sign-in fails, check the host has Node and that `kimi` is on the worker
-process's `PATH`, including when a service manager starts it.
+Kimi ships glibc builds only, so **Install** refuses on musl (Alpine) rather
+than leaving a binary that cannot start.
+
+If a sign-in fails, check that `kimi` is on the worker process's `PATH`,
+including when a service manager starts it — **Install** puts it there, but a
+copy installed by hand into a shell-only directory is not seen by a worker
+launchd or sshd started.
 
 Kimi 2.1.1 negotiated ACP v1 and `loadSession` in the live compatibility check.
 It runs with its own filesystem/terminal tools. This client advertises neither
