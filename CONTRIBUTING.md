@@ -15,7 +15,7 @@ Running Firetower needs Docker and one compose file — that is the
 > answer — often the better fix is a smaller one, or none at all — and that is
 > a much easier conversation to have before the code exists than after.
 
-### Request for contribution
+## Request for contribution
 
 These are the areas where help is worth the most right now.
 
