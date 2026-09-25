@@ -20,6 +20,12 @@ use tokio::sync::{broadcast, mpsc, oneshot, Mutex, Notify, RwLock};
 /// Long enough for a cold network, short enough that nobody watches a spinner
 /// forever. The worker gives up before this, so hitting it means the worker
 /// itself stopped answering.
+///
+/// That last sentence is a constraint on the worker, not a description of it:
+/// anything the worker bounds per-request — `kimi::TO_CODE`, and whatever the
+/// next agent needs — has to be bounded *below* this, or its reason is
+/// swallowed by the timeout here and the person is told the host went quiet
+/// when it was busy telling us exactly what went wrong.
 const PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// How long an agent install may take before we stop waiting.

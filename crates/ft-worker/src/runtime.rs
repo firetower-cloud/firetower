@@ -1,20 +1,22 @@
 //! The agents this machine can run, and where they came from.
 //!
 //! Each agent is fetched as the standalone binary its publisher ships — Claude
-//! Code from its own download service, Codex from its GitHub releases — and
-//! kept under the worker's state directory, one directory per version:
+//! Code and Kimi Code from their own download services, Codex from its GitHub
+//! releases — and kept under the worker's state directory, one per version:
 //!
 //! ```text
 //! <state>/agents/claude-code/2.1.0/bin/claude
 //! <state>/agents/codex/0.154.0/bin/codex
+//! <state>/agents/kimi/2.1.1/bin/kimi
 //! ```
 //!
-//! Not through npm. Both agents used to be installed that way, which made Node
-//! a requirement of every machine a worker ran on — and Node is exactly the
-//! thing people install through a version manager, into a directory only their
-//! interactive shell knows about. A worker started by sshd never saw it. A
-//! binary in a directory this module chose needs nothing on the machine but
-//! `curl` and `tar`, and is found by the `PATH` the worker builds itself.
+//! Not through npm. All three publish an npm package and all three were
+//! installed from it once, which made Node a requirement of every machine a
+//! worker ran on — and Node is exactly the thing people install through a
+//! version manager, into a directory only their interactive shell knows
+//! about. A worker started by sshd or launchd never saw it. A binary in a
+//! directory this module chose needs nothing on the machine but `curl` and
+//! `tar`, and is found by the `PATH` the worker builds itself.
 //!
 //! **Nothing here touches a credential.** Installing a binary and signing it
 //! in are separate acts, and only the first happens on this machine: what an
@@ -148,7 +150,7 @@ pub async fn install(state: &Path, kind: Agent, version: Option<&str>) -> Result
     let fetched = match kind {
         Agent::ClaudeCode => fetch_claude(&bin, &platform, version).await,
         Agent::Codex => fetch_codex(&bin, &platform, version).await,
-        Agent::KimiCode => fetch_kimi(&bin, version).await,
+        Agent::KimiCode => fetch_kimi(&bin, &platform, version).await,
         Agent::Shell => unreachable!("refused above"),
     };
     if let Err(e) = fetched {
@@ -257,6 +259,26 @@ impl Platform {
         }
     }
 
+    /// How Kimi Code's download service names this machine.
+    ///
+    /// A `Result` where the others are infallible, because Kimi ships glibc
+    /// only. Its own installer stops on musl rather than handing over a binary
+    /// that cannot start, and saying so here is better than an install that
+    /// succeeds and an agent that dies on first launch.
+    fn kimi(&self) -> Result<String> {
+        let arch = match self.arch {
+            Arch::X86_64 => "x64",
+            Arch::Aarch64 => "arm64",
+        };
+        match (self.os, self.musl) {
+            (Os::Darwin, _) => Ok(format!("darwin-{arch}")),
+            (Os::Linux, false) => Ok(format!("linux-{arch}")),
+            (Os::Linux, true) => {
+                bail!("Kimi Code publishes no musl build, so it cannot run on this machine")
+            }
+        }
+    }
+
     /// How Codex's release names this machine: a Rust target triple.
     fn codex(&self) -> &'static str {
         match (self.os, self.arch) {
@@ -276,63 +298,97 @@ impl Platform {
 /// a version, `<version>/manifest.json` carries a checksum per platform, and
 /// the binary is at `<version>/<platform>/claude`.
 const CLAUDE_RELEASES: &str = "https://downloads.claude.ai/claude-code-releases";
-/// Kimi Code ships as a package rather than a per-platform binary.
-const KIMI_PACKAGE: &str = "@moonshot-ai/kimi-code";
+/// Where Kimi Code publishes its native binaries.
+///
+/// The same service and the same layout its own `install.sh` reads: `latest`
+/// is a version, `binaries/<version>/manifest.json` carries a checksum per
+/// platform, and the binary is in `binaries/<version>/kimi-code-<platform>.tar.gz`.
+///
+/// `code.kimi.ai` is the global mirror of `code.kimi.com`; the two serve the
+/// same builds, and the checksum below is what decides whether to believe
+/// either of them. Which Kimi an *account* lives on is a separate question,
+/// settled per sign-in by [`crate::kimi`]'s `--region`.
+const KIMI_RELEASES: &str = "https://code.kimi.ai/kimi-code";
 
-/// Kimi Code, from npm.
+/// Kimi Code, from its download service.
 ///
-/// The odd one out: Claude and Codex publish a binary per platform, and Kimi
-/// publishes a package. So this shells out to npm with a prefix of its own
-/// rather than downloading and unpacking — which lands `bin/kimi` and
-/// `lib/node_modules` side by side, exactly where the rename expects them.
+/// Kimi also publishes an npm package, and this used to install that. It
+/// should not have: Node is the requirement this module exists to avoid, and
+/// a worker started by launchd or sshd sees none of the version manager a
+/// person installed Node into — so the install failed on exactly the machines
+/// that most needed it to work. Kimi ships a single-file binary per platform,
+/// which is what its own installer fetches and what this fetches now.
 ///
-/// npm writes its shims with relative paths, so moving the staging directory
-/// into its version directory afterwards leaves a launcher that still works.
-async fn fetch_kimi(bin: &Path, version: Option<&str>) -> Result<()> {
-    let prefix = bin
-        .parent()
-        .context("the staging directory has no parent")?
-        .to_path_buf();
-    let package = match version {
-        Some(v) => format!("{KIMI_PACKAGE}@{v}"),
-        None => KIMI_PACKAGE.to_string(),
+/// The published checksum is of the *bare* binary rather than the tarball, so
+/// the order here is unpack first and verify second. The tarball is worth the
+/// extra step: 62MB compressed against 188MB unpacked.
+async fn fetch_kimi(bin: &Path, platform: &Platform, version: Option<&str>) -> Result<()> {
+    let target = platform.kimi()?;
+
+    let version = match version {
+        Some(v) => v.to_string(),
+        None => {
+            let said = text(&format!("{KIMI_RELEASES}/latest"))
+                .await
+                .context("asking which Kimi Code is newest")?;
+            let said = said.trim().to_string();
+            if !looks_like_a_version(&said) {
+                bail!("the download service did not answer with a version: {said:.60}");
+            }
+            said
+        }
+    };
+    let base = format!("{KIMI_RELEASES}/binaries/{version}");
+
+    let manifest = text(&format!("{base}/manifest.json"))
+        .await
+        .with_context(|| format!("reading the manifest for Kimi Code {version}"))?;
+    let manifest: serde_json::Value =
+        serde_json::from_str(&manifest).context("the manifest is not JSON")?;
+    let expected = manifest
+        .get("platforms")
+        .and_then(|p| p.get(&target))
+        .and_then(|p| p.get("checksum"))
+        .and_then(|c| c.as_str())
+        .with_context(|| format!("Kimi Code {version} is not published for {target}"))?
+        .to_string();
+
+    let scratch = bin.join(".unpack");
+    tokio::fs::create_dir_all(&scratch).await?;
+    let asset = format!("kimi-code-{target}.tar.gz");
+    let archive = scratch.join(&asset);
+    let unpacked = async {
+        download(&format!("{base}/{asset}"), &archive).await?;
+        untar(&archive, &scratch).await?;
+        let _ = tokio::fs::remove_file(&archive).await;
+        find_binary(&scratch, "kimi", &target)
+            .await
+            .context("the tarball had no binary in it")
+    }
+    .await
+    .with_context(|| format!("downloading Kimi Code {version}"));
+
+    let unpacked = match unpacked {
+        Ok(found) => found,
+        Err(e) => {
+            let _ = tokio::fs::remove_dir_all(&scratch).await;
+            return Err(e);
+        }
     };
 
-    let out = tokio::process::Command::new("npm")
-        .arg("install")
-        .arg("--global")
-        .arg("--prefix")
-        .arg(&prefix)
-        // Its own noise is not ours to relay, and a release that prints a
-        // funding notice is not a release that failed.
-        .arg("--no-fund")
-        .arg("--no-audit")
-        .arg(&package)
-        .output()
-        .await
-        .context("running npm — Kimi Code is an npm package, so the worker needs Node")?;
-
-    if !out.status.success() {
-        let said = String::from_utf8_lossy(&out.stderr);
-        let said = said.trim();
-        bail!(
-            "npm could not install {package}: {}",
-            if said.is_empty() {
-                "it said nothing"
-            } else {
-                said
-            }
-        );
+    let actual = sha256_of(&unpacked).await?;
+    if actual != expected {
+        let _ = tokio::fs::remove_dir_all(&scratch).await;
+        bail!("Kimi Code {version} did not match its published checksum");
     }
 
-    anyhow::ensure!(
-        tokio::fs::try_exists(bin.join(ft_core::Agent::KimiCode.command()))
-            .await
-            .unwrap_or(false),
-        "npm installed {package} but left no kimi in {}",
-        bin.display()
-    );
-    Ok(())
+    let installed = bin.join(ft_core::Agent::KimiCode.command());
+    tokio::fs::rename(&unpacked, &installed)
+        .await
+        .with_context(|| format!("moving {} into place", unpacked.display()))?;
+    let _ = tokio::fs::remove_dir_all(&scratch).await;
+
+    executable(&installed).await
 }
 
 async fn fetch_claude(bin: &Path, platform: &Platform, version: Option<&str>) -> Result<()> {
@@ -681,6 +737,7 @@ mod tests {
         };
         assert_eq!(mac.claude(), "darwin-arm64");
         assert_eq!(mac.codex(), "aarch64-apple-darwin");
+        assert_eq!(mac.kimi().unwrap(), "darwin-arm64");
 
         let debian = Platform {
             os: Os::Linux,
@@ -689,6 +746,7 @@ mod tests {
         };
         assert_eq!(debian.claude(), "linux-x64");
         assert_eq!(debian.codex(), "x86_64-unknown-linux-musl");
+        assert_eq!(debian.kimi().unwrap(), "linux-x64");
 
         let alpine = Platform {
             os: Os::Linux,
@@ -696,6 +754,9 @@ mod tests {
             musl: true,
         };
         assert_eq!(alpine.claude(), "linux-arm64-musl");
+        // Kimi ships glibc only, and an install that succeeded here would be
+        // a binary that cannot start.
+        assert!(alpine.kimi().is_err());
     }
 
     #[test]

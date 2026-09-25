@@ -509,7 +509,7 @@ impl Worker {
                 out.send(ToServer::AgentsProbed { req, agents }).await?;
             }
 
-            // Slow — npm, a few hundred megabytes — so this arm only runs
+            // Slow — a few hundred megabytes over the wire — so this arm runs
             // because `takes_a_while` keeps it off the message loop. On the
             // loop it would hold up the heartbeats and the control plane would
             // give the connection up as dead half way through.
@@ -2840,8 +2840,8 @@ fn takes_a_while(frame: &ToWorker) -> bool {
             | ToWorker::ProbeRemote { .. }
             | ToWorker::ProbeAgents { .. }
             | ToWorker::CheckReadiness { .. }
-            // npm, fetching a few hundred megabytes. Minutes on a slow line,
-            // and every heartbeat is due during it.
+            // Fetches a few hundred megabytes. Minutes on a slow line, and
+            // every heartbeat is due during it.
             | ToWorker::InstallAgent { .. }
             // Starting a login is two round trips to a process this has to
             // spawn first. The waiting after that is its own task; getting as
