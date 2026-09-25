@@ -84,14 +84,6 @@ curl -fsSL https://usefiretower.com/install.sh | sh
 
 Everything after that happens in the desktop app: adding workers, connecting repositories, secrets, and updating Firetower itself.
 
-<div align="center">
-
-[![Full installation guide](https://img.shields.io/badge/Full_installation_guide-FF4F00?style=for-the-badge&logo=readthedocs&logoColor=white&labelColor=FF4F00)](https://usefiretower.com/docs/getting-started)
-
-</div>
-
-Native execution is also supported on the control-plane machine and remote machines. See [Run agents directly on a host](docs/host-execution.md) for setup, requirements and launch choices.
-
 ## Documentation
 
 | | |
