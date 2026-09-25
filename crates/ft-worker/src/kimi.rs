@@ -29,7 +29,14 @@ const EXPIRES: Duration = Duration::from_secs(1800);
 /// Getting as far as the code should be quick. If Kimi has not printed one by
 /// now it is not going to, and the person is owed the reason rather than a
 /// spinner.
-const TO_CODE: Duration = Duration::from_secs(60);
+///
+/// **Must stay under the control plane's `PROBE_TIMEOUT`, which is 30s.** That
+/// side gives up on the whole request when its own clock runs out, and its
+/// message is the generic one about a host not answering. This was 60s, so the
+/// specific reason below could never reach anybody: every failure to read a
+/// code was reported as a worker that had gone quiet. A real login prints its
+/// code in about a second, so the headroom here is already generous.
+const TO_CODE: Duration = Duration::from_secs(20);
 
 /// What to show somebody so they can approve this machine.
 #[derive(Debug, Clone)]
