@@ -54,8 +54,16 @@ here.
 A window has a title bar, a server strip, a rail and ⌘-numbered tabs. A phone
 has a stack and a back gesture.
 
-- **Three tabs**: Inbox, Tasks, You. The inbox carries the dashboard's own
-  filter, because that is the vocabulary.
+- **Four tabs**: Inbox, Tasks, Config, You. The inbox carries the dashboard's
+  own filter, because that is the vocabulary.
+- **Config and You are not one tab.** They were, briefly, and a server's
+  repositories under the list of servers reads as a thing and the things
+  inside it at the same level. `You` is this phone's — which Firetowers it
+  knows, which one is current, who you are on it — and it survives every
+  server in that list going away. `Config` is one server's, it is the same for
+  everybody signed into that server, and it changes the moment you switch on
+  the tab next door. A section legend is not enough to say which is which.
+  `Config` is also what the desk calls that page, down to the icon.
 - **The server is a monogram in the header**, always, and tapping it switches.
   Slack's model. Still never a colour — with N servers the temptation to
   colour-code is constant, and on a phone it would be a legend you can never

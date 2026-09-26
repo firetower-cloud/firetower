@@ -7,7 +7,7 @@ import { useListRepos } from "~/api/generated/repos/repos";
 import { useListTasks } from "~/api/generated/tasks/tasks";
 import { useListHosts } from "~/api/generated/hosts/hosts";
 import { useListAgents } from "~/api/generated/agents/agents";
-import { useListProviders } from "~/api/generated/providers/providers";
+import { useListProviderRepos, useListProviders } from "~/api/generated/providers/providers";
 import { useListAccounts } from "~/api/generated/accounts/accounts";
 import { useMe } from "~/api/generated/auth/auth";
 import { useSetupState } from "~/api/generated/setup/setup";
@@ -22,7 +22,17 @@ import {
 } from "~/api/generated/sessions/sessions";
 import { useMemo } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import type { DiffSince, FileDiff, ListTasksParams, Page, Repo, Session, Task, TaskScope } from "~/api/generated/model";
+import type {
+  DiffSince,
+  FileDiff,
+  ListTasksParams,
+  Page,
+  RemoteRepo,
+  Repo,
+  Session,
+  Task,
+  TaskScope,
+} from "~/api/generated/model";
 
 /** Everything a screen needs to know about where its data came from. */
 export type Feed<T> = { data: T; loading: boolean; error: string | null };
@@ -110,6 +120,22 @@ export function useAgents() {
 export function useProviders() {
   const q = useListProviders();
   return { data: q.data ?? [], loading: q.isPending, error: q.error ? why(q.error) : null };
+}
+
+/**
+ * What a git host says this person can clone.
+ *
+ * Asked with the token the control plane already holds, which is the whole
+ * reason the phone can connect a repository without authorizing anything: the
+ * account was connected once, on a desk, and this is the list that came with
+ * it. Nothing here starts a device flow.
+ *
+ * The id is nullable because the screen renders before the providers have
+ * arrived, and a query enabled against an empty id asks for `/providers//repos`.
+ */
+export function useProviderRepos(id: string | null): Feed<RemoteRepo[]> {
+  const q = useListProviderRepos(id ?? "", { query: { enabled: !!id } });
+  return { data: q.data ?? [], loading: !!id && q.isPending, error: q.error ? why(q.error) : null };
 }
 
 /**

@@ -25,6 +25,8 @@ out of it. It does not ship administering a fleet.
   filtered by what it is doing.
 - Tasks and trackers, and starting a workspace from one.
 - Starting a workspace from nothing.
+- Connecting a repository — picked from what the control plane's git token can
+  already see. See *The one administrative screen* below.
 - The conversation: read it, answer it, approve what it asks, interrupt it.
 - The repository: the diff, the file tree, a file, and shipping it — commit,
   push, open the pull request.
@@ -32,11 +34,50 @@ out of it. It does not ship administering a fleet.
 
 **Deliberately not in v1**
 
-- Hosts, repositories, secrets, users, agent accounts, organisation, updates.
-  Administering a fleet is a desk job and both other clients do it.
+- Hosts, secrets, users, agent accounts, organisation, updates. Administering a
+  fleet is a desk job and both other clients do it.
 - The preview tab and port forwards. A forwarded port opens in the system
   browser instead; an embedded webview of a dev server on a phone is a
   worse browser.
+
+### The one administrative screen
+
+Repositories were on the list above for a while, and being strict about it was
+wrong in exactly one place: the new-workspace form asks for a repository, and
+this client had no way to produce one. A repository approved on the desktop
+showed up here immediately; a repository nobody had connected yet could not be
+added at all, so the answer to *start work on that* was *go and find a laptop*.
+That is the one thing the phone exists not to be.
+
+So there is a **Config** tab — the desk's `Configuration` page, at the width a
+phone has and with almost all of it left behind — and `/repos` behind it. It is
+deliberately the narrow half of the desktop's configuration page:
+
+- **It lists what the git token can already see.** The control plane holds this
+  person's GitHub token, and `/providers/{id}/repos` is what it can clone.
+  Connecting one is `POST /repos` with a slug and a remote off that list.
+- **Nothing is authorized here, and no device flow runs on the phone.** A code
+  to type into a browser on another device, entered from the device that *is*
+  the browser, is the worst place to run that flow, and the desktop already runs
+  it well. A phone whose account has never been authorized says so, and says
+  where it is done.
+- **No settings, no env, no removal.** A setup script and a file of secrets are
+  a desk job; this screen is the step that stands between somebody and starting
+  work, and nothing more.
+
+It is a fourth tab rather than a section of `You`, and that is the part worth
+arguing with. `You` is **this phone's**: which Firetowers it knows about, which
+one is current, who you are on each. Config is **one server's**, the same for
+everybody signed into it, and different the moment you switch. Putting a
+server's repositories under the list of servers puts a thing and the things
+inside it at the same level, and a section legend is not enough to say which is
+which. The organisation sits under the title instead, because the answer to
+*whose configuration is this* changes on the tab next door.
+
+Pasting a remote by hand — the desktop's other half — is not here either. It is
+not a device flow and would not be wrong to add; it is a URL typed on a phone
+keyboard, which is the worst way to enter one, and the picker covers everybody
+whose repositories are on a host they have authorized.
 
 **Kept, but scheduled last** — the terminal and code annotations were not cut,
 and they should not be built before the six things above work. A tmux pane

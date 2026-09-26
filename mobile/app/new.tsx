@@ -27,18 +27,19 @@
  * with the pickers as panels, and the action pinned to the foot — the same
  * decision as the Commit tab, for the same reason.
  */
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { KeyboardStickyView } from "react-native-keyboard-controller";
 import { router } from "expo-router";
 import * as Haptics from "expo-haptics";
 import { GitBranch, Plus, X } from "lucide-react-native";
-import { useLocalSearchParams, useRouter } from "expo-router";
+import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { useCreateSession } from "~/api/generated/sessions/sessions";
 import type { Agent, Share } from "~/api/generated/model";
 import { useAccounts, useAgents, useHosts, useRepos, why } from "~/data";
 import { leaveDraft } from "~/workspace/draft";
+import { takeConnected } from "~/workspace/connected";
 import { Field, Picker, Trigger, type Choice } from "~/ui/Picker";
 import { Segmented } from "~/ui/Segmented";
 import { color, size } from "~/design/tokens.generated";
@@ -81,11 +82,16 @@ export default function NewWorkspace() {
   }>();
 
   /* Everything offered here is what this server actually has. A form that
-     lists agents from a constant is a form that offers one somebody removed. */
-  const { data: repos } = useRepos();
-  const { data: hosts } = useHosts();
-  const { data: agents } = useAgents();
-  const { data: accounts } = useAccounts();
+     lists agents from a constant is a form that offers one somebody removed.
+
+     The loading half is kept rather than dropped: each of these is a list
+     that arrives over the network, and a panel that draws nothing while it is
+     still in flight says *there are none of these* — which for repositories
+     is the one answer that sends somebody looking for a laptop. */
+  const { data: repos, loading: findingRepos } = useRepos();
+  const { data: hosts, loading: findingHosts } = useHosts();
+  const { data: agents, loading: findingAgents } = useAgents();
+  const { data: accounts, loading: findingAccounts } = useAccounts();
   const create = useCreateSession();
   const [wrong, setWrong] = useState<string | null>(null);
 
@@ -99,6 +105,22 @@ export default function NewWorkspace() {
     if (match) setPicked([match.id]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [repos.length, seed.repo]);
+  /**
+   * Whatever was just connected on `/repos`, chosen here.
+   *
+   * The repository is the reason anybody leaves this form for that screen, so
+   * coming back with it unchosen would mean opening the picker again to find a
+   * row created ten seconds ago. Taken on focus and taken once — see
+   * `workspace/connected.ts`.
+   */
+  useFocusEffect(
+    useCallback(() => {
+      const made = takeConnected();
+      if (made.length === 0) return;
+      setPicked((was) => [...was, ...made.filter((id) => !was.includes(id))]);
+    }, []),
+  );
+
   const [branch, setBranch] = useState("");
   const [touched, setTouched] = useState(false);
   const [hostId, setHostId] = useState("");
@@ -316,14 +338,30 @@ export default function NewWorkspace() {
       <Picker
         open={open === "repo"}
         title="Repositories"
+        waiting={findingRepos ? "Reading your repositories" : undefined}
+        empty="No repository is connected to this Firetower yet."
         chosen={picked}
         choices={repos.map((r) => ({ id: r.id, label: r.slug, detail: r.remote }))}
         onPick={(id) => setPicked(picked.includes(id) ? picked.filter((x) => x !== id) : [...picked, id])}
         onClose={() => setOpen(null)}
+        /* The one thing this list cannot hold: a repository nobody has
+           connected yet. Everything else offered on this form is administered
+           from a desk, but a repository is what the work is *in* — and until
+           this existed, somebody whose repository was not on the server had
+           nowhere to go from here. */
+        action={{
+          label: "Connect a repository",
+          onPress: () => {
+            setOpen(null);
+            router.push({ pathname: "/repos", params: { pick: "1" } });
+          },
+        }}
       />
       <Picker
         open={open === "host"}
         title="Where it runs"
+        waiting={findingHosts ? "Reading the machines" : undefined}
+        empty="No machine is connected to this Firetower yet. They are added from the desktop or the web console."
         chosen={hostId}
         choices={hosts.map((h) => ({
           id: h.id,
@@ -342,6 +380,8 @@ export default function NewWorkspace() {
       <Picker
         open={open === "agent"}
         title="Agent"
+        waiting={findingAgents ? "Reading the agents" : undefined}
+        empty="No agent is installed on this Firetower yet."
         chosen={agent}
         choices={agents.map((a) => ({
           id: a.kind,
@@ -360,6 +400,8 @@ export default function NewWorkspace() {
       <Picker
         open={open === "account"}
         title="Account"
+        waiting={findingAccounts ? "Reading the accounts" : undefined}
+        empty="No account for this agent. One is added from the desktop or the web console."
         chosen={accountId}
         choices={forAgent}
         onPick={(id) => {
