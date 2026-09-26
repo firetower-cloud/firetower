@@ -14,9 +14,9 @@
  */
 import { useState } from "react";
 import { Image, Pressable, Text, View } from "react-native";
-import { ChevronDown, ChevronRight, FileDiff, FileText, Search, Terminal } from "lucide-react-native";
-import type { Item } from "~/api/conversation";
-import { fold, type Row } from "~/api/steps";
+import { ChevronDown, ChevronRight, FileDiff, FileText, Search, Terminal, Users } from "lucide-react-native";
+import type { Item, Task } from "~/api/conversation";
+import { delegated, fold, mainline, type Row } from "~/api/steps";
 import { Code, Prose } from "~/ui/Prose";
 import { color } from "~/design/tokens.generated";
 
@@ -148,10 +148,76 @@ function Said({ item }: { item: Item }) {
   );
 }
 
-function Line({ row }: { row: Row }) {
+/**
+ * Work handed to a subagent: its own rail, one level in.
+ *
+ * The phone used to draw the spawning call as a dead one-line step and then
+ * interleave the subagent's own tool calls into the main rail, where they read
+ * as though the agent you are talking to had made them — the exact thing the
+ * `task` tag exists to prevent. Everything it did is in here now, with what it
+ * came back with.
+ */
+function Delegated({ item, items, tasks }: { item: Item; items: Item[]; tasks: Task[] }) {
+  const [open, setOpen] = useState(false);
+  const task = tasks.find((t) => t.item === item.id);
+  const mine = task ? delegated(items, task.id) : [];
+  const input = item.input as Record<string, unknown> | undefined;
+  const description =
+    task?.description ??
+    (typeof input?.description === "string" ? input.description : undefined) ??
+    "a subagent";
+  const failed = task?.status === "Failed" || item.status === "Failed";
+  const running = !task?.status && !item.status;
+
+  return (
+    <Rail>
+      <Pressable onPress={() => setOpen((o) => !o)} className="py-1.5" hitSlop={6}>
+        <View className="flex-row items-center gap-2">
+          <Users color={failed ? color.brick : color.mute} size={12} />
+          <Text className="font-sans text-meta text-mute">sent</Text>
+          <Text
+            numberOfLines={1}
+            className={`flex-1 font-mono text-meta ${failed ? "text-brick" : "text-dim"}`}
+          >
+            {description}
+          </Text>
+          {open ? <ChevronDown color={color.mute} size={12} /> : <ChevronRight color={color.mute} size={12} />}
+        </View>
+        {/* What it is doing now, while it is still doing it. The card is shut
+            by default, so this line is the only sign of life it has. */}
+        {running && task?.progress ? (
+          <Text numberOfLines={1} className="mt-0.5 pl-5 font-sans text-meta text-mute">
+            {task.progress}
+          </Text>
+        ) : null}
+      </Pressable>
+      {open ? (
+        <View className="pb-1 pl-1">
+          {mine.length > 0 ? (
+            fold(mine).map((row) => (
+              <Line key={row.type === "group" ? row.id : row.item.id} row={row} />
+            ))
+          ) : null}
+          {task?.summary ? (
+            <View className="mt-1.5 border-l pl-2.5" style={{ borderColor: color["line-soft"] }}>
+              <Prose text={task.summary} />
+            </View>
+          ) : null}
+          {mine.length === 0 && !task?.summary ? (
+            <Text className="font-sans text-meta text-mute">Nothing back yet.</Text>
+          ) : null}
+        </View>
+      ) : null}
+    </Rail>
+  );
+}
+
+function Line({ row, items, tasks }: { row: Row; items?: Item[]; tasks?: Task[] }) {
   if (row.type === "group") return <Group items={row.items} />;
   const item = row.item;
   switch (item.kind) {
+    case "SubagentCall":
+      return <Delegated item={item} items={items ?? []} tasks={tasks ?? []} />;
     case "UserMessage":
       return <Said item={item} />;
     case "AssistantMessage":
@@ -185,11 +251,18 @@ function Line({ row }: { row: Row }) {
  * down the page by a page they had asked for. Flattened, each row is its own
  * subview and the pinning has something to hold.
  */
-export function Transcript({ items }: { items: Item[] }) {
+export function Transcript({ items, tasks = [] }: { items: Item[]; tasks?: Task[] }) {
+  /* The main rail only: a subagent's work belongs to the card that owns it,
+     and drawing it here as well put the same command on the screen twice. */
   return (
     <>
-      {fold(items).map((row) => (
-        <Line key={row.type === "group" ? row.id : row.item.id} row={row} />
+      {fold(mainline(items)).map((row) => (
+        <Line
+          key={row.type === "group" ? row.id : row.item.id}
+          row={row}
+          items={items}
+          tasks={tasks}
+        />
       ))}
     </>
   );

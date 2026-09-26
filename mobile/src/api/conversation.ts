@@ -115,8 +115,25 @@ export type Conversation = {
   tasks: Task[];
   /** Questions waiting on an answer. */
   questions: Questionnaire[];
-  /** True between a turn starting and finishing — the agent is busy. */
+  /**
+   * True while the agent or anything it delegated to is busy.
+   *
+   * Not simply "a turn is open". A backgrounded subagent outlives the turn
+   * that spawned it — the turn ends, and the agent is woken again when the
+   * subagent reports — so clearing this on `TurnCompleted` left a session that
+   * was still writing transcript looking finished, and took away the stop
+   * button while work nobody could reach carried on. See `inTurn` for the
+   * narrower fact.
+   */
   working: boolean;
+  /**
+   * True between a turn starting and finishing, ignoring subagents.
+   *
+   * Kept apart from `working` because a subagent reporting has to know which
+   * of the two it is ending: the session coming to rest, or one voice of
+   * several going quiet while the agent is already off again.
+   */
+  inTurn?: boolean;
   /**
    * Somebody pressed stop, and the turn they pressed it on has not ended yet.
    *
@@ -271,6 +288,7 @@ export const nothing: Conversation = {
   questions: [],
   commands: [],
   working: false,
+  inTurn: false,
   lastLine: 0,
   firstLine: 0,
   hasMore: false,
@@ -295,6 +313,45 @@ const PAGE = 8;
  * whether to redraw by identity. Kept pure and exported so the interesting
  * part — what an event does to the screen — can be tested directly.
  */
+/**
+ * Whether this subagent is still going.
+ *
+ * A task with no status has been started and has not reported. Named for what
+ * it means rather than `!t.status`, because the same check decides three
+ * things — the stop button, the working line, and whether the session is at
+ * rest — and they must not drift apart.
+ */
+const adrift = (t: Task): boolean => t.status === undefined;
+
+/**
+ * What to call what is still running, once the turn itself has ended.
+ *
+ * A subagent's own progress line beats anything derived from the transcript
+ * here: after the turn closes, the newest item is whatever the main agent did
+ * last, and that is over. Shared by both clients so the two cannot drift into
+ * describing the same state differently.
+ */
+export function delegating(tasks: Task[]): string {
+  const running = tasks.filter(adrift);
+  if (running.length > 1) return `${running.length} subagents working`;
+  return running[0]?.progress ?? running[0]?.description ?? "A subagent is working";
+}
+
+/**
+ * Whether the stop button has anything it can actually reach.
+ *
+ * Narrower than `working`, and deliberately. The control plane asks the agent
+ * to interrupt only while a turn is open — `ClaudeNormaliser::working` is
+ * `active_turn.is_some()`, and that is taken on the `result` line — so a
+ * subagent the turn left running cannot be stopped from here. Offering the
+ * button anyway would report success, send nothing, and leave a spinner up
+ * until something unrelated cleared it.
+ *
+ * So: the session still reads as working, because it is, and the composer
+ * stays honest about which half of that somebody can interrupt.
+ */
+export const interruptible = (c: Conversation): boolean => c.inTurn === true;
+
 export function apply(state: Conversation, event: ConversationEvent): Conversation {
   const lastLine = Math.max(state.lastLine, event.lineNo);
   // Every event here came off the agent's stream, so any of them is proof it
@@ -331,12 +388,18 @@ export function apply(state: Conversation, event: ConversationEvent): Conversati
       };
 
     case "TurnStarted":
-      return { ...state, working: true, stopped: undefined, stopping: false, lastLine };
+      return { ...state, working: true, inTurn: true, stopped: undefined, stopping: false, lastLine };
 
     case "TurnCompleted":
       return {
         ...state,
-        working: false,
+        // Only the turn ended. Anything it left running is still running, and
+        // is still going to put more on this screen without being asked — so
+        // the session is not back with you yet. A turn that *failed* or that
+        // somebody stopped rests anyway: both are real endings, and both
+        // report as `Failed`.
+        working: event.status === "Completed" && state.tasks.some(adrift),
+        inTurn: false,
         stopping: false,
         // Kept when a turn ends without saying, so the meter does not blank
         // between turns.
@@ -490,16 +553,25 @@ export function apply(state: Conversation, event: ConversationEvent): Conversati
         ),
       };
 
-    case "TaskCompleted":
+    case "TaskCompleted": {
+      const tasks = state.tasks.map((t) =>
+        t.id === event.task
+          ? { ...t, status: event.status, summary: event.summary ?? undefined }
+          : t,
+      );
       return {
         ...state,
         lastLine,
-        tasks: state.tasks.map((t) =>
-          t.id === event.task
-            ? { ...t, status: event.status, summary: event.summary ?? undefined }
-            : t,
-        ),
+        tasks,
+        // The turn may have ended a while ago and left this running. If it is
+        // the last one, this is the moment the session actually stopped.
+        //
+        // `state.working &&` so a session that already came to rest — a turn
+        // that failed, or one somebody stopped, with work still in flight —
+        // cannot be talked back into looking busy by a straggler reporting.
+        working: state.working && (state.inTurn === true || tasks.some(adrift)),
       };
+    }
 
     case "UserInputRequested":
       // Re-sent whenever a watcher attaches, like an approval.

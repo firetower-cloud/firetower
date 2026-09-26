@@ -57,6 +57,10 @@ const WE_DRAW: &[&str] = &[
     "fileChange",
     "mcpToolCall",
     "webSearch",
+    // Delegation. Both are drawn as one subagent card and its work; see
+    // `CodexNormaliser::collab` and `subagent_activity`.
+    "collabAgentToolCall",
+    "subAgentActivity",
 ];
 
 #[test]
@@ -131,6 +135,84 @@ fn the_protocol_still_says_what_we_depend_on_it_saying() {
         }
     }
 
+    // ---- delegation ----------------------------------------------------
+    //
+    // Codex attributes a subagent's work by *thread*, not by the tool call
+    // that spawned it: `spawnAgent` names the new agent in
+    // `receiverThreadIds`, and every item notification says which `threadId`
+    // it belongs to. Nothing else in the protocol connects the two, so if
+    // either disappears the Agents panel silently goes back to drawing a
+    // subagent's commands as the main agent's.
+    let started = read(&dir.join("v2").join("ItemStartedNotification.json"));
+    assert!(
+        started
+            .get("required")
+            .and_then(|r| r.as_array())
+            .is_some_and(|r| r.iter().any(|f| f.as_str() == Some("threadId"))),
+        "item/started stopped saying which thread it belongs to — a \
+         subagent's work can no longer be told from the main agent's"
+    );
+
+    let variants = item_variant(&dir.join("v2").join("ItemStartedNotification.json"));
+    for (item_type, fields) in [
+        (
+            "collabAgentToolCall",
+            &[
+                "tool",
+                "senderThreadId",
+                "receiverThreadIds",
+                "agentsStates",
+            ][..],
+        ),
+        (
+            "subAgentActivity",
+            &["agentThreadId", "agentPath", "kind"][..],
+        ),
+    ] {
+        let variant = variants
+            .get(item_type)
+            .unwrap_or_else(|| panic!("{item_type} is gone"));
+        for field in fields {
+            assert!(
+                variant
+                    .get("properties")
+                    .and_then(|p| p.get(*field))
+                    .is_some(),
+                "{item_type} no longer carries {field}"
+            );
+        }
+    }
+
+    // The enum values the mapping switches on, rather than just the fields.
+    let defs = read(&dir.join("v2").join("ItemStartedNotification.json"));
+    let defs = defs.get("definitions").expect("definitions");
+    for (name, wanted) in [
+        ("CollabAgentTool", &["spawnAgent"][..]),
+        (
+            "SubAgentActivityKind",
+            &["started", "interacted", "interrupted", "completed"][..],
+        ),
+        (
+            "CollabAgentStatus",
+            &["running", "completed", "errored", "interrupted"][..],
+        ),
+    ] {
+        let values: BTreeSet<String> = defs
+            .get(name)
+            .and_then(|d| d.get("enum"))
+            .and_then(|e| e.as_array())
+            .map(|a| {
+                a.iter()
+                    .filter_map(|v| v.as_str())
+                    .map(str::to_string)
+                    .collect()
+            })
+            .unwrap_or_else(|| panic!("{name} is gone"));
+        for value in wanted {
+            assert!(values.contains(*value), "{name} no longer has {value}");
+        }
+    }
+
     // Where the text of a streamed message is, and which item it belongs to.
     let delta = read(&dir.join("v2").join("AgentMessageDeltaNotification.json"));
     for field in ["itemId", "delta"] {
@@ -189,6 +271,35 @@ fn methods(file: &Path) -> BTreeSet<String> {
 }
 
 /// Every kind of thing a transcript can hold.
+/// Each `ThreadItem` variant, by the `type` it is discriminated on.
+///
+/// `item_types` answers "does this still exist"; this answers "does it still
+/// carry what we reach into", which is the half that broke silently.
+fn item_variant(file: &Path) -> std::collections::BTreeMap<String, serde_json::Value> {
+    let value = read(file);
+    let mut out = std::collections::BTreeMap::new();
+    let Some(variants) = value
+        .get("definitions")
+        .and_then(|d| d.get("ThreadItem"))
+        .and_then(|t| t.get("oneOf"))
+        .and_then(|v| v.as_array())
+    else {
+        return out;
+    };
+    for variant in variants {
+        if let Some(name) = variant
+            .get("properties")
+            .and_then(|p| p.get("type"))
+            .and_then(|t| t.get("enum"))
+            .and_then(|e| e.get(0))
+            .and_then(|v| v.as_str())
+        {
+            out.insert(name.to_string(), variant.clone());
+        }
+    }
+    out
+}
+
 fn item_types(file: &Path) -> BTreeSet<String> {
     let value = read(file);
     value
@@ -247,4 +358,76 @@ fn read(file: &Path) -> serde_json::Value {
     let text =
         std::fs::read_to_string(file).unwrap_or_else(|e| panic!("reading {}: {e}", file.display()));
     serde_json::from_str(&text).unwrap_or_else(|e| panic!("parsing {}: {e}", file.display()))
+}
+
+/// The Codex subagent fixture is shaped like the protocol, not like a guess.
+///
+/// `tests/streams/codex_subagent.ndjson` drives the delegation tests, and a
+/// fixture is only worth what its accuracy is worth: one invented field, and
+/// the mapping is proved against a Codex that does not exist. So every item in
+/// it is checked against the installed app-server's own schema — its `type`
+/// has to be a real `ThreadItem` variant, and it has to carry everything that
+/// variant says is required.
+///
+/// This caught three lines the first time it ran: `commandExecution`
+/// completions written without `cwd` and `commandActions`.
+#[test]
+fn the_subagent_fixture_matches_the_protocol() {
+    let Some(schema) = generate() else {
+        println!("skipped: no `codex` on PATH — install one to check the fixture");
+        return;
+    };
+    let variants = item_variant(
+        &schema
+            .path()
+            .join("v2")
+            .join("ItemStartedNotification.json"),
+    );
+
+    let fixture = std::fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests")
+            .join("streams")
+            .join("codex_subagent.ndjson"),
+    )
+    .expect("the fixture should be readable");
+
+    let mut checked = 0;
+    for (n, line) in fixture.lines().enumerate() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let message: serde_json::Value = serde_json::from_str(line)
+            .unwrap_or_else(|e| panic!("line {} is not json: {e}", n + 1));
+        let Some(item) = message.pointer("/params/item") else {
+            continue;
+        };
+        let item_type = item
+            .get("type")
+            .and_then(|t| t.as_str())
+            .unwrap_or_else(|| panic!("line {} has an item with no type", n + 1));
+
+        let variant = variants
+            .get(item_type)
+            .unwrap_or_else(|| panic!("line {}: Codex has no item type {item_type}", n + 1));
+
+        for field in variant
+            .get("required")
+            .and_then(|r| r.as_array())
+            .into_iter()
+            .flatten()
+            .filter_map(|f| f.as_str())
+        {
+            assert!(
+                item.get(field).is_some(),
+                "line {}: a {item_type} must carry {field}, and this one does not",
+                n + 1
+            );
+        }
+        checked += 1;
+    }
+
+    assert!(checked > 0, "the fixture should contain items to check");
+    println!("checked {checked} fixture items against Codex's own schema");
 }

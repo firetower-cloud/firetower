@@ -15,7 +15,7 @@ import { useReanimatedKeyboardAnimation } from "react-native-keyboard-controller
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { router, useLocalSearchParams } from "expo-router";
 import { ChevronLeft, MoreHorizontal } from "lucide-react-native";
-import { useConversation } from "~/api/conversation";
+import { delegating, interruptible, useConversation } from "~/api/conversation";
 import { useListEvents } from "~/api/generated/events/events";
 import type { Attached, Event } from "~/api/generated/model";
 import { ready, stepLines } from "~/api/steps-bringup";
@@ -251,7 +251,7 @@ function Conversation({ place }: { place: Workspace }) {
             /* Which workspace the pictures in the agent's prose are read from.
                Without this a `![shot](docs/shot.png)` has nowhere to look. */
             <ImagesFrom.Provider value={{ session: speaker.id }}>
-              <Transcript items={conversation.items} />
+              <Transcript items={conversation.items} tasks={conversation.tasks} />
             </ImagesFrom.Provider>
           ) : conversation.trouble ? (
             <Text className="mt-2 font-sans text-meta text-brick">{conversation.trouble}</Text>
@@ -282,7 +282,17 @@ function Conversation({ place }: { place: Workspace }) {
 
           {conversation.working ? (
             <View className="mt-3">
-              <Sheen text={conversation.stopping ? "Stopping" : "Working"} />
+              {/* Once the turn has ended, the subagents are the only thing
+                  still working — so they are what this line is about. */}
+              <Sheen
+                text={
+                  conversation.stopping
+                    ? "Stopping"
+                    : conversation.inTurn
+                      ? "Working"
+                      : delegating(conversation.tasks)
+                }
+              />
             </View>
           ) : conversation.stopped ? (
             <Text className="mt-3 font-sans text-meta text-brick">{conversation.stopped}</Text>
@@ -307,7 +317,9 @@ function Conversation({ place }: { place: Workspace }) {
       <Composer
         sessionId={speaker.id}
         acp={speaker.agent === "KimiCode"}
-        working={conversation.working}
+        // What the stop button can reach, which is narrower than what is
+        // working. See `interruptible`.
+        working={interruptible(conversation)}
         model={conversation.model}
         mode={conversation.mode}
         onSend={say}

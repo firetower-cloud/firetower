@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { fold, summarise } from "./steps";
+import { delegated, fold, mainline, summarise } from "./steps";
 import type { Item } from "./conversation";
 import type { ItemKind, ItemStatus } from "./generated/model";
 
@@ -134,5 +134,43 @@ describe("summarise", () => {
 
   test("failures are counted, so the row can be marked without opening", () => {
     expect(summarise([ran("a"), broke("b"), broke("c")]).failed).toBe(2);
+  });
+});
+
+/**
+ * Whose rail an item belongs on.
+ *
+ * The normaliser tags a subagent's tool calls with the task that owns them,
+ * precisely so they can be kept off the main rail — see the comment on
+ * `ItemStarted.task` in `ft-core`. Nothing read that tag, so every delegated
+ * call was drawn twice: once inline, where it read as though the agent you are
+ * talking to had made it, and once inside the card that actually owns it.
+ */
+describe("whose work it is", () => {
+  const mine = (id: string): Item => ({ ...read(id), task: "task-1" });
+
+  test("the main rail leaves a subagent's work to its own card", () => {
+    const items = [ran("a"), mine("b"), mine("c"), ran("d")];
+    expect(mainline(items).map((i) => i.id)).toEqual(["a", "d"]);
+  });
+
+  test("and the card gets exactly what it owns", () => {
+    const items = [ran("a"), mine("b"), mine("c"), ran("d")];
+    expect(delegated(items, "task-1").map((i) => i.id)).toEqual(["b", "c"]);
+  });
+
+  test("a second subagent does not collect the first one's work", () => {
+    const theirs: Item = { ...read("e"), task: "task-2" };
+    const items = [mine("b"), theirs];
+    expect(delegated(items, "task-1").map((i) => i.id)).toEqual(["b"]);
+    expect(delegated(items, "task-2").map((i) => i.id)).toEqual(["e"]);
+  });
+
+  test("folding the main rail cannot reach a subagent's work", () => {
+    // The whole bug, in the shape it actually appeared: three delegated
+    // commands in a row became a "ran 3 commands" group on the main rail.
+    const items = [mine("b"), mine("c"), mine("d")];
+    const rows = fold(mainline(items));
+    expect(rows).toEqual([]);
   });
 });

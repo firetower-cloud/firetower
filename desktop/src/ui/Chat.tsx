@@ -43,8 +43,8 @@ import { GithubMark, Icon } from "~/components/ui";
 import { Markdown } from "~/components/Markdown";
 import { editFrom } from "~/components/EditCard";
 import { stepLines } from "~/components/Steps";
-import { useConversation, type Asked, type Item, type Questionnaire, type Task } from "~/api/conversation";
-import { fold, summarise } from "~/api/steps";
+import { delegating, useConversation, type Asked, type Item, type Questionnaire, type Task } from "~/api/conversation";
+import { delegated, fold, mainline, summarise } from "~/api/steps";
 import type { Decision, Event, ItemKind, PlanStep, RequestKind, Session } from "~/api/generated/model";
 import { useAnswerRequest, useRelaunchSession, getGetSessionQueryKey, sendTurn } from "~/api/generated/sessions/sessions";
 import { asMessage, useNotes, type Note } from "~/api/notes";
@@ -184,7 +184,18 @@ export function Chat({
     answerable,
   );
 
-  const rows = useMemo(() => fold(items), [items]);
+  /* The main rail only. A subagent's work is drawn by the card that owns it,
+     and drawing it here as well put the same `grep` on the screen twice —
+     once where it read as though the agent you are talking to had run it. */
+  const rows = useMemo(() => fold(mainline(items)), [items]);
+
+  /* Subagents that have not reported. The turn can end with these still
+     going, and when it has they are the only thing still working — so they
+     are what the line under the transcript has to be about. */
+  const running = useMemo(
+    () => conversation.tasks.filter((t) => t.status === undefined),
+    [conversation.tasks],
+  );
 
   /* Edits are not on the event stream, only the tool calls that make them
      are. So every finished edit or command is the cue to read the diff, the
@@ -358,7 +369,7 @@ export function Chat({
             <CheckingIn key={run.id} sessionId={session.id} run={run} />
           ))}
 
-          {working && <Working heardAt={conversation.heardAt} items={items} />}
+          {working && <Working heardAt={conversation.heardAt} items={items} delegates={running} inTurn={conversation.inTurn === true} />}
           {stopped && <Stopped why={stopped} />}
           {session.status === "Failed" && <Relaunch session={session} />}
 
@@ -672,7 +683,7 @@ function Edited({ item, onOpenDiff }: { item: Item; onOpenDiff: () => void }) {
 function Delegated({ item, items, tasks, onOpenDiff, onOpenFile }: { item: Item; items: Item[]; tasks: Task[] } & Open) {
   const [open, setOpen] = useState(false);
   const task = tasks.find((t) => t.item === item.id);
-  const mine = task ? items.filter((i) => i.task === task.id) : [];
+  const mine = task ? delegated(items, task.id) : [];
   const input = item.input as Record<string, unknown> | undefined;
   const description = task?.description ?? (typeof input?.description === "string" ? input.description : undefined) ?? "a subagent";
   const failed = task?.status === "Failed" || item.status === "Failed";
@@ -922,14 +933,33 @@ function phase(items: Item[]): string | null {
   }
 }
 
-function Working({ heardAt, items }: { heardAt?: number; items: Item[] }) {
+function Working({
+  heardAt,
+  items,
+  delegates,
+  inTurn,
+}: {
+  heardAt?: number;
+  items: Item[];
+  /** Subagents still running, which may be all that is. */
+  delegates: Task[];
+  /** Whether the main agent is still going, or only its subagents are. */
+  inTurn: boolean;
+}) {
   const [, tick] = useState(0);
   useEffect(() => {
     const t = setInterval(() => tick((n) => n + 1), 1000);
     return () => clearInterval(t);
   }, []);
   const ago = heardAt ? Math.round((Date.now() - heardAt) / 1000) : null;
-  const doing = phase(items);
+  /* What a subagent last said it was doing beats guessing from the transcript:
+     once the turn has ended the newest item is whatever the main agent did
+     last, which is over. */
+  /* While the turn is open the main agent is the story and the subagent has
+     its own card to narrate in. Once it has ended, the subagent is the only
+     thing still working — and `phase` would be reading an item that finished
+     before the turn did. */
+  const doing = inTurn || delegates.length === 0 ? phase(items) : delegating(delegates);
   /* Lit text rather than a dot: a band of light crossing the words. When the
      agent has gone quiet the words change, and stop moving — a sheen over
      "nothing heard for a minute" would be a lie. Nothing at all while an

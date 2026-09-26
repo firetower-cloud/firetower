@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { apply, nothing, prepend } from "./conversation";
+import { apply, interruptible, nothing, prepend } from "./conversation";
 import type { ConversationEvent } from "./generated/model";
 
 const event = (lineNo: number, type: string, extra: Record<string, unknown> = {}) =>
@@ -235,5 +235,90 @@ describe("a page of history", () => {
 
     expect(paged.hasMore).toBe(false);
     expect(paged.loadingOlder).toBe(false);
+  });
+});
+
+/**
+ * A subagent the agent left running outlives the turn that spawned it.
+ *
+ * `working` drives the composer's stop button and the "Working" line under the
+ * transcript, so clearing it on `TurnCompleted` left a session that was still
+ * producing transcript looking finished — and took away the only control that
+ * could have stopped it.
+ */
+describe("a turn that leaves a subagent running", () => {
+  const spawned = (at: number) => [
+    event(at, "ItemStarted", { item: "call-1", kind: "SubagentCall", title: "sent" }),
+    event(at + 1, "TaskStarted", { task: "task-1", item: "call-1", description: "look around" }),
+  ];
+
+  it("keeps the agent busy until the subagent reports", () => {
+    let state = apply(nothing, event(1, "TurnStarted", { turn: "turn-1" }));
+    for (const e of spawned(2)) state = apply(state, e);
+
+    const ended = apply(state, event(4, "TurnCompleted", { turn: "turn-1", status: "Completed" }));
+    expect(ended.working).toBe(true);
+
+    const reported = apply(
+      ended,
+      event(5, "TaskCompleted", { task: "task-1", status: "Completed", summary: "had a look" }),
+    );
+    expect(reported.working).toBe(false);
+  });
+
+  it("is still finished when the subagent reported first", () => {
+    let state = apply(nothing, event(1, "TurnStarted", { turn: "turn-1" }));
+    for (const e of spawned(2)) state = apply(state, e);
+    state = apply(state, event(4, "TaskCompleted", { task: "task-1", status: "Completed" }));
+
+    const ended = apply(state, event(5, "TurnCompleted", { turn: "turn-1", status: "Completed" }));
+    expect(ended.working).toBe(false);
+  });
+
+  it("does not leave a failed turn looking busy", () => {
+    let state = apply(nothing, event(1, "TurnStarted", { turn: "turn-1" }));
+    for (const e of spawned(2)) state = apply(state, e);
+
+    // Something broke here. Whatever is still running, the session stopped.
+    const ended = apply(state, event(4, "TurnCompleted", { turn: "turn-1", status: "Failed" }));
+    expect(ended.working).toBe(false);
+  });
+});
+
+/**
+ * The stop button must not promise something the control plane cannot do.
+ *
+ * `Progress::stop` asks the agent to interrupt only while a turn is open —
+ * `ClaudeNormaliser::working` is `active_turn.is_some()`, and that is taken on
+ * the `result` line. So once the turn has ended there is nothing an interrupt
+ * can reach, and a button offered anyway would report success, do nothing, and
+ * sit as a spinner until something unrelated cleared it.
+ */
+describe("what the stop button can reach", () => {
+  const spawned = (at: number) => [
+    event(at, "ItemStarted", { item: "call-1", kind: "SubagentCall", title: "sent" }),
+    event(at + 1, "TaskStarted", { task: "task-1", item: "call-1", description: "look around" }),
+  ];
+
+  it("is offered while the turn is open", () => {
+    const state = apply(nothing, event(1, "TurnStarted", { turn: "turn-1" }));
+    expect(interruptible(state)).toBe(true);
+  });
+
+  it("is not offered for a subagent the turn left behind", () => {
+    let state = apply(nothing, event(1, "TurnStarted", { turn: "turn-1" }));
+    for (const e of spawned(2)) state = apply(state, e);
+    const ended = apply(state, event(4, "TurnCompleted", { turn: "turn-1", status: "Completed" }));
+
+    // Still working — the session has not come to rest and must not look like
+    // it has — but there is nothing here to interrupt.
+    expect(ended.working).toBe(true);
+    expect(interruptible(ended)).toBe(false);
+  });
+
+  it("is not offered once everything is finished", () => {
+    let state = apply(nothing, event(1, "TurnStarted", { turn: "turn-1" }));
+    const ended = apply(state, event(2, "TurnCompleted", { turn: "turn-1", status: "Completed" }));
+    expect(interruptible(ended)).toBe(false);
   });
 });

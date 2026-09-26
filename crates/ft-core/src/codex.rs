@@ -27,7 +27,7 @@ use serde_json::Value;
 
 use crate::turn::{
     Decision, ItemId, ItemKind, ItemStatus, PlanStep, PlanStepStatus, Question, QuestionOption,
-    RawSource, RequestId, RequestKind, StreamKind, TurnEvent, TurnId, TurnStatus, Usage,
+    RawSource, RequestId, RequestKind, StreamKind, TaskId, TurnEvent, TurnId, TurnStatus, Usage,
 };
 
 /// The id the worker sends `initialize` under.
@@ -423,6 +423,17 @@ pub struct CodexNormaliser {
     /// `item/completed` under the item id. Without the pair, a replayed
     /// transcript re-asks every question it has ever contained.
     asked: HashMap<String, RequestId>,
+    /// Subagent threads we have been told about, and whether each has ended.
+    ///
+    /// Codex delegates by *thread*, not by tool call — nothing like Claude's
+    /// `parent_tool_use_id`. `spawnAgent` names the new agent in
+    /// `receiverThreadIds`, and every item notification says which `threadId`
+    /// it belongs to; this is what turns the second into attribution.
+    ///
+    /// A thread is kept after it ends rather than dropped: its work is still
+    /// in the transcript, and a page read again still has to attribute it.
+    /// The flag is only so an ending is announced once.
+    agents: HashMap<String, bool>,
 }
 
 /// A request we sent and have not had the answer to.
@@ -817,6 +828,185 @@ impl CodexNormaliser {
         }]
     }
 
+    /// Which subagent an item belongs to, if it is not the main agent's.
+    ///
+    /// Only threads we were told about, rather than "any thread that is not
+    /// the main one": an unknown thread is something we have no card for, and
+    /// attributing it to a task nothing started would hide it completely.
+    fn owning_task(&self, params: &Value) -> Option<TaskId> {
+        let thread = params.get("threadId").and_then(Value::as_str)?;
+        self.agents
+            .contains_key(thread)
+            .then(|| TaskId::new(thread))
+    }
+
+    /// Whether this item is a card, or only bookkeeping about a subagent.
+    ///
+    /// Three item types carry delegation and only one of them is a thing that
+    /// happened: the `spawnAgent` call. `wait`, `sendInput` and the rest act
+    /// on an agent that already has a card, and `subAgentActivity` is
+    /// lifecycle narration — drawn, each one became its own empty "sent a
+    /// subagent" rail with nothing under it.
+    ///
+    /// Nothing is lost by dropping them: everything they say reaches the card
+    /// that owns it as a `TaskProgress` or a `TaskCompleted`. The Claude
+    /// reader already works this way — `system/task_started` produces a task
+    /// and no item, and the tool call that spawned it is the card.
+    fn drawn(item: &Value) -> bool {
+        match item.get("type").and_then(Value::as_str) {
+            Some("subAgentActivity") => false,
+            Some("collabAgentToolCall") => {
+                item.get("tool").and_then(Value::as_str) == Some("spawnAgent")
+            }
+            _ => true,
+        }
+    }
+
+    /// What an item says about a subagent, if it is one of the two that do.
+    fn delegation(&mut self, item: &Value) -> Vec<TurnEvent> {
+        match item.get("type").and_then(Value::as_str) {
+            Some("collabAgentToolCall") => self.collab(item),
+            Some("subAgentActivity") => self.subagent_activity(item),
+            _ => Vec::new(),
+        }
+    }
+
+    /// A collab tool call: the main agent spawning, waiting on, or messaging
+    /// its subagents.
+    ///
+    /// `spawnAgent` is the only one of the nine tools that creates a task —
+    /// the rest act on agents that already exist. All of them restate
+    /// `agentsStates`, which is where a running agent's own message is, so
+    /// that is read whichever tool this was.
+    fn collab(&mut self, item: &Value) -> Vec<TurnEvent> {
+        let mut events = Vec::new();
+        let id = item.get("id").and_then(Value::as_str).unwrap_or_default();
+
+        if item.get("tool").and_then(Value::as_str) == Some("spawnAgent") {
+            let prompt = item.get("prompt").and_then(Value::as_str);
+            let model = item.get("model").and_then(Value::as_str);
+            for thread in item
+                .get("receiverThreadIds")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+            {
+                // Replayed transcripts arrive whole and more than once, so a
+                // thread we already know is not started again.
+                if self.agents.contains_key(thread) {
+                    continue;
+                }
+                self.agents.insert(thread.to_string(), false);
+                events.push(TurnEvent::TaskStarted {
+                    task: TaskId::new(thread),
+                    item: ItemId::new(id),
+                    description: prompt.unwrap_or_default().to_string(),
+                    agent: model.map(str::to_string),
+                });
+            }
+        }
+
+        // "Last known status of the target agents", which is the only place a
+        // running Codex subagent says anything about itself.
+        for (thread, state) in item
+            .get("agentsStates")
+            .and_then(Value::as_object)
+            .into_iter()
+            .flatten()
+        {
+            events.extend(self.agent_state(thread, state));
+        }
+
+        events
+    }
+
+    /// One entry of `agentsStates`, which carries a status and sometimes a
+    /// message.
+    fn agent_state(&mut self, thread: &str, state: &Value) -> Vec<TurnEvent> {
+        if !self.agents.contains_key(thread) {
+            return Vec::new();
+        }
+        let message = state.get("message").and_then(Value::as_str);
+        match state.get("status").and_then(Value::as_str) {
+            // Still going. A message is progress; no message says nothing new.
+            Some("pendingInit" | "running") => message
+                .map(|detail| TurnEvent::TaskProgress {
+                    task: TaskId::new(thread),
+                    detail: detail.to_string(),
+                })
+                .into_iter()
+                .collect(),
+            Some("completed") => self.finish(thread, ItemStatus::Completed, message),
+            // `shutdown` is an agent that was closed rather than one that
+            // answered, and `notFound` is one we cannot ask about any more.
+            // Neither produced a report, so neither is a success.
+            Some("interrupted" | "errored" | "shutdown" | "notFound") => {
+                self.finish(thread, ItemStatus::Failed, message)
+            }
+            _ => Vec::new(),
+        }
+    }
+
+    /// The subagent lifecycle Codex narrates apart from the call that started
+    /// it.
+    ///
+    /// `kind` is the whole of what it says — there is no message on this item,
+    /// so the agent's own path is the only true thing to report while it runs.
+    fn subagent_activity(&mut self, item: &Value) -> Vec<TurnEvent> {
+        let Some(thread) = item.get("agentThreadId").and_then(Value::as_str) else {
+            return Vec::new();
+        };
+        let path = item.get("agentPath").and_then(Value::as_str);
+        let id = item.get("id").and_then(Value::as_str).unwrap_or_default();
+
+        match item.get("kind").and_then(Value::as_str) {
+            Some("started") => {
+                if self.agents.contains_key(thread) {
+                    return Vec::new();
+                }
+                self.agents.insert(thread.to_string(), false);
+                vec![TurnEvent::TaskStarted {
+                    task: TaskId::new(thread),
+                    item: ItemId::new(id),
+                    description: path.unwrap_or_default().to_string(),
+                    agent: path.map(str::to_string),
+                }]
+            }
+            Some("interacted") if self.agents.contains_key(thread) => {
+                vec![TurnEvent::TaskProgress {
+                    task: TaskId::new(thread),
+                    detail: path.unwrap_or_default().to_string(),
+                }]
+            }
+            Some("completed") => self.finish(thread, ItemStatus::Completed, None),
+            Some("interrupted") => self.finish(thread, ItemStatus::Failed, None),
+            _ => Vec::new(),
+        }
+    }
+
+    /// Report a subagent's ending, once.
+    ///
+    /// Both `subAgentActivity` and every later `agentsStates` say an agent has
+    /// finished, and a card that is told twice is told once too often.
+    fn finish(
+        &mut self,
+        thread: &str,
+        status: ItemStatus,
+        summary: Option<&str>,
+    ) -> Vec<TurnEvent> {
+        match self.agents.get_mut(thread) {
+            Some(done) if !*done => *done = true,
+            // Either not ours, or already reported.
+            _ => return Vec::new(),
+        }
+        vec![TurnEvent::TaskCompleted {
+            task: TaskId::new(thread),
+            status,
+            summary: summary.map(str::to_string),
+        }]
+    }
+
     fn item_started(&mut self, params: &Value) -> Vec<TurnEvent> {
         let Some(item) = params.get("item") else {
             return Vec::new();
@@ -827,12 +1017,21 @@ impl CodexNormaliser {
         let kind = classify(item.get("type").and_then(Value::as_str).unwrap_or(""));
         self.open.insert(id.to_string(), kind);
 
-        let mut events = vec![TurnEvent::ItemStarted {
+        // Before the item itself: a `spawnAgent` has to register the thread it
+        // created before anything arriving on that thread can be attributed to
+        // it, and the two can be in the same batch.
+        let mut events = self.delegation(item);
+        if !Self::drawn(item) {
+            self.open.remove(id);
+            return events;
+        }
+
+        events.push(TurnEvent::ItemStarted {
             item: ItemId::new(id),
             kind,
             title: title_for(kind, item),
-            task: None,
-        }];
+            task: self.owning_task(params),
+        });
 
         // What somebody typed, which arrives whole and never as a stream —
         // Codex is echoing back a turn it was given rather than producing one.
@@ -860,7 +1059,13 @@ impl CodexNormaliser {
         let item_type = item.get("type").and_then(Value::as_str).unwrap_or("");
         let kind = self.open.remove(id).unwrap_or_else(|| classify(item_type));
 
-        let mut events = Vec::new();
+        // A subagent's ending arrives here as often as it does on the way in:
+        // `subAgentActivity` is completed rather than started when it is
+        // reporting a finish, and a collab call restates `agentsStates`.
+        let mut events = self.delegation(item);
+        if !Self::drawn(item) {
+            return events;
+        }
 
         // The whole item, so a card can show what it wants to.
         events.push(TurnEvent::ItemUpdated {
@@ -1219,6 +1424,131 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    /// Codex delegates by *thread*, not by tool call.
+    ///
+    /// Every field here is taken from the app-server's own schema — see
+    /// `tests/codex_protocol.rs`, which fails if any of them stops existing.
+    /// `spawnAgent` names the new agent in `receiverThreadIds`, and every
+    /// `item/started` says which `threadId` it belongs to. That pair is the
+    /// whole attribution mechanism, and it is nothing like Claude's
+    /// `parent_tool_use_id`.
+    #[test]
+    fn spawning_a_codex_agent_starts_a_task() {
+        let seen = events(&[
+            r#"{"method":"item/started","params":{"threadId":"th_main","turnId":"u1","startedAtMs":0,"item":{"id":"c1","type":"collabAgentToolCall","tool":"spawnAgent","senderThreadId":"th_main","receiverThreadIds":["th_sub"],"agentsStates":{},"status":"inProgress","prompt":"Audit the status surfaces","model":"gpt-5.6-sol"}}}"#,
+        ]);
+
+        let started = seen.iter().find_map(|e| match e {
+            TurnEvent::TaskStarted {
+                task,
+                item,
+                description,
+                agent,
+            } => Some((
+                task.clone(),
+                item.clone(),
+                description.clone(),
+                agent.clone(),
+            )),
+            _ => None,
+        });
+        let Some((task, item, description, agent)) = started else {
+            panic!("spawning an agent should start a task, got {seen:?}");
+        };
+        // The subagent's *own* thread, because that is what its work is
+        // labelled with when it arrives.
+        assert_eq!(task.as_str(), "th_sub");
+        assert_eq!(item.as_str(), "c1");
+        assert_eq!(description, "Audit the status surfaces");
+        assert_eq!(agent.as_deref(), Some("gpt-5.6-sol"));
+    }
+
+    /// And the work it does is attributed to it rather than to the main thread.
+    #[test]
+    fn a_codex_subagents_work_belongs_to_it() {
+        let mut reader = CodexNormaliser::new();
+        reader.push(
+            r#"{"method":"item/started","params":{"threadId":"th_main","turnId":"u1","startedAtMs":0,"item":{"id":"c1","type":"collabAgentToolCall","tool":"spawnAgent","senderThreadId":"th_main","receiverThreadIds":["th_sub"],"agentsStates":{},"status":"inProgress","prompt":"Audit it","model":"gpt-5.6-sol"}}}"#,
+        );
+
+        // A command the subagent ran, on the subagent's thread.
+        let mine = reader.push(
+            r#"{"method":"item/started","params":{"threadId":"th_sub","turnId":"u2","startedAtMs":1,"item":{"id":"d1","type":"commandExecution","command":"rg SessionStatus","cwd":"/w","commandActions":[],"status":"inProgress"}}}"#,
+        );
+        assert!(
+            mine.iter().any(|e| matches!(
+                e,
+                TurnEvent::ItemStarted { task: Some(owner), .. } if owner.as_str() == "th_sub"
+            )),
+            "the subagent's command should name it as owner, got {mine:?}"
+        );
+
+        // And one the main agent ran, which must not be swept up with it.
+        let theirs = reader.push(
+            r#"{"method":"item/started","params":{"threadId":"th_main","turnId":"u1","startedAtMs":2,"item":{"id":"d2","type":"commandExecution","command":"cargo test","cwd":"/w","commandActions":[],"status":"inProgress"}}}"#,
+        );
+        assert!(
+            theirs
+                .iter()
+                .any(|e| matches!(e, TurnEvent::ItemStarted { task: None, .. })),
+            "the main thread's own work is not delegated, got {theirs:?}"
+        );
+    }
+
+    /// `subAgentActivity` is the lifecycle Codex narrates separately from the
+    /// tool call that started it. `kind` is the whole of what it says.
+    #[test]
+    fn codex_subagent_activity_reports_progress_and_the_end() {
+        let mut reader = CodexNormaliser::new();
+        reader.push(
+            r#"{"method":"item/started","params":{"threadId":"th_main","turnId":"u1","startedAtMs":0,"item":{"id":"c1","type":"collabAgentToolCall","tool":"spawnAgent","senderThreadId":"th_main","receiverThreadIds":["th_sub"],"agentsStates":{},"status":"inProgress","prompt":"Audit it","model":"m"}}}"#,
+        );
+
+        let busy = reader.push(
+            r#"{"method":"item/started","params":{"threadId":"th_main","turnId":"u1","startedAtMs":1,"item":{"id":"a1","type":"subAgentActivity","agentThreadId":"th_sub","agentPath":"reviewer","kind":"interacted"}}}"#,
+        );
+        assert!(
+            busy.iter().any(
+                |e| matches!(e, TurnEvent::TaskProgress { task, .. } if task.as_str() == "th_sub")
+            ),
+            "activity should report progress, got {busy:?}"
+        );
+
+        let done = reader.push(
+            r#"{"method":"item/completed","params":{"threadId":"th_main","turnId":"u1","completedAtMs":2,"item":{"id":"a2","type":"subAgentActivity","agentThreadId":"th_sub","agentPath":"reviewer","kind":"completed"}}}"#,
+        );
+        assert!(
+            done.iter().any(|e| matches!(
+                e,
+                TurnEvent::TaskCompleted { task, status: ItemStatus::Completed, .. }
+                    if task.as_str() == "th_sub"
+            )),
+            "a finished subagent should report back, got {done:?}"
+        );
+    }
+
+    /// An interrupted agent is a failed one, not a quietly finished one.
+    #[test]
+    fn an_interrupted_codex_subagent_is_not_reported_as_success() {
+        let mut reader = CodexNormaliser::new();
+        reader.push(
+            r#"{"method":"item/started","params":{"threadId":"th_main","turnId":"u1","startedAtMs":0,"item":{"id":"c1","type":"collabAgentToolCall","tool":"spawnAgent","senderThreadId":"th_main","receiverThreadIds":["th_sub"],"agentsStates":{},"status":"inProgress","prompt":"p","model":"m"}}}"#,
+        );
+        let done = reader.push(
+            r#"{"method":"item/completed","params":{"threadId":"th_main","turnId":"u1","completedAtMs":1,"item":{"id":"a1","type":"subAgentActivity","agentThreadId":"th_sub","agentPath":"reviewer","kind":"interrupted"}}}"#,
+        );
+        assert!(
+            done.iter().any(|e| matches!(
+                e,
+                TurnEvent::TaskCompleted {
+                    status: ItemStatus::Failed,
+                    ..
+                }
+            )),
+            "an interrupted agent did not succeed, got {done:?}"
+        );
     }
 
     #[test]
