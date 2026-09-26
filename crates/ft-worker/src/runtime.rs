@@ -7,8 +7,11 @@
 //! ```text
 //! <state>/agents/claude-code/2.1.0/bin/claude
 //! <state>/agents/codex/0.154.0/bin/codex
+//! <state>/agents/codex/0.154.0/bin/codex-code-mode-host
 //! <state>/agents/kimi/2.1.1/bin/kimi
 //! ```
+//!
+//! Codex is two binaries, and both of them are Codex — see `CODE_MODE_HOST`.
 //!
 //! Not through npm. All three publish an npm package and all three were
 //! installed from it once, which made Node a requirement of every machine a
@@ -441,31 +444,74 @@ async fn fetch_claude(bin: &Path, platform: &Platform, version: Option<&str>) ->
 /// Where Codex publishes its binaries: one tarball per target on each release.
 const CODEX_RELEASES: &str = "https://github.com/openai/codex/releases";
 
+/// The sidecar Codex runs its tools through, and the second half of Codex.
+///
+/// What Codex calls Code Mode: every file it reads, every edit it makes and
+/// every command it runs goes through this process, which `codex` spawns from
+/// beside its own executable. Where it is missing Code Mode **fails closed** —
+/// the session starts, signs in and answers, and cannot touch the repository —
+/// which is harder to recognise than an agent that refuses to start, because
+/// everything about it looks like it is working.
+///
+/// The release publishes it as its own asset rather than inside the CLI's, so
+/// installing `codex` alone installs a Codex that can talk and not work.
+pub const CODE_MODE_HOST: &str = "codex-code-mode-host";
+
 async fn fetch_codex(bin: &Path, platform: &Platform, version: Option<&str>) -> Result<()> {
     let target = platform.codex();
-    let asset = format!("codex-{target}.tar.gz");
+    fetch_codex_binary(bin, target, version, "codex").await?;
+
+    // The host pinned to the CLI that will spawn it rather than asked for by
+    // `latest` a second time: the two speak a handshake to each other, and two
+    // `latest` requests either side of a release would fetch halves of
+    // different ones. Only where the CLI would not say its version does this
+    // fall back to asking for the newest.
+    let installed = version_of(&bin.join("codex")).await;
+    fetch_codex_binary(
+        bin,
+        target,
+        version.or(installed.as_deref()),
+        CODE_MODE_HOST,
+    )
+    .await
+}
+
+/// One binary out of a Codex release, installed under its plain name.
+async fn fetch_codex_binary(
+    bin: &Path,
+    target: &str,
+    version: Option<&str>,
+    name: &str,
+) -> Result<()> {
+    let asset = format!("{name}-{target}.tar.gz");
     let url = match version {
         // Codex tags its releases `rust-v<version>`.
         Some(v) => format!("{CODEX_RELEASES}/download/rust-v{v}/{asset}"),
         None => format!("{CODEX_RELEASES}/latest/download/{asset}"),
     };
 
-    let scratch = bin.join(".unpack");
+    // One scratch directory per asset, so the only thing the search below can
+    // find is the thing this download unpacked. Shared, `codex` and
+    // `codex-code-mode-host` are each other's near misses.
+    let scratch = bin.join(format!(".unpack-{name}"));
+    let _ = tokio::fs::remove_dir_all(&scratch).await;
     tokio::fs::create_dir_all(&scratch).await?;
     let archive = scratch.join(&asset);
     download(&url, &archive)
         .await
-        .context("downloading Codex")?;
-    untar(&archive, &scratch).await.context("unpacking Codex")?;
+        .with_context(|| format!("downloading {name}"))?;
+    untar(&archive, &scratch)
+        .await
+        .with_context(|| format!("unpacking {name}"))?;
     let _ = tokio::fs::remove_file(&archive).await;
 
-    let found = find_binary(&scratch, "codex", target).await;
+    let found = find_binary(&scratch, name, target).await;
     let Some(found) = found else {
         let _ = tokio::fs::remove_dir_all(&scratch).await;
-        bail!("the Codex release for {target} had no binary in it");
+        bail!("the Codex release for {target} had no {name} in it");
     };
 
-    let installed = bin.join("codex");
+    let installed = bin.join(name);
     tokio::fs::rename(&found, &installed)
         .await
         .with_context(|| format!("moving {} into place", found.display()))?;
@@ -476,7 +522,7 @@ async fn fetch_codex(bin: &Path, platform: &Platform, version: Option<&str>) -> 
 
 /// The executable in an unpacked release.
 ///
-/// Codex's tarball holds one file, named for its target. Looked for by name
+/// Each Codex asset holds one file, named for its target. Looked for by name
 /// first and by being the only file second, so a release that renames it
 /// still installs.
 async fn find_binary(dir: &Path, name: &str, target: &str) -> Option<PathBuf> {
