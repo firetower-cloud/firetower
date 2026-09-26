@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.42.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.41.1...firetower-v0.42.0) (2026-09-26)
+
+
+### Features
+
+* add repository connection from mobile app ([6456147](https://github.com/firetower-cloud/firetower/commit/6456147ed07fcbf974b8b3bda08b8a2bcfeae395))
+* add repository connection from mobile app ([b824734](https://github.com/firetower-cloud/firetower/commit/b824734b66d78959a5b277d28ecbb176434d0500))
+* **subagents:** add Codex support and defer turn completion for ([48bf029](https://github.com/firetower-cloud/firetower/commit/48bf029867d697d06cd64c541d1cafb098e2a574))
+* **subagents:** add Codex support and defer turn completion for ([ff1d776](https://github.com/firetower-cloud/firetower/commit/ff1d77667b6ba1459e3e76967564aca0b6a14ded))
+
+
+### Bug Fixes
+
+* **codex:** install code-mode host sidecar with CLI binary ([357751c](https://github.com/firetower-cloud/firetower/commit/357751c73b5d4b68ad0f71cfc447490d1050d455))
+* **codex:** install code-mode host sidecar with CLI binary ([0a58d89](https://github.com/firetower-cloud/firetower/commit/0a58d89a3d3ed2d489a211f1d08736d731da867a))
+
 ## [0.41.1](https://github.com/firetower-cloud/firetower/compare/firetower-v0.41.0...firetower-v0.41.1) (2026-09-25)
 
 

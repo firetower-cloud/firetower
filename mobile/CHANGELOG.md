@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.4.0](https://github.com/firetower-cloud/firetower/compare/mobile-v0.3.0...mobile-v0.4.0) (2026-09-26)
+
+
+### Features
+
+* add repository connection from mobile app ([6456147](https://github.com/firetower-cloud/firetower/commit/6456147ed07fcbf974b8b3bda08b8a2bcfeae395))
+* add repository connection from mobile app ([b824734](https://github.com/firetower-cloud/firetower/commit/b824734b66d78959a5b277d28ecbb176434d0500))
+* **subagents:** add Codex support and defer turn completion for ([48bf029](https://github.com/firetower-cloud/firetower/commit/48bf029867d697d06cd64c541d1cafb098e2a574))
+* **subagents:** add Codex support and defer turn completion for ([ff1d776](https://github.com/firetower-cloud/firetower/commit/ff1d77667b6ba1459e3e76967564aca0b6a14ded))
+
 ## [0.3.0](https://github.com/firetower-cloud/firetower/compare/mobile-v0.2.2...mobile-v0.3.0) (2026-09-25)
 
 

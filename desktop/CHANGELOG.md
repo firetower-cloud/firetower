@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.16.0](https://github.com/firetower-cloud/firetower/compare/desktop-v0.15.0...desktop-v0.16.0) (2026-09-26)
+
+
+### Features
+
+* **subagents:** add Codex support and defer turn completion for ([48bf029](https://github.com/firetower-cloud/firetower/commit/48bf029867d697d06cd64c541d1cafb098e2a574))
+* **subagents:** add Codex support and defer turn completion for ([ff1d776](https://github.com/firetower-cloud/firetower/commit/ff1d77667b6ba1459e3e76967564aca0b6a14ded))
+
 ## [0.15.0](https://github.com/firetower-cloud/firetower/compare/desktop-v0.14.0...desktop-v0.15.0) (2026-09-25)
 
 
