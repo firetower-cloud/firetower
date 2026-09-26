@@ -18,7 +18,8 @@ import Animated, {
   withTiming,
 } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Check, ChevronDown } from "lucide-react-native";
+import { Check, ChevronDown, Plus } from "lucide-react-native";
+import { Waiting } from "~/ui/Waiting";
 import { color } from "~/design/tokens.generated";
 
 export type Choice = {
@@ -96,6 +97,9 @@ export function Picker({
   chosen,
   onPick,
   onClose,
+  action,
+  waiting,
+  empty,
 }: {
   open: boolean;
   title: string;
@@ -103,6 +107,35 @@ export function Picker({
   chosen?: string | string[];
   onPick: (id: string) => void;
   onClose: () => void;
+  /**
+   * The way out, for what the list cannot hold.
+   *
+   * *Connect a repository* is not a choice — picking it picks nothing and
+   * leaves for another screen — so it sits under the rows, behind a hairline,
+   * and never looks like one of them. A panel wants one of these whenever the
+   * honest answer to "which one" can be *none of these yet*, and a picker that
+   * could only offer what already existed is how this app ended up unable to
+   * add a repository at all.
+   */
+  action?: { label: string; onPress: () => void };
+  /**
+   * What is being fetched, while there is nothing to choose from yet.
+   *
+   * An empty panel is a claim — *there are none* — and every one of these
+   * lists arrives over the network. Said only when the list is empty, so a
+   * refetch behind a panel somebody is already reading changes nothing under
+   * them.
+   */
+  waiting?: string;
+  /**
+   * What an empty list means, once something has come back.
+   *
+   * Separate from [`waiting`] because they are different sentences — *none
+   * yet* and *not here yet* — and a panel that says the first while the
+   * second is true is the empty state that costs the most trust. A list with
+   * an `action` under it can afford to be empty; it still has to say so.
+   */
+  empty?: string;
 }) {
   const insets = useSafeAreaInsets();
   const has = (id: string) =>
@@ -163,6 +196,13 @@ export function Picker({
           {title}
         </Text>
         <ScrollView>
+          {choices.length === 0 && waiting ? (
+            <View className="px-5">
+              <Waiting say={waiting} align="left" />
+            </View>
+          ) : choices.length === 0 && empty ? (
+            <Text className="px-5 py-3 font-sans text-ui text-mute">{empty}</Text>
+          ) : null}
           {choices.map((c) => (
             <Pressable
               key={c.id}
@@ -189,6 +229,18 @@ export function Picker({
               {has(c.id) ? <Check color={color.sage} size={17} /> : null}
             </Pressable>
           ))}
+
+          {action ? (
+            <Pressable
+              testID="picker-action"
+              onPress={action.onPress}
+              className="mt-1 flex-row items-center gap-3 border-t border-line-soft px-5 py-3.5"
+              android_ripple={{ color: color.overlay }}
+            >
+              <Plus color={color.dim} size={16} />
+              <Text className="font-medium text-title text-dim">{action.label}</Text>
+            </Pressable>
+          ) : null}
         </ScrollView>
       </Animated.View>
       </GestureDetector>
