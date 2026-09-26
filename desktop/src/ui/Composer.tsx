@@ -18,7 +18,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { RefObject } from "react";
 import { ArrowUp, Check, ChevronDown, FileText, ImageOff, Loader2, Paperclip, Square, X } from "lucide-react";
-import type { Conversation } from "~/api/conversation";
+import { interruptible, type Conversation } from "~/api/conversation";
 import type { Attached, Control, ControlKind, Session } from "~/api/generated/model";
 import { useAttachFile, useInterruptSession, useListFiles, useSendTurn } from "~/api/generated/sessions/sessions";
 import { useChooseControl, useSessionControls } from "~/api/generated/conversation/conversation";
@@ -507,7 +507,10 @@ export function Composer({
               </span>
             )}
 
-            {conversation.working ? (
+            {/* `interruptible`, not `working`: a subagent the turn left
+                running keeps the session working, but an interrupt cannot
+                reach it — so the button would report success and do nothing. */}
+            {interruptible(conversation) ? (
               <button
                 onClick={stop}
                 disabled={stopping}

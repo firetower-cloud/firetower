@@ -99,6 +99,24 @@ function foldable(item: Item): boolean {
 }
 
 /**
+ * The items on the main rail — what the agent you are talking to did itself.
+ *
+ * The normaliser tags everything a subagent does with the task that owns it,
+ * for exactly this: without the split, several voices interleave into one
+ * transcript and a delegated `grep` reads as though the main agent ran it.
+ * Drawn on the main rail *and* inside the owning card, it was also drawn
+ * twice.
+ */
+export function mainline(items: Item[]): Item[] {
+  return items.filter((i) => i.task === undefined);
+}
+
+/** The items one subagent owns, for the card that stands for it. */
+export function delegated(items: Item[], task: string): Item[] {
+  return items.filter((i) => i.task === task);
+}
+
+/**
  * Turn a list of items into rows, folding runs of tool calls.
  *
  * `least` is a parameter so the tests can say what they mean rather than

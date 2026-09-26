@@ -11,6 +11,7 @@
  */
 import { createServer } from "node:http";
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 
 const PORT = Number(process.argv[2] ?? 4401);
 
@@ -60,9 +61,9 @@ const session = () => ({
   name: "auth refactor",
   title: "Move session tokens onto the new signing key",
   prompt: "Move session tokens onto the new signing key",
-  agent: "ClaudeCode",
   size: "Medium",
-  status: "Working",
+  status: scene.endsWith("-done") ? "HandedBack" : "Working",
+  agent: scene.startsWith("codex") ? "Codex" : "ClaudeCode",
   hostId: "h_1",
   workspaceId: "w_1",
   createdAt: "2026-09-21T09:12:00Z",
@@ -129,9 +130,96 @@ const asked = (item, text) => [
   { lineNo: 0, type: "ItemCompleted", item, status: "Completed" },
 ];
 
+/**
+ * Which scene the mock is playing, set by `/__scene`.
+ *
+ * `subagent` is the state a backgrounded subagent leaves behind: the turn has
+ * ended, and the thing it handed work to has not reported. The session is
+ * still working, and the transcript has to say so — see `Delegated`.
+ */
+let scene = "default";
+
+/** A tool call a subagent made, which belongs on its rail and not the main one. */
+const delegated = (item, kind, title, task) => [
+  { lineNo: 0, type: "ItemStarted", item, kind, title, task },
+  { lineNo: 0, type: "ItemCompleted", item, status: "Completed" },
+];
+
+/**
+ * A turn that handed work to a subagent and ended before it came back.
+ *
+ * Three delegated commands on purpose: enough to fold into a "ran 3 commands"
+ * group, which is exactly how the leak used to show up on the main rail.
+ */
+const subagent = (reported) => [
+  { lineNo: 0, type: "SessionConfigured", model: "claude-opus-5", mode: "acceptEdits", tools: [], commands: [] },
+  { lineNo: 1, type: "TurnStarted", turn: "t_1" },
+  ...asked("i_1", "Audit every UI surface that shows session status, across desktop and mobile."),
+  ...say("i_2", "That is a wide sweep across two clients, so I'll hand it to a subagent and carry on here."),
+  {
+    lineNo: 10,
+    type: "ItemStarted",
+    item: "call_1",
+    kind: "SubagentCall",
+    title: "sent",
+    task: null,
+  },
+  { lineNo: 11, type: "ItemUpdated", item: "call_1", data: { description: "Audit subagent UI surfaces" } },
+  {
+    lineNo: 12,
+    type: "TaskStarted",
+    task: "task_1",
+    item: "call_1",
+    description: "Audit subagent UI surfaces",
+    agent: "Explore",
+  },
+  ...delegated("d_1", "CommandExecution", "ran ls desktop/src/ui mobile/src/ui", "task_1"),
+  ...delegated("d_2", "CommandExecution", "ran grep -rn SessionStatus desktop/src", "task_1"),
+  ...delegated("d_3", "CommandExecution", "ran grep -rn BEAT_TONE mobile/src", "task_1"),
+  ...delegated("d_4", "FileRead", "read desktop/src/api/view.ts", "task_1"),
+  { lineNo: 20, type: "TaskProgress", task: "task_1", detail: "Reading desktop/src/island/state.ts" },
+  // The turn ends here. The subagent does not.
+  { lineNo: 40, type: "TurnCompleted", turn: "t_1", status: "Completed", usage: null },
+  ...(reported
+    ? [
+        {
+          lineNo: 41,
+          type: "TaskCompleted",
+          task: "task_1",
+          status: "Completed",
+          summary:
+            "Seven surfaces read `SessionStatus`. Two of them — `Signal` and the island's blocks — draw the resting tick, and neither consults in-flight tasks.",
+        },
+        { lineNo: 42, type: "ItemCompleted", item: "call_1", status: "Completed" },
+      ]
+    : []),
+];
+
+/**
+ * The Codex scenes, normalised by the real thing.
+ *
+ * Not written by hand: `crates/ft-core/tests/streams/codex_subagent.ndjson` is
+ * app-server output checked against the installed binary's own schema, and
+ * these are what `CodexNormaliser` makes of it. So this photographs the actual
+ * Codex path rather than a drawing of it.
+ */
+const CODEX = JSON.parse(readFileSync(new URL("./codex-events.json", import.meta.url), "utf8"));
+const CODEX_DONE = JSON.parse(
+  readFileSync(new URL("./codex-events-done.json", import.meta.url), "utf8"),
+);
+
 const conversation = () => ({
   lastLine: 42,
-  events: [
+  events:
+    scene === "subagent"
+      ? subagent(false)
+      : scene === "subagent-done"
+        ? subagent(true)
+        : scene === "codex"
+          ? CODEX
+          : scene === "codex-done"
+            ? CODEX_DONE
+            : [
     { lineNo: 0, type: "SessionConfigured", model: "claude-opus-5", mode: "acceptEdits", tools: [], commands: [] },
     { lineNo: 1, type: "TurnStarted", turn: "t_1" },
     ...asked("i_1", "The signing key rotated. Move session tokens onto the new one, in the web app and the API both."),
@@ -140,7 +228,7 @@ const conversation = () => ({
       "I've read `web/src/auth/session.ts` and `api/src/tokens.rs`. They share the key id but not the code that reads it, so this is two changes that have to land together.\n\nStarting with the API, since the web app follows whatever it accepts.",
     ),
     { lineNo: 40, type: "TurnCompleted", turn: "t_1", status: "Completed", usage: null },
-  ],
+              ],
 });
 
 const json = (res, body, status = 200) => {
@@ -162,7 +250,8 @@ const server = createServer(async (req, res) => {
   // photographed without restarting the process.
   if (path === "/__reset") {
     checkouts = START();
-    return json(res, { detail: "back to three" });
+    scene = url.searchParams.get("scene") ?? "default";
+    return json(res, { detail: `back to three, playing ${scene}` });
   }
 
   if (req.method === "POST" && /^\/api\/v1\/sessions\/[^/]+\/repos$/.test(path)) {

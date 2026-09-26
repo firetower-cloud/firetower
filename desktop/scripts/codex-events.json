@@ -1,0 +1,193 @@
+[
+  {
+    "lineNo": 0,
+    "turn": "turn_1",
+    "type": "TurnStarted"
+  },
+  {
+    "item": "u1",
+    "kind": "UserMessage",
+    "lineNo": 1,
+    "task": null,
+    "title": null,
+    "type": "ItemStarted"
+  },
+  {
+    "delta": "Audit every UI surface that shows session status, across desktop and mobile.",
+    "item": "u1",
+    "lineNo": 1,
+    "stream": "UserText",
+    "type": "ContentDelta"
+  },
+  {
+    "data": {
+      "content": [
+        {
+          "text": "Audit every UI surface that shows session status, across desktop and mobile.",
+          "type": "text"
+        }
+      ],
+      "id": "u1",
+      "type": "userMessage"
+    },
+    "item": "u1",
+    "lineNo": 2,
+    "type": "ItemUpdated"
+  },
+  {
+    "item": "u1",
+    "lineNo": 2,
+    "status": "Completed",
+    "type": "ItemCompleted"
+  },
+  {
+    "item": "m1",
+    "kind": "AssistantMessage",
+    "lineNo": 3,
+    "task": null,
+    "title": null,
+    "type": "ItemStarted"
+  },
+  {
+    "delta": "That is a wide sweep across two clients, so I'll spawn an agent for it and carry on here.",
+    "item": "m1",
+    "lineNo": 4,
+    "stream": "AssistantText",
+    "type": "ContentDelta"
+  },
+  {
+    "data": {
+      "id": "m1",
+      "text": "That is a wide sweep across two clients, so I'll spawn an agent for it and carry on here.",
+      "type": "agentMessage"
+    },
+    "item": "m1",
+    "lineNo": 5,
+    "type": "ItemUpdated"
+  },
+  {
+    "item": "m1",
+    "lineNo": 5,
+    "status": "Completed",
+    "type": "ItemCompleted"
+  },
+  {
+    "agent": "gpt-5.6-sol",
+    "description": "Audit subagent UI surfaces",
+    "item": "c1",
+    "lineNo": 6,
+    "task": "th_sub",
+    "type": "TaskStarted"
+  },
+  {
+    "item": "c1",
+    "kind": "SubagentCall",
+    "lineNo": 6,
+    "task": null,
+    "title": "collabAgentToolCall",
+    "type": "ItemStarted"
+  },
+  {
+    "item": "d1",
+    "kind": "CommandExecution",
+    "lineNo": 7,
+    "task": "th_sub",
+    "title": "rg -n SessionStatus desktop/src",
+    "type": "ItemStarted"
+  },
+  {
+    "data": {
+      "command": "rg -n SessionStatus desktop/src",
+      "commandActions": [],
+      "cwd": "/w",
+      "exitCode": 0,
+      "id": "d1",
+      "status": "completed",
+      "type": "commandExecution"
+    },
+    "item": "d1",
+    "lineNo": 8,
+    "type": "ItemUpdated"
+  },
+  {
+    "item": "d1",
+    "lineNo": 8,
+    "status": "Completed",
+    "type": "ItemCompleted"
+  },
+  {
+    "item": "d2",
+    "kind": "CommandExecution",
+    "lineNo": 9,
+    "task": "th_sub",
+    "title": "rg -n BEAT_TONE mobile/src",
+    "type": "ItemStarted"
+  },
+  {
+    "data": {
+      "command": "rg -n BEAT_TONE mobile/src",
+      "commandActions": [],
+      "cwd": "/w",
+      "exitCode": 0,
+      "id": "d2",
+      "status": "completed",
+      "type": "commandExecution"
+    },
+    "item": "d2",
+    "lineNo": 10,
+    "type": "ItemUpdated"
+  },
+  {
+    "item": "d2",
+    "lineNo": 10,
+    "status": "Completed",
+    "type": "ItemCompleted"
+  },
+  {
+    "item": "d3",
+    "kind": "CommandExecution",
+    "lineNo": 11,
+    "task": "th_sub",
+    "title": "cat desktop/src/api/view.ts",
+    "type": "ItemStarted"
+  },
+  {
+    "data": {
+      "command": "cat desktop/src/api/view.ts",
+      "commandActions": [],
+      "cwd": "/w",
+      "exitCode": 0,
+      "id": "d3",
+      "status": "completed",
+      "type": "commandExecution"
+    },
+    "item": "d3",
+    "lineNo": 12,
+    "type": "ItemUpdated"
+  },
+  {
+    "item": "d3",
+    "lineNo": 12,
+    "status": "Completed",
+    "type": "ItemCompleted"
+  },
+  {
+    "detail": "reviewer",
+    "lineNo": 13,
+    "task": "th_sub",
+    "type": "TaskProgress"
+  },
+  {
+    "detail": "Reading desktop/src/island/state.ts",
+    "lineNo": 14,
+    "task": "th_sub",
+    "type": "TaskProgress"
+  },
+  {
+    "lineNo": 15,
+    "status": "Completed",
+    "turn": "turn_1",
+    "type": "TurnCompleted",
+    "usage": null
+  }
+]

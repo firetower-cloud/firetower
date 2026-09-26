@@ -13,7 +13,7 @@ use ft_proto::{
     decode, encode, Codec, CodecError, Credential, ProbeFailure, Pty, RemoteInfo, ReqId, ToServer,
     ToWorker, PROTOCOL_VERSION,
 };
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tokio::sync::{broadcast, mpsc, oneshot, Mutex, Notify, RwLock};
 
@@ -166,6 +166,25 @@ struct Progress {
     /// id its request went out with, so reusing one would attribute an answer
     /// to the wrong question.
     next_id: u64,
+    /// Subagents that have been started and have not reported.
+    ///
+    /// A backgrounded subagent outlives the turn that spawned it: the turn
+    /// ends, and the agent is woken again when the subagent is done. So a
+    /// `result` line is not proof the session stopped, and treating it as one
+    /// put the resting tick on a session that was still producing transcript
+    /// — and took away the stop button while work nobody could reach carried
+    /// on running.
+    running: HashSet<String>,
+    /// How the turn ended, held back until the last subagent reports.
+    ///
+    /// The note belongs to the turn — it is the last thing the agent said —
+    /// but the *moment* it is delivered is when the session actually comes to
+    /// rest, which is later. Kept rather than recomputed because `said` is
+    /// cleared by the next turn.
+    resting: Option<Option<String>>,
+    /// Whether a turn is open, so a subagent reporting knows whether the
+    /// session is coming to rest or the agent is already off again.
+    in_turn: bool,
 }
 
 impl Progress {
@@ -176,6 +195,9 @@ impl Progress {
             reader: ft_core::normalise::Reader::for_agent(agent),
             stopped: false,
             said: String::new(),
+            running: HashSet::new(),
+            resting: None,
+            in_turn: false,
             // Codex cannot be given work until a thread exists, so its first
             // prompt waits here for the answer that creates one. Claude Code
             // was handed its prompt with the first message and has none.
@@ -332,21 +354,50 @@ impl Progress {
                 }
                 E::TurnStarted { .. } => {
                     self.said.clear();
+                    self.in_turn = true;
+                    // A new turn supersedes the rest the last one was owed.
+                    self.resting = None;
                     moved = Some((SessionStatus::Working, None));
                 }
                 E::RequestResolved { req, .. } => resolved.push(req.to_string()),
+                E::TaskStarted { task, .. } => {
+                    self.running.insert(task.to_string());
+                }
+                E::TaskCompleted { task, .. } => {
+                    self.running.remove(task.as_str());
+                    // The turn already ended and was not allowed to rest the
+                    // session because this was still going. Now it has
+                    // reported, and nothing else is coming: this is the moment
+                    // the session stopped, so it is the moment to say so.
+                    if self.running.is_empty() && !self.in_turn {
+                        if let Some(note) = self.resting.take() {
+                            moved = Some((SessionStatus::HandedBack, note));
+                        }
+                    }
+                }
                 E::TurnCompleted { status, detail, .. } => {
+                    self.in_turn = false;
                     let note = detail.or_else(|| summarise(&self.said));
                     // A turn we stopped is not a turn that broke, whatever the
                     // agent calls it on the way out.
                     let asked_for = std::mem::take(&mut self.stopped);
-                    moved = Some(match status {
+                    let ended = match status {
                         TurnStatus::Failed if !asked_for => (SessionStatus::Failed, note),
                         // Handed back rather than finished: it did a turn and
                         // is waiting for the next thing, which is a resting
                         // state and not an end.
                         _ => (SessionStatus::HandedBack, note),
-                    });
+                    };
+                    // Unless a subagent is still going, in which case the turn
+                    // ending is not the session stopping — more transcript is
+                    // coming without anybody asking for it. A turn that
+                    // *failed* rests anyway: something went wrong here, and
+                    // that is worth reporting whatever is still running.
+                    if ended.0 == SessionStatus::HandedBack && !self.running.is_empty() {
+                        self.resting = Some(ended.1);
+                    } else {
+                        moved = Some(ended);
+                    }
                 }
                 // Not `moved`: what a blocked session does — record it,
                 // announce it, tell somebody — is one thing done in one place,
@@ -1951,7 +2002,23 @@ impl Fleet {
                         }
                         Ok(ToServer::AgentClosed { session_id }) => {
                             asked.write().await.remove(session_id.as_str());
-                            progress.write().await.remove(session_id.as_str());
+                            let held = progress.write().await.remove(session_id.as_str());
+                            // A turn that ended while a subagent was still
+                            // running does not rest the session — the subagent
+                            // reporting does. If the agent goes away first,
+                            // that report is never coming, and without this
+                            // the session sits under a breathing "Working"
+                            // light for ever with nothing left to move it.
+                            if let Some(note) = held.and_then(|p| p.resting) {
+                                announce_status(
+                                    &db,
+                                    &events,
+                                    &session_id,
+                                    SessionStatus::HandedBack,
+                                    note.as_deref(),
+                                )
+                                .await;
+                            }
                             if let Some(tx) = conversations.write().await.remove(session_id.as_str()) {
                                 let _ = tx.send(AgentSpeech::Closed);
                             }
@@ -3479,6 +3546,96 @@ mod progress_tests {
             }
         }
         assert_eq!(last, Some(SessionStatus::Failed));
+    }
+
+    /// A turn that ends while a subagent is still going has not handed back.
+    ///
+    /// `HandedBack` means "your move, and nothing happens until you make it".
+    /// A backgrounded subagent outlives the turn that spawned it and will
+    /// produce more of the transcript on its own, so a session showing the
+    /// resting tick is lying about what it is doing — and the composer drops
+    /// its stop button, leaving work running that nobody can interrupt.
+    #[test]
+    fn a_turn_that_leaves_a_subagent_running_does_not_hand_back() {
+        let lines = [
+            r#"{"type":"user","message":{"role":"user","content":[{"text":"go","type":"text"}]}}"#,
+            r#"{"type":"system","subtype":"task_started","task_id":"task_1","tool_use_id":"toolu_1","description":"look around","subagent_type":"Explore","is_backgrounded":true}"#,
+            r#"{"type":"result","subtype":"success","is_error":false,"num_turns":2,"stop_reason":"end_turn"}"#,
+        ];
+
+        let mut progress = Progress::for_agent(ft_core::Agent::ClaudeCode, String::new());
+        let mut last = None;
+        for line in lines {
+            if let Some(moved) = progress.read(line).moved {
+                last = Some(moved.0);
+            }
+        }
+        assert_eq!(
+            last,
+            Some(SessionStatus::Working),
+            "the subagent is still running, so the session is still working"
+        );
+
+        // And when it reports, that is the moment the session really stopped.
+        // Nothing else will say so: the turn already ended.
+        let done = progress.read(
+            r#"{"type":"system","subtype":"task_notification","task_id":"task_1","tool_use_id":"toolu_1","status":"completed","summary":"had a look"}"#,
+        );
+        assert_eq!(
+            done.moved.map(|m| m.0),
+            Some(SessionStatus::HandedBack),
+            "the last subagent reporting is what hands the session back"
+        );
+    }
+
+    /// The ordinary case must not regress: a subagent that finishes inside its
+    /// turn leaves nothing in flight, so the turn ends the session as before.
+    #[test]
+    fn a_subagent_that_finishes_inside_its_turn_hands_back_as_usual() {
+        let lines = [
+            r#"{"type":"user","message":{"role":"user","content":[{"text":"go","type":"text"}]}}"#,
+            r#"{"type":"system","subtype":"task_started","task_id":"task_1","tool_use_id":"toolu_1","description":"look around","subagent_type":"Explore","is_backgrounded":false}"#,
+            r#"{"type":"system","subtype":"task_notification","task_id":"task_1","tool_use_id":"toolu_1","status":"completed","summary":"had a look"}"#,
+            r#"{"type":"result","subtype":"success","is_error":false,"num_turns":2,"stop_reason":"end_turn"}"#,
+        ];
+
+        let mut progress = Progress::for_agent(ft_core::Agent::ClaudeCode, String::new());
+        let mut last = None;
+        for line in lines {
+            if let Some(moved) = progress.read(line).moved {
+                last = Some(moved.0);
+            }
+        }
+        assert_eq!(last, Some(SessionStatus::HandedBack));
+    }
+
+    /// The deferred rest is reachable from outside the reader, because the
+    /// agent going away is what has to deliver it when the subagent cannot.
+    ///
+    /// See the `AgentClosed` arm: a turn that ended with work still in flight
+    /// hands the note to `resting`, and only a subagent reporting takes it. If
+    /// the agent dies first nothing else will, so the session would sit under
+    /// a breathing "Working" light for ever.
+    #[test]
+    fn a_turn_held_back_by_a_subagent_leaves_its_note_where_a_dying_agent_finds_it() {
+        let lines = [
+            r#"{"type":"user","message":{"role":"user","content":[{"text":"go","type":"text"}]}}"#,
+            r#"{"type":"system","subtype":"task_started","task_id":"task_1","tool_use_id":"toolu_1","description":"look","subagent_type":"Explore","is_backgrounded":true}"#,
+            r#"{"type":"result","subtype":"success","is_error":false,"num_turns":1,"stop_reason":"end_turn"}"#,
+        ];
+        let mut progress = Progress::for_agent(ft_core::Agent::ClaudeCode, String::new());
+        for line in lines {
+            progress.read(line);
+        }
+
+        assert!(
+            progress.resting.is_some(),
+            "the turn's note is owed to somebody"
+        );
+        assert!(
+            !progress.running.is_empty(),
+            "and the subagent is why it has not been paid"
+        );
     }
 
     /// The handshake is what makes a Codex session usable, and it finishes on
