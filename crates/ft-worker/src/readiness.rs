@@ -125,8 +125,44 @@ async fn check_with_path(root: &Path, agent: Option<Agent>, path: &OsStr) -> Rea
     if let Some(agent) = agent {
         checks.push(tool(agent.label(), agent.command(), &["--version"], true,
             "Install this agent on the machine, or let Firetower fetch it: the readiness panel offers Install, and `firetower-worker agents add` does the same by hand.", path).await);
+        // Answering `--version` is the whole of what the check above proves,
+        // and for Codex that is not enough to run a session.
+        if agent == Agent::Codex {
+            checks.push(code_mode_host(path));
+        }
     }
     Readiness { checks, user }
+}
+
+/// The sidecar Codex runs every tool through.
+///
+/// Looked for beside whichever `codex` the PATH answers with, rather than
+/// anywhere on the PATH, because that is where `codex` looks: a machine with
+/// its own Codex earlier on the PATH is asked about that one. Its own check
+/// because `codex --version` answers perfectly without it, and the session it
+/// goes on to run cannot read a file.
+fn code_mode_host(path: &OsStr) -> Requirement {
+    let found = std::env::split_paths(path)
+        .find(|dir| dir.join(Agent::Codex.command()).is_file())
+        .map(|dir| dir.join(crate::runtime::CODE_MODE_HOST))
+        .filter(|host| host.is_file());
+
+    Requirement {
+        name: "Codex code-mode host".into(),
+        available: found.is_some(),
+        required: true,
+        detail: match &found {
+            Some(host) => host.display().to_string(),
+            None => format!(
+                "{} is not beside the codex binary, so Codex can answer and cannot read, edit or run anything",
+                crate::runtime::CODE_MODE_HOST
+            ),
+        },
+        remedy: Some(
+            "Reinstall Codex so the sidecar lands with it: the readiness panel offers Install, and `firetower-worker agents add codex` does the same by hand."
+                .into(),
+        ),
+    }
 }
 
 #[cfg(test)]
@@ -181,6 +217,13 @@ mod tests {
                 .any(|c| c.name == "npm" || c.name == "Node.js"),
             "Node is not a requirement of a machine"
         );
+        assert!(
+            !result
+                .checks
+                .iter()
+                .any(|c| c.name.contains("code-mode host")),
+            "the code-mode host is Codex's, and only Codex's"
+        );
     }
 
     #[tokio::test]
@@ -196,6 +239,46 @@ mod tests {
         assert!(!result.ready());
         assert!(result.missing().contains("Worker state directory"));
         assert!(result.missing().contains("Claude Code"));
+    }
+
+    /// A Codex that answers `--version` is not a Codex that can work: without
+    /// the sidecar it runs its tools through, every file read and command it
+    /// is asked for fails. So the sidecar is asked about separately, and is
+    /// required.
+    #[test]
+    fn codex_without_its_code_mode_host_is_not_ready() {
+        let bin = tempfile::tempdir().unwrap();
+        fake(bin.path(), "codex", "echo ready");
+
+        let lacking = code_mode_host(bin.path().as_os_str());
+        assert!(!lacking.available);
+        assert!(lacking.required);
+        assert!(lacking.detail.contains("codex-code-mode-host"));
+
+        fake(bin.path(), "codex-code-mode-host", "echo ready");
+        let whole = code_mode_host(bin.path().as_os_str());
+        assert!(whole.available, "{}", whole.detail);
+    }
+
+    /// Beside the `codex` that would run, not anywhere on the PATH: a machine
+    /// with its own Codex first is asked about that one, because that is the
+    /// one whose sidecar would be spawned.
+    #[test]
+    fn the_host_is_looked_for_beside_the_codex_that_answers() {
+        let theirs = tempfile::tempdir().unwrap();
+        let ours = tempfile::tempdir().unwrap();
+        fake(theirs.path(), "codex", "echo ready");
+        fake(ours.path(), "codex", "echo ready");
+        fake(ours.path(), "codex-code-mode-host", "echo ready");
+
+        let path = std::env::join_paths([theirs.path(), ours.path()]).unwrap();
+        assert!(
+            !code_mode_host(&path).available,
+            "ours answering for theirs would hide a broken install"
+        );
+
+        let path = std::env::join_paths([ours.path(), theirs.path()]).unwrap();
+        assert!(code_mode_host(&path).available);
     }
 
     /// The remedy is the command, in the words of whatever package manager
