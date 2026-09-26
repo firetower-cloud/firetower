@@ -10,7 +10,7 @@
       "name": "AGPL-3.0-only",
       "identifier": "AGPL-3.0-only"
     },
-    "version": "0.41.0"
+    "version": "0.41.1"
   },
   "paths": {
     "/api/v1/agent-accounts": {
@@ -1844,8 +1844,8 @@
         "tags": [
           "secrets"
         ],
-        "summary": "Replace a credential with a new one.",
-        "description": "Only for a name that already exists. Storing under an arbitrary name would\nlet this screen fill up with values nothing ever reads — what a credential is\n*for* is decided where it is used, not here.",
+        "summary": "Store a credential, whether or not there is one under that name already.",
+        "description": "A name nothing holds yet is created, because the Secrets screen offers to add\none and a button that refuses every name is not a feature. It used to refuse,\non the reasoning that what a credential is *for* is decided where it is used\n— but that is an argument about which names are worth adding, and the answer\nto it was a screen where adding did nothing at all.\n\nA `PUT` rather than a `POST` to a collection because the path is the whole\nidentity: the scope and the name say which row, and sending the same value\ntwice leaves the same one credential.",
         "operationId": "replace_secret",
         "parameters": [
           {
@@ -1882,16 +1882,6 @@
             "description": ""
           },
           "400": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiError"
-                }
-              }
-            }
-          },
-          "404": {
             "description": "",
             "content": {
               "application/json": {

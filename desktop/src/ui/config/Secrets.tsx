@@ -3,8 +3,12 @@
  *
  * Names and scopes are listed; a value is only ever shown by asking
  * (`reveal_secret`), which is logged on the server — the access trail is the
- * point of having a vault rather than a file. Replace and remove are the two
- * writes.
+ * point of having a vault rather than a file. Keep and remove are the two
+ * writes, and `keep` is one `PUT` whether the name is new or already held.
+ *
+ * Every write says out loud when it is refused. A silent mutation here is how
+ * "clicking Keep does nothing" got reported as the button being dead, when the
+ * request was going out and coming back with a reason nothing was showing.
  */
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
@@ -20,7 +24,6 @@ export function Secrets() {
   const cache = useQueryClient();
   const { data, isPending, error } = useListSecrets();
   const replace = useReplaceSecret();
-  const remove = useRemoveSecret();
   const [adding, setAdding] = useState(false);
   const [scope, setScope] = useState("global");
   const [name, setName] = useState("");
@@ -33,18 +36,21 @@ export function Secrets() {
     <Section
       title="Secrets"
       note="Held encrypted, revealed only by asking, and every read is logged."
-      action={<button onClick={() => setAdding(!adding)} className="control border border-line bg-raise text-ui text-bone hover:bg-overlay"><Icon of={Plus} size={12} />Add</button>}
+      action={<button onClick={() => { setAdding(!adding); replace.reset(); }} className="control border border-line bg-raise text-ui text-bone hover:bg-overlay"><Icon of={Plus} size={12} />Add</button>}
     >
       {isPending && <p className="px-3.5 py-4 text-ui text-mute">Reading the vault…</p>}
       {error ? <p className="px-3.5 py-4 text-ui text-brick">{why(error)}</p> : null}
       {!isPending && !error && held.length === 0 && !adding && <p className="px-3.5 py-4 text-ui text-mute">Nothing held yet.</p>}
 
       {adding && (
-        <div className="flex items-center gap-2 px-3.5 py-2.5">
-          <input value={scope} onChange={(e) => setScope(e.target.value)} placeholder="scope" className="w-28 rounded-md border border-line bg-ground px-2 py-1 font-mono text-ui text-bone focus:outline-none" />
-          <input value={name} onChange={(e) => setName(e.target.value.toUpperCase())} placeholder="NAME" className="w-40 rounded-md border border-line bg-ground px-2 py-1 font-mono text-ui text-bone focus:outline-none" />
-          <input value={value} onChange={(e) => setValue(e.target.value)} type="password" placeholder="value" className="min-w-0 flex-1 rounded-md border border-line bg-ground px-2 py-1 font-mono text-ui text-bone focus:outline-none" />
-          <button disabled={!scope || !name || !value || replace.isPending} onClick={() => replace.mutate({ scope, name, data: { value } }, { onSuccess: () => { setName(""); setValue(""); setAdding(false); refresh(); } })} className="control border border-line bg-raise text-bone hover:bg-overlay disabled:text-mute">Keep</button>
+        <div className="px-3.5 py-2.5">
+          <div className="flex items-center gap-2">
+            <input value={scope} onChange={(e) => setScope(e.target.value)} placeholder="scope" className="w-28 rounded-md border border-line bg-ground px-2 py-1 font-mono text-ui text-bone focus:outline-none" />
+            <input value={name} onChange={(e) => setName(e.target.value.toUpperCase())} placeholder="NAME" className="w-40 rounded-md border border-line bg-ground px-2 py-1 font-mono text-ui text-bone focus:outline-none" />
+            <input value={value} onChange={(e) => setValue(e.target.value)} type="password" placeholder="value" className="min-w-0 flex-1 rounded-md border border-line bg-ground px-2 py-1 font-mono text-ui text-bone focus:outline-none" />
+            <button disabled={!scope || !name || !value || replace.isPending} onClick={() => replace.mutate({ scope, name, data: { value } }, { onSuccess: () => { setName(""); setValue(""); setAdding(false); refresh(); } })} className="control border border-line bg-raise text-bone hover:bg-overlay disabled:text-mute">Keep</button>
+          </div>
+          {replace.isError && <p className="mt-1.5 text-meta text-brick">{why(replace.error)}</p>}
         </div>
       )}
 
@@ -70,7 +76,8 @@ function Row({ scope, name, mine, onGone }: { scope: string; name: string; mine:
       {editing !== null ? (
         <>
           <input autoFocus value={editing} onChange={(e) => setEditing(e.target.value)} type="password" onKeyDown={(e) => { if (e.key === "Enter" && editing) replace.mutate({ scope, name, data: { value: editing } }, { onSuccess: () => setEditing(null) }); if (e.key === "Escape") setEditing(null); }} placeholder="new value" className="w-48 rounded-md border border-line bg-ground px-2 py-1 font-mono text-micro text-bone focus:outline-none" />
-          <button onClick={() => setEditing(null)} className="text-micro text-mute hover:text-bone">cancel</button>
+          <button onClick={() => { setEditing(null); replace.reset(); }} className="text-micro text-mute hover:text-bone">cancel</button>
+          {replace.isError && <span className="text-micro text-brick">{why(replace.error)}</span>}
         </>
       ) : (
         <>
