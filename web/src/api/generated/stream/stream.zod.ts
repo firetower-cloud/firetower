@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.40.2
+ * OpenAPI spec version: 0
  */
 import * as zod from 'zod';
 
@@ -83,11 +83,11 @@ export const StreamResponse = zod.union([zod.object({
   "host": zod.string(),
   "type": zod.enum(['HostSelected'])
 }),zod.object({
-  "step": zod.enum(['Fetch', 'Worktree', 'Workspace', 'Setup', 'Launch']).describe('One stage of bringing a session up.\n\nThe point of naming them is that the whole list is knowable \*before\* any of\nit runs — so a session can show what it is going to do the moment it is\ncreated, rather than assembling a shape out of events as they arrive. A step\nnobody has reached yet is still worth showing.'),
+  "step": zod.enum(['Fetch', 'Worktree', 'Workspace', 'Setup', 'Launch']).describe('One stage of bringing a session up.\n\nThe point of naming them is that the whole list is knowable *before* any of\nit runs — so a session can show what it is going to do the moment it is\ncreated, rather than assembling a shape out of events as they arrive. A step\nnobody has reached yet is still worth showing.'),
   "type": zod.enum(['StepStarted'])
-}).describe('A step is under way. Every other event here is a \*completion\*, which is\nwhy a session that spent eight minutes fetching a repository looked\nfrozen: nothing had happened yet, so nothing had been said.'),zod.object({
+}).describe('A step is under way. Every other event here is a *completion*, which is\nwhy a session that spent eight minutes fetching a repository looked\nfrozen: nothing had happened yet, so nothing had been said.'),zod.object({
   "detail": zod.string(),
-  "step": zod.enum(['Fetch', 'Worktree', 'Workspace', 'Setup', 'Launch']).describe('One stage of bringing a session up.\n\nThe point of naming them is that the whole list is knowable \*before\* any of\nit runs — so a session can show what it is going to do the moment it is\ncreated, rather than assembling a shape out of events as they arrive. A step\nnobody has reached yet is still worth showing.'),
+  "step": zod.enum(['Fetch', 'Worktree', 'Workspace', 'Setup', 'Launch']).describe('One stage of bringing a session up.\n\nThe point of naming them is that the whole list is knowable *before* any of\nit runs — so a session can show what it is going to do the moment it is\ncreated, rather than assembling a shape out of events as they arrive. A step\nnobody has reached yet is still worth showing.'),
   "type": zod.enum(['StepProgress'])
 }).describe('How a step is getting on, while it is still going. Sent sparingly — one\nline replacing the last, not a log.'),zod.object({
   "detail": zod.string(),
@@ -136,7 +136,7 @@ export const StreamResponse = zod.union([zod.object({
   "turn": zod.string().describe('One exchange: a prompt in, and everything that happened before the agent stopped.'),
   "type": zod.enum(['TurnStarted'])
 }),zod.object({
-  "detail": zod.string().nullish().describe('Why it ended that way, when the agent said.\n\nA turn that failed used to arrive as a status and nothing else, so\n\"Your workspace is out of credits. Add credits to continue.\" — a\nsentence the agent had already written, and the only one that would\nhave explained the silence — was dropped on the floor and the\nsession read as an agent that had stopped answering for no reason.'),
+  "detail": zod.string().nullish().describe('Why it ended that way, when the agent said.\n\nA turn that failed used to arrive as a status and nothing else, so\n"Your workspace is out of credits. Add credits to continue." — a\nsentence the agent had already written, and the only one that would\nhave explained the silence — was dropped on the floor and the\nsession read as an agent that had stopped answering for no reason.'),
   "status": zod.enum(['Completed', 'Failed', 'Interrupted']).describe('How a turn ended.'),
   "turn": zod.string().describe('One exchange: a prompt in, and everything that happened before the agent stopped.'),
   "type": zod.enum(['TurnCompleted']),
@@ -184,7 +184,7 @@ export const StreamResponse = zod.union([zod.object({
 }),zod.object({
   "args": zod.unknown().describe('The tool\'s full input, for a card that wants to show more.'),
   "detail": zod.string().describe('The command, the path — whatever a person needs to decide.'),
-  "kind": zod.enum(['CommandExecution', 'FileRead', 'FileChange', 'Tool']).describe('What an agent is asking permission for.\n\nCoarser than the tool that triggered it, because the question a person is\nbeing asked is \"may this run\", not \"which of forty tools is this\".'),
+  "kind": zod.enum(['CommandExecution', 'FileRead', 'FileChange', 'Tool']).describe('What an agent is asking permission for.\n\nCoarser than the tool that triggered it, because the question a person is\nbeing asked is "may this run", not "which of forty tools is this".'),
   "req": zod.string().describe('One thing the agent is blocked on and needs an answer to.'),
   "type": zod.enum(['RequestOpened'])
 }).describe('The agent is blocked and cannot continue without an answer.'),zod.object({
@@ -198,7 +198,7 @@ export const StreamResponse = zod.union([zod.object({
 }),zod.object({
   "answers": zod.unknown(),
   "decision": zod.enum(['Answered'])
-}).describe('The answers to a question the agent asked.\n\nNot an allow with extra: a question is answered, not permitted, and\nletting it through without the answers gives the agent a tool result\nsaying nothing. Keyed by the question\'s own text, valued by the label\nof the option chosen — the agent matches on both, so neither may be\nparaphrased on the way back.')]).describe('What was decided, when whoever reports it knows.\n\nCodex says only that its request was answered — `serverRequest\/\nresolved` carries the id and nothing else — so \"answered, and it\ndid not say how\" has to be representable. It is the difference\nbetween a card that clears and one that sits on the screen for ever\nwhile somebody presses Allow again.')]).optional(),
+}).describe('The answers to a question the agent asked.\n\nNot an allow with extra: a question is answered, not permitted, and\nletting it through without the answers gives the agent a tool result\nsaying nothing. Keyed by the question\'s own text, valued by the label\nof the option chosen — the agent matches on both, so neither may be\nparaphrased on the way back.')]).describe('What was decided, when whoever reports it knows.\n\nCodex says only that its request was answered — `serverRequest/\nresolved` carries the id and nothing else — so "answered, and it\ndid not say how" has to be representable. It is the difference\nbetween a card that clears and one that sits on the screen for ever\nwhile somebody presses Allow again.')]).optional(),
   "req": zod.string().describe('One thing the agent is blocked on and needs an answer to.'),
   "type": zod.enum(['RequestResolved'])
 }),zod.object({
@@ -248,7 +248,7 @@ export const StreamResponse = zod.union([zod.object({
   "payload": zod.unknown(),
   "source": zod.enum(['ClaudeStreamJson', 'CodexAppServer', 'Acp']).describe('Which agent\'s output a raw frame came from.\n\nCarried so that a frame kept for later is still interpretable later: the\nbytes alone do not say whose they are.'),
   "type": zod.enum(['Raw'])
-}).describe('A line we kept but could not name.\n\nOnly for what nothing else matched — the complete raw log is already\nwhat Firetower stores, so repeating every mapped line here would double\nthe volume to say nothing new. This is the marker for \"an agent said\nsomething in a shape we have never seen\", which is how a version that\ngrew a new message type shows up as a gap to fill rather than as\nsilence.')]).describe('Something an agent said or did.\n\nThe vocabulary the interface draws, and the only thing that crosses out of\nthe normaliser.').and(zod.object({
+}).describe('A line we kept but could not name.\n\nOnly for what nothing else matched — the complete raw log is already\nwhat Firetower stores, so repeating every mapped line here would double\nthe volume to say nothing new. This is the marker for "an agent said\nsomething in a shape we have never seen", which is how a version that\ngrew a new message type shows up as a gap to fill rather than as\nsilence.')]).describe('Something an agent said or did.\n\nThe vocabulary the interface draws, and the only thing that crosses out of\nthe normaliser.').and(zod.object({
   "lineNo": zod.int().min(streamResponseThreeEventsItemTwoLineNoMin)
 })).describe('One thing that happened, and where in the log it was said.\n\nThe line number travels with the event because several events can come from\none line, and a client\'s cursor has to be a position in the agent\'s log\nrather than a count of what it drew.')),
   "id": zod.string(),

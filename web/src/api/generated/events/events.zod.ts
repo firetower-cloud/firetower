@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.40.2
+ * OpenAPI spec version: 0
  */
 import * as zod from 'zod';
 
@@ -28,11 +28,11 @@ export const ListEventsResponseItem = zod.object({
   "host": zod.string(),
   "type": zod.enum(['HostSelected'])
 }),zod.object({
-  "step": zod.enum(['Fetch', 'Worktree', 'Workspace', 'Setup', 'Launch']).describe('One stage of bringing a session up.\n\nThe point of naming them is that the whole list is knowable \*before\* any of\nit runs — so a session can show what it is going to do the moment it is\ncreated, rather than assembling a shape out of events as they arrive. A step\nnobody has reached yet is still worth showing.'),
+  "step": zod.enum(['Fetch', 'Worktree', 'Workspace', 'Setup', 'Launch']).describe('One stage of bringing a session up.\n\nThe point of naming them is that the whole list is knowable *before* any of\nit runs — so a session can show what it is going to do the moment it is\ncreated, rather than assembling a shape out of events as they arrive. A step\nnobody has reached yet is still worth showing.'),
   "type": zod.enum(['StepStarted'])
-}).describe('A step is under way. Every other event here is a \*completion\*, which is\nwhy a session that spent eight minutes fetching a repository looked\nfrozen: nothing had happened yet, so nothing had been said.'),zod.object({
+}).describe('A step is under way. Every other event here is a *completion*, which is\nwhy a session that spent eight minutes fetching a repository looked\nfrozen: nothing had happened yet, so nothing had been said.'),zod.object({
   "detail": zod.string(),
-  "step": zod.enum(['Fetch', 'Worktree', 'Workspace', 'Setup', 'Launch']).describe('One stage of bringing a session up.\n\nThe point of naming them is that the whole list is knowable \*before\* any of\nit runs — so a session can show what it is going to do the moment it is\ncreated, rather than assembling a shape out of events as they arrive. A step\nnobody has reached yet is still worth showing.'),
+  "step": zod.enum(['Fetch', 'Worktree', 'Workspace', 'Setup', 'Launch']).describe('One stage of bringing a session up.\n\nThe point of naming them is that the whole list is knowable *before* any of\nit runs — so a session can show what it is going to do the moment it is\ncreated, rather than assembling a shape out of events as they arrive. A step\nnobody has reached yet is still worth showing.'),
   "type": zod.enum(['StepProgress'])
 }).describe('How a step is getting on, while it is still going. Sent sparingly — one\nline replacing the last, not a log.'),zod.object({
   "detail": zod.string(),

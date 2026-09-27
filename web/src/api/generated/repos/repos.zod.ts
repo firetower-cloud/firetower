@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.40.2
+ * OpenAPI spec version: 0
  */
 import * as zod from 'zod';
 
@@ -15,14 +15,14 @@ export const ListReposResponseItem = zod.object({
   "id": zod.string().describe('Identifies a connected repository.'),
   "remote": zod.string().describe('Where the worker clones from.'),
   "setup": zod.string().nullish().describe('Runs once per session before the agent starts.'),
-  "slug": zod.string().describe('`acme\/backend`')
+  "slug": zod.string().describe('`acme/backend`')
 }).describe('A repository Firetower can cut worktrees from.')
 export const ListReposResponse = zod.array(ListReposResponseItem)
 
 export const CreateRepoBody = zod.object({
   "remote": zod.string().describe('Anything git can clone: a URL, or a path for a local repository.'),
   "setup": zod.string().nullish().describe('Runs once per session, before the agent starts.'),
-  "slug": zod.string().describe('`acme\/backend`')
+  "slug": zod.string().describe('`acme/backend`')
 }).describe('Connect a repository. Nothing is cloned until a session needs it.\n\nNo default branch here on purpose. Connecting reaches for the remote anyway,\nand what it answers with is the truth — a branch named by the caller was\naccepted and then ignored, which is worse than not asking.')
 
 export const CreateRepoResponse = zod.object({
@@ -32,7 +32,7 @@ export const CreateRepoResponse = zod.object({
   "id": zod.string().describe('Identifies a connected repository.'),
   "remote": zod.string().describe('Where the worker clones from.'),
   "setup": zod.string().nullish().describe('Runs once per session before the agent starts.'),
-  "slug": zod.string().describe('`acme\/backend`')
+  "slug": zod.string().describe('`acme/backend`')
 }).describe('A repository Firetower can cut worktrees from.')
 
 /**
@@ -70,7 +70,7 @@ export const UpdateRepoParams = zod.object({
 export const UpdateRepoBody = zod.object({
   "envFile": zod.string().nullish().describe('Where to write the variables in the workspace, or an empty string for\nno file at all.'),
   "setup": zod.string().nullish().describe('A shell command, or an empty string to run nothing.')
-}).describe('Change what a repository does before an agent starts.\n\nBoth fields are optional, and absent means \"leave it alone\" rather than\n\"clear it\" — a form that edits one must not wipe the other.')
+}).describe('Change what a repository does before an agent starts.\n\nBoth fields are optional, and absent means "leave it alone" rather than\n"clear it" — a form that edits one must not wipe the other.')
 
 export const UpdateRepoResponse = zod.object({
   "defaultBranch": zod.string().nullish().describe('The trunk, once something has read the remote.\n\nAbsent until then: a repository can be connected while no worker is\nreachable, and the first session to clone it fills this in.'),
@@ -79,7 +79,7 @@ export const UpdateRepoResponse = zod.object({
   "id": zod.string().describe('Identifies a connected repository.'),
   "remote": zod.string().describe('Where the worker clones from.'),
   "setup": zod.string().nullish().describe('Runs once per session before the agent starts.'),
-  "slug": zod.string().describe('`acme\/backend`')
+  "slug": zod.string().describe('`acme/backend`')
 }).describe('A repository Firetower can cut worktrees from.')
 
 /**

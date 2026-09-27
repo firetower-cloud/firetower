@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.40.2
+ * OpenAPI spec version: 0
  */
 import {
   useMutation,
@@ -158,8 +158,8 @@ export function useListSecrets<TData = Awaited<ReturnType<typeof listSecrets>>, 
  */
 export const useSetListSecretsQueryData = () => {
   const queryClient = useQueryClient();
-  return (updater: Awaited<ReturnType<typeof listSecrets>> | undefined | ((old: Awaited<ReturnType<typeof listSecrets>> | undefined) => Awaited<ReturnType<typeof listSecrets>> | undefined)) => {
-    queryClient.setQueriesData<Awaited<ReturnType<typeof listSecrets>>>({ queryKey: getListSecretsQueryKey() }, updater);
+  return (updater: Awaited<ReturnType<typeof listSecrets>> | undefined | ((old: Awaited<ReturnType<typeof listSecrets>> | undefined) => Awaited<ReturnType<typeof listSecrets>> | undefined), $exactMatch: boolean = true) => {
+    queryClient.setQueriesData<Awaited<ReturnType<typeof listSecrets>>>({ exact: $exactMatch, queryKey: getListSecretsQueryKey() }, updater);
   };
 }
 
@@ -192,11 +192,25 @@ export const replaceSecret = async (scope: string,
     name: string,
     replaceSecretBody: ReplaceSecret, options?: Parameters<typeof http>[1]): Promise<void> => {
 
-  return http<void>(getReplaceSecretUrl(scope,name),
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return http<void>(getReplaceSecretUrl(scope,name),
   {
     ...options,
     method: 'PUT',
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(replaceSecretBody)
   }
 );}
@@ -205,11 +219,13 @@ export const replaceSecret = async (scope: string,
 
 
 
-export const getReplaceSecretMutationOptions = <TError = ApiError,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof replaceSecret>>, TError,{scope: string;name: string;data: ReplaceSecret}, TContext>, request?: SecondParameter<typeof http>}
-): UseMutationOptions<Awaited<ReturnType<typeof replaceSecret>>, TError,{scope: string;name: string;data: ReplaceSecret}, TContext> => {
+export const getReplaceSecretMutationKey = () => ['replaceSecret'] as const;
 
-const mutationKey = ['replaceSecret'];
+export const getReplaceSecretMutationOptions = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof replaceSecret>>, TError,ReplaceSecretMutationVariables, TContext>, request?: SecondParameter<typeof http>}
+): UseMutationOptions<Awaited<ReturnType<typeof replaceSecret>>, TError,ReplaceSecretMutationVariables, TContext> => {
+
+const mutationKey = getReplaceSecretMutationKey();
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -219,7 +235,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof replaceSecret>>, {scope: string;name: string;data: ReplaceSecret}> = (props) => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof replaceSecret>>, ReplaceSecretMutationVariables> = (props) => {
           const {scope,name,data} = props ?? {};
 
           return  replaceSecret(scope,name,data,requestOptions)
@@ -235,16 +251,17 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type ReplaceSecretMutationResult = NonNullable<Awaited<ReturnType<typeof replaceSecret>>>
     export type ReplaceSecretMutationBody = ReplaceSecret
     export type ReplaceSecretMutationError = ApiError
+    export type ReplaceSecretMutationVariables = {scope: string;name: string;data: ReplaceSecret}
 
     /**
  * @summary Replace a credential with a new one.
  */
 export const useReplaceSecret = <TError = ApiError,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof replaceSecret>>, TError,{scope: string;name: string;data: ReplaceSecret}, TContext>, request?: SecondParameter<typeof http>}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof replaceSecret>>, TError,ReplaceSecretMutationVariables, TContext>, request?: SecondParameter<typeof http>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof replaceSecret>>,
         TError,
-        {scope: string;name: string;data: ReplaceSecret},
+        ReplaceSecretMutationVariables,
         TContext
       > => {
       return useMutation(getReplaceSecretMutationOptions(options), queryClient);
@@ -279,11 +296,13 @@ export const removeSecret = async (scope: string,
 
 
 
-export const getRemoveSecretMutationOptions = <TError = unknown,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof removeSecret>>, TError,{scope: string;name: string}, TContext>, request?: SecondParameter<typeof http>}
-): UseMutationOptions<Awaited<ReturnType<typeof removeSecret>>, TError,{scope: string;name: string}, TContext> => {
+export const getRemoveSecretMutationKey = () => ['removeSecret'] as const;
 
-const mutationKey = ['removeSecret'];
+export const getRemoveSecretMutationOptions = <TError = unknown,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof removeSecret>>, TError,RemoveSecretMutationVariables, TContext>, request?: SecondParameter<typeof http>}
+): UseMutationOptions<Awaited<ReturnType<typeof removeSecret>>, TError,RemoveSecretMutationVariables, TContext> => {
+
+const mutationKey = getRemoveSecretMutationKey();
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -293,7 +312,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof removeSecret>>, {scope: string;name: string}> = (props) => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof removeSecret>>, RemoveSecretMutationVariables> = (props) => {
           const {scope,name} = props ?? {};
 
           return  removeSecret(scope,name,requestOptions)
@@ -309,16 +328,17 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type RemoveSecretMutationResult = NonNullable<Awaited<ReturnType<typeof removeSecret>>>
 
     export type RemoveSecretMutationError = unknown
+    export type RemoveSecretMutationVariables = {scope: string;name: string}
 
     /**
  * @summary Remove a credential.
  */
 export const useRemoveSecret = <TError = unknown,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof removeSecret>>, TError,{scope: string;name: string}, TContext>, request?: SecondParameter<typeof http>}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof removeSecret>>, TError,RemoveSecretMutationVariables, TContext>, request?: SecondParameter<typeof http>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof removeSecret>>,
         TError,
-        {scope: string;name: string},
+        RemoveSecretMutationVariables,
         TContext
       > => {
       return useMutation(getRemoveSecretMutationOptions(options), queryClient);
@@ -359,11 +379,13 @@ export const revealSecret = async (scope: string,
 
 
 
-export const getRevealSecretMutationOptions = <TError = ApiError,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof revealSecret>>, TError,{scope: string;name: string}, TContext>, request?: SecondParameter<typeof http>}
-): UseMutationOptions<Awaited<ReturnType<typeof revealSecret>>, TError,{scope: string;name: string}, TContext> => {
+export const getRevealSecretMutationKey = () => ['revealSecret'] as const;
 
-const mutationKey = ['revealSecret'];
+export const getRevealSecretMutationOptions = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof revealSecret>>, TError,RevealSecretMutationVariables, TContext>, request?: SecondParameter<typeof http>}
+): UseMutationOptions<Awaited<ReturnType<typeof revealSecret>>, TError,RevealSecretMutationVariables, TContext> => {
+
+const mutationKey = getRevealSecretMutationKey();
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -373,7 +395,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof revealSecret>>, {scope: string;name: string}> = (props) => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof revealSecret>>, RevealSecretMutationVariables> = (props) => {
           const {scope,name} = props ?? {};
 
           return  revealSecret(scope,name,requestOptions)
@@ -389,16 +411,17 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type RevealSecretMutationResult = NonNullable<Awaited<ReturnType<typeof revealSecret>>>
 
     export type RevealSecretMutationError = ApiError
+    export type RevealSecretMutationVariables = {scope: string;name: string}
 
     /**
  * @summary Put a credential on screen.
  */
 export const useRevealSecret = <TError = ApiError,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof revealSecret>>, TError,{scope: string;name: string}, TContext>, request?: SecondParameter<typeof http>}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof revealSecret>>, TError,RevealSecretMutationVariables, TContext>, request?: SecondParameter<typeof http>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof revealSecret>>,
         TError,
-        {scope: string;name: string},
+        RevealSecretMutationVariables,
         TContext
       > => {
       return useMutation(getRevealSecretMutationOptions(options), queryClient);

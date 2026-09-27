@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.40.2
+ * OpenAPI spec version: 0
  */
 import {
   useMutation,
@@ -150,8 +150,8 @@ export function useListProviders<TData = Awaited<ReturnType<typeof listProviders
 
 export const useSetListProvidersQueryData = () => {
   const queryClient = useQueryClient();
-  return (updater: Awaited<ReturnType<typeof listProviders>> | undefined | ((old: Awaited<ReturnType<typeof listProviders>> | undefined) => Awaited<ReturnType<typeof listProviders>> | undefined)) => {
-    queryClient.setQueriesData<Awaited<ReturnType<typeof listProviders>>>({ queryKey: getListProvidersQueryKey() }, updater);
+  return (updater: Awaited<ReturnType<typeof listProviders>> | undefined | ((old: Awaited<ReturnType<typeof listProviders>> | undefined) => Awaited<ReturnType<typeof listProviders>> | undefined), $exactMatch: boolean = true) => {
+    queryClient.setQueriesData<Awaited<ReturnType<typeof listProviders>>>({ exact: $exactMatch, queryKey: getListProvidersQueryKey() }, updater);
   };
 }
 
@@ -188,11 +188,13 @@ export const disconnectProvider = async (id: string, options?: Parameters<typeof
 
 
 
-export const getDisconnectProviderMutationOptions = <TError = ApiError,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof disconnectProvider>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof http>}
-): UseMutationOptions<Awaited<ReturnType<typeof disconnectProvider>>, TError,{id: string}, TContext> => {
+export const getDisconnectProviderMutationKey = () => ['disconnectProvider'] as const;
 
-const mutationKey = ['disconnectProvider'];
+export const getDisconnectProviderMutationOptions = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof disconnectProvider>>, TError,DisconnectProviderMutationVariables, TContext>, request?: SecondParameter<typeof http>}
+): UseMutationOptions<Awaited<ReturnType<typeof disconnectProvider>>, TError,DisconnectProviderMutationVariables, TContext> => {
+
+const mutationKey = getDisconnectProviderMutationKey();
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -202,7 +204,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof disconnectProvider>>, {id: string}> = (props) => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof disconnectProvider>>, DisconnectProviderMutationVariables> = (props) => {
           const {id} = props ?? {};
 
           return  disconnectProvider(id,requestOptions)
@@ -218,16 +220,17 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type DisconnectProviderMutationResult = NonNullable<Awaited<ReturnType<typeof disconnectProvider>>>
 
     export type DisconnectProviderMutationError = ApiError
+    export type DisconnectProviderMutationVariables = {id: string}
 
     /**
  * @summary Sign out: forget the token and stop any authorization still waiting.
  */
 export const useDisconnectProvider = <TError = ApiError,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof disconnectProvider>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof http>}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof disconnectProvider>>, TError,DisconnectProviderMutationVariables, TContext>, request?: SecondParameter<typeof http>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof disconnectProvider>>,
         TError,
-        {id: string},
+        DisconnectProviderMutationVariables,
         TContext
       > => {
       return useMutation(getDisconnectProviderMutationOptions(options), queryClient);
@@ -269,11 +272,13 @@ export const authorizeProvider = async (id: string, options?: Parameters<typeof 
 
 
 
-export const getAuthorizeProviderMutationOptions = <TError = ApiError,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof authorizeProvider>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof http>}
-): UseMutationOptions<Awaited<ReturnType<typeof authorizeProvider>>, TError,{id: string}, TContext> => {
+export const getAuthorizeProviderMutationKey = () => ['authorizeProvider'] as const;
 
-const mutationKey = ['authorizeProvider'];
+export const getAuthorizeProviderMutationOptions = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof authorizeProvider>>, TError,AuthorizeProviderMutationVariables, TContext>, request?: SecondParameter<typeof http>}
+): UseMutationOptions<Awaited<ReturnType<typeof authorizeProvider>>, TError,AuthorizeProviderMutationVariables, TContext> => {
+
+const mutationKey = getAuthorizeProviderMutationKey();
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -283,7 +288,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof authorizeProvider>>, {id: string}> = (props) => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof authorizeProvider>>, AuthorizeProviderMutationVariables> = (props) => {
           const {id} = props ?? {};
 
           return  authorizeProvider(id,requestOptions)
@@ -299,16 +304,17 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type AuthorizeProviderMutationResult = NonNullable<Awaited<ReturnType<typeof authorizeProvider>>>
 
     export type AuthorizeProviderMutationError = ApiError
+    export type AuthorizeProviderMutationVariables = {id: string}
 
     /**
  * @summary Start an authorization and begin waiting for it to be approved.
  */
 export const useAuthorizeProvider = <TError = ApiError,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof authorizeProvider>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof http>}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof authorizeProvider>>, TError,AuthorizeProviderMutationVariables, TContext>, request?: SecondParameter<typeof http>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof authorizeProvider>>,
         TError,
-        {id: string},
+        AuthorizeProviderMutationVariables,
         TContext
       > => {
       return useMutation(getAuthorizeProviderMutationOptions(options), queryClient);
@@ -331,11 +337,25 @@ export const useAuthorizeProvider = <TError = ApiError,
 export const setClientId = async (id: string,
     clientId: ClientId, options?: Parameters<typeof http>[1]): Promise<void> => {
 
-  return http<void>(getSetClientIdUrl(id),
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return http<void>(getSetClientIdUrl(id),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(clientId)
   }
 );}
@@ -344,11 +364,13 @@ export const setClientId = async (id: string,
 
 
 
-export const getSetClientIdMutationOptions = <TError = ApiError,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setClientId>>, TError,{id: string;data: ClientId}, TContext>, request?: SecondParameter<typeof http>}
-): UseMutationOptions<Awaited<ReturnType<typeof setClientId>>, TError,{id: string;data: ClientId}, TContext> => {
+export const getSetClientIdMutationKey = () => ['setClientId'] as const;
 
-const mutationKey = ['setClientId'];
+export const getSetClientIdMutationOptions = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setClientId>>, TError,SetClientIdMutationVariables, TContext>, request?: SecondParameter<typeof http>}
+): UseMutationOptions<Awaited<ReturnType<typeof setClientId>>, TError,SetClientIdMutationVariables, TContext> => {
+
+const mutationKey = getSetClientIdMutationKey();
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -358,7 +380,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof setClientId>>, {id: string;data: ClientId}> = (props) => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof setClientId>>, SetClientIdMutationVariables> = (props) => {
           const {id,data} = props ?? {};
 
           return  setClientId(id,data,requestOptions)
@@ -374,16 +396,17 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type SetClientIdMutationResult = NonNullable<Awaited<ReturnType<typeof setClientId>>>
     export type SetClientIdMutationBody = ClientId
     export type SetClientIdMutationError = ApiError
+    export type SetClientIdMutationVariables = {id: string;data: ClientId}
 
     /**
  * @summary Register an application to authorize against.
  */
 export const useSetClientId = <TError = ApiError,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setClientId>>, TError,{id: string;data: ClientId}, TContext>, request?: SecondParameter<typeof http>}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setClientId>>, TError,SetClientIdMutationVariables, TContext>, request?: SecondParameter<typeof http>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof setClientId>>,
         TError,
-        {id: string;data: ClientId},
+        SetClientIdMutationVariables,
         TContext
       > => {
       return useMutation(getSetClientIdMutationOptions(options), queryClient);
@@ -490,8 +513,8 @@ export function useGetIdentity<TData = Awaited<ReturnType<typeof getIdentity>>, 
  */
 export const useSetGetIdentityQueryData = () => {
   const queryClient = useQueryClient();
-  return (id: string,updater: Awaited<ReturnType<typeof getIdentity>> | undefined | ((old: Awaited<ReturnType<typeof getIdentity>> | undefined) => Awaited<ReturnType<typeof getIdentity>> | undefined)) => {
-    queryClient.setQueriesData<Awaited<ReturnType<typeof getIdentity>>>({ queryKey: getGetIdentityQueryKey(id) }, updater);
+  return (id: string,updater: Awaited<ReturnType<typeof getIdentity>> | undefined | ((old: Awaited<ReturnType<typeof getIdentity>> | undefined) => Awaited<ReturnType<typeof getIdentity>> | undefined), $exactMatch: boolean = true) => {
+    queryClient.setQueriesData<Awaited<ReturnType<typeof getIdentity>>>({ exact: $exactMatch, queryKey: getGetIdentityQueryKey(id) }, updater);
   };
 }
 
@@ -522,11 +545,25 @@ export const getSetIdentityUrl = (id: string,) => {
 export const setIdentity = async (id: string,
     setIdentityBody: SetIdentity, options?: Parameters<typeof http>[1]): Promise<void> => {
 
-  return http<void>(getSetIdentityUrl(id),
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return http<void>(getSetIdentityUrl(id),
   {
     ...options,
     method: 'PUT',
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(setIdentityBody)
   }
 );}
@@ -535,11 +572,13 @@ export const setIdentity = async (id: string,
 
 
 
-export const getSetIdentityMutationOptions = <TError = ApiError,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setIdentity>>, TError,{id: string;data: SetIdentity}, TContext>, request?: SecondParameter<typeof http>}
-): UseMutationOptions<Awaited<ReturnType<typeof setIdentity>>, TError,{id: string;data: SetIdentity}, TContext> => {
+export const getSetIdentityMutationKey = () => ['setIdentity'] as const;
 
-const mutationKey = ['setIdentity'];
+export const getSetIdentityMutationOptions = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setIdentity>>, TError,SetIdentityMutationVariables, TContext>, request?: SecondParameter<typeof http>}
+): UseMutationOptions<Awaited<ReturnType<typeof setIdentity>>, TError,SetIdentityMutationVariables, TContext> => {
+
+const mutationKey = getSetIdentityMutationKey();
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -549,7 +588,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof setIdentity>>, {id: string;data: SetIdentity}> = (props) => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof setIdentity>>, SetIdentityMutationVariables> = (props) => {
           const {id,data} = props ?? {};
 
           return  setIdentity(id,data,requestOptions)
@@ -565,16 +604,17 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type SetIdentityMutationResult = NonNullable<Awaited<ReturnType<typeof setIdentity>>>
     export type SetIdentityMutationBody = SetIdentity
     export type SetIdentityMutationError = ApiError
+    export type SetIdentityMutationVariables = {id: string;data: SetIdentity}
 
     /**
  * @summary Say who your commits should be authored as.
  */
 export const useSetIdentity = <TError = ApiError,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setIdentity>>, TError,{id: string;data: SetIdentity}, TContext>, request?: SecondParameter<typeof http>}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setIdentity>>, TError,SetIdentityMutationVariables, TContext>, request?: SecondParameter<typeof http>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof setIdentity>>,
         TError,
-        {id: string;data: SetIdentity},
+        SetIdentityMutationVariables,
         TContext
       > => {
       return useMutation(getSetIdentityMutationOptions(options), queryClient);
@@ -605,11 +645,13 @@ export const clearIdentity = async (id: string, options?: Parameters<typeof http
 
 
 
-export const getClearIdentityMutationOptions = <TError = ApiError,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof clearIdentity>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof http>}
-): UseMutationOptions<Awaited<ReturnType<typeof clearIdentity>>, TError,{id: string}, TContext> => {
+export const getClearIdentityMutationKey = () => ['clearIdentity'] as const;
 
-const mutationKey = ['clearIdentity'];
+export const getClearIdentityMutationOptions = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof clearIdentity>>, TError,ClearIdentityMutationVariables, TContext>, request?: SecondParameter<typeof http>}
+): UseMutationOptions<Awaited<ReturnType<typeof clearIdentity>>, TError,ClearIdentityMutationVariables, TContext> => {
+
+const mutationKey = getClearIdentityMutationKey();
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -619,7 +661,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof clearIdentity>>, {id: string}> = (props) => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof clearIdentity>>, ClearIdentityMutationVariables> = (props) => {
           const {id} = props ?? {};
 
           return  clearIdentity(id,requestOptions)
@@ -635,16 +677,17 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type ClearIdentityMutationResult = NonNullable<Awaited<ReturnType<typeof clearIdentity>>>
 
     export type ClearIdentityMutationError = ApiError
+    export type ClearIdentityMutationVariables = {id: string}
 
     /**
  * @summary Go back to whatever the git host says you are called.
  */
 export const useClearIdentity = <TError = ApiError,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof clearIdentity>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof http>}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof clearIdentity>>, TError,ClearIdentityMutationVariables, TContext>, request?: SecondParameter<typeof http>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof clearIdentity>>,
         TError,
-        {id: string},
+        ClearIdentityMutationVariables,
         TContext
       > => {
       return useMutation(getClearIdentityMutationOptions(options), queryClient);
@@ -751,8 +794,8 @@ export function useListProviderRepos<TData = Awaited<ReturnType<typeof listProvi
  */
 export const useSetListProviderReposQueryData = () => {
   const queryClient = useQueryClient();
-  return (id: string,updater: Awaited<ReturnType<typeof listProviderRepos>> | undefined | ((old: Awaited<ReturnType<typeof listProviderRepos>> | undefined) => Awaited<ReturnType<typeof listProviderRepos>> | undefined)) => {
-    queryClient.setQueriesData<Awaited<ReturnType<typeof listProviderRepos>>>({ queryKey: getListProviderReposQueryKey(id) }, updater);
+  return (id: string,updater: Awaited<ReturnType<typeof listProviderRepos>> | undefined | ((old: Awaited<ReturnType<typeof listProviderRepos>> | undefined) => Awaited<ReturnType<typeof listProviderRepos>> | undefined), $exactMatch: boolean = true) => {
+    queryClient.setQueriesData<Awaited<ReturnType<typeof listProviderRepos>>>({ exact: $exactMatch, queryKey: getListProviderReposQueryKey(id) }, updater);
   };
 }
 

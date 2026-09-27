@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.40.2
+ * OpenAPI spec version: 0
  */
 import * as zod from 'zod';
 
@@ -13,7 +13,7 @@ export const ListTrackersResponseItem = zod.object({
   "connected": zod.boolean().describe('We hold a credential for it.'),
   "id": zod.string(),
   "keyUrl": zod.string().nullish().describe('Where somebody goes to make a key, when that is how it connects.'),
-  "kinds": zod.array(zod.enum(['issue', 'pullRequest', 'ticket']).describe('What sort of thing it is.\n\nThe one field the Issues\/PRs toggle reads, and the reason \"filter by kind\"\nis a query parameter rather than a migration when a second source lands.')).describe('What this tracker can return, so the kind toggle offers no more.'),
+  "kinds": zod.array(zod.enum(['issue', 'pullRequest', 'ticket']).describe('What sort of thing it is.\n\nThe one field the Issues/PRs toggle reads, and the reason "filter by kind"\nis a query parameter rather than a migration when a second source lands.')).describe('What this tracker can return, so the kind toggle offers no more.'),
   "label": zod.string(),
   "scopeKind": zod.enum(['repos', 'teams']).describe('Whether the scope picker offers repositories or teams.')
 })
@@ -51,7 +51,7 @@ export const ListTrackerScopesParams = zod.object({
 })
 
 export const ListTrackerScopesResponseItem = zod.object({
-  "key": zod.string().describe('What goes on the wire: `acme\/web`, or `ENG`.'),
+  "key": zod.string().describe('What goes on the wire: `acme/web`, or `ENG`.'),
   "label": zod.string().describe('What a person reads.')
 }).describe('One thing the list can be narrowed to: a repository, or a team.')
 export const ListTrackerScopesResponse = zod.array(ListTrackerScopesResponseItem)

@@ -146,7 +146,12 @@ async fn get_job(State(app): State<App>, Path(id): Path<String>) -> Response {
 
 #[derive(OpenApi)]
 #[openapi(
-    info(title = "Firetower updater", version = env!("CARGO_PKG_VERSION")),
+    // Not the crate version — see the note on ft-server's ApiDoc for why a
+    // committed contract must not carry one. This tracks `API_VERSION`, which
+    // is the number that already moves when a request or response changes
+    // shape, and `the_contract_states_the_api_version` below keeps the two
+    // honest since the attribute cannot read the constant.
+    info(title = "Firetower updater", version = "1"),
     components(schemas(ft_updater_api::JobKind, ft_updater_api::JobState, ft_updater_api::JobStep))
 )]
 pub struct ApiDoc;
@@ -191,6 +196,17 @@ mod tests {
         assert!(!same(b"abc", b"abd"));
         assert!(!same(b"abc", b"ab"));
         assert!(!same(b"", b"a"));
+    }
+
+    #[test]
+    fn the_contract_states_the_api_version() {
+        assert_eq!(
+            openapi().info.version,
+            API_VERSION.to_string(),
+            "the version in the #[openapi(info(..))] attribute has drifted from \
+             API_VERSION — the attribute cannot read the constant, so it is \
+             this test or nothing"
+        );
     }
 
     #[test]

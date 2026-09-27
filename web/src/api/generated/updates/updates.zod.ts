@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.40.2
+ * OpenAPI spec version: 0
  */
 import * as zod from 'zod';
 
@@ -44,7 +44,7 @@ export const GetUpdatesResponse = zod.object({
   "version": zod.string().nullish()
 })),
   "latest": zod.union([zod.null(),zod.object({
-  "cliMinimum": zod.string().nullish().describe('The least `@firetower\/cli` the release wants on the operator\'s own\nmachine. Reported; nothing here can install it.'),
+  "cliMinimum": zod.string().nullish().describe('The least `@firetower/cli` the release wants on the operator\'s own\nmachine. Reported; nothing here can install it.'),
   "notes": zod.string().nullish().describe('The changelog section for the release, as markdown.'),
   "notesUrl": zod.string().nullish(),
   "publishedAt": zod.iso.datetime({"offset":true}).nullish(),
@@ -97,7 +97,7 @@ export const CheckUpdatesResponse = zod.object({
   "version": zod.string().nullish()
 })),
   "latest": zod.union([zod.null(),zod.object({
-  "cliMinimum": zod.string().nullish().describe('The least `@firetower\/cli` the release wants on the operator\'s own\nmachine. Reported; nothing here can install it.'),
+  "cliMinimum": zod.string().nullish().describe('The least `@firetower/cli` the release wants on the operator\'s own\nmachine. Reported; nothing here can install it.'),
   "notes": zod.string().nullish().describe('The changelog section for the release, as markdown.'),
   "notesUrl": zod.string().nullish(),
   "publishedAt": zod.iso.datetime({"offset":true}).nullish(),

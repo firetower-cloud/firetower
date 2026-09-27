@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.40.2
+ * OpenAPI spec version: 0
  */
 import * as zod from 'zod';
 
@@ -121,7 +121,7 @@ export const ListProviderReposResponseItem = zod.object({
   "private": zod.boolean(),
   "pushedAt": zod.string().nullish().describe('Most recently pushed first is the order people actually want.'),
   "remote": zod.string().describe('The https URL, since a token authenticates over https.'),
-  "slug": zod.string().describe('`acme\/backend`')
+  "slug": zod.string().describe('`acme/backend`')
 }).describe('A repository the authorized account can see.')
 export const ListProviderReposResponse = zod.array(ListProviderReposResponseItem)
 

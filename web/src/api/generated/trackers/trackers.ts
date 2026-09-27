@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.40.2
+ * OpenAPI spec version: 0
  */
 import {
   useMutation,
@@ -148,8 +148,8 @@ export function useListTrackers<TData = Awaited<ReturnType<typeof listTrackers>>
 
 export const useSetListTrackersQueryData = () => {
   const queryClient = useQueryClient();
-  return (updater: Awaited<ReturnType<typeof listTrackers>> | undefined | ((old: Awaited<ReturnType<typeof listTrackers>> | undefined) => Awaited<ReturnType<typeof listTrackers>> | undefined)) => {
-    queryClient.setQueriesData<Awaited<ReturnType<typeof listTrackers>>>({ queryKey: getListTrackersQueryKey() }, updater);
+  return (updater: Awaited<ReturnType<typeof listTrackers>> | undefined | ((old: Awaited<ReturnType<typeof listTrackers>> | undefined) => Awaited<ReturnType<typeof listTrackers>> | undefined), $exactMatch: boolean = true) => {
+    queryClient.setQueriesData<Awaited<ReturnType<typeof listTrackers>>>({ exact: $exactMatch, queryKey: getListTrackersQueryKey() }, updater);
   };
 }
 
@@ -186,11 +186,13 @@ export const disconnectTracker = async (id: string, options?: Parameters<typeof 
 
 
 
-export const getDisconnectTrackerMutationOptions = <TError = ApiError,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof disconnectTracker>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof http>}
-): UseMutationOptions<Awaited<ReturnType<typeof disconnectTracker>>, TError,{id: string}, TContext> => {
+export const getDisconnectTrackerMutationKey = () => ['disconnectTracker'] as const;
 
-const mutationKey = ['disconnectTracker'];
+export const getDisconnectTrackerMutationOptions = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof disconnectTracker>>, TError,DisconnectTrackerMutationVariables, TContext>, request?: SecondParameter<typeof http>}
+): UseMutationOptions<Awaited<ReturnType<typeof disconnectTracker>>, TError,DisconnectTrackerMutationVariables, TContext> => {
+
+const mutationKey = getDisconnectTrackerMutationKey();
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -200,7 +202,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof disconnectTracker>>, {id: string}> = (props) => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof disconnectTracker>>, DisconnectTrackerMutationVariables> = (props) => {
           const {id} = props ?? {};
 
           return  disconnectTracker(id,requestOptions)
@@ -216,16 +218,17 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type DisconnectTrackerMutationResult = NonNullable<Awaited<ReturnType<typeof disconnectTracker>>>
 
     export type DisconnectTrackerMutationError = ApiError
+    export type DisconnectTrackerMutationVariables = {id: string}
 
     /**
  * @summary Forget the key. Nothing else about the tracker is ours to remove.
  */
 export const useDisconnectTracker = <TError = ApiError,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof disconnectTracker>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof http>}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof disconnectTracker>>, TError,DisconnectTrackerMutationVariables, TContext>, request?: SecondParameter<typeof http>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof disconnectTracker>>,
         TError,
-        {id: string},
+        DisconnectTrackerMutationVariables,
         TContext
       > => {
       return useMutation(getDisconnectTrackerMutationOptions(options), queryClient);
@@ -244,11 +247,25 @@ export const useDisconnectTracker = <TError = ApiError,
 export const setTrackerKey = async (id: string,
     trackerKey: TrackerKey, options?: Parameters<typeof http>[1]): Promise<Connected> => {
 
-  return http<Connected>(getSetTrackerKeyUrl(id),
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return http<Connected>(getSetTrackerKeyUrl(id),
   {
     ...options,
     method: 'PUT',
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(trackerKey)
   }
 );}
@@ -257,11 +274,13 @@ export const setTrackerKey = async (id: string,
 
 
 
-export const getSetTrackerKeyMutationOptions = <TError = ApiError,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setTrackerKey>>, TError,{id: string;data: TrackerKey}, TContext>, request?: SecondParameter<typeof http>}
-): UseMutationOptions<Awaited<ReturnType<typeof setTrackerKey>>, TError,{id: string;data: TrackerKey}, TContext> => {
+export const getSetTrackerKeyMutationKey = () => ['setTrackerKey'] as const;
 
-const mutationKey = ['setTrackerKey'];
+export const getSetTrackerKeyMutationOptions = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setTrackerKey>>, TError,SetTrackerKeyMutationVariables, TContext>, request?: SecondParameter<typeof http>}
+): UseMutationOptions<Awaited<ReturnType<typeof setTrackerKey>>, TError,SetTrackerKeyMutationVariables, TContext> => {
+
+const mutationKey = getSetTrackerKeyMutationKey();
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -271,7 +290,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof setTrackerKey>>, {id: string;data: TrackerKey}> = (props) => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof setTrackerKey>>, SetTrackerKeyMutationVariables> = (props) => {
           const {id,data} = props ?? {};
 
           return  setTrackerKey(id,data,requestOptions)
@@ -287,16 +306,17 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type SetTrackerKeyMutationResult = NonNullable<Awaited<ReturnType<typeof setTrackerKey>>>
     export type SetTrackerKeyMutationBody = TrackerKey
     export type SetTrackerKeyMutationError = ApiError
+    export type SetTrackerKeyMutationVariables = {id: string;data: TrackerKey}
 
     /**
  * @summary Store a key for a tracker, once it is known to work.
  */
 export const useSetTrackerKey = <TError = ApiError,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setTrackerKey>>, TError,{id: string;data: TrackerKey}, TContext>, request?: SecondParameter<typeof http>}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setTrackerKey>>, TError,SetTrackerKeyMutationVariables, TContext>, request?: SecondParameter<typeof http>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof setTrackerKey>>,
         TError,
-        {id: string;data: TrackerKey},
+        SetTrackerKeyMutationVariables,
         TContext
       > => {
       return useMutation(getSetTrackerKeyMutationOptions(options), queryClient);
@@ -403,8 +423,8 @@ export function useListTrackerScopes<TData = Awaited<ReturnType<typeof listTrack
  */
 export const useSetListTrackerScopesQueryData = () => {
   const queryClient = useQueryClient();
-  return (id: string,updater: Awaited<ReturnType<typeof listTrackerScopes>> | undefined | ((old: Awaited<ReturnType<typeof listTrackerScopes>> | undefined) => Awaited<ReturnType<typeof listTrackerScopes>> | undefined)) => {
-    queryClient.setQueriesData<Awaited<ReturnType<typeof listTrackerScopes>>>({ queryKey: getListTrackerScopesQueryKey(id) }, updater);
+  return (id: string,updater: Awaited<ReturnType<typeof listTrackerScopes>> | undefined | ((old: Awaited<ReturnType<typeof listTrackerScopes>> | undefined) => Awaited<ReturnType<typeof listTrackerScopes>> | undefined), $exactMatch: boolean = true) => {
+    queryClient.setQueriesData<Awaited<ReturnType<typeof listTrackerScopes>>>({ exact: $exactMatch, queryKey: getListTrackerScopesQueryKey(id) }, updater);
   };
 }
 

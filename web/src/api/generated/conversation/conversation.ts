@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.40.2
+ * OpenAPI spec version: 0
  */
 import {
   useMutation,
@@ -166,8 +166,8 @@ export function useSessionControls<TData = Awaited<ReturnType<typeof sessionCont
  */
 export const useSetSessionControlsQueryData = () => {
   const queryClient = useQueryClient();
-  return (id: string,updater: Awaited<ReturnType<typeof sessionControls>> | undefined | ((old: Awaited<ReturnType<typeof sessionControls>> | undefined) => Awaited<ReturnType<typeof sessionControls>> | undefined)) => {
-    queryClient.setQueriesData<Awaited<ReturnType<typeof sessionControls>>>({ queryKey: getSessionControlsQueryKey(id) }, updater);
+  return (id: string,updater: Awaited<ReturnType<typeof sessionControls>> | undefined | ((old: Awaited<ReturnType<typeof sessionControls>> | undefined) => Awaited<ReturnType<typeof sessionControls>> | undefined), $exactMatch: boolean = true) => {
+    queryClient.setQueriesData<Awaited<ReturnType<typeof sessionControls>>>({ exact: $exactMatch, queryKey: getSessionControlsQueryKey(id) }, updater);
   };
 }
 
@@ -195,11 +195,25 @@ export const getChooseControlUrl = (id: string,) => {
 export const chooseControl = async (id: string,
     chosen: Chosen, options?: Parameters<typeof http>[1]): Promise<Sent> => {
 
-  return http<Sent>(getChooseControlUrl(id),
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return http<Sent>(getChooseControlUrl(id),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(chosen)
   }
 );}
@@ -208,11 +222,13 @@ export const chooseControl = async (id: string,
 
 
 
-export const getChooseControlMutationOptions = <TError = ApiError,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof chooseControl>>, TError,{id: string;data: Chosen}, TContext>, request?: SecondParameter<typeof http>}
-): UseMutationOptions<Awaited<ReturnType<typeof chooseControl>>, TError,{id: string;data: Chosen}, TContext> => {
+export const getChooseControlMutationKey = () => ['chooseControl'] as const;
 
-const mutationKey = ['chooseControl'];
+export const getChooseControlMutationOptions = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof chooseControl>>, TError,ChooseControlMutationVariables, TContext>, request?: SecondParameter<typeof http>}
+): UseMutationOptions<Awaited<ReturnType<typeof chooseControl>>, TError,ChooseControlMutationVariables, TContext> => {
+
+const mutationKey = getChooseControlMutationKey();
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -222,7 +238,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof chooseControl>>, {id: string;data: Chosen}> = (props) => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof chooseControl>>, ChooseControlMutationVariables> = (props) => {
           const {id,data} = props ?? {};
 
           return  chooseControl(id,data,requestOptions)
@@ -238,16 +254,17 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type ChooseControlMutationResult = NonNullable<Awaited<ReturnType<typeof chooseControl>>>
     export type ChooseControlMutationBody = Chosen
     export type ChooseControlMutationError = ApiError
+    export type ChooseControlMutationVariables = {id: string;data: Chosen}
 
     /**
  * @summary Change one of them.
  */
 export const useChooseControl = <TError = ApiError,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof chooseControl>>, TError,{id: string;data: Chosen}, TContext>, request?: SecondParameter<typeof http>}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof chooseControl>>, TError,ChooseControlMutationVariables, TContext>, request?: SecondParameter<typeof http>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof chooseControl>>,
         TError,
-        {id: string;data: Chosen},
+        ChooseControlMutationVariables,
         TContext
       > => {
       return useMutation(getChooseControlMutationOptions(options), queryClient);

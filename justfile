@@ -114,9 +114,11 @@ gen:
     cd desktop && pnpm orval && pnpm tsc --noEmit
     cd mobile && pnpm orval && pnpm tokens && pnpm tsc --noEmit
 
-# Fails if the committed contract is stale. What a CI job would run.
+# Fails if the committed contract is stale. Mirrored by the `contract` workflow,
+# which runs the same script so a local verdict and a CI verdict agree.
 gen-check: gen
-    git diff --exit-code api/ web/src/api/generated desktop/src/api/generated mobile/src/api/generated mobile/src/design
+    .github/scripts/same-orval.sh
+    .github/scripts/unchanged.sh api/ web/src/api/generated desktop/src/api/generated mobile/src/api/generated mobile/src/design
 
 # The release artifact. Web first: the Rust build embeds its output.
 build:
