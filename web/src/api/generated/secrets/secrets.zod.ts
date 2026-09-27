@@ -33,10 +33,16 @@ export const ListSecretsResponse = zod.object({
 })
 
 /**
- * Only for a name that already exists. Storing under an arbitrary name would
- * let this screen fill up with values nothing ever reads — what a credential is
- * *for* is decided where it is used, not here.
- * @summary Replace a credential with a new one.
+ * A name nothing holds yet is created, because the Secrets screen offers to add
+ * one and a button that refuses every name is not a feature. It used to refuse,
+ * on the reasoning that what a credential is *for* is decided where it is used
+ * — but that is an argument about which names are worth adding, and the answer
+ * to it was a screen where adding did nothing at all.
+ *
+ * A `PUT` rather than a `POST` to a collection because the path is the whole
+ * identity: the scope and the name say which row, and sending the same value
+ * twice leaves the same one credential.
+ * @summary Store a credential, whether or not there is one under that name already.
  */
 export const ReplaceSecretParams = zod.object({
   "scope": zod.string().describe('Secret scope'),

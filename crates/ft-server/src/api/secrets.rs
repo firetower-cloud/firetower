@@ -6,7 +6,7 @@
 
 use super::{ApiError, ApiResult, ErrorCode};
 use crate::auth::Principal;
-use crate::vault::Key;
+use crate::vault::{Key, Vault};
 use crate::{vault, AppState};
 use axum::{
     extract::{Path, State},
@@ -132,18 +132,73 @@ pub struct RevealedSecret {
 /// because the path carries no owner and so there is no way to ask for one.
 /// Two people both looking at `git/github` are each looking at their own.
 async fn which<'a>(
-    state: &AppState,
+    vault: &Vault,
     scope: &'a str,
     name: &'a str,
     mine: &'a str,
 ) -> Result<Key<'a>, ApiError> {
     if !mine.is_empty() {
         let yours = Key::of(scope, name, mine);
-        if state.vault.holds(yours).await? {
+        if vault.holds(yours).await? {
             return Ok(yours);
         }
     }
     Ok(Key::shared(scope, name))
+}
+
+/// Which row a write means, and whether anything is there yet.
+///
+/// Same order as [`which`], because a write has to land on the row the next read
+/// will find: yours if you have one, then the install's. A row that exists keeps
+/// its owner — storing a personal copy over the install's own value would leave
+/// the old one sitting there unread and unrotated. A name nothing holds yet
+/// becomes yours, because a credential is a person's and two people adding
+/// `git/github` have to be able to add different ones.
+///
+/// The `bool` is what the caller would otherwise ask for a third time: whether
+/// this is a replacement or something new.
+async fn which_to_store<'a>(
+    vault: &Vault,
+    scope: &'a str,
+    name: &'a str,
+    mine: &'a str,
+) -> Result<(Key<'a>, bool), ApiError> {
+    if !mine.is_empty() {
+        let yours = Key::of(scope, name, mine);
+        if vault.holds(yours).await? {
+            return Ok((yours, true));
+        }
+    }
+
+    let shared = Key::shared(scope, name);
+    if vault.holds(shared).await? {
+        return Ok((shared, true));
+    }
+
+    let new = if mine.is_empty() {
+        shared
+    } else {
+        Key::of(scope, name, mine)
+    };
+    Ok((new, false))
+}
+
+/// A scope or a name somebody can type again tomorrow.
+///
+/// Only checked when a row is being created. Whatever is already stored is
+/// addressed by the path exactly as it is, so a name from before this existed
+/// can still be revealed, replaced and removed.
+fn nameable(what: &str, value: &str) -> Result<(), ApiError> {
+    let unusable = value.is_empty()
+        || value.chars().count() > 128
+        || value.chars().any(|c| c.is_whitespace() || c.is_control());
+    if unusable {
+        return Err(ApiError::new(
+            ErrorCode::InvalidRequest,
+            format!("a {what} is one word, 128 characters or less"),
+        ));
+    }
+    Ok(())
 }
 
 /// Put a credential on screen.
@@ -170,7 +225,7 @@ pub(super) async fn reveal_secret(
     Path((scope, name)): Path<(String, String)>,
 ) -> ApiResult<Json<RevealedSecret>> {
     let mine = principal.owner().unwrap_or("");
-    let key = which(&state, &scope, &name, mine).await?;
+    let key = which(&state.vault, &scope, &name, mine).await?;
 
     let value = state
         .vault
@@ -185,11 +240,17 @@ pub(super) async fn reveal_secret(
     }))
 }
 
-/// Replace a credential with a new one.
+/// Store a credential, whether or not there is one under that name already.
 ///
-/// Only for a name that already exists. Storing under an arbitrary name would
-/// let this screen fill up with values nothing ever reads — what a credential is
-/// *for* is decided where it is used, not here.
+/// A name nothing holds yet is created, because the Secrets screen offers to add
+/// one and a button that refuses every name is not a feature. It used to refuse,
+/// on the reasoning that what a credential is *for* is decided where it is used
+/// — but that is an argument about which names are worth adding, and the answer
+/// to it was a screen where adding did nothing at all.
+///
+/// A `PUT` rather than a `POST` to a collection because the path is the whole
+/// identity: the scope and the name say which row, and sending the same value
+/// twice leaves the same one credential.
 #[utoipa::path(
     put, path = "/api/v1/secrets/{scope}/{name}", tag = "secrets",
     params(
@@ -197,7 +258,7 @@ pub(super) async fn reveal_secret(
         ("name" = String, Path, description = "Secret name"),
     ),
     request_body = ReplaceSecret,
-    responses((status = 204), (status = 400, body = ApiError), (status = 404, body = ApiError)),
+    responses((status = 204), (status = 400, body = ApiError)),
 )]
 pub(super) async fn replace_secret(
     State(state): State<AppState>,
@@ -206,23 +267,28 @@ pub(super) async fn replace_secret(
     Json(req): Json<ReplaceSecret>,
 ) -> ApiResult<StatusCode> {
     let mine = principal.owner().unwrap_or("");
-    let key = which(&state, &scope, &name, mine).await?;
     let value = req.value.trim();
     if value.is_empty() {
         return Err(ApiError::new(
             ErrorCode::InvalidRequest,
-            "paste the new value, or remove this credential instead",
+            "paste the value, or remove this credential instead",
         ));
     }
 
-    if !state.vault.holds(key).await? {
-        return Err(ApiError::not_found("secret"));
+    let (key, held) = which_to_store(&state.vault, &scope, &name, mine).await?;
+    if !held {
+        nameable("scope", &scope)?;
+        nameable("name", &name)?;
     }
 
-    state
-        .vault
-        .put(key, value, "replaced on the Secrets screen")
-        .await?;
+    // The log is read by people, so it says which of the two happened rather
+    // than one word covering both.
+    let reason = if held {
+        "replaced on the Secrets screen"
+    } else {
+        "added on the Secrets screen"
+    };
+    state.vault.put(key, value, reason).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -244,10 +310,108 @@ pub(super) async fn remove_secret(
     Path((scope, name)): Path<(String, String)>,
 ) -> ApiResult<StatusCode> {
     let mine = principal.owner().unwrap_or("");
-    let key = which(&state, &scope, &name, mine).await?;
+    let key = which(&state.vault, &scope, &name, mine).await?;
     state
         .vault
         .forget(key, "removed on the Secrets screen")
         .await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::Db;
+    use crate::vault::crypto::RootKey;
+    use crate::vault::GIT;
+
+    async fn vault() -> Vault {
+        let db = Db::open_for_test().await.unwrap();
+        Vault::new(db.pool().clone(), RootKey::generate())
+    }
+
+    /// The bug this file was opened for: adding refused every name.
+    ///
+    /// `Add` on the Secrets screen sends the same `PUT` as `replace`, so a route
+    /// that only accepted a name it already held meant the button could not
+    /// work for the one thing it was there to do.
+    #[tokio::test]
+    async fn a_name_nothing_holds_is_created_as_your_own() {
+        let vault = vault().await;
+
+        let (key, held) = which_to_store(&vault, "global", "STRIPE", "u_alice")
+            .await
+            .unwrap();
+
+        assert!(!held, "nothing is stored under that name yet");
+        assert_eq!(key, Key::of("global", "STRIPE", "u_alice"));
+    }
+
+    /// Replacing the install's own value must not fork a personal copy.
+    ///
+    /// The next read resolves yours first, so a second row would leave the
+    /// original where it is, read by nobody and rotated by nobody.
+    #[tokio::test]
+    async fn an_existing_shared_row_is_replaced_where_it_is() {
+        let vault = vault().await;
+        vault
+            .put(Key::shared("repo:r_1", "DATABASE_URL"), "before", "setup")
+            .await
+            .unwrap();
+
+        let (key, held) = which_to_store(&vault, "repo:r_1", "DATABASE_URL", "u_alice")
+            .await
+            .unwrap();
+
+        assert!(held);
+        assert_eq!(key, Key::shared("repo:r_1", "DATABASE_URL"));
+    }
+
+    /// Yours wins over the install's, the same order `which` reads in.
+    #[tokio::test]
+    async fn your_own_row_is_the_one_you_write_to() {
+        let vault = vault().await;
+        vault
+            .put(Key::shared(GIT, "github"), "the install's", "setup")
+            .await
+            .unwrap();
+        vault
+            .put(Key::of(GIT, "github", "u_alice"), "hers", "setup")
+            .await
+            .unwrap();
+
+        let (key, held) = which_to_store(&vault, GIT, "github", "u_alice")
+            .await
+            .unwrap();
+
+        assert!(held);
+        assert_eq!(key, Key::of(GIT, "github", "u_alice"));
+    }
+
+    /// A principal with no owner of its own writes the install's row.
+    #[tokio::test]
+    async fn without_an_owner_a_new_name_belongs_to_the_install() {
+        let vault = vault().await;
+
+        let (key, held) = which_to_store(&vault, "global", "STRIPE", "")
+            .await
+            .unwrap();
+
+        assert!(!held);
+        assert_eq!(key, Key::shared("global", "STRIPE"));
+    }
+
+    /// What a new name may be. The scopes Firetower writes itself have to pass.
+    #[test]
+    fn a_name_has_to_be_typeable_again() {
+        assert!(nameable("name", "STRIPE_SECRET_KEY").is_ok());
+        assert!(nameable("scope", "repo:r_01k6m4").is_ok());
+        assert!(nameable("scope", "global").is_ok());
+
+        assert!(nameable("name", "").is_err());
+        assert!(nameable("name", "TWO WORDS").is_err());
+        assert!(nameable("name", "TRAILING ").is_err());
+        assert!(nameable("name", "NEW\nLINE").is_err());
+        assert!(nameable("name", &"N".repeat(129)).is_err());
+    }
 }
