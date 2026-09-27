@@ -6,7 +6,10 @@
  * authorisation clears — a code lasts about a quarter of an hour and the
  * control plane drops it when it expires, so the wait ends on its own. The
  * identity on commits (`get/set/clear_identity`) is a different fact from the
- * account that signed in, and is set here too.
+ * account that signed in, and is set here too. So is the client id: it registers
+ * the application rather than a person, and stays when somebody signs out — so
+ * it is changed here, not re-entered, and what the host refused is on screen
+ * rather than in a log nobody is reading.
  *
  * Trackers take an API key (`set_tracker_key`) and answer with the account it
  * belongs to; scopes say what the tasks list can be narrowed to.
@@ -63,7 +66,15 @@ function Provider({ p, live }: { p: ProviderStatus; live: boolean }) {
   const [waiting, setWaiting] = useState<{ userCode: string; verificationUri: string } | null>(null);
   const [clientId, setClientId] = useState("");
   const [open, setOpen] = useState(false);
+  const [app, setApp] = useState(false);
   const refresh = () => cache.invalidateQueries({ queryKey: getListProvidersQueryKey() });
+
+  /* Offered wherever one is already registered, which is the case the row used
+     to have no answer for: `configured` means a client id is stored, never that
+     it still works, so an application that was deleted or had the device flow
+     turned off left a Connect button that could not succeed and no field to
+     correct. */
+  const application = <button onClick={() => setApp(!app)} className="control text-mute hover:bg-raise hover:text-bone">application</button>;
 
   const start = () =>
     authorize.mutate(
@@ -95,10 +106,14 @@ function Provider({ p, live }: { p: ProviderStatus; live: boolean }) {
           <>
             <span className="flex items-center gap-1.5 text-meta text-sage"><Icon of={Check} size={12} />connected</span>
             <button onClick={() => setOpen(!open)} className="control text-mute hover:bg-raise hover:text-bone">identity</button>
+            {application}
             <button disabled={!live || disconnect.isPending} onClick={() => void confirm({ title: `Disconnect ${p.label}?`, body: "Sessions already running keep the token they were given.", action: "Disconnect", tone: "danger" }).then((ok) => ok && disconnect.mutate({ id: p.id }, { onSuccess: refresh }))} className="control text-mute hover:text-brick disabled:opacity-50"><Icon of={Unlink} size={12} /></button>
           </>
         ) : p.configured ? (
-          <button disabled={!live || authorize.isPending} onClick={start} className="control border border-line bg-raise text-ui text-text hover:bg-overlay disabled:opacity-50"><Icon of={Link2} size={12} />Connect</button>
+          <>
+            {application}
+            <button disabled={!live || authorize.isPending} onClick={start} className="control border border-line bg-raise text-ui text-text hover:bg-overlay disabled:opacity-50"><Icon of={Link2} size={12} />Connect</button>
+          </>
         ) : (
           <div className="flex items-center gap-1.5">
             <input value={clientId} onChange={(e) => setClientId(e.target.value)} placeholder="OAuth client id" className="w-44 rounded-md border border-line bg-ground px-2 py-1 font-mono text-micro text-bone focus:outline-none" />
@@ -106,8 +121,38 @@ function Provider({ p, live }: { p: ProviderStatus; live: boolean }) {
           </div>
         )}
       </div>
+      {/* What the host refused, in its own words. Without this the button is
+          silent about every way it can fail — a rejected client id, a host we
+          could not reach — and the screen looks identical to nothing having
+          been clicked. */}
+      {authorize.error && <p className="px-3.5 pb-3 text-meta text-brick">{why(authorize.error)}</p>}
       {waiting && <div className="px-3.5 pb-3"><DeviceCode code={waiting.userCode} url={waiting.verificationUri} note="Grant every organisation you want Firetower to clone from. Ones you skip stay hidden." /></div>}
       {open && p.connected && <Identity providerId={p.id} />}
+      {app && <Application p={p} onSaved={() => { setApp(false); refresh(); }} />}
+    </div>
+  );
+}
+
+/**
+ * Which OAuth application everybody here authorizes against.
+ *
+ * Install-wide rather than yours: one row in the server's settings, no owner —
+ * so changing it changes it for everybody, and disconnecting your own account
+ * deliberately leaves it alone. Shown filled in, because the reason to open
+ * this is that the id already there is the thing that stopped working.
+ */
+function Application({ p, onSaved }: { p: ProviderStatus; onSaved: () => void }) {
+  const save = useSetClientId();
+  const [value, setValue] = useState(p.clientId ?? "");
+
+  return (
+    <div className="border-t border-line-soft bg-ground/40 px-3.5 py-3">
+      <p className="text-meta text-dim">The application {p.label} authorizes against, for everybody on this server. Public by design — a device-flow client id has no paired secret.</p>
+      <div className="mt-2 flex items-center gap-2">
+        <input value={value} onChange={(e) => setValue(e.target.value)} placeholder="OAuth client id" spellCheck={false} className="min-w-0 flex-1 rounded-md border border-line bg-ground px-2 py-1 font-mono text-ui text-bone focus:outline-none" />
+        <button disabled={!value.trim() || value.trim() === p.clientId || save.isPending} onClick={() => save.mutate({ id: p.id, data: { clientId: value.trim() } }, { onSuccess: onSaved })} className="control border border-line bg-raise text-bone hover:bg-overlay disabled:text-mute">{save.isPending ? "Saving…" : "Save"}</button>
+      </div>
+      {save.error && <p className="mt-2 text-meta text-brick">{why(save.error)}</p>}
     </div>
   );
 }
