@@ -247,7 +247,15 @@ async fn credential_for(
 /// type registry rather than only a list of paths.
 #[derive(OpenApi)]
 #[openapi(
-    info(title = "Firetower", version = env!("CARGO_PKG_VERSION")),
+    // Deliberately not the crate version. This number is written into the
+    // committed contract, so tying it to the release means every release makes
+    // `api/openapi.json` stale without a single handler having changed — which
+    // is how `api/updater.json` came to sit three minor versions behind. The
+    // contract moves when the handlers move, and nothing else should move it.
+    //
+    // A client asking which Firetower it is talking to reads `version` off
+    // /bootstrap, which is the real answer and is always current.
+    info(title = "Firetower", version = "0"),
     components(schemas(
         Event,
         Agent,

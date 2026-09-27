@@ -19,8 +19,17 @@ fn main() -> anyhow::Result<()> {
     }
 
     let json = merged.to_pretty_json()?;
-    std::fs::create_dir_all("api")?;
-    std::fs::write("api/openapi.json", &json)?;
+
+    // Anchored to the source tree, not to wherever this was run from. A
+    // relative path here once put a second contract in `web/api/`, where it
+    // went stale and sat for a month because nothing reads it and nothing
+    // checked it.
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .ancestors()
+        .nth(2)
+        .expect("the workspace root is two directories above crates/ft-server");
+    std::fs::create_dir_all(root.join("api"))?;
+    std::fs::write(root.join("api/openapi.json"), &json)?;
     println!("api/openapi.json · {} bytes", json.len());
     Ok(())
 }

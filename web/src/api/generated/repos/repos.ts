@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.40.2
+ * OpenAPI spec version: 0
  */
 import {
   useMutation,
@@ -152,8 +152,8 @@ export function useListRepos<TData = Awaited<ReturnType<typeof listRepos>>, TErr
 
 export const useSetListReposQueryData = () => {
   const queryClient = useQueryClient();
-  return (updater: Awaited<ReturnType<typeof listRepos>> | undefined | ((old: Awaited<ReturnType<typeof listRepos>> | undefined) => Awaited<ReturnType<typeof listRepos>> | undefined)) => {
-    queryClient.setQueriesData<Awaited<ReturnType<typeof listRepos>>>({ queryKey: getListReposQueryKey() }, updater);
+  return (updater: Awaited<ReturnType<typeof listRepos>> | undefined | ((old: Awaited<ReturnType<typeof listRepos>> | undefined) => Awaited<ReturnType<typeof listRepos>> | undefined), $exactMatch: boolean = true) => {
+    queryClient.setQueriesData<Awaited<ReturnType<typeof listRepos>>>({ exact: $exactMatch, queryKey: getListReposQueryKey() }, updater);
   };
 }
 
@@ -174,11 +174,25 @@ export const getCreateRepoUrl = () => {
 
 export const createRepo = async (newRepo: NewRepo, options?: Parameters<typeof http>[1]): Promise<Repo> => {
 
-  return http<Repo>(getCreateRepoUrl(),
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return http<Repo>(getCreateRepoUrl(),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(newRepo)
   }
 );}
@@ -187,11 +201,13 @@ export const createRepo = async (newRepo: NewRepo, options?: Parameters<typeof h
 
 
 
-export const getCreateRepoMutationOptions = <TError = ApiError,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createRepo>>, TError,{data: NewRepo}, TContext>, request?: SecondParameter<typeof http>}
-): UseMutationOptions<Awaited<ReturnType<typeof createRepo>>, TError,{data: NewRepo}, TContext> => {
+export const getCreateRepoMutationKey = () => ['createRepo'] as const;
 
-const mutationKey = ['createRepo'];
+export const getCreateRepoMutationOptions = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createRepo>>, TError,CreateRepoMutationVariables, TContext>, request?: SecondParameter<typeof http>}
+): UseMutationOptions<Awaited<ReturnType<typeof createRepo>>, TError,CreateRepoMutationVariables, TContext> => {
+
+const mutationKey = getCreateRepoMutationKey();
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -201,7 +217,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createRepo>>, {data: NewRepo}> = (props) => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createRepo>>, CreateRepoMutationVariables> = (props) => {
           const {data} = props ?? {};
 
           return  createRepo(data,requestOptions)
@@ -217,13 +233,14 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type CreateRepoMutationResult = NonNullable<Awaited<ReturnType<typeof createRepo>>>
     export type CreateRepoMutationBody = NewRepo
     export type CreateRepoMutationError = ApiError
+    export type CreateRepoMutationVariables = {data: NewRepo}
 
     export const useCreateRepo = <TError = ApiError,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createRepo>>, TError,{data: NewRepo}, TContext>, request?: SecondParameter<typeof http>}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createRepo>>, TError,CreateRepoMutationVariables, TContext>, request?: SecondParameter<typeof http>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof createRepo>>,
         TError,
-        {data: NewRepo},
+        CreateRepoMutationVariables,
         TContext
       > => {
       return useMutation(getCreateRepoMutationOptions(options), queryClient);
@@ -244,11 +261,25 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
  */
 export const probeRepo = async (probeRequest: ProbeRequest, options?: Parameters<typeof http>[1]): Promise<ProbeResponse> => {
 
-  return http<ProbeResponse>(getProbeRepoUrl(),
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return http<ProbeResponse>(getProbeRepoUrl(),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(probeRequest)
   }
 );}
@@ -257,11 +288,13 @@ export const probeRepo = async (probeRequest: ProbeRequest, options?: Parameters
 
 
 
-export const getProbeRepoMutationOptions = <TError = ApiError,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof probeRepo>>, TError,{data: ProbeRequest}, TContext>, request?: SecondParameter<typeof http>}
-): UseMutationOptions<Awaited<ReturnType<typeof probeRepo>>, TError,{data: ProbeRequest}, TContext> => {
+export const getProbeRepoMutationKey = () => ['probeRepo'] as const;
 
-const mutationKey = ['probeRepo'];
+export const getProbeRepoMutationOptions = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof probeRepo>>, TError,ProbeRepoMutationVariables, TContext>, request?: SecondParameter<typeof http>}
+): UseMutationOptions<Awaited<ReturnType<typeof probeRepo>>, TError,ProbeRepoMutationVariables, TContext> => {
+
+const mutationKey = getProbeRepoMutationKey();
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -271,7 +304,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof probeRepo>>, {data: ProbeRequest}> = (props) => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof probeRepo>>, ProbeRepoMutationVariables> = (props) => {
           const {data} = props ?? {};
 
           return  probeRepo(data,requestOptions)
@@ -287,16 +320,17 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type ProbeRepoMutationResult = NonNullable<Awaited<ReturnType<typeof probeRepo>>>
     export type ProbeRepoMutationBody = ProbeRequest
     export type ProbeRepoMutationError = ApiError
+    export type ProbeRepoMutationVariables = {data: ProbeRequest}
 
     /**
  * @summary Can we reach it, and what is it called?
  */
 export const useProbeRepo = <TError = ApiError,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof probeRepo>>, TError,{data: ProbeRequest}, TContext>, request?: SecondParameter<typeof http>}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof probeRepo>>, TError,ProbeRepoMutationVariables, TContext>, request?: SecondParameter<typeof http>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof probeRepo>>,
         TError,
-        {data: ProbeRequest},
+        ProbeRepoMutationVariables,
         TContext
       > => {
       return useMutation(getProbeRepoMutationOptions(options), queryClient);
@@ -330,11 +364,13 @@ export const deleteRepo = async (id: string, options?: Parameters<typeof http>[1
 
 
 
-export const getDeleteRepoMutationOptions = <TError = ApiError,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteRepo>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof http>}
-): UseMutationOptions<Awaited<ReturnType<typeof deleteRepo>>, TError,{id: string}, TContext> => {
+export const getDeleteRepoMutationKey = () => ['deleteRepo'] as const;
 
-const mutationKey = ['deleteRepo'];
+export const getDeleteRepoMutationOptions = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteRepo>>, TError,DeleteRepoMutationVariables, TContext>, request?: SecondParameter<typeof http>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteRepo>>, TError,DeleteRepoMutationVariables, TContext> => {
+
+const mutationKey = getDeleteRepoMutationKey();
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -344,7 +380,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteRepo>>, {id: string}> = (props) => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteRepo>>, DeleteRepoMutationVariables> = (props) => {
           const {id} = props ?? {};
 
           return  deleteRepo(id,requestOptions)
@@ -360,16 +396,17 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type DeleteRepoMutationResult = NonNullable<Awaited<ReturnType<typeof deleteRepo>>>
 
     export type DeleteRepoMutationError = ApiError
+    export type DeleteRepoMutationVariables = {id: string}
 
     /**
  * @summary Disconnect a repository.
  */
 export const useDeleteRepo = <TError = ApiError,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteRepo>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof http>}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteRepo>>, TError,DeleteRepoMutationVariables, TContext>, request?: SecondParameter<typeof http>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof deleteRepo>>,
         TError,
-        {id: string},
+        DeleteRepoMutationVariables,
         TContext
       > => {
       return useMutation(getDeleteRepoMutationOptions(options), queryClient);
@@ -385,11 +422,25 @@ export const useDeleteRepo = <TError = ApiError,
 export const updateRepo = async (id: string,
     repoChanges: RepoChanges, options?: Parameters<typeof http>[1]): Promise<Repo> => {
 
-  return http<Repo>(getUpdateRepoUrl(id),
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return http<Repo>(getUpdateRepoUrl(id),
   {
     ...options,
     method: 'PATCH',
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(repoChanges)
   }
 );}
@@ -398,11 +449,13 @@ export const updateRepo = async (id: string,
 
 
 
-export const getUpdateRepoMutationOptions = <TError = ApiError,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateRepo>>, TError,{id: string;data: RepoChanges}, TContext>, request?: SecondParameter<typeof http>}
-): UseMutationOptions<Awaited<ReturnType<typeof updateRepo>>, TError,{id: string;data: RepoChanges}, TContext> => {
+export const getUpdateRepoMutationKey = () => ['updateRepo'] as const;
 
-const mutationKey = ['updateRepo'];
+export const getUpdateRepoMutationOptions = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateRepo>>, TError,UpdateRepoMutationVariables, TContext>, request?: SecondParameter<typeof http>}
+): UseMutationOptions<Awaited<ReturnType<typeof updateRepo>>, TError,UpdateRepoMutationVariables, TContext> => {
+
+const mutationKey = getUpdateRepoMutationKey();
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -412,7 +465,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateRepo>>, {id: string;data: RepoChanges}> = (props) => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateRepo>>, UpdateRepoMutationVariables> = (props) => {
           const {id,data} = props ?? {};
 
           return  updateRepo(id,data,requestOptions)
@@ -428,13 +481,14 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type UpdateRepoMutationResult = NonNullable<Awaited<ReturnType<typeof updateRepo>>>
     export type UpdateRepoMutationBody = RepoChanges
     export type UpdateRepoMutationError = ApiError
+    export type UpdateRepoMutationVariables = {id: string;data: RepoChanges}
 
     export const useUpdateRepo = <TError = ApiError,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateRepo>>, TError,{id: string;data: RepoChanges}, TContext>, request?: SecondParameter<typeof http>}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateRepo>>, TError,UpdateRepoMutationVariables, TContext>, request?: SecondParameter<typeof http>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof updateRepo>>,
         TError,
-        {id: string;data: RepoChanges},
+        UpdateRepoMutationVariables,
         TContext
       > => {
       return useMutation(getUpdateRepoMutationOptions(options), queryClient);
@@ -544,8 +598,8 @@ export function useRepoBranches<TData = Awaited<ReturnType<typeof repoBranches>>
  */
 export const useSetRepoBranchesQueryData = () => {
   const queryClient = useQueryClient();
-  return (id: string,updater: Awaited<ReturnType<typeof repoBranches>> | undefined | ((old: Awaited<ReturnType<typeof repoBranches>> | undefined) => Awaited<ReturnType<typeof repoBranches>> | undefined)) => {
-    queryClient.setQueriesData<Awaited<ReturnType<typeof repoBranches>>>({ queryKey: getRepoBranchesQueryKey(id) }, updater);
+  return (id: string,updater: Awaited<ReturnType<typeof repoBranches>> | undefined | ((old: Awaited<ReturnType<typeof repoBranches>> | undefined) => Awaited<ReturnType<typeof repoBranches>> | undefined), $exactMatch: boolean = true) => {
+    queryClient.setQueriesData<Awaited<ReturnType<typeof repoBranches>>>({ exact: $exactMatch, queryKey: getRepoBranchesQueryKey(id) }, updater);
   };
 }
 
@@ -663,8 +717,8 @@ export function useListRepoEnv<TData = Awaited<ReturnType<typeof listRepoEnv>>, 
  */
 export const useSetListRepoEnvQueryData = () => {
   const queryClient = useQueryClient();
-  return (id: string,updater: Awaited<ReturnType<typeof listRepoEnv>> | undefined | ((old: Awaited<ReturnType<typeof listRepoEnv>> | undefined) => Awaited<ReturnType<typeof listRepoEnv>> | undefined)) => {
-    queryClient.setQueriesData<Awaited<ReturnType<typeof listRepoEnv>>>({ queryKey: getListRepoEnvQueryKey(id) }, updater);
+  return (id: string,updater: Awaited<ReturnType<typeof listRepoEnv>> | undefined | ((old: Awaited<ReturnType<typeof listRepoEnv>> | undefined) => Awaited<ReturnType<typeof listRepoEnv>> | undefined), $exactMatch: boolean = true) => {
+    queryClient.setQueriesData<Awaited<ReturnType<typeof listRepoEnv>>>({ exact: $exactMatch, queryKey: getListRepoEnvQueryKey(id) }, updater);
   };
 }
 
@@ -689,11 +743,25 @@ export const getPutRepoEnvUrl = (id: string,) => {
 export const putRepoEnv = async (id: string,
     newEnv: NewEnv, options?: Parameters<typeof http>[1]): Promise<StoredEnv> => {
 
-  return http<StoredEnv>(getPutRepoEnvUrl(id),
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return http<StoredEnv>(getPutRepoEnvUrl(id),
   {
     ...options,
     method: 'PUT',
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(newEnv)
   }
 );}
@@ -702,11 +770,13 @@ export const putRepoEnv = async (id: string,
 
 
 
-export const getPutRepoEnvMutationOptions = <TError = ApiError,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof putRepoEnv>>, TError,{id: string;data: NewEnv}, TContext>, request?: SecondParameter<typeof http>}
-): UseMutationOptions<Awaited<ReturnType<typeof putRepoEnv>>, TError,{id: string;data: NewEnv}, TContext> => {
+export const getPutRepoEnvMutationKey = () => ['putRepoEnv'] as const;
 
-const mutationKey = ['putRepoEnv'];
+export const getPutRepoEnvMutationOptions = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof putRepoEnv>>, TError,PutRepoEnvMutationVariables, TContext>, request?: SecondParameter<typeof http>}
+): UseMutationOptions<Awaited<ReturnType<typeof putRepoEnv>>, TError,PutRepoEnvMutationVariables, TContext> => {
+
+const mutationKey = getPutRepoEnvMutationKey();
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -716,7 +786,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof putRepoEnv>>, {id: string;data: NewEnv}> = (props) => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof putRepoEnv>>, PutRepoEnvMutationVariables> = (props) => {
           const {id,data} = props ?? {};
 
           return  putRepoEnv(id,data,requestOptions)
@@ -732,13 +802,14 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type PutRepoEnvMutationResult = NonNullable<Awaited<ReturnType<typeof putRepoEnv>>>
     export type PutRepoEnvMutationBody = NewEnv
     export type PutRepoEnvMutationError = ApiError
+    export type PutRepoEnvMutationVariables = {id: string;data: NewEnv}
 
     export const usePutRepoEnv = <TError = ApiError,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof putRepoEnv>>, TError,{id: string;data: NewEnv}, TContext>, request?: SecondParameter<typeof http>}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof putRepoEnv>>, TError,PutRepoEnvMutationVariables, TContext>, request?: SecondParameter<typeof http>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof putRepoEnv>>,
         TError,
-        {id: string;data: NewEnv},
+        PutRepoEnvMutationVariables,
         TContext
       > => {
       return useMutation(getPutRepoEnvMutationOptions(options), queryClient);
@@ -768,11 +839,13 @@ export const removeRepoEnv = async (id: string,
 
 
 
-export const getRemoveRepoEnvMutationOptions = <TError = ApiError,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof removeRepoEnv>>, TError,{id: string;name: string}, TContext>, request?: SecondParameter<typeof http>}
-): UseMutationOptions<Awaited<ReturnType<typeof removeRepoEnv>>, TError,{id: string;name: string}, TContext> => {
+export const getRemoveRepoEnvMutationKey = () => ['removeRepoEnv'] as const;
 
-const mutationKey = ['removeRepoEnv'];
+export const getRemoveRepoEnvMutationOptions = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof removeRepoEnv>>, TError,RemoveRepoEnvMutationVariables, TContext>, request?: SecondParameter<typeof http>}
+): UseMutationOptions<Awaited<ReturnType<typeof removeRepoEnv>>, TError,RemoveRepoEnvMutationVariables, TContext> => {
+
+const mutationKey = getRemoveRepoEnvMutationKey();
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -782,7 +855,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof removeRepoEnv>>, {id: string;name: string}> = (props) => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof removeRepoEnv>>, RemoveRepoEnvMutationVariables> = (props) => {
           const {id,name} = props ?? {};
 
           return  removeRepoEnv(id,name,requestOptions)
@@ -798,13 +871,14 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type RemoveRepoEnvMutationResult = NonNullable<Awaited<ReturnType<typeof removeRepoEnv>>>
 
     export type RemoveRepoEnvMutationError = ApiError
+    export type RemoveRepoEnvMutationVariables = {id: string;name: string}
 
     export const useRemoveRepoEnv = <TError = ApiError,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof removeRepoEnv>>, TError,{id: string;name: string}, TContext>, request?: SecondParameter<typeof http>}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof removeRepoEnv>>, TError,RemoveRepoEnvMutationVariables, TContext>, request?: SecondParameter<typeof http>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof removeRepoEnv>>,
         TError,
-        {id: string;name: string},
+        RemoveRepoEnvMutationVariables,
         TContext
       > => {
       return useMutation(getRemoveRepoEnvMutationOptions(options), queryClient);

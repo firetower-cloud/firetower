@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.40.2
+ * OpenAPI spec version: 0
  */
 import {
   useMutation,
@@ -150,8 +150,8 @@ export function useListAccounts<TData = Awaited<ReturnType<typeof listAccounts>>
 
 export const useSetListAccountsQueryData = () => {
   const queryClient = useQueryClient();
-  return (updater: Awaited<ReturnType<typeof listAccounts>> | undefined | ((old: Awaited<ReturnType<typeof listAccounts>> | undefined) => Awaited<ReturnType<typeof listAccounts>> | undefined)) => {
-    queryClient.setQueriesData<Awaited<ReturnType<typeof listAccounts>>>({ queryKey: getListAccountsQueryKey() }, updater);
+  return (updater: Awaited<ReturnType<typeof listAccounts>> | undefined | ((old: Awaited<ReturnType<typeof listAccounts>> | undefined) => Awaited<ReturnType<typeof listAccounts>> | undefined), $exactMatch: boolean = true) => {
+    queryClient.setQueriesData<Awaited<ReturnType<typeof listAccounts>>>({ exact: $exactMatch, queryKey: getListAccountsQueryKey() }, updater);
   };
 }
 
@@ -172,11 +172,25 @@ export const getCreateAccountUrl = () => {
 
 export const createAccount = async (createAccountBody: CreateAccount, options?: Parameters<typeof http>[1]): Promise<Account> => {
 
-  return http<Account>(getCreateAccountUrl(),
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return http<Account>(getCreateAccountUrl(),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(createAccountBody)
   }
 );}
@@ -185,11 +199,13 @@ export const createAccount = async (createAccountBody: CreateAccount, options?: 
 
 
 
-export const getCreateAccountMutationOptions = <TError = unknown,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createAccount>>, TError,{data: CreateAccount}, TContext>, request?: SecondParameter<typeof http>}
-): UseMutationOptions<Awaited<ReturnType<typeof createAccount>>, TError,{data: CreateAccount}, TContext> => {
+export const getCreateAccountMutationKey = () => ['createAccount'] as const;
 
-const mutationKey = ['createAccount'];
+export const getCreateAccountMutationOptions = <TError = unknown,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createAccount>>, TError,CreateAccountMutationVariables, TContext>, request?: SecondParameter<typeof http>}
+): UseMutationOptions<Awaited<ReturnType<typeof createAccount>>, TError,CreateAccountMutationVariables, TContext> => {
+
+const mutationKey = getCreateAccountMutationKey();
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -199,7 +215,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createAccount>>, {data: CreateAccount}> = (props) => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createAccount>>, CreateAccountMutationVariables> = (props) => {
           const {data} = props ?? {};
 
           return  createAccount(data,requestOptions)
@@ -215,13 +231,14 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type CreateAccountMutationResult = NonNullable<Awaited<ReturnType<typeof createAccount>>>
     export type CreateAccountMutationBody = CreateAccount
     export type CreateAccountMutationError = unknown
+    export type CreateAccountMutationVariables = {data: CreateAccount}
 
     export const useCreateAccount = <TError = unknown,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createAccount>>, TError,{data: CreateAccount}, TContext>, request?: SecondParameter<typeof http>}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createAccount>>, TError,CreateAccountMutationVariables, TContext>, request?: SecondParameter<typeof http>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof createAccount>>,
         TError,
-        {data: CreateAccount},
+        CreateAccountMutationVariables,
         TContext
       > => {
       return useMutation(getCreateAccountMutationOptions(options), queryClient);
@@ -237,11 +254,25 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 export const updateAccount = async (id: string,
     updateAccountBody: UpdateAccount, options?: Parameters<typeof http>[1]): Promise<Account> => {
 
-  return http<Account>(getUpdateAccountUrl(id),
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return http<Account>(getUpdateAccountUrl(id),
   {
     ...options,
     method: 'PUT',
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(updateAccountBody)
   }
 );}
@@ -250,11 +281,13 @@ export const updateAccount = async (id: string,
 
 
 
-export const getUpdateAccountMutationOptions = <TError = unknown,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateAccount>>, TError,{id: string;data: UpdateAccount}, TContext>, request?: SecondParameter<typeof http>}
-): UseMutationOptions<Awaited<ReturnType<typeof updateAccount>>, TError,{id: string;data: UpdateAccount}, TContext> => {
+export const getUpdateAccountMutationKey = () => ['updateAccount'] as const;
 
-const mutationKey = ['updateAccount'];
+export const getUpdateAccountMutationOptions = <TError = unknown,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateAccount>>, TError,UpdateAccountMutationVariables, TContext>, request?: SecondParameter<typeof http>}
+): UseMutationOptions<Awaited<ReturnType<typeof updateAccount>>, TError,UpdateAccountMutationVariables, TContext> => {
+
+const mutationKey = getUpdateAccountMutationKey();
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -264,7 +297,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateAccount>>, {id: string;data: UpdateAccount}> = (props) => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateAccount>>, UpdateAccountMutationVariables> = (props) => {
           const {id,data} = props ?? {};
 
           return  updateAccount(id,data,requestOptions)
@@ -280,13 +313,14 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type UpdateAccountMutationResult = NonNullable<Awaited<ReturnType<typeof updateAccount>>>
     export type UpdateAccountMutationBody = UpdateAccount
     export type UpdateAccountMutationError = unknown
+    export type UpdateAccountMutationVariables = {id: string;data: UpdateAccount}
 
     export const useUpdateAccount = <TError = unknown,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateAccount>>, TError,{id: string;data: UpdateAccount}, TContext>, request?: SecondParameter<typeof http>}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateAccount>>, TError,UpdateAccountMutationVariables, TContext>, request?: SecondParameter<typeof http>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof updateAccount>>,
         TError,
-        {id: string;data: UpdateAccount},
+        UpdateAccountMutationVariables,
         TContext
       > => {
       return useMutation(getUpdateAccountMutationOptions(options), queryClient);
@@ -384,8 +418,8 @@ export function useSessionAccount<TData = Awaited<ReturnType<typeof sessionAccou
 
 export const useSetSessionAccountQueryData = () => {
   const queryClient = useQueryClient();
-  return (id: string,updater: Awaited<ReturnType<typeof sessionAccount>> | undefined | ((old: Awaited<ReturnType<typeof sessionAccount>> | undefined) => Awaited<ReturnType<typeof sessionAccount>> | undefined)) => {
-    queryClient.setQueriesData<Awaited<ReturnType<typeof sessionAccount>>>({ queryKey: getSessionAccountQueryKey(id) }, updater);
+  return (id: string,updater: Awaited<ReturnType<typeof sessionAccount>> | undefined | ((old: Awaited<ReturnType<typeof sessionAccount>> | undefined) => Awaited<ReturnType<typeof sessionAccount>> | undefined), $exactMatch: boolean = true) => {
+    queryClient.setQueriesData<Awaited<ReturnType<typeof sessionAccount>>>({ exact: $exactMatch, queryKey: getSessionAccountQueryKey(id) }, updater);
   };
 }
 
@@ -407,11 +441,25 @@ export const getSwitchAccountUrl = (id: string,) => {
 export const switchAccount = async (id: string,
     switchAccountBody: SwitchAccount, options?: Parameters<typeof http>[1]): Promise<SwitchedAccount> => {
 
-  return http<SwitchedAccount>(getSwitchAccountUrl(id),
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return http<SwitchedAccount>(getSwitchAccountUrl(id),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(switchAccountBody)
   }
 );}
@@ -420,11 +468,13 @@ export const switchAccount = async (id: string,
 
 
 
-export const getSwitchAccountMutationOptions = <TError = unknown,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof switchAccount>>, TError,{id: string;data: SwitchAccount}, TContext>, request?: SecondParameter<typeof http>}
-): UseMutationOptions<Awaited<ReturnType<typeof switchAccount>>, TError,{id: string;data: SwitchAccount}, TContext> => {
+export const getSwitchAccountMutationKey = () => ['switchAccount'] as const;
 
-const mutationKey = ['switchAccount'];
+export const getSwitchAccountMutationOptions = <TError = unknown,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof switchAccount>>, TError,SwitchAccountMutationVariables, TContext>, request?: SecondParameter<typeof http>}
+): UseMutationOptions<Awaited<ReturnType<typeof switchAccount>>, TError,SwitchAccountMutationVariables, TContext> => {
+
+const mutationKey = getSwitchAccountMutationKey();
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -434,7 +484,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof switchAccount>>, {id: string;data: SwitchAccount}> = (props) => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof switchAccount>>, SwitchAccountMutationVariables> = (props) => {
           const {id,data} = props ?? {};
 
           return  switchAccount(id,data,requestOptions)
@@ -450,13 +500,14 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type SwitchAccountMutationResult = NonNullable<Awaited<ReturnType<typeof switchAccount>>>
     export type SwitchAccountMutationBody = SwitchAccount
     export type SwitchAccountMutationError = unknown
+    export type SwitchAccountMutationVariables = {id: string;data: SwitchAccount}
 
     export const useSwitchAccount = <TError = unknown,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof switchAccount>>, TError,{id: string;data: SwitchAccount}, TContext>, request?: SecondParameter<typeof http>}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof switchAccount>>, TError,SwitchAccountMutationVariables, TContext>, request?: SecondParameter<typeof http>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof switchAccount>>,
         TError,
-        {id: string;data: SwitchAccount},
+        SwitchAccountMutationVariables,
         TContext
       > => {
       return useMutation(getSwitchAccountMutationOptions(options), queryClient);
@@ -554,8 +605,8 @@ export function useGetFallback<TData = Awaited<ReturnType<typeof getFallback>>, 
 
 export const useSetGetFallbackQueryData = () => {
   const queryClient = useQueryClient();
-  return (id: string,updater: Awaited<ReturnType<typeof getFallback>> | undefined | ((old: Awaited<ReturnType<typeof getFallback>> | undefined) => Awaited<ReturnType<typeof getFallback>> | undefined)) => {
-    queryClient.setQueriesData<Awaited<ReturnType<typeof getFallback>>>({ queryKey: getGetFallbackQueryKey(id) }, updater);
+  return (id: string,updater: Awaited<ReturnType<typeof getFallback>> | undefined | ((old: Awaited<ReturnType<typeof getFallback>> | undefined) => Awaited<ReturnType<typeof getFallback>> | undefined), $exactMatch: boolean = true) => {
+    queryClient.setQueriesData<Awaited<ReturnType<typeof getFallback>>>({ exact: $exactMatch, queryKey: getGetFallbackQueryKey(id) }, updater);
   };
 }
 
@@ -577,11 +628,25 @@ export const getSetFallbackUrl = (id: string,) => {
 export const setFallback = async (id: string,
     fallback: Fallback, options?: Parameters<typeof http>[1]): Promise<Fallback> => {
 
-  return http<Fallback>(getSetFallbackUrl(id),
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return http<Fallback>(getSetFallbackUrl(id),
   {
     ...options,
     method: 'PUT',
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(fallback)
   }
 );}
@@ -590,11 +655,13 @@ export const setFallback = async (id: string,
 
 
 
-export const getSetFallbackMutationOptions = <TError = unknown,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setFallback>>, TError,{id: string;data: Fallback}, TContext>, request?: SecondParameter<typeof http>}
-): UseMutationOptions<Awaited<ReturnType<typeof setFallback>>, TError,{id: string;data: Fallback}, TContext> => {
+export const getSetFallbackMutationKey = () => ['setFallback'] as const;
 
-const mutationKey = ['setFallback'];
+export const getSetFallbackMutationOptions = <TError = unknown,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setFallback>>, TError,SetFallbackMutationVariables, TContext>, request?: SecondParameter<typeof http>}
+): UseMutationOptions<Awaited<ReturnType<typeof setFallback>>, TError,SetFallbackMutationVariables, TContext> => {
+
+const mutationKey = getSetFallbackMutationKey();
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -604,7 +671,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof setFallback>>, {id: string;data: Fallback}> = (props) => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof setFallback>>, SetFallbackMutationVariables> = (props) => {
           const {id,data} = props ?? {};
 
           return  setFallback(id,data,requestOptions)
@@ -620,13 +687,14 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type SetFallbackMutationResult = NonNullable<Awaited<ReturnType<typeof setFallback>>>
     export type SetFallbackMutationBody = Fallback
     export type SetFallbackMutationError = unknown
+    export type SetFallbackMutationVariables = {id: string;data: Fallback}
 
     export const useSetFallback = <TError = unknown,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setFallback>>, TError,{id: string;data: Fallback}, TContext>, request?: SecondParameter<typeof http>}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setFallback>>, TError,SetFallbackMutationVariables, TContext>, request?: SecondParameter<typeof http>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof setFallback>>,
         TError,
-        {id: string;data: Fallback},
+        SetFallbackMutationVariables,
         TContext
       > => {
       return useMutation(getSetFallbackMutationOptions(options), queryClient);

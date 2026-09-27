@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.40.2
+ * OpenAPI spec version: 0
  */
 import * as zod from 'zod';
 
@@ -47,7 +47,7 @@ export const ListHostsResponseItem = zod.object({
   "hostKey": zod.string().nullish().describe('Recorded when the host is added. Not yet checked against what the\nmachine answers with — connecting trusts a key it hasn\'t seen before\nand remembers it, so this is a record rather than a guarantee.'),
   "key": zod.union([zod.object({
   "type": zod.enum(['Default'])
-}).describe('Let ssh choose: the agent first, then the usual names in `~\/.ssh`.\n\nThe default, and what an absent `identity_file` used to mean. Still\nuseful for a control plane running on a machine whose ssh is already\nconfigured — a development install, or a binary on a host.'),zod.object({
+}).describe('Let ssh choose: the agent first, then the usual names in `~/.ssh`.\n\nThe default, and what an absent `identity_file` used to mean. Still\nuseful for a control plane running on a machine whose ssh is already\nconfigured — a development install, or a binary on a host.'),zod.object({
   "type": zod.enum(['Managed'])
 }).describe('The key Firetower made for itself, sealed in the vault.\n\nWhat a server added through the interface uses. Firetower holds this one\nbecause in a container there is no other way for it to hold anything:\nit is scoped to this installation, opens nothing else, and is revoked by\ndeleting one line on one machine.'),zod.object({
   "name": zod.string(),
@@ -70,11 +70,11 @@ export const ListHostsResponseItem = zod.object({
 }).describe('Why it isn\'t answering, when it isn\'t. Cleared as soon as it does.')]).optional(),
   "docker": zod.object({
   "detail": zod.string().nullish().describe('The daemon\'s version where it is running, and why it isn\'t where it\nisn\'t. Absent when there is nothing to add: a machine with no Docker on\nit has said everything there is to say.'),
-  "status": zod.enum(['Unknown', 'Running', 'Stopped', 'Absent']).describe('The four answers to \"can a session here run a container?\".\n\nTwo kinds of no, because they have different fixes and an agent told only\n\"no\" keeps trying. The distinction that matters is between a machine where\nDocker was never meant to be and one where it was and did not start.')
+  "status": zod.enum(['Unknown', 'Running', 'Stopped', 'Absent']).describe('The four answers to "can a session here run a container?".\n\nTwo kinds of no, because they have different fixes and an agent told only\n"no" keeps trying. The distinction that matters is between a machine where\nDocker was never meant to be and one where it was and did not start.')
 }).optional().describe('Whether a session on this machine can run containers.\n\nReported by the worker at every handshake rather than inferred from the\nkind of host: the answer is a fact about the machine the worker is on,\nand a container, a server and a server-with-a-container each arrive at\nit differently.'),
   "drained": zod.boolean().optional().describe('Finishing what it has, taking nothing new. Separate from being\nunreachable: a draining host is still online and still working.'),
   "id": zod.string().describe('Identifies a host.'),
-  "machine": zod.string().nullish().describe('Machine grouping; \"local\" means the machine hosting the control plane.'),
+  "machine": zod.string().nullish().describe('Machine grouping; "local" means the machine hosting the control plane.'),
   "memoryMb": zod.int().min(listHostsResponseMemoryMbMin).nullish(),
   "name": zod.string().describe('What the user calls it. `localhost` is a real host, not a special case.'),
   "reconnecting": zod.boolean().optional().describe('Whether we are still trying to reach it.\n\nA fact about the running control plane rather than about the host, so it\nis answered per request and never stored. Distinguishes a machine on its\nway back from one nobody is looking for.'),
@@ -107,7 +107,7 @@ export const CreateHostBody = zod.object({
   "hostKey": zod.string().nullish().describe('Recorded when the host is added. Not yet checked against what the\nmachine answers with — connecting trusts a key it hasn\'t seen before\nand remembers it, so this is a record rather than a guarantee.'),
   "key": zod.union([zod.object({
   "type": zod.enum(['Default'])
-}).describe('Let ssh choose: the agent first, then the usual names in `~\/.ssh`.\n\nThe default, and what an absent `identity_file` used to mean. Still\nuseful for a control plane running on a machine whose ssh is already\nconfigured — a development install, or a binary on a host.'),zod.object({
+}).describe('Let ssh choose: the agent first, then the usual names in `~/.ssh`.\n\nThe default, and what an absent `identity_file` used to mean. Still\nuseful for a control plane running on a machine whose ssh is already\nconfigured — a development install, or a binary on a host.'),zod.object({
   "type": zod.enum(['Managed'])
 }).describe('The key Firetower made for itself, sealed in the vault.\n\nWhat a server added through the interface uses. Firetower holds this one\nbecause in a container there is no other way for it to hold anything:\nit is scoped to this installation, opens nothing else, and is revoked by\ndeleting one line on one machine.'),zod.object({
   "name": zod.string(),
@@ -163,7 +163,7 @@ export const CreateHostResponse = zod.object({
   "hostKey": zod.string().nullish().describe('Recorded when the host is added. Not yet checked against what the\nmachine answers with — connecting trusts a key it hasn\'t seen before\nand remembers it, so this is a record rather than a guarantee.'),
   "key": zod.union([zod.object({
   "type": zod.enum(['Default'])
-}).describe('Let ssh choose: the agent first, then the usual names in `~\/.ssh`.\n\nThe default, and what an absent `identity_file` used to mean. Still\nuseful for a control plane running on a machine whose ssh is already\nconfigured — a development install, or a binary on a host.'),zod.object({
+}).describe('Let ssh choose: the agent first, then the usual names in `~/.ssh`.\n\nThe default, and what an absent `identity_file` used to mean. Still\nuseful for a control plane running on a machine whose ssh is already\nconfigured — a development install, or a binary on a host.'),zod.object({
   "type": zod.enum(['Managed'])
 }).describe('The key Firetower made for itself, sealed in the vault.\n\nWhat a server added through the interface uses. Firetower holds this one\nbecause in a container there is no other way for it to hold anything:\nit is scoped to this installation, opens nothing else, and is revoked by\ndeleting one line on one machine.'),zod.object({
   "name": zod.string(),
@@ -186,11 +186,11 @@ export const CreateHostResponse = zod.object({
 }).describe('Why it isn\'t answering, when it isn\'t. Cleared as soon as it does.')]).optional(),
   "docker": zod.object({
   "detail": zod.string().nullish().describe('The daemon\'s version where it is running, and why it isn\'t where it\nisn\'t. Absent when there is nothing to add: a machine with no Docker on\nit has said everything there is to say.'),
-  "status": zod.enum(['Unknown', 'Running', 'Stopped', 'Absent']).describe('The four answers to \"can a session here run a container?\".\n\nTwo kinds of no, because they have different fixes and an agent told only\n\"no\" keeps trying. The distinction that matters is between a machine where\nDocker was never meant to be and one where it was and did not start.')
+  "status": zod.enum(['Unknown', 'Running', 'Stopped', 'Absent']).describe('The four answers to "can a session here run a container?".\n\nTwo kinds of no, because they have different fixes and an agent told only\n"no" keeps trying. The distinction that matters is between a machine where\nDocker was never meant to be and one where it was and did not start.')
 }).optional().describe('Whether a session on this machine can run containers.\n\nReported by the worker at every handshake rather than inferred from the\nkind of host: the answer is a fact about the machine the worker is on,\nand a container, a server and a server-with-a-container each arrive at\nit differently.'),
   "drained": zod.boolean().optional().describe('Finishing what it has, taking nothing new. Separate from being\nunreachable: a draining host is still online and still working.'),
   "id": zod.string().describe('Identifies a host.'),
-  "machine": zod.string().nullish().describe('Machine grouping; \"local\" means the machine hosting the control plane.'),
+  "machine": zod.string().nullish().describe('Machine grouping; "local" means the machine hosting the control plane.'),
   "memoryMb": zod.int().min(createHostResponseMemoryMbMin).nullish(),
   "name": zod.string().describe('What the user calls it. `localhost` is a real host, not a special case.'),
   "reconnecting": zod.boolean().optional().describe('Whether we are still trying to reach it.\n\nA fact about the running control plane rather than about the host, so it\nis answered per request and never stored. Distinguishes a machine on its\nway back from one nobody is looking for.'),
@@ -221,7 +221,7 @@ export const ProbeHostBody = zod.object({
   "hostKey": zod.string().nullish().describe('Recorded when the host is added. Not yet checked against what the\nmachine answers with — connecting trusts a key it hasn\'t seen before\nand remembers it, so this is a record rather than a guarantee.'),
   "key": zod.union([zod.object({
   "type": zod.enum(['Default'])
-}).describe('Let ssh choose: the agent first, then the usual names in `~\/.ssh`.\n\nThe default, and what an absent `identity_file` used to mean. Still\nuseful for a control plane running on a machine whose ssh is already\nconfigured — a development install, or a binary on a host.'),zod.object({
+}).describe('Let ssh choose: the agent first, then the usual names in `~/.ssh`.\n\nThe default, and what an absent `identity_file` used to mean. Still\nuseful for a control plane running on a machine whose ssh is already\nconfigured — a development install, or a binary on a host.'),zod.object({
   "type": zod.enum(['Managed'])
 }).describe('The key Firetower made for itself, sealed in the vault.\n\nWhat a server added through the interface uses. Firetower holds this one\nbecause in a container there is no other way for it to hold anything:\nit is scoped to this installation, opens nothing else, and is revoked by\ndeleting one line on one machine.'),zod.object({
   "name": zod.string(),
@@ -246,7 +246,7 @@ export const ProbeHostResponse = zod.object({
   "remedy": zod.string().nullish().describe('What to run, when there is something to run. Shown with a copy button,\nso it must be the whole command and nothing else.'),
   "summary": zod.string().describe('One sentence, written for whoever is looking at the screen.')
 }).describe('Why not, or what is still wrong once we were in.')]).optional(),
-  "reached": zod.boolean().describe('Whether ssh got onto the machine.\n\nNot the same as \"everything is fine\". A machine with no worker on it has\nbeen reached — the address, the account and the key are all right — and\nis worth adding, because what is left is a command to run over there.')
+  "reached": zod.boolean().describe('Whether ssh got onto the machine.\n\nNot the same as "everything is fine". A machine with no worker on it has\nbeen reached — the address, the account and the key are all right — and\nis worth adding, because what is left is a command to run over there.')
 }).describe('What a machine would say, before anything is written down.')
 
 /**
@@ -320,7 +320,7 @@ export const RenameHostResponse = zod.object({
   "hostKey": zod.string().nullish().describe('Recorded when the host is added. Not yet checked against what the\nmachine answers with — connecting trusts a key it hasn\'t seen before\nand remembers it, so this is a record rather than a guarantee.'),
   "key": zod.union([zod.object({
   "type": zod.enum(['Default'])
-}).describe('Let ssh choose: the agent first, then the usual names in `~\/.ssh`.\n\nThe default, and what an absent `identity_file` used to mean. Still\nuseful for a control plane running on a machine whose ssh is already\nconfigured — a development install, or a binary on a host.'),zod.object({
+}).describe('Let ssh choose: the agent first, then the usual names in `~/.ssh`.\n\nThe default, and what an absent `identity_file` used to mean. Still\nuseful for a control plane running on a machine whose ssh is already\nconfigured — a development install, or a binary on a host.'),zod.object({
   "type": zod.enum(['Managed'])
 }).describe('The key Firetower made for itself, sealed in the vault.\n\nWhat a server added through the interface uses. Firetower holds this one\nbecause in a container there is no other way for it to hold anything:\nit is scoped to this installation, opens nothing else, and is revoked by\ndeleting one line on one machine.'),zod.object({
   "name": zod.string(),
@@ -343,11 +343,11 @@ export const RenameHostResponse = zod.object({
 }).describe('Why it isn\'t answering, when it isn\'t. Cleared as soon as it does.')]).optional(),
   "docker": zod.object({
   "detail": zod.string().nullish().describe('The daemon\'s version where it is running, and why it isn\'t where it\nisn\'t. Absent when there is nothing to add: a machine with no Docker on\nit has said everything there is to say.'),
-  "status": zod.enum(['Unknown', 'Running', 'Stopped', 'Absent']).describe('The four answers to \"can a session here run a container?\".\n\nTwo kinds of no, because they have different fixes and an agent told only\n\"no\" keeps trying. The distinction that matters is between a machine where\nDocker was never meant to be and one where it was and did not start.')
+  "status": zod.enum(['Unknown', 'Running', 'Stopped', 'Absent']).describe('The four answers to "can a session here run a container?".\n\nTwo kinds of no, because they have different fixes and an agent told only\n"no" keeps trying. The distinction that matters is between a machine where\nDocker was never meant to be and one where it was and did not start.')
 }).optional().describe('Whether a session on this machine can run containers.\n\nReported by the worker at every handshake rather than inferred from the\nkind of host: the answer is a fact about the machine the worker is on,\nand a container, a server and a server-with-a-container each arrive at\nit differently.'),
   "drained": zod.boolean().optional().describe('Finishing what it has, taking nothing new. Separate from being\nunreachable: a draining host is still online and still working.'),
   "id": zod.string().describe('Identifies a host.'),
-  "machine": zod.string().nullish().describe('Machine grouping; \"local\" means the machine hosting the control plane.'),
+  "machine": zod.string().nullish().describe('Machine grouping; "local" means the machine hosting the control plane.'),
   "memoryMb": zod.int().min(renameHostResponseMemoryMbMin).nullish(),
   "name": zod.string().describe('What the user calls it. `localhost` is a real host, not a special case.'),
   "reconnecting": zod.boolean().optional().describe('Whether we are still trying to reach it.\n\nA fact about the running control plane rather than about the host, so it\nis answered per request and never stored. Distinguishes a machine on its\nway back from one nobody is looking for.'),

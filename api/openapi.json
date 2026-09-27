@@ -10,7 +10,7 @@
       "name": "AGPL-3.0-only",
       "identifier": "AGPL-3.0-only"
     },
-    "version": "0.41.1"
+    "version": "0"
   },
   "paths": {
     "/api/v1/agent-accounts": {
