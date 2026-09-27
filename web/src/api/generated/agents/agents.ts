@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.40.2
+ * OpenAPI spec version: 0
  */
 import {
   useMutation,
@@ -149,8 +149,8 @@ export function useListAgents<TData = Awaited<ReturnType<typeof listAgents>>, TE
 
 export const useSetListAgentsQueryData = () => {
   const queryClient = useQueryClient();
-  return (updater: Awaited<ReturnType<typeof listAgents>> | undefined | ((old: Awaited<ReturnType<typeof listAgents>> | undefined) => Awaited<ReturnType<typeof listAgents>> | undefined)) => {
-    queryClient.setQueriesData<Awaited<ReturnType<typeof listAgents>>>({ queryKey: getListAgentsQueryKey() }, updater);
+  return (updater: Awaited<ReturnType<typeof listAgents>> | undefined | ((old: Awaited<ReturnType<typeof listAgents>> | undefined) => Awaited<ReturnType<typeof listAgents>> | undefined), $exactMatch: boolean = true) => {
+    queryClient.setQueriesData<Awaited<ReturnType<typeof listAgents>>>({ exact: $exactMatch, queryKey: getListAgentsQueryKey() }, updater);
   };
 }
 
@@ -189,11 +189,13 @@ export const checkAgents = async ( options?: Parameters<typeof http>[1]): Promis
 
 
 
+export const getCheckAgentsMutationKey = () => ['checkAgents'] as const;
+
 export const getCheckAgentsMutationOptions = <TError = unknown,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof checkAgents>>, TError,void, TContext>, request?: SecondParameter<typeof http>}
 ): UseMutationOptions<Awaited<ReturnType<typeof checkAgents>>, TError,void, TContext> => {
 
-const mutationKey = ['checkAgents'];
+const mutationKey = getCheckAgentsMutationKey();
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -219,6 +221,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type CheckAgentsMutationResult = NonNullable<Awaited<ReturnType<typeof checkAgents>>>
 
     export type CheckAgentsMutationError = unknown
+
 
     /**
  * @summary Re-ask every reachable host what it has.
@@ -247,11 +250,25 @@ export const useCheckAgents = <TError = unknown,
 export const configureAgent = async (kind: string,
     configureAgentBody: ConfigureAgent, options?: Parameters<typeof http>[1]): Promise<void> => {
 
-  return http<void>(getConfigureAgentUrl(kind),
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return http<void>(getConfigureAgentUrl(kind),
   {
     ...options,
     method: 'PUT',
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(configureAgentBody)
   }
 );}
@@ -260,11 +277,13 @@ export const configureAgent = async (kind: string,
 
 
 
-export const getConfigureAgentMutationOptions = <TError = ApiError,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof configureAgent>>, TError,{kind: string;data: ConfigureAgent}, TContext>, request?: SecondParameter<typeof http>}
-): UseMutationOptions<Awaited<ReturnType<typeof configureAgent>>, TError,{kind: string;data: ConfigureAgent}, TContext> => {
+export const getConfigureAgentMutationKey = () => ['configureAgent'] as const;
 
-const mutationKey = ['configureAgent'];
+export const getConfigureAgentMutationOptions = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof configureAgent>>, TError,ConfigureAgentMutationVariables, TContext>, request?: SecondParameter<typeof http>}
+): UseMutationOptions<Awaited<ReturnType<typeof configureAgent>>, TError,ConfigureAgentMutationVariables, TContext> => {
+
+const mutationKey = getConfigureAgentMutationKey();
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -274,7 +293,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof configureAgent>>, {kind: string;data: ConfigureAgent}> = (props) => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof configureAgent>>, ConfigureAgentMutationVariables> = (props) => {
           const {kind,data} = props ?? {};
 
           return  configureAgent(kind,data,requestOptions)
@@ -290,16 +309,17 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type ConfigureAgentMutationResult = NonNullable<Awaited<ReturnType<typeof configureAgent>>>
     export type ConfigureAgentMutationBody = ConfigureAgent
     export type ConfigureAgentMutationError = ApiError
+    export type ConfigureAgentMutationVariables = {kind: string;data: ConfigureAgent}
 
     /**
  * @summary Configure how an agent authenticates.
  */
 export const useConfigureAgent = <TError = ApiError,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof configureAgent>>, TError,{kind: string;data: ConfigureAgent}, TContext>, request?: SecondParameter<typeof http>}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof configureAgent>>, TError,ConfigureAgentMutationVariables, TContext>, request?: SecondParameter<typeof http>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof configureAgent>>,
         TError,
-        {kind: string;data: ConfigureAgent},
+        ConfigureAgentMutationVariables,
         TContext
       > => {
       return useMutation(getConfigureAgentMutationOptions(options), queryClient);
@@ -330,11 +350,13 @@ export const forgetAgent = async (kind: string, options?: Parameters<typeof http
 
 
 
-export const getForgetAgentMutationOptions = <TError = ApiError,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof forgetAgent>>, TError,{kind: string}, TContext>, request?: SecondParameter<typeof http>}
-): UseMutationOptions<Awaited<ReturnType<typeof forgetAgent>>, TError,{kind: string}, TContext> => {
+export const getForgetAgentMutationKey = () => ['forgetAgent'] as const;
 
-const mutationKey = ['forgetAgent'];
+export const getForgetAgentMutationOptions = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof forgetAgent>>, TError,ForgetAgentMutationVariables, TContext>, request?: SecondParameter<typeof http>}
+): UseMutationOptions<Awaited<ReturnType<typeof forgetAgent>>, TError,ForgetAgentMutationVariables, TContext> => {
+
+const mutationKey = getForgetAgentMutationKey();
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -344,7 +366,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof forgetAgent>>, {kind: string}> = (props) => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof forgetAgent>>, ForgetAgentMutationVariables> = (props) => {
           const {kind} = props ?? {};
 
           return  forgetAgent(kind,requestOptions)
@@ -360,16 +382,17 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type ForgetAgentMutationResult = NonNullable<Awaited<ReturnType<typeof forgetAgent>>>
 
     export type ForgetAgentMutationError = ApiError
+    export type ForgetAgentMutationVariables = {kind: string}
 
     /**
  * @summary Forget an agent's configuration and any credential with it.
  */
 export const useForgetAgent = <TError = ApiError,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof forgetAgent>>, TError,{kind: string}, TContext>, request?: SecondParameter<typeof http>}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof forgetAgent>>, TError,ForgetAgentMutationVariables, TContext>, request?: SecondParameter<typeof http>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof forgetAgent>>,
         TError,
-        {kind: string},
+        ForgetAgentMutationVariables,
         TContext
       > => {
       return useMutation(getForgetAgentMutationOptions(options), queryClient);
@@ -388,18 +411,33 @@ export const useForgetAgent = <TError = ApiError,
  * Firetower is running inside. The work happens on the host either way — this
  * only means nobody has to reach it by hand.
  *
- * Slow on purpose: the request is held until npm is done, because the answer
- * somebody wants is which version they now have.
+ * Slow on purpose: the request is held until the download is done, because
+ * the answer somebody wants is which version they now have. A minute is
+ * normal — these are binaries of a few hundred megabytes.
  * @summary Fetch an agent onto a host.
  */
 export const installAgent = async (kind: string,
     installAgentBody: InstallAgent, options?: Parameters<typeof http>[1]): Promise<AgentView[]> => {
 
-  return http<AgentView[]>(getInstallAgentUrl(kind),
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return http<AgentView[]>(getInstallAgentUrl(kind),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(installAgentBody)
   }
 );}
@@ -408,11 +446,13 @@ export const installAgent = async (kind: string,
 
 
 
-export const getInstallAgentMutationOptions = <TError = ApiError,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof installAgent>>, TError,{kind: string;data: InstallAgent}, TContext>, request?: SecondParameter<typeof http>}
-): UseMutationOptions<Awaited<ReturnType<typeof installAgent>>, TError,{kind: string;data: InstallAgent}, TContext> => {
+export const getInstallAgentMutationKey = () => ['installAgent'] as const;
 
-const mutationKey = ['installAgent'];
+export const getInstallAgentMutationOptions = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof installAgent>>, TError,InstallAgentMutationVariables, TContext>, request?: SecondParameter<typeof http>}
+): UseMutationOptions<Awaited<ReturnType<typeof installAgent>>, TError,InstallAgentMutationVariables, TContext> => {
+
+const mutationKey = getInstallAgentMutationKey();
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -422,7 +462,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof installAgent>>, {kind: string;data: InstallAgent}> = (props) => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof installAgent>>, InstallAgentMutationVariables> = (props) => {
           const {kind,data} = props ?? {};
 
           return  installAgent(kind,data,requestOptions)
@@ -438,16 +478,17 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type InstallAgentMutationResult = NonNullable<Awaited<ReturnType<typeof installAgent>>>
     export type InstallAgentMutationBody = InstallAgent
     export type InstallAgentMutationError = ApiError
+    export type InstallAgentMutationVariables = {kind: string;data: InstallAgent}
 
     /**
  * @summary Fetch an agent onto a host.
  */
 export const useInstallAgent = <TError = ApiError,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof installAgent>>, TError,{kind: string;data: InstallAgent}, TContext>, request?: SecondParameter<typeof http>}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof installAgent>>, TError,InstallAgentMutationVariables, TContext>, request?: SecondParameter<typeof http>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof installAgent>>,
         TError,
-        {kind: string;data: InstallAgent},
+        InstallAgentMutationVariables,
         TContext
       > => {
       return useMutation(getInstallAgentMutationOptions(options), queryClient);
@@ -472,11 +513,25 @@ export const useInstallAgent = <TError = ApiError,
 export const signAgentIn = async (kind: string,
     signIn: SignIn, options?: Parameters<typeof http>[1]): Promise<PendingAuth> => {
 
-  return http<PendingAuth>(getSignAgentInUrl(kind),
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return http<PendingAuth>(getSignAgentInUrl(kind),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(signIn)
   }
 );}
@@ -485,11 +540,13 @@ export const signAgentIn = async (kind: string,
 
 
 
-export const getSignAgentInMutationOptions = <TError = ApiError,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof signAgentIn>>, TError,{kind: string;data: SignIn}, TContext>, request?: SecondParameter<typeof http>}
-): UseMutationOptions<Awaited<ReturnType<typeof signAgentIn>>, TError,{kind: string;data: SignIn}, TContext> => {
+export const getSignAgentInMutationKey = () => ['signAgentIn'] as const;
 
-const mutationKey = ['signAgentIn'];
+export const getSignAgentInMutationOptions = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof signAgentIn>>, TError,SignAgentInMutationVariables, TContext>, request?: SecondParameter<typeof http>}
+): UseMutationOptions<Awaited<ReturnType<typeof signAgentIn>>, TError,SignAgentInMutationVariables, TContext> => {
+
+const mutationKey = getSignAgentInMutationKey();
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -499,7 +556,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof signAgentIn>>, {kind: string;data: SignIn}> = (props) => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof signAgentIn>>, SignAgentInMutationVariables> = (props) => {
           const {kind,data} = props ?? {};
 
           return  signAgentIn(kind,data,requestOptions)
@@ -515,16 +572,17 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type SignAgentInMutationResult = NonNullable<Awaited<ReturnType<typeof signAgentIn>>>
     export type SignAgentInMutationBody = SignIn
     export type SignAgentInMutationError = ApiError
+    export type SignAgentInMutationVariables = {kind: string;data: SignIn}
 
     /**
  * @summary Sign an agent in with a device code, on a host.
  */
 export const useSignAgentIn = <TError = ApiError,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof signAgentIn>>, TError,{kind: string;data: SignIn}, TContext>, request?: SecondParameter<typeof http>}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof signAgentIn>>, TError,SignAgentInMutationVariables, TContext>, request?: SecondParameter<typeof http>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof signAgentIn>>,
         TError,
-        {kind: string;data: SignIn},
+        SignAgentInMutationVariables,
         TContext
       > => {
       return useMutation(getSignAgentInMutationOptions(options), queryClient);

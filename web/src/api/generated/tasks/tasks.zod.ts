@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.40.2
+ * OpenAPI spec version: 0
  */
 import * as zod from 'zod';
 
@@ -21,7 +21,7 @@ export const listTasksQueryPageMin = 0;
 
 export const ListTasksQueryParams = zod.object({
   "source": zod.string().optional().describe('Which tracker; github by default'),
-  "repo": zod.string().optional().describe('acme\/web, when the source has repositories'),
+  "repo": zod.string().optional().describe('acme/web, when the source has repositories'),
   "team": zod.string().optional().describe('ENG, when the source has teams'),
   "kind": zod.enum(['issue', 'pullRequest', 'ticket']).optional().describe('issue, pullRequest or ticket'),
   "state": zod.enum(['open', 'closed']).optional().describe('open or closed'),
@@ -44,9 +44,9 @@ export const ListTasksResponse = zod.object({
   "login": zod.string()
 })),
   "body": zod.string().nullish().describe('Seeds the first prompt, so nobody types the problem out twice.'),
-  "id": zod.string().describe('Stable within its source: `github:acme\/web#5138`.'),
+  "id": zod.string().describe('Stable within its source: `github:acme/web#5138`.'),
   "key": zod.string().describe('What a person calls it. `#5138`.'),
-  "kind": zod.enum(['issue', 'pullRequest', 'ticket']).describe('What sort of thing it is.\n\nThe one field the Issues\/PRs toggle reads, and the reason \"filter by kind\"\nis a query parameter rather than a migration when a second source lands.'),
+  "kind": zod.enum(['issue', 'pullRequest', 'ticket']).describe('What sort of thing it is.\n\nThe one field the Issues/PRs toggle reads, and the reason "filter by kind"\nis a query parameter rather than a migration when a second source lands.'),
   "labels": zod.array(zod.object({
   "colour": zod.string().nullish().describe('Six hex digits, no `#`. Whatever the source calls it.'),
   "name": zod.string()
@@ -82,9 +82,9 @@ export const GetTaskResponse = zod.object({
   "login": zod.string()
 })),
   "body": zod.string().nullish().describe('Seeds the first prompt, so nobody types the problem out twice.'),
-  "id": zod.string().describe('Stable within its source: `github:acme\/web#5138`.'),
+  "id": zod.string().describe('Stable within its source: `github:acme/web#5138`.'),
   "key": zod.string().describe('What a person calls it. `#5138`.'),
-  "kind": zod.enum(['issue', 'pullRequest', 'ticket']).describe('What sort of thing it is.\n\nThe one field the Issues\/PRs toggle reads, and the reason \"filter by kind\"\nis a query parameter rather than a migration when a second source lands.'),
+  "kind": zod.enum(['issue', 'pullRequest', 'ticket']).describe('What sort of thing it is.\n\nThe one field the Issues/PRs toggle reads, and the reason "filter by kind"\nis a query parameter rather than a migration when a second source lands.'),
   "labels": zod.array(zod.object({
   "colour": zod.string().nullish().describe('Six hex digits, no `#`. Whatever the source calls it.'),
   "name": zod.string()

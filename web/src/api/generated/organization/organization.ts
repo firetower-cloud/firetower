@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.40.2
+ * OpenAPI spec version: 0
  */
 import {
   useMutation,
@@ -71,11 +71,25 @@ export const getRenameOrganizationUrl = () => {
  */
 export const renameOrganization = async (organizationName: OrganizationName, options?: Parameters<typeof http>[1]): Promise<Organization> => {
 
-  return http<Organization>(getRenameOrganizationUrl(),
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return http<Organization>(getRenameOrganizationUrl(),
   {
     ...options,
     method: 'PATCH',
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(organizationName)
   }
 );}
@@ -84,11 +98,13 @@ export const renameOrganization = async (organizationName: OrganizationName, opt
 
 
 
-export const getRenameOrganizationMutationOptions = <TError = ApiError,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof renameOrganization>>, TError,{data: OrganizationName}, TContext>, request?: SecondParameter<typeof http>}
-): UseMutationOptions<Awaited<ReturnType<typeof renameOrganization>>, TError,{data: OrganizationName}, TContext> => {
+export const getRenameOrganizationMutationKey = () => ['renameOrganization'] as const;
 
-const mutationKey = ['renameOrganization'];
+export const getRenameOrganizationMutationOptions = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof renameOrganization>>, TError,RenameOrganizationMutationVariables, TContext>, request?: SecondParameter<typeof http>}
+): UseMutationOptions<Awaited<ReturnType<typeof renameOrganization>>, TError,RenameOrganizationMutationVariables, TContext> => {
+
+const mutationKey = getRenameOrganizationMutationKey();
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -98,7 +114,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof renameOrganization>>, {data: OrganizationName}> = (props) => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof renameOrganization>>, RenameOrganizationMutationVariables> = (props) => {
           const {data} = props ?? {};
 
           return  renameOrganization(data,requestOptions)
@@ -114,16 +130,17 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type RenameOrganizationMutationResult = NonNullable<Awaited<ReturnType<typeof renameOrganization>>>
     export type RenameOrganizationMutationBody = OrganizationName
     export type RenameOrganizationMutationError = ApiError
+    export type RenameOrganizationMutationVariables = {data: OrganizationName}
 
     /**
  * @summary Rename the organisation.
  */
 export const useRenameOrganization = <TError = ApiError,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof renameOrganization>>, TError,{data: OrganizationName}, TContext>, request?: SecondParameter<typeof http>}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof renameOrganization>>, TError,RenameOrganizationMutationVariables, TContext>, request?: SecondParameter<typeof http>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof renameOrganization>>,
         TError,
-        {data: OrganizationName},
+        RenameOrganizationMutationVariables,
         TContext
       > => {
       return useMutation(getRenameOrganizationMutationOptions(options), queryClient);
@@ -230,8 +247,8 @@ export function useListUsers<TData = Awaited<ReturnType<typeof listUsers>>, TErr
  */
 export const useSetListUsersQueryData = () => {
   const queryClient = useQueryClient();
-  return (updater: Awaited<ReturnType<typeof listUsers>> | undefined | ((old: Awaited<ReturnType<typeof listUsers>> | undefined) => Awaited<ReturnType<typeof listUsers>> | undefined)) => {
-    queryClient.setQueriesData<Awaited<ReturnType<typeof listUsers>>>({ queryKey: getListUsersQueryKey() }, updater);
+  return (updater: Awaited<ReturnType<typeof listUsers>> | undefined | ((old: Awaited<ReturnType<typeof listUsers>> | undefined) => Awaited<ReturnType<typeof listUsers>> | undefined), $exactMatch: boolean = true) => {
+    queryClient.setQueriesData<Awaited<ReturnType<typeof listUsers>>>({ exact: $exactMatch, queryKey: getListUsersQueryKey() }, updater);
   };
 }
 
@@ -258,11 +275,25 @@ export const getCreateUserUrl = () => {
  */
 export const createUser = async (newUser: NewUser, options?: Parameters<typeof http>[1]): Promise<CreatedUser> => {
 
-  return http<CreatedUser>(getCreateUserUrl(),
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return http<CreatedUser>(getCreateUserUrl(),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(newUser)
   }
 );}
@@ -271,11 +302,13 @@ export const createUser = async (newUser: NewUser, options?: Parameters<typeof h
 
 
 
-export const getCreateUserMutationOptions = <TError = ApiError,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createUser>>, TError,{data: NewUser}, TContext>, request?: SecondParameter<typeof http>}
-): UseMutationOptions<Awaited<ReturnType<typeof createUser>>, TError,{data: NewUser}, TContext> => {
+export const getCreateUserMutationKey = () => ['createUser'] as const;
 
-const mutationKey = ['createUser'];
+export const getCreateUserMutationOptions = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createUser>>, TError,CreateUserMutationVariables, TContext>, request?: SecondParameter<typeof http>}
+): UseMutationOptions<Awaited<ReturnType<typeof createUser>>, TError,CreateUserMutationVariables, TContext> => {
+
+const mutationKey = getCreateUserMutationKey();
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -285,7 +318,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createUser>>, {data: NewUser}> = (props) => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createUser>>, CreateUserMutationVariables> = (props) => {
           const {data} = props ?? {};
 
           return  createUser(data,requestOptions)
@@ -301,16 +334,17 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type CreateUserMutationResult = NonNullable<Awaited<ReturnType<typeof createUser>>>
     export type CreateUserMutationBody = NewUser
     export type CreateUserMutationError = ApiError
+    export type CreateUserMutationVariables = {data: NewUser}
 
     /**
  * @summary Add a user. The answer carries their temporary password.
  */
 export const useCreateUser = <TError = ApiError,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createUser>>, TError,{data: NewUser}, TContext>, request?: SecondParameter<typeof http>}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createUser>>, TError,CreateUserMutationVariables, TContext>, request?: SecondParameter<typeof http>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof createUser>>,
         TError,
-        {data: NewUser},
+        CreateUserMutationVariables,
         TContext
       > => {
       return useMutation(getCreateUserMutationOptions(options), queryClient);
@@ -341,11 +375,13 @@ export const deleteUser = async (id: string, options?: Parameters<typeof http>[1
 
 
 
-export const getDeleteUserMutationOptions = <TError = ApiError,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteUser>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof http>}
-): UseMutationOptions<Awaited<ReturnType<typeof deleteUser>>, TError,{id: string}, TContext> => {
+export const getDeleteUserMutationKey = () => ['deleteUser'] as const;
 
-const mutationKey = ['deleteUser'];
+export const getDeleteUserMutationOptions = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteUser>>, TError,DeleteUserMutationVariables, TContext>, request?: SecondParameter<typeof http>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteUser>>, TError,DeleteUserMutationVariables, TContext> => {
+
+const mutationKey = getDeleteUserMutationKey();
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -355,7 +391,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteUser>>, {id: string}> = (props) => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteUser>>, DeleteUserMutationVariables> = (props) => {
           const {id} = props ?? {};
 
           return  deleteUser(id,requestOptions)
@@ -371,16 +407,17 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type DeleteUserMutationResult = NonNullable<Awaited<ReturnType<typeof deleteUser>>>
 
     export type DeleteUserMutationError = ApiError
+    export type DeleteUserMutationVariables = {id: string}
 
     /**
  * @summary Remove a user for good. Their workspaces go with them; prefer switching off.
  */
 export const useDeleteUser = <TError = ApiError,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteUser>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof http>}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteUser>>, TError,DeleteUserMutationVariables, TContext>, request?: SecondParameter<typeof http>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof deleteUser>>,
         TError,
-        {id: string},
+        DeleteUserMutationVariables,
         TContext
       > => {
       return useMutation(getDeleteUserMutationOptions(options), queryClient);
@@ -399,11 +436,25 @@ export const useDeleteUser = <TError = ApiError,
 export const changeUser = async (id: string,
     userChange: UserChange, options?: Parameters<typeof http>[1]): Promise<User> => {
 
-  return http<User>(getChangeUserUrl(id),
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return http<User>(getChangeUserUrl(id),
   {
     ...options,
     method: 'PATCH',
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(userChange)
   }
 );}
@@ -412,11 +463,13 @@ export const changeUser = async (id: string,
 
 
 
-export const getChangeUserMutationOptions = <TError = ApiError,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof changeUser>>, TError,{id: string;data: UserChange}, TContext>, request?: SecondParameter<typeof http>}
-): UseMutationOptions<Awaited<ReturnType<typeof changeUser>>, TError,{id: string;data: UserChange}, TContext> => {
+export const getChangeUserMutationKey = () => ['changeUser'] as const;
 
-const mutationKey = ['changeUser'];
+export const getChangeUserMutationOptions = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof changeUser>>, TError,ChangeUserMutationVariables, TContext>, request?: SecondParameter<typeof http>}
+): UseMutationOptions<Awaited<ReturnType<typeof changeUser>>, TError,ChangeUserMutationVariables, TContext> => {
+
+const mutationKey = getChangeUserMutationKey();
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -426,7 +479,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof changeUser>>, {id: string;data: UserChange}> = (props) => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof changeUser>>, ChangeUserMutationVariables> = (props) => {
           const {id,data} = props ?? {};
 
           return  changeUser(id,data,requestOptions)
@@ -442,16 +495,17 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type ChangeUserMutationResult = NonNullable<Awaited<ReturnType<typeof changeUser>>>
     export type ChangeUserMutationBody = UserChange
     export type ChangeUserMutationError = ApiError
+    export type ChangeUserMutationVariables = {id: string;data: UserChange}
 
     /**
  * @summary Change a user's role, or switch them off or on.
  */
 export const useChangeUser = <TError = ApiError,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof changeUser>>, TError,{id: string;data: UserChange}, TContext>, request?: SecondParameter<typeof http>}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof changeUser>>, TError,ChangeUserMutationVariables, TContext>, request?: SecondParameter<typeof http>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof changeUser>>,
         TError,
-        {id: string;data: UserChange},
+        ChangeUserMutationVariables,
         TContext
       > => {
       return useMutation(getChangeUserMutationOptions(options), queryClient);
@@ -482,11 +536,13 @@ export const resetUserPassword = async (id: string, options?: Parameters<typeof 
 
 
 
-export const getResetUserPasswordMutationOptions = <TError = ApiError,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof resetUserPassword>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof http>}
-): UseMutationOptions<Awaited<ReturnType<typeof resetUserPassword>>, TError,{id: string}, TContext> => {
+export const getResetUserPasswordMutationKey = () => ['resetUserPassword'] as const;
 
-const mutationKey = ['resetUserPassword'];
+export const getResetUserPasswordMutationOptions = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof resetUserPassword>>, TError,ResetUserPasswordMutationVariables, TContext>, request?: SecondParameter<typeof http>}
+): UseMutationOptions<Awaited<ReturnType<typeof resetUserPassword>>, TError,ResetUserPasswordMutationVariables, TContext> => {
+
+const mutationKey = getResetUserPasswordMutationKey();
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -496,7 +552,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof resetUserPassword>>, {id: string}> = (props) => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof resetUserPassword>>, ResetUserPasswordMutationVariables> = (props) => {
           const {id} = props ?? {};
 
           return  resetUserPassword(id,requestOptions)
@@ -512,16 +568,17 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type ResetUserPasswordMutationResult = NonNullable<Awaited<ReturnType<typeof resetUserPassword>>>
 
     export type ResetUserPasswordMutationError = ApiError
+    export type ResetUserPasswordMutationVariables = {id: string}
 
     /**
  * @summary Give a user a new temporary password. Their sessions end; they replace it on sign-in.
  */
 export const useResetUserPassword = <TError = ApiError,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof resetUserPassword>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof http>}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof resetUserPassword>>, TError,ResetUserPasswordMutationVariables, TContext>, request?: SecondParameter<typeof http>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof resetUserPassword>>,
         TError,
-        {id: string},
+        ResetUserPasswordMutationVariables,
         TContext
       > => {
       return useMutation(getResetUserPasswordMutationOptions(options), queryClient);

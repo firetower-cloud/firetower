@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.40.2
+ * OpenAPI spec version: 0
  */
 import {
   useQuery,
@@ -68,11 +68,25 @@ export const getStreamUrl = () => {
  */
 export const stream = async (clientFrame: ClientFrame, options?: Parameters<typeof http>[1]): Promise<ServerFrame> => {
 
-  return http<ServerFrame>(getStreamUrl(),
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return http<ServerFrame>(getStreamUrl(),
   {
     ...options,
     method: 'GET',
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(clientFrame)
   }
 );}
@@ -157,8 +171,8 @@ export function useStream<TData = Awaited<ReturnType<typeof stream>>, TError = u
  */
 export const useSetStreamQueryData = () => {
   const queryClient = useQueryClient();
-  return (clientFrame: ClientFrame | undefined,updater: Awaited<ReturnType<typeof stream>> | undefined | ((old: Awaited<ReturnType<typeof stream>> | undefined) => Awaited<ReturnType<typeof stream>> | undefined)) => {
-    queryClient.setQueriesData<Awaited<ReturnType<typeof stream>>>({ queryKey: getStreamQueryKey(clientFrame) }, updater);
+  return (clientFrame: ClientFrame | undefined,updater: Awaited<ReturnType<typeof stream>> | undefined | ((old: Awaited<ReturnType<typeof stream>> | undefined) => Awaited<ReturnType<typeof stream>> | undefined), $exactMatch: boolean = true) => {
+    queryClient.setQueriesData<Awaited<ReturnType<typeof stream>>>({ exact: $exactMatch, queryKey: getStreamQueryKey(clientFrame) }, updater);
   };
 }
 

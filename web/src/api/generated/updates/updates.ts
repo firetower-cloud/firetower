@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.40.2
+ * OpenAPI spec version: 0
  */
 import {
   useMutation,
@@ -158,8 +158,8 @@ export function useGetUpdates<TData = Awaited<ReturnType<typeof getUpdates>>, TE
  */
 export const useSetGetUpdatesQueryData = () => {
   const queryClient = useQueryClient();
-  return (updater: Awaited<ReturnType<typeof getUpdates>> | undefined | ((old: Awaited<ReturnType<typeof getUpdates>> | undefined) => Awaited<ReturnType<typeof getUpdates>> | undefined)) => {
-    queryClient.setQueriesData<Awaited<ReturnType<typeof getUpdates>>>({ queryKey: getGetUpdatesQueryKey() }, updater);
+  return (updater: Awaited<ReturnType<typeof getUpdates>> | undefined | ((old: Awaited<ReturnType<typeof getUpdates>> | undefined) => Awaited<ReturnType<typeof getUpdates>> | undefined), $exactMatch: boolean = true) => {
+    queryClient.setQueriesData<Awaited<ReturnType<typeof getUpdates>>>({ exact: $exactMatch, queryKey: getGetUpdatesQueryKey() }, updater);
   };
 }
 
@@ -202,11 +202,13 @@ export const backUpNow = async ( options?: Parameters<typeof http>[1]): Promise<
 
 
 
+export const getBackUpNowMutationKey = () => ['backUpNow'] as const;
+
 export const getBackUpNowMutationOptions = <TError = ApiError,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof backUpNow>>, TError,void, TContext>, request?: SecondParameter<typeof http>}
 ): UseMutationOptions<Awaited<ReturnType<typeof backUpNow>>, TError,void, TContext> => {
 
-const mutationKey = ['backUpNow'];
+const mutationKey = getBackUpNowMutationKey();
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -232,6 +234,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type BackUpNowMutationResult = NonNullable<Awaited<ReturnType<typeof backUpNow>>>
 
     export type BackUpNowMutationError = ApiError
+
 
     /**
  * @summary Take a backup now, outside an upgrade.
@@ -272,11 +275,13 @@ export const checkUpdates = async ( options?: Parameters<typeof http>[1]): Promi
 
 
 
+export const getCheckUpdatesMutationKey = () => ['checkUpdates'] as const;
+
 export const getCheckUpdatesMutationOptions = <TError = unknown,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof checkUpdates>>, TError,void, TContext>, request?: SecondParameter<typeof http>}
 ): UseMutationOptions<Awaited<ReturnType<typeof checkUpdates>>, TError,void, TContext> => {
 
-const mutationKey = ['checkUpdates'];
+const mutationKey = getCheckUpdatesMutationKey();
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -302,6 +307,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type CheckUpdatesMutationResult = NonNullable<Awaited<ReturnType<typeof checkUpdates>>>
 
     export type CheckUpdatesMutationError = unknown
+
 
     /**
  * @summary Ask the releases feed now rather than waiting for the next check.
@@ -331,11 +337,25 @@ the screen rather than a surprise on the machine.
  */
 export const planUpdate = async (planRequest: PlanRequest, options?: Parameters<typeof http>[1]): Promise<UpgradePlan> => {
 
-  return http<UpgradePlan>(getPlanUpdateUrl(),
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return http<UpgradePlan>(getPlanUpdateUrl(),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(planRequest)
   }
 );}
@@ -344,11 +364,13 @@ export const planUpdate = async (planRequest: PlanRequest, options?: Parameters<
 
 
 
-export const getPlanUpdateMutationOptions = <TError = ApiError,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof planUpdate>>, TError,{data: PlanRequest}, TContext>, request?: SecondParameter<typeof http>}
-): UseMutationOptions<Awaited<ReturnType<typeof planUpdate>>, TError,{data: PlanRequest}, TContext> => {
+export const getPlanUpdateMutationKey = () => ['planUpdate'] as const;
 
-const mutationKey = ['planUpdate'];
+export const getPlanUpdateMutationOptions = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof planUpdate>>, TError,PlanUpdateMutationVariables, TContext>, request?: SecondParameter<typeof http>}
+): UseMutationOptions<Awaited<ReturnType<typeof planUpdate>>, TError,PlanUpdateMutationVariables, TContext> => {
+
+const mutationKey = getPlanUpdateMutationKey();
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -358,7 +380,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof planUpdate>>, {data: PlanRequest}> = (props) => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof planUpdate>>, PlanUpdateMutationVariables> = (props) => {
           const {data} = props ?? {};
 
           return  planUpdate(data,requestOptions)
@@ -374,6 +396,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type PlanUpdateMutationResult = NonNullable<Awaited<ReturnType<typeof planUpdate>>>
     export type PlanUpdateMutationBody = PlanRequest
     export type PlanUpdateMutationError = ApiError
+    export type PlanUpdateMutationVariables = {data: PlanRequest}
 
     /**
  * @summary What moving the control plane to a release would do to the deployment's
@@ -381,11 +404,11 @@ files. Asked before agreeing, so an edited `firetower.yml` is a diff on
 the screen rather than a surprise on the machine.
  */
 export const usePlanUpdate = <TError = ApiError,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof planUpdate>>, TError,{data: PlanRequest}, TContext>, request?: SecondParameter<typeof http>}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof planUpdate>>, TError,PlanUpdateMutationVariables, TContext>, request?: SecondParameter<typeof http>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof planUpdate>>,
         TError,
-        {data: PlanRequest},
+        PlanUpdateMutationVariables,
         TContext
       > => {
       return useMutation(getPlanUpdateMutationOptions(options), queryClient);
@@ -492,8 +515,8 @@ export function useListRuns<TData = Awaited<ReturnType<typeof listRuns>>, TError
  */
 export const useSetListRunsQueryData = () => {
   const queryClient = useQueryClient();
-  return (updater: Awaited<ReturnType<typeof listRuns>> | undefined | ((old: Awaited<ReturnType<typeof listRuns>> | undefined) => Awaited<ReturnType<typeof listRuns>> | undefined)) => {
-    queryClient.setQueriesData<Awaited<ReturnType<typeof listRuns>>>({ queryKey: getListRunsQueryKey() }, updater);
+  return (updater: Awaited<ReturnType<typeof listRuns>> | undefined | ((old: Awaited<ReturnType<typeof listRuns>> | undefined) => Awaited<ReturnType<typeof listRuns>> | undefined), $exactMatch: boolean = true) => {
+    queryClient.setQueriesData<Awaited<ReturnType<typeof listRuns>>>({ exact: $exactMatch, queryKey: getListRunsQueryKey() }, updater);
   };
 }
 
@@ -520,11 +543,25 @@ export const getCreateRunUrl = () => {
  */
 export const createRun = async (newRun: NewRun, options?: Parameters<typeof http>[1]): Promise<UpdateRun> => {
 
-  return http<UpdateRun>(getCreateRunUrl(),
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return http<UpdateRun>(getCreateRunUrl(),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(newRun)
   }
 );}
@@ -533,11 +570,13 @@ export const createRun = async (newRun: NewRun, options?: Parameters<typeof http
 
 
 
-export const getCreateRunMutationOptions = <TError = ApiError,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createRun>>, TError,{data: NewRun}, TContext>, request?: SecondParameter<typeof http>}
-): UseMutationOptions<Awaited<ReturnType<typeof createRun>>, TError,{data: NewRun}, TContext> => {
+export const getCreateRunMutationKey = () => ['createRun'] as const;
 
-const mutationKey = ['createRun'];
+export const getCreateRunMutationOptions = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createRun>>, TError,CreateRunMutationVariables, TContext>, request?: SecondParameter<typeof http>}
+): UseMutationOptions<Awaited<ReturnType<typeof createRun>>, TError,CreateRunMutationVariables, TContext> => {
+
+const mutationKey = getCreateRunMutationKey();
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -547,7 +586,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createRun>>, {data: NewRun}> = (props) => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createRun>>, CreateRunMutationVariables> = (props) => {
           const {data} = props ?? {};
 
           return  createRun(data,requestOptions)
@@ -563,16 +602,17 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type CreateRunMutationResult = NonNullable<Awaited<ReturnType<typeof createRun>>>
     export type CreateRunMutationBody = NewRun
     export type CreateRunMutationError = ApiError
+    export type CreateRunMutationVariables = {data: NewRun}
 
     /**
  * @summary Start an upgrade.
  */
 export const useCreateRun = <TError = ApiError,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createRun>>, TError,{data: NewRun}, TContext>, request?: SecondParameter<typeof http>}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createRun>>, TError,CreateRunMutationVariables, TContext>, request?: SecondParameter<typeof http>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof createRun>>,
         TError,
-        {data: NewRun},
+        CreateRunMutationVariables,
         TContext
       > => {
       return useMutation(getCreateRunMutationOptions(options), queryClient);
@@ -670,8 +710,8 @@ export function useGetRun<TData = Awaited<ReturnType<typeof getRun>>, TError = A
 
 export const useSetGetRunQueryData = () => {
   const queryClient = useQueryClient();
-  return (id: string,updater: Awaited<ReturnType<typeof getRun>> | undefined | ((old: Awaited<ReturnType<typeof getRun>> | undefined) => Awaited<ReturnType<typeof getRun>> | undefined)) => {
-    queryClient.setQueriesData<Awaited<ReturnType<typeof getRun>>>({ queryKey: getGetRunQueryKey(id) }, updater);
+  return (id: string,updater: Awaited<ReturnType<typeof getRun>> | undefined | ((old: Awaited<ReturnType<typeof getRun>> | undefined) => Awaited<ReturnType<typeof getRun>> | undefined), $exactMatch: boolean = true) => {
+    queryClient.setQueriesData<Awaited<ReturnType<typeof getRun>>>({ exact: $exactMatch, queryKey: getGetRunQueryKey(id) }, updater);
   };
 }
 
@@ -711,11 +751,13 @@ export const cancelRun = async (id: string, options?: Parameters<typeof http>[1]
 
 
 
-export const getCancelRunMutationOptions = <TError = ApiError,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof cancelRun>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof http>}
-): UseMutationOptions<Awaited<ReturnType<typeof cancelRun>>, TError,{id: string}, TContext> => {
+export const getCancelRunMutationKey = () => ['cancelRun'] as const;
 
-const mutationKey = ['cancelRun'];
+export const getCancelRunMutationOptions = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof cancelRun>>, TError,CancelRunMutationVariables, TContext>, request?: SecondParameter<typeof http>}
+): UseMutationOptions<Awaited<ReturnType<typeof cancelRun>>, TError,CancelRunMutationVariables, TContext> => {
+
+const mutationKey = getCancelRunMutationKey();
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -725,7 +767,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof cancelRun>>, {id: string}> = (props) => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof cancelRun>>, CancelRunMutationVariables> = (props) => {
           const {id} = props ?? {};
 
           return  cancelRun(id,requestOptions)
@@ -741,16 +783,17 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type CancelRunMutationResult = NonNullable<Awaited<ReturnType<typeof cancelRun>>>
 
     export type CancelRunMutationError = ApiError
+    export type CancelRunMutationVariables = {id: string}
 
     /**
  * @summary Stop a run that has not started changing anything yet.
  */
 export const useCancelRun = <TError = ApiError,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof cancelRun>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof http>}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof cancelRun>>, TError,CancelRunMutationVariables, TContext>, request?: SecondParameter<typeof http>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof cancelRun>>,
         TError,
-        {id: string},
+        CancelRunMutationVariables,
         TContext
       > => {
       return useMutation(getCancelRunMutationOptions(options), queryClient);
@@ -784,11 +827,13 @@ export const continueRun = async (id: string, options?: Parameters<typeof http>[
 
 
 
-export const getContinueRunMutationOptions = <TError = ApiError,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof continueRun>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof http>}
-): UseMutationOptions<Awaited<ReturnType<typeof continueRun>>, TError,{id: string}, TContext> => {
+export const getContinueRunMutationKey = () => ['continueRun'] as const;
 
-const mutationKey = ['continueRun'];
+export const getContinueRunMutationOptions = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof continueRun>>, TError,ContinueRunMutationVariables, TContext>, request?: SecondParameter<typeof http>}
+): UseMutationOptions<Awaited<ReturnType<typeof continueRun>>, TError,ContinueRunMutationVariables, TContext> => {
+
+const mutationKey = getContinueRunMutationKey();
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -798,7 +843,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof continueRun>>, {id: string}> = (props) => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof continueRun>>, ContinueRunMutationVariables> = (props) => {
           const {id} = props ?? {};
 
           return  continueRun(id,requestOptions)
@@ -814,16 +859,17 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type ContinueRunMutationResult = NonNullable<Awaited<ReturnType<typeof continueRun>>>
 
     export type ContinueRunMutationError = ApiError
+    export type ContinueRunMutationVariables = {id: string}
 
     /**
  * @summary Carry on with a run that stopped to ask.
  */
 export const useContinueRun = <TError = ApiError,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof continueRun>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof http>}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof continueRun>>, TError,ContinueRunMutationVariables, TContext>, request?: SecondParameter<typeof http>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof continueRun>>,
         TError,
-        {id: string},
+        ContinueRunMutationVariables,
         TContext
       > => {
       return useMutation(getContinueRunMutationOptions(options), queryClient);

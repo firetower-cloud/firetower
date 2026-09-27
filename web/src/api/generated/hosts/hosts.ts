@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.40.2
+ * OpenAPI spec version: 0
  */
 import {
   useMutation,
@@ -154,8 +154,8 @@ export function useListHosts<TData = Awaited<ReturnType<typeof listHosts>>, TErr
 
 export const useSetListHostsQueryData = () => {
   const queryClient = useQueryClient();
-  return (updater: Awaited<ReturnType<typeof listHosts>> | undefined | ((old: Awaited<ReturnType<typeof listHosts>> | undefined) => Awaited<ReturnType<typeof listHosts>> | undefined)) => {
-    queryClient.setQueriesData<Awaited<ReturnType<typeof listHosts>>>({ queryKey: getListHostsQueryKey() }, updater);
+  return (updater: Awaited<ReturnType<typeof listHosts>> | undefined | ((old: Awaited<ReturnType<typeof listHosts>> | undefined) => Awaited<ReturnType<typeof listHosts>> | undefined), $exactMatch: boolean = true) => {
+    queryClient.setQueriesData<Awaited<ReturnType<typeof listHosts>>>({ exact: $exactMatch, queryKey: getListHostsQueryKey() }, updater);
   };
 }
 
@@ -188,11 +188,25 @@ export const getCreateHostUrl = () => {
  */
 export const createHost = async (newHost: NewHost, options?: Parameters<typeof http>[1]): Promise<Host> => {
 
-  return http<Host>(getCreateHostUrl(),
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return http<Host>(getCreateHostUrl(),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(newHost)
   }
 );}
@@ -201,11 +215,13 @@ export const createHost = async (newHost: NewHost, options?: Parameters<typeof h
 
 
 
-export const getCreateHostMutationOptions = <TError = ApiError,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createHost>>, TError,{data: NewHost}, TContext>, request?: SecondParameter<typeof http>}
-): UseMutationOptions<Awaited<ReturnType<typeof createHost>>, TError,{data: NewHost}, TContext> => {
+export const getCreateHostMutationKey = () => ['createHost'] as const;
 
-const mutationKey = ['createHost'];
+export const getCreateHostMutationOptions = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createHost>>, TError,CreateHostMutationVariables, TContext>, request?: SecondParameter<typeof http>}
+): UseMutationOptions<Awaited<ReturnType<typeof createHost>>, TError,CreateHostMutationVariables, TContext> => {
+
+const mutationKey = getCreateHostMutationKey();
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -215,7 +231,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createHost>>, {data: NewHost}> = (props) => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createHost>>, CreateHostMutationVariables> = (props) => {
           const {data} = props ?? {};
 
           return  createHost(data,requestOptions)
@@ -231,16 +247,17 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type CreateHostMutationResult = NonNullable<Awaited<ReturnType<typeof createHost>>>
     export type CreateHostMutationBody = NewHost
     export type CreateHostMutationError = ApiError
+    export type CreateHostMutationVariables = {data: NewHost}
 
     /**
  * @summary Add somewhere for agents to run.
  */
 export const useCreateHost = <TError = ApiError,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createHost>>, TError,{data: NewHost}, TContext>, request?: SecondParameter<typeof http>}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createHost>>, TError,CreateHostMutationVariables, TContext>, request?: SecondParameter<typeof http>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof createHost>>,
         TError,
-        {data: NewHost},
+        CreateHostMutationVariables,
         TContext
       > => {
       return useMutation(getCreateHostMutationOptions(options), queryClient);
@@ -266,11 +283,25 @@ export const useCreateHost = <TError = ApiError,
  */
 export const probeHost = async (newHost: NewHost, options?: Parameters<typeof http>[1]): Promise<Reached> => {
 
-  return http<Reached>(getProbeHostUrl(),
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return http<Reached>(getProbeHostUrl(),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(newHost)
   }
 );}
@@ -279,11 +310,13 @@ export const probeHost = async (newHost: NewHost, options?: Parameters<typeof ht
 
 
 
-export const getProbeHostMutationOptions = <TError = ApiError,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof probeHost>>, TError,{data: NewHost}, TContext>, request?: SecondParameter<typeof http>}
-): UseMutationOptions<Awaited<ReturnType<typeof probeHost>>, TError,{data: NewHost}, TContext> => {
+export const getProbeHostMutationKey = () => ['probeHost'] as const;
 
-const mutationKey = ['probeHost'];
+export const getProbeHostMutationOptions = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof probeHost>>, TError,ProbeHostMutationVariables, TContext>, request?: SecondParameter<typeof http>}
+): UseMutationOptions<Awaited<ReturnType<typeof probeHost>>, TError,ProbeHostMutationVariables, TContext> => {
+
+const mutationKey = getProbeHostMutationKey();
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -293,7 +326,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof probeHost>>, {data: NewHost}> = (props) => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof probeHost>>, ProbeHostMutationVariables> = (props) => {
           const {data} = props ?? {};
 
           return  probeHost(data,requestOptions)
@@ -309,16 +342,17 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type ProbeHostMutationResult = NonNullable<Awaited<ReturnType<typeof probeHost>>>
     export type ProbeHostMutationBody = NewHost
     export type ProbeHostMutationError = ApiError
+    export type ProbeHostMutationVariables = {data: NewHost}
 
     /**
  * @summary Try a machine without adding it.
  */
 export const useProbeHost = <TError = ApiError,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof probeHost>>, TError,{data: NewHost}, TContext>, request?: SecondParameter<typeof http>}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof probeHost>>, TError,ProbeHostMutationVariables, TContext>, request?: SecondParameter<typeof http>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof probeHost>>,
         TError,
-        {data: NewHost},
+        ProbeHostMutationVariables,
         TContext
       > => {
       return useMutation(getProbeHostMutationOptions(options), queryClient);
@@ -364,11 +398,13 @@ export const deleteHost = async (id: string,
 
 
 
-export const getDeleteHostMutationOptions = <TError = ApiError,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteHost>>, TError,{id: string;params?: DeleteHostParams}, TContext>, request?: SecondParameter<typeof http>}
-): UseMutationOptions<Awaited<ReturnType<typeof deleteHost>>, TError,{id: string;params?: DeleteHostParams}, TContext> => {
+export const getDeleteHostMutationKey = () => ['deleteHost'] as const;
 
-const mutationKey = ['deleteHost'];
+export const getDeleteHostMutationOptions = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteHost>>, TError,DeleteHostMutationVariables, TContext>, request?: SecondParameter<typeof http>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteHost>>, TError,DeleteHostMutationVariables, TContext> => {
+
+const mutationKey = getDeleteHostMutationKey();
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -378,7 +414,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteHost>>, {id: string;params?: DeleteHostParams}> = (props) => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteHost>>, DeleteHostMutationVariables> = (props) => {
           const {id,params} = props ?? {};
 
           return  deleteHost(id,params,requestOptions)
@@ -394,16 +430,17 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type DeleteHostMutationResult = NonNullable<Awaited<ReturnType<typeof deleteHost>>>
 
     export type DeleteHostMutationError = ApiError
+    export type DeleteHostMutationVariables = {id: string;params?: DeleteHostParams}
 
     /**
  * @summary Forget a host.
  */
 export const useDeleteHost = <TError = ApiError,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteHost>>, TError,{id: string;params?: DeleteHostParams}, TContext>, request?: SecondParameter<typeof http>}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteHost>>, TError,DeleteHostMutationVariables, TContext>, request?: SecondParameter<typeof http>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof deleteHost>>,
         TError,
-        {id: string;params?: DeleteHostParams},
+        DeleteHostMutationVariables,
         TContext
       > => {
       return useMutation(getDeleteHostMutationOptions(options), queryClient);
@@ -424,11 +461,25 @@ export const useDeleteHost = <TError = ApiError,
 export const renameHost = async (id: string,
     rename: Rename, options?: Parameters<typeof http>[1]): Promise<Host> => {
 
-  return http<Host>(getRenameHostUrl(id),
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return http<Host>(getRenameHostUrl(id),
   {
     ...options,
     method: 'PATCH',
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(rename)
   }
 );}
@@ -437,11 +488,13 @@ export const renameHost = async (id: string,
 
 
 
-export const getRenameHostMutationOptions = <TError = ApiError,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof renameHost>>, TError,{id: string;data: Rename}, TContext>, request?: SecondParameter<typeof http>}
-): UseMutationOptions<Awaited<ReturnType<typeof renameHost>>, TError,{id: string;data: Rename}, TContext> => {
+export const getRenameHostMutationKey = () => ['renameHost'] as const;
 
-const mutationKey = ['renameHost'];
+export const getRenameHostMutationOptions = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof renameHost>>, TError,RenameHostMutationVariables, TContext>, request?: SecondParameter<typeof http>}
+): UseMutationOptions<Awaited<ReturnType<typeof renameHost>>, TError,RenameHostMutationVariables, TContext> => {
+
+const mutationKey = getRenameHostMutationKey();
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -451,7 +504,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof renameHost>>, {id: string;data: Rename}> = (props) => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof renameHost>>, RenameHostMutationVariables> = (props) => {
           const {id,data} = props ?? {};
 
           return  renameHost(id,data,requestOptions)
@@ -467,16 +520,17 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type RenameHostMutationResult = NonNullable<Awaited<ReturnType<typeof renameHost>>>
     export type RenameHostMutationBody = Rename
     export type RenameHostMutationError = ApiError
+    export type RenameHostMutationVariables = {id: string;data: Rename}
 
     /**
  * @summary Call it something else.
  */
 export const useRenameHost = <TError = ApiError,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof renameHost>>, TError,{id: string;data: Rename}, TContext>, request?: SecondParameter<typeof http>}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof renameHost>>, TError,RenameHostMutationVariables, TContext>, request?: SecondParameter<typeof http>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof renameHost>>,
         TError,
-        {id: string;data: Rename},
+        RenameHostMutationVariables,
         TContext
       > => {
       return useMutation(getRenameHostMutationOptions(options), queryClient);
@@ -509,11 +563,13 @@ export const connectHost = async (id: string, options?: Parameters<typeof http>[
 
 
 
-export const getConnectHostMutationOptions = <TError = ApiError,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof connectHost>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof http>}
-): UseMutationOptions<Awaited<ReturnType<typeof connectHost>>, TError,{id: string}, TContext> => {
+export const getConnectHostMutationKey = () => ['connectHost'] as const;
 
-const mutationKey = ['connectHost'];
+export const getConnectHostMutationOptions = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof connectHost>>, TError,ConnectHostMutationVariables, TContext>, request?: SecondParameter<typeof http>}
+): UseMutationOptions<Awaited<ReturnType<typeof connectHost>>, TError,ConnectHostMutationVariables, TContext> => {
+
+const mutationKey = getConnectHostMutationKey();
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -523,7 +579,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof connectHost>>, {id: string}> = (props) => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof connectHost>>, ConnectHostMutationVariables> = (props) => {
           const {id} = props ?? {};
 
           return  connectHost(id,requestOptions)
@@ -539,16 +595,17 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type ConnectHostMutationResult = NonNullable<Awaited<ReturnType<typeof connectHost>>>
 
     export type ConnectHostMutationError = ApiError
+    export type ConnectHostMutationVariables = {id: string}
 
     /**
  * @summary Try a host again now, instead of waiting out the backoff.
  */
 export const useConnectHost = <TError = ApiError,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof connectHost>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof http>}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof connectHost>>, TError,ConnectHostMutationVariables, TContext>, request?: SecondParameter<typeof http>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof connectHost>>,
         TError,
-        {id: string},
+        ConnectHostMutationVariables,
         TContext
       > => {
       return useMutation(getConnectHostMutationOptions(options), queryClient);
@@ -567,11 +624,25 @@ export const useConnectHost = <TError = ApiError,
 export const drainHost = async (id: string,
     drain: Drain, options?: Parameters<typeof http>[1]): Promise<void> => {
 
-  return http<void>(getDrainHostUrl(id),
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return http<void>(getDrainHostUrl(id),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(drain)
   }
 );}
@@ -580,11 +651,13 @@ export const drainHost = async (id: string,
 
 
 
-export const getDrainHostMutationOptions = <TError = ApiError,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof drainHost>>, TError,{id: string;data: Drain}, TContext>, request?: SecondParameter<typeof http>}
-): UseMutationOptions<Awaited<ReturnType<typeof drainHost>>, TError,{id: string;data: Drain}, TContext> => {
+export const getDrainHostMutationKey = () => ['drainHost'] as const;
 
-const mutationKey = ['drainHost'];
+export const getDrainHostMutationOptions = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof drainHost>>, TError,DrainHostMutationVariables, TContext>, request?: SecondParameter<typeof http>}
+): UseMutationOptions<Awaited<ReturnType<typeof drainHost>>, TError,DrainHostMutationVariables, TContext> => {
+
+const mutationKey = getDrainHostMutationKey();
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -594,7 +667,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof drainHost>>, {id: string;data: Drain}> = (props) => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof drainHost>>, DrainHostMutationVariables> = (props) => {
           const {id,data} = props ?? {};
 
           return  drainHost(id,data,requestOptions)
@@ -610,16 +683,17 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type DrainHostMutationResult = NonNullable<Awaited<ReturnType<typeof drainHost>>>
     export type DrainHostMutationBody = Drain
     export type DrainHostMutationError = ApiError
+    export type DrainHostMutationVariables = {id: string;data: Drain}
 
     /**
  * @summary Stop sending work here, or start again.
  */
 export const useDrainHost = <TError = ApiError,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof drainHost>>, TError,{id: string;data: Drain}, TContext>, request?: SecondParameter<typeof http>}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof drainHost>>, TError,DrainHostMutationVariables, TContext>, request?: SecondParameter<typeof http>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof drainHost>>,
         TError,
-        {id: string;data: Drain},
+        DrainHostMutationVariables,
         TContext
       > => {
       return useMutation(getDrainHostMutationOptions(options), queryClient);
@@ -742,8 +816,8 @@ export function useHostReadiness<TData = Awaited<ReturnType<typeof hostReadiness
 export const useSetHostReadinessQueryData = () => {
   const queryClient = useQueryClient();
   return (id: string,
-    params: HostReadinessParams | undefined,updater: Awaited<ReturnType<typeof hostReadiness>> | undefined | ((old: Awaited<ReturnType<typeof hostReadiness>> | undefined) => Awaited<ReturnType<typeof hostReadiness>> | undefined)) => {
-    queryClient.setQueriesData<Awaited<ReturnType<typeof hostReadiness>>>({ queryKey: getHostReadinessQueryKey(id,params) }, updater);
+    params: HostReadinessParams | undefined,updater: Awaited<ReturnType<typeof hostReadiness>> | undefined | ((old: Awaited<ReturnType<typeof hostReadiness>> | undefined) => Awaited<ReturnType<typeof hostReadiness>> | undefined), $exactMatch: boolean = true) => {
+    queryClient.setQueriesData<Awaited<ReturnType<typeof hostReadiness>>>({ exact: $exactMatch, queryKey: getHostReadinessQueryKey(id,params) }, updater);
   };
 }
 
@@ -789,11 +863,13 @@ export const installWorker = async (id: string, options?: Parameters<typeof http
 
 
 
-export const getInstallWorkerMutationOptions = <TError = ApiError,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof installWorker>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof http>}
-): UseMutationOptions<Awaited<ReturnType<typeof installWorker>>, TError,{id: string}, TContext> => {
+export const getInstallWorkerMutationKey = () => ['installWorker'] as const;
 
-const mutationKey = ['installWorker'];
+export const getInstallWorkerMutationOptions = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof installWorker>>, TError,InstallWorkerMutationVariables, TContext>, request?: SecondParameter<typeof http>}
+): UseMutationOptions<Awaited<ReturnType<typeof installWorker>>, TError,InstallWorkerMutationVariables, TContext> => {
+
+const mutationKey = getInstallWorkerMutationKey();
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -803,7 +879,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof installWorker>>, {id: string}> = (props) => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof installWorker>>, InstallWorkerMutationVariables> = (props) => {
           const {id} = props ?? {};
 
           return  installWorker(id,requestOptions)
@@ -819,16 +895,17 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type InstallWorkerMutationResult = NonNullable<Awaited<ReturnType<typeof installWorker>>>
 
     export type InstallWorkerMutationError = ApiError
+    export type InstallWorkerMutationVariables = {id: string}
 
     /**
  * @summary Put a worker on this machine.
  */
 export const useInstallWorker = <TError = ApiError,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof installWorker>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof http>}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof installWorker>>, TError,InstallWorkerMutationVariables, TContext>, request?: SecondParameter<typeof http>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof installWorker>>,
         TError,
-        {id: string},
+        InstallWorkerMutationVariables,
         TContext
       > => {
       return useMutation(getInstallWorkerMutationOptions(options), queryClient);
@@ -944,8 +1021,8 @@ a worker with it.
  */
 export const useSetSshKeyQueryData = () => {
   const queryClient = useQueryClient();
-  return (updater: Awaited<ReturnType<typeof sshKey>> | undefined | ((old: Awaited<ReturnType<typeof sshKey>> | undefined) => Awaited<ReturnType<typeof sshKey>> | undefined)) => {
-    queryClient.setQueriesData<Awaited<ReturnType<typeof sshKey>>>({ queryKey: getSshKeyQueryKey() }, updater);
+  return (updater: Awaited<ReturnType<typeof sshKey>> | undefined | ((old: Awaited<ReturnType<typeof sshKey>> | undefined) => Awaited<ReturnType<typeof sshKey>> | undefined), $exactMatch: boolean = true) => {
+    queryClient.setQueriesData<Awaited<ReturnType<typeof sshKey>>>({ exact: $exactMatch, queryKey: getSshKeyQueryKey() }, updater);
   };
 }
 

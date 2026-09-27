@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.40.2
+ * OpenAPI spec version: 0
  */
 import {
   useMutation,
@@ -147,8 +147,8 @@ export function useSetupState<TData = Awaited<ReturnType<typeof setupState>>, TE
 
 export const useSetSetupStateQueryData = () => {
   const queryClient = useQueryClient();
-  return (updater: Awaited<ReturnType<typeof setupState>> | undefined | ((old: Awaited<ReturnType<typeof setupState>> | undefined) => Awaited<ReturnType<typeof setupState>> | undefined)) => {
-    queryClient.setQueriesData<Awaited<ReturnType<typeof setupState>>>({ queryKey: getSetupStateQueryKey() }, updater);
+  return (updater: Awaited<ReturnType<typeof setupState>> | undefined | ((old: Awaited<ReturnType<typeof setupState>> | undefined) => Awaited<ReturnType<typeof setupState>> | undefined), $exactMatch: boolean = true) => {
+    queryClient.setQueriesData<Awaited<ReturnType<typeof setupState>>>({ exact: $exactMatch, queryKey: getSetupStateQueryKey() }, updater);
   };
 }
 
@@ -182,11 +182,13 @@ export const completeSetup = async ( options?: Parameters<typeof http>[1]): Prom
 
 
 
+export const getCompleteSetupMutationKey = () => ['completeSetup'] as const;
+
 export const getCompleteSetupMutationOptions = <TError = unknown,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof completeSetup>>, TError,void, TContext>, request?: SecondParameter<typeof http>}
 ): UseMutationOptions<Awaited<ReturnType<typeof completeSetup>>, TError,void, TContext> => {
 
-const mutationKey = ['completeSetup'];
+const mutationKey = getCompleteSetupMutationKey();
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -213,6 +215,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type CompleteSetupMutationError = unknown
 
+
     export const useCompleteSetup = <TError = unknown,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof completeSetup>>, TError,void, TContext>, request?: SecondParameter<typeof http>}
  , queryClient?: QueryClient): UseMutationResult<
@@ -233,11 +236,25 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 export const nameOrganization = async (nameOrganizationBody: NameOrganization, options?: Parameters<typeof http>[1]): Promise<Organization> => {
 
-  return http<Organization>(getNameOrganizationUrl(),
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return http<Organization>(getNameOrganizationUrl(),
   {
     ...options,
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(nameOrganizationBody)
   }
 );}
@@ -246,11 +263,13 @@ export const nameOrganization = async (nameOrganizationBody: NameOrganization, o
 
 
 
-export const getNameOrganizationMutationOptions = <TError = ApiError,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof nameOrganization>>, TError,{data: NameOrganization}, TContext>, request?: SecondParameter<typeof http>}
-): UseMutationOptions<Awaited<ReturnType<typeof nameOrganization>>, TError,{data: NameOrganization}, TContext> => {
+export const getNameOrganizationMutationKey = () => ['nameOrganization'] as const;
 
-const mutationKey = ['nameOrganization'];
+export const getNameOrganizationMutationOptions = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof nameOrganization>>, TError,NameOrganizationMutationVariables, TContext>, request?: SecondParameter<typeof http>}
+): UseMutationOptions<Awaited<ReturnType<typeof nameOrganization>>, TError,NameOrganizationMutationVariables, TContext> => {
+
+const mutationKey = getNameOrganizationMutationKey();
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -260,7 +279,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof nameOrganization>>, {data: NameOrganization}> = (props) => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof nameOrganization>>, NameOrganizationMutationVariables> = (props) => {
           const {data} = props ?? {};
 
           return  nameOrganization(data,requestOptions)
@@ -276,13 +295,14 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type NameOrganizationMutationResult = NonNullable<Awaited<ReturnType<typeof nameOrganization>>>
     export type NameOrganizationMutationBody = NameOrganization
     export type NameOrganizationMutationError = ApiError
+    export type NameOrganizationMutationVariables = {data: NameOrganization}
 
     export const useNameOrganization = <TError = ApiError,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof nameOrganization>>, TError,{data: NameOrganization}, TContext>, request?: SecondParameter<typeof http>}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof nameOrganization>>, TError,NameOrganizationMutationVariables, TContext>, request?: SecondParameter<typeof http>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof nameOrganization>>,
         TError,
-        {data: NameOrganization},
+        NameOrganizationMutationVariables,
         TContext
       > => {
       return useMutation(getNameOrganizationMutationOptions(options), queryClient);

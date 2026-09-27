@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.40.2
+ * OpenAPI spec version: 0
  */
 import * as zod from 'zod';
 
@@ -89,8 +89,9 @@ export const ForgetAgentResponse = zod.void()
  * Firetower is running inside. The work happens on the host either way — this
  * only means nobody has to reach it by hand.
  *
- * Slow on purpose: the request is held until npm is done, because the answer
- * somebody wants is which version they now have.
+ * Slow on purpose: the request is held until the download is done, because
+ * the answer somebody wants is which version they now have. A minute is
+ * normal — these are binaries of a few hundred megabytes.
  * @summary Fetch an agent onto a host.
  */
 export const InstallAgentParams = zod.object({

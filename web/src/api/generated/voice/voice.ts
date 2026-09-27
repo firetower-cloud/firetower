@@ -3,7 +3,7 @@
  * Do not edit manually.
  * Firetower
  * The Firetower control plane: API, scheduling, and worker transports.
- * OpenAPI spec version: 0.40.2
+ * OpenAPI spec version: 0
  */
 import {
   useMutation,
@@ -160,8 +160,8 @@ export function useVoiceState<TData = Awaited<ReturnType<typeof voiceState>>, TE
  */
 export const useSetVoiceStateQueryData = () => {
   const queryClient = useQueryClient();
-  return (updater: Awaited<ReturnType<typeof voiceState>> | undefined | ((old: Awaited<ReturnType<typeof voiceState>> | undefined) => Awaited<ReturnType<typeof voiceState>> | undefined)) => {
-    queryClient.setQueriesData<Awaited<ReturnType<typeof voiceState>>>({ queryKey: getVoiceStateQueryKey() }, updater);
+  return (updater: Awaited<ReturnType<typeof voiceState>> | undefined | ((old: Awaited<ReturnType<typeof voiceState>> | undefined) => Awaited<ReturnType<typeof voiceState>> | undefined), $exactMatch: boolean = true) => {
+    queryClient.setQueriesData<Awaited<ReturnType<typeof voiceState>>>({ exact: $exactMatch, queryKey: getVoiceStateQueryKey() }, updater);
   };
 }
 
@@ -188,11 +188,25 @@ export const getSetVoiceKeyUrl = () => {
  */
 export const setVoiceKey = async (setVoiceKeyBody: SetVoiceKey, options?: Parameters<typeof http>[1]): Promise<void> => {
 
-  return http<void>(getSetVoiceKeyUrl(),
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return http<void>(getSetVoiceKeyUrl(),
   {
     ...options,
     method: 'PUT',
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
     body: JSON.stringify(setVoiceKeyBody)
   }
 );}
@@ -201,11 +215,13 @@ export const setVoiceKey = async (setVoiceKeyBody: SetVoiceKey, options?: Parame
 
 
 
-export const getSetVoiceKeyMutationOptions = <TError = ApiError,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setVoiceKey>>, TError,{data: SetVoiceKey}, TContext>, request?: SecondParameter<typeof http>}
-): UseMutationOptions<Awaited<ReturnType<typeof setVoiceKey>>, TError,{data: SetVoiceKey}, TContext> => {
+export const getSetVoiceKeyMutationKey = () => ['setVoiceKey'] as const;
 
-const mutationKey = ['setVoiceKey'];
+export const getSetVoiceKeyMutationOptions = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setVoiceKey>>, TError,SetVoiceKeyMutationVariables, TContext>, request?: SecondParameter<typeof http>}
+): UseMutationOptions<Awaited<ReturnType<typeof setVoiceKey>>, TError,SetVoiceKeyMutationVariables, TContext> => {
+
+const mutationKey = getSetVoiceKeyMutationKey();
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -215,7 +231,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof setVoiceKey>>, {data: SetVoiceKey}> = (props) => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof setVoiceKey>>, SetVoiceKeyMutationVariables> = (props) => {
           const {data} = props ?? {};
 
           return  setVoiceKey(data,requestOptions)
@@ -231,16 +247,17 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type SetVoiceKeyMutationResult = NonNullable<Awaited<ReturnType<typeof setVoiceKey>>>
     export type SetVoiceKeyMutationBody = SetVoiceKey
     export type SetVoiceKeyMutationError = ApiError
+    export type SetVoiceKeyMutationVariables = {data: SetVoiceKey}
 
     /**
  * @summary Hold a key for this install, or replace the one held.
  */
 export const useSetVoiceKey = <TError = ApiError,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setVoiceKey>>, TError,{data: SetVoiceKey}, TContext>, request?: SecondParameter<typeof http>}
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setVoiceKey>>, TError,SetVoiceKeyMutationVariables, TContext>, request?: SecondParameter<typeof http>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof setVoiceKey>>,
         TError,
-        {data: SetVoiceKey},
+        SetVoiceKeyMutationVariables,
         TContext
       > => {
       return useMutation(getSetVoiceKeyMutationOptions(options), queryClient);
@@ -271,11 +288,13 @@ export const voiceTicket = async ( options?: Parameters<typeof http>[1]): Promis
 
 
 
+export const getVoiceTicketMutationKey = () => ['voiceTicket'] as const;
+
 export const getVoiceTicketMutationOptions = <TError = ApiError,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof voiceTicket>>, TError,void, TContext>, request?: SecondParameter<typeof http>}
 ): UseMutationOptions<Awaited<ReturnType<typeof voiceTicket>>, TError,void, TContext> => {
 
-const mutationKey = ['voiceTicket'];
+const mutationKey = getVoiceTicketMutationKey();
 const {mutation: mutationOptions, request: requestOptions} = options ?
       options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
       options
@@ -301,6 +320,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type VoiceTicketMutationResult = NonNullable<Awaited<ReturnType<typeof voiceTicket>>>
 
     export type VoiceTicketMutationError = ApiError
+
 
     /**
  * @summary Mint one, for one connection.
