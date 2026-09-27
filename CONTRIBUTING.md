@@ -89,8 +89,17 @@ The web application has its own dev server, so development runs two processes:
 just dev        # control plane on :4400, web application on :3000
 just test
 just gen        # regenerate the API contract and the typed client
+just gen-check  # ...and fail if what is committed is not what they produce
 just build-worker   # a worker tarball for this machine's shape, for a real host
 ```
+
+The contract and the three clients generated from it are committed, which is
+what lets a fresh clone typecheck without a Rust toolchain, and what puts the
+blast radius of a renamed field into the diff a reviewer reads. The `contract`
+workflow regenerates all of it on every pull request that could move it and
+fails if the result differs — so forgetting `just gen` is caught rather than
+merged. Running `just gen-check` before you push turns that into a local
+failure instead of a red job.
 
 While developing, the interface and the control plane are two processes on two
 ports, so the interface has to be told where the API is. That lives in
