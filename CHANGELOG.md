@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.42.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.41.1...firetower-v0.42.0) (2026-09-27)
+
+
+### Features
+
+* add repository connection from mobile app ([6456147](https://github.com/firetower-cloud/firetower/commit/6456147ed07fcbf974b8b3bda08b8a2bcfeae395))
+* add repository connection from mobile app ([b824734](https://github.com/firetower-cloud/firetower/commit/b824734b66d78959a5b277d28ecbb176434d0500))
+* **subagents:** add Codex support and defer turn completion for ([48bf029](https://github.com/firetower-cloud/firetower/commit/48bf029867d697d06cd64c541d1cafb098e2a574))
+* **subagents:** add Codex support and defer turn completion for ([ff1d776](https://github.com/firetower-cloud/firetower/commit/ff1d77667b6ba1459e3e76967564aca0b6a14ded))
+
+
+### Bug Fixes
+
+* **api:** regenerate the clients for the secrets contract ([ea29e11](https://github.com/firetower-cloud/firetower/commit/ea29e1100e6c1596e5c711213c3a52c2b5144efc))
+* **api:** regenerate the contract and all three clients ([4f38836](https://github.com/firetower-cloud/firetower/commit/4f388361d70b39af82ac42dfbdfbdb5178ae8dc9))
+* **codex:** install code-mode host sidecar with CLI binary ([357751c](https://github.com/firetower-cloud/firetower/commit/357751c73b5d4b68ad0f71cfc447490d1050d455))
+* **codex:** install code-mode host sidecar with CLI binary ([0a58d89](https://github.com/firetower-cloud/firetower/commit/0a58d89a3d3ed2d489a211f1d08736d731da867a))
+* request workflow scope for new GitHub connections ([b64ac10](https://github.com/firetower-cloud/firetower/commit/b64ac101e47fdbb7fe102ec9f15523a02d7060eb))
+* request workflow scope for new GitHub connections ([6230400](https://github.com/firetower-cloud/firetower/commit/6230400bf1be7896b4b3739448e5ae308475b84b))
+* **secrets:** allow adding new secrets from the UI ([7573831](https://github.com/firetower-cloud/firetower/commit/75738318581f4e1ef919cd17101385d50d50c822))
+* **secrets:** allow adding new secrets from the UI ([5d0a472](https://github.com/firetower-cloud/firetower/commit/5d0a4729e24f56ab62a6ebf1e6625b1a1ec310a2))
+* show GitHub errors and allow changing client ID ([198e214](https://github.com/firetower-cloud/firetower/commit/198e214dedf62a2a87db209f1865128225d18ba8))
+
 ## [0.41.1](https://github.com/firetower-cloud/firetower/compare/firetower-v0.41.0...firetower-v0.41.1) (2026-09-25)
 
 
