@@ -23,6 +23,10 @@ node_modules
 # The compose stack keeps its state here, including the key every stored
 # credential is encrypted with. It must never be committed.
 /.firetower
+# The same thing under another name: a control plane started by hand with
+# FIRETOWER_HOME pointed somewhere local writes its root key there too.
+/.dev-home
+/.ft-home
 # The ssh key pair the dev worker container is reached with.
 /.dev
 
