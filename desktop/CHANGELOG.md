@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.16.0](https://github.com/firetower-cloud/firetower/compare/desktop-v0.15.0...desktop-v0.16.0) (2026-09-27)
+
+
+### Features
+
+* **subagents:** add Codex support and defer turn completion for ([48bf029](https://github.com/firetower-cloud/firetower/commit/48bf029867d697d06cd64c541d1cafb098e2a574))
+* **subagents:** add Codex support and defer turn completion for ([ff1d776](https://github.com/firetower-cloud/firetower/commit/ff1d77667b6ba1459e3e76967564aca0b6a14ded))
+
+
+### Bug Fixes
+
+* **api:** regenerate the clients for the secrets contract ([ea29e11](https://github.com/firetower-cloud/firetower/commit/ea29e1100e6c1596e5c711213c3a52c2b5144efc))
+* **api:** regenerate the contract and all three clients ([4f38836](https://github.com/firetower-cloud/firetower/commit/4f388361d70b39af82ac42dfbdfbdb5178ae8dc9))
+* **desktop:** say why Connect was refused, and let the client id be changed ([3529839](https://github.com/firetower-cloud/firetower/commit/352983982c6ba50ae5c7d37f3946ad2c14803ade)), closes [#188](https://github.com/firetower-cloud/firetower/issues/188)
+* **secrets:** allow adding new secrets from the UI ([7573831](https://github.com/firetower-cloud/firetower/commit/75738318581f4e1ef919cd17101385d50d50c822))
+* **secrets:** allow adding new secrets from the UI ([5d0a472](https://github.com/firetower-cloud/firetower/commit/5d0a4729e24f56ab62a6ebf1e6625b1a1ec310a2))
+* show GitHub errors and allow changing client ID ([198e214](https://github.com/firetower-cloud/firetower/commit/198e214dedf62a2a87db209f1865128225d18ba8))
+
 ## [0.15.0](https://github.com/firetower-cloud/firetower/compare/desktop-v0.14.0...desktop-v0.15.0) (2026-09-25)
 
 
