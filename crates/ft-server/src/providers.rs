@@ -69,10 +69,10 @@ pub const PROVIDERS: &[Provider] = &[Provider {
     device_code_url: "https://github.com/login/device/code",
     token_url: "https://github.com/login/oauth/access_token",
     api_base: "https://api.github.com",
-    // `repo` covers reading a private repository and pushing the session's
-    // branch. Asking for the write half now avoids a second authorization
-    // later, when the branch is ready and the interruption is worst.
-    scopes: "repo",
+    // `repo` covers private repositories and ordinary branch pushes.
+    // GitHub also requires `workflow` when a push adds or updates a file under
+    // `.github/workflows/`, so request it with each new authorization.
+    scopes: "repo workflow",
     git_username: "x-access-token",
     git_host: "github.com",
     // Empty means every install has to register its own application before it
