@@ -110,7 +110,7 @@ jobs:
           printf 'SIGN_CONFIG=%s\n' "$(jq -cn --arg e "$ENDPOINT" --arg a "$ACCOUNT" --arg p "$PROFILE" '{bundle:{windows:{signCommand:("trusted-signing-cli -e " + $e + " -a " + $a + " -c " + $p + " %1")}}}')" >> "$GITHUB_ENV"
         # (the endpoint and account are read below, with the same names)
 
-      - uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0
+      - uses: tauri-apps/tauri-action@1deb371b0cd8bd54025b384f1cd735e725c4060f # v1.0.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # macOS: Developer ID signing and notarization by API key.
