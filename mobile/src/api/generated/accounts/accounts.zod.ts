@@ -23,6 +23,8 @@ export const ListAccountsResponseItem = zod.object({
 })),
   "mode": zod.string(),
   "name": zod.string(),
+  "ownerName": zod.string().nullish().describe('What to call the owner, so a list can say whose an account is.'),
+  "path": zod.string().describe('Where it is filed, and therefore who may pick it.\n\nA `String` rather than a `ResourcePath`, like `id` above: this struct is\nread by `sqlx::FromRow`, and what comes back is the text of an `ltree`.'),
   "revision": zod.int(),
   "state": zod.string()
 })
@@ -50,6 +52,8 @@ export const CreateAccountResponse = zod.object({
 })),
   "mode": zod.string(),
   "name": zod.string(),
+  "ownerName": zod.string().nullish().describe('What to call the owner, so a list can say whose an account is.'),
+  "path": zod.string().describe('Where it is filed, and therefore who may pick it.\n\nA `String` rather than a `ResourcePath`, like `id` above: this struct is\nread by `sqlx::FromRow`, and what comes back is the text of an `ltree`.'),
   "revision": zod.int(),
   "state": zod.string()
 })
@@ -80,6 +84,8 @@ export const UpdateAccountResponse = zod.object({
 })),
   "mode": zod.string(),
   "name": zod.string(),
+  "ownerName": zod.string().nullish().describe('What to call the owner, so a list can say whose an account is.'),
+  "path": zod.string().describe('Where it is filed, and therefore who may pick it.\n\nA `String` rather than a `ResourcePath`, like `id` above: this struct is\nread by `sqlx::FromRow`, and what comes back is the text of an `ltree`.'),
   "revision": zod.int(),
   "state": zod.string()
 })
@@ -104,6 +110,8 @@ export const SessionAccountResponse = zod.object({
 })),
   "mode": zod.string(),
   "name": zod.string(),
+  "ownerName": zod.string().nullish().describe('What to call the owner, so a list can say whose an account is.'),
+  "path": zod.string().describe('Where it is filed, and therefore who may pick it.\n\nA `String` rather than a `ResourcePath`, like `id` above: this struct is\nread by `sqlx::FromRow`, and what comes back is the text of an `ltree`.'),
   "revision": zod.int(),
   "state": zod.string()
 })]).optional(),

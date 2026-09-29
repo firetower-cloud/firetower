@@ -72,10 +72,14 @@ fn owner(principal: &Principal) -> ApiResult<&str> {
         .owner()
         .ok_or_else(|| ApiError::new(ErrorCode::Unauthorized, "Sign in to annotate a preview."))
 }
+/// Refuse unless they may work in this session.
+///
+/// Writer, not viewer: an annotation is a mark left on somebody's preview, and
+/// a grant to look is not a grant to write on what you are looking at.
 async fn owned(state: &AppState, principal: &Principal, id: &str) -> ApiResult<()> {
     state
         .db
-        .session_of(owner(principal)?, &SessionId::from_stored(id.to_string()))
+        .session_to_work_in(owner(principal)?, &SessionId::from_stored(id.to_string()))
         .await?
         .ok_or_else(|| ApiError::new(ErrorCode::NotFound, "no such session"))?;
     Ok(())
@@ -366,7 +370,7 @@ mod database_tests {
             user: Some(user),
         };
         let host = db
-            .ensure_host("localhost", ft_core::Compute::Local)
+            .ensure_host("localhost", ft_core::Compute::Local, &who)
             .await
             .unwrap();
         let id = SessionId::new();
@@ -399,6 +403,7 @@ mod database_tests {
             AppState {
                 updates: crate::updates::Updates::new(db.pool().clone()),
                 policy: crate::auth::Policy::open(),
+                access: crate::access::Access::new(db.pool().clone()),
                 db,
                 accounts,
                 fleet,

@@ -3909,7 +3909,7 @@ mod tests {
     async fn fleet() -> (Fleet, HostId) {
         let (db, _owner) = Db::open_for_test_owned().await.unwrap();
         let host = db
-            .ensure_host("fire-01", ft_core::Compute::Local)
+            .ensure_host("fire-01", ft_core::Compute::Local, _owner.as_str())
             .await
             .unwrap();
         (Fleet::new(db), host.id)
@@ -4049,7 +4049,7 @@ mod tests {
 
         let (db, owner) = Db::open_for_test_owned().await.unwrap();
         let host = db
-            .ensure_host("fire-01", ft_core::Compute::Local)
+            .ensure_host("fire-01", ft_core::Compute::Local, owner.as_str())
             .await
             .unwrap();
         let session = SessionId::new();
@@ -4269,7 +4269,7 @@ mod supervisor_tests {
     async fn a_tunnel_nobody_waited_for_is_closed_on_the_worker() {
         let (db, _owner) = Db::open_for_test_owned().await.unwrap();
         let host = db
-            .ensure_host("fire-01", ft_core::Compute::Local)
+            .ensure_host("fire-01", ft_core::Compute::Local, _owner.as_str())
             .await
             .unwrap();
         let fleet = Fleet::new(db);
@@ -4392,7 +4392,7 @@ mod supervisor_tests {
     async fn an_answer_of_the_wrong_kind_does_not_wedge_the_reader() {
         let (db, _owner) = Db::open_for_test_owned().await.unwrap();
         let host = db
-            .ensure_host("fire-01", ft_core::Compute::Local)
+            .ensure_host("fire-01", ft_core::Compute::Local, _owner.as_str())
             .await
             .unwrap();
         let fleet = Fleet::new(db);
@@ -4436,7 +4436,7 @@ mod supervisor_tests {
     async fn supervising_returns_while_the_host_is_still_connected() {
         let (db, _owner) = Db::open_for_test_owned().await.unwrap();
         let host = db
-            .ensure_host("fire-01", ft_core::Compute::Local)
+            .ensure_host("fire-01", ft_core::Compute::Local, _owner.as_str())
             .await
             .unwrap();
         let fleet = Fleet::new(db);

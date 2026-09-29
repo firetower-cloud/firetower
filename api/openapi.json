@@ -522,6 +522,493 @@
         }
       }
     },
+    "/api/v1/colleagues": {
+      "get": {
+        "tags": [
+          "access"
+        ],
+        "summary": "Everybody in the organisation, by name.",
+        "operationId": "list_colleagues",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Colleague"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/directories": {
+      "get": {
+        "tags": [
+          "access"
+        ],
+        "summary": "The directories somebody can see.",
+        "description": "An administrator of the organisation gets all of them, including ones they\nhave no grant in — `level` is still their own and still absent there. That\nis not a way to read what is inside: it is how a directory whose last\nadministrator left can be found by the person who can fix it.",
+        "operationId": "list_directories",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Directory"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "access"
+        ],
+        "operationId": "create_directory",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewDirectory"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Directory"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/directories/{id}": {
+      "delete": {
+        "tags": [
+          "access"
+        ],
+        "operationId": "delete_directory",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "access"
+        ],
+        "operationId": "rename_directory",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DirectoryName"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/directories/{id}/grants": {
+      "get": {
+        "tags": [
+          "access"
+        ],
+        "summary": "Who may do what in a directory.",
+        "description": "Readable by anybody who may look in it, not only by whoever administers it.\nSomebody working in a shared directory should be able to see who else is in\nthe room, and an agent's conversation is exactly the thing you want to know\nthe audience for before you type into it.",
+        "operationId": "list_grants",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Grant"
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "access"
+        ],
+        "operationId": "set_grant",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewGrant"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/directories/{id}/grants/{kind}/{subject}": {
+      "delete": {
+        "tags": [
+          "access"
+        ],
+        "operationId": "revoke_grant",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "kind",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "subject",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/directories/{id}/items": {
+      "get": {
+        "tags": [
+          "access"
+        ],
+        "summary": "What is filed here.",
+        "description": "Needs a look in the directory, the same as reading its grants: this is the\nlist a grant applies to, and somebody deciding whether to share a directory\nhas to be able to see what they would be sharing.",
+        "operationId": "list_items",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Filed"
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "access"
+        ],
+        "summary": "File these things in this directory.",
+        "description": "**The only thing that changes who can reach something.** Nothing about the\nthing itself moves: a workspace keeps its worktree, its branch and the\nagents running in it. What changes is the audience — and, deliberately, who\nowns it: filing something in a directory hands it to that directory, and\nwhoever put it there keeps access as somebody the directory grants.\n\nBoth ends are checked: [`may_share`] for the thing, and at least working\naccess on the directory it is going to — filing your own work somewhere you\nmay only look would put it out of your own reach.\n\nA refusal stops the run. The ones already filed stay filed, and the sentence\nsays which one failed, rather than one verdict over a list half applied.",
+        "operationId": "file_items",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Placement"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "access"
+        ],
+        "summary": "Take these back into your own space.",
+        "description": "The counterpart of filing: a thing is always somewhere, so \"unshare\" is not\nremoval, it is moving it home. Whoever does it ends up owning it, which is\nthe same rule read backwards.",
+        "operationId": "unfile_items",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Placement"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/events": {
       "get": {
         "tags": [
@@ -4422,6 +4909,279 @@
         }
       }
     },
+    "/api/v1/teams": {
+      "get": {
+        "tags": [
+          "access"
+        ],
+        "summary": "Every team in the organisation.",
+        "description": "Readable by anybody, because granting to a team means choosing one from a\nlist. Membership is a separate request.",
+        "operationId": "list_teams",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Team"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "access"
+        ],
+        "operationId": "create_team",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewTeam"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Team"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/teams/{id}": {
+      "delete": {
+        "tags": [
+          "access"
+        ],
+        "summary": "Remove a team, and with it everything it could reach.",
+        "operationId": "delete_team",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "access"
+        ],
+        "operationId": "rename_team",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TeamName"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/teams/{id}/members": {
+      "get": {
+        "tags": [
+          "access"
+        ],
+        "summary": "Who is in a team.",
+        "description": "Empty for the team that is everybody — it has no membership rows by design,\nand an interface says \"everyone in the organisation\" rather than listing\nthem twice.",
+        "operationId": "list_team_members",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Colleague"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/teams/{id}/members/{person}": {
+      "put": {
+        "tags": [
+          "access"
+        ],
+        "operationId": "add_team_member",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "person",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "access"
+        ],
+        "operationId": "remove_team_member",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "person",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/trackers": {
       "get": {
         "tags": [
@@ -5331,6 +6091,7 @@
         "type": "object",
         "required": [
           "id",
+          "path",
           "kind",
           "name",
           "mode",
@@ -5374,6 +6135,17 @@
           },
           "name": {
             "type": "string"
+          },
+          "ownerName": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What to call the owner, so a list can say whose an account is."
+          },
+          "path": {
+            "type": "string",
+            "description": "Where it is filed, and therefore who may pick it.\n\nA `String` rather than a `ResourcePath`, like `id` above: this struct is\nread by `sqlx::FromRow`, and what comes back is the text of an `ltree`."
           },
           "revision": {
             "type": "integer",
@@ -6105,6 +6877,22 @@
           }
         }
       },
+      "Colleague": {
+        "type": "object",
+        "description": "Somebody to hand a grant to.\n\nDeliberately not `User`, which carries a role and whether they are switched\noff — an administrator's facts about somebody. This is a name and an id,\nwhich is all that granting needs, and it is what makes sharing possible for\na member: listing the organisation's users is an administrator's request,\nand without this a member could only share with people they could already\nguess the id of.\n\nAlso not `Person`, which this contract already uses for an account on a git\nhost.",
+        "required": [
+          "id",
+          "username"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/UserId"
+          },
+          "username": {
+            "type": "string"
+          }
+        }
+      },
       "Commit": {
         "type": "object",
         "properties": {
@@ -6522,6 +7310,74 @@
           "Base",
           "Head"
         ]
+      },
+      "Directory": {
+        "type": "object",
+        "description": "A bag of things a grant is held over.",
+        "required": [
+          "id",
+          "name",
+          "slug",
+          "workspaces",
+          "hosts",
+          "agentAccounts",
+          "secrets"
+        ],
+        "properties": {
+          "agentAccounts": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "hosts": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "id": {
+            "$ref": "#/components/schemas/DirectoryId"
+          },
+          "level": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Level",
+                "description": "What the person asking may do here. Absent when nothing was asked for."
+              }
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "secrets": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "slug": {
+            "type": "string",
+            "description": "What appears in a path. Derived from the name once, and stable after —\nrenaming a directory must not rewrite every path underneath it."
+          },
+          "workspaces": {
+            "type": "integer",
+            "format": "int64",
+            "description": "What is filed here, so a list can say so and a deletion can refuse."
+          }
+        }
+      },
+      "DirectoryId": {
+        "type": "string",
+        "description": "Identifies a directory — the things a grant is held over."
+      },
+      "DirectoryName": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          }
+        }
       },
       "DockerState": {
         "type": "object",
@@ -7136,6 +7992,71 @@
           "Unshipped"
         ]
       },
+      "Filed": {
+        "type": "object",
+        "description": "One of the things a directory holds.\n\nFour kinds in one list, because \"what is in here\" is one question and\nanswering it four times is how a screen ends up with four tables nobody\nreads. What differs between them is only what the second line says.",
+        "required": [
+          "kind",
+          "path",
+          "id",
+          "name"
+        ],
+        "properties": {
+          "detail": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The second line: the repository, the agent, the scope."
+          },
+          "id": {
+            "type": "string",
+            "description": "What identifies it. A secret has no id of its own — it is keyed by\nscope, name and owner — so for one of those this is `scope/name`, and\nthe owner is whoever is asking. See `Access::place`."
+          },
+          "kind": {
+            "$ref": "#/components/schemas/FiledKind"
+          },
+          "name": {
+            "type": "string"
+          },
+          "ownerName": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Whose it is. Absent for a machine, which is the organisation's."
+          },
+          "path": {
+            "$ref": "#/components/schemas/ResourcePath",
+            "description": "Where it is filed — and so who can reach it."
+          }
+        }
+      },
+      "FiledKind": {
+        "type": "string",
+        "enum": [
+          "workspace",
+          "machine",
+          "agentAccount",
+          "secret"
+        ]
+      },
+      "FiledRef": {
+        "type": "object",
+        "description": "One thing to move, named the way `Filed` names it.\n\n**Not `Placed`.** That is already a schema in this contract — where an\nattached file landed in a workspace — and utoipa registers a type by its\nshort name, so a second `Placed` silently becomes whichever of the two the\ngenerator reached last. The clients then typecheck against a shape the\nserver never sends.",
+        "required": [
+          "kind",
+          "id"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/FiledKind"
+          }
+        }
+      },
       "Forwarded": {
         "type": "object",
         "description": "A port on this machine, and the one inside the session it stands for.",
@@ -7184,6 +8105,31 @@
           }
         }
       },
+      "Grant": {
+        "type": "object",
+        "description": "One line of who may do what in a directory.",
+        "required": [
+          "subjectKind",
+          "subjectId",
+          "subjectName",
+          "level"
+        ],
+        "properties": {
+          "level": {
+            "$ref": "#/components/schemas/Level"
+          },
+          "subjectId": {
+            "type": "string"
+          },
+          "subjectKind": {
+            "$ref": "#/components/schemas/SubjectKind"
+          },
+          "subjectName": {
+            "type": "string",
+            "description": "The person's username or the team's name, so a list needs one read."
+          }
+        }
+      },
       "HeldSecret": {
         "type": "object",
         "description": "A credential Firetower holds. Its name, and nothing else.",
@@ -7195,10 +8141,17 @@
         "properties": {
           "mine": {
             "type": "boolean",
-            "description": "Yours rather than the install's. What the screen says, so it never has\nto show an account id."
+            "description": "Yours rather than somebody else's or the install's. What the screen\nsays, so it never has to show an account id."
           },
           "name": {
             "type": "string"
+          },
+          "path": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Where it is filed, so a screen can say who else can reach it and offer\nto file it elsewhere.\n\nAbsent for an *attached* one — an agent account's credential, a\nrepository's variable, the install's own. Those move with what they\nbelong to and cannot be filed on their own."
           },
           "scope": {
             "type": "string"
@@ -7212,6 +8165,7 @@
           "id",
           "name",
           "state",
+          "path",
           "compute"
         ],
         "properties": {
@@ -7277,6 +8231,10 @@
           "name": {
             "type": "string",
             "description": "What the user calls it. `localhost` is a real host, not a special case."
+          },
+          "path": {
+            "$ref": "#/components/schemas/ResourcePath",
+            "description": "Where this machine is filed, and therefore who may run on it.\n\n`u/kevin/fire-01` for a connection somebody added and kept;\n`d/shared/fire-01` once it has been handed to the organisation."
           },
           "reconnecting": {
             "type": "boolean",
@@ -7464,6 +8422,15 @@
           }
         }
       },
+      "Level": {
+        "type": "string",
+        "description": "How much somebody may do in a directory.\n\nOrdered, and the order is the point — every check is \"at least this much\".\n`Ord` comes from the declaration order, so `Viewer < Writer < Admin` without\na comparison written anywhere.",
+        "enum": [
+          "viewer",
+          "writer",
+          "admin"
+        ]
+      },
       "Limit": {
         "type": "object",
         "required": [
@@ -7598,6 +8565,17 @@
           }
         }
       },
+      "NewDirectory": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          }
+        }
+      },
       "NewEnv": {
         "type": "object",
         "description": "Variables to hold for this repository.\n\nEither typed one at a time, or pasted as a whole `.env` — the same route,\nbecause they are the same thing arriving in two shapes, and the file is the\nshape people already have.",
@@ -7628,6 +8606,25 @@
             "format": "int32",
             "description": "The port inside the session's workspace.",
             "minimum": 0
+          }
+        }
+      },
+      "NewGrant": {
+        "type": "object",
+        "required": [
+          "subjectKind",
+          "subjectId",
+          "level"
+        ],
+        "properties": {
+          "level": {
+            "$ref": "#/components/schemas/Level"
+          },
+          "subjectId": {
+            "type": "string"
+          },
+          "subjectKind": {
+            "$ref": "#/components/schemas/SubjectKind"
           }
         }
       },
@@ -7780,6 +8777,17 @@
             ],
             "description": "The branch the agent works on. Omit to derive one from the prompt.\n\nNamed by whoever starts the session, because this is what ends up on a\npull request and a machine-written slug is a poor thing to live with."
           },
+          "directoryId": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/DirectoryId",
+                "description": "Which directory to file the workspace in, and therefore who will be able\nto see it.\n\nOmit for your own space, which is what a workspace has always been.\nNaming one hands it to that directory at the one moment when nobody has\nto be told it changed hands."
+              }
+            ]
+          },
           "hostId": {
             "oneOf": [
               {
@@ -7853,6 +8861,17 @@
                 "description": "A workspace to start this agent in, instead of making one.\n\nThe place already exists — its host, its repositories, its branch and\nits directory — so all of those are read from it and anything sent\nalongside is ignored. What is left is the agent and what to ask it.\n\nThis is how a workspace comes to hold two agents: they are two sessions\nnaming one `workspace_id`, each with its own conversation."
               }
             ]
+          }
+        }
+      },
+      "NewTeam": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
           }
         }
       },
@@ -7981,6 +9000,20 @@
           "path": {
             "type": "string",
             "description": "Where it landed, relative to the workspace — which is what to say to the\nagent, and what it can act on."
+          }
+        }
+      },
+      "Placement": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FiledRef"
+            }
           }
         }
       },
@@ -8571,6 +9604,10 @@
           }
         }
       },
+      "ResourcePath": {
+        "type": "string",
+        "description": "A path, as the wire and the interface spell it: `u/kevin/thing`."
+      },
       "RevealedSecret": {
         "type": "object",
         "description": "A value, on its way to a person who asked for it.",
@@ -8816,6 +9853,7 @@
         "required": [
           "id",
           "owner",
+          "path",
           "number",
           "name",
           "title",
@@ -8888,6 +9926,17 @@
           "owner": {
             "$ref": "#/components/schemas/UserId",
             "description": "Whoever started it.\n\nEverything else about who may do what follows from this: who can open\nthe session, whose token pushes its branch, whose name goes on its\ncommits. Carried on the session rather than looked up each time,\nbecause every one of those questions is asked while it is already\nloaded."
+          },
+          "ownerName": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What to call the owner, so a shared list can say whose this is.\n\nSent because it cannot be looked up: listing the people in an\norganisation is an administrator's request, and a member seeing a\ncolleague's workspace still has to be told a name rather than an id."
+          },
+          "path": {
+            "$ref": "#/components/schemas/ResourcePath",
+            "description": "Which directory the workspace is filed in — `u/kevin/…` for somebody's\nown, `d/backend/…` once it has been handed to a directory.\n\nWhat anybody may do with it follows from this and from their grants, and\nis not repeated on the session: a client already holds the directories\nit can see, with its level on each, so sending a level per session would\nbe a second copy of an answer that can disagree with the first."
           },
           "prompt": {
             "type": "string"
@@ -9303,6 +10352,14 @@
           "ToolInput"
         ]
       },
+      "SubjectKind": {
+        "type": "string",
+        "description": "Whether a grant names one person or a whole team.",
+        "enum": [
+          "person",
+          "team"
+        ]
+      },
       "Switch": {
         "type": "object",
         "required": [
@@ -9487,6 +10544,48 @@
           "open",
           "closed"
         ]
+      },
+      "Team": {
+        "type": "object",
+        "description": "A named group of people.",
+        "required": [
+          "id",
+          "name",
+          "everyone",
+          "members"
+        ],
+        "properties": {
+          "everyone": {
+            "type": "boolean",
+            "description": "True for the one team that is everybody in the organisation. It has no\nmembership rows: whoever exists now is who it means."
+          },
+          "id": {
+            "$ref": "#/components/schemas/TeamId"
+          },
+          "members": {
+            "type": "integer",
+            "format": "int64",
+            "description": "How many people are in it. The whole organisation, for `everyone`."
+          },
+          "name": {
+            "type": "string"
+          }
+        }
+      },
+      "TeamId": {
+        "type": "string",
+        "description": "Identifies a team — a named group of people."
+      },
+      "TeamName": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          }
+        }
       },
       "TemporaryPassword": {
         "type": "object",
@@ -10460,6 +11559,7 @@
           "id",
           "orgId",
           "username",
+          "slug",
           "role",
           "mustChangePassword"
         ],
@@ -10480,6 +11580,10 @@
           },
           "role": {
             "type": "string"
+          },
+          "slug": {
+            "type": "string",
+            "description": "The label their own space is named with — the `kevin` in\n`u/kevin/ledger_rounding`.\n\nSent because a client cannot otherwise tell whether a path it is looking\nat is *theirs*. \"Is this mine\" is the first half of \"may I decide where\nthis goes\", and a client that has to guess gets it wrong in the generous\ndirection: it offers a control that the server then refuses.\n\nNot the username. That is chosen by people and may yet become an email\naddress; this is derived once and never changes, so renaming somebody\nnever moves anything."
           },
           "username": {
             "type": "string"

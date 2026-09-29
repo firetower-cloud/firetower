@@ -14,14 +14,18 @@ pub mod acp;
 pub mod codex;
 pub mod controls;
 pub mod dotenv;
+pub mod grants;
 mod ids;
 pub mod normalise;
+pub mod path;
 pub mod quota;
 pub mod session;
 mod status;
 pub mod turn;
 
-pub use ids::{HostId, OrgId, RepoId, SessionId, UserId, WorkspaceId};
+pub use grants::{Level, SubjectKind};
+pub use ids::{DirectoryId, HostId, OrgId, RepoId, SessionId, TeamId, UserId, WorkspaceId};
+pub use path::{slug, ResourcePath};
 pub use session::{
     sanitize_branch, slugify, title_from, workspace_name, NewSession, Session, Share, Workspace,
     WorkspaceSize,
@@ -577,6 +581,11 @@ pub struct Host {
     /// What the user calls it. `localhost` is a real host, not a special case.
     pub name: String,
     pub state: HostState,
+    /// Where this machine is filed, and therefore who may run on it.
+    ///
+    /// `u/kevin/fire-01` for a connection somebody added and kept;
+    /// `d/shared/fire-01` once it has been handed to the organisation.
+    pub path: ResourcePath,
     pub compute: Compute,
     /// Finishing what it has, taking nothing new. Separate from being
     /// unreachable: a draining host is still online and still working.

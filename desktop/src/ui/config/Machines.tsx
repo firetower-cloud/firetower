@@ -31,10 +31,12 @@ import { getListAgentsQueryKey, useInstallAgent } from "~/api/generated/agents/a
 import type { AgentView } from "~/api/generated/model";
 import { parseDestination, reachedTheMachine, stateLabel, waitForOnline } from "~/api/environments";
 import { useAgents, useHosts } from "~/data";
-import { Rows, Section } from "~/ui/config/bits";
+import { FiledIn, Rows, Section } from "~/ui/config/bits";
+import { useMe } from "~/api/generated/auth/auth";
 import { useConfirm } from "~/ui/Confirm";
 
 export function Machines({ live }: { live: boolean }) {
+  const me = useMe();
   const hosts = useHosts();
   const [adding, setAdding] = useState(false);
   const [open, setOpen] = useState<string | null>(null);
@@ -54,6 +56,14 @@ export function Machines({ live }: { live: boolean }) {
                 <span className="block text-ui text-bone">{h.name}</span>
                 <span className="block font-mono text-micro text-mute">{describe(h.compute)} · worker {h.workerVersion ?? "not installed"}</span>
               </span>
+              {/* A machine is personal until it is shared, so whoever added it
+                  shares it — the same as a workspace. Taking one back out of a
+                  directory needs admin *there*, which is why the fleet's shared
+                  machines cannot be pulled out from under everybody. `FiledIn`
+                  works out whether this person is one of those; it used to be
+                  decided here, and `startsWith("u/")` read somebody else's own
+                  space as this person's. */}
+              <FiledIn kind="machine" id={h.id} path={h.path} />
               {h.cpus != null && <span className="flex items-center gap-1.5 text-meta text-mute"><Icon of={Cpu} size={12} />{h.cpus}</span>}
               {h.memoryMb != null && <span className="flex items-center gap-1.5 text-meta text-mute"><Icon of={HardDrive} size={12} />{Math.round(h.memoryMb / 1024)} GB</span>}
               <span className="w-[76px] text-right text-meta text-mute">{stateLabel(h)}</span>

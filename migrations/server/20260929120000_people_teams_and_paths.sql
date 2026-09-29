@@ -1,0 +1,258 @@
+-- Who may see what, for several people who work together.
+--
+-- Until now the answer was one column. A workspace, an agent account and a
+-- secret each carried the id of the person they belonged to, and every read
+-- said `WHERE user_id = $me`. That is a complete answer to "is this mine" and
+-- no answer at all to "may I see yours", which is the whole of collaboration.
+--
+-- ## The shape
+--
+-- **A path says where a thing lives, and where it lives says who can reach it.**
+-- Two roots, and only two:
+--
+--     u.<person>.<name…>     nobody else's business
+--     d.<directory>.<name…>  whoever has a grant on that directory
+--
+-- The first two labels are the *permission root* — `subpath(path, 0, 2)` — and
+-- nothing below them adds any authority. `d.backend.ledger.rounding` is filed
+-- in `backend`, full stop; the extra labels are a name with slashes in it, for
+-- people to read. That is deliberate and it is the whole reason this does not
+-- need a recursive query: a tree for legibility, one segment for permission.
+--
+-- **A team is not a root.** It groups people, not things. `t/backend/…` was
+-- considered and dropped: it carries no level, and it could never be shared
+-- with a second team. "The backend team's work" is a *directory* named
+-- `backend` with that team granted on it, which says the same thing, keeps
+-- viewer/writer/admin, and can be opened to a second team tomorrow.
+--
+-- **Assigning transfers ownership.** Filing something under `d.backend` hands
+-- it to that directory; whoever put it there keeps access only as somebody the
+-- directory grants. That is the Windmill rule and it is chosen deliberately —
+-- one source of authority, no second concept. `created_by` is kept on every
+-- resource so the record of who made a thing survives it changing hands.
+--
+-- ## ltree
+--
+-- Labels are `[A-Za-z0-9_-]`: `'Ledger work'` is a syntax error, so every root
+-- carries a `slug` beside its display name and the two are different columns on
+-- purpose. `<@` answers "is this under that" against a GiST index, which is
+-- what makes "everything in this directory" one indexed predicate rather than a
+-- join.
+-- Into `public` explicitly, and every connection keeps `public` on its search
+-- path (see `Db::open_for_test`, where each test works in a schema of its own
+-- and would otherwise not find the type).
+--
+-- `ltree` is a *trusted* extension, so the database owner can install it
+-- without being superuser — which is what a deployment's own user is.
+create extension if not exists ltree with schema public;
+
+-- ── who ─────────────────────────────────────────────────────────────────
+
+-- A person's own root, as a label a path can hold.
+--
+-- Not the username. Usernames are chosen by people and may yet become email
+-- addresses, and `kevin@westlabs.com` is not a legal ltree label — the `@` and
+-- the dots end it. A slug is derived once, kept stable, and renaming somebody
+-- never rewrites a path.
+alter table users add column slug text;
+
+update users set slug = trim(both '_' from regexp_replace(lower(username), '[^a-z0-9]+', '_', 'g'));
+
+-- Two people whose names slug the same get a number, deterministically by id.
+update users u set slug = u.slug || '_' || n.row
+  from (select id, row_number() over (partition by org_id, slug order by id) as row
+          from users) n
+ where n.id = u.id and n.row > 1;
+
+alter table users alter column slug set not null;
+create unique index users_by_slug on users (org_id, slug);
+
+create table teams (
+    id          text primary key,
+    org_id      text not null references organizations(id) on delete cascade,
+    name        text not null,
+    -- Everybody in the organisation, without a row each.
+    --
+    -- A flag rather than a membership row per person, because the membership
+    -- that has to be true is "however many people exist right now". Maintained
+    -- as rows it would be a trigger and a backfill and, eventually, somebody
+    -- added to the organisation and not to this — a person who silently cannot
+    -- see what everybody can see. Resolved instead, in the view below.
+    everyone    boolean not null default false,
+    created_by  text references users(id) on delete set null,
+    created_at  timestamptz not null default now()
+);
+
+-- Two teams called `Backend` and `backend` are a mistake being made, not a
+-- distinction being drawn.
+create unique index teams_by_name on teams (org_id, lower(name));
+create unique index teams_everyone on teams (org_id) where everyone;
+
+create table team_members (
+    team_id   text not null references teams(id) on delete cascade,
+    user_id   text not null references users(id) on delete cascade,
+    added_at  timestamptz not null default now(),
+    primary key (team_id, user_id)
+);
+
+create index team_members_by_user on team_members (user_id);
+
+-- ── where ───────────────────────────────────────────────────────────────
+
+create table directories (
+    id          text primary key,
+    org_id      text not null references organizations(id) on delete cascade,
+    name        text not null,
+    -- What appears in a path. See the note on `users.slug`.
+    slug        text not null,
+    created_by  text references users(id) on delete set null,
+    created_at  timestamptz not null default now()
+);
+
+create unique index directories_by_name on directories (org_id, lower(name));
+create unique index directories_by_slug on directories (org_id, slug);
+
+-- `subject_id` points at a user or a team depending on `subject_kind`, so it
+-- cannot carry a foreign key. What keeps it honest is that deleting a user or a
+-- team deletes its grants, in one place in the code, and a grant naming
+-- somebody who has gone resolves to nothing in the view below rather than to
+-- access.
+create table grants (
+    directory_id  text not null references directories(id) on delete cascade,
+    subject_kind  text not null check (subject_kind in ('person', 'team')),
+    subject_id    text not null,
+    -- `viewer` may look, `writer` may work, `admin` may also change who else
+    -- can. Ranked by `level_rank`, which is the only place the order is
+    -- written down.
+    level         text not null check (level in ('viewer', 'writer', 'admin')),
+    granted_by    text references users(id) on delete set null,
+    granted_at    timestamptz not null default now(),
+    primary key (directory_id, subject_kind, subject_id)
+);
+
+create index grants_by_subject on grants (subject_kind, subject_id);
+
+create function level_rank(level text) returns integer
+    language sql immutable strict
+    as $$ select case level when 'admin' then 3 when 'writer' then 2 when 'viewer' then 1 else 0 end $$;
+
+-- Every way a person reaches a directory, reduced to the best one.
+--
+-- The single answer to "may they, and how much". Three routes in, and somebody
+-- can have all three at once — granted directly, and in two teams that were
+-- both granted. `max` is why two grants never need a tie-break rule: the most
+-- access anybody was deliberately given is what they have.
+create view directory_access as
+select
+    reached.directory_id,
+    reached.user_id,
+    max(reached.rank) as rank,
+    case max(reached.rank) when 3 then 'admin' when 2 then 'writer' else 'viewer' end as level
+from (
+    select g.directory_id, g.subject_id as user_id, level_rank(g.level) as rank
+      from grants g join users u on u.id = g.subject_id
+     where g.subject_kind = 'person'
+    union all
+    select g.directory_id, m.user_id, level_rank(g.level)
+      from grants g join team_members m on m.team_id = g.subject_id
+     where g.subject_kind = 'team'
+    union all
+    -- The team that is everybody. No membership rows to go stale: whoever is in
+    -- the organisation now is who this is.
+    select g.directory_id, u.id, level_rank(g.level)
+      from grants g
+      join teams t on t.id = g.subject_id and t.everyone
+      join users u on u.org_id = t.org_id
+     where g.subject_kind = 'team'
+) reached
+group by reached.directory_id, reached.user_id;
+
+-- ── what is filed ───────────────────────────────────────────────────────
+
+-- A path on each kind that a person can file, and `created_by` beside it.
+--
+-- Nullable on `secrets` alone, and that is the rule rather than an exception:
+-- a secret in the `agent` or `env:` scope is *attached* — it is an agent
+-- account's credential or a repository's variable, it belongs to that thing,
+-- and it moves when that thing moves. Attached things get no path, because a
+-- path they could drift from their parent is how a subscription ends up filed
+-- in one directory with its token still sitting in another.
+alter table workspaces     add column path ltree;
+-- `created_by` is null on every row that already exists, and stays null. There
+-- is no source for it: a machine was the organisation's, and nothing recorded
+-- who added one. Screens read it as "unknown" rather than guessing at the first
+-- administrator, which would put somebody's name on a decision they may not have
+-- made.
+alter table hosts          add column path ltree, add column created_by text references users(id) on delete set null;
+alter table agent_accounts add column path ltree;
+alter table secrets        add column path ltree, add column created_by text references users(id) on delete set null;
+
+-- Not `repos`, deliberately. A repository is the organisation's and always has
+-- been: one row is one setup script and one mirror, and what actually opens it
+-- is the token of whoever connected it, which is already theirs alone. Giving it
+-- a path is the obvious next step and costs one `alter table` plus a backfill to
+-- `d.shared.<slug>` — it is left undone because nothing asks for it yet, and a
+-- `not null` column nobody reads is a collision waiting to happen (two hosts can
+-- both have an `acme/backend`).
+
+-- One organisation, one directory everything shared starts in.
+insert into directories (id, org_id, name, slug)
+select 'd_' || substr(o.id, 3), o.id, 'Shared', 'shared' from organizations o;
+
+insert into teams (id, org_id, name, everyone)
+select 't_' || substr(o.id, 3), o.id, 'Everyone', true from organizations o;
+
+-- Everybody may work in the shared directory, which is what compute has always
+-- been: a machine belongs to the organisation and every one of them runs on it.
+insert into grants (directory_id, subject_kind, subject_id, level)
+select 'd_' || substr(o.id, 3), 'team', 't_' || substr(o.id, 3), 'writer' from organizations o;
+
+-- A workspace goes to whoever made it.
+update workspaces w
+   set path = ('u.' || u.slug || '.' ||
+               trim(both '_' from regexp_replace(lower(coalesce(nullif(w.name, ''), 'workspace')), '[^a-z0-9]+', '_', 'g')) ||
+               '_' || substr(w.id, 3, 8))::ltree
+  from users u where u.id = w.user_id;
+
+update agent_accounts a
+   set path = ('u.' || u.slug || '.' ||
+               trim(both '_' from regexp_replace(lower(a.name), '[^a-z0-9]+', '_', 'g')) ||
+               '_' || substr(a.id, 1, 8))::ltree
+  from users u where u.id = a.user_id;
+
+-- A machine added from now on is personal until it is shared. The ones that
+-- already exist are not: they belong to the organisation and everybody is
+-- running on them, so an install with more than one person keeps them shared.
+-- With a single person there is nobody to take them from, and they become
+-- theirs.
+update hosts h
+   set path = case
+       when (select count(*) from users where org_id = h.org_id) > 1
+         then ('d.shared.' || trim(both '_' from regexp_replace(lower(h.name), '[^a-z0-9]+', '_', 'g')))::ltree
+         else ('u.' || (select slug from users where org_id = h.org_id order by id limit 1)
+               || '.' || trim(both '_' from regexp_replace(lower(h.name), '[^a-z0-9]+', '_', 'g')))::ltree
+   end;
+
+-- A secret somebody authorized is theirs. One an agent account or a repository
+-- owns is attached and gets none, and neither does the install's own.
+update secrets s
+   set path = ('u.' || u.slug || '.' || s.scope || '.' ||
+               trim(both '_' from regexp_replace(lower(s.name), '[^a-z0-9]+', '_', 'g')))::ltree
+  from users u
+ where u.id = s.owner and s.scope not in ('agent') and s.scope not like 'env:%';
+
+alter table workspaces     alter column path set not null;
+alter table hosts          alter column path set not null;
+alter table agent_accounts alter column path set not null;
+
+-- `<@` against these is the whole access check.
+create index workspaces_by_path     on workspaces     using gist (path);
+create index hosts_by_path          on hosts          using gist (path);
+create index agent_accounts_by_path on agent_accounts using gist (path);
+create index secrets_by_path        on secrets        using gist (path);
+
+-- One thing per place, per kind.
+create unique index workspaces_path_unique     on workspaces (path);
+create unique index hosts_path_unique          on hosts (path);
+create unique index agent_accounts_path_unique on agent_accounts (path);
+create unique index secrets_path_unique        on secrets (path) where path is not null;

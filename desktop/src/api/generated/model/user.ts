@@ -22,5 +22,19 @@ export interface User {
   mustChangePassword: boolean;
   orgId: OrgId;
   role: string;
+  /**
+     * The label their own space is named with — the `kevin` in
+     * `u/kevin/ledger_rounding`.
+     *
+     * Sent because a client cannot otherwise tell whether a path it is looking
+     * at is *theirs*. "Is this mine" is the first half of "may I decide where
+     * this goes", and a client that has to guess gets it wrong in the generous
+     * direction: it offers a control that the server then refuses.
+     *
+     * Not the username. That is chosen by people and may yet become an email
+     * address; this is derived once and never changes, so renaming somebody
+     * never moves anything.
+     */
+  slug: string;
   username: string;
 }

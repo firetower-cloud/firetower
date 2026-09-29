@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0
  */
 import type { Agent } from './agent.ts';
+import type { DirectoryId } from './directoryId.ts';
 import type { HostId } from './hostId.ts';
 import type { NewCheckout } from './newCheckout.ts';
 import type { RepoId } from './repoId.ts';
@@ -36,6 +37,7 @@ export interface NewSession {
      * @nullable
      */
   branch?: string | null;
+  directoryId?: null | DirectoryId;
   hostId?: null | HostId;
   /**
      * What to call the workspace. Omit to derive one from the branch.

@@ -8,6 +8,7 @@
 import type { Agent } from './agent.ts';
 import type { Checkout } from './checkout.ts';
 import type { HostId } from './hostId.ts';
+import type { ResourcePath } from './resourcePath.ts';
 import type { SessionId } from './sessionId.ts';
 import type { SessionStatus } from './sessionStatus.ts';
 import type { Share } from './share.ts';
@@ -86,6 +87,25 @@ export interface Session {
      * loaded.
      */
   owner: UserId;
+  /**
+     * What to call the owner, so a shared list can say whose this is.
+     *
+     * Sent because it cannot be looked up: listing the people in an
+     * organisation is an administrator's request, and a member seeing a
+     * colleague's workspace still has to be told a name rather than an id.
+     * @nullable
+     */
+  ownerName?: string | null;
+  /**
+     * Which directory the workspace is filed in — `u/kevin/…` for somebody's
+     * own, `d/backend/…` once it has been handed to a directory.
+     *
+     * What anybody may do with it follows from this and from their grants, and
+     * is not repeated on the session: a client already holds the directories
+     * it can see, with its level on each, so sending a level per session would
+     * be a second copy of an answer that can disagree with the first.
+     */
+  path: ResourcePath;
   prompt: string;
   /** @nullable */
   proposedBody?: string | null;

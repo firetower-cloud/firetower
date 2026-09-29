@@ -7,7 +7,8 @@
  * diff hid the conversation that explained it. They are two halves of one job.
  */
 import { useEffect, useRef, useState } from "react";
-import { Globe, PanelRight, Pencil, SquareTerminal, Trash2, X } from "lucide-react";
+import { Globe, PanelRight, Pencil, Share2, SquareTerminal, Trash2, X } from "lucide-react";
+import { Sharing } from "~/ui/Sharing";
 import { useQueryClient } from "@tanstack/react-query";
 import { getListSessionsQueryKey, useRenameSession } from "~/api/generated/sessions/sessions";
 import { Signal } from "~/components/Signal";
@@ -262,6 +263,7 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
   const cache = useQueryClient();
   const rename = useRenameSession();
   const endWorkspace = useEndWorkspace();
+  const [sharing, setSharing] = useState(false);
   const confirm = useConfirm();
   const endAgent = useEndAgent();
   const tabMenu = useMenu<string>();
@@ -393,6 +395,26 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
               <Trash2 className="h-4 w-4" strokeWidth={1.75} />
             </button>
           )}
+          {/* Where this is filed, and so who can reach it. Next to ending it
+              because they are the two things you do *to* a workspace rather
+              than in it.
+
+              The path is on the button when it is shared, because "who can see
+              my work" is not a question anybody should have to open a dialog to
+              answer. Nothing when it is in your own space, which is the quiet
+              default. */}
+          <button
+            onClick={() => setSharing((v) => !v)}
+            title={`Where this is filed — ${place.runs[0]?.path ?? "yours"}`}
+            className={`control gap-1.5 ${sharing ? "bg-overlay text-bone" : "text-mute hover:bg-raise hover:text-bone"}`}
+          >
+            <Share2 className="h-4 w-4" strokeWidth={1.75} />
+            {place.runs[0]?.path?.startsWith("d/") && (
+              <span className="font-mono text-micro">
+                {place.runs[0].path.split("/").slice(0, 2).join("/")}
+              </span>
+            )}
+          </button>
           <div className="relative">
             <button
               onClick={() => setPicking((p) => !p)}
@@ -518,6 +540,14 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
           />
         )}
       </div>
+
+      {sharing && (
+        <Sharing
+          workspaceId={place.id}
+          path={place.runs[0]?.path ?? ""}
+          onClose={() => setSharing(false)}
+        />
+      )}
 
       {tabMenu.open && <ContextMenu at={tabMenu.open.at} items={tabItems(tabMenu.open.on)} onClose={tabMenu.close} />}
       {chipMenu.open && (

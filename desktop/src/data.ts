@@ -9,6 +9,7 @@ import { useListHosts } from "~/api/generated/hosts/hosts";
 import { useListAgents } from "~/api/generated/agents/agents";
 import { useListProviders } from "~/api/generated/providers/providers";
 import { useListAccounts } from "~/api/generated/accounts/accounts";
+import { useListDirectories } from "~/api/generated/access/access";
 import { useMe } from "~/api/generated/auth/auth";
 import { useSetupState } from "~/api/generated/setup/setup";
 import { useGetUpdates } from "~/api/generated/updates/updates";
@@ -133,6 +134,23 @@ export function useUpdatesDot(): boolean {
 /** Named agent connections — whose subscription a session runs on. */
 export function useAccounts() {
   const q = useListAccounts();
+  return { data: q.data ?? [], loading: q.isPending, error: q.error ? why(q.error) : null };
+}
+
+/**
+ * The directories this person can reach, with what they may do in each.
+ *
+ * Where something is filed decides who can see it, so this is what the "Filed
+ * in" choice is built from and what turns the `d/<slug>` in a path into a name.
+ * Match on `slug`, not on `id`: the slug is the part that appears in a path, and
+ * the name is free to change without anything moving.
+ *
+ * Only the ones that can be worked in are somewhere to put new work — being
+ * allowed to look at a directory is not being allowed to file your own work
+ * there, where you could then not follow it.
+ */
+export function useDirectories() {
+  const q = useListDirectories();
   return { data: q.data ?? [], loading: q.isPending, error: q.error ? why(q.error) : null };
 }
 

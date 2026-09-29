@@ -18,6 +18,18 @@ export interface Account {
   limits: Limit[];
   mode: string;
   name: string;
+  /**
+     * What to call the owner, so a list can say whose an account is.
+     * @nullable
+     */
+  ownerName?: string | null;
+  /**
+     * Where it is filed, and therefore who may pick it.
+     *
+     * A `String` rather than a `ResourcePath`, like `id` above: this struct is
+     * read by `sqlx::FromRow`, and what comes back is the text of an `ltree`.
+     */
+  path: string;
   revision: number;
   state: string;
 }

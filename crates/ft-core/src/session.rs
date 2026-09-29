@@ -1,6 +1,9 @@
 //! Sessions and the workspaces they run on.
 
-use crate::{Agent, HostId, RepoId, SessionId, SessionStatus, UserId, WorkspaceId, WorkspaceUsage};
+use crate::{
+    Agent, DirectoryId, HostId, RepoId, ResourcePath, SessionId, SessionStatus, UserId,
+    WorkspaceId, WorkspaceUsage,
+};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
@@ -138,6 +141,21 @@ pub struct Session {
     /// because every one of those questions is asked while it is already
     /// loaded.
     pub owner: UserId,
+    /// What to call the owner, so a shared list can say whose this is.
+    ///
+    /// Sent because it cannot be looked up: listing the people in an
+    /// organisation is an administrator's request, and a member seeing a
+    /// colleague's workspace still has to be told a name rather than an id.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owner_name: Option<String>,
+    /// Which directory the workspace is filed in — `u/kevin/…` for somebody's
+    /// own, `d/backend/…` once it has been handed to a directory.
+    ///
+    /// What anybody may do with it follows from this and from their grants, and
+    /// is not repeated on the session: a client already holds the directories
+    /// it can see, with its level on each, so sending a level per session would
+    /// be a second copy of an answer that can disagree with the first.
+    pub path: ResourcePath,
     /// Assigned once, never reused, and the same for as long as the session
     /// exists. What `name` is derived from, and what a name that has been
     /// changed can always be traced back to.
@@ -272,6 +290,14 @@ pub struct NewSession {
     /// Omit to let the scheduler choose.
     #[serde(default)]
     pub host_id: Option<HostId>,
+    /// Which directory to file the workspace in, and therefore who will be able
+    /// to see it.
+    ///
+    /// Omit for your own space, which is what a workspace has always been.
+    /// Naming one hands it to that directory at the one moment when nobody has
+    /// to be told it changed hands.
+    #[serde(default)]
+    pub directory_id: Option<DirectoryId>,
     /// The branch to start from. Omit for the repository's default.
     #[serde(default)]
     pub base: Option<String>,

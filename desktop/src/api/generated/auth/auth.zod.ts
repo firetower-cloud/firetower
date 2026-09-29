@@ -21,6 +21,7 @@ export const LoginResponse = zod.object({
   "mustChangePassword": zod.boolean().describe('True while the password came from a file rather than from a person.\nNothing but replacing it is permitted until this clears.'),
   "orgId": zod.string().describe('Identifies an organisation.'),
   "role": zod.string(),
+  "slug": zod.string().describe('The label their own space is named with — the `kevin` in\n`u/kevin/ledger_rounding`.\n\nSent because a client cannot otherwise tell whether a path it is looking\nat is *theirs*. "Is this mine" is the first half of "may I decide where\nthis goes", and a client that has to guess gets it wrong in the generous\ndirection: it offers a control that the server then refuses.\n\nNot the username. That is chosen by people and may yet become an email\naddress; this is derived once and never changes, so renaming somebody\nnever moves anything.'),
   "username": zod.string()
 }).describe('Someone who can sign in.')
 }).describe('What a browser gets for a correct password.')
@@ -38,6 +39,7 @@ export const MeResponse = zod.object({
   "mustChangePassword": zod.boolean().describe('True while the password came from a file rather than from a person.\nNothing but replacing it is permitted until this clears.'),
   "orgId": zod.string().describe('Identifies an organisation.'),
   "role": zod.string(),
+  "slug": zod.string().describe('The label their own space is named with — the `kevin` in\n`u/kevin/ledger_rounding`.\n\nSent because a client cannot otherwise tell whether a path it is looking\nat is *theirs*. "Is this mine" is the first half of "may I decide where\nthis goes", and a client that has to guess gets it wrong in the generous\ndirection: it offers a control that the server then refuses.\n\nNot the username. That is chosen by people and may yet become an email\naddress; this is derived once and never changes, so renaming somebody\nnever moves anything.'),
   "username": zod.string()
 }).describe('Someone who can sign in.')
 }).describe('Who the caller is, and what they belong to.')

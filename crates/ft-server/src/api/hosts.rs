@@ -3,12 +3,14 @@
 //! Adding one connects to it there and then, so a wrong address is a message
 //! on the form rather than a host that quietly never works.
 
+use super::access::whoever;
 use super::{ApiError, ApiResult, ErrorCode};
+use crate::auth::Principal;
 use crate::{fleet, AppState};
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
-    Json,
+    Extension, Json,
 };
 use ft_core::Host;
 use ft_proto::ToWorker;
@@ -44,8 +46,12 @@ pub struct NewHost {
 )]
 pub(super) async fn create_host(
     State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
     Json(req): Json<NewHost>,
 ) -> ApiResult<(StatusCode, Json<Host>)> {
+    // Needed before anything is written: a machine is filed at
+    // `u/<whoever added it>/…`, so there has to be somebody adding it.
+    let me = whoever(&principal)?;
     // This machine is registered at start-up and always present. Adding a
     // second one would be two workers over the same directories.
     if req.compute == ft_core::Compute::Local {
@@ -79,7 +85,7 @@ pub(super) async fn create_host(
         ));
     }
 
-    let host = state.db.ensure_host(&name, compute).await?;
+    let host = state.db.ensure_host(&name, compute, me.id.as_str()).await?;
     if req.same_machine {
         sqlx::query("UPDATE hosts SET machine = 'local' WHERE id = $1")
             .bind(host.id.as_str())
@@ -367,9 +373,25 @@ pub(super) async fn delete_host(
     get, path = "/api/v1/hosts", tag = "hosts",
     responses((status = 200, body = Vec<Host>)),
 )]
-pub(super) async fn list_hosts(State(state): State<AppState>) -> ApiResult<Json<Vec<Host>>> {
+pub(super) async fn list_hosts(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+) -> ApiResult<Json<Vec<Host>>> {
+    // Filtered, and by the same predicate as everything else. A machine is
+    // personal until it is shared, so an unfiltered list here would show
+    // somebody the server their colleague added with their own key — and this
+    // endpoint feeds the picker that starts a session, which would then offer a
+    // machine the request is about to refuse.
+    //
+    // Viewer, not writer: seeing that a machine exists is what a list is. What
+    // it takes to run on one is asked where a session is started.
+    let me = whoever(&principal)?;
     let mut hosts = Vec::new();
-    for host in state.db.hosts().await? {
+    for host in state
+        .db
+        .hosts_for(me.id.as_str(), crate::access::Level::Viewer)
+        .await?
+    {
         hosts.push(seen(&state, host).await);
     }
     Ok(Json(hosts))
@@ -644,6 +666,10 @@ pub(super) async fn probe_host(
         id: ft_core::HostId::from_stored("probe".to_string()),
         name: "probe".to_string(),
         state: ft_core::HostState::Unreachable,
+        // Nowhere. Nothing reads it on this path — a probe is a connection
+        // attempt, not a machine anybody could be granted — and the row is
+        // never saved, so there is nothing to file.
+        path: ft_core::ResourcePath::from_stored("u.probe.probe"),
         compute: compute.clone(),
         drained: false,
         cpus: None,

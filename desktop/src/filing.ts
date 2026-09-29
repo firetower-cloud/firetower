@@ -1,0 +1,80 @@
+/**
+ * Who may decide where something is filed.
+ *
+ * **One function, because there were four.** The machines list, the agents
+ * list, the secrets list and the sharing dialog each worked this out for
+ * themselves and each got a different answer — the dialog did not ask at all,
+ * so somebody with a *look* at a directory was offered "move this into your own
+ * space", which the server then refused. A control that is offered and refused
+ * is worse than one that is absent: it reads as a broken button rather than as
+ * a permission they do not have.
+ *
+ * This is the same question `may_share` asks on the server
+ * (`crates/ft-server/src/api/access.rs`). It is asked here as well, before the
+ * control is drawn, and the two have to agree. The server is what enforces it;
+ * this only decides what to show.
+ */
+
+/** Just enough of the signed-in person. */
+export type Whoever = { slug: string; role: string } | null | undefined;
+
+/** Just enough of a directory: what appears in a path, and what they may do. */
+export type Reachable = { slug: string; level?: string | null };
+
+/**
+ * Whether this person may move this thing.
+ *
+ * Three ways to yes, and they are the three the server allows:
+ *
+ * * it is in **their own space** — `u/<their slug>/…`, which needs no grant;
+ * * they **administer the directory** it is filed in. Not writer: a writer may
+ *   put their own things in and may not take somebody else's out, which is what
+ *   stops a member pulling the fleet's shared machine out from under everybody;
+ * * they **administer the organisation**, which exists so that a directory
+ *   whose last administrator has left is fixable by somebody.
+ *
+ * `false` for anything *attached* — an agent account's credential, a
+ * repository's variables, the installation's own secrets. Those have no path,
+ * they move when the thing they belong to moves, and there is nothing to offer.
+ */
+export function mayMove(
+  path: string | null | undefined,
+  me: Whoever,
+  directories: Reachable[],
+): boolean {
+  if (!path || !me) return false;
+  if (me.role === "admin") return true;
+
+  const [root, label] = path.split("/");
+  if (root === "u") return label === me.slug;
+  if (root === "d") return directories.some((d) => d.slug === label && d.level === "admin");
+  return false;
+}
+
+/**
+ * Where something may be moved *to*.
+ *
+ * Writer, not admin, and deliberately a different question from `mayMove`:
+ * putting your own work into a directory you can work in is ordinary, and it is
+ * taking something out that needs administering. The server checks both ends —
+ * `may_share` for the thing, and at least writer on the directory it is going
+ * to.
+ */
+export function destinations<T extends Reachable>(directories: T[]): T[] {
+  return directories.filter((d) => d.level === "writer" || d.level === "admin");
+}
+
+/** `u/kevin/thing` → `["u", "kevin"]`. The first two labels are the whole of
+ *  what decides access; everything after them is a name with slashes in it. */
+export function rootOf(path: string): [string, string] {
+  const parts = path.split("/");
+  return [parts[0] ?? "", parts[1] ?? ""];
+}
+
+/** What a chip says: `yours`, or the directory root as it appears in the path. */
+export function where(path: string | null | undefined, me: Whoever): string {
+  if (!path) return "";
+  const [root, label] = rootOf(path);
+  if (root === "u") return label === me?.slug ? "yours" : `u/${label}`;
+  return `d/${label}`;
+}

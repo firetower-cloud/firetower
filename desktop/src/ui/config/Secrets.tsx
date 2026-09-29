@@ -15,9 +15,9 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Eye, EyeOff, Plus, Trash2 } from "lucide-react";
 import { Icon } from "~/components/ui";
 import { getListSecretsQueryKey, useListSecrets, useRemoveSecret, useReplaceSecret, useRevealSecret } from "~/api/generated/secrets/secrets";
-import { Section } from "~/ui/config/bits";
+import { FiledIn, Section } from "~/ui/config/bits";
 
-import { why } from "~/data";
+import { useDirectories, why } from "~/data";
 import { useConfirm } from "~/ui/Confirm";
 
 export function Secrets() {
@@ -30,7 +30,9 @@ export function Secrets() {
   const [value, setValue] = useState("");
   const refresh = () => cache.invalidateQueries({ queryKey: getListSecretsQueryKey() });
 
-  const held = (data as { held?: { scope: string; name: string; mine: boolean }[]; intact?: boolean } | undefined)?.held ?? [];
+  const held =
+    (data as { held?: { scope: string; name: string; mine: boolean; path?: string | null }[] } | undefined)
+      ?.held ?? [];
 
   return (
     <Section
@@ -55,13 +57,13 @@ export function Secrets() {
       )}
 
       {held.map((s) => (
-        <Row key={`${s.scope}/${s.name}`} scope={s.scope} name={s.name} mine={s.mine} onGone={refresh} />
+        <Row key={`${s.scope}/${s.name}`} scope={s.scope} name={s.name} mine={s.mine} path={s.path} onGone={refresh} />
       ))}
     </Section>
   );
 }
 
-function Row({ scope, name, mine, onGone }: { scope: string; name: string; mine: boolean; onGone: () => void }) {
+function Row({ scope, name, mine, path, onGone }: { scope: string; name: string; mine: boolean; path?: string | null; onGone: () => void }) {
   const confirm = useConfirm();
   const reveal = useRevealSecret();
   const remove = useRemoveSecret();
@@ -72,7 +74,23 @@ function Row({ scope, name, mine, onGone }: { scope: string; name: string; mine:
   return (
     <div className="flex items-center gap-2.5 px-3.5 py-2.5">
       <span className="w-24 shrink-0 truncate font-mono text-micro text-mute">{scope}</span>
-      <span className="min-w-0 flex-1 truncate font-mono text-ui text-text">{name}{!mine && <span className="ml-1.5 text-micro text-mute">· someone else's</span>}</span>
+      {/* What it says when it is not simply yours. A secret filed into a
+          directory has that directory as its owner — that is what handing it
+          over means — so `mine` goes false the moment it is shared, and
+          "someone else's" would be a lie about your own credential. The chip
+          beside it already says where it is; the only thing left to name is the
+          installation's own, which belongs to the deployment and to nobody. */}
+      <span className="min-w-0 flex-1 truncate font-mono text-ui text-text">{name}{!mine && !path && <span className="ml-1.5 text-micro text-mute">· this installation's</span>}</span>
+      {/* Filing a secret re-seals it: the owner is in the associated data of
+          both crypto layers, so it is opened under the old identity and sealed
+          under the new. That is why moving one is a real transfer and not a
+          second reader being added.
+
+          Never an `agent` one, and never a repository's `env:` variable. Those
+          are *attached* — they belong to an account or a repository and move when
+          it moves — so they arrive here with no path and `FiledIn` draws
+          nothing. Sharing the account is what sharing one of those means. */}
+      <FiledIn kind="secret" id={`${scope}/${name}`} path={path} />
       {editing !== null ? (
         <>
           <input autoFocus value={editing} onChange={(e) => setEditing(e.target.value)} type="password" onKeyDown={(e) => { if (e.key === "Enter" && editing) replace.mutate({ scope, name, data: { value: editing } }, { onSuccess: () => setEditing(null) }); if (e.key === "Escape") setEditing(null); }} placeholder="new value" className="w-48 rounded-md border border-line bg-ground px-2 py-1 font-mono text-micro text-bone focus:outline-none" />

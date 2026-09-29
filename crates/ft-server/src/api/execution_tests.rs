@@ -89,7 +89,7 @@ async fn fixture() -> (
         via: crate::auth::Via::Session,
         user: accounts.user_by_name("admin").await.unwrap(),
     };
-    let host = db.ensure_host("native", native()).await.unwrap();
+    let host = db.ensure_host("native", native(), &owner).await.unwrap();
     let ready = Arc::new(AtomicBool::new(false));
     let fleet = crate::fleet::Fleet::new(db.clone());
     fleet
@@ -108,6 +108,7 @@ async fn fixture() -> (
     let state = AppState {
         updates: crate::updates::Updates::new(db.pool().clone()),
         policy: crate::auth::Policy::open(),
+        access: crate::access::Access::new(db.pool().clone()),
         db,
         accounts,
         fleet,
@@ -197,10 +198,10 @@ async fn missing_native_worker_has_native_setup_instructions_and_stays_unready()
 
 #[tokio::test]
 async fn connecting_a_host_path_defers_validation_to_the_execution_machine() {
-    let (state, principal, host, ready, _) = fixture().await;
+    let (state, principal, host, ready, owner) = fixture().await;
     let local = state
         .db
-        .ensure_host("localhost", Compute::Local)
+        .ensure_host("localhost", Compute::Local, &owner)
         .await
         .unwrap();
     state
@@ -277,6 +278,7 @@ fn both_machine_locations_use_the_ssh_transport() {
     for same_machine in [false, true] {
         let host: Host = serde_json::from_value(serde_json::json!({
             "id": "h_transport", "name": "video", "state": "Online", "compute": native(),
+            "path": "u/editor/video",
             "machine": if same_machine { Some("local") } else { None },
         }))
         .unwrap();

@@ -491,9 +491,9 @@ mod end_to_end {
     }
 
     async fn tunnel_to(port: u16) -> (Fleet, ft_core::HostId, SessionId) {
-        let (db, _owner) = crate::db::Db::open_for_test_owned().await.unwrap();
+        let (db, owner) = crate::db::Db::open_for_test_owned().await.unwrap();
         let host = db
-            .ensure_host("fire-01", ft_core::Compute::Local)
+            .ensure_host("fire-01", ft_core::Compute::Local, &owner)
             .await
             .unwrap();
         let fleet = Fleet::new(db);

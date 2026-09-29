@@ -9,6 +9,7 @@
 //! only what every one of them needs: the error type, the document, and the
 //! router that puts them in order.
 
+mod access;
 pub(crate) mod accounts;
 pub(crate) mod agents;
 mod annotations;
@@ -279,6 +280,21 @@ async fn credential_for(
         ft_core::DiffSince,
         users::OrganizationName,
         users::NewUser,
+        crate::access::Team,
+        crate::access::Directory,
+        crate::access::Grant,
+        ft_core::Level,
+        ft_core::SubjectKind,
+        access::Colleague,
+        access::NewTeam,
+        access::TeamName,
+        access::NewDirectory,
+        access::DirectoryName,
+        access::NewGrant,
+        access::Placement,
+        access::FiledRef,
+        crate::access::Filed,
+        crate::access::FiledKind,
         users::CreatedUser,
         users::UserChange,
         users::TemporaryPassword,
@@ -333,6 +349,20 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(users::list_users, users::create_user))
         .routes(routes!(users::change_user, users::delete_user))
         .routes(routes!(users::reset_user_password))
+        .routes(routes!(access::list_colleagues))
+        .routes(routes!(access::list_teams, access::create_team))
+        .routes(routes!(access::rename_team, access::delete_team))
+        .routes(routes!(access::list_team_members))
+        .routes(routes!(access::add_team_member, access::remove_team_member))
+        .routes(routes!(access::list_directories, access::create_directory))
+        .routes(routes!(access::rename_directory, access::delete_directory))
+        .routes(routes!(access::list_grants, access::set_grant))
+        .routes(routes!(access::revoke_grant))
+        .routes(routes!(
+            access::list_items,
+            access::file_items,
+            access::unfile_items
+        ))
         .routes(routes!(hosts::list_hosts, hosts::create_host))
         .routes(routes!(hosts::delete_host))
         .routes(routes!(hosts::rename_host))

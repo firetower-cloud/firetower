@@ -4,6 +4,7 @@
 //! sessions and events are a projection of what workers reported, rebuildable by
 //! reconnecting and replaying from sequence zero.
 
+use crate::access::{filed_where, Level};
 use anyhow::{Context, Result};
 use ft_core::{
     session::Checkout, Agent, AgentMode, AgentPresence, Compute, Event, EventKind, Host, HostId,
@@ -11,6 +12,17 @@ use ft_core::{
 };
 use sqlx::postgres::PgPoolOptions;
 use sqlx::{PgPool, Row};
+
+/// What every read of a host selects.
+///
+/// Written once, and a `const` rather than a literal repeated in four queries —
+/// which is not only tidiness. Postgres spells an empty array `'{}'`, and `{}`
+/// inside a `format!` is a placeholder: the one of these that was built with
+/// `format!` silently had the access predicate substituted *into the array
+/// literal*, and the query came back "malformed array literal" with the whole
+/// `EXISTS (...)` clause quoted in the message. Substituting a const is not
+/// re-parsed, so the braces can only be braces.
+const HOST_COLUMNS: &str = "h.*, h.path::text AS path";
 
 /// What one host last said about one agent, and when.
 pub struct StoredPresence {
@@ -109,7 +121,10 @@ impl Db {
                         sqlx::query(&format!("CREATE SCHEMA IF NOT EXISTS {schema}"))
                             .execute(&mut *conn)
                             .await?;
-                        sqlx::query(&format!("SET search_path TO {schema}"))
+                        // `public` stays on the path: the test's own schema
+                        // holds its tables, and `ltree` is installed once, in
+                        // `public`, where every schema can reach the type.
+                        sqlx::query(&format!("SET search_path TO {schema}, public"))
                             .execute(&mut *conn)
                             .await?;
                         Ok(())
@@ -150,29 +165,78 @@ impl Db {
     /// Register a host, or leave the existing one alone.
     ///
     /// `localhost` goes through this like any other host, because it *is* one.
-    pub async fn ensure_host(&self, name: &str, compute: Compute) -> Result<Host> {
+    ///
+    /// **A machine is personal until somebody shares it.** It lands at
+    /// `u/<whoever added it>/<its name>`, which is the same default every other
+    /// kind gets, and moving it into a directory is a deliberate act with a
+    /// screen behind it. The alternative — every machine shared on arrival —
+    /// means a server somebody added with their own key is reachable by the
+    /// whole organisation before they have decided that, and there is no way to
+    /// undo a default nobody chose.
+    ///
+    /// `added_by` is a person's id, and at boot that is the installation's
+    /// administrator: `localhost` is registered before anybody else exists, so
+    /// "the only person here" and "whoever added it" are the same answer.
+    pub async fn ensure_host(&self, name: &str, compute: Compute, added_by: &str) -> Result<Host> {
         if let Some(existing) = self.host_by_name(name).await? {
             return Ok(existing);
         }
         let id = HostId::new();
+        let org = self.org().await?;
+        let path = format!(
+            "u.{}.{}",
+            self.slug_of(added_by).await?,
+            ft_core::slug(name)
+        );
         sqlx::query(
-            "INSERT INTO hosts (id, org_id, name, compute, state, created_at)
-             VALUES ($1, $2, $3, $4, $5, $6)",
+            "INSERT INTO hosts (id, org_id, name, compute, state, created_at, path, created_by)
+             VALUES ($1, $2, $3, $4, $5, $6, $7::ltree, $8)",
         )
         .bind(id.as_str())
-        // Compute is the team's: somebody pays for a machine and everybody
-        // runs on it.
-        .bind(self.org().await?)
+        .bind(&org)
         .bind(name)
         .bind(serde_json::to_value(&compute)?)
         .bind("Unreachable")
         .bind(chrono::Utc::now())
+        .bind(&path)
+        .bind(added_by)
         .execute(&self.pool)
-        .await?;
+        .await
+        .map_err(|e| anyhow::anyhow!("adding {name}: {e}"))?;
 
         self.host_by_name(name)
             .await?
             .context("host vanished immediately after insert")
+    }
+
+    /// Whoever has been here longest.
+    ///
+    /// For the one thing that happens before anybody signs in: `localhost` is
+    /// registered at boot and a machine is personal, so it needs an owner and
+    /// there is nobody asking. Ids sort by creation, so this is the account the
+    /// installation was set up with — the same person the migration gave the
+    /// existing machines to on a single-person install.
+    pub async fn first_person(&self) -> Result<String> {
+        sqlx::query_scalar("SELECT id FROM users ORDER BY id LIMIT 1")
+            .fetch_optional(&self.pool)
+            .await
+            .context("looking for the first person here")?
+            .context("this Firetower has nobody in it yet")
+    }
+
+    /// The label somebody's paths are built from.
+    ///
+    /// Here as well as on [`crate::access::Access`] because the two reach the
+    /// same column and this crate's tables are written from both: a path is
+    /// built wherever a row is created, and a second round trip through another
+    /// type to read one text column is not worth the coupling.
+    pub async fn slug_of(&self, person: &str) -> Result<String> {
+        sqlx::query_scalar("SELECT slug FROM users WHERE id = $1")
+            .bind(person)
+            .fetch_optional(&self.pool)
+            .await
+            .context("looking up a person's slug")?
+            .with_context(|| format!("{person} is not somebody here"))
     }
 
     /// Call a session something else.
@@ -498,55 +562,60 @@ impl Db {
     }
 
     pub async fn host_by_name(&self, name: &str) -> Result<Option<Host>> {
-        let row = sqlx::query("SELECT * FROM hosts WHERE name = $1")
-            .bind(name)
-            .fetch_optional(&self.pool)
-            .await?;
+        let row = sqlx::query(&format!(
+            "SELECT {HOST_COLUMNS} FROM hosts h WHERE h.name = $1"
+        ))
+        .bind(name)
+        .fetch_optional(&self.pool)
+        .await?;
         row.map(host_from_row).transpose()
     }
 
     pub async fn host_by_id(&self, id: &HostId) -> Result<Option<Host>> {
-        let row = sqlx::query("SELECT * FROM hosts WHERE id = $1")
-            .bind(id.as_str())
-            .fetch_optional(&self.pool)
-            .await?;
+        let row = sqlx::query(&format!(
+            "SELECT {HOST_COLUMNS} FROM hosts h WHERE h.id = $1"
+        ))
+        .bind(id.as_str())
+        .fetch_optional(&self.pool)
+        .await?;
         row.map(host_from_row).transpose()
     }
 
-    /// Every host, skipping any row this build cannot understand.
+    /// Every machine this person may run on.
     ///
-    /// One unreadable row used to fail the whole query, which meant it failed
-    /// start-up: the control plane would not boot at all because of one host,
-    /// and the message — `decoding compute` — named neither the host nor the
-    /// fact that the other ones were fine.
+    /// The fleet's own [`Db::hosts`] is unfiltered and has to be: a supervisor
+    /// reconnecting to a machine is not acting for anybody. This is the one an
+    /// interface asks, and the difference between them is the whole reason both
+    /// exist.
+    pub async fn hosts_for(&self, person: &str, at_least: Level) -> Result<Vec<Host>> {
+        Ok(sqlx::query(&format!(
+            "SELECT {HOST_COLUMNS} FROM hosts h WHERE {visible} ORDER BY h.created_at",
+            visible = filed_where("h", 1, at_least)
+        ))
+        .bind(person)
+        .fetch_all(&self.pool)
+        .await?
+        .into_iter()
+        .filter_map(skip_unreadable_host)
+        .collect())
+    }
+
+    /// Every host, whoever may run on it, skipping any row this build cannot
+    /// understand — see [`skip_unreadable_host`].
     ///
-    /// A row gets that way by being written by a different build: a version
-    /// that knew a kind of compute this one doesn't, or a downgrade. Refusing
-    /// to start is the worst available answer. Skipping it loudly means the
-    /// fleet keeps working and the row is still there to be looked at.
+    /// Unfiltered on purpose. What asks is the fleet: a supervisor keeping a
+    /// machine connected, a reclaim sweep, a start-up that has to know what to
+    /// reach for. None of them is acting for a person, so there is nobody to
+    /// check against. [`Db::hosts_for`] is what a request asks.
     pub async fn hosts(&self) -> Result<Vec<Host>> {
-        Ok(sqlx::query("SELECT * FROM hosts ORDER BY created_at")
-            .fetch_all(&self.pool)
-            .await?
-            .into_iter()
-            .filter_map(|row| {
-                let id: String = row.get("id");
-                let name: String = row.get("name");
-                match host_from_row(row) {
-                    Ok(host) => Some(host),
-                    Err(e) => {
-                        tracing::error!(
-                            host = %name,
-                            id = %id,
-                            "this build cannot read that host, so it is being left out of the \
-                             fleet: {e:#}. It was probably written by a different version. \
-                             Nothing has been deleted."
-                        );
-                        None
-                    }
-                }
-            })
-            .collect())
+        Ok(sqlx::query(&format!(
+            "SELECT {HOST_COLUMNS} FROM hosts h ORDER BY h.created_at"
+        ))
+        .fetch_all(&self.pool)
+        .await?
+        .into_iter()
+        .filter_map(skip_unreadable_host)
+        .collect())
     }
 
     pub async fn mark_host_online(
@@ -989,10 +1058,39 @@ impl Db {
             .fetch_one(&mut *tx)
             .await?;
 
+        let called = name
+            .map(str::to_string)
+            .unwrap_or_else(|| format!("Agent {number}"));
+
+        // Where it goes if nobody says otherwise: the creator's own space, which
+        // is exactly what a workspace has always been — theirs and nobody
+        // else's. Moving it into a directory is a deliberate act afterwards,
+        // through `Access::transfer`.
+        //
+        // Not a parameter, and not for want of one. Putting it here keeps
+        // `insert_session` from growing a fourteenth argument and forty call
+        // sites from being rewritten to pass the same default. The failure is
+        // the safe one: a move that does not happen leaves the workspace
+        // private rather than shared.
+        let slug: String = sqlx::query_scalar("SELECT slug FROM users WHERE id = $1")
+            .bind(owner)
+            .fetch_optional(&mut *tx)
+            .await?
+            .with_context(|| format!("{owner} has no path of their own to file this under"))?;
+        // The id's own tail keeps two workspaces of the same name apart, which
+        // `workspaces_path_unique` would otherwise refuse — and two agents on
+        // the same branch is the ordinary case, not a corner one.
+        let path = format!(
+            "u.{slug}.{}_{}",
+            ft_core::slug(&called),
+            &id.as_str()[2..10.min(id.as_str().len())]
+        );
+
         sqlx::query(
             "INSERT INTO workspaces
-               (id, user_id, host_id, repo, branch, base, size, share, name, created_at, updated_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $10)",
+               (id, user_id, host_id, repo, branch, base, size, share, name, created_at,
+                updated_at, path)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $10, $11::ltree)",
         )
         .bind(id.as_str())
         .bind(owner)
@@ -1002,11 +1100,9 @@ impl Db {
         .bind(base)
         .bind(serde_json::to_string(&size)?.trim_matches('"').to_string())
         .bind(serde_json::to_string(&share)?.trim_matches('"').to_string())
-        .bind(
-            name.map(str::to_string)
-                .unwrap_or_else(|| format!("Agent {number}")),
-        )
+        .bind(&called)
         .bind(now)
+        .bind(&path)
         .execute(&mut *tx)
         .await?;
 
@@ -1051,20 +1147,23 @@ impl Db {
         Ok(())
     }
 
-    /// One workspace of this person's, for starting another agent in it.
+    /// One workspace they may work in, for starting another agent in it.
     ///
-    /// Absent rather than refused when it is somebody else's, for the reason
-    /// [`Db::session_of`] gives: a 403 and a 404 differ only in confirming that
-    /// the thing exists.
+    /// Writer, not viewer: this is the read that precedes putting an agent into
+    /// somebody's worktree, and being allowed to watch is not being allowed to
+    /// join. Absent rather than refused when they may not, for the reason
+    /// [`Db::session_of`] gives.
     pub async fn workspace_for(
         &self,
         owner: &str,
         id: &WorkspaceId,
     ) -> Result<Option<WorkspacePlace>> {
-        let row = sqlx::query(
-            "SELECT id, host_id, repo, branch, base, size, share, forgotten_at
-               FROM workspaces WHERE id = $1 AND user_id = $2",
-        )
+        let row = sqlx::query(&format!(
+            "SELECT w.id, w.host_id, w.repo, w.branch, w.base, w.size, w.share,
+                        w.forgotten_at
+                   FROM workspaces w WHERE w.id = $1 AND {visible}",
+            visible = filed_where("w", 2, Level::Writer)
+        ))
         .bind(id.as_str())
         .bind(owner)
         .fetch_optional(&self.pool)
@@ -1146,10 +1245,11 @@ impl Db {
             format!(
                 "SELECT {SESSION_COLUMNS} FROM sessions s
                    JOIN workspaces w ON w.id = s.workspace_id
-                  WHERE s.user_id = $3
+                  WHERE {visible}
                     AND ($1::text IS NULL OR s.id < $1)
                   ORDER BY s.id DESC
-                  LIMIT $2"
+                  LIMIT $2",
+                visible = filed_where("w", 3, Level::Viewer)
             )
             .as_str(),
         )
@@ -1170,16 +1270,25 @@ impl Db {
     /// ending that one alone would leave the rest running against a directory
     /// that is about to be reclaimed — invisible, because nothing lists a
     /// session whose workspace has gone.
+    ///
+    /// **Every agent in it, not only the asker's.** A shared workspace holds
+    /// runs belonging to several people, and they are all in the one worktree
+    /// that is about to go. Ending only your own would leave a colleague's
+    /// agent writing into a directory being deleted underneath it. What is
+    /// checked is therefore the workspace — whoever may work here may end what
+    /// is running here — rather than each row's owner.
     pub async fn live_runs_beside(
         &self,
         owner: &str,
         workspace_id: &WorkspaceId,
         excluding: &SessionId,
     ) -> Result<Vec<SessionId>> {
-        let rows = sqlx::query(
-            "SELECT id FROM sessions
-              WHERE user_id = $1 AND workspace_id = $2 AND id <> $3 AND status <> $4",
-        )
+        let rows = sqlx::query(&format!(
+            "SELECT s.id FROM sessions s
+                   JOIN workspaces w ON w.id = s.workspace_id
+                  WHERE {visible} AND s.workspace_id = $2 AND s.id <> $3 AND s.status <> $4",
+            visible = filed_where("w", 1, Level::Writer)
+        ))
         .bind(owner)
         .bind(workspace_id.as_str())
         .bind(excluding.as_str())
@@ -1213,17 +1322,49 @@ impl Db {
         self.with_checkouts(rows).await
     }
 
-    /// One session, if it is this person's.
+    /// One session, if they may *see* it.
     ///
-    /// Absent rather than refused when it is somebody else's: a 403 and a 404
+    /// Theirs, or filed in a directory somebody granted them at least a look
+    /// in. Absent rather than refused when it is neither: a 403 and a 404
     /// differ only in confirming that the session exists, which is itself
     /// something the asker was not meant to learn.
+    ///
+    /// **Reads only.** A viewer may watch a session and read its conversation;
+    /// they may not end it, rename it, send it a turn, or open a terminal in it.
+    /// Anything that changes something asks [`Db::session_to_work_in`], and the
+    /// two are separate methods rather than a level argument so that a handler
+    /// naming the wrong one reads wrongly at the call site.
     pub async fn session_of(&self, owner: &str, id: &SessionId) -> Result<Option<Session>> {
+        self.one_session(owner, id, Level::Viewer).await
+    }
+
+    /// One session, if they may *work in* it.
+    ///
+    /// Writer, and the difference from [`Db::session_of`] is the whole of what a
+    /// viewer grant means. A viewer who could end a session, rename it, drive
+    /// its terminal or send it a turn would be a writer with a misleading label
+    /// — and the level a directory was shared at is the only promise this
+    /// system makes.
+    ///
+    /// Absent rather than refused, for the same reason as `session_of`: what
+    /// somebody may not touch, they are not told is there. A viewer asking to
+    /// delete gets the same 404 as a stranger.
+    pub async fn session_to_work_in(&self, owner: &str, id: &SessionId) -> Result<Option<Session>> {
+        self.one_session(owner, id, Level::Writer).await
+    }
+
+    async fn one_session(
+        &self,
+        owner: &str,
+        id: &SessionId,
+        at_least: Level,
+    ) -> Result<Option<Session>> {
         let row = sqlx::query(
             format!(
                 "SELECT {SESSION_COLUMNS} FROM sessions s
                    JOIN workspaces w ON w.id = s.workspace_id
-                  WHERE s.id = $1 AND s.user_id = $2"
+                  WHERE s.id = $1 AND {visible}",
+                visible = filed_where("w", 2, at_least)
             )
             .as_str(),
         )
@@ -1857,13 +1998,15 @@ impl Db {
         // Joined to `sessions` rather than filtered on the id given: an event
         // stream is how a session narrates itself, and asking for somebody
         // else's id must return nothing rather than their build steps.
-        let rows = sqlx::query(
+        let rows = sqlx::query(&format!(
             "SELECT e.id, e.session_id, e.payload, e.created_at
-             FROM events e JOIN sessions s ON s.id = e.session_id
-             WHERE e.id > $1 AND ($2::text IS NULL OR e.session_id = $2)
-               AND s.user_id = $3
-             ORDER BY e.id",
-        )
+                 FROM events e JOIN sessions s ON s.id = e.session_id
+                              JOIN workspaces w ON w.id = s.workspace_id
+                 WHERE e.id > $1 AND ($2::text IS NULL OR e.session_id = $2)
+                   AND {visible}
+                 ORDER BY e.id",
+            visible = filed_where("w", 3, Level::Viewer)
+        ))
         .bind(since)
         .bind(session.map(|s| s.as_str()))
         .bind(owner)
@@ -1982,10 +2125,36 @@ async fn sweep_test_schemas(pool: &PgPool) {
         .await;
 }
 
+/// A host row, or nothing and a line in the log saying which one.
+///
+/// A row gets unreadable by being written by a different build: a version that
+/// knew a kind of compute this one doesn't, or a downgrade. Refusing to start
+/// over it is the worst available answer — it used to fail the whole query,
+/// which failed start-up, naming neither the host nor the fact that every other
+/// one was fine. Skipping it loudly means the fleet keeps working and the row is
+/// still there to look at.
+fn skip_unreadable_host(row: sqlx::postgres::PgRow) -> Option<Host> {
+    let id: String = row.get("id");
+    let name: String = row.get("name");
+    match host_from_row(row) {
+        Ok(host) => Some(host),
+        Err(e) => {
+            tracing::error!(
+                host = %name,
+                id = %id,
+                "this build cannot read that host, so it is being left out of the fleet: {e:#}. \
+                 It was probably written by a different version. Nothing has been deleted."
+            );
+            None
+        }
+    }
+}
+
 fn host_from_row(r: sqlx::postgres::PgRow) -> Result<Host> {
     let raw: String = r.get("state");
     Ok(Host {
         machine: r.get("machine"),
+        path: ft_core::ResourcePath::from_stored(r.get::<String, _>("path")),
         id: HostId::from_stored(r.get::<String, _>("id")),
         name: r.get("name"),
         state: serde_json::from_str::<HostState>(&format!("\"{raw}\""))
@@ -2068,7 +2237,9 @@ pub struct WorkspacePlace {
 
 const SESSION_COLUMNS: &str = "\
     s.*, w.host_id, w.repo, w.branch, w.base, w.size, w.share, w.pull_request, \
-    w.forgotten_at, w.cleaned_at, w.name, w.task_key, w.task_url";
+    w.forgotten_at, w.cleaned_at, w.name, w.task_key, w.task_url, \
+    w.path::text AS path, \
+    (SELECT username FROM users WHERE users.id = s.user_id) AS owner_name";
 
 fn session_from_row(r: sqlx::postgres::PgRow) -> Result<Session> {
     let status: String = r.get("status");
@@ -2079,6 +2250,11 @@ fn session_from_row(r: sqlx::postgres::PgRow) -> Result<Session> {
     Ok(Session {
         number: r.get("number"),
         owner: ft_core::UserId::from_stored(r.get::<String, _>("user_id")),
+        // Read here rather than by the caller, because every read of a session
+        // is a read somebody may be doing of somebody else's now, and a list
+        // that cannot say whose it is makes a shared directory unreadable.
+        owner_name: r.get("owner_name"),
+        path: ft_core::ResourcePath::from_stored(r.get::<String, _>("path")),
         // Filled in by `with_checkouts`, which asks for the lot in one query.
         checkouts: Vec::new(),
         // On the workspace, and never absent: the migration that moved it here
@@ -2178,7 +2354,10 @@ mod tests {
     #[tokio::test]
     async fn localhost_is_stored_like_any_other_host() {
         let (db, _owner) = db_with_user().await;
-        let local = db.ensure_host("localhost", Compute::Local).await.unwrap();
+        let local = db
+            .ensure_host("localhost", Compute::Local, _owner.as_str())
+            .await
+            .unwrap();
         let remote = db
             .ensure_host(
                 "fire-01",
@@ -2191,6 +2370,7 @@ mod tests {
                     },
                     host_key: None,
                 },
+                _owner.as_str(),
             )
             .await
             .unwrap();
@@ -2220,7 +2400,10 @@ mod tests {
     #[tokio::test]
     async fn a_host_with_live_sessions_refuses_to_be_forgotten() {
         let (db, owner) = db_with_user().await;
-        let host = db.ensure_host("localhost", Compute::Local).await.unwrap();
+        let host = db
+            .ensure_host("localhost", Compute::Local, owner.as_str())
+            .await
+            .unwrap();
         let id = SessionId::new();
 
         db.insert_session(
@@ -2255,7 +2438,10 @@ mod tests {
         // value nothing can read back, and every session in that workspace
         // 500s instead of loading.
         let (db, owner) = db_with_user().await;
-        let host = db.ensure_host("localhost", Compute::Local).await.unwrap();
+        let host = db
+            .ensure_host("localhost", Compute::Local, owner.as_str())
+            .await
+            .unwrap();
         let id = SessionId::new();
 
         db.insert_session(
@@ -2296,7 +2482,10 @@ mod tests {
         // A draining host is still online and still finishing what it has;
         // folding the two together would make its sessions look lost.
         let (db, _owner) = db_with_user().await;
-        let host = db.ensure_host("localhost", Compute::Local).await.unwrap();
+        let host = db
+            .ensure_host("localhost", Compute::Local, _owner.as_str())
+            .await
+            .unwrap();
 
         assert!(!db.is_drained(&host.id).await.unwrap());
         db.set_drained(&host.id, true).await.unwrap();
@@ -2309,8 +2498,14 @@ mod tests {
     #[tokio::test]
     async fn registering_a_host_twice_is_harmless() {
         let (db, _owner) = db_with_user().await;
-        let first = db.ensure_host("localhost", Compute::Local).await.unwrap();
-        let again = db.ensure_host("localhost", Compute::Local).await.unwrap();
+        let first = db
+            .ensure_host("localhost", Compute::Local, _owner.as_str())
+            .await
+            .unwrap();
+        let again = db
+            .ensure_host("localhost", Compute::Local, _owner.as_str())
+            .await
+            .unwrap();
         assert_eq!(first.id, again.id);
         assert_eq!(db.hosts().await.unwrap().len(), 1);
     }
@@ -2318,7 +2513,10 @@ mod tests {
     #[tokio::test]
     async fn a_host_starts_unreachable_until_it_says_hello() {
         let (db, _owner) = db_with_user().await;
-        let host = db.ensure_host("localhost", Compute::Local).await.unwrap();
+        let host = db
+            .ensure_host("localhost", Compute::Local, _owner.as_str())
+            .await
+            .unwrap();
         assert_eq!(host.state, HostState::Unreachable);
 
         assert_eq!(
@@ -2351,7 +2549,10 @@ mod tests {
     #[tokio::test]
     async fn what_a_host_can_run_is_replaced_rather_than_accumulated() {
         let (db, _owner) = db_with_user().await;
-        let host = db.ensure_host("localhost", Compute::Local).await.unwrap();
+        let host = db
+            .ensure_host("localhost", Compute::Local, _owner.as_str())
+            .await
+            .unwrap();
 
         for state in [
             ft_core::DockerState::absent(),
@@ -2370,7 +2571,10 @@ mod tests {
     #[tokio::test]
     async fn why_a_host_failed_outlives_the_attempt() {
         let (db, _owner) = db_with_user().await;
-        let host = db.ensure_host("fire-01", Compute::Local).await.unwrap();
+        let host = db
+            .ensure_host("fire-01", Compute::Local, _owner.as_str())
+            .await
+            .unwrap();
         assert!(host.diagnosis.is_none(), "nothing has failed yet");
 
         let told = ft_core::Diagnosis::new(
@@ -2395,7 +2599,10 @@ mod tests {
     #[tokio::test]
     async fn a_host_that_comes_back_stops_explaining_itself() {
         let (db, _owner) = db_with_user().await;
-        let host = db.ensure_host("fire-01", Compute::Local).await.unwrap();
+        let host = db
+            .ensure_host("fire-01", Compute::Local, _owner.as_str())
+            .await
+            .unwrap();
 
         db.record_diagnosis(
             &host.id,
@@ -2416,7 +2623,10 @@ mod tests {
     #[tokio::test]
     async fn a_status_event_updates_the_session_projection() {
         let (db, owner) = db_with_user().await;
-        let host = db.ensure_host("localhost", Compute::Local).await.unwrap();
+        let host = db
+            .ensure_host("localhost", Compute::Local, owner.as_str())
+            .await
+            .unwrap();
         let id = SessionId::new();
         db.insert_session(
             &id,
@@ -2463,7 +2673,10 @@ mod tests {
     #[tokio::test]
     async fn the_branch_the_worker_actually_used_wins() {
         let (db, owner) = db_with_user().await;
-        let host = db.ensure_host("localhost", Compute::Local).await.unwrap();
+        let host = db
+            .ensure_host("localhost", Compute::Local, owner.as_str())
+            .await
+            .unwrap();
         let id = SessionId::new();
         db.insert_session(
             &id,
@@ -2507,7 +2720,10 @@ mod tests {
     #[tokio::test]
     async fn a_replayed_event_is_ignored_rather_than_duplicated() {
         let (db, owner) = db_with_user().await;
-        let host = db.ensure_host("localhost", Compute::Local).await.unwrap();
+        let host = db
+            .ensure_host("localhost", Compute::Local, owner.as_str())
+            .await
+            .unwrap();
         let id = SessionId::new();
         db.insert_session(
             &id,
@@ -2547,7 +2763,10 @@ mod tests {
     #[tokio::test]
     async fn a_repository_can_be_added_to_a_running_session() {
         let (db, owner) = db_with_user().await;
-        let host = db.ensure_host("localhost", Compute::Local).await.unwrap();
+        let host = db
+            .ensure_host("localhost", Compute::Local, owner.as_str())
+            .await
+            .unwrap();
         let id = SessionId::new();
 
         db.insert_session(
@@ -2607,7 +2826,10 @@ mod tests {
     #[tokio::test]
     async fn a_worktree_event_that_names_its_repository_is_recorded() {
         let (db, owner) = db_with_user().await;
-        let host = db.ensure_host("localhost", Compute::Local).await.unwrap();
+        let host = db
+            .ensure_host("localhost", Compute::Local, owner.as_str())
+            .await
+            .unwrap();
         let id = SessionId::new();
 
         db.insert_session(
@@ -2679,7 +2901,10 @@ mod tests {
         // A bare agent: somewhere to work, nothing checked out. The columns
         // that describe a checkout are absent rather than empty strings.
         let (db, owner) = db_with_user().await;
-        let host = db.ensure_host("localhost", Compute::Local).await.unwrap();
+        let host = db
+            .ensure_host("localhost", Compute::Local, owner.as_str())
+            .await
+            .unwrap();
         let id = SessionId::new();
 
         db.insert_session(
@@ -2713,7 +2938,10 @@ mod tests {
         use ft_core::controls::ControlKind as K;
 
         let (db, owner) = db_with_user().await;
-        let host = db.ensure_host("localhost", Compute::Local).await.unwrap();
+        let host = db
+            .ensure_host("localhost", Compute::Local, owner.as_str())
+            .await
+            .unwrap();
         let id = SessionId::new();
         db.insert_session(
             &id,
@@ -2769,7 +2997,10 @@ mod tests {
     #[tokio::test]
     async fn paging_walks_backwards_without_skipping_or_repeating() {
         let (db, owner) = db_with_user().await;
-        let host = db.ensure_host("localhost", Compute::Local).await.unwrap();
+        let host = db
+            .ensure_host("localhost", Compute::Local, owner.as_str())
+            .await
+            .unwrap();
 
         for n in 0..5 {
             let id = SessionId::new();
@@ -2830,7 +3061,10 @@ mod tests {
     #[tokio::test]
     async fn replay_can_be_narrowed_to_one_session() {
         let (db, owner) = db_with_user().await;
-        let host = db.ensure_host("localhost", Compute::Local).await.unwrap();
+        let host = db
+            .ensure_host("localhost", Compute::Local, owner.as_str())
+            .await
+            .unwrap();
 
         // Real sessions, because the log is now read through them: an event
         // belongs to whoever owns the session it is about, and that is how
@@ -2886,7 +3120,10 @@ mod tests {
     #[tokio::test]
     async fn the_resume_cursor_only_moves_forward() {
         let (db, owner) = db_with_user().await;
-        let host = db.ensure_host("localhost", Compute::Local).await.unwrap();
+        let host = db
+            .ensure_host("localhost", Compute::Local, owner.as_str())
+            .await
+            .unwrap();
         let id = SessionId::new();
         db.insert_session(
             &id,
@@ -2976,7 +3213,10 @@ mod tests {
     #[tokio::test]
     async fn presence_is_remembered_per_host_and_refreshed_in_place() {
         let (db, _owner) = db_with_user().await;
-        let host = db.ensure_host("localhost", Compute::Local).await.unwrap();
+        let host = db
+            .ensure_host("localhost", Compute::Local, _owner.as_str())
+            .await
+            .unwrap();
 
         db.record_presence(
             &host.id,
@@ -3024,6 +3264,7 @@ mod tests {
                     key: ft_core::SshKey::Default,
                     host_key: None,
                 },
+                _owner.as_str(),
             )
             .await
             .unwrap();
@@ -3047,7 +3288,10 @@ mod tests {
     #[tokio::test]
     async fn a_forgotten_session_is_not_resurrected_by_its_host() {
         let (db, owner) = db_with_user().await;
-        let host = db.ensure_host("fire-01", Compute::Local).await.unwrap();
+        let host = db
+            .ensure_host("fire-01", Compute::Local, owner.as_str())
+            .await
+            .unwrap();
 
         let id = SessionId::new();
         db.insert_session(
@@ -3110,7 +3354,10 @@ mod tests {
     #[tokio::test]
     async fn a_session_state_is_written_unless_the_workspace_is_gone() {
         let (db, owner) = db_with_user().await;
-        let host = db.ensure_host("fire-01", Compute::Local).await.unwrap();
+        let host = db
+            .ensure_host("fire-01", Compute::Local, owner.as_str())
+            .await
+            .unwrap();
 
         let id = SessionId::new();
         db.insert_session(
@@ -3188,7 +3435,10 @@ mod tests {
     #[tokio::test]
     async fn a_status_the_control_plane_decides_is_on_the_stream() {
         let (db, owner) = db_with_user().await;
-        let host = db.ensure_host("fire-01", Compute::Local).await.unwrap();
+        let host = db
+            .ensure_host("fire-01", Compute::Local, owner.as_str())
+            .await
+            .unwrap();
 
         let id = SessionId::new();
         db.insert_session(
@@ -3244,7 +3494,10 @@ mod tests {
     #[tokio::test]
     async fn nothing_brings_an_ended_session_back() {
         let (db, owner) = db_with_user().await;
-        let host = db.ensure_host("fire-01", Compute::Local).await.unwrap();
+        let host = db
+            .ensure_host("fire-01", Compute::Local, owner.as_str())
+            .await
+            .unwrap();
 
         let id = SessionId::new();
         db.insert_session(
@@ -3328,7 +3581,10 @@ mod tests {
     #[tokio::test]
     async fn a_finished_workspace_gives_back_what_it_was_holding() {
         let (db, owner) = db_with_user().await;
-        let host = db.ensure_host("fire-01", Compute::Local).await.unwrap();
+        let host = db
+            .ensure_host("fire-01", Compute::Local, owner.as_str())
+            .await
+            .unwrap();
         let id = a_run(&db, &host.id, &owner).await;
 
         db.record_agent_line(&id, 1, r#"{"type":"assistant"}"#)
@@ -3355,7 +3611,10 @@ mod tests {
     #[tokio::test]
     async fn a_workspace_still_working_is_left_alone() {
         let (db, owner) = db_with_user().await;
-        let host = db.ensure_host("fire-01", Compute::Local).await.unwrap();
+        let host = db
+            .ensure_host("fire-01", Compute::Local, owner.as_str())
+            .await
+            .unwrap();
         let id = a_run(&db, &host.id, &owner).await;
 
         set_status(&db, &id, ft_core::SessionStatus::Working, None).await;
@@ -3380,11 +3639,16 @@ mod tests {
     #[tokio::test]
     async fn a_workspace_with_nothing_in_it_yet_is_not_swept_away() {
         let (db, owner) = db_with_user().await;
-        let host = db.ensure_host("fire-01", Compute::Local).await.unwrap();
+        let host = db
+            .ensure_host("fire-01", Compute::Local, owner.as_str())
+            .await
+            .unwrap();
 
         let empty = WorkspaceId::new();
         sqlx::query(
-            "INSERT INTO workspaces (id, user_id, host_id, name) VALUES ($1,$2,$3,'coming up')",
+            "INSERT INTO workspaces (id, user_id, host_id, name, path)
+             VALUES ($1, $2, $3, 'coming up',
+                     ('u.' || (SELECT slug FROM users WHERE id = $2) || '.coming_up')::ltree)",
         )
         .bind(empty.as_str())
         .bind(&owner)
@@ -3403,7 +3667,10 @@ mod tests {
     #[tokio::test]
     async fn purging_the_same_workspace_twice_is_not_an_error() {
         let (db, owner) = db_with_user().await;
-        let host = db.ensure_host("fire-01", Compute::Local).await.unwrap();
+        let host = db
+            .ensure_host("fire-01", Compute::Local, owner.as_str())
+            .await
+            .unwrap();
         let id = a_run(&db, &host.id, &owner).await;
         set_status(&db, &id, ft_core::SessionStatus::Ended, None).await;
 
@@ -3418,7 +3685,10 @@ mod tests {
     #[tokio::test]
     async fn no_event_outlives_the_session_it_was_about() {
         let (db, owner) = db_with_user().await;
-        let host = db.ensure_host("fire-01", Compute::Local).await.unwrap();
+        let host = db
+            .ensure_host("fire-01", Compute::Local, owner.as_str())
+            .await
+            .unwrap();
         let id = a_run(&db, &host.id, &owner).await;
 
         set_status(&db, &id, ft_core::SessionStatus::Ended, None).await;
@@ -3450,14 +3720,18 @@ mod tests {
     #[tokio::test]
     async fn a_switch_pointing_at_a_run_does_not_refuse_to_let_it_go() {
         let (db, owner) = db_with_user().await;
-        let host = db.ensure_host("fire-01", Compute::Local).await.unwrap();
+        let host = db
+            .ensure_host("fire-01", Compute::Local, owner.as_str())
+            .await
+            .unwrap();
         let from = a_run(&db, &host.id, &owner).await;
         let to = a_run(&db, &host.id, &owner).await;
 
         let account = format!("aa_{}", SessionId::new());
         sqlx::query(
-            "INSERT INTO agent_accounts(id,user_id,kind,name,mode,credential_key,state)
-             VALUES($1,$2,'ClaudeCode','Acme','Subscription',$1,'ready')",
+            "INSERT INTO agent_accounts(id,user_id,kind,name,mode,credential_key,state,path)
+             VALUES($1,$2,'ClaudeCode','Acme','Subscription',$1,'ready',
+                    ('u.' || (SELECT slug FROM users WHERE id = $2) || '.acme')::ltree)",
         )
         .bind(&account)
         .bind(&owner)
@@ -3499,7 +3773,10 @@ mod tests {
     #[tokio::test]
     async fn a_forgotten_session_is_owed_a_teardown_until_it_is_told() {
         let (db, owner) = db_with_user().await;
-        let host = db.ensure_host("fire-01", Compute::Local).await.unwrap();
+        let host = db
+            .ensure_host("fire-01", Compute::Local, owner.as_str())
+            .await
+            .unwrap();
 
         let id = SessionId::new();
         db.insert_session(
@@ -3547,7 +3824,10 @@ mod tests {
     #[tokio::test]
     async fn a_session_runs_inside_a_workspace() {
         let (db, owner) = db_with_user().await;
-        let host = db.ensure_host("localhost", Compute::Local).await.unwrap();
+        let host = db
+            .ensure_host("localhost", Compute::Local, owner.as_str())
+            .await
+            .unwrap();
 
         let id = SessionId::new();
         db.insert_session(
@@ -3599,7 +3879,10 @@ mod tests {
     #[tokio::test]
     async fn checkouts_belong_to_the_workspace() {
         let (db, owner) = db_with_user().await;
-        let host = db.ensure_host("localhost", Compute::Local).await.unwrap();
+        let host = db
+            .ensure_host("localhost", Compute::Local, owner.as_str())
+            .await
+            .unwrap();
 
         let id = SessionId::new();
         db.insert_session(
@@ -3664,7 +3947,10 @@ mod tests {
     #[tokio::test]
     async fn forgetting_ends_the_session_and_marks_the_workspace() {
         let (db, owner) = db_with_user().await;
-        let host = db.ensure_host("localhost", Compute::Local).await.unwrap();
+        let host = db
+            .ensure_host("localhost", Compute::Local, owner.as_str())
+            .await
+            .unwrap();
 
         let id = SessionId::new();
         db.insert_session(
@@ -3708,7 +3994,10 @@ mod tests {
     #[tokio::test]
     async fn a_workspace_is_named_for_its_work() {
         let (db, owner) = db_with_user().await;
-        let host = db.ensure_host("localhost", Compute::Local).await.unwrap();
+        let host = db
+            .ensure_host("localhost", Compute::Local, owner.as_str())
+            .await
+            .unwrap();
 
         let named = SessionId::new();
         db.insert_session(
@@ -3761,7 +4050,10 @@ mod tests {
     #[tokio::test]
     async fn renaming_a_session_renames_its_workspace() {
         let (db, owner) = db_with_user().await;
-        let host = db.ensure_host("localhost", Compute::Local).await.unwrap();
+        let host = db
+            .ensure_host("localhost", Compute::Local, owner.as_str())
+            .await
+            .unwrap();
 
         let id = SessionId::new();
         db.insert_session(
@@ -3807,7 +4099,10 @@ mod tests {
     #[tokio::test]
     async fn a_workspace_keeps_its_first_sessions_id() {
         let (db, owner) = db_with_user().await;
-        let host = db.ensure_host("localhost", Compute::Local).await.unwrap();
+        let host = db
+            .ensure_host("localhost", Compute::Local, owner.as_str())
+            .await
+            .unwrap();
 
         let id = SessionId::new();
         db.insert_session(
@@ -3839,7 +4134,10 @@ mod tests {
     #[tokio::test]
     async fn a_workspace_can_hold_two_agents() {
         let (db, owner) = db_with_user().await;
-        let host = db.ensure_host("localhost", Compute::Local).await.unwrap();
+        let host = db
+            .ensure_host("localhost", Compute::Local, owner.as_str())
+            .await
+            .unwrap();
 
         let first = SessionId::new();
         db.insert_session(
@@ -3914,7 +4212,10 @@ mod tests {
     #[tokio::test]
     async fn a_workspace_knows_the_other_agents_it_has_to_take_with_it() {
         let (db, owner) = db_with_user().await;
-        let host = db.ensure_host("localhost", Compute::Local).await.unwrap();
+        let host = db
+            .ensure_host("localhost", Compute::Local, owner.as_str())
+            .await
+            .unwrap();
 
         let first = SessionId::new();
         db.insert_session(
@@ -3985,7 +4286,10 @@ mod tests {
     #[tokio::test]
     async fn ending_one_agent_leaves_the_workspace_and_its_neighbour() {
         let (db, owner) = db_with_user().await;
-        let host = db.ensure_host("localhost", Compute::Local).await.unwrap();
+        let host = db
+            .ensure_host("localhost", Compute::Local, owner.as_str())
+            .await
+            .unwrap();
 
         let first = SessionId::new();
         db.insert_session(
@@ -4046,7 +4350,10 @@ mod tests {
     #[tokio::test]
     async fn every_session_gets_its_own_number_and_a_name_from_it() {
         let (db, owner) = db_with_user().await;
-        let host = db.ensure_host("localhost", Compute::Local).await.unwrap();
+        let host = db
+            .ensure_host("localhost", Compute::Local, owner.as_str())
+            .await
+            .unwrap();
 
         let mut made = Vec::new();
         for expected in 1..=3 {
@@ -4097,25 +4404,24 @@ mod tests {
         assert_eq!(after.number, *number, "the handle does not move");
     }
 
-    /// The failure that stopped a control plane from booting: a host row
-    /// written by a build that knew a kind of compute this one does not.
-    /// A second account, for the tests that have to prove one person cannot
-    /// see another's work.
+    /// Somebody else on this Firetower, for the tests that have to prove one
+    /// person cannot see another's work.
+    ///
+    /// Made the way a real one is rather than with an `INSERT`, because a person
+    /// now arrives with a `slug` — the label every path of theirs begins with.
+    /// Inserted by hand they have nowhere to put a workspace, and the failure
+    /// lands at the first `insert_session` rather than here.
     async fn second_user(db: &Db) -> String {
         let accounts = crate::accounts::Accounts::new(db.pool().clone());
-        let org = db.org().await.unwrap();
-        let id = ft_core::UserId::new();
-        sqlx::query(
-            "INSERT INTO users (id, org_id, username, password_hash, role)
-             VALUES ($1, $2, 'somebody-else', 'x', 'admin')",
-        )
-        .bind(id.as_str())
-        .bind(&org)
-        .execute(db.pool())
-        .await
-        .unwrap();
-        let _ = accounts;
-        id.as_str().to_string()
+        let org = ft_core::OrgId::from_stored(db.org().await.unwrap());
+        accounts
+            .create_user(&org, "somebody-else", "admin")
+            .await
+            .unwrap()
+            .0
+            .id
+            .as_str()
+            .to_string()
     }
 
     /// Clearing a typed identity brings the host's answer back.
@@ -4168,7 +4474,10 @@ mod tests {
     async fn one_persons_session_is_not_another_persons() {
         let (db, mine) = db_with_user().await;
         let theirs = second_user(&db).await;
-        let host = db.ensure_host("localhost", Compute::Local).await.unwrap();
+        let host = db
+            .ensure_host("localhost", Compute::Local, mine.as_str())
+            .await
+            .unwrap();
 
         let id = SessionId::new();
         db.insert_session(
@@ -4202,7 +4511,10 @@ mod tests {
     async fn the_session_list_holds_only_your_own() {
         let (db, mine) = db_with_user().await;
         let theirs = second_user(&db).await;
-        let host = db.ensure_host("localhost", Compute::Local).await.unwrap();
+        let host = db
+            .ensure_host("localhost", Compute::Local, mine.as_str())
+            .await
+            .unwrap();
 
         for owner in [&mine, &theirs] {
             db.insert_session(
@@ -4234,7 +4546,10 @@ mod tests {
     async fn the_event_log_is_narrowed_to_its_owner() {
         let (db, mine) = db_with_user().await;
         let theirs = second_user(&db).await;
-        let host = db.ensure_host("localhost", Compute::Local).await.unwrap();
+        let host = db
+            .ensure_host("localhost", Compute::Local, mine.as_str())
+            .await
+            .unwrap();
 
         let id = SessionId::new();
         db.insert_session(
@@ -4331,15 +4646,109 @@ mod tests {
         assert_eq!(db.git_identity(&mine, "github").await.unwrap(), Some(typed));
     }
 
+    /// A viewer may watch and may not touch.
+    ///
+    /// The regression this pins: every mutation of a session used to go through
+    /// the same read that a viewer passes, so somebody shared a directory to
+    /// look in could end the sessions in it. The level a directory was shared
+    /// at is the only promise this system makes.
+    #[tokio::test]
+    async fn a_viewer_can_watch_a_session_and_not_work_in_it() {
+        let (db, admin) = db_with_user().await;
+        let accounts = crate::accounts::Accounts::new(db.pool().clone());
+        let access = crate::access::Access::new(db.pool().clone());
+        let vault =
+            crate::vault::Vault::new(db.pool().clone(), crate::vault::crypto::RootKey::generate());
+        let org = ft_core::OrgId::from_stored(db.org().await.unwrap());
+        let admin_id = ft_core::UserId::from_stored(admin.clone());
+
+        let ana = accounts
+            .create_user(&org, "ana", "member")
+            .await
+            .unwrap()
+            .0
+            .id;
+
+        // Hers to look in, and nothing more.
+        let shelf = access
+            .create_directory(&org, "Shelf", &admin_id)
+            .await
+            .unwrap();
+        access
+            .set_grant(
+                shelf.id.as_str(),
+                crate::access::SubjectKind::Person,
+                ana.as_str(),
+                Level::Viewer,
+                &admin_id,
+            )
+            .await
+            .unwrap();
+
+        let host = db
+            .ensure_host("fire-01", Compute::Local, &admin)
+            .await
+            .unwrap();
+        let id = a_run(&db, &host.id, &admin).await;
+        let workspace = workspace_of(&db, &id).await;
+        let at = access
+            .path_of(crate::access::FiledKind::Workspace, workspace.as_str())
+            .await
+            .unwrap()
+            .unwrap();
+        access
+            .transfer(
+                &vault,
+                crate::access::FiledKind::Workspace,
+                workspace.as_str(),
+                &at.moved_to(ft_core::path::DIRECTORY, &shelf.slug),
+                "admin",
+            )
+            .await
+            .unwrap();
+
+        assert!(
+            db.session_of(ana.as_str(), &id).await.unwrap().is_some(),
+            "a viewer can watch it"
+        );
+        assert!(
+            db.session_to_work_in(ana.as_str(), &id)
+                .await
+                .unwrap()
+                .is_none(),
+            "and cannot end it, rename it, or open a terminal in it"
+        );
+
+        // Promoted, and now she can.
+        access
+            .set_grant(
+                shelf.id.as_str(),
+                crate::access::SubjectKind::Person,
+                ana.as_str(),
+                Level::Writer,
+                &admin_id,
+            )
+            .await
+            .unwrap();
+        assert!(db
+            .session_to_work_in(ana.as_str(), &id)
+            .await
+            .unwrap()
+            .is_some());
+    }
+
     #[tokio::test]
     async fn a_host_this_build_cannot_read_is_skipped_rather_than_fatal() {
         let (db, _owner) = db_with_user().await;
-        let keep = db.ensure_host("localhost", Compute::Local).await.unwrap();
+        let keep = db
+            .ensure_host("localhost", Compute::Local, _owner.as_str())
+            .await
+            .unwrap();
 
         // What a newer version would have left behind.
         sqlx::query(
-            "INSERT INTO hosts (id, org_id, name, compute, state, created_at)
-             VALUES ($1, $2, $3, $4, $5, $6)",
+            "INSERT INTO hosts (id, org_id, name, compute, state, created_at, path)
+             VALUES ($1, $2, $3, $4, $5, $6, 'd.shared.mystery'::ltree)",
         )
         .bind("h_fromthefuture")
         .bind(db.org().await.unwrap())

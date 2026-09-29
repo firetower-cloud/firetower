@@ -627,7 +627,7 @@ pub(super) async fn send_turn(
     let who = owner(&principal)?.to_string();
     let session = state
         .db
-        .session_of(&who, &id)
+        .session_to_work_in(&who, &id)
         .await?
         .ok_or_else(|| ApiError::new(ErrorCode::NotFound, "no such session"))?;
     super::accounts::ensure_not_switching(&state.db, &id).await?;
@@ -1356,7 +1356,7 @@ mod tests {
     async fn session_holding(name: &str) -> (crate::db::Db, SessionId) {
         let (db, owner) = crate::db::Db::open_for_test_owned().await.unwrap();
         let host = db
-            .ensure_host("localhost", ft_core::Compute::Local)
+            .ensure_host("localhost", ft_core::Compute::Local, &owner)
             .await
             .unwrap();
 
@@ -1474,7 +1474,7 @@ mod tests {
     async fn an_empty_session_pages_to_nothing() {
         let (db, owner) = crate::db::Db::open_for_test_owned().await.unwrap();
         let host = db
-            .ensure_host("localhost", ft_core::Compute::Local)
+            .ensure_host("localhost", ft_core::Compute::Local, &owner)
             .await
             .unwrap();
         let id = SessionId::new();

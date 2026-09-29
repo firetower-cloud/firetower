@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import { useMe, useLogout } from "@/src/api/generated/auth/auth";
 import { forgetToken } from "@/src/api/http";
 import { useEffect, useState } from "react";
-import { BookOpen, CircleDashed, CircleFadingArrowUp, LayoutList, ListTodo, Menu, Plus, Settings2, X, Building2, Download, UserRound } from "lucide-react";
+import { BookOpen, CircleDashed, CircleFadingArrowUp, FolderOpen, LayoutList, ListTodo, Menu, Plus, Settings2, Users, X, Building2, Download, UserRound } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { Mark, Signal } from "./Signal";
 import { useHasRail } from "@/src/workspace/layout";
@@ -31,8 +31,25 @@ import { elapsed, minutesSince, needsYou, unfinished } from "@/src/api/view";
  */
 const NAV: { href: string; label: string; icon: LucideIcon; admin?: boolean }[] = [
   { href: "/", label: "Get the app", icon: Download },
-  { href: "/organization", label: "Organisation", icon: Building2, admin: true },
   { href: "/account", label: "Account", icon: UserRound },
+];
+
+/**
+ * The organisation is three screens, not one destination.
+ *
+ * Drawn as a group with its rooms under it rather than a link that expands: it
+ * is two or three items, and a disclosure triangle over three rows is a control
+ * that exists to hide almost nothing.
+ *
+ * `Access` has no `admin` flag on purpose — see the note in
+ * `app/organization/layout.tsx`. A member sees the group with one room in it,
+ * which is honest: it is the only one that is theirs.
+ */
+const ORGANIZATION: { href: string; label: string; icon: LucideIcon; admin?: boolean }[] = [
+  { href: "/organization/people", label: "People", icon: Users, admin: true },
+  { href: "/organization/teams", label: "Teams", icon: Building2, admin: true },
+  { href: "/organization/access", label: "Access", icon: FolderOpen },
+  { href: "/organization/settings", label: "Settings", icon: Settings2, admin: true },
 ];
 
 export function Shell({ children }: { children: React.ReactNode }) {
@@ -108,10 +125,16 @@ export function Shell({ children }: { children: React.ReactNode }) {
         </div>
 
         <nav className="flex flex-col gap-0.5 px-2">
-          {NAV.filter((n) => !n.admin || me?.user.role === "admin").map((n) => {
-            const on = path === n.href;
-            return <NavLink key={n.href} {...n} on={on} />;
-          })}
+          {NAV.filter((n) => !n.admin || me?.user.role === "admin").map((n) => (
+            <NavLink key={n.href} {...n} on={path === n.href} />
+          ))}
+
+          <div className="mt-4 mb-1 px-2.5">
+            <span className="eyebrow">Organisation</span>
+          </div>
+          {ORGANIZATION.filter((n) => !n.admin || me?.user.role === "admin").map((n) => (
+            <NavLink key={n.href} {...n} on={path.startsWith(n.href)} />
+          ))}
         </nav>
 
 
@@ -195,6 +218,10 @@ export function Shell({ children }: { children: React.ReactNode }) {
  */
 const TITLE: Record<string, string> = {
   "/": "Dashboard",
+  "/organization/people": "People",
+  "/organization/teams": "Teams",
+  "/organization/access": "Access",
+  "/organization/settings": "Settings",
   "/tasks": "Tasks",
   "/configuration": "Configuration",
   "/updates": "Updates",

@@ -8,6 +8,7 @@ use anyhow::{Context, Result};
 use std::path::PathBuf;
 use std::sync::Arc;
 
+pub mod access;
 pub mod accounts;
 pub mod api;
 pub mod auth;
@@ -56,6 +57,8 @@ pub struct AppState {
     pub pending: Arc<tokio::sync::RwLock<std::collections::HashMap<String, api::Pending>>>,
     /// Organisations, users, sessions and settings.
     pub accounts: accounts::Accounts,
+    /// Teams, directories and grants — who may see what.
+    pub access: access::Access,
     /// What this deployment will accept, so `/bootstrap` can say so.
     ///
     /// A copy rather than a reference to the gate's: the gate enforces it and
@@ -164,7 +167,16 @@ pub async fn run(config: Config) -> Result<()> {
     // be drained — the only thing it skips is the network.
     // This machine is always registered. A fresh install has somewhere to run
     // without anyone configuring anything; it can be removed deliberately.
-    db.ensure_host("localhost", ft_core::Compute::Local).await?;
+    //
+    // Added by whoever set this installation up, because a machine is personal
+    // until it is shared and there is nobody signed in at boot to ask. On a
+    // fresh install that is the only account there is.
+    db.ensure_host(
+        "localhost",
+        ft_core::Compute::Local,
+        &db.first_person().await?,
+    )
+    .await?;
 
     // Every host, not just this one. A control plane that only reconnected to
     // itself would silently lose every server you added the moment it
@@ -199,6 +211,7 @@ pub async fn run(config: Config) -> Result<()> {
         home: config.home.clone(),
         pending: Default::default(),
         accounts: accounts.clone(),
+        access: access::Access::new(db_pool.clone()),
         forwards: Default::default(),
         previews: Default::default(),
         names,
@@ -777,11 +790,16 @@ mod tests {
 
     #[tokio::test]
     async fn a_fresh_control_plane_registers_localhost() {
-        let (db, _owner) = Db::open_for_test_owned().await.unwrap();
+        let (db, owner) = Db::open_for_test_owned().await.unwrap();
         let host = db
-            .ensure_host("localhost", ft_core::Compute::Local)
+            .ensure_host("localhost", ft_core::Compute::Local, &owner)
             .await
             .unwrap();
+        assert_eq!(
+            host.path.as_str(),
+            "u/admin/localhost",
+            "this machine is the administrator's until they share it"
+        );
         assert_eq!(host.name, "localhost");
         assert_eq!(host.compute, ft_core::Compute::Local);
     }

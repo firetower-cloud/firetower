@@ -53,6 +53,18 @@ pub struct User {
     pub id: UserId,
     pub org_id: OrgId,
     pub username: String,
+    /// The label their own space is named with — the `kevin` in
+    /// `u/kevin/ledger_rounding`.
+    ///
+    /// Sent because a client cannot otherwise tell whether a path it is looking
+    /// at is *theirs*. "Is this mine" is the first half of "may I decide where
+    /// this goes", and a client that has to guess gets it wrong in the generous
+    /// direction: it offers a control that the server then refuses.
+    ///
+    /// Not the username. That is chosen by people and may yet become an email
+    /// address; this is derived once and never changes, so renaming somebody
+    /// never moves anything.
+    pub slug: String,
     pub role: String,
     /// True while the password came from a file rather than from a person.
     /// Nothing but replacing it is permitted until this clears.
@@ -154,8 +166,15 @@ impl Accounts {
 
         let id = UserId::new();
         sqlx::query(
-            "INSERT INTO users (id, org_id, username, password_hash, role, must_change_password)
-             VALUES ($1, $2, $3, $4, 'admin', TRUE)",
+            // `slug` starts as the id. It is `not null` because every path
+            // begins with it, and the readable one is chosen a few lines below
+            // by `provision_person` — which has to run after this row exists,
+            // and which needs to be able to try a second candidate when two
+            // usernames slug the same. The id is already a legal label and
+            // already unique, so the column is never briefly meaningless.
+            "INSERT INTO users (id, org_id, username, password_hash, role,
+                                must_change_password, slug)
+             VALUES ($1, $2, $3, $4, 'admin', TRUE, $1)",
         )
         .bind(id.as_str())
         .bind(org_id.as_str())
@@ -172,12 +191,21 @@ impl Accounts {
             .execute(&mut *tx)
             .await?;
 
+        // The team that is everybody and the directory they share, then this
+        // person's own label. In the same transaction as the organisation
+        // because an organisation without them cannot say "all of us" and has
+        // nowhere to share anything — a first boot that got halfway would leave
+        // a Firetower that looks set up and cannot share any work.
+        crate::access::Access::provision_organization(&mut tx, &org_id).await?;
+        let slug = crate::access::Access::provision_person(&mut tx, &org_id, &id, username).await?;
+
         tx.commit().await?;
 
         Ok(User {
             id,
             org_id,
             username: username.to_string(),
+            slug,
             role: "admin".into(),
             must_change_password: true,
             disabled: false,
@@ -249,9 +277,17 @@ impl Accounts {
         );
         let password = temporary_password();
         let id = UserId::new();
+
+        // One transaction for the account and the label its paths are built
+        // from. Separately, a failure between them leaves somebody who can sign
+        // in and whose own space is named after their id — and nothing would
+        // ever retry it.
+        let mut tx = self.pool.begin().await?;
         let done = sqlx::query(
-            "INSERT INTO users (id, org_id, username, password_hash, role, must_change_password)
-             VALUES ($1, $2, $3, $4, $5, TRUE)
+            // `slug` starts as the id — see `create_first_admin`.
+            "INSERT INTO users (id, org_id, username, password_hash, role,
+                                must_change_password, slug)
+             VALUES ($1, $2, $3, $4, $5, TRUE, $1)
              ON CONFLICT (org_id, username) DO NOTHING",
         )
         .bind(id.as_str())
@@ -259,16 +295,20 @@ impl Accounts {
         .bind(username)
         .bind(hash_password(&password)?)
         .bind(role)
-        .execute(&self.pool)
+        .execute(&mut *tx)
         .await?;
         if done.rows_affected() == 0 {
             bail!("there is already a user called {username}");
         }
+        let slug = crate::access::Access::provision_person(&mut tx, org, &id, username).await?;
+        tx.commit().await?;
+
         Ok((
             User {
                 id,
                 org_id: org.clone(),
                 username: username.to_string(),
+                slug,
                 role: role.to_string(),
                 must_change_password: true,
                 disabled: false,
@@ -364,7 +404,13 @@ impl Accounts {
         Ok(password)
     }
 
-    /// Gone for good, with everything they owned — the database cascades.
+    /// Gone for good, with everything filed in their own space.
+    ///
+    /// Most of it the database cascades. What it cannot is dealt with below, and
+    /// the reason is the one thing to know here: a slug is freed when its row
+    /// goes, so anything left at `u/<their slug>` would be handed to the next
+    /// person who slugs the same way.
+    ///
     /// Refused for the last administrator.
     pub async fn delete_user(&self, id: &UserId) -> Result<()> {
         let mut tx = self.pool.begin().await?;
@@ -380,6 +426,73 @@ impl Accounts {
         {
             bail!("{} is the only administrator", user.username);
         }
+        // Their grants go with them. `grants.subject_id` names a user or a
+        // team depending on the row, so it carries no foreign key and the
+        // database cannot cascade this — which left a grant naming somebody who
+        // no longer exists. It resolved to no access, because `directory_access`
+        // joins `users`, so nothing was reachable by it; what it did do was
+        // appear on the list of who can see a directory, as a row with no name.
+        sqlx::query("DELETE FROM grants WHERE subject_kind = 'person' AND subject_id = $1")
+            .bind(id.as_str())
+            .execute(&mut *tx)
+            .await?;
+
+        // What is still filed at `u/<their slug>` has to leave with them, and
+        // this is why.
+        //
+        // Their workspaces and subscriptions cascade — those rows carry
+        // `user_id`. Two kinds do not: a **machine** belongs to the
+        // organisation and a `created_by` that goes null does not move it, and a
+        // **secret** is keyed by an owner with no foreign key on it (the
+        // install's own owner is the empty string, which a null could not be).
+        //
+        // Left alone, both would sit at a root nobody can reach — and the slug
+        // is freed the moment the row goes, so the next person called `ana`
+        // would be given `u/ana` and inherit whatever was still under it. That
+        // is the failure: not an orphan, but somebody else's machine and
+        // somebody else's tokens quietly becoming a new colleague's.
+        //
+        // A machine goes to the shared directory, because compute is real and
+        // the organisation is still running on it. A secret goes, because it was
+        // that person's credential, nothing else can open it, and keeping it
+        // would be keeping a token nobody can rotate.
+        // Twice, and the second one is why this cannot fail: `hosts_path_unique`
+        // would refuse `d.shared.fire_01` if something were already filed there,
+        // and a delete that dies on a name collision is a person nobody can
+        // remove. The first pass takes the readable path where it is free; the
+        // second takes whatever is left and puts the machine's own id on the end,
+        // which nothing can collide with.
+        for statement in [
+            // `subpath` returns an `ltree`, and `text || ltree` is *ltree*
+            // concatenation — which would read `'d.shared.'` as a path and fail
+            // on its trailing dot. Cast to text and build the string.
+            "UPDATE hosts h SET path = ('d.shared.' || subpath(h.path, 2)::text)::ltree
+              WHERE h.path <@ ('u.' || (SELECT slug FROM users WHERE id = $1))::ltree
+                AND NOT EXISTS (SELECT 1 FROM hosts o
+                                 WHERE o.path
+                                     = ('d.shared.' || subpath(h.path, 2)::text)::ltree)",
+            "UPDATE hosts h
+                SET path = ('d.shared.' || subpath(h.path, 2)::text || '_' ||
+                            lower(substr(h.id, 3, 8)))::ltree
+              WHERE h.path <@ ('u.' || (SELECT slug FROM users WHERE id = $1))::ltree",
+        ] {
+            sqlx::query(statement)
+                .bind(id.as_str())
+                .execute(&mut *tx)
+                .await
+                .context("moving their machines somewhere the organisation can still reach")?;
+        }
+
+        sqlx::query(
+            "DELETE FROM secrets
+              WHERE owner = $1
+                 OR path <@ ('u.' || (SELECT slug FROM users WHERE id = $1))::ltree",
+        )
+        .bind(id.as_str())
+        .execute(&mut *tx)
+        .await
+        .context("removing their credentials")?;
+
         sqlx::query("DELETE FROM users WHERE id = $1")
             .bind(id.as_str())
             .execute(&mut *tx)
@@ -636,6 +749,7 @@ fn user_from_row(r: sqlx::postgres::PgRow) -> User {
         id: UserId::from_stored(r.get::<String, _>("id")),
         org_id: OrgId::from_stored(r.get::<String, _>("org_id")),
         username: r.get("username"),
+        slug: r.get("slug"),
         role: r.get("role"),
         must_change_password: r.get("must_change_password"),
         disabled: r.try_get("disabled").unwrap_or(false),
@@ -712,6 +826,72 @@ mod tests {
     async fn accounts() -> Accounts {
         let db = Db::open_for_test().await.unwrap();
         Accounts::new(db.pool().clone())
+    }
+
+    /// A slug is freed when its row goes, so anything still filed at
+    /// `u/<their slug>` would be handed to the next person who slugs the same
+    /// way. This is the test for the sweep that stops that.
+    #[tokio::test]
+    async fn nothing_is_left_behind_at_a_deleted_persons_root() {
+        let (db, admin) = Db::open_for_test_owned().await.unwrap();
+        let accounts = Accounts::new(db.pool().clone());
+        let org = OrgId::from_stored(db.org().await.unwrap());
+        let ana = accounts
+            .create_user(&org, "ana", "member")
+            .await
+            .unwrap()
+            .0
+            .id;
+
+        // A machine she added, and a credential she authorized.
+        let host = db
+            .ensure_host("fire-01", ft_core::Compute::Local, ana.as_str())
+            .await
+            .unwrap();
+        assert_eq!(host.path.as_str(), "u/ana/fire_01");
+        let vault =
+            crate::vault::Vault::new(db.pool().clone(), crate::vault::crypto::RootKey::generate());
+        vault
+            .put(
+                crate::vault::Key::of(crate::vault::GIT, "github", ana.as_str()),
+                "a-token",
+                "test setup",
+            )
+            .await
+            .unwrap();
+
+        accounts.delete_user(&ana).await.unwrap();
+
+        // The machine is the organisation's and is still running: it moves to
+        // the shared directory rather than going with her.
+        let moved = db.host_by_name("fire-01").await.unwrap().unwrap();
+        assert_eq!(moved.path.as_str(), "d/shared/fire_01");
+
+        // Her token goes. Nothing else can open it, and a credential nobody can
+        // rotate is worse than no credential.
+        assert!(!vault
+            .holds(crate::vault::Key::of(
+                crate::vault::GIT,
+                "github",
+                ana.as_str()
+            ))
+            .await
+            .unwrap());
+
+        // And the next `ana` inherits nothing, which is the whole point.
+        let again = accounts
+            .create_user(&org, "ana", "member")
+            .await
+            .unwrap()
+            .0
+            .id;
+        assert!(db
+            .hosts_for(again.as_str(), crate::access::Level::Viewer)
+            .await
+            .unwrap()
+            .iter()
+            .all(|h| h.path.as_str() != "u/ana/fire_01"));
+        drop(admin);
     }
 
     #[test]

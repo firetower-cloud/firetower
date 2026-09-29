@@ -83,6 +83,8 @@ Everything after that happens in the desktop app: adding workers, connecting rep
 | | |
 | --- | --- |
 | [Getting started](https://usefiretower.com/docs) | The short path from nothing to a running session |
+| [Teams and directories](docs/teams-and-directories.md) | Who can see what, and what sharing something does |
+| [Paths and ownership](docs/paths-and-ownership.md) | The same subject, for whoever is writing the next feature |
 
 ## Supported agents
 

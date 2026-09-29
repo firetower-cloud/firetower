@@ -231,6 +231,12 @@ pub(super) async fn create_session(
     // everything afterwards — who may open it, whose token pushes its branch,
     // whose name goes on its commits — is answered from here.
     let owner = owner(&principal)?.to_string();
+    // The same person, in words, for the vault's log — see `Access::transfer`.
+    let whose = principal
+        .user
+        .as_ref()
+        .map(|u| u.username.clone())
+        .unwrap_or_else(|| owner.clone());
 
     // Another agent in a place that already exists, which is a different job
     // from making one: the host, the repositories, the branch and the directory
@@ -305,7 +311,17 @@ pub(super) async fn create_session(
 
     // Scheduling is the control plane's job — it is the only thing that sees
     // every host. Today there is one, so this is the whole scheduler.
-    let hosts = state.db.hosts().await?;
+    //
+    // Narrowed to the machines this person may work on, which for every
+    // installation that has not deliberately narrowed one is all of them: a
+    // host is filed in the shared directory and everybody works there. Asking
+    // for one by id gets the same list, so naming a machine somebody was not
+    // given is `no host is available` rather than a refusal that confirms it
+    // exists.
+    let hosts = state
+        .db
+        .hosts_for(&owner, crate::access::Level::Writer)
+        .await?;
     let host = match &req.host_id {
         // Named explicitly, so a drained one is still refused below rather
         // than silently swapped for another.
@@ -546,6 +562,42 @@ pub(super) async fn create_session(
         state.db.bind_task(&id, key, url).await?;
     }
 
+    // Shared from the start, when that is what was asked for. `insert_session`
+    // files it in the creator's own space; this hands it to a directory, which
+    // is the same operation the Access screen performs later — at the one
+    // moment when nobody has to be told it changed hands.
+    //
+    // After the place exists, for the same reason `bind_task` is here rather
+    // than inside the insert. The failure is the safe one: a filing that does
+    // not happen leaves the workspace private.
+    if let Some(directory) = &req.directory_id {
+        let target = state
+            .access
+            .directory(directory.as_str())
+            .await?
+            .ok_or_else(|| ApiError::not_found("directory"))?;
+        match state.access.level_on(&owner, directory.as_str()).await? {
+            Some(level) if level >= crate::access::Level::Writer => {
+                let from = state
+                    .access
+                    .path_of(crate::access::FiledKind::Workspace, id.as_str())
+                    .await?
+                    .ok_or_else(|| ApiError::not_found("workspace"))?;
+                state
+                    .access
+                    .transfer(
+                        &state.vault,
+                        crate::access::FiledKind::Workspace,
+                        id.as_str(),
+                        &from.moved_to(ft_core::path::DIRECTORY, &target.slug),
+                        &whose,
+                    )
+                    .await?;
+            }
+            _ => return Err(ApiError::not_found("directory")),
+        }
+    }
+
     state.db.record_checkouts(&id, &checkouts).await?;
 
     // Each repository's own variables, opened once. Every read is a line in the
@@ -705,7 +757,7 @@ pub(super) async fn relaunch_session(
     let owner = owner(&principal)?.to_string();
     let session = state
         .db
-        .session_of(&owner, &id)
+        .session_to_work_in(&owner, &id)
         .await?
         .ok_or_else(|| ApiError::not_found("session"))?;
 
@@ -1005,7 +1057,7 @@ pub(super) async fn destroy_session(
     let id = SessionId::from_stored(id);
     let session = state
         .db
-        .session_of(owner(&principal)?, &id)
+        .session_to_work_in(owner(&principal)?, &id)
         .await?
         .ok_or_else(|| ApiError::not_found("session"))?;
 
@@ -1430,7 +1482,7 @@ pub(super) async fn rename_session(
     let owner = owner(&principal)?;
     state
         .db
-        .session_of(owner, &id)
+        .session_to_work_in(owner, &id)
         .await?
         .ok_or_else(|| ApiError::not_found("session"))?;
 
@@ -1438,7 +1490,7 @@ pub(super) async fn rename_session(
 
     state
         .db
-        .session_of(owner, &id)
+        .session_to_work_in(owner, &id)
         .await?
         .map(Json)
         .ok_or_else(|| ApiError::not_found("session"))
@@ -1480,7 +1532,7 @@ pub(super) async fn set_share(
     // guessing an id.
     let session = state
         .db
-        .session_of(owner, &id)
+        .session_to_work_in(owner, &id)
         .await?
         .ok_or_else(|| ApiError::not_found("session"))?;
 
@@ -1506,7 +1558,7 @@ pub(super) async fn set_share(
 
     state
         .db
-        .session_of(owner, &id)
+        .session_to_work_in(owner, &id)
         .await?
         .map(Json)
         .ok_or_else(|| ApiError::not_found("session"))

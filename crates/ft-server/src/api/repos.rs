@@ -735,6 +735,7 @@ mod tests {
             id: ft_core::HostId::new(),
             name: name.into(),
             state: ft_core::HostState::Online,
+            path: ft_core::ResourcePath::personal("kevin", "localhost"),
             compute,
             drained: false,
             cpus: None,
