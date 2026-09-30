@@ -1523,7 +1523,7 @@ mod tests {
     use super::*;
     use crate::accounts::Accounts;
     use crate::db::Db;
-    use crate::vault::{crypto::RootKey, Vault};
+    use crate::vault::{crypto::RootKey, Key, Vault};
 
     /// A database with an organisation, an administrator, and the two rows a
     /// first boot makes.
@@ -1969,6 +1969,77 @@ mod tests {
                 .is_empty(),
             "and only as far as the exception said"
         );
+    }
+
+    /// The fourth route reaches a secret, not only a machine.
+    ///
+    /// Every kind reads through [`filed_where`], so this cannot be true of one
+    /// and false of another — but a secret is the one where being wrong is
+    /// expensive, and until this the exception route was only ever exercised on
+    /// a host. It is also the one kind addressed by something other than an id,
+    /// which is its own way to be wrong.
+    #[tokio::test]
+    async fn one_person_can_be_let_into_one_secret() {
+        let (db, access, accounts, org, _admin) = set_up().await;
+        let bob = person(&accounts, &org, "bob").await;
+        let lisa = person(&accounts, &org, "lisa").await;
+        let vault = vault(&db);
+
+        vault
+            .put(
+                Key::of("global", "STRIPE_KEY", bob.as_str()),
+                "sk_live_not_a_real_one",
+                "a test",
+            )
+            .await
+            .unwrap();
+
+        assert!(
+            vault
+                .names_for(lisa.as_str(), Level::Viewer)
+                .await
+                .unwrap()
+                .is_empty(),
+            "bob's own space is nobody else's"
+        );
+
+        access
+            .set_exception(
+                FiledKind::Secret,
+                "global/STRIPE_KEY",
+                lisa.as_str(),
+                Level::Viewer,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            vault
+                .names_for(lisa.as_str(), Level::Viewer)
+                .await
+                .unwrap()
+                .len(),
+            1,
+            "named on the one secret, and reaching it"
+        );
+        assert!(
+            vault
+                .names_for(lisa.as_str(), Level::Writer)
+                .await
+                .unwrap()
+                .is_empty(),
+            "and only as far as the exception said"
+        );
+
+        access
+            .remove_exception(FiledKind::Secret, "global/STRIPE_KEY", lisa.as_str())
+            .await
+            .unwrap();
+        assert!(vault
+            .names_for(lisa.as_str(), Level::Viewer)
+            .await
+            .unwrap()
+            .is_empty());
     }
 
     /// `admin` is not spellable as an exception: administration belongs to the

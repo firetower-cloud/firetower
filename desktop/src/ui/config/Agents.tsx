@@ -16,7 +16,8 @@ import { getListAgentsQueryKey, useCheckAgents, useConfigureAgent, useForgetAgen
 import { getListAccountsQueryKey, useUpdateAccount } from "~/api/generated/accounts/accounts";
 import { quota } from "~/api/accounts";
 import { useAccounts, useAgents, useHosts } from "~/data";
-import { FiledIn, Rows, Section } from "~/ui/config/bits";
+import { Rows, Section } from "~/ui/config/bits";
+import { WhoCanAccess } from "~/ui/Sharing";
 import { useDirectories } from "~/data";
 import { ConnectAccount } from "~/ui/config/ConnectAccount";
 import { useConfirm } from "~/ui/Confirm";
@@ -119,7 +120,7 @@ function AgentDetail({ agent, accounts, onConnect }: { agent: AgentView; account
                       reach it. Its credential goes with it — re-sealed under the
                       directory — and a borrowed one still spends the quota of
                       whoever's subscription it is. */}
-                  <FiledIn kind="agentAccount" id={a.id} path={a.path} />
+                  <WhoCanAccess look="chip" kind="agentAccount" id={a.id} path={a.path} />
                   {renaming?.id !== a.id && <button onClick={() => setRenaming({ id: a.id, name: a.name })} className="text-micro text-mute hover:text-bone">rename</button>}
                   <button onClick={() => onConnect(a)} className="text-micro text-mute hover:text-bone">{connected ? "reconnect" : "finish connecting"}</button>
                   {!a.isDefault && a.enabled && connected && <button onClick={() => change.mutate({ id: a.id, data: { isDefault: true } }, { onSuccess: refresh })} className="text-micro text-mute hover:text-bone">make default</button>}

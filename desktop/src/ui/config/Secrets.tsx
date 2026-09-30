@@ -15,7 +15,8 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Eye, EyeOff, Plus, Trash2 } from "lucide-react";
 import { Icon } from "~/components/ui";
 import { getListSecretsQueryKey, useListSecrets, useRemoveSecret, useReplaceSecret, useRevealSecret } from "~/api/generated/secrets/secrets";
-import { FiledIn, Section } from "~/ui/config/bits";
+import { Section } from "~/ui/config/bits";
+import { WhoCanAccess } from "~/ui/Sharing";
 
 import { useDirectories, why } from "~/data";
 import { useConfirm } from "~/ui/Confirm";
@@ -88,9 +89,9 @@ function Row({ scope, name, mine, path, onGone }: { scope: string; name: string;
 
           Never an `agent` one, and never a repository's `env:` variable. Those
           are *attached* — they belong to an account or a repository and move when
-          it moves — so they arrive here with no path and `FiledIn` draws
+          it moves — so they arrive here with no path and the chip draws
           nothing. Sharing the account is what sharing one of those means. */}
-      <FiledIn kind="secret" id={`${scope}/${name}`} path={path} />
+      <WhoCanAccess look="chip" kind="secret" id={`${scope}/${name}`} path={path} />
       {editing !== null ? (
         <>
           <input autoFocus value={editing} onChange={(e) => setEditing(e.target.value)} type="password" onKeyDown={(e) => { if (e.key === "Enter" && editing) replace.mutate({ scope, name, data: { value: editing } }, { onSuccess: () => setEditing(null) }); if (e.key === "Escape") setEditing(null); }} placeholder="new value" className="w-48 rounded-md border border-line bg-ground px-2 py-1 font-mono text-micro text-bone focus:outline-none" />

@@ -1,7 +1,14 @@
 "use client";
 
 /**
- * Who can access one workspace.
+ * Who can access one thing — a workspace, a machine, a subscription, a secret.
+ *
+ * **One sheet for all four, because it is one question.** The server has always
+ * answered it generically: `filed_where` takes an alias, `FiledRef` takes a
+ * kind, and every read of every kind runs the same predicate. Only this
+ * component was wired to workspaces. What actually differs between the kinds is
+ * four nouns and which list to refresh afterwards, which is `KINDS` below —
+ * everything else would have been four copies drifting apart.
  *
  * **Two kinds of access, kept apart on the screen.** Whoever the directory lets
  * in is one row — the directory itself — with its people folded underneath it,
@@ -28,6 +35,7 @@ import {
   ChevronDown,
   ChevronRight,
   CornerDownRight,
+  Share2,
   FolderOpen,
   Plus,
   UserRound,
@@ -47,10 +55,13 @@ import {
   useListGrants,
 } from "~/api/generated/access/access";
 import { getListSessionsQueryKey } from "~/api/generated/sessions/sessions";
+import { getListHostsQueryKey } from "~/api/generated/hosts/hosts";
+import { getListAccountsQueryKey } from "~/api/generated/accounts/accounts";
+import { getListSecretsQueryKey } from "~/api/generated/secrets/secrets";
 import { useMe } from "~/api/generated/auth/auth";
-import type { Level, Reaches } from "~/api/generated/model";
+import type { FiledKind, Level, Reaches } from "~/api/generated/model";
 import { useDirectories, why } from "~/data";
-import { destinations, pathSlug, rootOf } from "~/filing";
+import { destinations, pathSlug, rootOf, where } from "~/filing";
 import { PickPeople, Face, type Pickable } from "~/ui/PickPeople";
 import { useConfirm } from "~/ui/Confirm";
 
@@ -89,11 +100,115 @@ type Somewhere = {
 /** Somewhere it could go. There is no row for a personal root, hence `mine`. */
 type Place = { kind: "mine" } | { kind: "directory"; id: string } | { kind: "new" };
 
-export function Sharing({ workspaceId, onClose }: { workspaceId: string; onClose: () => void }) {
+/**
+ * The whole of what a kind changes.
+ *
+ * A noun, because the sheet says "this machine will go in it" and saying "this
+ * item" would be the sort of writing that makes a product feel like a database
+ * browser. And the list that has to be re-read once something moves — moving a
+ * machine does not change any session, and refreshing everything on every save
+ * would reload the world to change one word.
+ */
+const KINDS: Record<FiledKind, { one: string; refresh: () => readonly unknown[] }> = {
+  workspace: { one: "workspace", refresh: getListSessionsQueryKey },
+  machine: { one: "machine", refresh: getListHostsQueryKey },
+  agentAccount: { one: "subscription", refresh: getListAccountsQueryKey },
+  secret: { one: "secret", refresh: getListSecretsQueryKey },
+};
+
+/**
+ * The way in: the control that opens the sheet, for anything.
+ *
+ * **Two looks, one sheet.** Where it appears is genuinely different — a toolbar
+ * control next to the terminal and the bin, or a chip at the end of a table row
+ * — and what it opens is not. Before this, three screens had a menu of their
+ * own that could move a thing between directories and had no way to say "and
+ * let Ana in", while the fourth had the whole sheet. The capability was on the
+ * server for all four the entire time; only the screens disagreed.
+ *
+ * **It opens for everybody, including whoever may change nothing.** Who can
+ * reach a thing is worth reading whether or not you may alter it, and the sheet
+ * says in its own words what you may do. Hiding it from a reader teaches them
+ * the screen is broken; showing them a control the server refuses teaches them
+ * the same. Saying what is true and offering nothing to change is neither.
+ */
+export function WhoCanAccess({
+  kind,
+  id,
+  path,
+  look,
+}: {
+  kind: FiledKind;
+  id: string;
+  /** Where it is now. */
+  path?: string | null;
+  look: "toolbar" | "chip";
+}) {
+  const [open, setOpen] = useState(false);
+  const me = useMe();
+
+  // Nothing to open: an *attached* thing — an agent account's own credential,
+  // the install's own secrets — is filed nowhere and has no access of its own.
+  // Only the chip can be absent; the toolbar's control holds its place in a row
+  // of icons, and one that comes and goes moves its neighbours under the
+  // pointer.
+  if (look === "chip" && !path) return null;
+
+  const sheet = open && <Sharing kind={kind} id={id} onClose={() => setOpen(false)} />;
+
+  if (look === "chip") {
+    return (
+      <>
+        <button
+          onClick={() => setOpen(true)}
+          title="Who can access it"
+          className="flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 font-mono text-micro text-mute transition-colors hover:bg-raise hover:text-bone"
+        >
+          <Icon of={Share2} size={12} />
+          {where(path, me.data?.user)}
+        </button>
+        {sheet}
+      </>
+    );
+  }
+
+  return (
+    <>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        title={`Who can access it — ${path ?? "yours"}`}
+        className={`control gap-1.5 ${open ? "bg-overlay text-bone" : "text-mute hover:bg-raise hover:text-bone"}`}
+      >
+        <Share2 className="h-4 w-4 shrink-0" strokeWidth={1.75} />
+        {/* The root on the button when it is shared, because "who can see my
+            work" is not a question anybody should have to open a dialog to
+            answer. Nothing in your own space, which is the quiet default, and
+            capped because a directory can be called anything. */}
+        {path?.startsWith("d/") && (
+          <span className="max-w-[150px] truncate font-mono text-micro">
+            {path.split("/").slice(0, 2).join("/")}
+          </span>
+        )}
+      </button>
+      {sheet}
+    </>
+  );
+}
+
+export function Sharing({
+  kind,
+  id,
+  onClose,
+}: {
+  kind: FiledKind;
+  id: string;
+  onClose: () => void;
+}) {
   const cache = useQueryClient();
   const confirm = useConfirm();
-  const item = useMemo(() => ({ kind: "workspace" as const, id: workspaceId }), [workspaceId]);
-  const { data, isPending } = useAccessOf({ kind: "workspace", id: workspaceId });
+  const item = useMemo(() => ({ kind, id }), [kind, id]);
+  const one = KINDS[kind].one;
+  const { data, isPending } = useAccessOf({ kind, id });
   const { data: directories } = useDirectories();
   const me = useMe();
 
@@ -185,11 +300,9 @@ export function Sharing({ workspaceId, onClose }: { workspaceId: string; onClose
         }
       }
       await Promise.all([
-        cache.invalidateQueries({
-          queryKey: getAccessOfQueryKey({ kind: "workspace", id: workspaceId }),
-        }),
+        cache.invalidateQueries({ queryKey: getAccessOfQueryKey(item) }),
         cache.invalidateQueries({ queryKey: getListDirectoriesQueryKey() }),
-        cache.invalidateQueries({ queryKey: getListSessionsQueryKey() }),
+        cache.invalidateQueries({ queryKey: KINDS[kind].refresh() }),
       ]);
       onClose();
     } catch (e) {
@@ -340,7 +453,7 @@ export function Sharing({ workspaceId, onClose }: { workspaceId: string; onClose
 
   const title =
     step === "places" ? "Where it lives" : step === "new" ? "A new directory" : "Who can access it";
-  const subtitle = step === "new" ? "This workspace will go in it" : (data?.path ?? "");
+  const subtitle = step === "new" ? `This ${one} will go in it` : (data?.path ?? "");
 
   return (
     <div
@@ -411,6 +524,7 @@ export function Sharing({ workspaceId, onClose }: { workspaceId: string; onClose
               onName={setNewName}
               people={newWith}
               onPeople={setNewWith}
+              one={one}
               meId={me.data?.user.id}
             />
           )}
@@ -939,12 +1053,15 @@ function NewDirectory({
   onName,
   people,
   onPeople,
+  one,
   meId,
 }: {
   name: string;
   onName: (s: string) => void;
   people: { who: Pickable; level: Level }[];
   onPeople: (p: { who: Pickable; level: Level }[]) => void;
+  /** What this is, in a word: "workspace", "machine", "secret". */
+  one: string;
   meId: string | undefined;
 }) {
   const [adding, setAdding] = useState(false);
@@ -1021,7 +1138,7 @@ function NewDirectory({
         </Act>
       )}
       <p className="px-3.5 py-2.5 text-micro leading-relaxed text-mute">
-        You administer it, so you keep this workspace and decide who else sees it.
+        You administer it, so you keep this {one} and decide who else sees it.
       </p>
     </>
   );
