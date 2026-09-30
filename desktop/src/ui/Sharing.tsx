@@ -680,6 +680,10 @@ function Where({
       <div
         className={`flex items-center gap-2.5 pr-3.5 pl-3.5 ${pending ? PENDING : "hover:bg-raise"}`}
       >
+        {/* Two buttons and not one, because the way back belongs *between* the
+            slug and the count — and a button cannot contain a button. The
+            second carries no label of its own: it only keeps the count and the
+            chevron clickable, which is where anybody expands a row from. */}
         <button
           disabled={!many}
           onClick={() => setOpen((v) => !v)}
@@ -692,18 +696,26 @@ function Where({
           <span className="min-w-0 flex-1 truncate text-ui text-bone">
             {name} <span className="font-mono text-micro text-mute">{note}</span>
           </span>
-          <span className="shrink-0 text-micro text-mute">{count}</span>
-          {many && <Icon of={open ? ChevronDown : ChevronRight} size={12} />}
         </button>
         {onUndo && (
           <button
             onClick={onUndo}
             aria-label="Leave it where it is"
-            className="shrink-0 py-2 pl-2 text-meta text-mute hover:text-bone"
+            className="shrink-0 px-1 py-2 text-meta text-mute hover:text-bone"
           >
             Cancel
           </button>
         )}
+        <button
+          disabled={!many}
+          tabIndex={-1}
+          aria-hidden="true"
+          onClick={() => setOpen((v) => !v)}
+          className="flex shrink-0 items-center gap-2.5 py-2 disabled:cursor-default"
+        >
+          <span className="text-micro text-mute">{count}</span>
+          {many && <Icon of={open ? ChevronDown : ChevronRight} size={12} />}
+        </button>
       </div>
       {open &&
         who?.map((m) => (
