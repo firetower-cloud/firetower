@@ -21,7 +21,8 @@
  * showing it. The first version acted on click, so a mis-click gave somebody
  * access with no way to reconsider.
  */
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   ChevronDown,
@@ -43,6 +44,7 @@ import {
   setException,
   unfileItems,
   useAccessOf,
+  useListGrants,
 } from "~/api/generated/access/access";
 import { getListSessionsQueryKey } from "~/api/generated/sessions/sessions";
 import { useMe } from "~/api/generated/auth/auth";
@@ -119,7 +121,6 @@ export function Sharing({ workspaceId, onClose }: { workspaceId: string; onClose
   }, [onClose, step]);
 
   const root = data ? rootOf(data.path)[0] : "u";
-  const mySlug = data ? rootOf(data.path)[1] : "";
   const here = data?.directory ?? null;
 
   const owner = (data?.who ?? []).find((r) => r.route === "owner");
@@ -277,21 +278,64 @@ export function Sharing({ workspaceId, onClose }: { workspaceId: string; onClose
     };
   };
 
-  /** What "where it lives" says — the pending answer if there is one. */
-  const destination = () => {
-    if (place?.kind === "new")
+  /* Who is in the directory it is going to. A destination is somewhere they may
+     at least work, so they may always read its grants — and the pending row
+     has to say who is in it, not just its name. */
+  const goingTo = moving && place?.kind === "directory" ? place.id : null;
+  const { data: waiting } = useListGrants(goingTo ?? "", {
+    query: { enabled: goingTo !== null },
+  });
+
+  /**
+   * Where it would end up, shaped exactly like where it is now.
+   *
+   * The pending move used to be an extra line under the directory row saying
+   * "Moving to X — when you save". Two rows for one question read as two
+   * places it lives. This describes the destination in the same terms — a
+   * name, a slug, who is in it — so the row can simply be swapped.
+   */
+  const destination = (): Landing | null => {
+    if (!moving || !place) return null;
+    if (place.kind === "mine")
+      return {
+        name: "Only you",
+        note: `u/${me.data?.user.slug ?? ""}`,
+        count: "just you",
+        personal: true,
+        who: null,
+      };
+    if (place.kind === "new") {
+      const inside = [
+        { subjectId: "you", subjectKind: "person", name: "You", level: "admin" as Level },
+        ...newWith.map((g) => ({
+          subjectId: g.who.id,
+          subjectKind: g.who.kind,
+          name: g.who.name,
+          level: g.level,
+        })),
+      ];
       return {
         name: newName.trim() || "A new directory",
-        note: `new · ${newWith.length + 1} in it`,
+        note: `d/${pathSlug(newName)}`,
+        count: counted(inside),
+        personal: false,
+        who: inside,
       };
-    if (place?.kind === "mine") return { name: "Only you", note: "nobody else" };
-    if (place?.kind === "directory") {
-      const d = directories.find((x) => x.id === place.id);
-      return { name: d?.name ?? "somewhere", note: d ? `d/${d.slug}` : "" };
     }
-    return here
-      ? { name: here.name, note: `d/${here.slug}` }
-      : { name: "Only you", note: `u/${mySlug}` };
+    const d = directories.find((x) => x.id === place.id);
+    const inside = (waiting ?? []).map((g) => ({
+      subjectId: g.subjectId,
+      subjectKind: g.subjectKind,
+      name: g.subjectName,
+      level: g.level,
+    }));
+    return {
+      name: d?.name ?? "somewhere",
+      note: d ? `d/${d.slug}` : "",
+      count: counted(inside),
+      personal: false,
+      who: inside,
+    };
   };
 
   const title =
@@ -344,7 +388,7 @@ export function Sharing({ workspaceId, onClose }: { workspaceId: string; onClose
                 setPending((p) => ({ ...p, [w.id]: "writer" }));
               }}
               destination={destination()}
-              pendingMove={moving}
+              onUndoMove={() => setPlace(null)}
               onChange={() => setStep("places")}
             />
           )}
@@ -492,7 +536,7 @@ function Main({
   onLevel,
   onAdd,
   destination,
-  pendingMove,
+  onUndoMove,
   onChange,
 }: {
   here: { id: string; name: string; slug: string } | null;
@@ -503,54 +547,40 @@ function Main({
   taken: string[];
   onLevel: (id: string, level: Level | null) => void;
   onAdd: (who: Pickable) => void;
-  destination: { name: string; note: string };
-  pendingMove: boolean;
+  destination: Landing | null;
+  onUndoMove: () => void;
   onChange: () => void;
 }) {
-  // Folded by default. A directory with twenty people in it would otherwise bury
-  // the two lines that are actually about *this* workspace.
-  const [open, setOpen] = useState(false);
   const [adding, setAdding] = useState(false);
 
   return (
     <>
-      <Label>{here ? "Directory access" : "Owner"}</Label>
+      <Label>{(destination ? destination.personal : !here) ? "Owner" : "Directory access"}</Label>
 
-      {/* One row, not two. The place and the access it confers were separate
-          sections, which meant the directory's name and slug appeared twice on
-          a screen small enough to see both at once.
-
-          This row does one thing — expand to show who is in the directory —
-          and moving is a row of its own below. It had been squeezed onto the
-          right of this one, behind the count and the chevron, where it read as
-          part of the folder's own label. */}
-      {here ? (
-        <>
-          <div className="flex items-center gap-2.5 pr-3.5 pl-3.5 hover:bg-raise">
-            <button
-              onClick={() => setOpen((v) => !v)}
-              aria-label={`People in ${here.name}`}
-              className="flex min-w-0 flex-1 items-center gap-2.5 py-2 text-left"
-            >
-              <span className="grid h-[21px] w-[21px] shrink-0 place-items-center rounded-full border border-line bg-overlay text-dim">
-                <Icon of={FolderOpen} size={12} />
-              </span>
-              <span className="min-w-0 flex-1 truncate text-ui text-bone">
-                {here.name} <span className="font-mono text-micro text-mute">d/{here.slug}</span>
-              </span>
-              <span className="shrink-0 text-micro text-mute">{counted(fromDirectory)}</span>
-              <Icon of={open ? ChevronDown : ChevronRight} size={12} />
-            </button>
-          </div>
-          {open &&
-            fromDirectory.map((r) => (
-              <div key={r.subjectId} className="flex items-center gap-2.5 py-1.5 pr-3.5 pl-9">
-                <Face who={{ name: r.name, kind: r.subjectKind === "team" ? "team" : "person" }} />
-                <span className="min-w-0 flex-1 truncate text-ui text-text">{r.name}</span>
-                <span className="shrink-0 text-meta text-dim">{said(r.level)}</span>
-              </div>
-            ))}
-        </>
+      {/* Where it would go *replaces* where it is, rather than sitting under
+          it. Two rows for one question read as two places it lives at once —
+          and the destination is described in the same terms, so the swap is
+          the only difference apart from the tint and the way back. */}
+      {destination ? (
+        <Where
+          key={destination.note}
+          name={destination.name}
+          note={destination.note}
+          count={destination.count}
+          who={destination.who}
+          personal={destination.personal}
+          pending
+          onUndo={onUndoMove}
+        />
+      ) : here ? (
+        <Where
+          name={here.name}
+          note={`d/${here.slug}`}
+          count={counted(fromDirectory)}
+          who={fromDirectory}
+          personal={false}
+          pending={false}
+        />
       ) : (
         owner && (
           <div className="flex items-center gap-2.5 px-3.5 py-2">
@@ -560,23 +590,6 @@ function Main({
             </span>
           </div>
         )
-      )}
-
-      {/* A pending move is shown *beside* where it lives now, never instead of
-          it. Replacing the row hid the directory and everybody in it behind one
-          line — so the screen stopped answering "who can access this" at exactly
-          the moment somebody was deciding whether to change it. */}
-      {pendingMove && (
-        <div className={`flex items-center gap-2.5 px-3.5 py-2 ${PENDING}`}>
-          <span className="grid h-[21px] w-[21px] shrink-0 place-items-center text-dim">
-            <Icon of={destination.name === "Only you" ? UserRound : FolderOpen} size={12} />
-          </span>
-          <span className="min-w-0 flex-1 truncate text-ui text-bone">
-            Moving to {destination.name}{" "}
-            <span className="font-mono text-micro text-mute">{destination.note}</span>
-            <span className="block text-micro text-mute">when you save</span>
-          </span>
-        </div>
       )}
 
       {mayShare && (
@@ -618,6 +631,177 @@ function Main({
 }
 
 /** One exception, and the one control that changes or removes it. */
+/** Somebody a directory lets in — a grant, or a staged one on a new directory. */
+type Member = { subjectId: string; subjectKind: string; name: string; level: Level };
+
+/** Where something lives, or would. */
+type Landing = {
+  name: string;
+  /** `d/slug` or `u/slug`, under the name. */
+  note: string;
+  count: string;
+  personal: boolean;
+  /** Null when there is nobody to list, which is what a personal space is. */
+  who: Member[] | null;
+};
+
+/**
+ * Where it lives — one component, so that where it *would* live cannot drift.
+ *
+ * The pending row is this row with a tint and a way back. Written twice, the
+ * two would differ within a week, and the whole point is that swapping them is
+ * the only change on the screen.
+ *
+ * Folded by default: a directory with twenty people in it would otherwise bury
+ * the lines that are actually about this workspace.
+ */
+function Where({
+  name,
+  note,
+  count,
+  who,
+  personal,
+  pending,
+  onUndo,
+}: {
+  name: string;
+  note: string;
+  count: string;
+  who: Member[] | null;
+  personal: boolean;
+  pending: boolean;
+  onUndo?: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const many = (who?.length ?? 0) > 0;
+
+  return (
+    <>
+      <div
+        className={`flex items-center gap-2.5 pr-3.5 pl-3.5 ${pending ? PENDING : "hover:bg-raise"}`}
+      >
+        <button
+          disabled={!many}
+          onClick={() => setOpen((v) => !v)}
+          aria-label={`People in ${name}`}
+          className="flex min-w-0 flex-1 items-center gap-2.5 py-2 text-left disabled:cursor-default"
+        >
+          <span className="grid h-[21px] w-[21px] shrink-0 place-items-center rounded-full border border-line bg-overlay text-dim">
+            <Icon of={personal ? UserRound : FolderOpen} size={12} />
+          </span>
+          <span className="min-w-0 flex-1 truncate text-ui text-bone">
+            {name} <span className="font-mono text-micro text-mute">{note}</span>
+          </span>
+          <span className="shrink-0 text-micro text-mute">{count}</span>
+          {many && <Icon of={open ? ChevronDown : ChevronRight} size={12} />}
+        </button>
+        {onUndo && (
+          <button
+            onClick={onUndo}
+            aria-label="Leave it where it is"
+            className="shrink-0 py-2 pl-2 text-meta text-mute hover:text-bone"
+          >
+            Cancel
+          </button>
+        )}
+      </div>
+      {open &&
+        who?.map((m) => (
+          <div
+            key={m.subjectId}
+            className={`flex items-center gap-2.5 py-1.5 pr-3.5 pl-9 ${pending ? PENDING : ""}`}
+          >
+            <Face who={{ name: m.name, kind: m.subjectKind === "team" ? "team" : "person" }} />
+            <span className="min-w-0 flex-1 truncate text-ui text-text">{m.name}</span>
+            <span className="shrink-0 text-meta text-dim">{said(m.level)}</span>
+          </div>
+        ))}
+    </>
+  );
+}
+
+/**
+ * A menu that gets out of the sheet.
+ *
+ * The rows live in an `overflow-y-auto` column inside an `overflow-hidden`
+ * card, and a clipping ancestor clips whatever its descendants' `z-index` say
+ * — the last row's level menu came out cut in half, and no stacking would have
+ * saved it. So it is not a descendant: it goes into `document.body` at
+ * coordinates read off the button, and flips above when the room below has run
+ * out.
+ *
+ * The price of coordinates is that they stop being true. Anything that could
+ * move the button underneath it — a scroll, a resize — closes it rather than
+ * leaving a menu pointing at nothing.
+ */
+function Pop({
+  anchor,
+  onClose,
+  children,
+}: {
+  anchor: HTMLElement;
+  onClose: () => void;
+  children: React.ReactNode;
+}) {
+  const box = useRef<HTMLDivElement>(null);
+  const [at, setAt] = useState<{ top: number; left: number } | null>(null);
+
+  // Measured rather than guessed, so the flip keeps working when the menu is
+  // four rows instead of three.
+  useLayoutEffect(() => {
+    const el = box.current;
+    if (!el) return;
+    const to = anchor.getBoundingClientRect();
+    setAt({
+      top:
+        window.innerHeight - to.bottom - 8 < el.offsetHeight
+          ? to.top - el.offsetHeight - 4
+          : to.bottom + 4,
+      left: Math.max(8, to.right - el.offsetWidth),
+    });
+  }, [anchor]);
+
+  useEffect(() => {
+    const away = (e: MouseEvent) => {
+      const t = e.target as Node;
+      // Not the button, which toggles itself: closing here first would let its
+      // own click reopen what it meant to shut.
+      if (!box.current?.contains(t) && !anchor.contains(t)) onClose();
+    };
+    // Captured at the document, which runs before the sheet's own Escape on the
+    // window — otherwise dismissing this menu threw the whole sheet away.
+    const key = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      e.stopPropagation();
+      onClose();
+    };
+    document.addEventListener("mousedown", away);
+    document.addEventListener("keydown", key, true);
+    window.addEventListener("scroll", onClose, true);
+    window.addEventListener("resize", onClose);
+    return () => {
+      document.removeEventListener("mousedown", away);
+      document.removeEventListener("keydown", key, true);
+      window.removeEventListener("scroll", onClose, true);
+      window.removeEventListener("resize", onClose);
+    };
+  }, [anchor, onClose]);
+
+  return createPortal(
+    <div
+      ref={box}
+      role="menu"
+      style={{ position: "fixed", top: at?.top ?? -9999, left: at?.left ?? -9999 }}
+      className={`z-[70] w-44 overflow-hidden rounded-lg border border-line bg-panel shadow-(--shadow-float) ${
+        at ? "" : "invisible"
+      }`}
+    >
+      {children}
+    </div>,
+    document.body,
+  );
+}
+
 function Line({
   row,
   mayEdit,
@@ -627,13 +811,13 @@ function Line({
   mayEdit: boolean;
   onLevel: (level: Level | null) => void;
 }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState<HTMLElement | null>(null);
   const level = row.pendingLevel === undefined ? row.level : row.pendingLevel;
   if (level === null) return null;
 
   return (
     <div
-      className={`relative flex items-center gap-2.5 px-3.5 py-2 ${
+      className={`flex items-center gap-2.5 px-3.5 py-2 ${
         row.pendingLevel !== undefined ? PENDING : "hover:bg-raise"
       }`}
     >
@@ -642,19 +826,19 @@ function Line({
       {mayEdit ? (
         <>
           <button
-            onClick={() => setOpen((v) => !v)}
+            onClick={(e) => setOpen((a) => (a ? null : e.currentTarget))}
             className="shrink-0 rounded-md border border-line bg-raise px-2 py-0.5 text-meta text-text hover:bg-overlay"
           >
             {said(level)} ⌄
           </button>
           {open && (
-            <div className="absolute top-full right-3.5 z-10 w-44 overflow-hidden rounded-lg border border-line bg-panel shadow-(--shadow-float)">
+            <Pop anchor={open} onClose={() => setOpen(null)}>
               {LEVELS.map((l) => (
                 <button
                   key={l.value}
                   onClick={() => {
                     onLevel(l.value);
-                    setOpen(false);
+                    setOpen(null);
                   }}
                   className="block w-full px-3 py-1.5 text-left text-ui text-text hover:bg-raise"
                 >
@@ -666,13 +850,13 @@ function Line({
               <button
                 onClick={() => {
                   onLevel(null);
-                  setOpen(false);
+                  setOpen(null);
                 }}
                 className="block w-full px-3 py-1.5 text-left text-ui text-brick hover:bg-raise"
               >
                 Remove access
               </button>
-            </div>
+            </Pop>
           )}
         </>
       ) : (
@@ -864,7 +1048,7 @@ function Option({
  * together and has no business on a screen — so this says which, and only
  * mentions a kind that is actually there.
  */
-function counted(rows: Reaches[]): string {
+function counted(rows: { subjectKind: string }[]): string {
   const people = rows.filter((r) => r.subjectKind === "person").length;
   const teams = rows.filter((r) => r.subjectKind === "team").length;
   const said = [
