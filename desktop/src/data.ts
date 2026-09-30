@@ -80,7 +80,13 @@ export function useTasks(ask: ListTasksParams, enabled = true): Tasks {
   const q = useListTasks(ask, { query: { enabled } });
   const page = q.data as Page | undefined;
   return {
-    data: page?.tasks ?? [],
+    /* Nothing, once the request stops working. React Query keeps the last good
+       answer beside a failed one, which is right for a flaky network and wrong
+       for a revoked key: a shared Linear key filed back out of a directory left
+       everybody who had reached through it still reading the tasks it fetched,
+       with the refusal arriving quietly alongside. Access that has been taken
+       away has to look like it. */
+    data: q.error ? [] : (page?.tasks ?? []),
     // `isPending` stays true for a query that was never allowed to run, which
     // would leave "Reading your trackers…" on screen for a tracker nobody has
     // connected yet.
