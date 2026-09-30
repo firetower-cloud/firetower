@@ -552,6 +552,7 @@ function Main({
   onChange: () => void;
 }) {
   const [adding, setAdding] = useState(false);
+  const [menu, setMenu] = useState<{ id: string; at: HTMLElement } | null>(null);
 
   return (
     <>
@@ -607,6 +608,8 @@ function Main({
           row={r}
           mayEdit={mayShare}
           onLevel={(lv) => onLevel(r.subjectId, lv)}
+          open={menu?.id === r.subjectId ? menu.at : null}
+          onOpen={(at) => setMenu(at ? { id: r.subjectId, at } : null)}
         />
       ))}
 
@@ -818,12 +821,17 @@ function Line({
   row,
   mayEdit,
   onLevel,
+  open,
+  onOpen,
 }: {
   row: Reaches & { pendingLevel?: Level | null };
   mayEdit: boolean;
   onLevel: (level: Level | null) => void;
+  /* Whose menu is open is one answer for the whole list, held above. Each row
+     holding its own meant two could be open at once, drawn over each other. */
+  open: HTMLElement | null;
+  onOpen: (at: HTMLElement | null) => void;
 }) {
-  const [open, setOpen] = useState<HTMLElement | null>(null);
   const level = row.pendingLevel === undefined ? row.level : row.pendingLevel;
   if (level === null) return null;
 
@@ -838,19 +846,19 @@ function Line({
       {mayEdit ? (
         <>
           <button
-            onClick={(e) => setOpen((a) => (a ? null : e.currentTarget))}
+            onClick={(e) => onOpen(open ? null : e.currentTarget)}
             className="shrink-0 rounded-md border border-line bg-raise px-2 py-0.5 text-meta text-text hover:bg-overlay"
           >
             {said(level)} ⌄
           </button>
           {open && (
-            <Pop anchor={open} onClose={() => setOpen(null)}>
+            <Pop anchor={open} onClose={() => onOpen(null)}>
               {LEVELS.map((l) => (
                 <button
                   key={l.value}
                   onClick={() => {
                     onLevel(l.value);
-                    setOpen(null);
+                    onOpen(null);
                   }}
                   className="block w-full px-3 py-1.5 text-left text-ui text-text hover:bg-raise"
                 >
@@ -862,7 +870,7 @@ function Line({
               <button
                 onClick={() => {
                   onLevel(null);
-                  setOpen(null);
+                  onOpen(null);
                 }}
                 className="block w-full px-3 py-1.5 text-left text-ui text-brick hover:bg-raise"
               >
