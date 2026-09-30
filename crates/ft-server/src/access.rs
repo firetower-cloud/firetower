@@ -810,7 +810,12 @@ impl Access {
     /// Where something is filed now.
     pub async fn path_of(&self, kind: FiledKind, id: &str) -> Result<Option<ResourcePath>> {
         let table = Self::table(kind);
-        let found: Option<String> = match kind {
+        // `Option<Option<_>>`: no row, and a row whose `path` is null, are two
+        // different things that flatten to the same answer. Decoding it as a
+        // `String` treated the second as a decoding failure, so asking about an
+        // *attached* thing — the install's own secrets, an agent account's
+        // credential — answered 500 rather than "it has no path".
+        let found: Option<Option<String>> = match kind {
             FiledKind::Secret => {
                 let (scope, name, owner) = split_secret(id)?;
                 sqlx::query_scalar(
@@ -830,7 +835,7 @@ impl Access {
                     .await?
             }
         };
-        Ok(found.map(ResourcePath::from_stored))
+        Ok(found.flatten().map(ResourcePath::from_stored))
     }
 
     /// Who `u/<slug>` is, as an id and a name to read.
@@ -2126,6 +2131,34 @@ mod tests {
             0,
             "ana's namesake is untouched"
         );
+    }
+
+    /// An *attached* thing has no path, and asking where it is filed is a fair
+    /// question with a plain answer.
+    ///
+    /// It used to be a decoding error: `path` is nullable on every kind, and a
+    /// null was read as a broken column rather than as "nowhere". The install's
+    /// own SSH identity — the one that opens every machine in the fleet — was
+    /// the row that produced it.
+    #[tokio::test]
+    async fn something_filed_nowhere_says_so_rather_than_failing() {
+        let (db, access, _accounts, _org, _admin) = set_up().await;
+        let vault = vault(&db);
+        vault
+            .put(Key::shared("firetower", "ssh-identity"), "k", "a test")
+            .await
+            .unwrap();
+
+        assert!(access
+            .path_of(FiledKind::Secret, "firetower/ssh-identity/")
+            .await
+            .unwrap()
+            .is_none());
+        assert!(access
+            .path_of(FiledKind::Secret, "firetower/nothing-here/")
+            .await
+            .unwrap()
+            .is_none());
     }
 
     /// `admin` is not spellable as an exception: administration belongs to the
