@@ -65,6 +65,7 @@ export const getGetUpdatesUrl = () => {
 }
 
 /**
+ * Readable by anybody. What it says is narrowed to them — see [`as_seen_by`].
  * @summary Where everything stands against the newest release.
  */
 export const getUpdates = async ( options?: Parameters<typeof http>[1]): Promise<UpdateStatus> => {
@@ -421,9 +422,6 @@ export const usePlanUpdate = <TError = ApiError,
   return `/api/v1/updates/runs`
 }
 
-/**
- * @summary Past and present runs, newest first.
- */
 export const listRuns = async ( options?: Parameters<typeof http>[1]): Promise<UpdateRun[]> => {
 
   return http<UpdateRun[]>(getListRunsUrl(),
@@ -492,9 +490,6 @@ export function useListRuns<TData = Awaited<ReturnType<typeof listRuns>>, TError
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listRuns>>, TError, TData>>, request?: SecondParameter<typeof http>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-/**
- * @summary Past and present runs, newest first.
- */
 
 export function useListRuns<TData = Awaited<ReturnType<typeof listRuns>>, TError = unknown>(
   options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listRuns>>, TError, TData>>, request?: SecondParameter<typeof http>}
@@ -510,9 +505,6 @@ export function useListRuns<TData = Awaited<ReturnType<typeof listRuns>>, TError
 
 
 
-/**
- * @summary Past and present runs, newest first.
- */
 export const useSetListRunsQueryData = () => {
   const queryClient = useQueryClient();
   return (updater: Awaited<ReturnType<typeof listRuns>> | undefined | ((old: Awaited<ReturnType<typeof listRuns>> | undefined) => Awaited<ReturnType<typeof listRuns>> | undefined), $exactMatch: boolean = true) => {
@@ -520,9 +512,6 @@ export const useSetListRunsQueryData = () => {
   };
 }
 
-/**
- * @summary Past and present runs, newest first.
- */
 export const useGetListRunsQueryData = () => {
   const queryClient = useQueryClient();
   return () =>

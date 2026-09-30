@@ -137,6 +137,9 @@ pub async fn status(state: &AppState) -> Result<UpdateStatus> {
         },
         sessions: local_sessions,
         updater,
+        // Answered for the caller in `api::updates`, which is the layer that
+        // knows who is asking. False here so a path that forgets says no.
+        may_upgrade: false,
     };
 
     let mut targets = Vec::new();
@@ -163,6 +166,7 @@ pub async fn status(state: &AppState) -> Result<UpdateStatus> {
             online,
             drained: host.drained,
             upgradable,
+            may_upgrade: false,
             reason,
             sessions: state.db.live_sessions_on(&host.id).await?,
         });

@@ -5508,6 +5508,7 @@
           "updates"
         ],
         "summary": "Where everything stands against the newest release.",
+        "description": "Readable by anybody. What it says is narrowed to them — see [`as_seen_by`].",
         "operationId": "get_updates",
         "responses": {
           "200": {
@@ -5622,7 +5623,6 @@
         "tags": [
           "updates"
         ],
-        "summary": "Past and present runs, newest first.",
         "operationId": "list_runs",
         "responses": {
           "200": {
@@ -7222,6 +7222,10 @@
           "updater"
         ],
         "properties": {
+          "mayUpgrade": {
+            "type": "boolean",
+            "description": "Whether the person asking may move it. Only an administrator of the\norganisation: the control plane is the whole deployment, not a resource\nanybody holds a grant on."
+          },
           "reason": {
             "type": [
               "string",
@@ -8460,6 +8464,10 @@
           },
           "hostId": {
             "type": "string"
+          },
+          "mayUpgrade": {
+            "type": "boolean",
+            "description": "Whether the person asking may bring this machine up to the control\nplane, right now, and it would do something.\n\nTwo things at once, because one button is being drawn: they administer\nthis machine — by owning it, by administering the directory it is filed\nin, or by administering the organisation — *and* it is behind the\ncontrol plane. A machine level with the control plane has nowhere to go\nuntil the deployment itself moves."
           },
           "name": {
             "type": "string"

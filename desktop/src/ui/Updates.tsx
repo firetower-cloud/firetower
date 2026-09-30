@@ -1,6 +1,18 @@
 /**
  * Upgrading Firetower from Firetower.
  *
+ * **Reading is not upgrading.** Everybody can see what this Firetower runs and
+ * whether a release is out — somebody who cannot tell that their work runs on
+ * something months old cannot ask for anything about it. The controls are what
+ * narrow: moving the deployment is an administrator's, and moving one machine
+ * belongs to whoever administers that machine.
+ *
+ * **A machine is brought level with the control plane, never past it.** The
+ * server refuses the rest, and this screen offers exactly the version the
+ * server would accept. A worker ahead of the control plane is a worker talking
+ * to something that does not know its protocol, and whoever put it there may
+ * have no right to move the control plane after it.
+ *
  * The web's flow, kept: `get_updates` says what is running and what is out;
  * `check_updates` asks again; `plan_update` for a version says which files the
  * upgrade wants to write and whether your edits are in the way; `create_run`
@@ -12,7 +24,7 @@ import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, Check, Download, Loader2, RefreshCw, Save, X } from "lucide-react";
 import { Icon } from "~/components/ui";
-import type { FilePlan, UpdateRun, UpdateStatus } from "~/api/generated/model";
+import type { FilePlan, HostTarget, UpdateRun, UpdateStatus } from "~/api/generated/model";
 import {
   getGetUpdatesQueryKey,
   getListRunsQueryKey,
@@ -28,6 +40,7 @@ import {
 } from "~/api/generated/updates/updates";
 import { ACTIVE, canStart, countEnded, everythingUpgradable, needsChoice, willWrite, wouldEnd } from "~/api/updates";
 import { useBackendKey } from "~/backend";
+import { useConfirm } from "~/ui/Confirm";
 
 import { why } from "~/data";
 
@@ -46,12 +59,32 @@ export function Updates() {
 
   const s = status.data as UpdateStatus;
   const active = ((runs.data ?? []) as UpdateRun[]).find((r) => ACTIVE.includes(r.state));
+  const mayMoveEverything = s.controlPlane.mayUpgrade ?? false;
+  const behind = s.hosts.filter((h) => h.mayUpgrade);
+
+  /* What the heading says is what this person can do something about. "A newer
+     version is out" to somebody who cannot install it is a notice with no
+     action behind it; what they can act on is a machine of theirs that is
+     behind what the deployment is already running. */
+  const headline = mayMoveEverything
+    ? !s.updateAvailable
+      ? "Up to date."
+      : s.latest?.version === s.current
+        ? "Some machines are behind."
+        : `${s.latest?.version ?? "A newer version"} is out.`
+    : behind.length > 0
+      ? behind.length === 1
+        ? `${behind[0].name} is behind.`
+        : `${behind.length} machines are behind.`
+      : s.updateAvailable
+        ? `${s.latest?.version ?? "A newer version"} is out.`
+        : "Up to date.";
 
   return (
     <Page>
       <div className="flex items-start gap-3">
         <div className="min-w-0 flex-1">
-          <h1 className="text-display text-bone">{!s.updateAvailable ? "Up to date." : s.latest?.version === s.current ? "Some machines are behind." : `${s.latest?.version ?? "A newer version"} is out.`}</h1>
+          <h1 className="text-display text-bone">{headline}</h1>
           <p className="mt-2 text-read text-dim">
             Running <span className="font-mono text-text">{s.current}</span>
             {s.checkedAt && <span className="text-mute"> · checked {new Date(s.checkedAt).toLocaleTimeString()}</span>}
@@ -61,21 +94,58 @@ export function Updates() {
         <button disabled={check.isPending} onClick={() => check.mutate(undefined as never, { onSuccess: refresh })} className="control border border-line bg-raise text-dim hover:bg-overlay disabled:text-mute"><Icon of={RefreshCw} size={12} />{check.isPending ? "Checking…" : "Check now"}</button>
       </div>
 
-      <div className="mt-6 overflow-hidden rounded-xl border border-line bg-panel">
-        <Row name="Control plane" version={s.controlPlane.version} ok={s.controlPlane.upgradable} reason={s.controlPlane.reason} sessions={s.controlPlane.sessions.length} note={s.controlPlane.updater.reachable ? `updater ${s.controlPlane.updater.version ?? ""}` : (s.controlPlane.updater.problem ?? "updater unreachable")} />
-        {s.hosts.map((h) => (
-          <Row key={h.hostId} name={h.name} version={h.version ?? "—"} ok={h.upgradable} reason={h.reason} sessions={h.sessions.length} note={`${h.online ? "online" : "offline"}${h.drained ? " · drained" : ""}`} />
-        ))}
+      <Label>The deployment</Label>
+      <div className="overflow-hidden rounded-xl border border-line bg-panel">
+        <Row
+          name="Control plane"
+          note={s.controlPlane.updater.reachable ? `updater ${s.controlPlane.updater.version ?? ""}` : "no updater"}
+          version={s.controlPlane.version}
+          sessions={s.controlPlane.sessions.length}
+          said={
+            !s.updateAvailable || s.latest?.version === s.current
+              ? "up to date"
+              : mayMoveEverything
+                ? s.controlPlane.upgradable ? null : "cannot move itself"
+                : "an administrator moves this"
+          }
+          action={mayMoveEverything && s.controlPlane.upgradable && !active && s.updateAvailable && s.latest?.version !== s.current
+            ? <button onClick={() => setPlanning(true)} className="control bg-bone font-medium text-ground hover:opacity-90"><Icon of={Download} size={12} />Upgrade to {s.latest?.version}</button>
+            : null}
+        />
       </div>
 
-      <div className="mt-4 flex flex-wrap items-center gap-2">
-        <button disabled={backUp.isPending} onClick={() => backUp.mutate(undefined as never)} className="control border border-line bg-raise text-bone hover:bg-overlay disabled:text-mute"><Icon of={Save} size={12} />{backUp.isPending ? "Backing up…" : backUp.isSuccess ? "Backed up" : "Back up now"}</button>
-        {s.updateAvailable && !active && <button onClick={() => setPlanning(true)} className="control bg-bone font-medium text-ground hover:opacity-90"><Icon of={Download} size={12} />Upgrade to {s.latest?.version}</button>}
-        {active && <span className="text-meta text-kind-data">A run is in progress.</span>}
-      </div>
+      {/* Why the deployment cannot move itself is a paragraph, and a paragraph
+          does not go in a row — it was pushing the version and the verdict off
+          the end of one. Only to somebody who could act on it: a member cannot
+          run `firetower upgrade` on the host, and telling them to is telling
+          them to go and fail. */}
+      {mayMoveEverything && !s.controlPlane.upgradable && s.controlPlane.reason && (
+        <p className="mt-2 flex items-start gap-2 rounded-lg border border-line bg-ground px-3 py-2 text-micro leading-relaxed text-mute">
+          <Icon of={AlertTriangle} size={12} />
+          <span className="min-w-0 flex-1">{s.controlPlane.reason}</span>
+        </p>
+      )}
 
-      <h2 className="mt-8 text-title text-bone">Runs</h2>
-      <div className="mt-2 overflow-hidden rounded-xl border border-line bg-panel">
+      {s.hosts.length > 0 && (
+        <>
+          <Label>Machines</Label>
+          <div className="overflow-hidden rounded-xl border border-line bg-panel">
+            {s.hosts.map((h) => (
+              <Machine key={h.hostId} host={h} to={s.current} blocked={!!active} onDone={refresh} />
+            ))}
+          </div>
+        </>
+      )}
+
+      {mayMoveEverything && (
+        <div className="mt-4 flex flex-wrap items-center gap-2">
+          <button disabled={backUp.isPending} onClick={() => backUp.mutate(undefined as never)} className="control border border-line bg-raise text-bone hover:bg-overlay disabled:text-mute"><Icon of={Save} size={12} />{backUp.isPending ? "Backing up…" : backUp.isSuccess ? "Backed up" : "Back up now"}</button>
+          {active && <span className="text-meta text-kind-data">A run is in progress.</span>}
+        </div>
+      )}
+
+      <Label>Runs</Label>
+      <div className="overflow-hidden rounded-xl border border-line bg-panel">
         {((runs.data ?? []) as UpdateRun[]).length === 0 && <p className="px-3.5 py-4 text-ui text-mute">No upgrade has been run from here yet.</p>}
         {((runs.data ?? []) as UpdateRun[]).map((r) => (
           <button key={r.id} onClick={() => setOpened(opened === r.id ? null : r.id)} className="flex w-full items-center gap-3 border-b border-line-soft px-3.5 py-2.5 text-left last:border-0 hover:bg-raise/60">
@@ -93,13 +163,82 @@ export function Updates() {
   );
 }
 
-function Row({ name, version, ok, reason, sessions, note }: { name: string; version: string; ok: boolean; reason?: string | null; sessions: number; note: string }) {
+function Label({ children }: { children: React.ReactNode }) {
+  return <h2 className="mt-7 mb-2 text-meta tracking-[0.08em] text-mute uppercase">{children}</h2>;
+}
+
+/**
+ * One machine, and the one thing that can be done to it.
+ *
+ * The target is the control plane's version, not the newest release — that is
+ * the only version the server will accept for a machine on its own, so it is
+ * the only one worth putting on a button.
+ */
+function Machine({ host, to, blocked, onDone }: { host: HostTarget; to: string; blocked: boolean; onDone: () => void }) {
+  const confirm = useConfirm();
+  const create = useCreateRun();
+  const [trouble, setTrouble] = useState<string | null>(null);
+
+  const go = async (whenIdle: boolean) => {
+    setTrouble(null);
+    create.mutate(
+      { data: { version: to, controlPlane: false, hostIds: [host.hostId], whenIdle, endSessions: !whenIdle, files: [] } },
+      { onSuccess: () => void onDone(), onError: (e) => setTrouble(why(e)) },
+    );
+  };
+
+  const ask = async () => {
+    if (host.sessions.length === 0) return void go(false);
+    // Said out loud, with the titles: somebody administering a directory can
+    // end work that is not theirs, and the only defensible version of that is
+    // one where they read what they are ending first.
+    const ok = await confirm({
+      title: `Bring ${host.name} up to ${to}?`,
+      body: (
+        <>
+          It is reinstalled, so what is running on it ends —{" "}
+          <b className="text-bone">{host.sessions.length === 1 ? "one session" : `${host.sessions.length} sessions`}</b>
+          {host.sessions.length <= 4 && <>: {host.sessions.join(", ")}</>}. Whoever is in them loses what they have not saved.
+        </>
+      ),
+      action: "End them and upgrade",
+      tone: "danger",
+    });
+    if (ok) void go(false);
+  };
+
   return (
     <div className="flex items-center gap-3 border-b border-line-soft px-3.5 py-2.5 last:border-0">
-      <span className="min-w-0 flex-1"><span className="block text-ui text-bone">{name}</span><span className="block text-micro text-mute">{note}</span></span>
+      <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${host.online ? "bg-sage" : "bg-line"}`} />
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-ui text-bone">{host.name}</span>
+        <span className="block text-micro text-mute">
+          {host.online ? "online" : "offline"}{host.drained ? " · drained" : ""}
+          {host.sessions.length > 0 && ` · ${host.sessions.length} running`}
+          {trouble && <span className="text-brick"> · {trouble}</span>}
+        </span>
+      </span>
+      <span className="font-mono text-meta text-dim">{host.version ?? "—"}</span>
+      {host.mayUpgrade ? (
+        <button disabled={blocked || create.isPending} onClick={() => void ask()} className="control border border-line bg-raise text-bone hover:bg-overlay disabled:text-mute">
+          <Icon of={Download} size={12} />{create.isPending ? "Starting…" : `Bring up to ${to}`}
+        </button>
+      ) : (
+        <span className="text-micro text-mute">{host.version === to ? "up to date" : host.upgradable ? "somebody who administers it can move it" : (host.reason ?? "")}</span>
+      )}
+    </div>
+  );
+}
+
+function Row({ name, version, said, sessions, note, action }: { name: string; version: string; said: string | null; sessions: number; note: string; action: React.ReactNode }) {
+  return (
+    <div className="flex items-center gap-3 border-b border-line-soft px-3.5 py-2.5 last:border-0">
+      <span className="min-w-0 flex-1">
+        <span className="block text-ui text-bone">{name}</span>
+        <span className="block text-micro text-mute">{note}{sessions ? ` · ${sessions} running` : ""}</span>
+      </span>
       <span className="font-mono text-meta text-dim">{version}</span>
-      <span className="w-24 text-right text-meta text-mute">{sessions ? `${sessions} running` : ""}</span>
-      <span className={`w-28 truncate text-right text-meta ${ok ? "text-sage" : "text-mute"}`} title={reason ?? undefined}>{ok ? "can upgrade" : (reason ?? "up to date")}</span>
+      {action ?? <span className="truncate text-right text-micro text-mute">{said}</span>}
     </div>
   );
 }

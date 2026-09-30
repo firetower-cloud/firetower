@@ -581,7 +581,7 @@ pub(super) async fn list_items(
 /// protects everything else in a directory — taking it out needs *admin* there,
 /// and the shared directory grants writer. So a member can put their own server
 /// in and cannot pull the fleet's out from under everybody.
-async fn may_share(
+pub(super) async fn may_share(
     state: &AppState,
     me: &User,
     kind: FiledKind,

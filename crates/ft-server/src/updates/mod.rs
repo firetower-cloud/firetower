@@ -205,6 +205,11 @@ pub struct UpdaterView {
 pub struct ControlPlaneTarget {
     pub version: String,
     pub upgradable: bool,
+    /// Whether the person asking may move it. Only an administrator of the
+    /// organisation: the control plane is the whole deployment, not a resource
+    /// anybody holds a grant on.
+    #[serde(default)]
+    pub may_upgrade: bool,
     pub reason: Option<String>,
     /// Sessions on this machine, by title. They end when it is recreated.
     pub sessions: Vec<String>,
@@ -220,6 +225,16 @@ pub struct HostTarget {
     pub online: bool,
     pub drained: bool,
     pub upgradable: bool,
+    /// Whether the person asking may bring this machine up to the control
+    /// plane, right now, and it would do something.
+    ///
+    /// Two things at once, because one button is being drawn: they administer
+    /// this machine — by owning it, by administering the directory it is filed
+    /// in, or by administering the organisation — *and* it is behind the
+    /// control plane. A machine level with the control plane has nowhere to go
+    /// until the deployment itself moves.
+    #[serde(default)]
+    pub may_upgrade: bool,
     pub reason: Option<String>,
     /// Sessions on this machine, by title. They end when it is reinstalled.
     pub sessions: Vec<String>,

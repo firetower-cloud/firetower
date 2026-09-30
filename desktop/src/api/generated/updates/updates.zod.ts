@@ -9,6 +9,7 @@ import * as zod from 'zod';
 
 
 /**
+ * Readable by anybody. What it says is narrowed to them — see [`as_seen_by`].
  * @summary Where everything stands against the newest release.
  */
 export const getUpdatesResponseControlPlaneUpdaterApiVersionMin = 0;
@@ -20,6 +21,7 @@ export const GetUpdatesResponse = zod.object({
   "checkError": zod.string().nullish(),
   "checkedAt": zod.iso.datetime({"offset":true}).nullish(),
   "controlPlane": zod.object({
+  "mayUpgrade": zod.boolean().optional().describe('Whether the person asking may move it. Only an administrator of the\norganisation: the control plane is the whole deployment, not a resource\nanybody holds a grant on.'),
   "reason": zod.string().nullish(),
   "sessions": zod.array(zod.string()).describe('Sessions on this machine, by title. They end when it is recreated.'),
   "updater": zod.object({
@@ -36,6 +38,7 @@ export const GetUpdatesResponse = zod.object({
   "hosts": zod.array(zod.object({
   "drained": zod.boolean(),
   "hostId": zod.string(),
+  "mayUpgrade": zod.boolean().optional().describe('Whether the person asking may bring this machine up to the control\nplane, right now, and it would do something.\n\nTwo things at once, because one button is being drawn: they administer\nthis machine — by owning it, by administering the directory it is filed\nin, or by administering the organisation — *and* it is behind the\ncontrol plane. A machine level with the control plane has nowhere to go\nuntil the deployment itself moves.'),
   "name": zod.string(),
   "online": zod.boolean(),
   "reason": zod.string().nullish(),
@@ -73,6 +76,7 @@ export const CheckUpdatesResponse = zod.object({
   "checkError": zod.string().nullish(),
   "checkedAt": zod.iso.datetime({"offset":true}).nullish(),
   "controlPlane": zod.object({
+  "mayUpgrade": zod.boolean().optional().describe('Whether the person asking may move it. Only an administrator of the\norganisation: the control plane is the whole deployment, not a resource\nanybody holds a grant on.'),
   "reason": zod.string().nullish(),
   "sessions": zod.array(zod.string()).describe('Sessions on this machine, by title. They end when it is recreated.'),
   "updater": zod.object({
@@ -89,6 +93,7 @@ export const CheckUpdatesResponse = zod.object({
   "hosts": zod.array(zod.object({
   "drained": zod.boolean(),
   "hostId": zod.string(),
+  "mayUpgrade": zod.boolean().optional().describe('Whether the person asking may bring this machine up to the control\nplane, right now, and it would do something.\n\nTwo things at once, because one button is being drawn: they administer\nthis machine — by owning it, by administering the directory it is filed\nin, or by administering the organisation — *and* it is behind the\ncontrol plane. A machine level with the control plane has nowhere to go\nuntil the deployment itself moves.'),
   "name": zod.string(),
   "online": zod.boolean(),
   "reason": zod.string().nullish(),
@@ -128,9 +133,6 @@ export const PlanUpdateResponse = zod.object({
   "version": zod.string()
 }).describe('What a run would do to the deployment\'s files, asked before agreeing.')
 
-/**
- * @summary Past and present runs, newest first.
- */
 export const ListRunsResponseItem = zod.object({
   "createdAt": zod.iso.datetime({"offset":true}),
   "error": zod.string().nullish(),
