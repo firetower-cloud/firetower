@@ -6,17 +6,16 @@
  * OpenAPI spec version: 0
  */
 import type { Level } from './level.ts';
+import type { Route } from './route.ts';
 import type { SubjectKind } from './subjectKind.ts';
 
 /**
- * Somebody to put in a directory, and how much they may do there.
- *
- * Lives here rather than in `api::access` because the access layer is what
- * consumes it — `create_directory` takes a list of these — and a type that
- * crosses the boundary should belong to the side that acts on it.
+ * One line of "who can access it".
  */
-export interface NewGrant {
+export interface Reaches {
   level: Level;
+  name: string;
+  route: Route;
   subjectId: string;
   subjectKind: SubjectKind;
 }

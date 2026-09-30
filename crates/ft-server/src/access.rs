@@ -240,6 +240,19 @@ pub struct Exception {
     pub level: Level,
 }
 
+/// Somebody to put in a directory, and how much they may do there.
+///
+/// Lives here rather than in `api::access` because the access layer is what
+/// consumes it — `create_directory` takes a list of these — and a type that
+/// crosses the boundary should belong to the side that acts on it.
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct NewGrant {
+    pub subject_kind: SubjectKind,
+    pub subject_id: String,
+    pub level: Level,
+}
+
 /// One line of who may do what in a directory.
 #[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
@@ -567,6 +580,7 @@ impl Access {
         org: &OrgId,
         name: &str,
         by: &UserId,
+        with: &[NewGrant],
     ) -> Result<Directory> {
         let name = check_name(name, "a directory")?;
         // The slug is derived once and never again. Renaming a directory must
@@ -590,7 +604,24 @@ impl Access {
         .context("creating a directory")?;
 
         if done.rows_affected() == 0 {
-            bail!("there is already a directory called {name}");
+            // Two indexes can refuse this, and they are different mistakes. A
+            // name clash is obvious to whoever typed it; a *slug* clash is not —
+            // `Ledger work` and `Ledger  Work!` are different names and the same
+            // `d/ledger_work`, and saying "there is already a directory called
+            // Ledger  Work!" would name a directory that does not exist.
+            let taken: Option<String> =
+                sqlx::query_scalar("SELECT name FROM directories WHERE org_id = $1 AND slug = $2")
+                    .bind(org.as_str())
+                    .bind(&slug)
+                    .fetch_optional(&mut *tx)
+                    .await?;
+            match taken {
+                Some(other) if other.to_lowercase() != name.to_lowercase() => bail!(
+                    "{other} already uses d/{slug}. Pick a name that differs by more than \
+                     spacing or punctuation — or put this in {other} instead."
+                ),
+                _ => bail!("there is already a directory called {name}"),
+            }
         }
 
         sqlx::query(
@@ -602,6 +633,30 @@ impl Access {
         .execute(&mut *tx)
         .await
         .context("granting a directory to whoever made it")?;
+
+        // The rest of the people, in the same transaction. `set_grant` is not
+        // reused here on purpose: it locks the directory and checks that an
+        // administrator survives, and neither can be in question for a directory
+        // that is being created with its author as admin two statements up.
+        for g in with {
+            if g.subject_id == by.as_str() {
+                continue;
+            }
+            Self::exists(&mut tx, g.subject_kind, &g.subject_id).await?;
+            sqlx::query(
+                "INSERT INTO grants (directory_id, subject_kind, subject_id, level, granted_by)
+                 VALUES ($1, $2, $3, $4, $5)
+                 ON CONFLICT (directory_id, subject_kind, subject_id) DO UPDATE SET level = $4",
+            )
+            .bind(id.as_str())
+            .bind(g.subject_kind.as_str())
+            .bind(&g.subject_id)
+            .bind(g.level.as_str())
+            .bind(by.as_str())
+            .execute(&mut *tx)
+            .await
+            .context("putting somebody in a new directory")?;
+        }
 
         tx.commit().await?;
 
@@ -770,6 +825,24 @@ impl Access {
             }
         };
         Ok(found.map(ResourcePath::from_stored))
+    }
+
+    /// Who `u/<slug>` is, as an id and a name to read.
+    pub async fn person_by_slug(&self, slug: &str) -> Result<Option<(String, String)>> {
+        sqlx::query_as("SELECT id, name FROM principals WHERE slug = $1 AND kind = 'user'")
+            .bind(slug)
+            .fetch_optional(&self.pool)
+            .await
+            .context("looking up whose space this is")
+    }
+
+    /// What to call a principal, live or retired.
+    pub async fn principal_name(&self, id: &str) -> Result<Option<String>> {
+        sqlx::query_scalar("SELECT name FROM principals WHERE id = $1")
+            .bind(id)
+            .fetch_optional(&self.pool)
+            .await
+            .context("looking up a name")
     }
 
     /// The root of somebody's own space — `u/<their slug>`.
@@ -1566,7 +1639,7 @@ mod tests {
         // Hers, in her own space, and his to administer only because he
         // administers the organisation.
         let backend = access
-            .create_directory(&org, "Backend", &ana)
+            .create_directory(&org, "Backend", &ana, &[])
             .await
             .unwrap();
         assert_eq!(backend.slug, "backend");
@@ -1620,7 +1693,7 @@ mod tests {
         let vault = vault(&db);
 
         let backend = access
-            .create_directory(&org, "Backend", &ana)
+            .create_directory(&org, "Backend", &ana, &[])
             .await
             .unwrap();
 
@@ -1706,7 +1779,7 @@ mod tests {
     async fn a_directory_can_be_found_by_its_slug_without_anybody_asking() {
         let (_db, access, _accounts, org, admin) = set_up().await;
         access
-            .create_directory(&org, "Ledger work", &admin)
+            .create_directory(&org, "Ledger work", &admin, &[])
             .await
             .unwrap();
 
@@ -1737,7 +1810,7 @@ mod tests {
         let vault = vault(&db);
 
         let backend = access
-            .create_directory(&org, "Backend", &admin)
+            .create_directory(&org, "Backend", &admin, &[])
             .await
             .unwrap();
         access
@@ -1931,7 +2004,7 @@ mod tests {
         let vault = vault(&db);
 
         let shelf = access
-            .create_directory(&org, "Shelf", &admin)
+            .create_directory(&org, "Shelf", &admin, &[])
             .await
             .unwrap();
         access
@@ -2000,7 +2073,7 @@ mod tests {
             .unwrap();
 
         let shelf = access
-            .create_directory(&org, "Ledger work", &admin)
+            .create_directory(&org, "Ledger work", &admin, &[])
             .await
             .unwrap();
         assert_eq!(
@@ -2061,7 +2134,7 @@ mod tests {
             .unwrap();
 
         let shelf = access
-            .create_directory(&org, "Shelf", &admin)
+            .create_directory(&org, "Shelf", &admin, &[])
             .await
             .unwrap();
         access
@@ -2103,7 +2176,7 @@ mod tests {
         let (_db, access, accounts, org, admin) = set_up().await;
         let ana = person(&accounts, &org, "ana").await;
         let shelf = access
-            .create_directory(&org, "Shelf", &admin)
+            .create_directory(&org, "Shelf", &admin, &[])
             .await
             .unwrap();
 
@@ -2211,7 +2284,7 @@ mod tests {
     async fn a_grant_to_nobody_is_refused_rather_than_stored() {
         let (_db, access, _accounts, org, admin) = set_up().await;
         let shelf = access
-            .create_directory(&org, "Shelf", &admin)
+            .create_directory(&org, "Shelf", &admin, &[])
             .await
             .unwrap();
 
@@ -2244,7 +2317,7 @@ mod tests {
         let (db, access, _accounts, org, admin) = set_up().await;
         let vault = vault(&db);
         let shelf = access
-            .create_directory(&org, "Shelf", &admin)
+            .create_directory(&org, "Shelf", &admin, &[])
             .await
             .unwrap();
 
@@ -2290,13 +2363,116 @@ mod tests {
         assert!(access.create_team(&org, "backend").await.is_err());
 
         access
-            .create_directory(&org, "Ledger", &admin)
+            .create_directory(&org, "Ledger", &admin, &[])
             .await
             .unwrap();
         assert!(access
-            .create_directory(&org, "LEDGER", &admin)
+            .create_directory(&org, "LEDGER", &admin, &[])
             .await
             .is_err());
+    }
+
+    /// Making a directory with people already in it — what the desktop does when
+    /// somebody picks "A new directory" while sharing.
+    #[tokio::test]
+    async fn a_directory_can_be_made_with_its_people_at_once() {
+        let (_db, access, accounts, org, bob) = set_up().await;
+        let lisa = person(&accounts, &org, "lisa").await;
+        let delivery = access.create_team(&org, "Delivery").await.unwrap();
+
+        let made = access
+            .create_directory(
+                &org,
+                "Ledger rounding",
+                &bob,
+                &[
+                    NewGrant {
+                        subject_kind: SubjectKind::Person,
+                        subject_id: lisa.as_str().to_string(),
+                        level: Level::Writer,
+                    },
+                    NewGrant {
+                        subject_kind: SubjectKind::Team,
+                        subject_id: delivery.id.as_str().to_string(),
+                        level: Level::Viewer,
+                    },
+                ],
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(made.slug, "ledger_rounding");
+        assert_eq!(
+            access
+                .level_on(bob.as_str(), made.id.as_str())
+                .await
+                .unwrap(),
+            Some(Level::Admin),
+            "whoever made it administers it, so they keep what they put in it"
+        );
+        assert_eq!(
+            access
+                .level_on(lisa.as_str(), made.id.as_str())
+                .await
+                .unwrap(),
+            Some(Level::Writer)
+        );
+
+        let on_it = access.grants_on(made.id.as_str()).await.unwrap();
+        assert_eq!(on_it.len(), 3, "bob, lisa, and the team");
+    }
+
+    /// Nothing is written when one of the people named is not real — the whole
+    /// call is one transaction, so a half-made directory cannot survive it.
+    #[tokio::test]
+    async fn a_directory_is_not_made_at_all_if_somebody_in_it_is_not() {
+        let (_db, access, _accounts, org, bob) = set_up().await;
+
+        let refused = access
+            .create_directory(
+                &org,
+                "Ledger rounding",
+                &bob,
+                &[NewGrant {
+                    subject_kind: SubjectKind::Person,
+                    subject_id: "u_nobody".into(),
+                    level: Level::Writer,
+                }],
+            )
+            .await
+            .expect_err("there is no such person");
+        assert!(refused.to_string().contains("no person"), "{refused}");
+
+        assert!(
+            access
+                .directory_by_slug(org.as_str(), "ledger_rounding")
+                .await
+                .unwrap()
+                .is_none(),
+            "and the directory was rolled back with it"
+        );
+    }
+
+    /// Two names, one slug — and the refusal has to name the directory that
+    /// actually holds it, not the name that was just typed.
+    #[tokio::test]
+    async fn a_slug_collision_names_the_directory_in_the_way() {
+        let (_db, access, _accounts, org, bob) = set_up().await;
+        access
+            .create_directory(&org, "Ledger work", &bob, &[])
+            .await
+            .unwrap();
+
+        let refused = access
+            .create_directory(&org, "Ledger  Work!", &bob, &[])
+            .await
+            .expect_err("both are d/ledger_work");
+        let said = refused.to_string();
+        assert!(
+            said.contains("Ledger work"),
+            "names the one in the way: {said}"
+        );
+        assert!(said.contains("d/ledger_work"), "and says why: {said}");
     }
 
     /// Two names that slug the same would be two roots spelled one way, and
@@ -2305,11 +2481,11 @@ mod tests {
     async fn two_directories_cannot_share_a_slug() {
         let (_db, access, _accounts, org, admin) = set_up().await;
         access
-            .create_directory(&org, "Ledger work", &admin)
+            .create_directory(&org, "Ledger work", &admin, &[])
             .await
             .unwrap();
         let refused = access
-            .create_directory(&org, "Ledger  Work!", &admin)
+            .create_directory(&org, "Ledger  Work!", &admin, &[])
             .await
             .expect_err("both slug to `ledger_work`");
         assert!(refused.to_string().contains("already"), "{refused}");
@@ -2368,7 +2544,7 @@ mod tests {
         let (db, access, _accounts, org, admin) = set_up().await;
         let vault = vault(&db);
         let shelf = access
-            .create_directory(&org, "Shelf", &admin)
+            .create_directory(&org, "Shelf", &admin, &[])
             .await
             .unwrap();
         let host = db
@@ -2404,7 +2580,10 @@ mod tests {
     async fn an_administrator_can_see_a_directory_they_cannot_open() {
         let (_db, access, accounts, org, admin) = set_up().await;
         let ana = person(&accounts, &org, "ana").await;
-        let hers = access.create_directory(&org, "Hers", &ana).await.unwrap();
+        let hers = access
+            .create_directory(&org, "Hers", &ana, &[])
+            .await
+            .unwrap();
 
         let mine = access.directories_for(admin.as_str()).await.unwrap();
         assert!(

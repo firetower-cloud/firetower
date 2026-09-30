@@ -26,13 +26,17 @@ import type {
 } from '@tanstack/react-query';
 
 import type {
+  AccessOf,
+  AccessOfParams,
   ApiError,
   Colleague,
   Directory,
   DirectoryName,
+  DropException,
   Filed,
   Grant,
   NewDirectory,
+  NewException,
   NewGrant,
   NewTeam,
   Placement,
@@ -62,7 +66,303 @@ const withQueryKey = <T extends object, K>(query: T, queryKey: K): T & { queryKe
   return result;
 };
 
-export const getListColleaguesUrl = () => {
+export const getAccessOfUrl = (params: AccessOfParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/v1/access?${stringifiedParams}` : `/api/v1/access`
+}
+
+/**
+ * @summary Who can access one thing, and by what route.
+ */
+export const accessOf = async (params: AccessOfParams, options?: Parameters<typeof http>[1]): Promise<AccessOf> => {
+
+  return http<AccessOf>(getAccessOfUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getAccessOfQueryKey = (params?: AccessOfParams,) => {
+    return [
+    `/api/v1/access`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getAccessOfQueryOptions = <TData = Awaited<ReturnType<typeof accessOf>>, TError = ApiError>(params: AccessOfParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof accessOf>>, TError, TData>>, request?: SecondParameter<typeof http>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getAccessOfQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof accessOf>>> = ({ signal }) => accessOf(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof accessOf>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type AccessOfQueryResult = NonNullable<Awaited<ReturnType<typeof accessOf>>>
+export type AccessOfQueryError = ApiError
+
+
+export function useAccessOf<TData = Awaited<ReturnType<typeof accessOf>>, TError = ApiError>(
+ params: AccessOfParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof accessOf>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof accessOf>>,
+          TError,
+          Awaited<ReturnType<typeof accessOf>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useAccessOf<TData = Awaited<ReturnType<typeof accessOf>>, TError = ApiError>(
+ params: AccessOfParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof accessOf>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof accessOf>>,
+          TError,
+          Awaited<ReturnType<typeof accessOf>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useAccessOf<TData = Awaited<ReturnType<typeof accessOf>>, TError = ApiError>(
+ params: AccessOfParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof accessOf>>, TError, TData>>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Who can access one thing, and by what route.
+ */
+
+export function useAccessOf<TData = Awaited<ReturnType<typeof accessOf>>, TError = ApiError>(
+ params: AccessOfParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof accessOf>>, TError, TData>>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getAccessOfQueryOptions(params,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+/**
+ * @summary Who can access one thing, and by what route.
+ */
+export const useSetAccessOfQueryData = () => {
+  const queryClient = useQueryClient();
+  return (params: AccessOfParams | undefined,updater: Awaited<ReturnType<typeof accessOf>> | undefined | ((old: Awaited<ReturnType<typeof accessOf>> | undefined) => Awaited<ReturnType<typeof accessOf>> | undefined), $exactMatch: boolean = true) => {
+    queryClient.setQueriesData<Awaited<ReturnType<typeof accessOf>>>({ exact: $exactMatch, queryKey: getAccessOfQueryKey(params) }, updater);
+  };
+}
+
+/**
+ * @summary Who can access one thing, and by what route.
+ */
+export const useGetAccessOfQueryData = () => {
+  const queryClient = useQueryClient();
+  return (params: AccessOfParams,) =>
+    queryClient.getQueryData<Awaited<ReturnType<typeof accessOf>>>(getAccessOfQueryKey(params));
+}
+
+
+export const getSetExceptionUrl = () => {
+
+
+
+
+  return `/api/v1/access/exception`
+}
+
+/**
+ * **Not a transfer.** The resource does not move, its owner does not change,
+ * and nothing else filed where it lives is affected. That is the whole reason
+ * this exists beside `file_items`: sharing one thing with one colleague should
+ * not be a change of ownership.
+ * @summary Let somebody into one thing, or take them back out.
+ */
+export const setException = async (newException: NewException, options?: Parameters<typeof http>[1]): Promise<void> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return http<void>(getSetExceptionUrl(),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(newException)
+  }
+);}
+
+
+
+
+
+export const getSetExceptionMutationKey = () => ['setException'] as const;
+
+export const getSetExceptionMutationOptions = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setException>>, TError,SetExceptionMutationVariables, TContext>, request?: SecondParameter<typeof http>}
+): UseMutationOptions<Awaited<ReturnType<typeof setException>>, TError,SetExceptionMutationVariables, TContext> => {
+
+const mutationKey = getSetExceptionMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof setException>>, SetExceptionMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  setException(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SetExceptionMutationResult = NonNullable<Awaited<ReturnType<typeof setException>>>
+    export type SetExceptionMutationBody = NewException
+    export type SetExceptionMutationError = ApiError
+    export type SetExceptionMutationVariables = {data: NewException}
+
+    /**
+ * @summary Let somebody into one thing, or take them back out.
+ */
+export const useSetException = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setException>>, TError,SetExceptionMutationVariables, TContext>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof setException>>,
+        TError,
+        SetExceptionMutationVariables,
+        TContext
+      > => {
+      return useMutation(getSetExceptionMutationOptions(options), queryClient);
+    }
+    export const getDropExceptionUrl = () => {
+
+
+
+
+  return `/api/v1/access/exception`
+}
+
+export const dropException = async (dropExceptionBody: DropException, options?: Parameters<typeof http>[1]): Promise<void> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return http<void>(getDropExceptionUrl(),
+  {
+    ...options,
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(dropExceptionBody)
+  }
+);}
+
+
+
+
+
+export const getDropExceptionMutationKey = () => ['dropException'] as const;
+
+export const getDropExceptionMutationOptions = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof dropException>>, TError,DropExceptionMutationVariables, TContext>, request?: SecondParameter<typeof http>}
+): UseMutationOptions<Awaited<ReturnType<typeof dropException>>, TError,DropExceptionMutationVariables, TContext> => {
+
+const mutationKey = getDropExceptionMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof dropException>>, DropExceptionMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  dropException(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DropExceptionMutationResult = NonNullable<Awaited<ReturnType<typeof dropException>>>
+    export type DropExceptionMutationBody = DropException
+    export type DropExceptionMutationError = ApiError
+    export type DropExceptionMutationVariables = {data: DropException}
+
+    export const useDropException = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof dropException>>, TError,DropExceptionMutationVariables, TContext>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof dropException>>,
+        TError,
+        DropExceptionMutationVariables,
+        TContext
+      > => {
+      return useMutation(getDropExceptionMutationOptions(options), queryClient);
+    }
+    export const getListColleaguesUrl = () => {
 
 
 

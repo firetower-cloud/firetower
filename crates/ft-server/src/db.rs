@@ -4671,7 +4671,7 @@ mod tests {
 
         // Hers to look in, and nothing more.
         let shelf = access
-            .create_directory(&org, "Shelf", &admin_id)
+            .create_directory(&org, "Shelf", &admin_id, &[])
             .await
             .unwrap();
         access

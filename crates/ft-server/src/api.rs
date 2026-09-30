@@ -358,6 +358,8 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(access::rename_directory, access::delete_directory))
         .routes(routes!(access::list_grants, access::set_grant))
         .routes(routes!(access::revoke_grant))
+        .routes(routes!(access::access_of))
+        .routes(routes!(access::set_exception, access::drop_exception))
         .routes(routes!(
             access::list_items,
             access::file_items,

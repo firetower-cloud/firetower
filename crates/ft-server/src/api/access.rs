@@ -17,12 +17,15 @@
 //! administrator's errand means it does not happen.
 
 use super::{ApiError, ApiResult, ErrorCode};
+/// Re-exported so the generated contract keeps naming it here, where the
+/// endpoint that takes it lives.
+pub use crate::access::NewGrant;
 use crate::access::{Directory, Filed, FiledKind, Grant, Level, SubjectKind, Team};
 use crate::accounts::User;
 use crate::auth::Principal;
 use crate::AppState;
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::StatusCode,
     Extension, Json,
 };
@@ -299,6 +302,19 @@ pub(super) async fn remove_team_member(
 #[serde(rename_all = "camelCase")]
 pub struct NewDirectory {
     pub name: String,
+    /// Who else is in it, set once at creation. Whoever creates it is always an
+    /// administrator of it and is not in this list.
+    #[serde(default)]
+    pub grants: Vec<NewGrant>,
+    /// Something to put in it straight away.
+    ///
+    /// **The reason this endpoint takes all three jobs.** Creating the
+    /// directory, granting the people and moving the thing are one intention,
+    /// and three requests can fail between any two — leaving a directory with
+    /// nobody in it, or people with nothing to look at, and no screen that shows
+    /// either. One call, one transaction, or none of it.
+    #[serde(default)]
+    pub r#move: Option<FiledRef>,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -344,12 +360,35 @@ pub(super) async fn create_directory(
     Json(request): Json<NewDirectory>,
 ) -> ApiResult<Json<Directory>> {
     let me = whoever(&principal)?;
+
+    // Checked before anything is written. Being refused the move *after* the
+    // directory exists would leave a directory somebody did not want, named
+    // after a workspace that is not in it.
+    let moving = match &request.r#move {
+        Some(item) => Some((item, may_share(&state, me, item.kind, &item.id).await?)),
+        None => None,
+    };
+
     let directory = state
         .access
-        .create_directory(&me.org_id, &request.name, &me.id)
+        .create_directory(&me.org_id, &request.name, &me.id, &request.grants)
         .await
         .map_err(said)?;
-    tracing::info!(by = %me.username, directory = %directory.name, "directory created");
+
+    if let Some((item, from)) = moving {
+        let to = from.moved_to(ft_core::path::DIRECTORY, &directory.slug);
+        state
+            .access
+            .transfer(&state.vault, item.kind, &item.id, &to, &me.username)
+            .await
+            .map_err(said)?;
+        tracing::info!(by = %me.username, from = %from, to = %to, "filed into a new directory");
+    }
+
+    tracing::info!(
+        by = %me.username, directory = %directory.name,
+        with = request.grants.len(), "directory created"
+    );
     Ok(Json(directory))
 }
 
@@ -393,14 +432,6 @@ pub(super) async fn delete_directory(
 }
 
 // ── grants ──────────────────────────────────────────────────────────────
-
-#[derive(Debug, Deserialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct NewGrant {
-    pub subject_kind: SubjectKind,
-    pub subject_id: String,
-    pub level: Level,
-}
 
 /// Who may do what in a directory.
 ///
@@ -504,6 +535,9 @@ pub struct FiledRef {
     pub kind: FiledKind,
     pub id: String,
 }
+// Also arrives as `?kind=workspace&id=s_01…`, which is why it is `Deserialize`
+// rather than only a body type: a secret's id carries a slash (`git/github`)
+// that a path segment cannot hold but a query parameter can.
 
 /// What is filed here.
 ///
@@ -586,6 +620,207 @@ async fn may_share(
         // and only for a directory they can already see.
         _ => Err(ApiError::not_found(kind.singular())),
     }
+}
+
+/// Why somebody can reach a thing — which decides whether it can be changed here.
+///
+/// The sheet shows one list, and a row's provenance is what tells a person
+/// whether it is theirs to edit: an exception belongs to this resource, a grant
+/// belongs to the directory and is changed on the Organisation screen.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum Route {
+    /// They made it, or it is in their own space.
+    Owner,
+    /// Granted on the directory it is filed in. Read-only here.
+    Directory,
+    /// Named on this resource. The only kind this screen writes.
+    Exception,
+}
+
+/// One line of "who can access it".
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct Reaches {
+    pub subject_kind: SubjectKind,
+    pub subject_id: String,
+    pub name: String,
+    pub level: Level,
+    pub route: Route,
+}
+
+/// Everything the sharing sheet draws, in one read.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AccessOf {
+    pub path: ResourcePath,
+    /// The directory it is filed in, if it is filed in one. Absent for
+    /// `u/<somebody>/…`, which is a personal root and has no row.
+    pub directory: Option<Directory>,
+    /// Who can reach it, by every route, most authority first.
+    pub who: Vec<Reaches>,
+    /// Whether this person may edit the exceptions or move it. Asked once here
+    /// so the client does not have to reconstruct `may_share`.
+    pub may_share: bool,
+}
+
+/// Who can access one thing, and by what route.
+#[utoipa::path(
+    get, path = "/api/v1/access", tag = "access",
+    params(("kind" = String, Query,), ("id" = String, Query,)),
+    responses((status = 200, body = AccessOf), (status = 404, body = ApiError)),
+)]
+pub(super) async fn access_of(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Query(asked): Query<FiledRef>,
+) -> ApiResult<Json<AccessOf>> {
+    let me = whoever(&principal)?;
+    let at = state
+        .access
+        .path_of(asked.kind, &asked.id)
+        .await?
+        .ok_or_else(|| ApiError::not_found(asked.kind.singular()))?;
+
+    let directory = match at.directory_slug() {
+        Some(slug) => {
+            state
+                .access
+                .directory_by_slug(me.org_id.as_str(), slug)
+                .await?
+        }
+        None => None,
+    };
+
+    let mut who = Vec::new();
+
+    // Whose it is. A personal root is somebody; a directory is itself, because
+    // filing something there handed it over.
+    match (&directory, at.owner_slug()) {
+        (Some(d), _) => who.push(Reaches {
+            subject_kind: SubjectKind::Team,
+            subject_id: d.id.as_str().to_string(),
+            name: d.name.clone(),
+            level: Level::Admin,
+            route: Route::Owner,
+        }),
+        (None, Some(slug)) => {
+            if let Some(owner) = state.access.person_by_slug(slug).await? {
+                who.push(Reaches {
+                    subject_kind: SubjectKind::Person,
+                    subject_id: owner.0,
+                    name: owner.1,
+                    level: Level::Admin,
+                    route: Route::Owner,
+                });
+            }
+        }
+        _ => {}
+    }
+
+    if let Some(d) = &directory {
+        for g in state.access.grants_on(d.id.as_str()).await? {
+            who.push(Reaches {
+                subject_kind: g.subject_kind,
+                subject_id: g.subject_id,
+                name: g.subject_name,
+                level: g.level,
+                route: Route::Directory,
+            });
+        }
+    }
+
+    for e in state.access.exceptions_on(asked.kind, &asked.id).await? {
+        let name = state
+            .access
+            .principal_name(&e.subject_id)
+            .await?
+            .unwrap_or_else(|| "(gone)".into());
+        who.push(Reaches {
+            subject_kind: e.subject_kind,
+            subject_id: e.subject_id,
+            name,
+            level: e.level,
+            route: Route::Exception,
+        });
+    }
+
+    Ok(Json(AccessOf {
+        path: at,
+        directory,
+        who,
+        // The same question the writes ask, asked once for the screen — so a
+        // control is absent rather than offered and refused.
+        may_share: may_share(&state, me, asked.kind, &asked.id).await.is_ok(),
+    }))
+}
+
+/// Let somebody into one thing, or take them back out.
+///
+/// **Not a transfer.** The resource does not move, its owner does not change,
+/// and nothing else filed where it lives is affected. That is the whole reason
+/// this exists beside `file_items`: sharing one thing with one colleague should
+/// not be a change of ownership.
+#[utoipa::path(
+    put, path = "/api/v1/access/exception", tag = "access",
+    request_body = NewException,
+    responses((status = 204), (status = 400, body = ApiError), (status = 403, body = ApiError)),
+)]
+pub(super) async fn set_exception(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Json(request): Json<NewException>,
+) -> ApiResult<StatusCode> {
+    let me = whoever(&principal)?;
+    may_share(&state, me, request.item.kind, &request.item.id).await?;
+    state
+        .access
+        .set_exception(
+            request.item.kind,
+            &request.item.id,
+            &request.subject_id,
+            request.level,
+        )
+        .await
+        .map_err(said)?;
+    tracing::info!(by = %me.username, subject = %request.subject_id, "let in");
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[utoipa::path(
+    delete, path = "/api/v1/access/exception", tag = "access",
+    request_body = DropException,
+    responses((status = 204), (status = 403, body = ApiError)),
+)]
+pub(super) async fn drop_exception(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Json(request): Json<DropException>,
+) -> ApiResult<StatusCode> {
+    let me = whoever(&principal)?;
+    may_share(&state, me, request.item.kind, &request.item.id).await?;
+    state
+        .access
+        .remove_exception(request.item.kind, &request.item.id, &request.subject_id)
+        .await
+        .map_err(said)?;
+    tracing::info!(by = %me.username, subject = %request.subject_id, "taken back out");
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct NewException {
+    pub item: FiledRef,
+    pub subject_id: String,
+    pub level: Level,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct DropException {
+    pub item: FiledRef,
+    pub subject_id: String,
 }
 
 /// File these things in this directory.

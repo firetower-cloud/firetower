@@ -904,7 +904,7 @@ mod tests {
 
         let ana = accounts.create_user(&org, "ana", "member").await.unwrap().0;
         let shelf = access
-            .create_directory(&org, "Shelf", &admin)
+            .create_directory(&org, "Shelf", &admin, &[])
             .await
             .unwrap();
         access

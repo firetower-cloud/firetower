@@ -13,6 +13,131 @@
     "version": "0"
   },
   "paths": {
+    "/api/v1/access": {
+      "get": {
+        "tags": [
+          "access"
+        ],
+        "summary": "Who can access one thing, and by what route.",
+        "operationId": "access_of",
+        "parameters": [
+          {
+            "name": "kind",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccessOf"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/access/exception": {
+      "put": {
+        "tags": [
+          "access"
+        ],
+        "summary": "Let somebody into one thing, or take them back out.",
+        "description": "**Not a transfer.** The resource does not move, its owner does not change,\nand nothing else filed where it lives is affected. That is the whole reason\nthis exists beside `file_items`: sharing one thing with one colleague should\nnot be a change of ownership.",
+        "operationId": "set_exception",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewException"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "access"
+        ],
+        "operationId": "drop_exception",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DropException"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/agent-accounts": {
       "get": {
         "tags": [
@@ -6087,6 +6212,42 @@
           }
         }
       },
+      "AccessOf": {
+        "type": "object",
+        "description": "Everything the sharing sheet draws, in one read.",
+        "required": [
+          "path",
+          "who",
+          "mayShare"
+        ],
+        "properties": {
+          "directory": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Directory",
+                "description": "The directory it is filed in, if it is filed in one. Absent for\n`u/<somebody>/…`, which is a personal root and has no row."
+              }
+            ]
+          },
+          "mayShare": {
+            "type": "boolean",
+            "description": "Whether this person may edit the exceptions or move it. Asked once here\nso the client does not have to reconstruct `may_share`."
+          },
+          "path": {
+            "$ref": "#/components/schemas/ResourcePath"
+          },
+          "who": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Reaches"
+            },
+            "description": "Who can reach it, by every route, most authority first."
+          }
+        }
+      },
       "Account": {
         "type": "object",
         "required": [
@@ -7430,6 +7591,21 @@
           }
         }
       },
+      "DropException": {
+        "type": "object",
+        "required": [
+          "item",
+          "subjectId"
+        ],
+        "properties": {
+          "item": {
+            "$ref": "#/components/schemas/FiledRef"
+          },
+          "subjectId": {
+            "type": "string"
+          }
+        }
+      },
       "ElementSnapshot": {
         "type": "object",
         "required": [
@@ -8571,6 +8747,24 @@
           "name"
         ],
         "properties": {
+          "grants": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NewGrant"
+            },
+            "description": "Who else is in it, set once at creation. Whoever creates it is always an\nadministrator of it and is not in this list."
+          },
+          "move": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/FiledRef",
+                "description": "Something to put in it straight away.\n\n**The reason this endpoint takes all three jobs.** Creating the\ndirectory, granting the people and moving the thing are one intention,\nand three requests can fail between any two — leaving a directory with\nnobody in it, or people with nothing to look at, and no screen that shows\neither. One call, one transaction, or none of it."
+              }
+            ]
+          },
           "name": {
             "type": "string"
           }
@@ -8595,6 +8789,25 @@
           }
         }
       },
+      "NewException": {
+        "type": "object",
+        "required": [
+          "item",
+          "subjectId",
+          "level"
+        ],
+        "properties": {
+          "item": {
+            "$ref": "#/components/schemas/FiledRef"
+          },
+          "level": {
+            "$ref": "#/components/schemas/Level"
+          },
+          "subjectId": {
+            "type": "string"
+          }
+        }
+      },
       "NewForward": {
         "type": "object",
         "required": [
@@ -8611,6 +8824,7 @@
       },
       "NewGrant": {
         "type": "object",
+        "description": "Somebody to put in a directory, and how much they may do there.\n\nLives here rather than in `api::access` because the access layer is what\nconsumes it — `create_directory` takes a list of these — and a type that\ncrosses the boundary should belong to the side that acts on it.",
         "required": [
           "subjectKind",
           "subjectId",
@@ -9360,6 +9574,34 @@
           }
         }
       },
+      "Reaches": {
+        "type": "object",
+        "description": "One line of \"who can access it\".",
+        "required": [
+          "subjectKind",
+          "subjectId",
+          "name",
+          "level",
+          "route"
+        ],
+        "properties": {
+          "level": {
+            "$ref": "#/components/schemas/Level"
+          },
+          "name": {
+            "type": "string"
+          },
+          "route": {
+            "$ref": "#/components/schemas/Route"
+          },
+          "subjectId": {
+            "type": "string"
+          },
+          "subjectKind": {
+            "$ref": "#/components/schemas/SubjectKind"
+          }
+        }
+      },
       "Readiness": {
         "type": "object",
         "required": [
@@ -9640,6 +9882,15 @@
             "description": "A new session, because the old one went with every other. Store this\nand carry on — being signed out is not part of changing a password."
           }
         }
+      },
+      "Route": {
+        "type": "string",
+        "description": "Why somebody can reach a thing — which decides whether it can be changed here.\n\nThe sheet shows one list, and a row's provenance is what tells a person\nwhether it is theirs to edit: an exception belongs to this resource, a grant\nbelongs to the directory and is changed on the Organisation screen.",
+        "enum": [
+          "owner",
+          "directory",
+          "exception"
+        ]
       },
       "RunState": {
         "type": "string",

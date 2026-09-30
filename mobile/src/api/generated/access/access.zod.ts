@@ -9,6 +9,64 @@ import * as zod from 'zod';
 
 
 /**
+ * @summary Who can access one thing, and by what route.
+ */
+export const AccessOfQueryParams = zod.object({
+  "kind": zod.string(),
+  "id": zod.string()
+})
+
+export const AccessOfResponse = zod.object({
+  "directory": zod.union([zod.null(),zod.object({
+  "agentAccounts": zod.int(),
+  "hosts": zod.int(),
+  "id": zod.string().describe('Identifies a directory — the things a grant is held over.'),
+  "level": zod.union([zod.null(),zod.enum(['viewer', 'writer', 'admin']).describe('What the person asking may do here. Absent when nothing was asked for.')]).optional(),
+  "name": zod.string(),
+  "secrets": zod.int(),
+  "slug": zod.string().describe('What appears in a path. Derived from the name once, and stable after —\nrenaming a directory must not rewrite every path underneath it.'),
+  "workspaces": zod.int().describe('What is filed here, so a list can say so and a deletion can refuse.')
+}).describe('The directory it is filed in, if it is filed in one. Absent for\n`u/<somebody>/…`, which is a personal root and has no row.')]).optional(),
+  "mayShare": zod.boolean().describe('Whether this person may edit the exceptions or move it. Asked once here\nso the client does not have to reconstruct `may_share`.'),
+  "path": zod.string().describe('A path, as the wire and the interface spell it: `u/kevin/thing`.'),
+  "who": zod.array(zod.object({
+  "level": zod.enum(['viewer', 'writer', 'admin']).describe('How much somebody may do in a directory.\n\nOrdered, and the order is the point — every check is "at least this much".\n`Ord` comes from the declaration order, so `Viewer < Writer < Admin` without\na comparison written anywhere.'),
+  "name": zod.string(),
+  "route": zod.enum(['owner', 'directory', 'exception']).describe('Why somebody can reach a thing — which decides whether it can be changed here.\n\nThe sheet shows one list, and a row\'s provenance is what tells a person\nwhether it is theirs to edit: an exception belongs to this resource, a grant\nbelongs to the directory and is changed on the Organisation screen.'),
+  "subjectId": zod.string(),
+  "subjectKind": zod.enum(['person', 'team']).describe('Whether a grant names one person or a whole team.')
+}).describe('One line of "who can access it".')).describe('Who can reach it, by every route, most authority first.')
+}).describe('Everything the sharing sheet draws, in one read.')
+
+/**
+ * **Not a transfer.** The resource does not move, its owner does not change,
+ * and nothing else filed where it lives is affected. That is the whole reason
+ * this exists beside `file_items`: sharing one thing with one colleague should
+ * not be a change of ownership.
+ * @summary Let somebody into one thing, or take them back out.
+ */
+export const SetExceptionBody = zod.object({
+  "item": zod.object({
+  "id": zod.string(),
+  "kind": zod.enum(['workspace', 'machine', 'agentAccount', 'secret'])
+}).describe('One thing to move, named the way `Filed` names it.\n\n**Not `Placed`.** That is already a schema in this contract — where an\nattached file landed in a workspace — and utoipa registers a type by its\nshort name, so a second `Placed` silently becomes whichever of the two the\ngenerator reached last. The clients then typecheck against a shape the\nserver never sends.'),
+  "level": zod.enum(['viewer', 'writer', 'admin']).describe('How much somebody may do in a directory.\n\nOrdered, and the order is the point — every check is "at least this much".\n`Ord` comes from the declaration order, so `Viewer < Writer < Admin` without\na comparison written anywhere.'),
+  "subjectId": zod.string()
+})
+
+export const SetExceptionResponse = zod.void()
+
+export const DropExceptionBody = zod.object({
+  "item": zod.object({
+  "id": zod.string(),
+  "kind": zod.enum(['workspace', 'machine', 'agentAccount', 'secret'])
+}).describe('One thing to move, named the way `Filed` names it.\n\n**Not `Placed`.** That is already a schema in this contract — where an\nattached file landed in a workspace — and utoipa registers a type by its\nshort name, so a second `Placed` silently becomes whichever of the two the\ngenerator reached last. The clients then typecheck against a shape the\nserver never sends.'),
+  "subjectId": zod.string()
+})
+
+export const DropExceptionResponse = zod.void()
+
+/**
  * @summary Everybody in the organisation, by name.
  */
 export const ListColleaguesResponseItem = zod.object({
@@ -37,6 +95,15 @@ export const ListDirectoriesResponseItem = zod.object({
 export const ListDirectoriesResponse = zod.array(ListDirectoriesResponseItem)
 
 export const CreateDirectoryBody = zod.object({
+  "grants": zod.array(zod.object({
+  "level": zod.enum(['viewer', 'writer', 'admin']).describe('How much somebody may do in a directory.\n\nOrdered, and the order is the point — every check is "at least this much".\n`Ord` comes from the declaration order, so `Viewer < Writer < Admin` without\na comparison written anywhere.'),
+  "subjectId": zod.string(),
+  "subjectKind": zod.enum(['person', 'team']).describe('Whether a grant names one person or a whole team.')
+}).describe('Somebody to put in a directory, and how much they may do there.\n\nLives here rather than in `api::access` because the access layer is what\nconsumes it — `create_directory` takes a list of these — and a type that\ncrosses the boundary should belong to the side that acts on it.')).optional().describe('Who else is in it, set once at creation. Whoever creates it is always an\nadministrator of it and is not in this list.'),
+  "move": zod.union([zod.null(),zod.object({
+  "id": zod.string(),
+  "kind": zod.enum(['workspace', 'machine', 'agentAccount', 'secret'])
+}).describe('Something to put in it straight away.\n\n**The reason this endpoint takes all three jobs.** Creating the\ndirectory, granting the people and moving the thing are one intention,\nand three requests can fail between any two — leaving a directory with\nnobody in it, or people with nothing to look at, and no screen that shows\neither. One call, one transaction, or none of it.')]).optional(),
   "name": zod.string()
 })
 
@@ -94,7 +161,7 @@ export const SetGrantBody = zod.object({
   "level": zod.enum(['viewer', 'writer', 'admin']).describe('How much somebody may do in a directory.\n\nOrdered, and the order is the point — every check is "at least this much".\n`Ord` comes from the declaration order, so `Viewer < Writer < Admin` without\na comparison written anywhere.'),
   "subjectId": zod.string(),
   "subjectKind": zod.enum(['person', 'team']).describe('Whether a grant names one person or a whole team.')
-})
+}).describe('Somebody to put in a directory, and how much they may do there.\n\nLives here rather than in `api::access` because the access layer is what\nconsumes it — `create_directory` takes a list of these — and a type that\ncrosses the boundary should belong to the side that acts on it.')
 
 export const SetGrantResponse = zod.void()
 
