@@ -35,7 +35,7 @@ import {
   ChevronDown,
   ChevronRight,
   CornerDownRight,
-  Share2,
+  UserPlus,
   FolderOpen,
   Plus,
   UserRound,
@@ -164,7 +164,7 @@ export function WhoCanAccess({
           title="Who can access it"
           className="flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 font-mono text-micro text-mute transition-colors hover:bg-raise hover:text-bone"
         >
-          <Icon of={Share2} size={12} />
+          <Icon of={UserPlus} size={12} />
           {where(path, me.data?.user)}
         </button>
         {sheet}
@@ -179,7 +179,7 @@ export function WhoCanAccess({
         title={`Who can access it — ${path ?? "yours"}`}
         className={`control gap-1.5 ${open ? "bg-overlay text-bone" : "text-mute hover:bg-raise hover:text-bone"}`}
       >
-        <Share2 className="h-4 w-4 shrink-0" strokeWidth={1.75} />
+        <UserPlus className="h-4 w-4 shrink-0" strokeWidth={1.75} />
         {/* The root on the button when it is shared, because "who can see my
             work" is not a question anybody should have to open a dialog to
             answer. Nothing in your own space, which is the quiet default, and
@@ -208,7 +208,7 @@ export function Sharing({
   const confirm = useConfirm();
   const item = useMemo(() => ({ kind, id }), [kind, id]);
   const one = KINDS[kind].one;
-  const { data, isPending } = useAccessOf({ kind, id });
+  const { data, isPending, error } = useAccessOf({ kind, id });
   const { data: directories } = useDirectories();
   const me = useMe();
 
@@ -487,6 +487,14 @@ export function Sharing({
         <div className="min-h-0 flex-1 overflow-y-auto">
           {isPending && <p className="px-3.5 py-3 text-ui text-mute">Reading…</p>}
 
+          {/* Said, and not mistaken for an answer. A failed read left `mayShare`
+              at its `false` default, so the sheet explained a permission the
+              person already had — "only its owner can change this" to the
+              owner. A screen that cannot load something has to say so. */}
+          {!isPending && !data && (
+            <p className="px-3.5 py-3 text-ui text-brick">{why(error)}</p>
+          )}
+
           {data && step === "main" && (
             <Main
               here={here}
@@ -529,7 +537,7 @@ export function Sharing({
             />
           )}
 
-          {step === "main" && !mayShare && (
+          {data && step === "main" && !mayShare && (
             <p className="px-3.5 py-2.5 text-micro leading-relaxed text-mute">
               You can open this and read it.{" "}
               {here
