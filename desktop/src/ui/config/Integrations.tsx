@@ -37,17 +37,17 @@ import { DeviceCode, Rows, Section, sleep } from "~/ui/config/bits";
 import { WhoCanAccess } from "~/ui/Sharing";
 import { useConfirm } from "~/ui/Confirm";
 
-export function Connections({ live }: { live: boolean }) {
+export function Integrations({ live }: { live: boolean }) {
   const providers = useProviders();
   const trackers = useTrackers();
   return (
     <>
-      <Section title="Connections" note="What Firetower may reach on your behalf. Authorised as you, and revocable.">
+      <Section title="Git hosts" note="Signed in as you, because a commit has to be attributable to a person. Everybody here connects their own.">
         <Rows feed={providers} empty="Nothing to connect to on this server.">
           {providers.data.map((p) => <Provider key={p.id} p={p} live={live} />)}
         </Rows>
       </Section>
-      <Section title="Trackers" note="Where the tasks list reads from.">
+      <Section title="Task trackers" note="Where the tasks list reads from. An API key can belong to a directory, so one key answers for a team.">
         <Rows feed={trackers} empty="No tracker is available on this server.">
           {trackers.data.map((t) => <Tracker key={t.id} t={t} live={live} />)}
         </Rows>

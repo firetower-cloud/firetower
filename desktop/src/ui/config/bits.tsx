@@ -17,7 +17,7 @@ export function Rows<T>({ feed, empty, children }: { feed: { data: T[]; loading:
 
 export function Section({ title, note, action, children }: { title: string; note?: string; action?: React.ReactNode; children: React.ReactNode }) {
   return (
-    <section className="mt-7">
+    <section className="mt-7 first:mt-0">
       <div className="flex items-center gap-3">
         <div className="min-w-0">
           <h2 className="text-title text-bone">{title}</h2>

@@ -11,7 +11,7 @@
 import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { Connections } from "./Connections";
+import { Integrations } from "./Integrations";
 import { getListProvidersQueryKey } from "~/api/generated/providers/providers";
 import { getListTrackersQueryKey } from "~/api/generated/trackers/trackers";
 import type { ProviderStatus } from "~/api/generated/model";
@@ -34,7 +34,7 @@ function draw(providers: ProviderStatus[]) {
   cache.setQueryData(getListTrackersQueryKey(), []);
   return renderToStaticMarkup(
     <QueryClientProvider client={cache}>
-      <Connections live />
+      <Integrations live />
     </QueryClientProvider>,
   );
 }
