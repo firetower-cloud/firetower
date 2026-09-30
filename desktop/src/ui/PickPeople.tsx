@@ -24,12 +24,16 @@ export function PickPeople({
   onPick,
   onClose,
   placeholder = "Find a person or a team",
+  empty = "Everybody already has access.",
 }: {
   /** Ids already in the list, which are not offered again. */
   already: string[];
   onPick: (who: Pickable) => void;
   onClose: () => void;
   placeholder?: string;
+  /** What to say when `already` has swallowed the whole organisation. The list
+   *  this belongs to is not always "access to this thing". */
+  empty?: string;
 }) {
   const { data: colleagues = [] } = useListColleagues();
   const { data: teams = [] } = useListTeams();
@@ -79,7 +83,7 @@ export function PickPeople({
 
       {shown.all.length === 0 ? (
         <p className="px-1 py-3 text-micro text-mute">
-          {find.trim() ? `Nobody here is called “${find.trim()}”.` : "Everybody already has access."}
+          {find.trim() ? `Nobody here is called “${find.trim()}”.` : empty}
         </p>
       ) : (
         <div className="mt-1.5 max-h-48 overflow-y-auto rounded-lg border border-line bg-panel">

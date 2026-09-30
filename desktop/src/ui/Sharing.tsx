@@ -45,6 +45,7 @@ import {
   useAccessOf,
 } from "~/api/generated/access/access";
 import { getListSessionsQueryKey } from "~/api/generated/sessions/sessions";
+import { useMe } from "~/api/generated/auth/auth";
 import type { Level, Reaches } from "~/api/generated/model";
 import { useDirectories, why } from "~/data";
 import { destinations, pathSlug, rootOf } from "~/filing";
@@ -92,6 +93,7 @@ export function Sharing({ workspaceId, onClose }: { workspaceId: string; onClose
   const item = useMemo(() => ({ kind: "workspace" as const, id: workspaceId }), [workspaceId]);
   const { data, isPending } = useAccessOf({ kind: "workspace", id: workspaceId });
   const { data: directories } = useDirectories();
+  const me = useMe();
 
   const [step, setStep] = useState<"main" | "places" | "new">("main");
   const [busy, setBusy] = useState(false);
@@ -365,7 +367,7 @@ export function Sharing({ workspaceId, onClose }: { workspaceId: string; onClose
               onName={setNewName}
               people={newWith}
               onPeople={setNewWith}
-              taken={taken}
+              meId={me.data?.user.id}
             />
           )}
 
@@ -733,13 +735,13 @@ function NewDirectory({
   onName,
   people,
   onPeople,
-  taken,
+  meId,
 }: {
   name: string;
   onName: (s: string) => void;
   people: { who: Pickable; level: Level }[];
   onPeople: (p: { who: Pickable; level: Level }[]) => void;
-  taken: string[];
+  meId: string | undefined;
 }) {
   const [adding, setAdding] = useState(false);
   return (
@@ -797,7 +799,12 @@ function NewDirectory({
       ))}
       {adding ? (
         <PickPeople
-          already={[...taken, ...people.map((g) => g.who.id)]}
+          /* Only who is already *in this new directory* — not who can reach
+             the workspace we came from. A directory that does not exist yet
+             has nobody in it, and excluding the workspace's people made the
+             picker claim "everybody already has access" to something empty. */
+          already={[...people.map((g) => g.who.id), ...(meId ? [meId] : [])]}
+          empty="Everybody is in it already."
           onClose={() => setAdding(false)}
           onPick={(w) => {
             onPeople([...people, { who: w, level: "writer" }]);
