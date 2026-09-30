@@ -47,17 +47,11 @@ import {
   createDirectory,
   dropException,
   fileItems,
-  getAccessOfQueryKey,
-  getListDirectoriesQueryKey,
   setException,
   unfileItems,
   useAccessOf,
   useListGrants,
 } from "~/api/generated/access/access";
-import { getListSessionsQueryKey } from "~/api/generated/sessions/sessions";
-import { getListHostsQueryKey } from "~/api/generated/hosts/hosts";
-import { getListAccountsQueryKey } from "~/api/generated/accounts/accounts";
-import { getListSecretsQueryKey } from "~/api/generated/secrets/secrets";
 import { useMe } from "~/api/generated/auth/auth";
 import type { FiledKind, Level, Reaches } from "~/api/generated/model";
 import { useDirectories, why } from "~/data";
@@ -101,19 +95,16 @@ type Somewhere = {
 type Place = { kind: "mine" } | { kind: "directory"; id: string } | { kind: "new" };
 
 /**
- * The whole of what a kind changes.
+ * The whole of what a kind changes: a noun.
  *
- * A noun, because the sheet says "this machine will go in it" and saying "this
- * item" would be the sort of writing that makes a product feel like a database
- * browser. And the list that has to be re-read once something moves — moving a
- * machine does not change any session, and refreshing everything on every save
- * would reload the world to change one word.
+ * The sheet says "this machine will go in it", and saying "this item" would be
+ * the sort of writing that makes a product feel like a database browser.
  */
-const KINDS: Record<FiledKind, { one: string; refresh: () => readonly unknown[] }> = {
-  workspace: { one: "workspace", refresh: getListSessionsQueryKey },
-  machine: { one: "machine", refresh: getListHostsQueryKey },
-  agentAccount: { one: "subscription", refresh: getListAccountsQueryKey },
-  secret: { one: "secret", refresh: getListSecretsQueryKey },
+const KINDS: Record<FiledKind, string> = {
+  workspace: "workspace",
+  machine: "machine",
+  agentAccount: "subscription",
+  secret: "secret",
 };
 
 /**
@@ -207,7 +198,7 @@ export function Sharing({
   const cache = useQueryClient();
   const confirm = useConfirm();
   const item = useMemo(() => ({ kind, id }), [kind, id]);
-  const one = KINDS[kind].one;
+  const one = KINDS[kind];
   const { data, isPending, error } = useAccessOf({ kind, id });
   const { data: directories } = useDirectories();
   const me = useMe();
@@ -299,11 +290,20 @@ export function Sharing({
           });
         }
       }
-      await Promise.all([
-        cache.invalidateQueries({ queryKey: getAccessOfQueryKey(item) }),
-        cache.invalidateQueries({ queryKey: getListDirectoriesQueryKey() }),
-        cache.invalidateQueries({ queryKey: KINDS[kind].refresh() }),
-      ]);
+      /* Everything, and not a list of keys.
+       *
+       * Where a thing is filed is on more screens than the one it was filed
+       * from — its own list, the directories, the toolbar chip, the tracker
+       * row — and naming them meant a chip kept showing the old directory
+       * until something else happened to refetch. That list also has to be
+       * added to every time a path appears somewhere new, and it was already
+       * one short: a filed API key is drawn from the trackers list, which was
+       * in none of the three.
+       *
+       * Filing something is rare and deliberate. Refetching what is on screen
+       * costs a great deal less than a screen that quietly disagrees with the
+       * server about who can read something. */
+      await cache.invalidateQueries();
       onClose();
     } catch (e) {
       setTrouble(why(e));
