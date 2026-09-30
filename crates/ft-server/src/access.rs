@@ -56,28 +56,58 @@ pub use ft_core::{Level, SubjectKind};
 /// spring that leaves the condition off altogether, and one function with one
 /// set of callers is something a reviewer can check by grepping.
 ///
-/// Two ways in, and they are the two roots a path can have:
+/// Four ways in, `OR`ed — which is the same as taking the most generous, and is
+/// why two of them can never contradict each other:
 ///
 /// * it is in **their own space**, `u.<their slug>.…`, which needs no grant and
 ///   no row — a personal root is implicit, and that is the whole of why there
 ///   is no per-person directory to create, own and clean up;
-/// * it is in a **directory** they hold a grant on at `at_least`.
+/// * it is in a **directory** they hold a grant on at `at_least`;
+/// * the row **names them** in `extra_perms`;
+/// * the row **names a team they are in**.
 ///
 /// `<@` is "is a descendant of", against a GiST index. Only the first two
 /// labels decide anything, so a path nested five deep costs the same as one
 /// nested none — and there is no recursion, because depth grants nothing.
 ///
-/// It no longer takes a kind. Every table a person can file has a `path`, and
-/// the question is the same for all of them, which is the point.
+/// **Both exception clauses lead with a key test, and that is deliberate.**
+/// `extra_perms ? key` and `?| keys` are what the GIN index can answer;
+/// `level_rank(extra_perms ->> key) >= n` is an opaque expression over a dynamic
+/// key and would be a sequential scan on every list query in the product. So the
+/// index narrows to the few rows that name this person at all, and the level is
+/// rechecked on those.
+///
+/// The team clause is **uncorrelated** — its subquery never mentions `{alias}` —
+/// so Postgres builds the array of their team keys once and hits the index with
+/// it, rather than walking `team_members` per candidate row.
+///
+/// It takes no kind. Every table a person can file has `path` and
+/// `extra_perms`, and the question is the same for all of them, which is the
+/// point.
 pub fn filed_where(alias: &str, person: usize, at_least: Level) -> String {
+    let rank = at_least.rank();
     format!(
         "(EXISTS (SELECT 1 FROM principals me \
                    WHERE me.id = ${person} AND {alias}.path <@ ('u.' || me.slug)::ltree) \
           OR EXISTS (SELECT 1 FROM directories dd \
                        JOIN directory_access da ON da.directory_id = dd.id \
-                      WHERE da.user_id = ${person} AND da.rank >= {} \
-                        AND {alias}.path <@ ('d.' || dd.slug)::ltree))",
-        at_least.rank()
+                      WHERE da.user_id = ${person} AND da.rank >= {rank} \
+                        AND {alias}.path <@ ('d.' || dd.slug)::ltree) \
+          OR ({alias}.extra_perms ? (SELECT 'u/' || me.slug FROM principals me \
+                                      WHERE me.id = ${person} AND me.retired_at IS NULL) \
+              AND level_rank({alias}.extra_perms ->> \
+                    (SELECT 'u/' || me.slug FROM principals me WHERE me.id = ${person})) \
+                  >= {rank}) \
+          OR ({alias}.extra_perms ?| (SELECT array_agg('t/' || p.slug) \
+                                        FROM team_members m \
+                                        JOIN principals p ON p.id = m.team_id \
+                                       WHERE m.user_id = ${person}) \
+              AND EXISTS (SELECT 1 FROM jsonb_each_text({alias}.extra_perms) e \
+                           WHERE level_rank(e.value) >= {rank} \
+                             AND e.key = ANY (SELECT 't/' || p.slug \
+                                                FROM team_members m \
+                                                JOIN principals p ON p.id = m.team_id \
+                                               WHERE m.user_id = ${person}))))"
     )
 }
 
@@ -195,6 +225,19 @@ impl FiledKind {
             FiledKind::Secret => "secret",
         }
     }
+}
+
+/// Somebody named on one resource, over and above where it is filed.
+///
+/// Deliberately the same shape as [`Grant`] minus the directory: a screen shows
+/// the two in one list, because "who can access this" does not care which route
+/// somebody arrived by.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct Exception {
+    pub subject_kind: SubjectKind,
+    pub subject_id: String,
+    pub level: Level,
 }
 
 /// One line of who may do what in a directory.
@@ -389,6 +432,11 @@ impl Access {
     pub async fn delete_team(&self, team: &str) -> Result<()> {
         let mut tx = self.pool.begin().await?;
 
+        let slug: Option<String> = sqlx::query_scalar("SELECT slug FROM principals WHERE id = $1")
+            .bind(team)
+            .fetch_optional(&mut *tx)
+            .await?;
+
         sqlx::query("DELETE FROM grants WHERE subject_kind = 'team' AND subject_id = $1")
             .bind(team)
             .execute(&mut *tx)
@@ -408,6 +456,9 @@ impl Access {
         // The identity stays, retired. A second team called `Backend` gets
         // `backend_2`, so an exception naming `t/backend` cannot be inherited by
         // it — the same rule as a person.
+        if let Some(slug) = slug {
+            Self::forget_exceptions(&mut tx, &format!("t/{slug}")).await?;
+        }
         Self::retire_principal(&mut tx, team).await?;
 
         tx.commit().await?;
@@ -972,6 +1023,179 @@ impl Access {
                     other.singular()
                 );
             }
+        }
+        Ok(())
+    }
+
+    // ── exceptions ─────────────────────────────────────────────────────
+
+    /// The key a principal is named by inside `extra_perms`.
+    ///
+    /// `u/<slug>` and `t/<slug>` — the same spelling a path uses, because they
+    /// name the same things. Built here and nowhere else.
+    async fn exception_key(&self, principal: &str) -> Result<String> {
+        let found: Option<(String, String)> = sqlx::query_as(
+            "SELECT kind, slug FROM principals WHERE id = $1 AND retired_at IS NULL",
+        )
+        .bind(principal)
+        .fetch_optional(&self.pool)
+        .await
+        .context("looking up who an exception is for")?;
+        let (kind, slug) = found.context("there is nobody here to let in")?;
+        Ok(match kind.as_str() {
+            "team" => format!("t/{slug}"),
+            _ => format!("u/{slug}"),
+        })
+    }
+
+    /// Who is named on this resource, over and above where it is filed.
+    pub async fn exceptions_on(&self, kind: FiledKind, id: &str) -> Result<Vec<Exception>> {
+        let table = Self::table(kind);
+        let row: Option<serde_json::Value> = match kind {
+            FiledKind::Secret => {
+                let (scope, name) = split_secret(id)?;
+                sqlx::query_scalar("SELECT extra_perms FROM secrets WHERE scope = $1 AND name = $2")
+                    .bind(scope)
+                    .bind(name)
+                    .fetch_optional(&self.pool)
+                    .await?
+            }
+            _ => {
+                sqlx::query_scalar(&format!("SELECT extra_perms FROM {table} WHERE id = $1"))
+                    .bind(id)
+                    .fetch_optional(&self.pool)
+                    .await?
+            }
+        };
+        let Some(serde_json::Value::Object(map)) = row else {
+            return Ok(Vec::new());
+        };
+        if map.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // One read for every name, rather than one per entry. The slug is what
+        // the blob holds; a person reads the name.
+        let slugs: Vec<String> = map
+            .keys()
+            .filter_map(|k| k.split_once('/').map(|(_, s)| s.to_string()))
+            .collect();
+        let named: Vec<(String, String, String)> = sqlx::query_as(
+            "SELECT id, kind, slug FROM principals WHERE slug = ANY($1) AND retired_at IS NULL",
+        )
+        .bind(&slugs)
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mut out = Vec::new();
+        for (principal, kind_of, slug) in named {
+            let key = if kind_of == "team" {
+                format!("t/{slug}")
+            } else {
+                format!("u/{slug}")
+            };
+            let Some(level) = map.get(&key).and_then(|v| v.as_str()) else {
+                continue;
+            };
+            out.push(Exception {
+                subject_kind: if kind_of == "team" {
+                    SubjectKind::Team
+                } else {
+                    SubjectKind::Person
+                },
+                subject_id: principal,
+                level: parse_level(level)?,
+            });
+        }
+        Ok(out)
+    }
+
+    /// Let somebody into one resource, without moving it.
+    ///
+    /// **Capped at writer.** `admin` is not spellable here: administration
+    /// belongs to the path, so exactly one place answers "who may change
+    /// permissions". Somebody admin-by-exception could otherwise rewrite the
+    /// grants of a directory they were only an exception to.
+    pub async fn set_exception(
+        &self,
+        kind: FiledKind,
+        id: &str,
+        principal: &str,
+        level: Level,
+    ) -> Result<()> {
+        anyhow::ensure!(
+            level < Level::Admin,
+            "somebody let into one thing cannot administer it — share the directory it is in instead"
+        );
+        let key = self.exception_key(principal).await?;
+        self.write_exception(kind, id, &key, Some(level)).await
+    }
+
+    /// Take one back. Nothing else about the resource changes.
+    pub async fn remove_exception(&self, kind: FiledKind, id: &str, principal: &str) -> Result<()> {
+        let key = self.exception_key(principal).await?;
+        self.write_exception(kind, id, &key, None).await
+    }
+
+    async fn write_exception(
+        &self,
+        kind: FiledKind,
+        id: &str,
+        key: &str,
+        level: Option<Level>,
+    ) -> Result<()> {
+        let table = Self::table(kind);
+        // `||` merges a key in, `-` takes one out. Either way the rest of the
+        // blob is untouched, so two people editing different entries at once do
+        // not overwrite each other.
+        let set = match level {
+            Some(_) => "extra_perms = extra_perms || jsonb_build_object($1::text, $2::text)",
+            None => "extra_perms = extra_perms - $1::text",
+        };
+        let level = level.map(|l| l.as_str()).unwrap_or("");
+
+        let done = match kind {
+            FiledKind::Secret => {
+                let (scope, name) = split_secret(id)?;
+                sqlx::query(&format!(
+                    "UPDATE secrets SET {set} WHERE scope = $3 AND name = $4"
+                ))
+                .bind(key)
+                .bind(level)
+                .bind(scope)
+                .bind(name)
+                .execute(&self.pool)
+                .await?
+            }
+            _ => {
+                sqlx::query(&format!("UPDATE {table} SET {set} WHERE id = $3"))
+                    .bind(key)
+                    .bind(level)
+                    .bind(id)
+                    .execute(&self.pool)
+                    .await?
+            }
+        };
+        anyhow::ensure!(done.rows_affected() == 1, "no {} here", kind.singular());
+        Ok(())
+    }
+
+    /// Take a departed principal out of every blob that named them.
+    ///
+    /// **Hygiene, not the guarantee.** What makes a stale `{"u/ana": "writer"}`
+    /// harmless is that `ana` is never issued to anybody again — see
+    /// `principals`. This keeps the rows tidy and the screens honest; if a table
+    /// is ever added and forgotten here, the cost is a dead entry rather than a
+    /// stranger's access.
+    pub async fn forget_exceptions(tx: &mut Transaction<'_, Postgres>, key: &str) -> Result<()> {
+        for table in ["workspaces", "hosts", "agent_accounts", "secrets"] {
+            sqlx::query(&format!(
+                "UPDATE {table} SET extra_perms = extra_perms - $1::text WHERE extra_perms ? $1"
+            ))
+            .bind(key)
+            .execute(&mut **tx)
+            .await
+            .with_context(|| format!("forgetting exceptions in {table}"))?;
         }
         Ok(())
     }
@@ -1562,6 +1786,204 @@ mod tests {
                 .hosts,
             1,
             "a directory counts what is under it, however deep"
+        );
+    }
+
+    /// The case the whole feature was added for.
+    ///
+    /// Bob makes a workspace and wants Lisa to see it. Before exceptions the
+    /// only route was: create a directory holding them both, and hand the
+    /// workspace to it — a lot of machinery for "let Lisa in", and it transfers
+    /// ownership as a side effect. Now it is one entry, Bob keeps his workspace,
+    /// and nothing moves.
+    #[tokio::test]
+    async fn one_person_can_be_let_into_one_thing() {
+        let (db, access, accounts, org, _admin) = set_up().await;
+        let bob = person(&accounts, &org, "bob").await;
+        let lisa = person(&accounts, &org, "lisa").await;
+
+        let host = db
+            .ensure_host("fire-01", ft_core::Compute::Local, bob.as_str())
+            .await
+            .unwrap();
+        assert!(
+            db.hosts_for(lisa.as_str(), Level::Viewer)
+                .await
+                .unwrap()
+                .is_empty(),
+            "it is his"
+        );
+
+        access
+            .set_exception(
+                FiledKind::Machine,
+                host.id.as_str(),
+                lisa.as_str(),
+                Level::Writer,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            db.hosts_for(lisa.as_str(), Level::Writer)
+                .await
+                .unwrap()
+                .len(),
+            1,
+            "she is named on it"
+        );
+        // And it is still his. An exception is access, never ownership.
+        let after = db.host_by_name("fire-01").await.unwrap().unwrap();
+        assert_eq!(after.path.as_str(), "u/bob/fire_01");
+
+        let named = access
+            .exceptions_on(FiledKind::Machine, host.id.as_str())
+            .await
+            .unwrap();
+        assert_eq!(named.len(), 1);
+        assert_eq!(named[0].subject_id, lisa.as_str());
+        assert_eq!(named[0].level, Level::Writer);
+
+        access
+            .remove_exception(FiledKind::Machine, host.id.as_str(), lisa.as_str())
+            .await
+            .unwrap();
+        assert!(db
+            .hosts_for(lisa.as_str(), Level::Viewer)
+            .await
+            .unwrap()
+            .is_empty());
+    }
+
+    /// A team can be named too, and it reaches everybody in it.
+    #[tokio::test]
+    async fn a_team_can_be_let_into_one_thing() {
+        let (db, access, accounts, org, _admin) = set_up().await;
+        let bob = person(&accounts, &org, "bob").await;
+        let lisa = person(&accounts, &org, "lisa").await;
+        let backend = access.create_team(&org, "Backend").await.unwrap();
+        access
+            .add_member(backend.id.as_str(), lisa.as_str())
+            .await
+            .unwrap();
+
+        let host = db
+            .ensure_host("fire-01", ft_core::Compute::Local, bob.as_str())
+            .await
+            .unwrap();
+        access
+            .set_exception(
+                FiledKind::Machine,
+                host.id.as_str(),
+                backend.id.as_str(),
+                Level::Viewer,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            db.hosts_for(lisa.as_str(), Level::Viewer)
+                .await
+                .unwrap()
+                .len(),
+            1,
+            "through the team she is in"
+        );
+        assert!(
+            db.hosts_for(lisa.as_str(), Level::Writer)
+                .await
+                .unwrap()
+                .is_empty(),
+            "and only as far as the exception said"
+        );
+    }
+
+    /// `admin` is not spellable as an exception: administration belongs to the
+    /// path, so one place answers "who may change permissions".
+    #[tokio::test]
+    async fn an_exception_cannot_make_somebody_an_administrator() {
+        let (db, access, accounts, org, _admin) = set_up().await;
+        let bob = person(&accounts, &org, "bob").await;
+        let lisa = person(&accounts, &org, "lisa").await;
+        let host = db
+            .ensure_host("fire-01", ft_core::Compute::Local, bob.as_str())
+            .await
+            .unwrap();
+
+        let refused = access
+            .set_exception(
+                FiledKind::Machine,
+                host.id.as_str(),
+                lisa.as_str(),
+                Level::Admin,
+            )
+            .await
+            .expect_err("capped at writer");
+        assert!(refused.to_string().contains("administer"), "{refused}");
+    }
+
+    /// The most generous route wins, and an exception is just a fourth route —
+    /// so it can raise what a directory gave, and never lower it.
+    #[tokio::test]
+    async fn an_exception_adds_to_what_a_directory_already_gave() {
+        let (db, access, accounts, org, admin) = set_up().await;
+        let lisa = person(&accounts, &org, "lisa").await;
+        let vault = vault(&db);
+
+        let shelf = access
+            .create_directory(&org, "Shelf", &admin)
+            .await
+            .unwrap();
+        access
+            .set_grant(
+                shelf.id.as_str(),
+                SubjectKind::Person,
+                lisa.as_str(),
+                Level::Viewer,
+                &admin,
+            )
+            .await
+            .unwrap();
+
+        let host = db
+            .ensure_host("fire-01", ft_core::Compute::Local, admin.as_str())
+            .await
+            .unwrap();
+        access
+            .transfer(
+                &vault,
+                FiledKind::Machine,
+                host.id.as_str(),
+                &host.path.moved_to(ft_core::path::DIRECTORY, &shelf.slug),
+                "admin",
+            )
+            .await
+            .unwrap();
+
+        assert!(
+            db.hosts_for(lisa.as_str(), Level::Writer)
+                .await
+                .unwrap()
+                .is_empty(),
+            "the directory gave her a look, no more"
+        );
+
+        access
+            .set_exception(
+                FiledKind::Machine,
+                host.id.as_str(),
+                lisa.as_str(),
+                Level::Writer,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            db.hosts_for(lisa.as_str(), Level::Writer)
+                .await
+                .unwrap()
+                .len(),
+            1,
+            "and the exception raises it, without touching the directory"
         );
     }
 

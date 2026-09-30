@@ -520,6 +520,7 @@ impl Accounts {
         // on their own workspace, `{"u/kevin": "writer"}`, can never land on a
         // new colleague who happens to have the same name. Sweeping those
         // entries is hygiene; this is the guarantee.
+        crate::access::Access::forget_exceptions(&mut tx, &format!("u/{}", user.slug)).await?;
         crate::access::Access::retire_principal(&mut tx, id.as_str()).await?;
 
         tx.commit().await?;

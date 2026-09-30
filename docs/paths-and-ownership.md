@@ -80,6 +80,31 @@ be listed in `Access::transfer`, which is the one place a thing changes hands
 and therefore the one place that knows what hangs off what. SQL cascades a
 delete and cannot cascade a move.
 
+### Exceptions — `extra_perms` on a Placed row
+
+A few named people on one thing, on top of where it lives. `{"u/lisa":
+"writer", "t/backend": "viewer"}` — slugs, and `viewer` or `writer` only.
+
+It is a **fourth route in, not a second source of authority**:
+`directory_access` already reduces three routes with `max`, and this is one more
+input to the same `max`, so two answers can never contradict.
+
+Four rules, each closing something:
+
+- **never `admin`.** Administration belongs to the path, so one place answers
+  "who may change permissions". Somebody admin-by-exception could otherwise
+  rewrite the grants of a directory they were only an exception to
+- **additive only.** There is no way to spell a denial, and there never will be
+- **never ownership.** The path and `created_by` stay the record
+- **only on Placed rows.** An exception on an attached secret would be a way to
+  reach a subscription's token without reaching the subscription
+
+Both clauses in `filed_where` lead with a key test (`?`, `?|`) because that is
+what the GIN index can answer; the level is rechecked on the few rows that
+matched. The team clause is uncorrelated on purpose — its subquery never
+mentions the outer row — so the array of team keys is built once. Write it as a
+correlated `EXISTS` and you have a sequential scan on every list in the product.
+
 ### Recorded — an append-only fact about the past
 
 Events, agent output lines, usage, the vault's access log, step attempts. These

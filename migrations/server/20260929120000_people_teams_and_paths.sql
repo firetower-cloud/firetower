@@ -333,6 +333,56 @@ alter table workspaces     alter column path set not null;
 alter table hosts          alter column path set not null;
 alter table agent_accounts alter column path set not null;
 
+-- ── exceptions ──────────────────────────────────────────────────────────
+
+-- A few named people on one resource, on top of where it lives.
+--
+-- A directory is how a company shares a body of work; this is how one person
+-- lets one colleague into one thing. Without it the only way to show Lisa a
+-- workspace is to create a directory containing both of you and hand the
+-- workspace to it — which is a lot of machinery for "let Lisa see this", and
+-- which transfers ownership as a side effect.
+--
+--     {"u/lisa": "writer", "t/backend": "viewer"}
+--
+-- **A fourth route in, not a second source of authority.** `directory_access`
+-- already reduces three routes — granted directly, granted through a team,
+-- granted through the team that is everybody — with `max`. This is one more
+-- input to the same `max`, so two answers can never contradict: the most access
+-- anybody was deliberately given is what they have.
+--
+-- Four rules, and each closes something:
+--
+--   * **keys are slugs, values are `viewer` or `writer`.** Never `admin` —
+--     administration stays with the path, so exactly one place answers "who may
+--     change permissions". An admin-by-exception could otherwise rewrite the
+--     grants of the directory they were only an exception to;
+--   * **additive only.** There is no way to spell a denial. Deny rules are what
+--     make a permission system impossible to reason about, and we have none;
+--   * **never ownership.** The path and `created_by` stay the record of whose a
+--     thing is. An exception is access;
+--   * **only on what can be filed.** Nothing attached — an agent account's
+--     credential, a repository's variables, the install's own secrets. An
+--     exception on one of those would be a way to reach a subscription's token
+--     without reaching the subscription.
+--
+-- The keys naming a departed principal are swept on the way out, but that is
+-- hygiene: what makes a stale `{"u/ana": "writer"}` harmless is that `ana` is
+-- never issued to anybody again. See `principals`.
+alter table workspaces     add column extra_perms jsonb not null default '{}';
+alter table hosts          add column extra_perms jsonb not null default '{}';
+alter table agent_accounts add column extra_perms jsonb not null default '{}';
+alter table secrets        add column extra_perms jsonb not null default '{}';
+
+-- `jsonb_ops`, the default — not `jsonb_path_ops`, which is smaller and
+-- supports only `@>`. The access check asks `?` ("is this key here") and `?|`
+-- ("is any of these keys here"), and only the default operator class indexes
+-- those.
+create index workspaces_extra_perms     on workspaces     using gin (extra_perms);
+create index hosts_extra_perms          on hosts          using gin (extra_perms);
+create index agent_accounts_extra_perms on agent_accounts using gin (extra_perms);
+create index secrets_extra_perms        on secrets        using gin (extra_perms);
+
 -- `<@` against these is the whole access check.
 create index workspaces_by_path     on workspaces     using gist (path);
 create index hosts_by_path          on hosts          using gist (path);
