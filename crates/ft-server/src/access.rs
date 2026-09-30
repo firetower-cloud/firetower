@@ -71,7 +71,7 @@ pub use ft_core::{Level, SubjectKind};
 /// the question is the same for all of them, which is the point.
 pub fn filed_where(alias: &str, person: usize, at_least: Level) -> String {
     format!(
-        "(EXISTS (SELECT 1 FROM users me \
+        "(EXISTS (SELECT 1 FROM principals me \
                    WHERE me.id = ${person} AND {alias}.path <@ ('u.' || me.slug)::ltree) \
           OR EXISTS (SELECT 1 FROM directories dd \
                        JOIN directory_access da ON da.directory_id = dd.id \
@@ -333,6 +333,13 @@ impl Access {
     pub async fn create_team(&self, org: &OrgId, name: &str) -> Result<Team> {
         let name = check_name(name, "a team")?;
         let id = TeamId::new();
+        let mut tx = self.pool.begin().await?;
+
+        // The identity first: `teams.id` references it, and a team is a
+        // principal like a person — it can be granted, it can be named in an
+        // exception, and its name must never be reissued to a second team.
+        Self::provision_principal(&mut tx, org, id.as_str(), SubjectKind::Team, &name).await?;
+
         let done = sqlx::query(
             "INSERT INTO teams (id, org_id, name) VALUES ($1, $2, $3)
              ON CONFLICT DO NOTHING",
@@ -340,13 +347,14 @@ impl Access {
         .bind(id.as_str())
         .bind(org.as_str())
         .bind(&name)
-        .execute(&self.pool)
+        .execute(&mut *tx)
         .await
         .context("creating a team")?;
 
         if done.rows_affected() == 0 {
             bail!("there is already a team called {name}");
         }
+        tx.commit().await?;
 
         Ok(Team {
             id,
@@ -396,6 +404,11 @@ impl Access {
         if done.rows_affected() == 0 {
             bail!("no team here to remove — the team that is everybody cannot be removed");
         }
+
+        // The identity stays, retired. A second team called `Backend` gets
+        // `backend_2`, so an exception naming `t/backend` cannot be inherited by
+        // it — the same rule as a person.
+        Self::retire_principal(&mut tx, team).await?;
 
         tx.commit().await?;
         Ok(())
@@ -631,21 +644,21 @@ impl Access {
         let under = format!("d.{directory_slug}");
         let rows = sqlx::query(
             "SELECT 'workspace' AS kind, w.id, w.path::text, w.name, w.repo AS detail,
-                    u.username AS owner_name
-               FROM workspaces w LEFT JOIN users u ON u.id = w.user_id
+                    u.name AS owner_name
+               FROM workspaces w LEFT JOIN principals u ON u.id = w.created_by
               WHERE w.path <@ $1::ltree
              UNION ALL
-             SELECT 'machine', h.id, h.path::text, h.name, NULL, u.username
-               FROM hosts h LEFT JOIN users u ON u.id = h.created_by
+             SELECT 'machine', h.id, h.path::text, h.name, NULL, u.name
+               FROM hosts h LEFT JOIN principals u ON u.id = h.created_by
               WHERE h.path <@ $1::ltree
              UNION ALL
-             SELECT 'agentAccount', a.id, a.path::text, a.name, a.kind, u.username
-               FROM agent_accounts a LEFT JOIN users u ON u.id = a.user_id
+             SELECT 'agentAccount', a.id, a.path::text, a.name, a.kind, u.name
+               FROM agent_accounts a LEFT JOIN principals u ON u.id = a.user_id
               WHERE a.path <@ $1::ltree
              UNION ALL
              SELECT 'secret', s.scope || '/' || s.name, s.path::text, s.name, s.scope,
-                    u.username
-               FROM secrets s LEFT JOIN users u ON u.id = s.created_by
+                    u.name
+               FROM secrets s LEFT JOIN principals u ON u.id = s.created_by
               WHERE s.path <@ $1::ltree
              ORDER BY kind, name",
         )
@@ -710,7 +723,7 @@ impl Access {
 
     /// The root of somebody's own space — `u/<their slug>`.
     pub async fn personal_root(&self, person: &str) -> Result<String> {
-        let slug: Option<String> = sqlx::query_scalar("SELECT slug FROM users WHERE id = $1")
+        let slug: Option<String> = sqlx::query_scalar("SELECT slug FROM principals WHERE id = $1")
             .bind(person)
             .fetch_optional(&self.pool)
             .await
@@ -718,18 +731,25 @@ impl Access {
         slug.ok_or_else(|| anyhow::anyhow!("{person} is not somebody here"))
     }
 
-    /// Give a new person the label their paths are built from.
+    /// Write the identity a person or a team is known by, forever.
     ///
-    /// The whole of what somebody needs on the way in. There is no directory to
-    /// create and no grant to write: `u/<slug>` is implicit, which is the
-    /// simplification paths bought over a row per person.
-    pub async fn provision_person(
+    /// **This runs before the `users` or `teams` row**, because both reference
+    /// it. It is the whole of what somebody needs on the way in: there is no
+    /// directory to create and no grant to write, because `u/<slug>` is
+    /// implicit — the simplification paths bought over a row per person.
+    ///
+    /// The loop is how a taken slug is settled. It is not a race: the unique
+    /// index on `(org_id, slug)` is what decides, and a conflict simply costs
+    /// another attempt. That index spans retired principals too, which is why a
+    /// second Ana gets `ana_2` rather than the first Ana's access.
+    pub async fn provision_principal(
         tx: &mut Transaction<'_, Postgres>,
         org: &OrgId,
-        person: &UserId,
-        username: &str,
+        id: &str,
+        kind: SubjectKind,
+        name: &str,
     ) -> Result<String> {
-        let base = ft_core::slug(username);
+        let base = ft_core::slug(name);
         for attempt in 0..20u32 {
             let slug = if attempt == 0 {
                 base.clone()
@@ -737,20 +757,42 @@ impl Access {
                 format!("{base}_{}", attempt + 1)
             };
             let done = sqlx::query(
-                "UPDATE users SET slug = $1 WHERE id = $2
-                  AND NOT EXISTS (SELECT 1 FROM users o WHERE o.org_id = $3 AND o.slug = $1)",
+                "INSERT INTO principals (id, org_id, kind, slug, name)
+                 VALUES ($1, $2, $3, $4, $5) ON CONFLICT DO NOTHING",
             )
-            .bind(&slug)
-            .bind(person.as_str())
+            .bind(id)
             .bind(org.as_str())
+            .bind(match kind {
+                SubjectKind::Person => "user",
+                SubjectKind::Team => "team",
+            })
+            .bind(&slug)
+            .bind(name)
             .execute(&mut **tx)
             .await
-            .context("giving somebody a slug")?;
+            .context("writing an identity")?;
             if done.rows_affected() == 1 {
                 return Ok(slug);
             }
         }
-        bail!("could not find a free path for {username}")
+        bail!("could not find a free name for {name}")
+    }
+
+    /// Mark a principal as gone, keeping the row so its slug is never reissued.
+    ///
+    /// The `users` or `teams` row is deleted by the caller — cascades take the
+    /// sessions and memberships with it. This is what survives, and it is the
+    /// reason an exception written on somebody else's resource cannot land on a
+    /// new person with the same name.
+    pub async fn retire_principal(tx: &mut Transaction<'_, Postgres>, id: &str) -> Result<()> {
+        sqlx::query(
+            "UPDATE principals SET retired_at = now() WHERE id = $1 AND retired_at IS NULL",
+        )
+        .bind(id)
+        .execute(&mut **tx)
+        .await
+        .context("retiring an identity")?;
+        Ok(())
     }
 
     /// The one row an organisation cannot work without, plus the team that is
@@ -760,6 +802,7 @@ impl Access {
         org: &OrgId,
     ) -> Result<(TeamId, DirectoryId)> {
         let team = TeamId::new();
+        Self::provision_principal(tx, org, team.as_str(), SubjectKind::Team, "Everyone").await?;
         sqlx::query(
             "INSERT INTO teams (id, org_id, name, everyone) VALUES ($1, $2, 'Everyone', TRUE)",
         )
@@ -834,7 +877,7 @@ impl Access {
         // or a directory: both are ids, and the vault does not care which.
         let holder: String = match to.root() {
             Some((ft_core::path::PERSONAL, slug)) => {
-                sqlx::query_scalar("SELECT id FROM users WHERE slug = $1")
+                sqlx::query_scalar("SELECT id FROM principals WHERE slug = $1 AND kind = 'user'")
                     .bind(slug)
                     .fetch_optional(&self.pool)
                     .await?
@@ -939,12 +982,11 @@ impl Access {
     pub async fn grants_on(&self, directory: &str) -> Result<Vec<Grant>> {
         let rows = sqlx::query(
             "SELECT g.subject_kind, g.subject_id, g.level,
-                    COALESCE(u.username, t.name, '(gone)') AS subject_name
+                    COALESCE(p.name, '(gone)') AS subject_name
                FROM grants g
-               LEFT JOIN users u ON g.subject_kind = 'person' AND u.id = g.subject_id
-               LEFT JOIN teams t ON g.subject_kind = 'team'   AND t.id = g.subject_id
+               LEFT JOIN principals p ON p.id = g.subject_id
               WHERE g.directory_id = $1
-              ORDER BY g.subject_kind, lower(COALESCE(u.username, t.name, ''))",
+              ORDER BY g.subject_kind, lower(COALESCE(p.name, ''))",
         )
         .bind(directory)
         .fetch_all(&self.pool)
@@ -1037,27 +1079,28 @@ impl Access {
         Ok(())
     }
 
-    /// Whether the thing a grant is about to name is really there.
+    /// Whether the thing a grant is about to name is really there, and still is.
     ///
-    /// `grants.subject_id` carries no foreign key — it points at a user or a
-    /// team depending on the row — so this is the check that would otherwise be
-    /// the database's. Without it a typo becomes a grant to nobody, which looks
-    /// exactly like a grant that works until somebody cannot open something.
+    /// `grants.subject_id` now carries a foreign key to `principals`, so the
+    /// database catches an id that was never anybody. What it cannot catch is an
+    /// id that *was* somebody — a principal is never deleted — so this is the
+    /// check that they have not left.
     async fn exists(
         tx: &mut Transaction<'_, Postgres>,
         kind: SubjectKind,
         subject: &str,
     ) -> Result<()> {
-        let table = match kind {
-            SubjectKind::Person => "users",
-            SubjectKind::Team => "teams",
-        };
-        let there: Option<i32> =
-            sqlx::query_scalar(&format!("SELECT 1 FROM {table} WHERE id = $1"))
-                .bind(subject)
-                .fetch_optional(&mut **tx)
-                .await?;
-        if there.is_none() {
+        let live: Option<i32> = sqlx::query_scalar(
+            "SELECT 1 FROM principals WHERE id = $1 AND kind = $2 AND retired_at IS NULL",
+        )
+        .bind(subject)
+        .bind(match kind {
+            SubjectKind::Person => "user",
+            SubjectKind::Team => "team",
+        })
+        .fetch_optional(&mut **tx)
+        .await?;
+        if live.is_none() {
             bail!(
                 "there is no {} here to grant anything to",
                 match kind {

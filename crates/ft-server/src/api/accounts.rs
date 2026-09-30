@@ -837,7 +837,7 @@ mod tests {
     use super::*;
     use crate::db::Db;
     async fn account(db: &Db, owner: &str, id: &str, label: &str) {
-        sqlx::query("INSERT INTO agent_accounts(id,user_id,kind,name,mode,credential_key,state,path) VALUES($1,$2,'ClaudeCode',$3,'Subscription',$1,'pending',('u.' || (SELECT slug FROM users WHERE id=$2) || '.' || $1)::ltree)")
+        sqlx::query("INSERT INTO agent_accounts(id,user_id,kind,name,mode,credential_key,state,path) VALUES($1,$2,'ClaudeCode',$3,'Subscription',$1,'pending',('u.' || (SELECT slug FROM principals WHERE id=$2) || '.' || $1)::ltree)")
             .bind(id).bind(owner).bind(label).execute(db.pool()).await.unwrap();
     }
     async fn session(db: &Db, owner: &str) -> SessionId {
@@ -996,7 +996,7 @@ mod tests {
              UPDATE agent_accounts a SET path = ('u.' || u.slug || '.' || \
                  trim(both '_' from regexp_replace(lower(a.name || '_' || a.id), \
                                                    '[^a-z0-9]+', '_', 'g')))::ltree \
-               FROM users u WHERE u.id = a.user_id;",
+               FROM principals u WHERE u.id = a.user_id;",
         )
         .execute(db.pool())
         .await

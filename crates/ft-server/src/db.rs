@@ -231,7 +231,7 @@ impl Db {
     /// built wherever a row is created, and a second round trip through another
     /// type to read one text column is not worth the coupling.
     pub async fn slug_of(&self, person: &str) -> Result<String> {
-        sqlx::query_scalar("SELECT slug FROM users WHERE id = $1")
+        sqlx::query_scalar("SELECT slug FROM principals WHERE id = $1")
             .bind(person)
             .fetch_optional(&self.pool)
             .await
@@ -1072,7 +1072,7 @@ impl Db {
         // sites from being rewritten to pass the same default. The failure is
         // the safe one: a move that does not happen leaves the workspace
         // private rather than shared.
-        let slug: String = sqlx::query_scalar("SELECT slug FROM users WHERE id = $1")
+        let slug: String = sqlx::query_scalar("SELECT slug FROM principals WHERE id = $1")
             .bind(owner)
             .fetch_optional(&mut *tx)
             .await?
@@ -1088,7 +1088,7 @@ impl Db {
 
         sqlx::query(
             "INSERT INTO workspaces
-               (id, user_id, host_id, repo, branch, base, size, share, name, created_at,
+               (id, created_by, host_id, repo, branch, base, size, share, name, created_at,
                 updated_at, path)
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $10, $11::ltree)",
         )
@@ -3646,9 +3646,9 @@ mod tests {
 
         let empty = WorkspaceId::new();
         sqlx::query(
-            "INSERT INTO workspaces (id, user_id, host_id, name, path)
+            "INSERT INTO workspaces (id, created_by, host_id, name, path)
              VALUES ($1, $2, $3, 'coming up',
-                     ('u.' || (SELECT slug FROM users WHERE id = $2) || '.coming_up')::ltree)",
+                     ('u.' || (SELECT slug FROM principals WHERE id = $2) || '.coming_up')::ltree)",
         )
         .bind(empty.as_str())
         .bind(&owner)
@@ -3731,7 +3731,7 @@ mod tests {
         sqlx::query(
             "INSERT INTO agent_accounts(id,user_id,kind,name,mode,credential_key,state,path)
              VALUES($1,$2,'ClaudeCode','Acme','Subscription',$1,'ready',
-                    ('u.' || (SELECT slug FROM users WHERE id = $2) || '.acme')::ltree)",
+                    ('u.' || (SELECT slug FROM principals WHERE id = $2) || '.acme')::ltree)",
         )
         .bind(&account)
         .bind(&owner)

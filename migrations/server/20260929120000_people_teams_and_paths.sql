@@ -48,27 +48,88 @@ create extension if not exists ltree with schema public;
 
 -- ── who ─────────────────────────────────────────────────────────────────
 
--- A person's own root, as a label a path can hold.
+-- Everything that can be granted access, and can still be named after it is
+-- gone.
 --
--- Not the username. Usernames are chosen by people and may yet become email
--- addresses, and `kevin@westlabs.com` is not a legal ltree label — the `@` and
--- the dots end it. A slug is derived once, kept stable, and renaming somebody
--- never rewrites a path.
-alter table users add column slug text;
+-- **One table for both kinds**, because a person and a team are the same thing
+-- to every part of this feature: a grant names one, an exception on a resource
+-- names one, and a path is built from one. `users` and `teams` hold what
+-- differs — a password, a membership list — and this holds what they share.
+--
+-- **A principal is never deleted.** Removing somebody deletes their `users`
+-- row, and the cascades take their sessions and memberships with it, but this
+-- row stays with `retired_at` set. Three things depend on that:
+--
+--   * `slug` is never reused. An exception written on somebody else's
+--     workspace — `{"u/kevin": "writer"}` — outlives Kevin entirely, and a new
+--     Kevin must not inherit it. The unique index below is what enforces that,
+--     and it only works because the row survives;
+--   * `created_by` can point here without being nullable. It used to reference
+--     `users` with `on delete set null`, so "who added this machine" evaporated
+--     the day they left. A resource always had a creator; the column should not
+--     be able to say otherwise;
+--   * `name` keeps what they were called, so a list can say "Kevin Piacentini
+--     (removed)" rather than a blank.
+--
+-- **`slug` lives here, not on `users`.** It is the label every path of theirs
+-- begins with and the key every ACL entry names, so it belongs to the identity
+-- rather than to the account.
+create table principals (
+    id          text primary key,
+    org_id      text not null references organizations(id) on delete cascade,
+    kind        text not null check (kind in ('user', 'team')),
+    -- Derived once from the name, immutable, never reused. Not the username:
+    -- usernames are chosen by people and may yet become email addresses, and
+    -- `kevin@westlabs.com` is not a legal ltree label — the `@` and the dots
+    -- end it.
+    slug        text not null,
+    -- What they are called, as of now or as of their removal.
+    name        text not null,
+    -- Null while they are here.
+    retired_at  timestamptz,
+    created_at  timestamptz not null default now()
+);
 
-update users set slug = trim(both '_' from regexp_replace(lower(username), '[^a-z0-9]+', '_', 'g'));
+insert into principals (id, org_id, kind, slug, name)
+select u.id, u.org_id, 'user',
+       trim(both '_' from regexp_replace(lower(u.username), '[^a-z0-9]+', '_', 'g')),
+       u.username
+  from users u;
+
+-- The one team every organisation gets. Its principal is written here, with the
+-- people, so that the dedup below covers it: somebody whose username slugs to
+-- `everyone` is unlikely but possible, and the index would otherwise refuse the
+-- team rather than number the person.
+insert into principals (id, org_id, kind, slug, name)
+select 't_' || substr(o.id, 3), o.id, 'team', 'everyone', 'Everyone'
+  from organizations o;
 
 -- Two people whose names slug the same get a number, deterministically by id.
-update users u set slug = u.slug || '_' || n.row
-  from (select id, row_number() over (partition by org_id, slug order by id) as row
-          from users) n
- where n.id = u.id and n.row > 1;
+-- Before the unique index, not after: `Ana Lopez` and `ana.lopez` both arrive as
+-- `ana_lopez`, so the index would refuse the second insert rather than let this
+-- separate them.
+update principals p set slug = p.slug || '_' || n.row
+  from (select id, row_number() over (partition by org_id, slug
+                                          order by kind desc, id) as row
+          from principals) n
+ where n.id = p.id and n.row > 1;
 
-alter table users alter column slug set not null;
-create unique index users_by_slug on users (org_id, slug);
+-- The invariant the whole design rests on: one slug, one principal, forever.
+create unique index principals_by_slug on principals (org_id, slug);
+
+-- So `users` and `teams` can carry `org_id` for their own unique indexes —
+-- `unique (org_id, username)` cannot be built across two tables — without the
+-- two ever being able to disagree. The database enforces the agreement rather
+-- than the code remembering to.
+create unique index principals_id_org on principals (id, org_id);
+
+alter table users add constraint users_are_principals
+    foreign key (id) references principals(id);
+alter table users add constraint users_org_matches_principal
+    foreign key (id, org_id) references principals (id, org_id);
 
 create table teams (
-    id          text primary key,
+    id          text primary key references principals(id),
     org_id      text not null references organizations(id) on delete cascade,
     name        text not null,
     -- Everybody in the organisation, without a row each.
@@ -79,8 +140,11 @@ create table teams (
     -- added to the organisation and not to this — a person who silently cannot
     -- see what everybody can see. Resolved instead, in the view below.
     everyone    boolean not null default false,
-    created_by  text references users(id) on delete set null,
-    created_at  timestamptz not null default now()
+    created_by  text references principals(id),
+    created_at  timestamptz not null default now(),
+    -- See `principals_id_org`: the copy of `org_id` above exists so the unique
+    -- index below can be built, and this stops it drifting.
+    foreign key (id, org_id) references principals (id, org_id)
 );
 
 -- Two teams called `Backend` and `backend` are a mistake being made, not a
@@ -103,29 +167,34 @@ create table directories (
     id          text primary key,
     org_id      text not null references organizations(id) on delete cascade,
     name        text not null,
-    -- What appears in a path. See the note on `users.slug`.
+    -- What appears in a path. Derived once, like a principal's — but reusable
+    -- once the directory is gone, because `delete_directory` refuses while
+    -- anything is filed here. Nothing can be pointing at `d/backend` at the
+    -- moment it dies, which is exactly what is not true of a person.
     slug        text not null,
-    created_by  text references users(id) on delete set null,
+    created_by  text references principals(id),
     created_at  timestamptz not null default now()
 );
 
 create unique index directories_by_name on directories (org_id, lower(name));
 create unique index directories_by_slug on directories (org_id, slug);
 
--- `subject_id` points at a user or a team depending on `subject_kind`, so it
--- cannot carry a foreign key. What keeps it honest is that deleting a user or a
--- team deletes its grants, in one place in the code, and a grant naming
--- somebody who has gone resolves to nothing in the view below rather than to
--- access.
+-- `subject_id` points at a user or a team — which is why it carries no foreign
+-- key in most designs. Here it can: both are principals, so one reference
+-- covers both, and the database checks what used to be checked by hand.
+--
+-- It does not cascade, because a principal is never deleted. Removing somebody
+-- deletes their grants explicitly; what this stops is a grant naming an id that
+-- was never anybody.
 create table grants (
     directory_id  text not null references directories(id) on delete cascade,
     subject_kind  text not null check (subject_kind in ('person', 'team')),
-    subject_id    text not null,
+    subject_id    text not null references principals(id),
     -- `viewer` may look, `writer` may work, `admin` may also change who else
     -- can. Ranked by `level_rank`, which is the only place the order is
     -- written down.
     level         text not null check (level in ('viewer', 'writer', 'admin')),
-    granted_by    text references users(id) on delete set null,
+    granted_by    text references principals(id),
     granted_at    timestamptz not null default now(),
     primary key (directory_id, subject_kind, subject_id)
 );
@@ -137,6 +206,12 @@ create function level_rank(level text) returns integer
     as $$ select case level when 'admin' then 3 when 'writer' then 2 when 'viewer' then 1 else 0 end $$;
 
 -- Every way a person reaches a directory, reduced to the best one.
+--
+-- **The join to `users` is what makes a principal's retirement bite.** A grant
+-- naming somebody who has been removed still exists — the row references a
+-- principal, which is never deleted — but they have no `users` row, so it
+-- resolves to nothing here rather than to access. Removing their grants on the
+-- way out is hygiene; this is the guarantee.
 --
 -- The single answer to "may they, and how much". Three routes in, and somebody
 -- can have all three at once — granted directly, and in two teams that were
@@ -178,14 +253,26 @@ group by reached.directory_id, reached.user_id;
 -- path they could drift from their parent is how a subscription ends up filed
 -- in one directory with its token still sitting in another.
 alter table workspaces     add column path ltree;
--- `created_by` is null on every row that already exists, and stays null. There
--- is no source for it: a machine was the organisation's, and nothing recorded
--- who added one. Screens read it as "unknown" rather than guessing at the first
--- administrator, which would put somebody's name on a decision they may not have
--- made.
-alter table hosts          add column path ltree, add column created_by text references users(id) on delete set null;
+
+-- `user_id` meant *owner* before a path did. Every read that asked it — the
+-- `WHERE user_id = $me` that used to be the whole of access control — now asks
+-- `filed_where` instead, so what is left is the record of who made it, spelled
+-- the way the other three kinds spell it. Three call sites, all of them writes
+-- or a join for a display name.
+alter table workspaces     rename column user_id to created_by;
+alter table workspaces     alter column created_by drop not null;
+alter table workspaces     drop constraint workspaces_user_id_fkey;
+alter table workspaces     add constraint workspaces_created_by_fkey
+    foreign key (created_by) references principals(id);
+-- **`created_by` is null only for rows that predate it.** It can never become
+-- null because somebody left — that is the whole reason it points at
+-- `principals`, which is never deleted. A machine that existed before this
+-- migration genuinely has no recorded creator: nothing wrote one down, and
+-- guessing at the first administrator would put a name on a decision they may
+-- not have made.
+alter table hosts          add column path ltree, add column created_by text references principals(id);
 alter table agent_accounts add column path ltree;
-alter table secrets        add column path ltree, add column created_by text references users(id) on delete set null;
+alter table secrets        add column path ltree, add column created_by text references principals(id);
 
 -- Not `repos`, deliberately. A repository is the organisation's and always has
 -- been: one row is one setup script and one mirror, and what actually opens it
@@ -212,13 +299,13 @@ update workspaces w
    set path = ('u.' || u.slug || '.' ||
                trim(both '_' from regexp_replace(lower(coalesce(nullif(w.name, ''), 'workspace')), '[^a-z0-9]+', '_', 'g')) ||
                '_' || substr(w.id, 3, 8))::ltree
-  from users u where u.id = w.user_id;
+  from principals u where u.id = w.created_by;
 
 update agent_accounts a
    set path = ('u.' || u.slug || '.' ||
                trim(both '_' from regexp_replace(lower(a.name), '[^a-z0-9]+', '_', 'g')) ||
                '_' || substr(a.id, 1, 8))::ltree
-  from users u where u.id = a.user_id;
+  from principals u where u.id = a.user_id;
 
 -- A machine added from now on is personal until it is shared. The ones that
 -- already exist are not: they belong to the organisation and everybody is
@@ -229,7 +316,8 @@ update hosts h
    set path = case
        when (select count(*) from users where org_id = h.org_id) > 1
          then ('d.shared.' || trim(both '_' from regexp_replace(lower(h.name), '[^a-z0-9]+', '_', 'g')))::ltree
-         else ('u.' || (select slug from users where org_id = h.org_id order by id limit 1)
+         else ('u.' || (select slug from principals
+                         where org_id = h.org_id and kind = 'user' order by id limit 1)
                || '.' || trim(both '_' from regexp_replace(lower(h.name), '[^a-z0-9]+', '_', 'g')))::ltree
    end;
 
@@ -238,7 +326,7 @@ update hosts h
 update secrets s
    set path = ('u.' || u.slug || '.' || s.scope || '.' ||
                trim(both '_' from regexp_replace(lower(s.name), '[^a-z0-9]+', '_', 'g')))::ltree
-  from users u
+  from principals u
  where u.id = s.owner and s.scope not in ('agent') and s.scope not like 'env:%';
 
 alter table workspaces     alter column path set not null;

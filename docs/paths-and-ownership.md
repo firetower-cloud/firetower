@@ -177,12 +177,19 @@ If you add a kind, add it there.
 
 ### Slugs
 
-`users.slug` and `directories.slug` are derived once and never change. Renaming
+`principals.slug` and `directories.slug` are derived once and never change. Renaming
 a person or a directory changes what people read; it must never rewrite a path,
 because rewriting one moves everything under it.
 
-That means slugs are also *reused* — delete `ana` and the next `ana` gets
-`u/ana`. Anything of theirs still filed there would become the new person's, so
+Principal slugs are additionally **never reused** — delete `ana` and the next
+one gets `ana_2`, because the retired row still holds the name. Directory slugs
+*are* reusable, and the reason is worth knowing before you change it: a
+directory can only be deleted while empty, so nothing can be pointing at
+`d/backend` at the moment it dies. **That exemption rests entirely on
+`delete_directory` requiring emptiness.** A force-delete or a cascade added
+later would break it silently.
+
+For anything still filed at a departed person's root: Anything of theirs still filed there would become the new person's, so
 `Accounts::delete_user` sweeps the root. Three outcomes, and a new Placed kind
 has to pick one:
 
@@ -223,11 +230,12 @@ the fleet.
 ## 5. The schema, in one place
 
 ```sql
-users (…, slug text not null)                   -- unique per org; never changes
-teams (id, org_id, name, everyone, created_by)
+principals (id, org_id, kind, slug, name, retired_at)   -- never deleted
+users (id → principals, org_id, username, …)
+teams (id → principals, org_id, name, everyone, created_by)
 team_members (team_id, user_id)
 directories (id, org_id, name, slug, created_by)
-grants (directory_id, subject_kind, subject_id, level, granted_by)
+grants (directory_id, subject_kind, subject_id → principals, level, granted_by)
 
 create view directory_access as …               -- the three routes in, max()
 
@@ -237,13 +245,24 @@ alter table agent_accounts add column path ltree not null;
 alter table secrets        add column path ltree,          created_by …;
 ```
 
-`grants.subject_id` names a user **or** a team depending on `subject_kind`, so
-it carries no foreign key. Two consequences you have to honour by hand:
+**A principal is never deleted.** Removing somebody deletes their `users` row —
+the cascades take their sessions and memberships — and sets `retired_at` on the
+principal. Three things rest on that:
 
-1. `Access::exists` checks the subject is real before writing a grant — without
-   it a typo becomes a grant to nobody, which looks exactly like one that works
-   until somebody cannot open something.
-2. Deleting a user or a team must delete its grants. The database will not.
+1. **A slug is never reissued.** An exception on somebody else's resource,
+   `{"u/ana": "writer"}`, outlives Ana entirely and nothing in the database can
+   reach into a JSON blob to clean it up. Sweeping those entries is hygiene; the
+   retired row is the guarantee.
+2. **`created_by` is never nulled by a departure.** It points at `principals`,
+   so "who added this machine" survives them. NULL means only that the row
+   predates the column.
+3. **`grants.subject_id` has a real foreign key**, because a user and a team are
+   both principals. What the database still cannot check is whether they have
+   *left* — that is `Access::exists`, and `directory_access` joining `users` is
+   what makes a departed person's grants resolve to nothing.
+
+Deleting a user or a team must still delete its grants: they do not cascade,
+because the principal they point at is never deleted.
 
 `directory_access` resolves the three routes — granted directly, in a team that
 was granted, in the team that is everybody — and takes `max`. That is why two

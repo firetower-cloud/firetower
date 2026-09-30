@@ -166,7 +166,7 @@ const WHERE_A_NEW_SECRET_LANDS: &str = "CASE \
      THEN (SELECT ('u.' || u.slug || '.' || \
                    trim(both '_' from regexp_replace(lower($1), '[^a-z0-9]+', '_', 'g')) || '.' || \
                    trim(both '_' from regexp_replace(lower($2), '[^a-z0-9]+', '_', 'g')))::ltree \
-             FROM users u WHERE u.id = $3) \
+             FROM principals u WHERE u.id = $3) \
    END";
 
 /// Postgres serialises appends to the log on this. A fixed number rather than a
