@@ -140,12 +140,15 @@ function Settings({ path }: { path: string }) {
   const at = paneAt(path);
   return (
     <div className="scroll-slim flex min-h-0 flex-1 flex-col overflow-y-auto pb-3">
+      {/* Where it goes, not where you are. The pane's own heading already says
+          which screen this is, and a button labelled with the place you are
+          standing is a button nobody can guess the effect of. */}
       <button
         onClick={() => navigate("/")}
-        className="flex shrink-0 items-center gap-2 px-3 py-2.5 text-left text-ui text-dim transition-colors hover:text-bone"
+        className="flex shrink-0 items-center gap-1.5 px-3 py-2.5 text-left text-ui text-dim transition-colors hover:text-bone"
       >
         <Icon of={ChevronLeft} size={14} />
-        <span className="min-w-0 flex-1 truncate font-medium text-bone">Configuration</span>
+        Back to Dashboard
       </button>
 
       {PANES.map((g) => (
