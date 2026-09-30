@@ -374,6 +374,17 @@ const server = createServer(async (req, res) => {
  */
 const EDITS = Number(process.env.FT_MOCK_EDITS ?? 0);
 
+/**
+ * What kind of item the edit is reported as.
+ *
+ * The refresh in `Chat.tsx` counts `FileChange` and `CommandExecution` only, and
+ * `classify` in `ft-core/src/normalise.rs` answers `McpToolCall` for anything
+ * whose name carries `mcp` *before* it asks whether the name is an edit — so a
+ * file written through an MCP server arrives as `McpToolCall` and that refresh
+ * never sees it. `FT_MOCK_EDITS_KIND=McpToolCall` is that case.
+ */
+const EDIT_KIND = process.env.FT_MOCK_EDITS_KIND ?? "FileChange";
+
 server.on("upgrade", (req, socket) => {
   const key = req.headers["sec-websocket-key"];
   const accept = createHash("sha1").update(`${key}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`).digest("base64");
@@ -394,7 +405,7 @@ server.on("upgrade", (req, socket) => {
       t: "line",
       id: "s_1",
       events: [
-        { lineNo: 100 + n * 2, type: "ItemStarted", item: `edit_${n}`, kind: "FileChange", title: "changed", task: null },
+        { lineNo: 100 + n * 2, type: "ItemStarted", item: `edit_${n}`, kind: EDIT_KIND, title: "changed", task: null },
         { lineNo: 101 + n * 2, type: "ItemCompleted", item: `edit_${n}`, status: "Completed" },
       ],
     });

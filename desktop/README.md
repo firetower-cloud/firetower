@@ -119,6 +119,9 @@ these probes measure it rather than argue about it:
   when each poll answered, and which polls came back byte-identical to the
   one before. `TAB=file` runs it with a file open instead of the
   conversation, which is where the refresh in `Chat.tsx` stops happening.
+  `FT_MOCK_EDITS_KIND=McpToolCall` reports the same edit the way a file
+  written through an MCP server arrives, which that refresh does not count —
+  the poll is what finds those, so it is not redundant.
 
 Measure against `pnpm preview`, not `pnpm dev`: the development build's
 `jsxDEV` and prop validation are most of its render cost and none of the
