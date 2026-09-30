@@ -548,11 +548,7 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
       </div>
 
       {sharing && (
-        <Sharing
-          workspaceId={place.id}
-          path={place.runs[0]?.path ?? ""}
-          onClose={() => setSharing(false)}
-        />
+        <Sharing workspaceId={place.id} onClose={() => setSharing(false)} />
       )}
 
       {tabMenu.open && <ContextMenu at={tabMenu.open.at} items={tabItems(tabMenu.open.on)} onClose={tabMenu.close} />}

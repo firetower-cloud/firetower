@@ -78,3 +78,30 @@ export function where(path: string | null | undefined, me: Whoever): string {
   if (root === "u") return label === me?.slug ? "yours" : `u/${label}`;
   return `d/${label}`;
 }
+
+/**
+ * A name, as an `ltree` label — what `d/<this>` will be.
+ *
+ * **Must agree with `ft_core::slug`.** The server derives it from the same name
+ * a moment later, and a field previewing a different answer is worse than one
+ * previewing nothing: somebody reads `d/ledger-work`, gets `d/ledger_work`, and
+ * has no reason to trust the next thing the screen tells them.
+ *
+ * Labels are `[A-Za-z0-9_-]`, so every run of anything else becomes one `_`.
+ * `Ledger  Work!` and `ledger work` are the same label, which is exactly why
+ * two directories can collide on names that look different.
+ */
+export function pathSlug(text: string): string {
+  let out = "";
+  let gap = false;
+  for (const ch of text) {
+    if (/[a-zA-Z0-9]/.test(ch)) {
+      if (gap && out) out += "_";
+      gap = false;
+      out += ch.toLowerCase();
+    } else {
+      gap = true;
+    }
+  }
+  return out || "untitled";
+}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { destinations, mayMove, where } from "@/src/filing";
+import { destinations, mayMove, pathSlug, where } from "@/src/filing";
 
 const me = { slug: "kevin", role: "member" };
 const admin = { slug: "root", role: "admin" };
@@ -81,5 +81,23 @@ describe("what a chip says", () => {
     expect(where("u/ana/thing", me)).toBe("u/ana");
     expect(where("d/backend/thing", me)).toBe("d/backend");
     expect(where(null, me)).toBe("");
+  });
+});
+
+describe("the label a name becomes", () => {
+  /** These are the cases `ft_core::slug` is written for; if it changes, this
+   *  fails, which is the point. */
+  it("agrees with the server", () => {
+    expect(pathSlug("Ledger work")).toBe("ledger_work");
+    expect(pathSlug("Ledger  Work!")).toBe("ledger_work");
+    expect(pathSlug("ledger-work")).toBe("ledger_work");
+    expect(pathSlug("Q4 launch")).toBe("q4_launch");
+    expect(pathSlug("kevin@westlabs.com")).toBe("kevin_westlabs_com");
+    expect(pathSlug("  trimmed  ")).toBe("trimmed");
+  });
+
+  it("never gives back nothing", () => {
+    expect(pathSlug("")).toBe("untitled");
+    expect(pathSlug("!!!")).toBe("untitled");
   });
 });
