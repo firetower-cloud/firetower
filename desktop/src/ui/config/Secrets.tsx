@@ -15,6 +15,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Eye, EyeOff, Plus, Trash2 } from "lucide-react";
 import { Icon } from "~/components/ui";
 import { getListSecretsQueryKey, useListSecrets, useRemoveSecret, useReplaceSecret, useRevealSecret } from "~/api/generated/secrets/secrets";
+import type { HeldSecret } from "~/api/generated/model";
 import { Section } from "~/ui/config/bits";
 import { WhoCanAccess } from "~/ui/Sharing";
 
@@ -31,9 +32,9 @@ export function Secrets() {
   const [value, setValue] = useState("");
   const refresh = () => cache.invalidateQueries({ queryKey: getListSecretsQueryKey() });
 
-  const held =
-    (data as { held?: { scope: string; name: string; mine: boolean; path?: string | null }[] } | undefined)
-      ?.held ?? [];
+  // The generated type, not a hand-written copy of it: this was spelled out
+  // here and so did not learn about `id` when the server grew one.
+  const held = (data as { held?: HeldSecret[] } | undefined)?.held ?? [];
 
   return (
     <Section
@@ -58,13 +59,17 @@ export function Secrets() {
       )}
 
       {held.map((s) => (
-        <Row key={`${s.scope}/${s.name}`} scope={s.scope} name={s.name} mine={s.mine} path={s.path} onGone={refresh} />
+        <Row key={s.id} id={s.id} scope={s.scope} name={s.name} mine={s.mine} path={s.path} onGone={refresh} />
       ))}
     </Section>
   );
 }
 
-function Row({ scope, name, mine, path, onGone }: { scope: string; name: string; mine: boolean; path?: string | null; onGone: () => void }) {
+/* `id` is `scope/name/owner`, which is the whole key. Scope and name alone are
+   not unique — two people each authorizing GitHub as themselves is the point —
+   so they are what the row *says* and `id` is what addresses it, here and as
+   the React key. */
+function Row({ id, scope, name, mine, path, onGone }: { id: string; scope: string; name: string; mine: boolean; path?: string | null; onGone: () => void }) {
   const confirm = useConfirm();
   const reveal = useRevealSecret();
   const remove = useRemoveSecret();
@@ -91,7 +96,7 @@ function Row({ scope, name, mine, path, onGone }: { scope: string; name: string;
           are *attached* — they belong to an account or a repository and move when
           it moves — so they arrive here with no path and the chip draws
           nothing. Sharing the account is what sharing one of those means. */}
-      <WhoCanAccess look="chip" kind="secret" id={`${scope}/${name}`} path={path} />
+      <WhoCanAccess look="chip" kind="secret" id={id} path={path} />
       {editing !== null ? (
         <>
           <input autoFocus value={editing} onChange={(e) => setEditing(e.target.value)} type="password" onKeyDown={(e) => { if (e.key === "Enter" && editing) replace.mutate({ scope, name, data: { value: editing } }, { onSuccess: () => setEditing(null) }); if (e.key === "Escape") setEditing(null); }} placeholder="new value" className="w-48 rounded-md border border-line bg-ground px-2 py-1 font-mono text-micro text-bone focus:outline-none" />

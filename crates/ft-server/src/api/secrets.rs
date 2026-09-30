@@ -23,6 +23,16 @@ use utoipa::ToSchema;
 #[derive(Debug, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct HeldSecret {
+    /// `scope/name/owner`, which is how everything else addresses it.
+    ///
+    /// A secret has no id column: it is keyed by all three, because two people
+    /// each authorizing GitHub as themselves is the point. So a screen that
+    /// wants to file one or say who can reach it has to name the owner too —
+    /// `scope/name` names a *set* of rows, and addressing it that way let
+    /// somebody be named on everybody's at once.
+    ///
+    /// A handle, not a label. `mine` is what the screen says.
+    pub id: String,
     pub scope: String,
     pub name: String,
     /// Yours rather than somebody else's or the install's. What the screen
@@ -108,6 +118,7 @@ pub(super) async fn list_secrets(
             .into_iter()
             .map(|held| HeldSecret {
                 path: held.path.as_ref().map(|p| p.as_str().to_string()),
+                id: format!("{}/{}/{}", held.scope, held.name, held.owner),
                 scope: held.scope,
                 name: held.name,
                 // So the screen can say "yours" rather than showing an

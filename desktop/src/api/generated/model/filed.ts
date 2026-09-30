@@ -23,7 +23,8 @@ export interface Filed {
   detail?: string | null;
   /**
      * What identifies it. A secret has no id of its own — it is keyed by
-     * scope, name and owner — so for one of those this is `scope/name`, and
+     * scope, name and owner — so for one of those this is `scope/name/owner`,
+     * and
      * the owner is whoever is asking. See `Access::place`.
      */
   id: string;

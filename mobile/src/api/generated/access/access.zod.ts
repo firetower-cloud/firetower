@@ -185,7 +185,7 @@ export const ListItemsParams = zod.object({
 
 export const ListItemsResponseItem = zod.object({
   "detail": zod.string().nullish().describe('The second line: the repository, the agent, the scope.'),
-  "id": zod.string().describe('What identifies it. A secret has no id of its own — it is keyed by\nscope, name and owner — so for one of those this is `scope/name`, and\nthe owner is whoever is asking. See `Access::place`.'),
+  "id": zod.string().describe('What identifies it. A secret has no id of its own — it is keyed by\nscope, name and owner — so for one of those this is `scope/name/owner`,\nand\nthe owner is whoever is asking. See `Access::place`.'),
   "kind": zod.enum(['workspace', 'machine', 'agentAccount', 'secret']),
   "name": zod.string(),
   "ownerName": zod.string().nullish().describe('Whose it is. Absent for a machine, which is the organisation\'s.'),

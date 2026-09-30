@@ -8187,7 +8187,7 @@
           },
           "id": {
             "type": "string",
-            "description": "What identifies it. A secret has no id of its own — it is keyed by\nscope, name and owner — so for one of those this is `scope/name`, and\nthe owner is whoever is asking. See `Access::place`."
+            "description": "What identifies it. A secret has no id of its own — it is keyed by\nscope, name and owner — so for one of those this is `scope/name/owner`,\nand\nthe owner is whoever is asking. See `Access::place`."
           },
           "kind": {
             "$ref": "#/components/schemas/FiledKind"
@@ -8310,11 +8310,16 @@
         "type": "object",
         "description": "A credential Firetower holds. Its name, and nothing else.",
         "required": [
+          "id",
           "scope",
           "name",
           "mine"
         ],
         "properties": {
+          "id": {
+            "type": "string",
+            "description": "`scope/name/owner`, which is how everything else addresses it.\n\nA secret has no id column: it is keyed by all three, because two people\neach authorizing GitHub as themselves is the point. So a screen that\nwants to file one or say who can reach it has to name the owner too —\n`scope/name` names a *set* of rows, and addressing it that way let\nsomebody be named on everybody's at once.\n\nA handle, not a label. `mine` is what the screen says."
+          },
           "mine": {
             "type": "boolean",
             "description": "Yours rather than somebody else's or the install's. What the screen\nsays, so it never has to show an account id."

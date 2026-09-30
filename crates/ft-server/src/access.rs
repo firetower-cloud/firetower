@@ -186,7 +186,8 @@ pub struct Filed {
     /// Where it is filed — and so who can reach it.
     pub path: ResourcePath,
     /// What identifies it. A secret has no id of its own — it is keyed by
-    /// scope, name and owner — so for one of those this is `scope/name`, and
+    /// scope, name and owner — so for one of those this is `scope/name/owner`,
+    /// and
     /// the owner is whoever is asking. See `Access::place`.
     pub id: String,
     pub name: String,
@@ -762,7 +763,8 @@ impl Access {
                FROM agent_accounts a LEFT JOIN principals u ON u.id = a.user_id
               WHERE a.path <@ $1::ltree
              UNION ALL
-             SELECT 'secret', s.scope || '/' || s.name, s.path::text, s.name, s.scope,
+             SELECT 'secret', s.scope || '/' || s.name || '/' || s.owner,
+                    s.path::text, s.name, s.scope,
                     u.name
                FROM secrets s LEFT JOIN principals u ON u.id = s.created_by
               WHERE s.path <@ $1::ltree
@@ -810,12 +812,16 @@ impl Access {
         let table = Self::table(kind);
         let found: Option<String> = match kind {
             FiledKind::Secret => {
-                let (scope, name) = split_secret(id)?;
-                sqlx::query_scalar("SELECT path::text FROM secrets WHERE scope = $1 AND name = $2")
-                    .bind(scope)
-                    .bind(name)
-                    .fetch_optional(&self.pool)
-                    .await?
+                let (scope, name, owner) = split_secret(id)?;
+                sqlx::query_scalar(
+                    "SELECT path::text FROM secrets
+                      WHERE scope = $1 AND name = $2 AND owner = $3",
+                )
+                .bind(scope)
+                .bind(name)
+                .bind(owner)
+                .fetch_optional(&self.pool)
+                .await?
             }
             _ => {
                 sqlx::query_scalar(&format!("SELECT path::text FROM {table} WHERE id = $1"))
@@ -1019,14 +1025,17 @@ impl Access {
 
         match kind {
             FiledKind::Secret => {
-                let (scope, name) = split_secret(id)?;
-                let owner: String =
-                    sqlx::query_scalar("SELECT owner FROM secrets WHERE scope = $1 AND name = $2")
-                        .bind(scope)
-                        .bind(name)
-                        .fetch_optional(&self.pool)
-                        .await?
-                        .context("no secret here to hand over")?;
+                let (scope, name, addressed) = split_secret(id)?;
+                let owner: String = sqlx::query_scalar(
+                    "SELECT owner FROM secrets
+                      WHERE scope = $1 AND name = $2 AND owner = $3",
+                )
+                .bind(scope)
+                .bind(name)
+                .bind(addressed)
+                .fetch_optional(&self.pool)
+                .await?
+                .context("no secret here to hand over")?;
 
                 if owner != holder {
                     vault
@@ -1126,12 +1135,16 @@ impl Access {
         let table = Self::table(kind);
         let row: Option<serde_json::Value> = match kind {
             FiledKind::Secret => {
-                let (scope, name) = split_secret(id)?;
-                sqlx::query_scalar("SELECT extra_perms FROM secrets WHERE scope = $1 AND name = $2")
-                    .bind(scope)
-                    .bind(name)
-                    .fetch_optional(&self.pool)
-                    .await?
+                let (scope, name, owner) = split_secret(id)?;
+                sqlx::query_scalar(
+                    "SELECT extra_perms FROM secrets
+                      WHERE scope = $1 AND name = $2 AND owner = $3",
+                )
+                .bind(scope)
+                .bind(name)
+                .bind(owner)
+                .fetch_optional(&self.pool)
+                .await?
             }
             _ => {
                 sqlx::query_scalar(&format!("SELECT extra_perms FROM {table} WHERE id = $1"))
@@ -1229,14 +1242,16 @@ impl Access {
 
         let done = match kind {
             FiledKind::Secret => {
-                let (scope, name) = split_secret(id)?;
+                let (scope, name, owner) = split_secret(id)?;
                 sqlx::query(&format!(
-                    "UPDATE secrets SET {set} WHERE scope = $3 AND name = $4"
+                    "UPDATE secrets SET {set}
+                      WHERE scope = $3 AND name = $4 AND owner = $5"
                 ))
                 .bind(key)
                 .bind(level)
                 .bind(scope)
                 .bind(name)
+                .bind(owner)
                 .execute(&self.pool)
                 .await?
             }
@@ -1467,9 +1482,28 @@ impl Access {
 /// Split once from the left: a scope never contains a slash and a name may —
 /// `env:r_01.../DATABASE_URL` is one of ours — so splitting from the right
 /// would cut the name in half.
-fn split_secret(id: &str) -> Result<(&str, &str)> {
-    id.split_once('/')
-        .ok_or_else(|| anyhow::anyhow!("{id} does not name a secret"))
+/// `scope/name/owner` — the whole of what identifies a secret.
+///
+/// **The owner is not optional.** `secrets` is keyed `(scope, name, owner)`
+/// precisely so that two people can each authorize GitHub as themselves, so a
+/// `scope/name` names *a set of rows*, not a row. It was addressed that way,
+/// and the consequence was not a wrong answer but a dangerous one: naming
+/// somebody on `global/GITHUB_TOKEN` updated every row with that scope and
+/// name, then failed the "exactly one row" check *after* the write and with no
+/// transaction to undo it — so the caller saw "no secret here" and the person
+/// they named silently gained everybody's.
+///
+/// The owner is a user id, a directory id, or empty for the install's own —
+/// none of which may contain a `/`, so the last segment is the owner and
+/// whatever precedes it splits once into scope and name.
+fn split_secret(id: &str) -> Result<(&str, &str, &str)> {
+    let (head, owner) = id
+        .rsplit_once('/')
+        .ok_or_else(|| anyhow::anyhow!("{id} does not name a secret"))?;
+    let (scope, name) = head
+        .split_once('/')
+        .ok_or_else(|| anyhow::anyhow!("{id} does not name a secret"))?;
+    Ok((scope, name, owner))
 }
 
 /// A name somebody typed, trimmed, or a sentence saying why not.
@@ -2006,7 +2040,7 @@ mod tests {
         access
             .set_exception(
                 FiledKind::Secret,
-                "global/STRIPE_KEY",
+                &format!("global/STRIPE_KEY/{bob}"),
                 lisa.as_str(),
                 Level::Viewer,
             )
@@ -2032,7 +2066,11 @@ mod tests {
         );
 
         access
-            .remove_exception(FiledKind::Secret, "global/STRIPE_KEY", lisa.as_str())
+            .remove_exception(
+                FiledKind::Secret,
+                &format!("global/STRIPE_KEY/{bob}"),
+                lisa.as_str(),
+            )
             .await
             .unwrap();
         assert!(vault
@@ -2040,6 +2078,54 @@ mod tests {
             .await
             .unwrap()
             .is_empty());
+    }
+
+    /// Two people each authorizing GitHub as themselves is the point of the
+    /// owner being half the key — so naming somebody on one must not name them
+    /// on the other.
+    ///
+    /// It did. `scope/name` matched both rows, the `UPDATE` wrote to both, and
+    /// the "exactly one row" check fired afterwards with nothing to roll it
+    /// back: the caller was told "no secret here" while the person they named
+    /// quietly gained everybody's.
+    #[tokio::test]
+    async fn naming_somebody_on_one_secret_does_not_name_them_on_a_namesake() {
+        let (db, access, accounts, org, _admin) = set_up().await;
+        let bob = person(&accounts, &org, "bob").await;
+        let ana = person(&accounts, &org, "ana").await;
+        let lisa = person(&accounts, &org, "lisa").await;
+        let vault = vault(&db);
+
+        for who in [&bob, &ana] {
+            vault
+                .put(Key::of("global", "GITHUB_TOKEN", who.as_str()), "t", "a test")
+                .await
+                .unwrap();
+        }
+
+        access
+            .set_exception(
+                FiledKind::Secret,
+                &format!("global/GITHUB_TOKEN/{bob}"),
+                lisa.as_str(),
+                Level::Viewer,
+            )
+            .await
+            .unwrap();
+
+        let seen = vault.names_for(lisa.as_str(), Level::Viewer).await.unwrap();
+        assert_eq!(seen.len(), 1, "bob's, and not ana's");
+        assert_eq!(seen[0].owner, bob.as_str());
+
+        assert_eq!(
+            access
+                .exceptions_on(FiledKind::Secret, &format!("global/GITHUB_TOKEN/{ana}"))
+                .await
+                .unwrap()
+                .len(),
+            0,
+            "ana's namesake is untouched"
+        );
     }
 
     /// `admin` is not spellable as an exception: administration belongs to the
