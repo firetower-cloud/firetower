@@ -80,13 +80,18 @@ export function useTasks(ask: ListTasksParams, enabled = true): Tasks {
   const q = useListTasks(ask, { query: { enabled } });
   const page = q.data as Page | undefined;
   return {
-    /* Nothing, once the request stops working. React Query keeps the last good
-       answer beside a failed one, which is right for a flaky network and wrong
-       for a revoked key: a shared Linear key filed back out of a directory left
-       everybody who had reached through it still reading the tasks it fetched,
-       with the refusal arriving quietly alongside. Access that has been taken
-       away has to look like it. */
-    data: q.error ? [] : (page?.tasks ?? []),
+    /* Nothing, unless this question is one we are currently allowed to ask.
+       React Query hands back the last good answer for a query that is failing
+       *and* for one that has been switched off, and a revoked key produces the
+       second: the tracker stops reporting itself as connected, so the screen
+       disables the query, so it never errors, so the cache answers as if
+       nothing had happened. A shared Linear key filed back out of a directory
+       left everybody who had reached through it reading the tasks it had
+       fetched, under a panel telling them Linear was not connected.
+
+       Right for a flaky network, wrong for access that has been taken away:
+       that has to look like it has been taken away. */
+    data: enabled && !q.error ? (page?.tasks ?? []) : [],
     // `isPending` stays true for a query that was never allowed to run, which
     // would leave "Reading your trackers…" on screen for a tracker nobody has
     // connected yet.
