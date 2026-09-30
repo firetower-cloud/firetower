@@ -463,6 +463,14 @@ pub struct ClientId {
 /// and again on the connect-a-repository screen at the moment somebody wants
 /// the thing it enables. Stored rather than configured, so it takes effect
 /// without a restart.
+///
+/// **The application is the installation's, so changing it is an
+/// administrator's.** The id itself is public — a device-flow application has
+/// no paired secret — and it is shared by everybody here by construction,
+/// which is the point: one application, and each person's own token under it.
+/// That is also why this was worth closing. Anyone at all could point the
+/// whole installation at an application they controlled, and the next person
+/// to connect would authorize it.
 #[utoipa::path(
     post, path = "/api/v1/providers/{id}/client-id", tag = "providers",
     params(("id" = String, Path, description = "Provider id")),
@@ -470,14 +478,24 @@ pub struct ClientId {
     responses(
         (status = 204, description = "Stored"),
         (status = 400, body = ApiError),
+        (status = 403, body = ApiError),
         (status = 404, body = ApiError),
     ),
 )]
 pub(super) async fn set_client_id(
     State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
     Path(id): Path<String>,
     Json(request): Json<ClientId>,
 ) -> ApiResult<axum::http::StatusCode> {
+    if let Some(me) = principal.user.as_ref() {
+        if me.role != "admin" {
+            return Err(ApiError::new(
+                ErrorCode::Forbidden,
+                "the application this Firetower authorizes against is an administrator's to set",
+            ));
+        }
+    }
     let provider = providers::find(&id).ok_or_else(|| ApiError::not_found("provider"))?;
 
     let value = request.client_id.trim();

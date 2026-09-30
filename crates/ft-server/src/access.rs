@@ -1068,26 +1068,36 @@ impl Access {
                 .await?;
             }
             FiledKind::AgentAccount => {
-                let held: Option<(String, String)> = sqlx::query_as(
-                    "SELECT credential_key, user_id FROM agent_accounts WHERE id = $1",
+                // The credential's owner is read from the row that has it, and
+                // never from `agent_accounts.user_id`.
+                //
+                // `user_id` is who connected the subscription, which stops being
+                // who holds its credential the first time one is filed. Taking
+                // an account *back* then compared `user_id` with itself, found
+                // them equal, and quietly moved nothing — so the account came
+                // home and its key stayed with the directory, where its owner
+                // could no longer see it and no later move could find it either.
+                let credential: String = sqlx::query_scalar(
+                    "SELECT credential_key FROM agent_accounts WHERE id = $1",
                 )
                 .bind(id)
                 .fetch_optional(&self.pool)
+                .await?
+                .context("no agent account here")?;
+
+                let owner: Option<String> = sqlx::query_scalar(
+                    "SELECT owner FROM secrets WHERE scope = $1 AND name = $2",
+                )
+                .bind(crate::vault::AGENT)
+                .bind(&credential)
+                .fetch_optional(&self.pool)
                 .await?;
-                let (credential, owner) = held.context("no agent account here")?;
 
                 // The credential follows the subscription. It is attached, not
                 // filed: it has no path, and this is the only thing that ever
-                // moves it.
-                if owner != holder
-                    && vault
-                        .holds(crate::vault::Key::of(
-                            crate::vault::AGENT,
-                            &credential,
-                            &owner,
-                        ))
-                        .await?
-                {
+                // moves it. Nothing stored yet is nothing to move — a first
+                // `connect` writes it under whoever holds the account then.
+                if let Some(owner) = owner.filter(|o| o != &holder) {
                     vault
                         .hand_over(
                             crate::vault::Key::of(crate::vault::AGENT, &credential, &owner),
@@ -2225,6 +2235,129 @@ mod tests {
             untouched.as_str().starts_with("u/"),
             "and still in her own space, not dragged along: {}",
             untouched.as_str()
+        );
+    }
+
+    /// A subscription taken back brings its credential home.
+    ///
+    /// It did not: the move compared `agent_accounts.user_id` with where the
+    /// account was going, and on the way back those are the same person — so it
+    /// moved nothing, and the key stayed sealed to the directory while the
+    /// account sat in its owner's space. They could no longer see it, and the
+    /// next move could not find it either.
+    #[tokio::test]
+    async fn taking_a_subscription_back_brings_its_credential_with_it() {
+        let (db, access, accounts, org, admin) = set_up().await;
+        let vault = vault(&db);
+        let shelf = access
+            .create_directory(&org, "Shelf", &admin, &[])
+            .await
+            .unwrap();
+
+        let id = "acct_for_the_take_back";
+        sqlx::query(
+            "INSERT INTO agent_accounts(id,user_id,kind,name,mode,credential_key,state,path) \
+             VALUES($1,$2,'ClaudeCode','Mine','Subscription',$1,'pending', \
+                    ('u.' || (SELECT slug FROM principals WHERE id=$2) || '.mine')::ltree)",
+        )
+        .bind(id)
+        .bind(admin.as_str())
+        .execute(db.pool())
+        .await
+        .unwrap();
+        let key = id.to_string();
+        vault
+            .put(Key::of(crate::vault::AGENT, &key, admin.as_str()), "t", "a test")
+            .await
+            .unwrap();
+
+        let owner_now = || async {
+            sqlx::query_scalar::<_, String>(
+                "SELECT owner FROM secrets WHERE scope = $1 AND name = $2",
+            )
+            .bind(crate::vault::AGENT)
+            .bind(&key)
+            .fetch_one(db.pool())
+            .await
+            .unwrap()
+        };
+
+        let there =
+            ft_core::path::ResourcePath::from_stored(format!("d.{}.mine", shelf.slug));
+        access
+            .transfer(&vault, FiledKind::AgentAccount, id, &there, "admin")
+            .await
+            .unwrap();
+        assert_eq!(owner_now().await, shelf.id.as_str(), "filed: the directory holds it");
+
+        let home = ft_core::path::ResourcePath::from_stored("u.admin.mine".to_string());
+        access
+            .transfer(&vault, FiledKind::AgentAccount, id, &home, "admin")
+            .await
+            .unwrap();
+        assert_eq!(owner_now().await, admin.as_str(), "taken back: so is the key");
+    }
+
+    /// One API key a team shares: filed into a directory, it answers for
+    /// everybody the directory lets in, and for nobody else.
+    ///
+    /// This is what `Vault::owner_for` is for, and what the tracker reads now
+    /// ask instead of assuming the key is the asker's. A Linear workspace key
+    /// belongs to the workspace; five people pasting the same string is not an
+    /// arrangement a product should require.
+    #[tokio::test]
+    async fn a_filed_api_key_answers_for_the_directory() {
+        let (db, access, accounts, org, admin) = set_up().await;
+        let ana = person(&accounts, &org, "ana").await;
+        let bob = person(&accounts, &org, "bob").await;
+        let vault = vault(&db);
+
+        vault
+            .put(Key::of(crate::vault::TRACKER, "linear", ana.as_str()), "lin_key", "a test")
+            .await
+            .unwrap();
+
+        let resolve = |who: String| {
+            let vault = &vault;
+            async move {
+                vault
+                    .owner_for(crate::vault::TRACKER, "linear", &who, Level::Viewer)
+                    .await
+                    .unwrap()
+            }
+        };
+
+        assert_eq!(resolve(ana.to_string()).await.as_deref(), Some(ana.as_str()));
+        assert!(resolve(bob.to_string()).await.is_none(), "not while it is ana's alone");
+
+        let team = access.create_directory(&org, "Team", &admin, &[]).await.unwrap();
+        access
+            .set_grant(team.id.as_str(), SubjectKind::Person, bob.as_str(), Level::Viewer, &admin)
+            .await
+            .unwrap();
+        let there =
+            ft_core::path::ResourcePath::from_stored(format!("d.{}.tracker.linear", team.slug));
+        access
+            .transfer(
+                &vault,
+                FiledKind::Secret,
+                &format!("tracker/linear/{ana}"),
+                &there,
+                "ana",
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            resolve(bob.to_string()).await.as_deref(),
+            Some(team.id.as_str()),
+            "filed where he works, so it answers for him"
+        );
+
+        let cleo = person(&accounts, &org, "cleo").await;
+        assert!(
+            resolve(cleo.to_string()).await.is_none(),
+            "and for nobody the directory does not let in"
         );
     }
 

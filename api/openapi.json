@@ -1776,7 +1776,7 @@
           "providers"
         ],
         "summary": "Register an application to authorize against.",
-        "description": "Asked twice on purpose: once in the setup wizard, where it is skippable,\nand again on the connect-a-repository screen at the moment somebody wants\nthe thing it enables. Stored rather than configured, so it takes effect\nwithout a restart.",
+        "description": "Asked twice on purpose: once in the setup wizard, where it is skippable,\nand again on the connect-a-repository screen at the moment somebody wants\nthe thing it enables. Stored rather than configured, so it takes effect\nwithout a restart.\n\n**The application is the installation's, so changing it is an\nadministrator's.** The id itself is public — a device-flow application has\nno paired secret — and it is shared by everybody here by construction,\nwhich is the point: one application, and each person's own token under it.\nThat is also why this was worth closing. Anyone at all could point the\nwhole installation at an application they controlled, and the next person\nto connect would authorize it.",
         "operationId": "set_client_id",
         "parameters": [
           {
@@ -1804,6 +1804,16 @@
             "description": "Stored"
           },
           "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
             "description": "",
             "content": {
               "application/json": {
@@ -10921,9 +10931,23 @@
           "label": {
             "type": "string"
           },
+          "path": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Where that key is filed, and so who else it answers for. Set only\nalongside `secret`: the two describe the same shareable thing."
+          },
           "scopeKind": {
             "$ref": "#/components/schemas/ScopeKind",
             "description": "Whether the scope picker offers repositories or teams."
+          },
+          "secret": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The key that answers for this person, as the vault addresses it —\n`scope/name/owner`. Absent when nothing is held.\n\nA handle, so a screen can ask who can reach it and offer to file it\nsomewhere. It is the *resolved* one: their own if they have connected\none, otherwise whatever a directory they work in holds."
           }
         }
       },

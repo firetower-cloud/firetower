@@ -2062,10 +2062,16 @@ async fn tracked(state: &AppState, session: &Session) -> Option<ft_proto::Tracke
 async fn read_task(state: &AppState, session: &Session, url: &str) -> anyhow::Result<tasks::Task> {
     let tracker =
         crate::trackers::for_url(url).ok_or_else(|| anyhow::anyhow!("nothing tracks {url}"))?;
+    // Whose key, resolved rather than assumed: a team that shares one Linear
+    // workspace key files it into a directory, and a session started by anybody
+    // there has to find it. See `tasks::whose`.
+    let holder = super::tasks::whose(state, tracker, session.owner.as_str())
+        .await
+        .map_err(|e| anyhow::anyhow!("{e:?}"))?;
     let credential = state
         .vault
         .get(
-            Key::of(tracker.vault_scope(), tracker.id, session.owner.as_str()),
+            Key::of(tracker.vault_scope(), tracker.id, &holder),
             "reading the issue a session was started from",
         )
         .await?

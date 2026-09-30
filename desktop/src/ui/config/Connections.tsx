@@ -34,6 +34,7 @@ import { useProviders, useTrackers } from "~/data";
 import { why } from "~/data";
 import { openExternal } from "~/open";
 import { DeviceCode, Rows, Section, sleep } from "~/ui/config/bits";
+import { WhoCanAccess } from "~/ui/Sharing";
 import { useConfirm } from "~/ui/Confirm";
 
 export function Connections({ live }: { live: boolean }) {
@@ -204,6 +205,12 @@ function Tracker({ t, live }: { t: TrackerStatus; live: boolean }) {
       {t.connected ? (
         <>
           <span className="flex items-center gap-1.5 text-meta text-sage"><Icon of={Check} size={12} />connected</span>
+          {/* An API key is frequently the organisation's — one Linear workspace
+              key a team shares, rather than five people pasting the same
+              string. A git host's is not: its token pushes commits, and a
+              commit has to be attributable to a person, so the server hands
+              back no handle for one and nothing is drawn here. */}
+          {t.secret && <WhoCanAccess look="chip" kind="secret" id={t.secret} path={t.path} />}
           {t.auth === "apiKey" && <button disabled={!live} onClick={() => disconnect.mutate({ id: t.id }, { onSuccess: refresh })} className="control text-mute hover:text-brick"><Icon of={Unlink} size={12} /></button>}
         </>
       ) : t.auth === "gitProvider" ? (
