@@ -9,7 +9,7 @@
  * name, since which server you are on is the question a multi-server client has
  * to answer on every screen.
  */
-import { BookOpen, CircleDashed, CircleFadingArrowUp, LayoutList, ListTodo, Plus, Settings2 } from "lucide-react";
+import { BookOpen, ChevronLeft, CircleDashed, CircleFadingArrowUp, LayoutList, ListTodo, Plus, Settings2 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { AgentMark } from "~/components/AgentMark";
 import { Blocks } from "~/island/Blocks";
@@ -20,6 +20,7 @@ import type { Backend } from "~/fleet";
 import { useSessions, useUpdatesDot } from "~/data";
 import { navigate, usePathname } from "~/shims/next-navigation";
 import { useStart } from "~/start";
+import { PANES, paneAt } from "~/ui/config/panes";
 import { useNow } from "~/ui/clock";
 import { useQueryClient } from "@tanstack/react-query";
 import { getListSessionsQueryKey, renameSession } from "~/api/generated/sessions/sessions";
@@ -39,6 +40,7 @@ const NAV: { href: string; label: string; icon: LucideIcon }[] = [
 
 export function Rail({ backend }: { backend: Backend }) {
   const path = usePathname();
+  const inConfig = path.startsWith("/configuration");
   const start = useStart();
   const { data: sessions, loading, error } = useSessions();
   const updates = useUpdatesDot();
@@ -52,16 +54,21 @@ export function Rail({ backend }: { backend: Backend }) {
 
   return (
     <aside className="flex w-[16rem] shrink-0 flex-col overflow-hidden border-r border-line bg-(--color-panel-vibrant)">
-      <nav className="flex shrink-0 flex-col gap-0.5 px-2 pt-2">
-        {NAV.map((n) => (
-          <NavLink
-            key={n.href}
-            {...n}
-            on={n.href === "/" ? path === "/" || path.startsWith("/sessions") : path.startsWith(n.href)}
-          />
-        ))}
-      </nav>
+      {inConfig ? (
+        <Settings path={path} />
+      ) : (
+        <nav className="flex shrink-0 flex-col gap-0.5 px-2 pt-2">
+          {NAV.map((n) => (
+            <NavLink
+              key={n.href}
+              {...n}
+              on={n.href === "/" ? path === "/" || path.startsWith("/sessions") : path.startsWith(n.href)}
+            />
+          ))}
+        </nav>
+      )}
 
+      {!inConfig && (
       <div className="mt-4 flex min-h-0 flex-1 flex-col">
         <div className="flex shrink-0 items-center gap-2 px-4 pb-1">
           <span className="eyebrow">Workspaces</span>
@@ -101,12 +108,15 @@ export function Rail({ backend }: { backend: Backend }) {
           ))}
         </div>
       </div>
+      )}
 
-      <div className="shrink-0 border-t border-line px-2 py-1.5">
-        <NavLink href="/configuration" label="Configuration" icon={Settings2} on={path.startsWith("/configuration")} />
-        <NavLink href="/updates" label="Updates" icon={CircleFadingArrowUp} on={path.startsWith("/updates")} dot={updates} />
-        {import.meta.env.DEV && <NavLink href="/style" label="Style guide" icon={BookOpen} on={path.startsWith("/style")} />}
-      </div>
+      {!inConfig && (
+        <div className="shrink-0 border-t border-line px-2 py-1.5">
+          <NavLink href="/configuration" label="Configuration" icon={Settings2} on={false} />
+          <NavLink href="/updates" label="Updates" icon={CircleFadingArrowUp} on={path.startsWith("/updates")} dot={updates} />
+          {import.meta.env.DEV && <NavLink href="/style" label="Style guide" icon={BookOpen} on={path.startsWith("/style")} />}
+        </div>
+      )}
 
       {/* Who you are *here*. Two servers means two accounts, so this is not
           furniture — it answers whose credentials a session would use. */}
@@ -115,6 +125,46 @@ export function Rail({ backend }: { backend: Backend }) {
         <div className="truncate text-meta text-mute">{backend.org}</div>
       </button>
     </aside>
+  );
+}
+
+/**
+ * The rail, while you are in configuration.
+ *
+ * It *replaces* the workspaces rather than standing beside them. Two rails at
+ * once was a busy screen where one of them was always irrelevant — nobody
+ * reading "who is in Ledger work" is also picking a session to open — and the
+ * way back is one button at the top rather than a column you have to keep.
+ */
+function Settings({ path }: { path: string }) {
+  const at = paneAt(path);
+  return (
+    <div className="scroll-slim flex min-h-0 flex-1 flex-col overflow-y-auto pb-3">
+      <button
+        onClick={() => navigate("/")}
+        className="flex shrink-0 items-center gap-2 px-3 py-2.5 text-left text-ui text-dim transition-colors hover:text-bone"
+      >
+        <Icon of={ChevronLeft} size={14} />
+        <span className="min-w-0 flex-1 truncate font-medium text-bone">Configuration</span>
+      </button>
+
+      {PANES.map((g) => (
+        <div key={g.group} className="mt-3.5 px-2 first:mt-1">
+          <p className="px-2.5 pb-1 text-micro tracking-[0.09em] text-mute uppercase">{g.group}</p>
+          {g.items.map((i) => (
+            <button
+              key={i.at}
+              onClick={() => navigate(`/configuration/${i.at}`)}
+              className={`block w-full rounded-md px-2.5 py-1.5 text-left text-ui transition-colors ${
+                i.at === at ? "bg-raise text-bone" : "text-dim hover:bg-raise/60 hover:text-text"
+              }`}
+            >
+              {i.label}
+            </button>
+          ))}
+        </div>
+      ))}
+    </div>
   );
 }
 

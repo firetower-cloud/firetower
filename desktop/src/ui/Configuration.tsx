@@ -2,10 +2,10 @@
  * Everything you set up once, as an index and one pane at a time.
  *
  * **One page became too many things.** It was five sections on one scroll —
- * fine at five, and this is now nine with People, Teams and Directories to
- * come. The index is what makes that survivable: the group heading carries the
- * meaning, so `Directories` sits under **Access** beside People and Teams and
- * needs no sentence explaining what it is.
+ * fine at five, and this is nine now. The index that makes it survivable lives
+ * in the rail (`ui/config/panes.ts`), because configuration *replaces* the
+ * workspaces rather than standing a second column beside them: two rails side
+ * by side was a busy screen where one of them was always irrelevant.
  *
  * **A pane at a time is also a pane's worth of requests.** The old page asked
  * for machines, repositories, providers, trackers, agents, accounts and secrets
@@ -21,7 +21,8 @@ import { Unplug } from "lucide-react";
 import { useBackendKey, dropCache } from "~/backend";
 import { dropFleet, type Backend } from "~/fleet";
 import { forget } from "~/servers";
-import { navigate, usePathname } from "~/shims/next-navigation";
+import { usePathname } from "~/shims/next-navigation";
+import { paneAt } from "~/ui/config/panes";
 import { Section } from "~/ui/config/bits";
 import { Machines } from "~/ui/config/Machines";
 import { Repos } from "~/ui/config/Repos";
@@ -33,74 +34,13 @@ import { Teams } from "~/ui/config/Teams";
 import { Directories } from "~/ui/config/Directories";
 import { useConfirm } from "~/ui/Confirm";
 
-/**
- * The index, and the only place the order is decided.
- *
- * Grouped by what a thing *is*, not by what it produces. An earlier draft put
- * Integrations and Repositories under "Sources", which reads as a promise that
- * both feed the same pipe — and Linear yields no repositories. Services divide
- * badly by output: GitHub gives code *and* work, a tracker gives only work, and
- * the next git host will give only code.
- */
-const INDEX: { group: string; items: { at: string; label: string }[] }[] = [
-  {
-    group: "Setup",
-    items: [
-      { at: "integrations", label: "Integrations" },
-      { at: "repositories", label: "Repositories" },
-    ],
-  },
-  {
-    group: "Compute",
-    items: [
-      { at: "machines", label: "Machines" },
-      { at: "agents", label: "Agents" },
-    ],
-  },
-  {
-    group: "Access",
-    items: [
-      { at: "people", label: "People" },
-      { at: "teams", label: "Teams" },
-      { at: "directories", label: "Directories" },
-    ],
-  },
-  { group: "Credentials", items: [{ at: "vault", label: "Vault" }] },
-  { group: "Server", items: [{ at: "server", label: "This Firetower" }] },
-];
-
-const FIRST = "integrations";
-
 export function Configuration({ backend, onForgot }: { backend: Backend; onForgot: () => void }) {
   const path = usePathname();
-  const at = path.split("/").filter(Boolean)[1] ?? FIRST;
-  const known = INDEX.some((g) => g.items.some((i) => i.at === at)) ? at : FIRST;
 
   return (
-    <div className="flex h-full min-h-0">
-      <nav className="scroll-slim w-[13.5rem] shrink-0 overflow-y-auto border-r border-line bg-panel/40 px-2.5 py-4">
-        {INDEX.map((g) => (
-          <div key={g.group} className="mt-5 first:mt-0">
-            <p className="px-2.5 pb-1.5 text-micro tracking-[0.09em] text-mute uppercase">{g.group}</p>
-            {g.items.map((i) => (
-              <button
-                key={i.at}
-                onClick={() => navigate(`/configuration/${i.at}`)}
-                className={`block w-full rounded-md px-2.5 py-1.5 text-left text-ui transition-colors ${
-                  i.at === known ? "bg-overlay text-bone" : "text-dim hover:bg-raise hover:text-text"
-                }`}
-              >
-                {i.label}
-              </button>
-            ))}
-          </div>
-        ))}
-      </nav>
-
-      <div className="scroll-slim min-w-0 flex-1 overflow-y-auto">
-        <div className="mx-auto max-w-[48rem] px-6 py-6 pb-16">
-          <Pane at={known} backend={backend} onForgot={onForgot} />
-        </div>
+    <div className="scroll-slim h-full overflow-y-auto">
+      <div className="mx-auto max-w-[48rem] px-6 py-6 pb-16">
+        <Pane at={paneAt(path)} backend={backend} onForgot={onForgot} />
       </div>
     </div>
   );
