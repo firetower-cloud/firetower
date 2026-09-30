@@ -231,6 +231,55 @@ const conversation = () => ({
               ],
 });
 
+/**
+ * A diff the size of a real day's work, for looking at what the inspector
+ * costs to draw.
+ *
+ * `FT_MOCK_DIFF=<files>x<lines>` — so `FT_MOCK_DIFF=12x900` is twelve files of
+ * nine hundred changed lines each. Off unless asked for, because every other
+ * scene here wants the empty sheet.
+ */
+const BIG = (() => {
+  const asked = process.env.FT_MOCK_DIFF;
+  if (!asked) return null;
+  const [files, lines] = asked.split("x").map(Number);
+  return { files: files || 12, lines: lines || 900 };
+})();
+
+/* An agent that is still working changes the diff under the poll, which is the
+   state the app was reported slow in. `FT_MOCK_DIFF_CHURN=1` moves one line
+   every answer, so no two responses are equal. */
+let churn = 0;
+
+const bigDiff = () => {
+  if (!BIG) return [];
+  if (process.env.FT_MOCK_DIFF_CHURN) churn++;
+  const out = [];
+  for (let f = 0; f < BIG.files; f++) {
+    const path = `web/src/auth/module-${String(f).padStart(2, "0")}.ts`;
+    const body = [`diff --git a/${path} b/${path}`, `index 1111111..2222222 100644`, `--- a/${path}`, `+++ b/${path}`];
+    let added = 0;
+    let removed = 0;
+    // Hunks of forty, the way a rewrite of a file actually prints.
+    for (let h = 0; h * 40 < BIG.lines; h++) {
+      const at = h * 44 + 1;
+      body.push(`@@ -${at},42 +${at},42 @@ export function signingKey(id: string) {`);
+      for (let i = 0; i < 40 && h * 40 + i < BIG.lines; i++) {
+        const n = h * 40 + i;
+        if (n % 5 === 0) {
+          body.push(`-  const legacy = keyring.lookup(id, { generation: ${n} });`);
+          removed++;
+        }
+        body.push(`+  const key = await keyring.current(id, { generation: ${n + churn}, rotateAfter: 30 });`);
+        added++;
+        body.push(`   return sign(payload, key, { alg: "EdDSA", kid: id, line: ${n} });`);
+      }
+    }
+    out.push({ path, patch: `${body.join("\n")}\n`, added, removed });
+  }
+  return out;
+};
+
 const json = (res, body, status = 200) => {
   res.writeHead(status, {
     "content-type": "application/json",
@@ -289,7 +338,7 @@ const server = createServer(async (req, res) => {
     "/api/v1/sessions/s_1": session(),
     "/api/v1/sessions/w_1": session(),
     "/api/v1/sessions/s_1/work": work(),
-    "/api/v1/sessions/s_1/diff": [],
+    "/api/v1/sessions/s_1/diff": bigDiff(),
     "/api/v1/sessions/s_1/files": [],
     "/api/v1/sessions/s_1/conversation": conversation(),
     "/api/v1/sessions/s_1/controls": [],
