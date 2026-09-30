@@ -221,7 +221,7 @@ has to pick one:
 | | |
 | --- | --- |
 | **Cascades** | Workspaces, agent accounts — rows with `user_id` and a foreign key. Deleted with the person, *including ones filed in a directory*: a session is an agent run under somebody, and its conversation, the subscription it spent and the git identity on its commits do not outlive the account. |
-| **Moves** | Machines. Compute is real and the organisation is still running on it, so they go to `d/shared` — twice, because the unique index would refuse a name collision and a delete that dies on one is a person nobody can remove. |
+| **Moves** | Machines, to `d/shared` — twice, because the unique index would refuse a name collision and a delete that dies on one is a person nobody can remove. Compute is real and somebody is still running on it, so a person leaving hands their machines to the organisation rather than taking them away. |
 | **Goes** | Their secrets. Nothing else can open one, and a token nobody can rotate is worse than no token. |
 
 Only the first is the database's; the other two are `delete_user` doing by hand
@@ -310,9 +310,14 @@ Nothing anybody notices, which is the requirement.
 
 - Every person gets a slug from their username, deduplicated with a number.
 - Workspaces and agent accounts go to whoever made them: `u/<them>/…`.
-- Machines are the exception, because they were already shared. An installation
-  with **more than one person** keeps them in `d/shared/…`; with **one person**
-  there is nobody to take them from and they become theirs.
+- Machines go to the administrator who set the installation up — the earliest
+  one. Nothing recorded who added them, and a machine is personal until somebody
+  shares it. They were reachable by everybody before this, so on an install
+  where several people shared a fleet, nobody else can start work on it until it
+  is filed into `Shared` — which the migration has already created and granted
+  to everyone, so that is one move on one screen. The trade is a worse first
+  minute after an upgrade against never silently publishing a machine somebody
+  added with their own key.
 - A secret somebody authorized is theirs. Attached ones — `agent`, `env:`, the
   install's own — get no path.
 - `hosts.created_by` stays null on rows that already exist. Nothing recorded who

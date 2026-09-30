@@ -307,19 +307,32 @@ update agent_accounts a
                '_' || substr(a.id, 1, 8))::ltree
   from principals u where u.id = a.user_id;
 
--- A machine added from now on is personal until it is shared. The ones that
--- already exist are not: they belong to the organisation and everybody is
--- running on them, so an install with more than one person keeps them shared.
--- With a single person there is nobody to take them from, and they become
--- theirs.
+-- A machine is personal until somebody shares it, and that includes the ones
+-- that already exist.
+--
+-- Nothing recorded who added them, so they go to the administrator who set the
+-- installation up — the earliest one, which on every install that has not been
+-- through a handover is the person who ran it the first time. Not `d.shared`:
+-- the whole point of a default is that it is the safe one, and "every machine
+-- in the fleet is reachable by everybody" is not a decision anybody here made.
+-- Somebody who wants the old arrangement files them into `Shared`, which the
+-- lines above have already created and granted to everyone, and that is one
+-- move on one screen.
+--
+-- The cost, stated plainly: on an installation where several people were
+-- already working on a shared fleet, they stop being able to start anything on
+-- it until the administrator shares it back. That is a worse first minute after
+-- an upgrade, in exchange for never silently publishing a machine somebody
+-- added with their own key.
 update hosts h
-   set path = case
-       when (select count(*) from users where org_id = h.org_id) > 1
-         then ('d.shared.' || trim(both '_' from regexp_replace(lower(h.name), '[^a-z0-9]+', '_', 'g')))::ltree
-         else ('u.' || (select slug from principals
-                         where org_id = h.org_id and kind = 'user' order by id limit 1)
-               || '.' || trim(both '_' from regexp_replace(lower(h.name), '[^a-z0-9]+', '_', 'g')))::ltree
-   end;
+   set path = ('u.' || coalesce(
+                   (select p.slug from principals p join users u on u.id = p.id
+                     where p.org_id = h.org_id and p.kind = 'user' and u.role = 'admin'
+                     order by p.id limit 1),
+                   (select p.slug from principals p
+                     where p.org_id = h.org_id and p.kind = 'user'
+                     order by p.id limit 1))
+               || '.' || trim(both '_' from regexp_replace(lower(h.name), '[^a-z0-9]+', '_', 'g')))::ltree;
 
 -- A secret somebody authorized is theirs. One an agent account or a repository
 -- owns is attached and gets none, and neither does the install's own.
