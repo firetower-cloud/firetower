@@ -113,6 +113,12 @@ these probes measure it rather than argue about it:
   window.
 - `stalls` / `profile` — the same run, attributed: `long-animation-frame`
   entries by script, and a CPU profile by self time.
+- `when` — the poll against the socket, on one clock. Needs
+  `FT_MOCK_EDITS=<ms>`, which makes the mock report a `FileChange` on the
+  conversation stream that often; it prints when each edit was announced,
+  when each poll answered, and which polls came back byte-identical to the
+  one before. `TAB=file` runs it with a file open instead of the
+  conversation, which is where the refresh in `Chat.tsx` stops happening.
 
 Measure against `pnpm preview`, not `pnpm dev`: the development build's
 `jsxDEV` and prop validation are most of its render cost and none of the

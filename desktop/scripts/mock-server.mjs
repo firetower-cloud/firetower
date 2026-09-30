@@ -366,6 +366,14 @@ const server = createServer(async (req, res) => {
  * refused, so refusing it would put a reconnect loop behind every screenshot.
  * Completing the handshake and sending nothing is what "quiet" looks like.
  */
+/**
+ * How often the mock agent reports having edited a file, in milliseconds.
+ *
+ * `FT_MOCK_EDITS=3000` is an agent writing a file every three seconds. Off by
+ * default: every other scene here wants the quiet socket.
+ */
+const EDITS = Number(process.env.FT_MOCK_EDITS ?? 0);
+
 server.on("upgrade", (req, socket) => {
   const key = req.headers["sec-websocket-key"];
   const accept = createHash("sha1").update(`${key}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`).digest("base64");
@@ -374,6 +382,45 @@ server.on("upgrade", (req, socket) => {
   );
   socket.on("data", () => {});
   socket.on("error", () => {});
+
+  if (!EDITS) return;
+  /* An agent editing a file, on the stream, the way a real one reports it —
+     so what the diff poll is for can be compared against what the socket
+     already knows. See `FT_MOCK_EDITS` above. */
+  let n = 0;
+  const every = setInterval(() => {
+    n++;
+    push(socket, {
+      t: "line",
+      id: "s_1",
+      events: [
+        { lineNo: 100 + n * 2, type: "ItemStarted", item: `edit_${n}`, kind: "FileChange", title: "changed", task: null },
+        { lineNo: 101 + n * 2, type: "ItemCompleted", item: `edit_${n}`, status: "Completed" },
+      ],
+    });
+  }, EDITS);
+  socket.on("close", () => clearInterval(every));
+  socket.on("error", () => clearInterval(every));
 });
+
+/** One text frame, server to client — unmasked, which is the server's half. */
+function push(socket, frame) {
+  const body = Buffer.from(JSON.stringify(frame));
+  let head;
+  if (body.length < 126) {
+    head = Buffer.from([0x81, body.length]);
+  } else if (body.length < 65536) {
+    head = Buffer.alloc(4);
+    head[0] = 0x81;
+    head[1] = 126;
+    head.writeUInt16BE(body.length, 2);
+  } else {
+    head = Buffer.alloc(10);
+    head[0] = 0x81;
+    head[1] = 127;
+    head.writeBigUInt64BE(BigInt(body.length), 2);
+  }
+  socket.write(Buffer.concat([head, body]));
+}
 
 server.listen(PORT, () => console.log(`mock control plane on http://localhost:${PORT}`));
