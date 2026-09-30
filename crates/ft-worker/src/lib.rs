@@ -2490,8 +2490,18 @@ You are in the directory that holds them, not inside one of them.              P
                 })?)
             }
 
-            ft_proto::Action::Diff { checkout, since } => {
+            ft_proto::Action::Diff {
+                checkout,
+                since,
+                names_only,
+            } => {
                 let (dest, base) = self.checkout_diff_refs(session_id, &checkout).await?;
+                if names_only {
+                    // JSON, because there is no unified diff to send and the
+                    // caller would have nothing to split.
+                    let files = self.git.changed_since(&dest, &base, since).await?;
+                    return Ok(serde_json::to_string(&files)?);
+                }
                 self.git.diff_since(&dest, &base, since).await
             }
 

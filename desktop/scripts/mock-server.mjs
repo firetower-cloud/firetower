@@ -251,7 +251,10 @@ const BIG = (() => {
    every answer, so no two responses are equal. */
 let churn = 0;
 
-const bigDiff = () => {
+/** What `ft_core::MOST_OF_A_PATCH` cuts a single file's patch to. */
+const MOST_OF_A_PATCH = 256 * 1024;
+
+const bigDiff = (namesOnly = false) => {
   if (!BIG) return [];
   if (process.env.FT_MOCK_DIFF_CHURN) churn++;
   const out = [];
@@ -275,7 +278,21 @@ const bigDiff = () => {
         body.push(`   return sign(payload, key, { alg: "EdDSA", kid: id, line: ${n} });`);
       }
     }
-    out.push({ path, patch: `${body.join("\n")}\n`, added, removed });
+    // `namesOnly` is what the file tree asks for: the counts and whether the
+    // file is new, and not one byte of hunk. Everything else is cut the way
+    // the control plane cuts it, on a line boundary, so the client's own
+    // "there is more of this" state is reachable here.
+    const whole = `${body.join("\n")}\n`;
+    const cut = whole.length > MOST_OF_A_PATCH;
+    const patch = cut ? whole.slice(0, whole.lastIndexOf("\n", MOST_OF_A_PATCH) + 1) : whole;
+    out.push({
+      path,
+      patch: namesOnly ? "" : patch,
+      added,
+      removed,
+      fresh: f % 2 === 1,
+      truncated: namesOnly ? false : cut,
+    });
   }
   return out;
 };
@@ -338,8 +355,8 @@ const server = createServer(async (req, res) => {
     "/api/v1/sessions/s_1": session(),
     "/api/v1/sessions/w_1": session(),
     "/api/v1/sessions/s_1/work": work(),
-    "/api/v1/sessions/s_1/diff": bigDiff(),
-    "/api/v1/sessions/s_1/files": [],
+    "/api/v1/sessions/s_1/diff": bigDiff(url.searchParams.get("namesOnly") === "true"),
+    "/api/v1/sessions/s_1/files": BIG ? listing(url.searchParams.get("path") ?? "") : [],
     "/api/v1/sessions/s_1/conversation": conversation(),
     "/api/v1/sessions/s_1/controls": [],
     "/api/v1/sessions/s_1/account": { account: ACCOUNTS[0], limits: [], switches: [] },
@@ -413,6 +430,25 @@ server.on("upgrade", (req, socket) => {
   socket.on("close", () => clearInterval(every));
   socket.on("error", () => clearInterval(every));
 });
+
+/**
+ * The workspace tree the generated diff implies, one directory at a time.
+ *
+ * `bigDiff` writes into `web/src/auth`, so this answers `web`, `web/src`,
+ * `web/src/auth` and nothing else — which is all the tree asks for.
+ */
+function listing(path) {
+  if (!BIG) return [];
+  const dirs = { "": "web", web: "src", "web/src": "auth" };
+  if (path in dirs) return [{ name: dirs[path], directory: true, link: false, bytes: 0 }];
+  if (path !== "web/src/auth") return [];
+  return bigDiff(true).map((f) => ({
+    name: f.path.split("/").pop(),
+    directory: false,
+    link: false,
+    bytes: 1024,
+  }));
+}
 
 /** One text frame, server to client — unmasked, which is the server's half. */
 function push(socket, frame) {

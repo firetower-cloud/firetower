@@ -44,19 +44,6 @@ export function addedLines(patch: string): Set<number> {
 }
 
 /**
- * Whether the patch creates the file rather than changing one that was there.
- *
- * Only the header can say so, and the header is everything above the first
- * hunk — so the search stops there. Run over the whole patch it was reading a
- * megabyte per file to answer a question about its first five lines, and the
- * sheet asks it of every file on every poll.
- */
-export const isNew = (patch: string) => {
-  const hunks = patch.indexOf("\n@@");
-  return /^new file mode/m.test(hunks === -1 ? patch : patch.slice(0, hunks));
-};
-
-/**
  * The lines the patch removed, keyed by the line in the new file they sat
  * before — so a file can show what was there, in place, the way the diff
  * does. Lines removed at the very end key to one past the last line.

@@ -91,7 +91,10 @@ it lets go. Paths the agent writes in the conversation open the same way
 `scripts/mock-server.mjs` answers with an empty diff unless `FT_MOCK_DIFF` asks
 for one: `FT_MOCK_DIFF=8x6000` is eight files of six thousand changed lines, and
 `FT_MOCK_DIFF_CHURN=1` moves a line every answer, which is what an agent that is
-still working does to the poll. That is the state issue #198 was reported in, and
+still working does to the poll. The mock answers `?namesOnly=true` the way the
+control plane does — counts and `fresh`, no hunks — and cuts any one patch to
+`MOST_OF_A_PATCH`, so both halves of what the server now does are reachable
+without a worker. That is the state issue #198 was reported in, and
 these probes measure it rather than argue about it:
 
     FT_MOCK_DIFF=8x6000 FT_MOCK_DIFF_CHURN=1 node scripts/mock-server.mjs 4471 &

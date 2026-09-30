@@ -3647,6 +3647,15 @@
             "schema": {
               "$ref": "#/components/schemas/DiffSince"
             }
+          },
+          {
+            "name": "namesOnly",
+            "in": "query",
+            "description": "Which files changed and by how much, with no hunks — for marking a tree rather than drawing a diff. Orders of magnitude smaller, and the worker never builds the patch.",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
           }
         ],
         "responses": {
@@ -8235,9 +8244,13 @@
             "format": "int32",
             "minimum": 0
           },
+          "fresh": {
+            "type": "boolean",
+            "description": "Whether the file was created rather than changed.\n\nSaid here rather than left to be read back out of the patch, because a\nnames-only answer has no patch to read it out of — and because every\nclient was running the same regex over a megabyte of text to learn one\nbit that the header already knew."
+          },
           "patch": {
             "type": "string",
-            "description": "The hunks, as git printed them."
+            "description": "The hunks, as git printed them. Empty when only the names were asked\nfor, and cut short when [`FileDiff::truncated`] is set."
           },
           "path": {
             "type": "string"
@@ -8246,6 +8259,10 @@
             "type": "integer",
             "format": "int32",
             "minimum": 0
+          },
+          "truncated": {
+            "type": "boolean",
+            "description": "Set when the patch was cut for being too long — never merely because\nthe caller asked for names and got no patch at all.\n\n`added` and `removed` still count the whole file, because they are what\nthe sheet totals and a total that quietly stopped at a cut is a wrong\nnumber rather than a missing one."
           }
         }
       },

@@ -17,7 +17,7 @@ import type { FileEntry, Session } from "~/api/generated/model";
 import { sendTurn } from "~/api/generated/sessions/sessions";
 import { asMessage } from "~/api/notes";
 import { useDiff } from "~/data";
-import { fromPatch, isNew } from "~/patch";
+import { fromPatch } from "~/patch";
 import { why } from "~/data";
 import { Ship } from "~/ui/Ship";
 import { FileGlyph } from "~/ui/FileGlyph";
@@ -61,16 +61,18 @@ export function Inspector({
   const shown: TabId = tab === "ship" && !mayAct ? "diff" : tab;
 
   const diff = useDiff(session);
-  const pending = useDiff(session, "Head");
+  /* Names only: the tree marks each file added or modified and reads nothing
+     else, and this was pulling every byte of every patch to do it. */
+  const pending = useDiff(session, "Head", true);
   /* The patch is carried, not read. Turning one into rows costs about what it
      is long, and only the open file's rows are drawn — so `Hunks` does it for
      that one file and nothing does it for the other forty. */
   const files: Changed[] = useMemo(
-    () => diff.data.map((d) => ({ path: d.path, at: d.at, added: d.added, removed: d.removed, patch: d.patch, fresh: isNew(d.patch) })),
+    () => diff.data.map((d) => ({ path: d.path, at: d.at, added: d.added, removed: d.removed, patch: d.patch, fresh: d.fresh, truncated: d.truncated })),
     [diff.data],
   );
   /* The tree marks what is not committed yet — the editor's sense of "changed". */
-  const changed = useMemo(() => new Map(pending.data.map((d) => [d.at, isNew(d.patch)])), [pending.data]);
+  const changed = useMemo(() => new Map(pending.data.map((d) => [d.at, d.fresh === true])), [pending.data]);
   /* The pane that scrolls. The diff draws only the rows in it, so the list
      inside has to be able to ask where it has got to. */
   const scroller = useRef<HTMLDivElement>(null);
@@ -106,7 +108,7 @@ export function Inspector({
 /* ── Diff ──────────────────────────────────────────────────────────────── */
 
 /** `path` as the server names it (what the ship flow sends back); `at` where the file sits in the workspace tree. */
-export type Changed = { path: string; at: string; added: number; removed: number; patch: string; fresh?: boolean };
+export type Changed = { path: string; at: string; added: number; removed: number; patch: string; fresh?: boolean; truncated?: boolean };
 
 /** A note being written against one line of one file. */
 type Note = { id: string; path: string; quote: string; text: string };
@@ -166,6 +168,9 @@ function DiffList({
               <Hunks
                 path={d.path}
                 patch={d.patch}
+                truncated={d.truncated === true}
+                at={d.at}
+                onOpenFile={onOpenFile}
                 scroller={scroller}
                 note={note?.path === d.path ? note : null}
                 onNote={setNote}
@@ -211,6 +216,9 @@ const OVERSCAN = 24;
 function Hunks({
   path,
   patch,
+  truncated,
+  at,
+  onOpenFile,
   scroller,
   note,
   onNote,
@@ -220,6 +228,10 @@ function Hunks({
 }: {
   path: string;
   patch: string;
+  /** The server cut this one for length; what is here is the start of it. */
+  truncated: boolean;
+  at: string;
+  onOpenFile: (p: string, keep?: boolean) => void;
   scroller: React.RefObject<HTMLDivElement | null>;
   note: Note | null;
   onNote: (n: Note | null) => void;
@@ -269,22 +281,23 @@ function Hunks({
   }, [scroller, lines.length]);
 
   return (
-    <div
-      ref={box}
-      onMouseOver={(e) => {
-        const row = (e.target as HTMLElement).closest<HTMLElement>("[data-row]");
-        setHover(row ? Number(row.dataset.row) : null);
-      }}
-      onMouseLeave={() => setHover(null)}
-      /* `contain-layout` so that measuring something else on the page — the
-         composer sizing itself to its text on every keystroke — cannot be made
-         to lay these rows out again. */
-      className="scroll-slim contain-layout overflow-x-auto border-y border-line-soft bg-ground/50 font-mono text-code"
-    >
+    <>
+      <div
+        ref={box}
+        onMouseOver={(e) => {
+          const row = (e.target as HTMLElement).closest<HTMLElement>("[data-row]");
+          setHover(row ? Number(row.dataset.row) : null);
+        }}
+        onMouseLeave={() => setHover(null)}
+        /* `contain-layout` so that measuring something else on the page — the
+           composer sizing itself to its text on every keystroke — cannot be
+           made to lay these rows out again. */
+        className="scroll-slim contain-layout overflow-x-auto border-y border-line-soft bg-ground/50 font-mono text-code"
+      >
       <div style={{ minWidth: `calc(${widest}ch + 3.5rem)` }}>
         <div style={{ height: from * ROW }} aria-hidden />
-        {lines.slice(from, to).map(([kind, text], at) => {
-          const i = from + at;
+        {lines.slice(from, to).map(([kind, text], nth) => {
+          const i = from + nth;
           const id = `${path}:${i}`;
           return (
             <div key={i}>
@@ -316,7 +329,24 @@ function Hunks({
         })}
         <div style={{ height: Math.max(0, lines.length - to) * ROW }} aria-hidden />
       </div>
-    </div>
+      </div>
+
+      {/* Said at the foot, where the patch stops, rather than as a banner at
+          the top: what is above is real and worth reading, and the only thing
+          wrong with it is that it is not all of it.
+
+          Outside the scrolling box on purpose — inside, it would be as wide as
+          the widest line of code and the way out of it would be somewhere off
+          to the right. */}
+      {truncated && (
+        <div className="flex items-center gap-2 border-b border-line-soft bg-panel px-3 py-2.5">
+          <span className="min-w-0 flex-1 text-meta text-mute">Too much changed here to draw it all.</span>
+          <button onClick={() => onOpenFile(at, true)} className="control shrink-0 text-ui text-dim hover:bg-raise hover:text-bone">
+            Open the file
+          </button>
+        </div>
+      )}
+    </>
   );
 }
 

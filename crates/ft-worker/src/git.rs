@@ -9,6 +9,7 @@ use crate::askpass::Askpass;
 use anyhow::{bail, Context, Result};
 use ft_core::WorkSummary;
 use ft_proto::{Credential, ProbeFailure, RemoteInfo};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use tokio::process::Command;
 
@@ -695,6 +696,107 @@ impl GitRoot {
         Ok(format!("{out}{untracked}"))
     }
 
+    /// Which files changed and by how much, without asking git for the hunks.
+    ///
+    /// The file tree marks each file added or modified and reads nothing else,
+    /// and it was being handed every byte of every patch on an eight-second
+    /// poll to do it. `--numstat` and `--name-status` answer the same question
+    /// in about a thousandth of the bytes, and git never has to build the diff.
+    ///
+    /// `-z` on both, because the names are about to be used as paths: without
+    /// it git escapes anything outside ASCII and the escaped name is not a file
+    /// that exists.
+    pub async fn changed_since(
+        &self,
+        dest: &Path,
+        base: &str,
+        since: ft_core::DiffSince,
+    ) -> Result<Vec<ft_core::FileDiff>> {
+        let from = match since {
+            ft_core::DiffSince::Head => "HEAD".to_string(),
+            ft_core::DiffSince::Base => {
+                let base = &self.base_ref(dest, base).await;
+                run(dest, "git", &["merge-base", base, "HEAD"])
+                    .await
+                    .map(|sha| sha.trim().to_string())
+                    .unwrap_or_else(|_| base.to_string())
+            }
+        };
+
+        let counts = run(
+            dest,
+            "git",
+            &["-c", QUOTE_PATH, "diff", "--numstat", "-z", &from],
+        )
+        .await?;
+        let states = run(
+            dest,
+            "git",
+            &["-c", QUOTE_PATH, "diff", "--name-status", "-z", &from],
+        )
+        .await?;
+
+        let mut files: Vec<ft_core::FileDiff> = Vec::new();
+        let mut counted = numstat(&counts);
+        for (path, status) in name_status(&states) {
+            let (added, removed) = counted.remove(&path).unwrap_or((0, 0));
+            files.push(ft_core::FileDiff {
+                path,
+                added,
+                removed,
+                // Not asked for, so not sent — and not `truncated`, which means
+                // a patch that was cut rather than one nobody wanted.
+                patch: String::new(),
+                fresh: status == 'A',
+                truncated: false,
+            });
+        }
+
+        // Untracked files are not in either listing — the same reason the full
+        // diff has to go and find them. Every one of them is new, and all of it
+        // is added; counting the lines means reading the file, which is still
+        // far less work than diffing it against nothing.
+        for path in self.untracked(dest).await? {
+            let added = tokio::fs::read(dest.join(&path))
+                .await
+                .map(|bytes| {
+                    if bytes.contains(&0) {
+                        // Binary. `--numstat` says `-` for these and the sheet
+                        // draws no number, so nor does this.
+                        0
+                    } else {
+                        bytes.iter().filter(|b| **b == b'\n').count() as u32
+                    }
+                })
+                .unwrap_or(0);
+            files.push(ft_core::FileDiff {
+                path,
+                added,
+                removed: 0,
+                patch: String::new(),
+                fresh: true,
+                truncated: false,
+            });
+        }
+
+        Ok(files)
+    }
+
+    /// The untracked files git would not otherwise mention, as paths.
+    async fn untracked(&self, dest: &Path) -> Result<Vec<String>> {
+        let listed = run(
+            dest,
+            "git",
+            &["ls-files", "-z", "--others", "--exclude-standard"],
+        )
+        .await?;
+        Ok(listed
+            .split('\0')
+            .filter(|p| !p.is_empty())
+            .map(str::to_string)
+            .collect())
+    }
+
     /// New files, which `git diff` says nothing about until they are tracked.
     ///
     /// An agent's first act is often to create something, and a diff that
@@ -738,6 +840,77 @@ impl GitRoot {
         }
         Ok(out)
     }
+}
+
+/// `git diff --numstat -z`, as lines added and removed against each path.
+///
+/// One record is `added \t removed \t path NUL`. A rename is the odd one:
+/// the path field is empty and two more NUL-terminated fields follow, the name
+/// before and the name after — and the name after is the one to key on, because
+/// it is the one `--name-status` and the patch both call the file.
+///
+/// A binary file's counts are `-`, which is not a number and is reported as no
+/// lines rather than as zero lines of nothing.
+fn numstat(out: &str) -> HashMap<String, (u32, u32)> {
+    let mut counts = HashMap::new();
+    let mut records = out.split('\0');
+    while let Some(record) = records.next() {
+        if record.is_empty() {
+            continue;
+        }
+        let mut parts = record.splitn(3, '\t');
+        let (Some(added), Some(removed), Some(path)) = (parts.next(), parts.next(), parts.next())
+        else {
+            continue;
+        };
+        let count = |n: &str| n.parse::<u32>().unwrap_or(0);
+        let path = if path.is_empty() {
+            // A rename: `from` then `to` follow as their own records.
+            let _from = records.next();
+            match records.next() {
+                Some(to) if !to.is_empty() => to.to_string(),
+                // A record the read stopped in the middle of; there is no name
+                // to key the counts on, so there is nothing to record.
+                _ => continue,
+            }
+        } else {
+            path.to_string()
+        };
+        counts.insert(path, (count(added), count(removed)));
+    }
+    counts
+}
+
+/// `git diff --name-status -z`, as a path and the letter git gave it.
+///
+/// One record is `status NUL path NUL`, and a rename or copy is
+/// `R100 NUL from NUL to NUL` — three fields, of which the last is the name the
+/// file now has.
+fn name_status(out: &str) -> Vec<(String, char)> {
+    let mut files = Vec::new();
+    let mut records = out.split('\0');
+    while let Some(status) = records.next() {
+        if status.is_empty() {
+            continue;
+        }
+        let letter = status.chars().next().unwrap_or('M');
+        let Some(path) = records.next() else { break };
+        let path = if matches!(letter, 'R' | 'C') {
+            match records.next() {
+                Some(to) => to,
+                None => break,
+            }
+        } else {
+            path
+        };
+        // A record the read stopped in the middle of. Pushing it would put a
+        // file with no name in the sheet, which offers to commit `""`.
+        if path.is_empty() {
+            break;
+        }
+        files.push((path.to_string(), letter));
+    }
+    files
 }
 
 /// Run a command, capturing stdout and turning a non-zero exit into an error
@@ -1963,7 +2136,7 @@ mod tests {
         .unwrap();
 
         let diff = git.diff(&tree, "main").await.unwrap();
-        let files = ft_core::split_diff(&diff);
+        let files = ft_core::split_diff(&diff, usize::MAX);
         let readme: Vec<_> = files.iter().filter(|f| f.path == "README.md").collect();
 
         assert_eq!(files.len(), 1, "one file changed, one entry: {diff}");
@@ -2016,7 +2189,7 @@ mod tests {
         }
 
         let diff = git.diff(&tree, "main").await.unwrap();
-        let files = ft_core::split_diff(&diff);
+        let files = ft_core::split_diff(&diff, usize::MAX);
         let mut paths: Vec<String> = files.iter().map(|f| f.path.clone()).collect();
         paths.sort();
         assert_eq!(
@@ -2046,5 +2219,144 @@ mod tests {
                 "{name} is not in the commit: {tracked:?}"
             );
         }
+    }
+
+    /// The bytes below are what git actually printed, read off `od -c` against
+    /// a repository with a rename and a binary file in it — not a guess at the
+    /// format. `-z` is the point: every name arrives as itself.
+    #[test]
+    fn numstat_reads_counts_renames_and_binaries() {
+        // `-\t-\tb.bin\0` — a binary file has no line counts.
+        // `1\t0\t\0a.txt\0renamed.txt\0` — a rename leaves the path field
+        // empty and follows it with the name before and the name after.
+        let out = "-\t-\tb.bin\0\
+                   4\t2\tsrc/main.rs\0\
+                   1\t0\t\0a.txt\0renamed.txt\0";
+        let counts = super::numstat(out);
+
+        assert_eq!(counts.get("src/main.rs"), Some(&(4, 2)));
+        // Keyed on the name the file has now, which is what `--name-status`
+        // and the patch both call it.
+        assert_eq!(counts.get("renamed.txt"), Some(&(1, 0)));
+        assert!(!counts.contains_key("a.txt"));
+        // Not a number, so not a count — the sheet draws nothing for these.
+        assert_eq!(counts.get("b.bin"), Some(&(0, 0)));
+    }
+
+    #[test]
+    fn name_status_reads_the_letter_and_the_name_it_ends_up_with() {
+        let out = "M\0b.bin\0A\0new.rs\0R057\0a.txt\0renamed.txt\0D\0gone.rs\0";
+        assert_eq!(
+            super::name_status(out),
+            vec![
+                ("b.bin".to_string(), 'M'),
+                ("new.rs".to_string(), 'A'),
+                ("renamed.txt".to_string(), 'R'),
+                // A deleted file is named by what it was called, there being
+                // nothing else to call it.
+                ("gone.rs".to_string(), 'D'),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_truncated_listing_stops_rather_than_inventing_a_file() {
+        // A record cut in half by a short read must not become a file with an
+        // empty name that the sheet would then offer to commit.
+        // A status with no name after it is not a file.
+        assert!(super::name_status("A\0").is_empty());
+        // A rename missing the name it ended up with, likewise.
+        assert!(super::name_status("R100\0only-one-name\0").is_empty());
+        assert!(super::numstat("1\t2\t\0only-one-name\0").is_empty());
+        // And what is whole before the cut still comes through.
+        assert_eq!(
+            super::name_status("M\0kept.rs\0A\0"),
+            vec![("kept.rs".to_string(), 'M')]
+        );
+    }
+
+    /// The two ways of asking must agree about what changed.
+    ///
+    /// `changed_since` is a different pair of git commands from `diff_since`,
+    /// so nothing but a test run against a real repository says they see the
+    /// same files — and the file tree believes the cheap one.
+    #[tokio::test]
+    async fn names_only_sees_what_the_whole_diff_sees() {
+        let (_origin, remote) = origin().await;
+        let home = TempDir::new().unwrap();
+        let git = GitRoot::new(home.path());
+        let (mirror, _) = git
+            .ensure_mirror(&remote, "acme/backend", None, None)
+            .await
+            .unwrap();
+        let (tree, _) = git
+            .add_worktree(&mirror, "agent/names", "main", "s_names")
+            .await
+            .unwrap();
+
+        // One of each shape the two commands read differently: a file that was
+        // on the base and is renamed, a file created and committed here, a
+        // binary, and a file left untracked.
+        run(&tree, "git", &["mv", "README.md", "docs.md"])
+            .await
+            .unwrap();
+        tokio::fs::write(tree.join("added.rs"), "fn main() {}\n")
+            .await
+            .unwrap();
+        tokio::fs::write(tree.join("logo.bin"), [0u8, 1, 2, 3])
+            .await
+            .unwrap();
+        run(&tree, "git", &["add", "added.rs", "logo.bin"])
+            .await
+            .unwrap();
+        run(&tree, "git", &["commit", "-m", "added"]).await.unwrap();
+        tokio::fs::write(tree.join("untracked.txt"), "one\ntwo\n")
+            .await
+            .unwrap();
+
+        let whole = ft_core::split_diff(
+            &git.diff_since(&tree, "main", ft_core::DiffSince::Base)
+                .await
+                .unwrap(),
+            usize::MAX,
+        );
+        let names = git
+            .changed_since(&tree, "main", ft_core::DiffSince::Base)
+            .await
+            .unwrap();
+
+        let sorted = |mut v: Vec<String>| {
+            v.sort();
+            v
+        };
+        assert_eq!(
+            sorted(names.iter().map(|f| f.path.clone()).collect()),
+            sorted(whole.iter().map(|f| f.path.clone()).collect()),
+            "names-only: {names:#?}\nwhole: {whole:#?}"
+        );
+
+        // And they agree about which are new, which is the one bit the tree
+        // draws — and the bit the cheap answer cannot read out of a patch.
+        for file in &names {
+            let same = whole.iter().find(|f| f.path == file.path).unwrap();
+            assert_eq!(
+                file.fresh, same.fresh,
+                "{} is new in one answer and not the other",
+                file.path
+            );
+            assert!(file.patch.is_empty(), "names-only carries no patch");
+            assert!(!file.truncated, "nothing was cut; nothing was asked for");
+        }
+
+        let named = |path: &str| names.iter().find(|f| f.path == path).unwrap();
+        // A rename is the file under the name it now has, and not new: it was
+        // on the base, under another name.
+        assert!(!named("docs.md").fresh);
+        assert!(named("added.rs").fresh);
+        assert!(named("logo.bin").fresh);
+        // Untracked files are in neither git listing, so they are found the
+        // same way the whole diff finds them, and counted by reading them.
+        assert!(named("untracked.txt").fresh);
+        assert_eq!(named("untracked.txt").added, 2);
     }
 }

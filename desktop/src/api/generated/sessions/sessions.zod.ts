@@ -770,7 +770,8 @@ export const SessionDiffParams = zod.object({
 
 export const SessionDiffQueryParams = zod.object({
   "checkout": zod.string().optional().describe('Which checkout, by its path in the workspace. Every one when omitted.'),
-  "since": zod.enum(['Base', 'Head']).optional().describe('Measured from the base of the branch (the default) or from the last commit.')
+  "since": zod.enum(['Base', 'Head']).optional().describe('Measured from the base of the branch (the default) or from the last commit.'),
+  "namesOnly": zod.boolean().optional().describe('Which files changed and by how much, with no hunks — for marking a tree rather than drawing a diff. Orders of magnitude smaller, and the worker never builds the patch.')
 })
 
 export const sessionDiffResponseAddedMin = 0;
@@ -781,9 +782,11 @@ export const sessionDiffResponseRemovedMin = 0;
 
 export const SessionDiffResponseItem = zod.object({
   "added": zod.int().min(sessionDiffResponseAddedMin),
-  "patch": zod.string().describe('The hunks, as git printed them.'),
+  "fresh": zod.boolean().optional().describe('Whether the file was created rather than changed.\n\nSaid here rather than left to be read back out of the patch, because a\nnames-only answer has no patch to read it out of — and because every\nclient was running the same regex over a megabyte of text to learn one\nbit that the header already knew.'),
+  "patch": zod.string().describe('The hunks, as git printed them. Empty when only the names were asked\nfor, and cut short when [`FileDiff::truncated`] is set.'),
   "path": zod.string(),
-  "removed": zod.int().min(sessionDiffResponseRemovedMin)
+  "removed": zod.int().min(sessionDiffResponseRemovedMin),
+  "truncated": zod.boolean().optional().describe('Set when the patch was cut for being too long — never merely because\nthe caller asked for names and got no patch at all.\n\n`added` and `removed` still count the whole file, because they are what\nthe sheet totals and a total that quietly stopped at a cut is a wrong\nnumber rather than a missing one.')
 }).describe('One file\'s worth of a unified diff.')
 export const SessionDiffResponse = zod.array(SessionDiffResponseItem)
 
