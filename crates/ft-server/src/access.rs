@@ -1051,12 +1051,21 @@ impl Access {
                         )
                         .await?;
                 }
-                sqlx::query("UPDATE secrets SET path = $1::ltree WHERE scope = $2 AND name = $3")
-                    .bind(to.to_ltree())
-                    .bind(scope)
-                    .bind(name)
-                    .execute(&self.pool)
-                    .await?;
+                // `holder`, not the owner it had: `hand_over` moves the row,
+                // because the owner is half the primary key. Either way the row
+                // to file is the holder's by the time we are here — and naming
+                // it by scope and name alone filed every namesake with it,
+                // which is two people's GitHub token on one person's move.
+                sqlx::query(
+                    "UPDATE secrets SET path = $1::ltree
+                      WHERE scope = $2 AND name = $3 AND owner = $4",
+                )
+                .bind(to.to_ltree())
+                .bind(scope)
+                .bind(name)
+                .bind(&holder)
+                .execute(&self.pool)
+                .await?;
             }
             FiledKind::AgentAccount => {
                 let held: Option<(String, String)> = sqlx::query_as(
@@ -2159,6 +2168,64 @@ mod tests {
             .await
             .unwrap()
             .is_none());
+    }
+
+    /// Filing one person's token does not file everybody's.
+    ///
+    /// The move wrote `path` by scope and name, so two people who had each
+    /// authorized GitHub as themselves were one `UPDATE` — one of them filed
+    /// something and handed over the other's with it.
+    #[tokio::test]
+    async fn filing_one_secret_leaves_a_namesake_where_it_was() {
+        let (db, access, accounts, org, admin) = set_up().await;
+        let bob = person(&accounts, &org, "bob").await;
+        let ana = person(&accounts, &org, "ana").await;
+        let vault = vault(&db);
+
+        for who in [&bob, &ana] {
+            vault
+                .put(Key::of("git", "github", who.as_str()), "t", "a test")
+                .await
+                .unwrap();
+        }
+
+        let shelf = access
+            .create_directory(&org, "Shelf", &admin, &[])
+            .await
+            .unwrap();
+        let there = ft_core::path::ResourcePath::from_stored(format!("d.{}.github", shelf.slug));
+        access
+            .transfer(
+                &vault,
+                FiledKind::Secret,
+                &format!("git/github/{bob}"),
+                &there,
+                "admin",
+            )
+            .await
+            .unwrap();
+
+        let moved = access
+            .path_of(FiledKind::Secret, &format!("git/github/{}", shelf.id))
+            .await
+            .unwrap()
+            .expect("bob's, under the directory that now owns it");
+        assert!(
+            moved.as_str().starts_with(&format!("d/{}", shelf.slug)),
+            "filed where it was sent: {}",
+            moved.as_str()
+        );
+
+        let untouched = access
+            .path_of(FiledKind::Secret, &format!("git/github/{ana}"))
+            .await
+            .unwrap()
+            .expect("ana's is still ana's");
+        assert!(
+            untouched.as_str().starts_with("u/"),
+            "and still in her own space, not dragged along: {}",
+            untouched.as_str()
+        );
     }
 
     /// `admin` is not spellable as an exception: administration belongs to the
