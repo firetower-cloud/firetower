@@ -4,7 +4,13 @@
  * Names and scopes are listed; a value is only ever shown by asking
  * (`reveal_secret`), which is logged on the server — the access trail is the
  * point of having a vault rather than a file. Keep and remove are the two
- * writes, and `keep` is one `PUT` whether the name is new or already held.
+ * A list, not a form. Every secret the product uses is made where it is used —
+ * a git token by connecting an account, an agent's credential by connecting a
+ * subscription, a repository's variables on the repository, the voice key on
+ * the composer. Nothing reads a scope somebody invented here, so a control that
+ * made one was a trap: you stored the thing, reasonably expected an agent to be
+ * given it, and it never was. What is left is seeing what is held, replacing a
+ * value, and taking one away.
  *
  * Every write says out loud when it is refused. A silent mutation here is how
  * "clicking Keep does nothing" got reported as the button being dead, when the
@@ -12,24 +18,19 @@
  */
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Eye, EyeOff, Plus, Trash2 } from "lucide-react";
+import { Eye, EyeOff, Trash2 } from "lucide-react";
 import { Icon } from "~/components/ui";
 import { getListSecretsQueryKey, useListSecrets, useRemoveSecret, useReplaceSecret, useRevealSecret } from "~/api/generated/secrets/secrets";
 import type { HeldSecret } from "~/api/generated/model";
 import { Section } from "~/ui/config/bits";
 import { WhoCanAccess } from "~/ui/Sharing";
 
-import { useDirectories, why } from "~/data";
+import { why } from "~/data";
 import { useConfirm } from "~/ui/Confirm";
 
 export function Secrets() {
   const cache = useQueryClient();
   const { data, isPending, error } = useListSecrets();
-  const replace = useReplaceSecret();
-  const [adding, setAdding] = useState(false);
-  const [scope, setScope] = useState("global");
-  const [name, setName] = useState("");
-  const [value, setValue] = useState("");
   const refresh = () => cache.invalidateQueries({ queryKey: getListSecretsQueryKey() });
 
   // The generated type, not a hand-written copy of it: this was spelled out
@@ -39,24 +40,11 @@ export function Secrets() {
   return (
     <Section
       title="Secrets"
-      note="Held encrypted, revealed only by asking, and every read is logged."
-      action={<button onClick={() => { setAdding(!adding); replace.reset(); }} className="control border border-line bg-raise text-ui text-bone hover:bg-overlay"><Icon of={Plus} size={12} />Add</button>}
+      note="Held encrypted, revealed only by asking, and every read is logged. Each one is made where it is used."
     >
       {isPending && <p className="px-3.5 py-4 text-ui text-mute">Reading the vault…</p>}
       {error ? <p className="px-3.5 py-4 text-ui text-brick">{why(error)}</p> : null}
-      {!isPending && !error && held.length === 0 && !adding && <p className="px-3.5 py-4 text-ui text-mute">Nothing held yet.</p>}
-
-      {adding && (
-        <div className="px-3.5 py-2.5">
-          <div className="flex items-center gap-2">
-            <input value={scope} onChange={(e) => setScope(e.target.value)} placeholder="scope" className="w-28 rounded-md border border-line bg-ground px-2 py-1 font-mono text-ui text-bone focus:outline-none" />
-            <input value={name} onChange={(e) => setName(e.target.value.toUpperCase())} placeholder="NAME" className="w-40 rounded-md border border-line bg-ground px-2 py-1 font-mono text-ui text-bone focus:outline-none" />
-            <input value={value} onChange={(e) => setValue(e.target.value)} type="password" placeholder="value" className="min-w-0 flex-1 rounded-md border border-line bg-ground px-2 py-1 font-mono text-ui text-bone focus:outline-none" />
-            <button disabled={!scope || !name || !value || replace.isPending} onClick={() => replace.mutate({ scope, name, data: { value } }, { onSuccess: () => { setName(""); setValue(""); setAdding(false); refresh(); } })} className="control border border-line bg-raise text-bone hover:bg-overlay disabled:text-mute">Keep</button>
-          </div>
-          {replace.isError && <p className="mt-1.5 text-meta text-brick">{why(replace.error)}</p>}
-        </div>
-      )}
+      {!isPending && !error && held.length === 0 && <p className="px-3.5 py-4 text-ui text-mute">Nothing held yet.</p>}
 
       {held.map((s) => (
         <Row key={s.id} id={s.id} scope={s.scope} name={s.name} mine={s.mine} path={s.path} onGone={refresh} />
