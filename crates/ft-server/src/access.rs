@@ -227,6 +227,20 @@ pub struct Named {
 /// a reader that does not know about a new one ignores it rather than failing.
 #[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
+pub struct Administered {
+    pub directory_id: String,
+    pub name: String,
+    pub slug: String,
+    /// Nobody else administers it. Not a blocker — an organisation
+    /// administrator can administer any directory, which is the fallback that
+    /// makes a directory whose last administrator left fixable. It is said
+    /// because the people who *work* there would lose the ability to file
+    /// anything out of it.
+    pub alone: bool,
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct Reach {
     pub teams: Vec<Team>,
     /// Directories they can work in, and how they came by each.
@@ -235,6 +249,14 @@ pub struct Reach {
     pub exceptions: Vec<Named>,
     /// Filed in their own root. This is what a deletion takes with it.
     pub owns: Vec<Filed>,
+    /// Directories they administer, and whether anybody else does.
+    pub administers: Vec<Administered>,
+    /// They made these and then filed them somewhere else, so the directory
+    /// owns them now and they do not go with them. Nothing to decide — shown
+    /// because somebody deciding about a person wants the whole picture, and
+    /// the absence of an action is the answer to "what happens to the thing
+    /// ana built for the backend team".
+    pub created: Vec<Filed>,
 }
 
 /// One of the things a directory holds.
@@ -1023,11 +1045,74 @@ impl Access {
             exceptions.extend(self.named_by(&key, route).await?);
         }
 
+        let administers = sqlx::query(
+            "SELECT d.id, d.name, d.slug,
+                    (SELECT count(*) FROM directory_access o
+                      WHERE o.directory_id = d.id AND o.rank = 3 AND o.user_id <> $1) = 0
+                      AS alone
+               FROM directory_access a
+               JOIN directories d ON d.id = a.directory_id
+              WHERE a.user_id = $1 AND a.rank = 3
+              ORDER BY lower(d.name)",
+        )
+        .bind(person)
+        .fetch_all(&self.pool)
+        .await
+        .context("reading what somebody administers")?
+        .into_iter()
+        .map(|r| Administered {
+            directory_id: r.get("id"),
+            name: r.get("name"),
+            slug: r.get("slug"),
+            alone: r.get("alone"),
+        })
+        .collect();
+
+        // Theirs by creation and filed elsewhere. Agent accounts carry no
+        // `created_by`: the person who connected one is `user_id`, and that is
+        // already how they are found.
+        let mine = format!("u.{slug}");
+        let created = sqlx::query(
+            "SELECT 'workspace' AS kind, w.id, w.path::text, w.name, w.repo AS detail,
+                    NULL::text AS owner_name
+               FROM workspaces w
+              WHERE w.created_by = $1 AND w.path IS NOT NULL AND NOT (w.path <@ $2::ltree)
+             UNION ALL
+             SELECT 'machine', h.id, h.path::text, h.name, NULL, NULL
+               FROM hosts h
+              WHERE h.created_by = $1 AND h.path IS NOT NULL AND NOT (h.path <@ $2::ltree)
+             UNION ALL
+             SELECT 'secret', s.scope || '/' || s.name || '/' || s.owner, s.path::text,
+                    s.scope || '/' || s.name, s.scope, NULL
+               FROM secrets s
+              WHERE s.created_by = $1 AND s.path IS NOT NULL AND NOT (s.path <@ $2::ltree)
+             ORDER BY kind, name",
+        )
+        .bind(person)
+        .bind(&mine)
+        .fetch_all(&self.pool)
+        .await
+        .context("reading what somebody made and filed elsewhere")?
+        .into_iter()
+        .map(|r| {
+            Ok(Filed {
+                kind: FiledKind::parse(&r.get::<String, _>("kind"))?,
+                id: r.get("id"),
+                path: ResourcePath::from_stored(r.get::<String, _>("path")),
+                name: r.get("name"),
+                detail: r.get("detail"),
+                owner_name: r.get("owner_name"),
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+
         Ok(Reach {
             teams,
             directories,
             exceptions,
-            owns: self.filed_under(&format!("u.{slug}")).await?,
+            owns: self.filed_under(&mine).await?,
+            administers,
+            created,
         })
     }
 
@@ -2661,6 +2746,43 @@ mod tests {
 
         assert_eq!(reach.owns.len(), 1, "her own token goes with her");
         assert_eq!(reach.owns[0].kind, FiledKind::Secret);
+
+        // Shelf is hers to administer and nobody else's — `admin` holds the
+        // grant that created it, so she is not alone there.
+        access
+            .set_grant(shelf.id.as_str(), SubjectKind::Person, ana.as_str(), Level::Admin, &admin)
+            .await
+            .unwrap();
+        let reach = access.reach(ana.as_str()).await.unwrap();
+        let shelf_admin = reach
+            .administers
+            .iter()
+            .find(|a| a.slug == shelf.slug)
+            .expect("she administers Shelf");
+        assert!(
+            !shelf_admin.alone,
+            "whoever made it administers it too, so she is not the only one"
+        );
+
+        // A machine she added and then filed into a directory. It belongs to
+        // the directory now, so it is not hers and does not go with her.
+        let host = db
+            .ensure_host("fire-02", ft_core::Compute::Local, ana.as_str())
+            .await
+            .unwrap();
+        let there = ft_core::path::ResourcePath::from_stored(format!("d.{}.fire_02", shelf.slug));
+        access
+            .transfer(&vault, FiledKind::Machine, host.id.as_str(), &there, "ana")
+            .await
+            .unwrap();
+
+        let reach = access.reach(ana.as_str()).await.unwrap();
+        assert!(
+            reach.owns.iter().all(|o| o.kind != FiledKind::Machine),
+            "filed away, so not hers to decide about"
+        );
+        assert_eq!(reach.created.len(), 1, "but still shown: she made it");
+        assert_eq!(reach.created[0].kind, FiledKind::Machine);
     }
 
     /// `admin` is not spellable as an exception: administration belongs to the

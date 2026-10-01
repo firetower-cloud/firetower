@@ -5,24 +5,23 @@
  * The Firetower control plane: API, scheduling, and worker transports.
  * OpenAPI spec version: 0
  */
+import type { Administered } from './administered.ts';
 import type { Filed } from './filed.ts';
 import type { Named } from './named.ts';
 import type { Reached } from './reached.ts';
 import type { Team } from './team.ts';
 
-/**
- * Everything one person can reach, and everything that is theirs.
- *
- * **Answered for a person, which is the opposite of how access is stored.**
- * Every other read asks "may this person see this thing" and lets
- * [`filed_where`] answer it per row. This asks the reverse, and nothing else
- * needs it — only offboarding, where deciding about somebody means seeing what
- * goes with them before it goes.
- *
- * Each field is a list so the shape can grow a kind without breaking a client:
- * a reader that does not know about a new one ignores it rather than failing.
- */
 export interface Reach {
+  /** Directories they administer, and whether anybody else does. */
+  administers: Administered[];
+  /**
+     * They made these and then filed them somewhere else, so the directory
+     * owns them now and they do not go with them. Nothing to decide — shown
+     * because somebody deciding about a person wants the whole picture, and
+     * the absence of an action is the answer to "what happens to the thing
+     * ana built for the backend team".
+     */
+  created: Filed[];
   /** Directories they can work in, and how they came by each. */
   directories: Reached[];
   /** Resources naming them personally, or naming a team they are in. */

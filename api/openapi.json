@@ -6380,6 +6380,31 @@
           }
         }
       },
+      "Administered": {
+        "type": "object",
+        "description": "Everything one person can reach, and everything that is theirs.\n\n**Answered for a person, which is the opposite of how access is stored.**\nEvery other read asks \"may this person see this thing\" and lets\n[`filed_where`] answer it per row. This asks the reverse, and nothing else\nneeds it — only offboarding, where deciding about somebody means seeing what\ngoes with them before it goes.\n\nEach field is a list so the shape can grow a kind without breaking a client:\na reader that does not know about a new one ignores it rather than failing.",
+        "required": [
+          "directoryId",
+          "name",
+          "slug",
+          "alone"
+        ],
+        "properties": {
+          "alone": {
+            "type": "boolean",
+            "description": "Nobody else administers it. Not a blocker — an organisation\nadministrator can administer any directory, which is the fallback that\nmakes a directory whose last administrator left fixable. It is said\nbecause the people who *work* there would lose the ability to file\nanything out of it."
+          },
+          "directoryId": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          }
+        }
+      },
       "Agent": {
         "type": "string",
         "description": "Which agent runs inside a workspace.\n\nSerialised as the variant name — see the wire conventions in the brief: a\nfield takes the consumer's casing, an enum value stays the symbol it is.",
@@ -9656,14 +9681,29 @@
       },
       "Reach": {
         "type": "object",
-        "description": "Everything one person can reach, and everything that is theirs.\n\n**Answered for a person, which is the opposite of how access is stored.**\nEvery other read asks \"may this person see this thing\" and lets\n[`filed_where`] answer it per row. This asks the reverse, and nothing else\nneeds it — only offboarding, where deciding about somebody means seeing what\ngoes with them before it goes.\n\nEach field is a list so the shape can grow a kind without breaking a client:\na reader that does not know about a new one ignores it rather than failing.",
         "required": [
           "teams",
           "directories",
           "exceptions",
-          "owns"
+          "owns",
+          "administers",
+          "created"
         ],
         "properties": {
+          "administers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Administered"
+            },
+            "description": "Directories they administer, and whether anybody else does."
+          },
+          "created": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Filed"
+            },
+            "description": "They made these and then filed them somewhere else, so the directory\nowns them now and they do not go with them. Nothing to decide — shown\nbecause somebody deciding about a person wants the whole picture, and\nthe absence of an action is the answer to \"what happens to the thing\nana built for the backend team\"."
+          },
           "directories": {
             "type": "array",
             "items": {

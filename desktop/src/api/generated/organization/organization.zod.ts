@@ -114,6 +114,20 @@ export const UserReachParams = zod.object({
 })
 
 export const UserReachResponse = zod.object({
+  "administers": zod.array(zod.object({
+  "alone": zod.boolean().describe('Nobody else administers it. Not a blocker — an organisation\nadministrator can administer any directory, which is the fallback that\nmakes a directory whose last administrator left fixable. It is said\nbecause the people who *work* there would lose the ability to file\nanything out of it.'),
+  "directoryId": zod.string(),
+  "name": zod.string(),
+  "slug": zod.string()
+}).describe('Everything one person can reach, and everything that is theirs.\n\n**Answered for a person, which is the opposite of how access is stored.**\nEvery other read asks "may this person see this thing" and lets\n[`filed_where`] answer it per row. This asks the reverse, and nothing else\nneeds it — only offboarding, where deciding about somebody means seeing what\ngoes with them before it goes.\n\nEach field is a list so the shape can grow a kind without breaking a client:\na reader that does not know about a new one ignores it rather than failing.')).describe('Directories they administer, and whether anybody else does.'),
+  "created": zod.array(zod.object({
+  "detail": zod.string().nullish().describe('The second line: the repository, the agent, the scope.'),
+  "id": zod.string().describe('What identifies it. A secret has no id of its own — it is keyed by\nscope, name and owner — so for one of those this is `scope/name/owner`,\nand\nthe owner is whoever is asking. See `Access::place`.'),
+  "kind": zod.enum(['workspace', 'machine', 'agentAccount', 'secret']),
+  "name": zod.string(),
+  "ownerName": zod.string().nullish().describe('Whose it is. Absent for a machine, which is the organisation\'s.'),
+  "path": zod.string().describe('Where it is filed — and so who can reach it.')
+}).describe('One of the things a directory holds.\n\nFour kinds in one list, because "what is in here" is one question and\nanswering it four times is how a screen ends up with four tables nobody\nreads. What differs between them is only what the second line says.')).describe('They made these and then filed them somewhere else, so the directory\nowns them now and they do not go with them. Nothing to decide — shown\nbecause somebody deciding about a person wants the whole picture, and\nthe absence of an action is the answer to "what happens to the thing\nana built for the backend team".'),
   "directories": zod.array(zod.object({
   "diagnosis": zod.union([zod.null(),zod.object({
   "at": zod.iso.datetime({"offset":true}),
@@ -145,5 +159,5 @@ export const UserReachResponse = zod.object({
   "members": zod.int().describe('How many people are in it. The whole organisation, for `everyone`.'),
   "name": zod.string()
 }).describe('A named group of people.'))
-}).describe('Everything one person can reach, and everything that is theirs.\n\n**Answered for a person, which is the opposite of how access is stored.**\nEvery other read asks "may this person see this thing" and lets\n[`filed_where`] answer it per row. This asks the reverse, and nothing else\nneeds it — only offboarding, where deciding about somebody means seeing what\ngoes with them before it goes.\n\nEach field is a list so the shape can grow a kind without breaking a client:\na reader that does not know about a new one ignores it rather than failing.')
+})
 

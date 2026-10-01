@@ -10,6 +10,7 @@ export * from './accessEntry';
 export * from './accessOf';
 export * from './accessOfParams';
 export * from './account';
+export * from './administered';
 export * from './agent';
 export * from './agentMode';
 export * from './agentOnHost';

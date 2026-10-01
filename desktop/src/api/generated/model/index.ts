@@ -10,6 +10,7 @@ export * from './accessEntry.ts';
 export * from './accessOf.ts';
 export * from './accessOfParams.ts';
 export * from './account.ts';
+export * from './administered.ts';
 export * from './agent.ts';
 export * from './agentMode.ts';
 export * from './agentOnHost.ts';
