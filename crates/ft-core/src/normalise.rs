@@ -132,7 +132,7 @@ impl Reader {
                 reader.sent_model_list(crate::codex::MODEL_LIST_ID);
                 Reader::Codex(Box::new(reader))
             }
-            crate::Agent::KimiCode => Reader::Acp(Box::default()),
+            crate::Agent::KimiCode | crate::Agent::CursorAgent => Reader::Acp(Box::default()),
             _ => Reader::Claude(Box::new(ClaudeNormaliser::new())),
         }
     }

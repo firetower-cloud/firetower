@@ -2859,19 +2859,19 @@ impl Fleet {
                                 Ok(ft_core::acp::Record::ConfigurationRejected { id: rejected, detail }) if id == rejected => anyhow::bail!("{detail}"),
                                 Ok(ft_core::acp::Record::Received { message, .. }) if message.get("method").is_none() && message["id"] == id => {
                                     if let Some(error) = message.get("error") {
-                                        anyhow::bail!("Kimi refused the setting: {error}");
+                                        anyhow::bail!("ACP agent refused the setting: {error}");
                                     }
-                                    anyhow::ensure!(message["result"]["configOptions"].is_array(), "Kimi did not confirm its configuration");
+                                    anyhow::ensure!(message["result"]["configOptions"].is_array(), "ACP agent did not confirm its configuration");
                                     return Ok(());
                                 }
                                 _ => {}
                             }
                         }
-                        AgentSpeech::Closed => anyhow::bail!("Kimi stopped before confirming the setting"),
+                        AgentSpeech::Closed => anyhow::bail!("ACP agent stopped before confirming the setting"),
                         _ => {}
                     }
                 }
-            }).await.context("Kimi did not confirm the setting in time; refresh its current configuration before retrying")??;
+            }).await.context("ACP agent did not confirm the setting in time; refresh its current configuration before retrying")??;
         }
         Ok(())
     }

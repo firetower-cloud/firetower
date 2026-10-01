@@ -5391,6 +5391,7 @@
           "ClaudeCode",
           "Codex",
           "KimiCode",
+          "CursorAgent",
           "Shell"
         ]
       },
@@ -5541,7 +5542,7 @@
           },
           "signsInWithACode": {
             "type": "boolean",
-            "description": "Whether this one signs a machine in with a code instead.\n\nSeparate from `supported`: a credential is worth having before there is\na driver to spend it, and it is the half that needs a person."
+            "description": "Whether this one uses a worker-mediated browser sign-in, with or without a short code.\n\nSeparate from `supported`: a credential is worth having before there is\na driver to spend it, and it is the half that needs a person."
           },
           "supported": {
             "type": "boolean",
@@ -7947,7 +7948,7 @@
         "properties": {
           "userCode": {
             "type": "string",
-            "description": "The short code to type. Shown, not clicked."
+            "description": "The short code to type, or empty for a link-only agent login."
           },
           "verificationUri": {
             "type": "string",

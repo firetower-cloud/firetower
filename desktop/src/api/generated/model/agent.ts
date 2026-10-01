@@ -19,5 +19,6 @@ export const Agent = {
   ClaudeCode: 'ClaudeCode',
   Codex: 'Codex',
   KimiCode: 'KimiCode',
+  CursorAgent: 'CursorAgent',
   Shell: 'Shell',
 } as const;

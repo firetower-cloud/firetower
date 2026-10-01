@@ -154,6 +154,7 @@ pub async fn install(state: &Path, kind: Agent, version: Option<&str>) -> Result
         Agent::ClaudeCode => fetch_claude(&bin, &platform, version).await,
         Agent::Codex => fetch_codex(&bin, &platform, version).await,
         Agent::KimiCode => fetch_kimi(&bin, &platform, version).await,
+        Agent::CursorAgent => fetch_cursor(&bin, &platform, version).await,
         Agent::Shell => unreachable!("refused above"),
     };
     if let Err(e) = fetched {
@@ -200,6 +201,7 @@ fn directory(kind: Agent) -> &'static str {
         Agent::Codex => "codex",
         Agent::Shell => "shell",
         Agent::KimiCode => "kimi",
+        Agent::CursorAgent => "cursor-agent",
     }
 }
 
@@ -312,6 +314,71 @@ const CLAUDE_RELEASES: &str = "https://downloads.claude.ai/claude-code-releases"
 /// either of them. Which Kimi an *account* lives on is a separate question,
 /// settled per sign-in by [`crate::kimi`]'s `--region`.
 const KIMI_RELEASES: &str = "https://code.kimi.ai/kimi-code";
+
+/// Pinned official CLI build. Cursor does not publish a signed checksum
+/// manifest, so only platform archives whose digest we verified are offered.
+const CURSOR_BUILD: &str = "2026.09.28-64d2043";
+const CURSOR_DOWNLOADS: &str = "https://downloads.cursor.com/lab";
+
+async fn fetch_cursor(bin: &Path, platform: &Platform, version: Option<&str>) -> Result<()> {
+    let build = version.unwrap_or(CURSOR_BUILD);
+    anyhow::ensure!(
+        build == CURSOR_BUILD,
+        "Cursor Agent build {build} has no verified checksum"
+    );
+    let (os, arch, expected) = match (platform.os, platform.arch, platform.musl) {
+        (Os::Darwin, Arch::Aarch64, _) => (
+            "darwin",
+            "arm64",
+            "c0d7e9cd2e62438610b886d3439907dc1f98c2923b07b3a41416cc919aaf53c7",
+        ),
+        (Os::Darwin, Arch::X86_64, _) => (
+            "darwin",
+            "x64",
+            "3efe0dff2f3d92a1e8139e33fef182801556b57ed50a6afd7bac19c4fad09549",
+        ),
+        (Os::Linux, Arch::X86_64, false) => (
+            "linux",
+            "x64",
+            "6e4cd936a4866b8a77c50ff51a564460d715772fabc477a01aa0f0455d9559f0",
+        ),
+        (Os::Linux, Arch::Aarch64, false) => (
+            "linux",
+            "arm64",
+            "c737599b27d3d8d6743c72b487204e335f3a8ea2fdbaf18302ee207a646ffd8d",
+        ),
+        _ => bail!("Cursor Agent has no verified archive for this platform"),
+    };
+    let archive = bin.join(".cursor-agent-package.tar.gz");
+    let url = format!("{CURSOR_DOWNLOADS}/{build}/{os}/{arch}/agent-cli-package.tar.gz");
+    download(&url, &archive).await?;
+    anyhow::ensure!(
+        sha256_of(&archive).await? == expected,
+        "Cursor Agent archive checksum mismatch"
+    );
+    let output = Command::new("tar")
+        .arg("-xzf")
+        .arg(&archive)
+        .arg("-C")
+        .arg(bin)
+        .args(["--strip-components=1"])
+        .stdin(std::process::Stdio::null())
+        .output()
+        .await
+        .context("unpacking Cursor Agent")?;
+    anyhow::ensure!(
+        output.status.success(),
+        "Cursor Agent archive could not be unpacked: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    tokio::fs::remove_file(&archive).await?;
+    let agent = bin.join("cursor-agent");
+    anyhow::ensure!(
+        tokio::fs::metadata(&agent).await?.is_file(),
+        "Cursor Agent archive has no launcher"
+    );
+    executable(&agent).await
+}
 
 /// Kimi Code, from its download service.
 ///

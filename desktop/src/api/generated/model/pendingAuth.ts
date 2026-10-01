@@ -10,7 +10,7 @@
  * A device authorization waiting for someone to approve it in a browser.
  */
 export interface PendingAuth {
-  /** The short code to type. Shown, not clicked. */
+  /** The short code to type, or empty for a link-only agent login. */
   userCode: string;
   /** Where to type it. */
   verificationUri: string;

@@ -57,6 +57,9 @@ export function AgentMark({
     case "KimiCode":
       return <svg {...common} viewBox="0 0 16 16" fill="none" stroke="currentColor"><path d="M4 3v10M12 3L5 8l7 5" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>;
 
+    case "CursorAgent":
+      return <svg {...common} viewBox="0 0 16 16"><path d="M8 1.5 14 5v6l-6 3.5L2 11V5L8 1.5Zm0 2.3L4 6.1v3.8l4 2.3 4-2.3V6.1L8 3.8Z" /></svg>;
+
     case "Codex":
       return (
         <svg {...common} viewBox="0 0 2406 2406">
@@ -92,6 +95,7 @@ export const AGENT_LABEL: Record<Agent, string> = {
   ClaudeCode: "Claude Code",
   Codex: "Codex",
   KimiCode: "Kimi Code",
+  CursorAgent: "Cursor Agent",
   Shell: "Shell",
 };
 
@@ -100,5 +104,6 @@ export const AGENT_SHORT: Record<Agent, string> = {
   ClaudeCode: "claude",
   Codex: "codex",
   KimiCode: "kimi",
+  CursorAgent: "cursor",
   Shell: "shell",
 };

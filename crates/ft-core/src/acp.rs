@@ -7,7 +7,7 @@ use crate::controls::{Choice, Control, ControlKind};
 use crate::turn::*;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "acp")]
@@ -78,6 +78,7 @@ pub struct AcpNormaliser {
     requests: BTreeSet<String>,
     configuration_requests: BTreeSet<String>,
     configuration: Vec<(String, Control)>,
+    cursor_tasks: BTreeMap<String, Option<ItemStatus>>,
 }
 
 impl AcpNormaliser {
@@ -188,6 +189,7 @@ impl AcpNormaliser {
                 self.session = None;
                 self.configuration.clear();
                 self.configuration_requests.clear();
+                self.cursor_tasks.clear();
             }
             Record::Ready { session } => self.session = Some(session),
             Record::Failed { detail } => {
@@ -281,6 +283,29 @@ impl AcpNormaliser {
                             args: message["params"].clone(),
                         });
                     }
+                } else if message["method"] == "cursor/task" {
+                    let params = &message["params"];
+                    if let Some(call) = params["toolCallId"].as_str() {
+                        if let Some(status) = self.cursor_tasks.remove(call) {
+                            let task = TaskId::new(call);
+                            if let Some(agent) = params["agentId"].as_str() {
+                                events.push(TurnEvent::TaskProgress {
+                                    task: task.clone(),
+                                    detail: format!("Cursor subagent {agent}"),
+                                });
+                            }
+                            events.push(TurnEvent::TaskCompleted {
+                                task,
+                                status: status.unwrap_or(ItemStatus::Completed),
+                                summary: params["description"].as_str().map(str::to_owned),
+                            });
+                        } else {
+                            events.push(TurnEvent::Raw {
+                                source: RawSource::Acp,
+                                payload: message,
+                            });
+                        }
+                    }
                 } else if message["method"] == "session/update" {
                     if self.session.as_deref() == message["params"]["sessionId"].as_str() {
                         self.update(&message["params"]["update"], &mut events);
@@ -363,12 +388,19 @@ impl AcpNormaliser {
                 };
                 let item = ItemId::new(format!("{turn}:tool:{id}"));
                 if self.items.insert(item.clone()) {
-                    let kind = match update["kind"].as_str() {
-                        Some("read") => ItemKind::FileRead,
-                        Some("edit" | "delete" | "move") => ItemKind::FileChange,
-                        Some("execute") => ItemKind::CommandExecution,
-                        Some("search" | "fetch") => ItemKind::WebSearch,
-                        _ => ItemKind::Unknown,
+                    let delegated = update["title"]
+                        .as_str()
+                        .is_some_and(|title| title.starts_with("Task:"));
+                    let kind = if delegated {
+                        ItemKind::SubagentCall
+                    } else {
+                        match update["kind"].as_str() {
+                            Some("read") => ItemKind::FileRead,
+                            Some("edit" | "delete" | "move") => ItemKind::FileChange,
+                            Some("execute") => ItemKind::CommandExecution,
+                            Some("search" | "fetch") => ItemKind::WebSearch,
+                            _ => ItemKind::Unknown,
+                        }
                     };
                     events.push(TurnEvent::ItemStarted {
                         item: item.clone(),
@@ -376,6 +408,15 @@ impl AcpNormaliser {
                         title: update["title"].as_str().map(str::to_owned),
                         task: None,
                     });
+                    if delegated {
+                        self.cursor_tasks.insert(id.to_owned(), None);
+                        events.push(TurnEvent::TaskStarted {
+                            task: TaskId::new(id),
+                            item: item.clone(),
+                            description: update["title"].as_str().unwrap_or("Task").to_owned(),
+                            agent: Some("Cursor subagent".into()),
+                        });
+                    }
                 }
                 events.push(TurnEvent::ItemUpdated {
                     item: item.clone(),
@@ -412,6 +453,13 @@ impl AcpNormaliser {
                     }
                 }
                 if let Some(status @ ("completed" | "failed")) = update["status"].as_str() {
+                    if let Some(task) = self.cursor_tasks.get_mut(id) {
+                        *task = Some(if status == "failed" {
+                            ItemStatus::Failed
+                        } else {
+                            ItemStatus::Completed
+                        });
+                    }
                     self.items.remove(&item);
                     events.push(TurnEvent::ItemCompleted {
                         item,
@@ -431,6 +479,13 @@ impl AcpNormaliser {
     }
 
     fn finish(&mut self, status: TurnStatus, detail: Option<String>, events: &mut Vec<TurnEvent>) {
+        for (call, outcome) in std::mem::take(&mut self.cursor_tasks) {
+            events.push(TurnEvent::TaskCompleted {
+                task: TaskId::new(call),
+                status: outcome.unwrap_or(ItemStatus::Failed),
+                summary: None,
+            });
+        }
         for req in std::mem::take(&mut self.requests) {
             events.push(TurnEvent::RequestResolved {
                 req: RequestId::new(req),

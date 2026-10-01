@@ -136,7 +136,7 @@ pub struct ProviderStatus {
 #[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct PendingAuth {
-    /// The short code to type. Shown, not clicked.
+    /// The short code to type, or empty for a link-only agent login.
     pub user_code: String,
     /// Where to type it.
     pub verification_uri: String,

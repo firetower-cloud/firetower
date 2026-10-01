@@ -231,12 +231,12 @@ export function DeviceCode({ pending, note }: { pending: PendingAuth; note?: str
           rel="noopener"
           className="text-dim underline underline-offset-2 transition-colors hover:text-bone"
         >
-          {pending.verificationUri.replace(/^https?:\/\//, "")}
+          {pending.userCode ? pending.verificationUri.replace(/^https?:\/\//, "") : "Continue with Cursor"}
         </a>
-        . Enter this code:
+        {pending.userCode ? ". Enter this code:" : ". Approve the sign-in in your browser."}
       </p>
 
-      <CodeToType code={pending.userCode} />
+      {pending.userCode && <CodeToType code={pending.userCode} />}
 
       {note && <p className="mt-3 max-w-[54ch] text-meta leading-[1.55] text-dim">{note}</p>}
 

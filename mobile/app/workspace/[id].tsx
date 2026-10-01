@@ -316,7 +316,7 @@ function Conversation({ place }: { place: Workspace }) {
 
       <Composer
         sessionId={speaker.id}
-        acp={speaker.agent === "KimiCode"}
+        acp={speaker.agent === "KimiCode" || speaker.agent === "CursorAgent"}
         // What the stop button can reach, which is narrower than what is
         // working. See `interruptible`.
         working={interruptible(conversation)}

@@ -15,7 +15,7 @@ export const ListProvidersResponseItem = zod.object({
   "id": zod.string(),
   "label": zod.string(),
   "pending": zod.union([zod.null(),zod.object({
-  "userCode": zod.string().describe('The short code to type. Shown, not clicked.'),
+  "userCode": zod.string().describe('The short code to type, or empty for a link-only agent login.'),
   "verificationUri": zod.string().describe('Where to type it.')
 }).describe('Set while an authorization is in flight.')]).optional()
 }).describe('What the interface shows on the connect screen.')
@@ -49,7 +49,7 @@ export const AuthorizeProviderParams = zod.object({
 })
 
 export const AuthorizeProviderResponse = zod.object({
-  "userCode": zod.string().describe('The short code to type. Shown, not clicked.'),
+  "userCode": zod.string().describe('The short code to type, or empty for a link-only agent login.'),
   "verificationUri": zod.string().describe('Where to type it.')
 }).describe('A device authorization waiting for someone to approve it in a browser.')
 

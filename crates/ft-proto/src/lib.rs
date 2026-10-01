@@ -45,7 +45,7 @@ use serde::{Deserialize, Serialize};
 /// 15 — KimiCode and its ACP journal require an ACP-aware worker.
 /// 16 — ACP configuration commands require a worker that can apply them.
 /// 17 — signing in names its agent, so Kimi can use the device flow too.
-pub const PROTOCOL_VERSION: u32 = 17;
+pub const PROTOCOL_VERSION: u32 = 18;
 
 mod codec;
 pub use codec::{Codec, CodecError, FrameReader, FrameWriter};
@@ -982,15 +982,12 @@ pub enum ToServer {
     Pong,
 }
 
-/// A device code somebody has to approve before Codex is signed in.
-///
-/// The two things worth showing and nothing else: this is what a person reads
-/// off a screen and types somewhere else.
+/// Browser sign-in details, with a code for providers that use device codes.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LoginPending {
-    /// The short code. Shown, not clicked.
+    /// The short code to type, or empty for Cursor's link-only flow.
     pub user_code: String,
-    /// Where to type it.
+    /// The verification link to open.
     pub verification_url: String,
 }
 

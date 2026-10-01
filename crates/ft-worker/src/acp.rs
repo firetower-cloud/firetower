@@ -16,6 +16,7 @@ use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncWrite, AsyncWriteExt, BufRea
 use tokio::process::{ChildStdin, ChildStdout, Command};
 
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(30);
+const CONFIG_TIMEOUT: Duration = Duration::from_secs(25);
 
 #[derive(Serialize, Deserialize)]
 struct Saved {
@@ -23,15 +24,29 @@ struct Saved {
     carry: Option<String>,
 }
 
-pub async fn run(session: &str, workspace: &Path) -> Result<()> {
-    let mut command = Command::new("kimi");
+pub async fn run(session: &str, workspace: &Path, agent: ft_core::Agent) -> Result<()> {
+    anyhow::ensure!(
+        matches!(
+            agent,
+            ft_core::Agent::KimiCode | ft_core::Agent::CursorAgent
+        ),
+        "{} is not an ACP agent",
+        agent.label()
+    );
+    let mut command = Command::new(agent.command());
     command.arg("acp");
-    serve(
+    if agent == ft_core::Agent::CursorAgent {
+        command
+            .env("AGENT_CLI_CREDENTIAL_STORE", "file")
+            .env("NO_OPEN_BROWSER", "1");
+    }
+    serve_agent(
         command,
         session,
         workspace,
         BufReader::new(tokio::io::stdin()),
         tokio::io::stdout(),
+        agent,
     )
     .await
 }
@@ -39,11 +54,34 @@ pub async fn run(session: &str, workspace: &Path) -> Result<()> {
 /// The process/stdio seam also lets integration tests drive a real fixture
 /// subprocess without installing an agent or borrowing somebody's credentials.
 pub async fn serve<R, W>(
+    command: Command,
+    session: &str,
+    workspace: &Path,
+    input: R,
+    output: W,
+) -> Result<()>
+where
+    R: AsyncBufRead + Unpin,
+    W: AsyncWrite + Unpin,
+{
+    serve_agent(
+        command,
+        session,
+        workspace,
+        input,
+        output,
+        ft_core::Agent::KimiCode,
+    )
+    .await
+}
+
+pub async fn serve_agent<R, W>(
     mut command: Command,
     session: &str,
     workspace: &Path,
     input: R,
     mut output: W,
+    agent: ft_core::Agent,
 ) -> Result<()>
 where
     R: AsyncBufRead + Unpin,
@@ -65,7 +103,7 @@ where
             .stderr(Stdio::inherit())
             .kill_on_drop(true)
             .spawn()
-            .context("starting Kimi ACP; install kimi and run kimi login as the worker user")?;
+            .with_context(|| format!("starting {} ACP", agent.label()))?;
         let mut stdin = child.stdin.take().context("ACP stdin")?;
         let mut stdout = BufReader::new(child.stdout.take().context("ACP stdout")?).lines();
         let result = connection(
@@ -76,6 +114,7 @@ where
             &mut stdout,
             input,
             &mut output,
+            agent,
         )
         .await;
         // Ending the bridge must not leave an agent holding credentials and
@@ -186,6 +225,11 @@ async fn reject_request<W: AsyncWrite + Unpin>(
 ) -> Result<()> {
     let reply = if message["method"] == "session/request_permission" {
         json!({"jsonrpc":"2.0", "id":message["id"], "result":{"outcome":{"outcome":"cancelled"}}})
+    } else if matches!(
+        message["method"].as_str(),
+        Some("cursor/ask_question" | "cursor/create_plan")
+    ) {
+        json!({"jsonrpc":"2.0", "id":message["id"], "error":{"code":-32601, "message":"Firetower cannot answer this Cursor extension; continue without it"}})
     } else {
         json!({"jsonrpc":"2.0", "id":message["id"], "error":{"code":-32601, "message":"Client capability not supported"}})
     };
@@ -206,6 +250,7 @@ async fn connection<R, W>(
     stdout: &mut Lines<BufReader<ChildStdout>>,
     input: R,
     out: &mut W,
+    agent: ft_core::Agent,
 ) -> Result<()>
 where
     R: AsyncBufRead + Unpin,
@@ -225,6 +270,9 @@ where
         init["protocolVersion"] == 1,
         "ACP agent did not negotiate protocol version 1"
     );
+    // Cursor reads its file-backed credential during session/new and returns
+    // `Authentication required` when it is absent. Its optional authenticate
+    // RPC starts a browser login; that belongs only to AgentLoginStart.
     let can_load = init["agentCapabilities"]["loadSession"] == true;
     let cwd = workspace.canonicalize()?.to_string_lossy().into_owned();
     let mut loaded = false;
@@ -244,11 +292,19 @@ where
             .await?;
             // Kimi 2.0.2's explicit missing-session response, verified against
             // the binary. Do not classify arbitrary invalid params as loss.
-            let missing = response["error"]["code"] == -32602
-                && response["error"]["data"]["sessionId"] == saved.session
+            let kimi_missing = response["error"]["data"]["sessionId"] == saved.session
                 && response["error"]["message"]
                     .as_str()
                     .is_some_and(|s| s.starts_with("Invalid params: Unknown sessionId:"));
+            // Cursor persists only after the first turn. Restarting between
+            // session/new and that turn returns this exact missing-session
+            // error; carry history and open a fresh session in that case.
+            let cursor_missing = agent == ft_core::Agent::CursorAgent
+                && response["error"]["message"] == "Invalid params"
+                && response["error"]["data"]["message"]
+                    .as_str()
+                    .is_some_and(|s| s == format!("Session \"{}\" not found", saved.session));
+            let missing = response["error"]["code"] == -32602 && (kimi_missing || cursor_missing);
             if !missing {
                 result(&response)?;
                 loaded = true;
@@ -271,7 +327,7 @@ where
             .filter(|s| !s.is_empty())
             .context("ACP session/new returned no sessionId")?
             .to_owned();
-        let carry = crate::history::carry(workspace, session, ft_core::Agent::KimiCode).await?;
+        let carry = crate::history::carry(workspace, session, agent).await?;
         Saved { session: id, carry }
     };
     save(&state_path, &saved).await?;
@@ -287,6 +343,7 @@ where
     let mut next_id = 4;
     let mut active: Option<u64> = None;
     let mut configuring: Option<Value> = None;
+    let mut configure_deadline = None;
     let mut pending: HashMap<String, Value> = HashMap::new();
     let mut cancel_deadline = None;
     let mut queued = VecDeque::new();
@@ -340,10 +397,11 @@ where
                     }
                     Input::Configure { id, config_id, value } => {
                         if configuring.is_some() {
-                            record(out, Record::ConfigurationRejected { id, detail: "Another setting change is still awaiting Kimi's response".into() }).await?;
+                            record(out, Record::ConfigurationRejected { id, detail: "Another setting change is still awaiting the agent's response".into() }).await?;
                             continue;
                         }
                         configuring = Some(json!(id));
+                        configure_deadline = Some(tokio::time::Instant::now() + CONFIG_TIMEOUT);
                         // A configuration response is journalled like every
                         // other RPC. Keep reading prompts and permissions while
                         // it is outstanding; it is not a conversation turn.
@@ -359,6 +417,7 @@ where
                         anyhow::ensure!(!pending.contains_key(&key), "ACP agent reused an outstanding permission ID");
                         pending.insert(key, message.clone());
                     } else {
+                        record(out, Record::Received { message: message.clone(), replay: false }).await?;
                         reject_request(stdin, out, &message).await?;
                         continue;
                     }
@@ -366,6 +425,7 @@ where
                 record(out, Record::Received { message: message.clone(), replay: false }).await?;
                 if message.get("method").is_none() && configuring.as_ref().is_some_and(|id| *id == message["id"]) {
                     configuring = None;
+                    configure_deadline = None;
                 }
                 if message.get("method").is_none() && active.is_some_and(|id| message["id"] == id) {
                     active = None;
@@ -375,6 +435,12 @@ where
             }
             _ = async { if let Some(deadline) = cancel_deadline { tokio::time::sleep_until(deadline).await } else { std::future::pending::<()>().await } } => {
                 bail!("ACP agent did not acknowledge cancellation; its connection was stopped");
+            }
+            _ = async { if let Some(deadline) = configure_deadline { tokio::time::sleep_until(deadline).await } else { std::future::pending::<()>().await } } => {
+                if let Some(id) = configuring.take().and_then(|id| id.as_str().map(str::to_string)) {
+                    record(out, Record::ConfigurationRejected { id, detail: "Agent did not confirm the setting change within 25 seconds".into() }).await?;
+                }
+                configure_deadline = None;
             }
         }
     }

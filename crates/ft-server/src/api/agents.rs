@@ -210,7 +210,7 @@ pub struct AgentView {
     pub supported: bool,
     /// What to run locally to get a token, when this agent works that way.
     pub token_command: Option<String>,
-    /// Whether this one signs a machine in with a code instead.
+    /// Whether this one uses a worker-mediated browser sign-in, with or without a short code.
     ///
     /// Separate from `supported`: a credential is worth having before there is
     /// a driver to spend it, and it is the half that needs a person.
