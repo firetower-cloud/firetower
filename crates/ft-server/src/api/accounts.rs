@@ -23,7 +23,7 @@ use axum::{
     extract::{Path, State},
     Extension, Json,
 };
-use ft_core::{Agent, AgentMode, SessionId, TurnEvent};
+use ft_core::{Agent, AgentMode, ResourcePath, SessionId, TurnEvent};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use utoipa::ToSchema;
@@ -44,9 +44,15 @@ pub struct Account {
     pub owner_name: Option<String>,
     /// Where it is filed, and therefore who may pick it.
     ///
-    /// A `String` rather than a `ResourcePath`, like `id` above: this struct is
-    /// read by `sqlx::FromRow`, and what comes back is the text of an `ltree`.
-    pub path: String,
+    /// A `ResourcePath`, like every other kind sends — **not** the `String` that
+    /// used to be here. `a.path::text` is the text of an `ltree`, so it comes
+    /// back dotted (`d.backend.mine`), and a client that splits a path on `/`
+    /// to read its root found one part, matched neither `u` nor `d`, and fell
+    /// through to printing a bare `d/`. Every agent account showed the same
+    /// wrong directory whoever owned it, because the path was never read at
+    /// all.
+    #[sqlx(try_from = "String")]
+    pub path: ResourcePath,
     pub kind: String,
     pub name: String,
     pub mode: String,

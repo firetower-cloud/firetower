@@ -34,6 +34,19 @@ pub const DIRECTORY: &str = "d";
 #[serde(transparent)]
 pub struct ResourcePath(String);
 
+/// So a row can be read straight into one.
+///
+/// `sqlx::FromRow` can derive a field as `#[sqlx(try_from = "String")]`, and
+/// that is the only way a struct read by the derive can hold a path rather than
+/// the raw `ltree` text. Without it the choice is to carry a `String` and hope
+/// every reader remembers which spelling it is in — which is how every agent
+/// account came to report a path no client could parse.
+impl From<String> for ResourcePath {
+    fn from(stored: String) -> Self {
+        Self::from_stored(stored)
+    }
+}
+
 impl ResourcePath {
     /// From what the database holds — dots.
     pub fn from_stored(ltree: impl AsRef<str>) -> Self {

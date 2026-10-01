@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0
  */
 import type { Limit } from './limit.ts';
+import type { ResourcePath } from './resourcePath.ts';
 
 export interface Account {
   credentialSet: boolean;
@@ -26,10 +27,15 @@ export interface Account {
   /**
      * Where it is filed, and therefore who may pick it.
      *
-     * A `String` rather than a `ResourcePath`, like `id` above: this struct is
-     * read by `sqlx::FromRow`, and what comes back is the text of an `ltree`.
+     * A `ResourcePath`, like every other kind sends — **not** the `String` that
+     * used to be here. `a.path::text` is the text of an `ltree`, so it comes
+     * back dotted (`d.backend.mine`), and a client that splits a path on `/`
+     * to read its root found one part, matched neither `u` nor `d`, and fell
+     * through to printing a bare `d/`. Every agent account showed the same
+     * wrong directory whoever owned it, because the path was never read at
+     * all.
      */
-  path: string;
+  path: ResourcePath;
   revision: number;
   state: string;
 }
