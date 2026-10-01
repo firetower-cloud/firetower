@@ -320,10 +320,10 @@ function Conversation({ place }: { place: Workspace }) {
       {/* `=== false`, not falsiness: an older control plane sends no such field,
           and treating that as read-only hides the composer from everybody. */}
       {session && session.mayWrite === false ? (
-        <View style={{ paddingHorizontal: 16, paddingBottom: 16 }}>
+        <View style={{ paddingHorizontal: 16, paddingBottom: 16, alignItems: "center" }}>
           <View className="flex-row items-center gap-2.5 rounded-full border border-line bg-panel px-4 py-3">
             <Eye color={color.mute} size={14} />
-            <Text className="flex-1 font-sans text-ui text-dim">You are watching this work.</Text>
+            <Text className="font-sans text-ui text-dim">You are watching this work.</Text>
           </View>
         </View>
       ) : (

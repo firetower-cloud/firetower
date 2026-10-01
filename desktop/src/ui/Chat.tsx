@@ -1150,8 +1150,10 @@ function Questions({ sessionId, asking, onAnswered }: { sessionId: string; askin
  */
 function Watching() {
   return (
-    <div className="px-3 pb-3">
-      <div className="flex items-center gap-2.5 rounded-full border border-line bg-panel px-4 py-2.5">
+    // As wide as the sentence and no wider, in the middle. A full-width bar
+    // reads as a composer that has lost its text box; a pill reads as a note.
+    <div className="flex justify-center px-3 pb-3">
+      <div className="inline-flex items-center gap-2.5 rounded-full border border-line bg-panel px-4 py-2.5">
         <Eye className="h-3.5 w-3.5 shrink-0 text-mute" strokeWidth={1.75} />
         <span className="text-ui text-dim">You are watching this work.</span>
       </div>
