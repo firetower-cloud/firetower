@@ -53,6 +53,7 @@ import {
   TableRow,
   type Item,
 } from "@/components/ui";
+import { write } from "@/components/ui/Copy";
 import { Modal } from "@/components/Modal";
 import { Offboard } from "@/components/org/Offboard";
 import { Trouble, Toolbar } from "./Shared";
@@ -463,11 +464,15 @@ function HandOver({
     `Password: ${password}  (you will be asked to change it)\n\n` +
     `Once you are signed in there, you can download the Mac or Windows app from the same page.`;
 
-  /* Written here rather than through `Copyable`, which lays its own button over
-     whatever it wraps: around a button that produced two controls in one place,
-     one of them clipping the other's label. */
+  /* Through `write`, which the rest of the product already uses: it falls back
+     to a selection when `navigator.clipboard` is missing or refuses, and says
+     so when neither works. The first version here called the clipboard directly
+     with no catch, so a refusal did nothing and reported nothing — which is
+     indistinguishable from a dead button. */
   const put = (text: string, confirm: string) => {
-    void navigator.clipboard.writeText(text).then(() => setSaid(confirm));
+    void write(text).then((ok) =>
+      setSaid(ok ? confirm : "That didn't copy. Select it and copy by hand."),
+    );
   };
 
   return (
@@ -483,7 +488,7 @@ function HandOver({
         <span className="eyebrow">Temporary password</span>
         <div className="mt-1.5 flex items-stretch gap-2">
           <div className="flex min-w-0 flex-1 items-center overflow-hidden rounded-lg border border-line bg-ground px-3 py-2 font-mono text-ui text-bone">
-            <span className="truncate">{shown ? who.password : hidden}</span>
+            <span className="truncate select-all">{shown ? who.password : hidden}</span>
           </div>
           <IconButton
             of={shown ? EyeOff : Eye}
@@ -497,7 +502,7 @@ function HandOver({
           />
         </div>
         <p className="mt-1.5 text-meta text-mute">
-          They are asked to change it the first time they sign in.
+          {said ?? "They are asked to change it the first time they sign in."}
         </p>
       </div>
 
@@ -517,7 +522,7 @@ function HandOver({
           {note(hidden)}
         </pre>
         <p className="mt-1.5 text-meta text-mute">
-          {said ?? "The password is hidden here and copied in full."}
+          The password is hidden here and copied in full.
         </p>
       </div>
 
