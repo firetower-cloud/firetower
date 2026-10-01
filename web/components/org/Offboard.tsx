@@ -31,7 +31,10 @@ import { ApiError } from "@/src/api/http";
 
 const why = (e: unknown) => (e instanceof ApiError ? e.message : "That didn't work.");
 
-/** What letting go actually does, which is not the same for every kind. */
+/** What a level is called where somebody reads it. */
+const said = (l: string) => (l === "writer" ? "editor" : l);
+
+/** What going actually does, which is not the same for every kind. */
 function goesAs(kind: FiledKind): string {
   return kind === "machine" ? "moves to Shared" : "is deleted";
 }
@@ -89,7 +92,7 @@ export function Offboard({ person, onClose }: { person: User; onClose: () => voi
         <div className="flex items-center gap-3">
           <span className="text-meta text-mute">
             {owns.length === 0
-              ? "Nothing of theirs to destroy"
+              ? "Nothing of theirs is destroyed"
               : `${owns.length} ${owns.length === 1 ? "thing" : "things"} destroyed`}
           </span>
           <div className="ml-auto flex gap-2">
@@ -110,15 +113,13 @@ export function Offboard({ person, onClose }: { person: User; onClose: () => voi
         <div className="space-y-6">
           <section>
             <h3 className="text-ui text-bone">
-              Destroyed — {owns.length} {owns.length === 1 ? "thing" : "things"}
+              {owns.length === 1 ? "1 thing is destroyed" : `${owns.length} things are destroyed`}
             </h3>
             <p className="mt-1 text-meta text-mute">
-              Filed in their own space, so it is theirs and it goes with them. Nobody can be given
-              it instead — not even an administrator. Anything worth keeping has to be moved into a
-              directory by {person.username} before they go.
+              Theirs, so nobody else can be given it.
             </p>
             {owns.length === 0 ? (
-              <p className="mt-2 text-meta text-mute">Nothing is filed in their own space.</p>
+              <p className="mt-2 text-meta text-mute">Nothing of theirs.</p>
             ) : (
               <div className="mt-2 divide-y divide-line-soft overflow-hidden rounded-xl border border-brick-deep/50">
                 {owns.map((o: Filed) => (
@@ -139,11 +140,9 @@ export function Offboard({ person, onClose }: { person: User; onClose: () => voi
 
           {alone.length > 0 && (
             <section>
-              <h3 className="text-ui text-bone">Only they administer these</h3>
+              <h3 className="text-ui text-bone">Only they administer</h3>
               <p className="mt-1 text-meta text-mute">
-                A directory belongs to the organisation, so this one is a job to hand on. Leave it
-                empty and an administrator of this Firetower is the only one who can change it
-                afterwards.
+                Hand it on, or only administrators can change it.
               </p>
               <div className="mt-2 divide-y divide-line-soft overflow-hidden rounded-xl border border-line">
                 {alone.map((a) => (
@@ -178,7 +177,7 @@ export function Offboard({ person, onClose }: { person: User; onClose: () => voi
             <section>
               <h3 className="text-ui text-bone">Stays where it is</h3>
               <p className="mt-1 text-meta text-mute">
-                They made these and filed them in a directory, so it owns them now.
+                Filed in a directory, so they stay.
               </p>
               <div className="mt-2 divide-y divide-line-soft overflow-hidden rounded-xl border border-line">
                 {reach.created.map((c) => (
@@ -193,24 +192,34 @@ export function Offboard({ person, onClose }: { person: User; onClose: () => voi
             </section>
           )}
 
-          <section>
-            <h3 className="text-ui text-bone">Goes without asking</h3>
-            <p className="mt-1 text-meta text-mute">
-              Access, not property. Their slug is kept forever so nothing can ever be issued it
-              again.
-            </p>
-            <ul className="mt-2 space-y-1 text-meta text-dim">
-              {reach.teams.map((t) => (
-                <li key={t.id}>{t.name} — team membership</li>
-              ))}
-              {reach.directories.map((d) => (
-                <li key={d.directoryId}>
-                  d/{d.slug} · {d.level} —{" "}
-                  {d.through.map((r) => (r.how === "team" ? `through ${r.name}` : r.how)).join(", ")}
-                </li>
-              ))}
-            </ul>
-          </section>
+          {/* Only what actually disappears. Reach through the team that is
+              everybody is not a row that goes anywhere — the grant stays, the
+              directory is untouched, and listing it under a heading promising
+              removal said the opposite of the truth. */}
+          {(reach.teams.length > 0 ||
+            reach.directories.some((d) => d.through.some((r) => r.how === "direct")) ||
+            reach.exceptions.length > 0) && (
+            <section>
+              <h3 className="text-ui text-bone">Revoked</h3>
+              <ul className="mt-2 space-y-1 text-meta text-dim">
+                {reach.teams.map((t) => (
+                  <li key={t.id}>{t.name} (team)</li>
+                ))}
+                {reach.directories
+                  .filter((d) => d.through.some((r) => r.how === "direct"))
+                  .map((d) => (
+                    <li key={d.directoryId}>
+                      d/{d.slug} ({said(d.level)})
+                    </li>
+                  ))}
+                {reach.exceptions.map((e) => (
+                  <li key={`${e.kind}:${e.id}`}>
+                    {e.name} ({said(e.level)})
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
 
           {trouble && <p className="text-ui text-brick">{trouble}</p>}
         </div>
