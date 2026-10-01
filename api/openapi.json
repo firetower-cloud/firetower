@@ -8677,6 +8677,60 @@
           }
         }
       },
+      "HowReached": {
+        "oneOf": [
+          {
+            "type": "object",
+            "description": "A grant naming them.",
+            "required": [
+              "how"
+            ],
+            "properties": {
+              "how": {
+                "type": "string",
+                "enum": [
+                  "direct"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "A grant naming a team they are in.",
+            "required": [
+              "name",
+              "how"
+            ],
+            "properties": {
+              "how": {
+                "type": "string",
+                "enum": [
+                  "team"
+                ]
+              },
+              "name": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "A grant naming the team that is everybody. Leaving is not possible;\nonly the grant can go.",
+            "required": [
+              "how"
+            ],
+            "properties": {
+              "how": {
+                "type": "string",
+                "enum": [
+                  "everyone"
+                ]
+              }
+            }
+          }
+        ],
+        "description": "How somebody came by the access they have to a directory.\n\nNot `Route`, which is taken: the sharing sheet already has one, meaning\n*owner, directory or exception*. Two schemas of the same name do not\ncollide loudly — one silently replaces the other in every generated client,\nand the first sign is a field typed as something unrelated.\n\nFlattened, `directory_access` answers *what* they may do and loses *why* —\nwhich is the only thing that matters when the question is how to take it\naway. Revoking a grant that was never theirs to begin with changes nothing;\nthe team is what has to be left."
+      },
       "InstallAgent": {
         "type": "object",
         "description": "What a host is being asked to fetch.",
@@ -8936,7 +8990,7 @@
             "type": "string"
           },
           "through": {
-            "$ref": "#/components/schemas/Route",
+            "$ref": "#/components/schemas/HowReached",
             "description": "Named personally, or through a team they are in."
           }
         }
@@ -9823,7 +9877,7 @@
           "directories": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/Reached"
+              "$ref": "#/components/schemas/ReachedDirectory"
             },
             "description": "Directories they can work in, and how they came by each."
           },
@@ -9870,6 +9924,37 @@
           "reached": {
             "type": "boolean",
             "description": "Whether ssh got onto the machine.\n\nNot the same as \"everything is fine\". A machine with no worker on it has\nbeen reached — the address, the account and the key are all right — and\nis worth adding, because what is left is a command to run over there."
+          }
+        }
+      },
+      "ReachedDirectory": {
+        "type": "object",
+        "required": [
+          "directoryId",
+          "name",
+          "slug",
+          "level",
+          "through"
+        ],
+        "properties": {
+          "directoryId": {
+            "type": "string"
+          },
+          "level": {
+            "$ref": "#/components/schemas/Level",
+            "description": "The most generous of the routes below."
+          },
+          "name": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "through": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/HowReached"
+            }
           }
         }
       },

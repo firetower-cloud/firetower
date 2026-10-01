@@ -6,8 +6,8 @@
  * OpenAPI spec version: 0
  */
 import type { FiledKind } from './filedKind';
+import type { HowReached } from './howReached';
 import type { Level } from './level';
-import type { Route } from './route';
 
 export interface Named {
   id: string;
@@ -15,5 +15,5 @@ export interface Named {
   level: Level;
   name: string;
   /** Named personally, or through a team they are in. */
-  through: Route;
+  through: HowReached;
 }

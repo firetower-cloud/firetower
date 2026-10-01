@@ -154,21 +154,32 @@ export const UserReachResponse = zod.object({
   "path": zod.string().describe('Where it is filed — and so who can reach it.')
 }).describe('One of the things a directory holds.\n\nFour kinds in one list, because "what is in here" is one question and\nanswering it four times is how a screen ends up with four tables nobody\nreads. What differs between them is only what the second line says.')).describe('They made these and then filed them somewhere else, so the directory\nowns them now and they do not go with them. Nothing to decide — shown\nbecause somebody deciding about a person wants the whole picture, and\nthe absence of an action is the answer to "what happens to the thing\nana built for the backend team".'),
   "directories": zod.array(zod.object({
-  "diagnosis": zod.union([zod.null(),zod.object({
-  "at": zod.iso.datetime({"offset":true}),
-  "cause": zod.enum(['WorkerMissing', 'AuthRefused', 'Unreachable', 'HostKeyChanged', 'ProtocolMismatch', 'Unknown']).describe('What went wrong, at the granularity of what fixes it.'),
-  "detail": zod.string().nullish().describe('What the far end actually said, verbatim.\n\nKept even when the cause is recognised: the summary is an inference\nabout another machine, and this is what survives it being wrong.'),
-  "remedy": zod.string().nullish().describe('What to run, when there is something to run. Shown with a copy button,\nso it must be the whole command and nothing else.'),
-  "summary": zod.string().describe('One sentence, written for whoever is looking at the screen.')
-}).describe('Why not, or what is still wrong once we were in.')]).optional(),
-  "reached": zod.boolean().describe('Whether ssh got onto the machine.\n\nNot the same as "everything is fine". A machine with no worker on it has\nbeen reached — the address, the account and the key are all right — and\nis worth adding, because what is left is a command to run over there.')
-}).describe('What a machine would say, before anything is written down.')).describe('Directories they can work in, and how they came by each.'),
+  "directoryId": zod.string(),
+  "level": zod.enum(['viewer', 'writer', 'admin']).describe('The most generous of the routes below.'),
+  "name": zod.string(),
+  "slug": zod.string(),
+  "through": zod.array(zod.union([zod.object({
+  "how": zod.enum(['direct'])
+}).describe('A grant naming them.'),zod.object({
+  "how": zod.enum(['team']),
+  "name": zod.string()
+}).describe('A grant naming a team they are in.'),zod.object({
+  "how": zod.enum(['everyone'])
+}).describe('A grant naming the team that is everybody. Leaving is not possible;\nonly the grant can go.')]).describe('How somebody came by the access they have to a directory.\n\nNot `Route`, which is taken: the sharing sheet already has one, meaning\n*owner, directory or exception*. Two schemas of the same name do not\ncollide loudly — one silently replaces the other in every generated client,\nand the first sign is a field typed as something unrelated.\n\nFlattened, `directory_access` answers *what* they may do and loses *why* —\nwhich is the only thing that matters when the question is how to take it\naway. Revoking a grant that was never theirs to begin with changes nothing;\nthe team is what has to be left.'))
+})).describe('Directories they can work in, and how they came by each.'),
   "exceptions": zod.array(zod.object({
   "id": zod.string(),
   "kind": zod.enum(['workspace', 'machine', 'agentAccount', 'secret']),
   "level": zod.enum(['viewer', 'writer', 'admin']).describe('How much somebody may do in a directory.\n\nOrdered, and the order is the point — every check is "at least this much".\n`Ord` comes from the declaration order, so `Viewer < Writer < Admin` without\na comparison written anywhere.'),
   "name": zod.string(),
-  "through": zod.enum(['owner', 'directory', 'exception']).describe('Named personally, or through a team they are in.')
+  "through": zod.union([zod.object({
+  "how": zod.enum(['direct'])
+}).describe('A grant naming them.'),zod.object({
+  "how": zod.enum(['team']),
+  "name": zod.string()
+}).describe('A grant naming a team they are in.'),zod.object({
+  "how": zod.enum(['everyone'])
+}).describe('A grant naming the team that is everybody. Leaving is not possible;\nonly the grant can go.')]).describe('Named personally, or through a team they are in.')
 })).describe('Resources naming them personally, or naming a team they are in.'),
   "owns": zod.array(zod.object({
   "detail": zod.string().nullish().describe('The second line: the repository, the agent, the scope.'),

@@ -5,15 +5,14 @@
  * The Firetower control plane: API, scheduling, and worker transports.
  * OpenAPI spec version: 0
  */
-import type { FiledKind } from './filedKind.ts';
 import type { HowReached } from './howReached.ts';
 import type { Level } from './level.ts';
 
-export interface Named {
-  id: string;
-  kind: FiledKind;
+export interface ReachedDirectory {
+  directoryId: string;
+  /** The most generous of the routes below. */
   level: Level;
   name: string;
-  /** Named personally, or through a team they are in. */
-  through: HowReached;
+  slug: string;
+  through: HowReached[];
 }

@@ -8,7 +8,7 @@
 import type { Administered } from './administered.ts';
 import type { Filed } from './filed.ts';
 import type { Named } from './named.ts';
-import type { Reached } from './reached.ts';
+import type { ReachedDirectory } from './reachedDirectory.ts';
 import type { Team } from './team.ts';
 
 export interface Reach {
@@ -23,7 +23,7 @@ export interface Reach {
      */
   created: Filed[];
   /** Directories they can work in, and how they came by each. */
-  directories: Reached[];
+  directories: ReachedDirectory[];
   /** Resources naming them personally, or naming a team they are in. */
   exceptions: Named[];
   /** Filed in their own root. This is what a deletion takes with it. */

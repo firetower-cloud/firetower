@@ -25,7 +25,6 @@ import {
   getListUsersQueryKey,
   useChangeUser,
   useCreateUser,
-  useDeleteUser,
   useListUsers,
   useResetUserPassword,
 } from "@/src/api/generated/organization/organization";
@@ -52,6 +51,7 @@ import {
   type Item,
 } from "@/components/ui";
 import { Modal } from "@/components/Modal";
+import { Offboard } from "@/components/org/Offboard";
 import { Trouble, Toolbar } from "./Shared";
 
 const why = (e: unknown) => (e instanceof ApiError ? e.message : "That didn't work.");
@@ -62,13 +62,15 @@ export function People() {
   const { data: users = [], isPending } = useListUsers();
   const change = useChangeUser();
   const reset = useResetUserPassword();
-  const remove = useDeleteUser();
   const refresh = () => cache.invalidateQueries({ queryKey: getListUsersQueryKey() });
 
   const [find, setFind] = useState("");
   const [adding, setAdding] = useState(false);
   const [handed, setHanded] = useState<{ username: string; password: string; fresh: boolean } | null>(null);
-  const [removing, setRemoving] = useState<User[] | null>(null);
+  /* One at a time. Removing somebody now means deciding about everything
+     that is theirs, and a decision per row cannot be made for four people at
+     once — see `Offboard`. */
+  const [leaving, setLeaving] = useState<User | null>(null);
   const [trouble, setTrouble] = useState<string | null>(null);
 
   const shown = useMemo(
@@ -114,9 +116,11 @@ export function People() {
             <Button size="sm" variant="quiet" icon={Power} onClick={() => setDisabled(chosen, !chosen.every((u) => u.disabled))}>
               {chosen.every((u) => u.disabled) ? "Switch on" : "Switch off"}
             </Button>
-            <Button size="sm" variant="danger" icon={Trash2} onClick={() => setRemoving(chosen)}>
-              Remove
-            </Button>
+            {/* No bulk remove. Removing somebody is now a decision about every
+                single thing that is theirs, and four people at once is the
+                shape of the problem this replaced: a selection, one button,
+                and whatever it swept discovered afterwards. Switching off
+                stays, because it takes nothing away. */}
           </Bulk>
         ) : (
           <Toolbar
@@ -224,7 +228,7 @@ export function People() {
                               label: "Remove",
                               icon: Trash2,
                               danger: true,
-                              onClick: () => setRemoving([u]),
+                              onClick: () => setLeaving(u),
                             },
                           ] satisfies Item[]}
                         />
@@ -270,50 +274,7 @@ export function People() {
         </Modal>
       )}
 
-      {removing && (
-        <Modal
-          title={
-            removing.length === 1 ? `Remove ${removing[0].username}?` : `Remove ${removing.length} people?`
-          }
-          onClose={() => setRemoving(null)}
-        >
-          {/* Said plainly, because a directory makes it look otherwise: a
-              workspace filed in `d/backend` belongs to that directory, and
-              somebody reading the Access screen would reasonably expect it to
-              stay. It does not. A session is an agent run under a person — its
-              conversation, the subscription it spent, the git identity on its
-              commits — and none of that outlives the account. Their machines do
-              stay: compute is real and the organisation is still on it. */}
-          <p className="text-ui text-dim">
-            Their workspaces go too, including ones they filed in a directory, and so do their
-            credentials. Machines they added stay, in <span className="font-mono">Shared</span>. If
-            they might be back, switch them off instead — that keeps what they made.
-          </p>
-          <ul className="mt-4 flex flex-wrap gap-1.5">
-            {removing.map((u) => (
-              <li key={u.id}>
-                <Badge>{u.username}</Badge>
-              </li>
-            ))}
-          </ul>
-          <div className="mt-5 flex justify-end gap-2">
-            <Button variant="quiet" onClick={() => setRemoving(null)}>
-              Cancel
-            </Button>
-            <Button
-              variant="danger"
-              disabled={remove.isPending}
-              onClick={() => {
-                const over = removing;
-                setRemoving(null);
-                void run(over, (u) => remove.mutateAsync({ id: u.id }));
-              }}
-            >
-              Remove
-            </Button>
-          </div>
-        </Modal>
-      )}
+      {leaving && <Offboard person={leaving} onClose={() => setLeaving(null)} />}
     </>
   );
 }

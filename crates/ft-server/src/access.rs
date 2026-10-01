@@ -177,13 +177,18 @@ impl Directory {
 
 /// How somebody came by the access they have to a directory.
 ///
+/// Not `Route`, which is taken: the sharing sheet already has one, meaning
+/// *owner, directory or exception*. Two schemas of the same name do not
+/// collide loudly — one silently replaces the other in every generated client,
+/// and the first sign is a field typed as something unrelated.
+///
 /// Flattened, `directory_access` answers *what* they may do and loses *why* —
 /// which is the only thing that matters when the question is how to take it
 /// away. Revoking a grant that was never theirs to begin with changes nothing;
 /// the team is what has to be left.
 #[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase", tag = "how")]
-pub enum Route {
+pub enum HowReached {
     /// A grant naming them.
     Direct,
     /// A grant naming a team they are in.
@@ -195,13 +200,13 @@ pub enum Route {
 
 #[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct Reached {
+pub struct ReachedDirectory {
     pub directory_id: String,
     pub name: String,
     pub slug: String,
     /// The most generous of the routes below.
     pub level: Level,
-    pub through: Vec<Route>,
+    pub through: Vec<HowReached>,
 }
 
 #[derive(Debug, Clone, Serialize, ToSchema)]
@@ -212,7 +217,7 @@ pub struct Named {
     pub name: String,
     pub level: Level,
     /// Named personally, or through a team they are in.
-    pub through: Route,
+    pub through: HowReached,
 }
 
 /// Everything one person can reach, and everything that is theirs.
@@ -244,7 +249,7 @@ pub struct Administered {
 pub struct Reach {
     pub teams: Vec<Team>,
     /// Directories they can work in, and how they came by each.
-    pub directories: Vec<Reached>,
+    pub directories: Vec<ReachedDirectory>,
     /// Resources naming them personally, or naming a team they are in.
     pub exceptions: Vec<Named>,
     /// Filed in their own root. This is what a deletion takes with it.
@@ -1004,14 +1009,14 @@ impl Access {
         .await
         .context("reading what somebody can work in")?;
 
-        let mut directories: Vec<Reached> = Vec::new();
+        let mut directories: Vec<ReachedDirectory> = Vec::new();
         for r in rows {
             let id: String = r.get("id");
             let level = Level::parse(&r.get::<String, _>("level")).unwrap_or(Level::Viewer);
             let route = match r.get::<String, _>("how").as_str() {
-                "direct" => Route::Direct,
-                "everyone" => Route::Everyone,
-                _ => Route::Team {
+                "direct" => HowReached::Direct,
+                "everyone" => HowReached::Everyone,
+                _ => HowReached::Team {
                     name: r.get::<Option<String>, _>("team").unwrap_or_default(),
                 },
             };
@@ -1022,7 +1027,7 @@ impl Access {
                     }
                     found.through.push(route);
                 }
-                None => directories.push(Reached {
+                None => directories.push(ReachedDirectory {
                     directory_id: id,
                     name: r.get("name"),
                     slug: r.get("slug"),
@@ -1034,11 +1039,11 @@ impl Access {
         directories.sort_by_key(|d| d.name.to_lowercase());
 
         let mut exceptions = Vec::new();
-        let mut keys = vec![(format!("u/{slug}"), Route::Direct)];
+        let mut keys = vec![(format!("u/{slug}"), HowReached::Direct)];
         for (team_slug, name) in &team_slugs {
             keys.push((
                 format!("t/{team_slug}"),
-                Route::Team { name: name.clone() },
+                HowReached::Team { name: name.clone() },
             ));
         }
         for (key, route) in keys {
@@ -1117,7 +1122,7 @@ impl Access {
     }
 
     /// Everything whose `extra_perms` names one key.
-    async fn named_by(&self, key: &str, through: Route) -> Result<Vec<Named>> {
+    async fn named_by(&self, key: &str, through: HowReached) -> Result<Vec<Named>> {
         let rows = sqlx::query(
             "SELECT 'workspace' AS kind, w.id, w.name, w.extra_perms ->> $1 AS level
                FROM workspaces w WHERE w.extra_perms ? $1
@@ -2733,7 +2738,7 @@ mod tests {
             .find(|d| d.slug == prod.slug)
             .expect("Production");
         assert!(
-            matches!(prod_row.through.as_slice(), [Route::Team { name }] if name == "Backend"),
+            matches!(prod_row.through.as_slice(), [HowReached::Team { name }] if name == "Backend"),
             "through the team and not directly: {:?}",
             prod_row.through
         );
@@ -2742,7 +2747,7 @@ mod tests {
             .iter()
             .find(|d| d.slug == shelf.slug)
             .expect("Shelf");
-        assert!(matches!(shelf_row.through.as_slice(), [Route::Direct]));
+        assert!(matches!(shelf_row.through.as_slice(), [HowReached::Direct]));
 
         assert_eq!(reach.owns.len(), 1, "her own token goes with her");
         assert_eq!(reach.owns[0].kind, FiledKind::Secret);

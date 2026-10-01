@@ -8,7 +8,7 @@
 import type { Administered } from './administered';
 import type { Filed } from './filed';
 import type { Named } from './named';
-import type { Reached } from './reached';
+import type { ReachedDirectory } from './reachedDirectory';
 import type { Team } from './team';
 
 export interface Reach {
@@ -23,7 +23,7 @@ export interface Reach {
      */
   created: Filed[];
   /** Directories they can work in, and how they came by each. */
-  directories: Reached[];
+  directories: ReachedDirectory[];
   /** Resources naming them personally, or naming a team they are in. */
   exceptions: Named[];
   /** Filed in their own root. This is what a deletion takes with it. */
