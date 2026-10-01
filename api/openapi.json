@@ -6035,6 +6035,61 @@
         }
       }
     },
+    "/api/v1/users/{id}/offboard": {
+      "post": {
+        "tags": [
+          "organization"
+        ],
+        "summary": "Hand their work over, then take the account away — in one transaction.",
+        "operationId": "offboard_user",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "User id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Offboarding"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "400": {
+            "description": "Something of theirs was left undecided",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/users/{id}/password": {
       "post": {
         "tags": [
@@ -7520,6 +7575,22 @@
         ],
         "description": "What the person decided, when they were asked."
       },
+      "Destination": {
+        "type": "object",
+        "required": [
+          "kind",
+          "id"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "description": "`person` or `directory`."
+          }
+        }
+      },
       "Diagnosis": {
         "type": "object",
         "description": "Why a connection didn't happen, in terms of what to do about it.\n\nEach cause has a different fix, and the failure they arrive as — a closed\nstream — distinguishes none of them.",
@@ -8398,6 +8469,25 @@
           }
         }
       },
+      "HandOver": {
+        "type": "object",
+        "required": [
+          "kind",
+          "id",
+          "to"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/FiledKind"
+          },
+          "to": {
+            "$ref": "#/components/schemas/Destination"
+          }
+        }
+      },
       "HeldSecret": {
         "type": "object",
         "description": "A credential Firetower holds. Its name, and nothing else.",
@@ -9231,6 +9321,32 @@
           },
           "username": {
             "type": "string"
+          }
+        }
+      },
+      "Offboarding": {
+        "type": "object",
+        "description": "What to do about everything that is theirs, decided before anything happens.\n\n**Every row answered, or none of it runs.** A half-specified offboarding is\nthe thing this exists to prevent: the old path was one `DELETE` behind a\nwarning written in the abstract, and whatever it swept was found out\nafterwards or not at all.\n\nTwo answers per row and not three. *Hand over* moves it; *let go* means it\ngoes with them, which is deletion for a workspace, a subscription or a\nsecret and a move to `Shared` for a machine — compute is real and the\norganisation is still running on it. A third option spelled \"delete\" would\nbe a lie on the one kind that is never deleted.",
+        "required": [
+          "then"
+        ],
+        "properties": {
+          "handOver": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/HandOver"
+            }
+          },
+          "letGo": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FiledRef"
+            },
+            "description": "Acknowledged as going with them. Named rather than implied, so that\nnothing is lost by somebody not having scrolled."
+          },
+          "then": {
+            "type": "string",
+            "description": "Switched off, or removed for good."
           }
         }
       },

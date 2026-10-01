@@ -87,6 +87,31 @@ export const ChangeUserResponse = zod.object({
 }).describe('Someone who can sign in.')
 
 /**
+ * @summary Hand their work over, then take the account away — in one transaction.
+ */
+export const OffboardUserParams = zod.object({
+  "id": zod.string().describe('User id')
+})
+
+export const OffboardUserBody = zod.object({
+  "handOver": zod.array(zod.object({
+  "id": zod.string(),
+  "kind": zod.enum(['workspace', 'machine', 'agentAccount', 'secret']),
+  "to": zod.object({
+  "id": zod.string(),
+  "kind": zod.string().describe('`person` or `directory`.')
+})
+})).optional(),
+  "letGo": zod.array(zod.object({
+  "id": zod.string(),
+  "kind": zod.enum(['workspace', 'machine', 'agentAccount', 'secret'])
+}).describe('One thing to move, named the way `Filed` names it.\n\n**Not `Placed`.** That is already a schema in this contract — where an\nattached file landed in a workspace — and utoipa registers a type by its\nshort name, so a second `Placed` silently becomes whichever of the two the\ngenerator reached last. The clients then typecheck against a shape the\nserver never sends.')).optional().describe('Acknowledged as going with them. Named rather than implied, so that\nnothing is lost by somebody not having scrolled.'),
+  "then": zod.string().describe('Switched off, or removed for good.')
+}).describe('What to do about everything that is theirs, decided before anything happens.\n\n**Every row answered, or none of it runs.** A half-specified offboarding is\nthe thing this exists to prevent: the old path was one `DELETE` behind a\nwarning written in the abstract, and whatever it swept was found out\nafterwards or not at all.\n\nTwo answers per row and not three. *Hand over* moves it; *let go* means it\ngoes with them, which is deletion for a workspace, a subscription or a\nsecret and a move to `Shared` for a machine — compute is real and the\norganisation is still running on it. A third option spelled "delete" would\nbe a lie on the one kind that is never deleted.')
+
+export const OffboardUserResponse = zod.void()
+
+/**
  * @summary Give a user a new temporary password. Their sessions end; they replace it on sign-in.
  */
 export const ResetUserPasswordParams = zod.object({

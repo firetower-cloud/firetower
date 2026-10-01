@@ -218,6 +218,162 @@ pub(super) async fn user_reach(
     Ok(Json(state.access.reach(id.as_str()).await?))
 }
 
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct Destination {
+    /// `person` or `directory`.
+    pub kind: String,
+    pub id: String,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct HandOver {
+    pub kind: crate::access::FiledKind,
+    pub id: String,
+    pub to: Destination,
+}
+
+/// What to do about everything that is theirs, decided before anything happens.
+///
+/// **Every row answered, or none of it runs.** A half-specified offboarding is
+/// the thing this exists to prevent: the old path was one `DELETE` behind a
+/// warning written in the abstract, and whatever it swept was found out
+/// afterwards or not at all.
+///
+/// Two answers per row and not three. *Hand over* moves it; *let go* means it
+/// goes with them, which is deletion for a workspace, a subscription or a
+/// secret and a move to `Shared` for a machine — compute is real and the
+/// organisation is still running on it. A third option spelled "delete" would
+/// be a lie on the one kind that is never deleted.
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct Offboarding {
+    #[serde(default)]
+    pub hand_over: Vec<HandOver>,
+    /// Acknowledged as going with them. Named rather than implied, so that
+    /// nothing is lost by somebody not having scrolled.
+    #[serde(default)]
+    pub let_go: Vec<super::access::FiledRef>,
+    /// Switched off, or removed for good.
+    pub then: String,
+}
+
+/// Hand their work over, then take the account away — in one transaction.
+#[utoipa::path(
+    post, path = "/api/v1/users/{id}/offboard", tag = "organization",
+    params(("id" = String, Path, description = "User id")),
+    request_body = Offboarding,
+    responses(
+        (status = 204),
+        (status = 400, body = ApiError, description = "Something of theirs was left undecided"),
+        (status = 403, body = ApiError),
+    ),
+)]
+pub(super) async fn offboard_user(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Path(id): Path<String>,
+    Json(request): Json<Offboarding>,
+) -> ApiResult<axum::http::StatusCode> {
+    let me = admin(&principal)?;
+    let id = UserId::from_stored(id);
+    if id == me.id {
+        return Err(ApiError::new(
+            ErrorCode::InvalidRequest,
+            "you cannot offboard yourself",
+        ));
+    }
+    let user = one_of_ours(&state, me, &id).await?;
+
+    // Asked again here rather than trusted from the screen: what is theirs can
+    // change between drawing the list and agreeing to it, and the whole promise
+    // is that nothing is swept unseen.
+    let reach = state.access.reach(id.as_str()).await?;
+    let mut undecided: Vec<String> = Vec::new();
+    for owned in &reach.owns {
+        let decided = request
+            .hand_over
+            .iter()
+            .any(|h| h.kind == owned.kind && h.id == owned.id)
+            || request
+                .let_go
+                .iter()
+                .any(|l| l.kind == owned.kind && l.id == owned.id);
+        if !decided {
+            undecided.push(owned.name.clone());
+        }
+    }
+    if !undecided.is_empty() {
+        return Err(ApiError::new(
+            ErrorCode::InvalidRequest,
+            format!(
+                "nothing happens until everything of theirs is decided — still waiting on {}",
+                undecided.join(", ")
+            ),
+        ));
+    }
+
+    let remove = match request.then.as_str() {
+        "remove" => true,
+        "disable" => false,
+        other => {
+            return Err(ApiError::new(
+                ErrorCode::InvalidRequest,
+                format!("{other} is not something to do with an account"),
+            ))
+        }
+    };
+
+    let mut tx = state.db.pool().begin().await?;
+    for hand in &request.hand_over {
+        let from = state
+            .access
+            .path_of(hand.kind, &hand.id)
+            .await?
+            .ok_or_else(|| ApiError::not_found(hand.kind.singular()))?;
+        let root = match hand.to.kind.as_str() {
+            "directory" => {
+                let d = state
+                    .access
+                    .directory(&hand.to.id)
+                    .await?
+                    .ok_or_else(|| ApiError::not_found("directory"))?;
+                from.moved_to(ft_core::path::DIRECTORY, &d.slug)
+            }
+            _ => {
+                let slug = state.access.personal_root(&hand.to.id).await?;
+                from.moved_to(ft_core::path::PERSONAL, &slug)
+            }
+        };
+        state
+            .access
+            .transfer_in(&mut tx, &state.vault, hand.kind, &hand.id, &root, &me.username)
+            .await?;
+    }
+
+    if remove {
+        // Whatever was let go is still at their root, and this is what takes
+        // it: workspaces and subscriptions cascade, secrets are deleted, and
+        // machines move to `Shared`. Anything handed over above has already
+        // left, so none of it is caught by that.
+        state.accounts.delete_user_in(&mut tx, &id).await?;
+    } else {
+        sqlx::query("UPDATE users SET disabled = true WHERE id = $1")
+            .bind(id.as_str())
+            .execute(&mut *tx)
+            .await?;
+    }
+    tx.commit().await?;
+
+    tracing::info!(
+        by = %me.username, user = %user.username,
+        handed = request.hand_over.len(), let_go = request.let_go.len(),
+        removed = remove, "offboarded"
+    );
+    Ok(axum::http::StatusCode::NO_CONTENT)
+}
+
 /// Remove a user for good. Their workspaces go with them; prefer switching off.
 #[utoipa::path(
     delete, path = "/api/v1/users/{id}", tag = "organization",
@@ -238,6 +394,26 @@ pub(super) async fn delete_user(
         ));
     }
     let user = one_of_ours(&state, me, &id).await?;
+
+    // Refused while anything is still theirs. This used to sweep: workspaces
+    // and secrets deleted, machines moved, and the only warning a sentence true
+    // of anybody — *their workspaces go too* — which told you nothing about
+    // this person. What is theirs now has to be decided row by row, through
+    // `offboard`, and this stays as the short path for somebody who holds
+    // nothing.
+    let theirs = state.access.reach(id.as_str()).await?.owns;
+    if !theirs.is_empty() {
+        return Err(ApiError::new(
+            ErrorCode::InvalidRequest,
+            format!(
+                "{} still has {} thing{} of their own. Decide what happens to each before removing them.",
+                user.username,
+                theirs.len(),
+                if theirs.len() == 1 { "" } else { "s" }
+            ),
+        ));
+    }
+
     state
         .accounts
         .delete_user(&id)

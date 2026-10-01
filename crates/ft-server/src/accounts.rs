@@ -427,15 +427,31 @@ impl Accounts {
     /// Refused for the last administrator.
     pub async fn delete_user(&self, id: &UserId) -> Result<()> {
         let mut tx = self.pool.begin().await?;
+        self.delete_user_in(&mut tx, id).await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
+    /// The same, inside somebody else's transaction.
+    ///
+    /// Offboarding hands things over first and removes the account second, and
+    /// a failure between the two would leave somebody's work transferred to a
+    /// colleague and the account still able to sign in — or, worse, the account
+    /// gone and half its work still at a root nobody can reach.
+    pub async fn delete_user_in(
+        &self,
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        id: &UserId,
+    ) -> Result<()> {
         let user = sqlx::query("SELECT u.*, p.slug FROM users u JOIN principals p ON p.id = u.id WHERE u.id = $1 FOR UPDATE OF u")
             .bind(id.as_str())
-            .fetch_optional(&mut *tx)
+            .fetch_optional(&mut **tx)
             .await?
             .map(user_from_row)
             .context("no such user")?;
         if user.role == "admin"
             && !user.disabled
-            && Self::active_admins(&mut tx, &user.org_id).await? <= 1
+            && Self::active_admins(tx, &user.org_id).await? <= 1
         {
             bail!("{} is the only administrator", user.username);
         }
@@ -447,7 +463,7 @@ impl Accounts {
         // appear on the list of who can see a directory, as a row with no name.
         sqlx::query("DELETE FROM grants WHERE subject_kind = 'person' AND subject_id = $1")
             .bind(id.as_str())
-            .execute(&mut *tx)
+            .execute(&mut **tx)
             .await?;
 
         // What is still filed at `u/<their slug>` has to leave with them, and
@@ -495,7 +511,7 @@ impl Accounts {
         ] {
             sqlx::query(statement)
                 .bind(id.as_str())
-                .execute(&mut *tx)
+                .execute(&mut **tx)
                 .await
                 .context("moving their machines somewhere the organisation can still reach")?;
         }
@@ -506,13 +522,13 @@ impl Accounts {
                  OR path <@ ('u.' || (SELECT slug FROM principals WHERE id = $1))::ltree",
         )
         .bind(id.as_str())
-        .execute(&mut *tx)
+        .execute(&mut **tx)
         .await
         .context("removing their credentials")?;
 
         sqlx::query("DELETE FROM users WHERE id = $1")
             .bind(id.as_str())
-            .execute(&mut *tx)
+            .execute(&mut **tx)
             .await?;
 
         // The account goes; the identity stays, retired. That row is what keeps
@@ -520,10 +536,9 @@ impl Accounts {
         // on their own workspace, `{"u/kevin": "writer"}`, can never land on a
         // new colleague who happens to have the same name. Sweeping those
         // entries is hygiene; this is the guarantee.
-        crate::access::Access::forget_exceptions(&mut tx, &format!("u/{}", user.slug)).await?;
-        crate::access::Access::retire_principal(&mut tx, id.as_str()).await?;
+        crate::access::Access::forget_exceptions(tx, &format!("u/{}", user.slug)).await?;
+        crate::access::Access::retire_principal(tx, id.as_str()).await?;
 
-        tx.commit().await?;
         Ok(())
     }
 
