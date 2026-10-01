@@ -6087,6 +6087,59 @@
         }
       }
     },
+    "/api/v1/users/{id}/reach": {
+      "get": {
+        "tags": [
+          "organization"
+        ],
+        "summary": "Everything one person reaches, and everything that is theirs.",
+        "description": "**For deciding about them, which is the one time this question is asked.**\nEvery other read goes the other way — \"may this person see this thing\",\nanswered per row by `filed_where`. Offboarding needs the reverse, because\nremoving somebody without being shown what goes with them is a decision\ntaken blind.\n\nAn administrator's. It names things across the whole installation,\nincluding ones the person asking may not be able to reach themselves, which\nis exactly what makes it useful and exactly why it is gated.",
+        "operationId": "user_reach",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "User id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Reach"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/voice": {
       "get": {
         "tags": [
@@ -8745,6 +8798,34 @@
           }
         }
       },
+      "Named": {
+        "type": "object",
+        "required": [
+          "kind",
+          "id",
+          "name",
+          "level",
+          "through"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/FiledKind"
+          },
+          "level": {
+            "$ref": "#/components/schemas/Level"
+          },
+          "name": {
+            "type": "string"
+          },
+          "through": {
+            "$ref": "#/components/schemas/Route",
+            "description": "Named personally, or through a team they are in."
+          }
+        }
+      },
       "NewCheckout": {
         "type": "object",
         "description": "One repository to check out, as the API accepts it.",
@@ -9572,6 +9653,45 @@
           "CodexAppServer",
           "Acp"
         ]
+      },
+      "Reach": {
+        "type": "object",
+        "description": "Everything one person can reach, and everything that is theirs.\n\n**Answered for a person, which is the opposite of how access is stored.**\nEvery other read asks \"may this person see this thing\" and lets\n[`filed_where`] answer it per row. This asks the reverse, and nothing else\nneeds it — only offboarding, where deciding about somebody means seeing what\ngoes with them before it goes.\n\nEach field is a list so the shape can grow a kind without breaking a client:\na reader that does not know about a new one ignores it rather than failing.",
+        "required": [
+          "teams",
+          "directories",
+          "exceptions",
+          "owns"
+        ],
+        "properties": {
+          "directories": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Reached"
+            },
+            "description": "Directories they can work in, and how they came by each."
+          },
+          "exceptions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Named"
+            },
+            "description": "Resources naming them personally, or naming a team they are in."
+          },
+          "owns": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Filed"
+            },
+            "description": "Filed in their own root. This is what a deletion takes with it."
+          },
+          "teams": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Team"
+            }
+          }
+        }
       },
       "Reached": {
         "type": "object",

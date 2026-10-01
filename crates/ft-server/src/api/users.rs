@@ -8,6 +8,7 @@
 //! person they are for has to replace them the first time they sign in.
 
 use super::{ApiError, ApiResult, ErrorCode};
+use crate::access::Reach;
 use crate::accounts::{Organization, User};
 use crate::auth::Principal;
 use crate::AppState;
@@ -188,6 +189,33 @@ pub(super) async fn reset_user_password(
         .map_err(|e| ApiError::new(ErrorCode::InvalidRequest, format!("{e:#}")))?;
     tracing::info!(by = %me.username, user = %user.username, "password reset");
     Ok(Json(TemporaryPassword { password }))
+}
+
+/// Everything one person reaches, and everything that is theirs.
+///
+/// **For deciding about them, which is the one time this question is asked.**
+/// Every other read goes the other way — "may this person see this thing",
+/// answered per row by `filed_where`. Offboarding needs the reverse, because
+/// removing somebody without being shown what goes with them is a decision
+/// taken blind.
+///
+/// An administrator's. It names things across the whole installation,
+/// including ones the person asking may not be able to reach themselves, which
+/// is exactly what makes it useful and exactly why it is gated.
+#[utoipa::path(
+    get, path = "/api/v1/users/{id}/reach", tag = "organization",
+    params(("id" = String, Path, description = "User id")),
+    responses((status = 200, body = Reach), (status = 403, body = ApiError), (status = 404, body = ApiError)),
+)]
+pub(super) async fn user_reach(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Path(id): Path<String>,
+) -> ApiResult<Json<Reach>> {
+    let me = admin(&principal)?;
+    let id = UserId::from_stored(id);
+    one_of_ours(&state, me, &id).await?;
+    Ok(Json(state.access.reach(id.as_str()).await?))
 }
 
 /// Remove a user for good. Their workspaces go with them; prefer switching off.

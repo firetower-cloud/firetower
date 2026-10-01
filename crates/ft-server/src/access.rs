@@ -174,6 +174,69 @@ impl Directory {
     }
 }
 
+
+/// How somebody came by the access they have to a directory.
+///
+/// Flattened, `directory_access` answers *what* they may do and loses *why* —
+/// which is the only thing that matters when the question is how to take it
+/// away. Revoking a grant that was never theirs to begin with changes nothing;
+/// the team is what has to be left.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase", tag = "how")]
+pub enum Route {
+    /// A grant naming them.
+    Direct,
+    /// A grant naming a team they are in.
+    Team { name: String },
+    /// A grant naming the team that is everybody. Leaving is not possible;
+    /// only the grant can go.
+    Everyone,
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct Reached {
+    pub directory_id: String,
+    pub name: String,
+    pub slug: String,
+    /// The most generous of the routes below.
+    pub level: Level,
+    pub through: Vec<Route>,
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct Named {
+    pub kind: FiledKind,
+    pub id: String,
+    pub name: String,
+    pub level: Level,
+    /// Named personally, or through a team they are in.
+    pub through: Route,
+}
+
+/// Everything one person can reach, and everything that is theirs.
+///
+/// **Answered for a person, which is the opposite of how access is stored.**
+/// Every other read asks "may this person see this thing" and lets
+/// [`filed_where`] answer it per row. This asks the reverse, and nothing else
+/// needs it — only offboarding, where deciding about somebody means seeing what
+/// goes with them before it goes.
+///
+/// Each field is a list so the shape can grow a kind without breaking a client:
+/// a reader that does not know about a new one ignores it rather than failing.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct Reach {
+    pub teams: Vec<Team>,
+    /// Directories they can work in, and how they came by each.
+    pub directories: Vec<Reached>,
+    /// Resources naming them personally, or naming a team they are in.
+    pub exceptions: Vec<Named>,
+    /// Filed in their own root. This is what a deletion takes with it.
+    pub owns: Vec<Filed>,
+}
+
 /// One of the things a directory holds.
 ///
 /// Four kinds in one list, because "what is in here" is one question and
@@ -748,7 +811,15 @@ impl Access {
     /// like in the schema, and this filters on it by asking for descendants of
     /// the root, which a null path can never be.
     pub async fn filed_in(&self, directory_slug: &str) -> Result<Vec<Filed>> {
-        let under = format!("d.{directory_slug}");
+        self.filed_under(&format!("d.{directory_slug}")).await
+    }
+
+    /// The same question asked of any root, including somebody's own.
+    ///
+    /// `u.<slug>` is what "theirs" means, and asking it is how offboarding
+    /// finds out what would go with them. The only difference from a directory
+    /// is the first label.
+    pub async fn filed_under(&self, under: &str) -> Result<Vec<Filed>> {
         let rows = sqlx::query(
             "SELECT 'workspace' AS kind, w.id, w.path::text, w.name, w.repo AS detail,
                     u.name AS owner_name
@@ -770,10 +841,10 @@ impl Access {
               WHERE s.path <@ $1::ltree
              ORDER BY kind, name",
         )
-        .bind(&under)
+        .bind(under)
         .fetch_all(&self.pool)
         .await
-        .context("reading what a directory holds")?;
+        .context("reading what is filed there")?;
 
         rows.into_iter()
             .map(|r| {
@@ -836,6 +907,162 @@ impl Access {
             }
         };
         Ok(found.flatten().map(ResourcePath::from_stored))
+    }
+
+    /// Everything one person reaches, and everything that is theirs.
+    ///
+    /// Four reads rather than one union, because they answer four different
+    /// shapes and a single query would have to flatten them back apart in Rust
+    /// anyway. None of them is on a hot path: this is asked once, by one
+    /// administrator, while deciding about one person.
+    pub async fn reach(&self, person: &str) -> Result<Reach> {
+        let slug: Option<String> =
+            sqlx::query_scalar("SELECT slug FROM principals WHERE id = $1 AND kind = 'user'")
+                .bind(person)
+                .fetch_optional(&self.pool)
+                .await?;
+        let Some(slug) = slug else {
+            anyhow::bail!("there is nobody here with that id");
+        };
+
+        // The slug comes back beside the team because the exception key is
+        // `t/<slug>` and a name cannot be turned back into one: two teams whose
+        // names differ can slug the same, and the stored slug is the only
+        // answer that is not a guess.
+        let rows = sqlx::query(
+            "SELECT p.id, p.name, p.slug, t.everyone,
+                    (SELECT count(*) FROM team_members m2 WHERE m2.team_id = t.id)::int AS members
+               FROM team_members m
+               JOIN teams t ON t.id = m.team_id
+               JOIN principals p ON p.id = t.id
+              WHERE m.user_id = $1
+              ORDER BY lower(p.name)",
+        )
+        .bind(person)
+        .fetch_all(&self.pool)
+        .await
+        .context("reading the teams somebody is in")?;
+
+        let mut teams = Vec::new();
+        let mut team_slugs = Vec::new();
+        for r in rows {
+            team_slugs.push((r.get::<String, _>("slug"), r.get::<String, _>("name")));
+            teams.push(Team {
+                id: TeamId::from_stored(r.get::<String, _>("id")),
+                name: r.get("name"),
+                everyone: r.get("everyone"),
+                members: r.get::<i32, _>("members") as i64,
+            });
+        }
+
+        // Every route separately, then folded — `directory_access` takes the
+        // max and throws away which grant produced it, and which grant produced
+        // it is the whole question here.
+        let rows = sqlx::query(
+            "SELECT d.id, d.name, d.slug, g.level, 'direct' AS how, NULL::text AS team
+               FROM grants g JOIN directories d ON d.id = g.directory_id
+              WHERE g.subject_kind = 'person' AND g.subject_id = $1
+             UNION ALL
+             SELECT d.id, d.name, d.slug, g.level, 'team', p.name
+               FROM grants g
+               JOIN directories d ON d.id = g.directory_id
+               JOIN team_members m ON m.team_id = g.subject_id AND m.user_id = $1
+               JOIN principals p ON p.id = g.subject_id
+              WHERE g.subject_kind = 'team'
+             UNION ALL
+             SELECT d.id, d.name, d.slug, g.level, 'everyone', NULL
+               FROM grants g
+               JOIN directories d ON d.id = g.directory_id
+               JOIN teams t ON t.id = g.subject_id AND t.everyone
+               JOIN users u ON u.org_id = t.org_id AND u.id = $1
+              WHERE g.subject_kind = 'team'",
+        )
+        .bind(person)
+        .fetch_all(&self.pool)
+        .await
+        .context("reading what somebody can work in")?;
+
+        let mut directories: Vec<Reached> = Vec::new();
+        for r in rows {
+            let id: String = r.get("id");
+            let level = Level::parse(&r.get::<String, _>("level")).unwrap_or(Level::Viewer);
+            let route = match r.get::<String, _>("how").as_str() {
+                "direct" => Route::Direct,
+                "everyone" => Route::Everyone,
+                _ => Route::Team {
+                    name: r.get::<Option<String>, _>("team").unwrap_or_default(),
+                },
+            };
+            match directories.iter_mut().find(|d| d.directory_id == id) {
+                Some(found) => {
+                    if level.rank() > found.level.rank() {
+                        found.level = level;
+                    }
+                    found.through.push(route);
+                }
+                None => directories.push(Reached {
+                    directory_id: id,
+                    name: r.get("name"),
+                    slug: r.get("slug"),
+                    level,
+                    through: vec![route],
+                }),
+            }
+        }
+        directories.sort_by_key(|d| d.name.to_lowercase());
+
+        let mut exceptions = Vec::new();
+        let mut keys = vec![(format!("u/{slug}"), Route::Direct)];
+        for (team_slug, name) in &team_slugs {
+            keys.push((
+                format!("t/{team_slug}"),
+                Route::Team { name: name.clone() },
+            ));
+        }
+        for (key, route) in keys {
+            exceptions.extend(self.named_by(&key, route).await?);
+        }
+
+        Ok(Reach {
+            teams,
+            directories,
+            exceptions,
+            owns: self.filed_under(&format!("u.{slug}")).await?,
+        })
+    }
+
+    /// Everything whose `extra_perms` names one key.
+    async fn named_by(&self, key: &str, through: Route) -> Result<Vec<Named>> {
+        let rows = sqlx::query(
+            "SELECT 'workspace' AS kind, w.id, w.name, w.extra_perms ->> $1 AS level
+               FROM workspaces w WHERE w.extra_perms ? $1
+             UNION ALL
+             SELECT 'machine', h.id, h.name, h.extra_perms ->> $1 FROM hosts h WHERE h.extra_perms ? $1
+             UNION ALL
+             SELECT 'agentAccount', a.id, a.name, a.extra_perms ->> $1
+               FROM agent_accounts a WHERE a.extra_perms ? $1
+             UNION ALL
+             SELECT 'secret', s.scope || '/' || s.name || '/' || s.owner, s.scope || '/' || s.name,
+                    s.extra_perms ->> $1
+               FROM secrets s WHERE s.extra_perms ? $1",
+        )
+        .bind(key)
+        .fetch_all(&self.pool)
+        .await
+        .context("reading what names somebody directly")?;
+
+        rows.into_iter()
+            .map(|r| {
+                Ok(Named {
+                    kind: FiledKind::parse(&r.get::<String, _>("kind"))?,
+                    id: r.get("id"),
+                    name: r.get("name"),
+                    level: Level::parse(&r.get::<Option<String>, _>("level").unwrap_or_default())
+                        .unwrap_or(Level::Viewer),
+                    through: through.clone(),
+                })
+            })
+            .collect()
     }
 
     /// Who `u/<slug>` is, as an id and a name to read.
@@ -2359,6 +2586,65 @@ mod tests {
             resolve(cleo.to_string()).await.is_none(),
             "and for nobody the directory does not let in"
         );
+    }
+
+    /// What one person reaches, and *how* — which is the only part that helps
+    /// when the question is how to take it away.
+    ///
+    /// `directory_access` takes the most generous route and throws the rest
+    /// away. That is right for enforcement and useless for offboarding:
+    /// revoking a grant somebody never held changes nothing, and a screen that
+    /// cannot say "through Backend" sends an administrator to undo the wrong
+    /// thing.
+    #[tokio::test]
+    async fn what_somebody_reaches_says_how_they_reach_it() {
+        let (db, access, accounts, org, admin) = set_up().await;
+        let ana = person(&accounts, &org, "ana").await;
+        let vault = vault(&db);
+
+        let backend = access.create_team(&org, "Backend").await.unwrap();
+        access.add_member(backend.id.as_str(), ana.as_str()).await.unwrap();
+
+        let prod = access.create_directory(&org, "Production", &admin, &[]).await.unwrap();
+        access
+            .set_grant(prod.id.as_str(), SubjectKind::Team, backend.id.as_str(), Level::Writer, &admin)
+            .await
+            .unwrap();
+
+        let shelf = access.create_directory(&org, "Shelf", &admin, &[]).await.unwrap();
+        access
+            .set_grant(shelf.id.as_str(), SubjectKind::Person, ana.as_str(), Level::Viewer, &admin)
+            .await
+            .unwrap();
+
+        // Hers, so it is what a deletion would take.
+        vault
+            .put(Key::of("git", "github", ana.as_str()), "t", "a test")
+            .await
+            .unwrap();
+
+        let reach = access.reach(ana.as_str()).await.unwrap();
+
+        assert_eq!(reach.teams.len(), 1, "Backend");
+        let prod_row = reach
+            .directories
+            .iter()
+            .find(|d| d.slug == prod.slug)
+            .expect("Production");
+        assert!(
+            matches!(prod_row.through.as_slice(), [Route::Team { name }] if name == "Backend"),
+            "through the team and not directly: {:?}",
+            prod_row.through
+        );
+        let shelf_row = reach
+            .directories
+            .iter()
+            .find(|d| d.slug == shelf.slug)
+            .expect("Shelf");
+        assert!(matches!(shelf_row.through.as_slice(), [Route::Direct]));
+
+        assert_eq!(reach.owns.len(), 1, "her own token goes with her");
+        assert_eq!(reach.owns[0].kind, FiledKind::Secret);
     }
 
     /// `admin` is not spellable as an exception: administration belongs to the

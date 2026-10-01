@@ -31,6 +31,7 @@ import type {
   NewUser,
   Organization,
   OrganizationName,
+  Reach,
   TemporaryPassword,
   User,
   UserChange
@@ -583,3 +584,129 @@ export const useResetUserPassword = <TError = ApiError,
       > => {
       return useMutation(getResetUserPasswordMutationOptions(options), queryClient);
     }
+    export const getUserReachUrl = (id: string,) => {
+
+
+
+
+  return `/api/v1/users/${id}/reach`
+}
+
+/**
+ * **For deciding about them, which is the one time this question is asked.**
+ * Every other read goes the other way — "may this person see this thing",
+ * answered per row by `filed_where`. Offboarding needs the reverse, because
+ * removing somebody without being shown what goes with them is a decision
+ * taken blind.
+ *
+ * An administrator's. It names things across the whole installation,
+ * including ones the person asking may not be able to reach themselves, which
+ * is exactly what makes it useful and exactly why it is gated.
+ * @summary Everything one person reaches, and everything that is theirs.
+ */
+export const userReach = async (id: string, options?: Parameters<typeof http>[1]): Promise<Reach> => {
+
+  return http<Reach>(getUserReachUrl(id),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getUserReachQueryKey = (id: string,) => {
+    return [
+    `/api/v1/users/${id}/reach`
+    ] as const;
+    }
+
+
+export const getUserReachQueryOptions = <TData = Awaited<ReturnType<typeof userReach>>, TError = ApiError>(id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof userReach>>, TError, TData>>, request?: SecondParameter<typeof http>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getUserReachQueryKey(id);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof userReach>>> = ({ signal }) => userReach(id, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: id !== null && id !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof userReach>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type UserReachQueryResult = NonNullable<Awaited<ReturnType<typeof userReach>>>
+export type UserReachQueryError = ApiError
+
+
+export function useUserReach<TData = Awaited<ReturnType<typeof userReach>>, TError = ApiError>(
+ id: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof userReach>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof userReach>>,
+          TError,
+          Awaited<ReturnType<typeof userReach>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useUserReach<TData = Awaited<ReturnType<typeof userReach>>, TError = ApiError>(
+ id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof userReach>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof userReach>>,
+          TError,
+          Awaited<ReturnType<typeof userReach>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useUserReach<TData = Awaited<ReturnType<typeof userReach>>, TError = ApiError>(
+ id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof userReach>>, TError, TData>>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Everything one person reaches, and everything that is theirs.
+ */
+
+export function useUserReach<TData = Awaited<ReturnType<typeof userReach>>, TError = ApiError>(
+ id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof userReach>>, TError, TData>>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getUserReachQueryOptions(id,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+/**
+ * @summary Everything one person reaches, and everything that is theirs.
+ */
+export const useSetUserReachQueryData = () => {
+  const queryClient = useQueryClient();
+  return (id: string,updater: Awaited<ReturnType<typeof userReach>> | undefined | ((old: Awaited<ReturnType<typeof userReach>> | undefined) => Awaited<ReturnType<typeof userReach>> | undefined), $exactMatch: boolean = true) => {
+    queryClient.setQueriesData<Awaited<ReturnType<typeof userReach>>>({ exact: $exactMatch, queryKey: getUserReachQueryKey(id) }, updater);
+  };
+}
+
+/**
+ * @summary Everything one person reaches, and everything that is theirs.
+ */
+export const useGetUserReachQueryData = () => {
+  const queryClient = useQueryClient();
+  return (id: string,) =>
+    queryClient.getQueryData<Awaited<ReturnType<typeof userReach>>>(getUserReachQueryKey(id));
+}
+
+

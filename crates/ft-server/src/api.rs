@@ -348,6 +348,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(users::rename_organization))
         .routes(routes!(users::list_users, users::create_user))
         .routes(routes!(users::change_user, users::delete_user))
+        .routes(routes!(users::user_reach))
         .routes(routes!(users::reset_user_password))
         .routes(routes!(access::list_colleagues))
         .routes(routes!(access::list_teams, access::create_team))
