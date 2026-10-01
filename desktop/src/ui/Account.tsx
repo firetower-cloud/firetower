@@ -71,7 +71,7 @@ export function Account({ backend, onForgot }: { backend: Backend; onForgot: () 
             to work from here — not a value the server reports about itself. */}
         <section className="mt-7">
           <h2 className="flex items-center gap-2 text-title text-bone"><KeyRound className="h-4 w-4 text-dim" strokeWidth={1.75} />Password</h2>
-          <p className="mt-0.5 text-meta text-mute">Changed in a browser, on the Firetower itself. Everywhere else signed in as you is signed out.</p>
+          <p className="mt-0.5 text-meta text-mute">To manage your account and password open the Firetower control plane</p>
           <div className="mt-2.5 rounded-xl border border-line bg-panel p-4">
             <button
               onClick={() => void openExternal(origin)}
