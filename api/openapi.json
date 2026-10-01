@@ -10523,6 +10523,10 @@
           "id": {
             "$ref": "#/components/schemas/SessionId"
           },
+          "mayWrite": {
+            "type": "boolean",
+            "description": "Whether whoever asked for this may act in it, or only watch.\n\n**Sent, because it cannot be derived.** The level was deliberately left\noff this type once, on the grounds that a client already holds the\ndirectories it can see and can work the answer out from the path. That\nstopped being true the moment a single workspace could be shared to one\nperson by name: an exception lives on the resource, in no directory, so\nthere is nothing on the client that mentions it.\n\nWithout it, a viewer was shown a composer, typed, pressed send, and the\nserver answered 404 — which the screen reported as \"Working — nothing\nheard\", because an echo had already been added optimistically. A\ncontrol that is drawn and then refused is worse than one that is\nabsent: it reads as the product being broken.\n\n`true` by default so that a client talking to a control plane that\npredates this field behaves as it did before, rather than deciding\neverybody is a spectator."
+          },
           "name": {
             "type": "string",
             "description": "What to call it. `Agent 3` until somebody says otherwise.\n\nSeparate from `title`, which is cut from the prompt and describes the\nwork. This one identifies the session, which is a different job: five\nsessions on one repository all called \"Ask me…\" are impossible to tell\napart, and renaming one of them to \"the flaky test\" fixes that."
@@ -10552,7 +10556,7 @@
           },
           "path": {
             "$ref": "#/components/schemas/ResourcePath",
-            "description": "Which directory the workspace is filed in — `u/kevin/…` for somebody's\nown, `d/backend/…` once it has been handed to a directory.\n\nWhat anybody may do with it follows from this and from their grants, and\nis not repeated on the session: a client already holds the directories\nit can see, with its level on each, so sending a level per session would\nbe a second copy of an answer that can disagree with the first."
+            "description": "Which directory the workspace is filed in — `u/kevin/…` for somebody's\nown, `d/backend/…` once it has been handed to a directory."
           },
           "prompt": {
             "type": "string"

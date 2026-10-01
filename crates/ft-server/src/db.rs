@@ -1299,12 +1299,13 @@ impl Db {
     ) -> Result<Vec<Session>> {
         let rows = sqlx::query(
             format!(
-                "SELECT {SESSION_COLUMNS} FROM sessions s
+                "SELECT {columns} FROM sessions s
                    JOIN workspaces w ON w.id = s.workspace_id
                   WHERE {visible}
                     AND ($1::text IS NULL OR s.id < $1)
                   ORDER BY s.id DESC
                   LIMIT $2",
+                columns = session_columns(Some(3)),
                 visible = filed_where("w", 3, Level::Viewer)
             )
             .as_str(),
@@ -1363,10 +1364,11 @@ impl Db {
     pub async fn live_sessions(&self, owner: &str) -> Result<Vec<Session>> {
         let rows = sqlx::query(
             format!(
-                "SELECT {SESSION_COLUMNS} FROM sessions s
+                "SELECT {columns} FROM sessions s
                    JOIN workspaces w ON w.id = s.workspace_id
                   WHERE s.user_id = $2 AND s.status != $1
-                  ORDER BY s.id DESC"
+                  ORDER BY s.id DESC",
+                columns = session_columns(None)
             )
             .as_str(),
         )
@@ -1417,9 +1419,10 @@ impl Db {
     ) -> Result<Option<Session>> {
         let row = sqlx::query(
             format!(
-                "SELECT {SESSION_COLUMNS} FROM sessions s
+                "SELECT {columns} FROM sessions s
                    JOIN workspaces w ON w.id = s.workspace_id
                   WHERE s.id = $1 AND {visible}",
+                columns = session_columns(Some(2)),
                 visible = filed_where("w", 2, at_least)
             )
             .as_str(),
@@ -1441,9 +1444,10 @@ impl Db {
     pub async fn session(&self, id: &SessionId) -> Result<Option<Session>> {
         let row = sqlx::query(
             format!(
-                "SELECT {SESSION_COLUMNS} FROM sessions s
+                "SELECT {columns} FROM sessions s
                    JOIN workspaces w ON w.id = s.workspace_id
-                  WHERE s.id = $1"
+                  WHERE s.id = $1",
+                columns = session_columns(None)
             )
             .as_str(),
         )
@@ -2292,11 +2296,33 @@ pub struct WorkspacePlace {
     pub forgotten: bool,
 }
 
-const SESSION_COLUMNS: &str = "\
+const SESSION_FIELDS: &str = "\
     s.*, w.host_id, w.repo, w.branch, w.base, w.size, w.share, w.pull_request, \
     w.forgotten_at, w.cleaned_at, w.name, w.task_key, w.task_url, \
     w.path::text AS path, \
     (SELECT username FROM users WHERE users.id = s.user_id) AS owner_name";
+
+/// The session's own columns, plus whether the person asking may act in it.
+///
+/// **Computed here rather than derived by the client.** A client holds the
+/// directories it can see and the level it has on each, which was once enough
+/// to work this out — and is not, because an exception named on one workspace
+/// is not in any directory. Somebody given a look at a single piece of work
+/// has no grant anywhere that says so, so the only honest answer comes from
+/// the same predicate that enforces it.
+///
+/// `None` for the reads that have nobody to ask about: the internal lookup a
+/// reconnecting worker does, and "every session of mine", which is already
+/// filtered to the owner. Both are a writer by construction.
+fn session_columns(person: Option<usize>) -> String {
+    match person {
+        Some(n) => format!(
+            "{SESSION_FIELDS}, ({visible}) AS may_write",
+            visible = filed_where("w", n, Level::Writer)
+        ),
+        None => format!("{SESSION_FIELDS}, TRUE AS may_write"),
+    }
+}
 
 fn session_from_row(r: sqlx::postgres::PgRow) -> Result<Session> {
     let status: String = r.get("status");
@@ -2305,6 +2331,7 @@ fn session_from_row(r: sqlx::postgres::PgRow) -> Result<Session> {
     let share: String = r.get("share");
 
     Ok(Session {
+        may_write: r.get("may_write"),
         number: r.get("number"),
         owner: ft_core::UserId::from_stored(r.get::<String, _>("user_id")),
         // Read here rather than by the caller, because every read of a session
@@ -2486,6 +2513,94 @@ mod tests {
             vec!["Still going"],
             "removing this host would orphan running work"
         );
+    }
+
+    /// Somebody let into one workspace by name, and nothing else.
+    ///
+    /// This is the case that broke the composer. An exception lives on the
+    /// resource and in no directory, so a client holding its directories and
+    /// their levels has nothing that mentions it — it drew a text box, took a
+    /// message, and the server answered 404. `may_write` comes from the same
+    /// predicate that refused the send, so the two cannot disagree.
+    #[tokio::test]
+    async fn a_viewer_named_on_one_workspace_may_watch_and_not_act() {
+        let (db, owner) = db_with_user().await;
+        let accounts = crate::accounts::Accounts::new(db.pool().clone());
+        let access = crate::access::Access::new(db.pool().clone());
+        let org = ft_core::OrgId::from_stored(db.org().await.unwrap());
+        let bob = accounts
+            .create_user(&org, "bob", "bob@example.test", "member")
+            .await
+            .unwrap()
+            .0
+            .id;
+
+        let host = db
+            .ensure_host("localhost", Compute::Local, owner.as_str())
+            .await
+            .unwrap();
+        let id = SessionId::new();
+        db.insert_session(
+            &id,
+            &host.id,
+            &owner,
+            Some("acme/backend"),
+            "Mine",
+            "do a thing",
+            Some("agent/x"),
+            Some("main"),
+            "Shell",
+            WorkspaceSize::Medium,
+            ft_core::Share::Equal,
+            &ft_core::Step::plan(true, false),
+            None,
+        )
+        .await
+        .unwrap();
+
+        let workspace = db
+            .session(&id)
+            .await
+            .unwrap()
+            .unwrap()
+            .workspace_id
+            .unwrap();
+
+        assert!(
+            db.session_of(bob.as_str(), &id).await.unwrap().is_none(),
+            "nothing of anybody's is visible before it is shared"
+        );
+
+        access
+            .set_exception(
+                crate::access::FiledKind::Workspace,
+                workspace.as_str(),
+                bob.as_str(),
+                Level::Viewer,
+            )
+            .await
+            .unwrap();
+
+        let seen = db
+            .session_of(bob.as_str(), &id)
+            .await
+            .unwrap()
+            .expect("named on it, so he can watch");
+        assert!(
+            !seen.may_write,
+            "and that is the whole of what viewer means"
+        );
+
+        assert!(
+            db.session_to_work_in(bob.as_str(), &id)
+                .await
+                .unwrap()
+                .is_none(),
+            "the same answer from the path that enforces it"
+        );
+
+        let mine = db.session_of(&owner, &id).await.unwrap().unwrap();
+        assert!(mine.may_write, "their own is still theirs to act in");
     }
 
     #[tokio::test]

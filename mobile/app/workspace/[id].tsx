@@ -14,7 +14,7 @@ import Animated, { useAnimatedStyle } from "react-native-reanimated";
 import { useReanimatedKeyboardAnimation } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { router, useLocalSearchParams } from "expo-router";
-import { ChevronLeft, MoreHorizontal } from "lucide-react-native";
+import { ChevronLeft, Eye, MoreHorizontal } from "lucide-react-native";
 import { delegating, interruptible, useConversation } from "~/api/conversation";
 import { useListEvents } from "~/api/generated/events/events";
 import type { Attached, Event } from "~/api/generated/model";
@@ -314,6 +314,21 @@ function Conversation({ place }: { place: Workspace }) {
         />
       ) : null}
 
+      {/* A viewer gets no composer here either. Same reason as the desk: a box
+          that takes a message the server will refuse reads as the product
+          being broken, not as a permission somebody does not have. */}
+      {/* `=== false`, not falsiness: an older control plane sends no such field,
+          and treating that as read-only hides the composer from everybody. */}
+      {session && session.mayWrite === false ? (
+        <View style={{ paddingHorizontal: 16, paddingBottom: 16 }}>
+          <View className="flex-row items-center gap-2.5 rounded-full border border-line bg-panel px-4 py-3">
+            <Eye color={color.mute} size={14} />
+            <Text className="flex-1 font-sans text-ui text-dim">
+              You are watching this work. Ask whoever owns it for more than a look to join in.
+            </Text>
+          </View>
+        </View>
+      ) : (
       <Composer
         sessionId={speaker.id}
         acp={speaker.agent === "KimiCode"}
@@ -343,6 +358,7 @@ function Conversation({ place }: { place: Workspace }) {
           />
         ))}
       />
+      )}
     </View>
   );
 }

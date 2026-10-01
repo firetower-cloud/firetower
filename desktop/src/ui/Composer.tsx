@@ -480,8 +480,21 @@ export function Composer({
             className="scroll-slim block w-full resize-none bg-transparent px-4 py-3.5 text-read text-text placeholder:text-mute focus:outline-none"
           />
 
-          <div className="flex items-center gap-1.5 px-2.5 pb-2.5">
-            <label className="control cursor-pointer text-mute hover:bg-raise hover:text-bone" title="Attach a file or an image">
+          {/* The controls wrap; send does not.
+              Labels come from whichever agent this is and some are long —
+              `Workspace + network`, `gpt-6.1-sol`. They used to wrap *inside* a
+              fixed-height control, which put two lines of text in a 28px box
+              and read as overlapping junk. Each control is one line now
+              (`.control` says so), and when they no longer fit they move onto
+              a second line whole, which is the one way this degrades without
+              anything becoming unreadable.
+
+              Squeezing them instead was tried and is worse: four controls
+              sharing a narrow column shrink to `G…`, `Ask …` and an Effort
+              button with no word in it at all. */}
+          <div className="flex items-start gap-1.5 px-2.5 pb-2.5">
+            <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
+            <label className="control shrink-0 cursor-pointer text-mute hover:bg-raise hover:text-bone" title="Attach a file or an image">
               <Paperclip className="h-4 w-4" strokeWidth={1.75} />
               <input type="file" multiple className="hidden" onChange={(e) => take(e.target.files)} />
             </label>
@@ -499,13 +512,15 @@ export function Composer({
             ))}
 
             {full !== null && (
-              <span className="control gap-2 text-mute" title={`${Math.round(full * 100)}% of the context window used`}>
+              <span className="control shrink-0 gap-2 text-mute" title={`${Math.round(full * 100)}% of the context window used`}>
                 <span className="h-1 w-14 overflow-hidden rounded-full bg-ground">
                   <span className={`block h-full rounded-full ${full > 0.75 ? "bg-ember" : "bg-slate"}`} style={{ width: `${Math.min(100, full * 100)}%` }} />
                 </span>
                 <span className="text-micro tabular-nums">{Math.round(full * 100)}%</span>
               </span>
             )}
+
+            </div>
 
             {/* `interruptible`, not `working`: a subagent the turn left
                 running keeps the session working, but an interrupt cannot
@@ -572,9 +587,17 @@ function Picker({ control, value, onPick, disabled = false }: { control: Control
   const here = control.choices.find((c) => c.value === value);
   return (
     <div className="relative">
-      <button disabled={disabled} onClick={() => setOpen(!open)} className="control text-mute hover:bg-raise hover:text-bone">
-        {here?.label ?? control.fallback}
-        <ChevronDown className="h-3 w-3" strokeWidth={2} />
+      {/* `title`, because the label is what gets truncated: a model called
+          `claude-opus-4-1-20250805` has nowhere useful to break, and the
+          dropdown is the only other place it is written out in full. */}
+      <button
+        disabled={disabled}
+        onClick={() => setOpen(!open)}
+        title={here?.label ?? control.fallback}
+        className="control max-w-[13rem] shrink-0 overflow-hidden text-mute hover:bg-raise hover:text-bone"
+      >
+        <span className="truncate">{here?.label ?? control.fallback}</span>
+        <ChevronDown className="h-3 w-3 shrink-0" strokeWidth={2} />
       </button>
       {open && (
         <>

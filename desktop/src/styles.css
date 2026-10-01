@@ -518,6 +518,11 @@
     padding-inline: 0.625rem;
     border-radius: var(--radius-md);
     font-size: var(--text-ui);
+    /* One line, always. The height is fixed, so a label that wraps does not
+       make the control taller — it spills out of it. `GPT-6.1-Sol` and
+       `Workspace + network` both broke across two lines inside a 28px box and
+       turned the composer's toolbar into a stack of overlapping text. */
+    white-space: nowrap;
     transition: background var(--dur-native) var(--ease-swift);
   }
 

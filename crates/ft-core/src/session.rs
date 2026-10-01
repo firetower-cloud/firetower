@@ -128,6 +128,12 @@ pub fn checkout_dir(slug: &str, taken: &[String]) -> String {
     first
 }
 
+/// The default for [`Session::may_write`]: a function, because
+/// `serde(default = "...")` takes a path rather than a literal.
+fn yes() -> bool {
+    true
+}
+
 /// A line of work with a conversation attached and a branch at the end.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
@@ -150,12 +156,27 @@ pub struct Session {
     pub owner_name: Option<String>,
     /// Which directory the workspace is filed in — `u/kevin/…` for somebody's
     /// own, `d/backend/…` once it has been handed to a directory.
-    ///
-    /// What anybody may do with it follows from this and from their grants, and
-    /// is not repeated on the session: a client already holds the directories
-    /// it can see, with its level on each, so sending a level per session would
-    /// be a second copy of an answer that can disagree with the first.
     pub path: ResourcePath,
+    /// Whether whoever asked for this may act in it, or only watch.
+    ///
+    /// **Sent, because it cannot be derived.** The level was deliberately left
+    /// off this type once, on the grounds that a client already holds the
+    /// directories it can see and can work the answer out from the path. That
+    /// stopped being true the moment a single workspace could be shared to one
+    /// person by name: an exception lives on the resource, in no directory, so
+    /// there is nothing on the client that mentions it.
+    ///
+    /// Without it, a viewer was shown a composer, typed, pressed send, and the
+    /// server answered 404 — which the screen reported as "Working — nothing
+    /// heard", because an echo had already been added optimistically. A
+    /// control that is drawn and then refused is worse than one that is
+    /// absent: it reads as the product being broken.
+    ///
+    /// `true` by default so that a client talking to a control plane that
+    /// predates this field behaves as it did before, rather than deciding
+    /// everybody is a spectator.
+    #[serde(default = "yes")]
+    pub may_write: bool,
     /// Assigned once, never reused, and the same for as long as the session
     /// exists. What `name` is derived from, and what a name that has been
     /// changed can always be traced back to.

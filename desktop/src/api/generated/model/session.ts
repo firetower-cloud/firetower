@@ -54,6 +54,27 @@ export interface Session {
   hostId: HostId;
   id: SessionId;
   /**
+     * Whether whoever asked for this may act in it, or only watch.
+     *
+     * **Sent, because it cannot be derived.** The level was deliberately left
+     * off this type once, on the grounds that a client already holds the
+     * directories it can see and can work the answer out from the path. That
+     * stopped being true the moment a single workspace could be shared to one
+     * person by name: an exception lives on the resource, in no directory, so
+     * there is nothing on the client that mentions it.
+     *
+     * Without it, a viewer was shown a composer, typed, pressed send, and the
+     * server answered 404 — which the screen reported as "Working — nothing
+     * heard", because an echo had already been added optimistically. A
+     * control that is drawn and then refused is worse than one that is
+     * absent: it reads as the product being broken.
+     *
+     * `true` by default so that a client talking to a control plane that
+     * predates this field behaves as it did before, rather than deciding
+     * everybody is a spectator.
+     */
+  mayWrite?: boolean;
+  /**
      * What to call it. `Agent 3` until somebody says otherwise.
      *
      * Separate from `title`, which is cut from the prompt and describes the
@@ -99,11 +120,6 @@ export interface Session {
   /**
      * Which directory the workspace is filed in — `u/kevin/…` for somebody's
      * own, `d/backend/…` once it has been handed to a directory.
-     *
-     * What anybody may do with it follows from this and from their grants, and
-     * is not repeated on the session: a client already holds the directories
-     * it can see, with its level on each, so sending a level per session would
-     * be a second copy of an answer that can disagree with the first.
      */
   path: ResourcePath;
   prompt: string;

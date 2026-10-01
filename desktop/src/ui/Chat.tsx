@@ -26,6 +26,7 @@ import {
   Check,
   ChevronRight,
   Copy,
+  Eye,
   FileText,
   FileUp,
   GitBranch,
@@ -415,18 +416,38 @@ export function Chat({
       {handing && <AddAgent session={session} workspaceId={session.workspaceId ?? session.id} prompt={asMessage(notes)} onClose={() => setHanding(false)} onStarted={clear} />}
       </div>
 
-      <AccountSwitcher session={session} working={working}>
-        <Composer
-          session={session}
-          conversation={conversation}
-          onEcho={echo}
-          onRemember={remember}
-          onStopping={stopping}
-          disabled={!answerable}
-          asking={asked.length + questions.length > 0}
-          hand={hand}
-        />
-      </AccountSwitcher>
+      {/* A viewer gets no composer at all.
+          Disabling it would be worse than leaving it out: a text box you can
+          click into, type in and press send on, which then fails, is how this
+          was found — the send was refused, the echo had already been added,
+          and the transcript sat there saying "Working — nothing heard". There
+          is nothing to type, so there is no box.
+
+          `mayWrite` comes from the server, computed with the predicate that
+          enforces it. It cannot be worked out here: being named on a single
+          workspace is an exception on the resource, in no directory, so
+          nothing this client holds mentions it.
+
+          `!== false`, not truthiness: a control plane older than this app does
+          not send the field at all, and reading its absence as "you may only
+          watch" would take the composer away from everybody on it — which it
+          promptly did, to the owner of the workspace. */}
+      {session.mayWrite !== false ? (
+        <AccountSwitcher session={session} working={working}>
+          <Composer
+            session={session}
+            conversation={conversation}
+            onEcho={echo}
+            onRemember={remember}
+            onStopping={stopping}
+            disabled={!answerable}
+            asking={asked.length + questions.length > 0}
+            hand={hand}
+          />
+        </AccountSwitcher>
+      ) : (
+        <Watching />
+      )}
     </div>
   );
 }
@@ -1115,6 +1136,27 @@ function Questions({ sessionId, asking, onAnswered }: { sessionId: string; askin
       <div className="flex items-center gap-2 border-t border-ember-deep/40 px-5 py-3">
         <button disabled={!ready} onClick={send} className="control bg-bone font-medium text-ground hover:opacity-90 disabled:bg-raise disabled:text-mute">Answer</button>
         <span className="text-micro text-mute">{asking.questions.length > 1 ? `${asking.questions.length} questions` : ""}</span>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * What somebody shared a look at sees instead of a composer.
+ *
+ * Stated as what they have rather than as what they lack — "you are watching"
+ * is a position, "you cannot type" is a complaint. It says who to ask, because
+ * the next thing anybody wants after reading this is to join in, and the owner
+ * is the only person who can arrange that.
+ */
+function Watching() {
+  return (
+    <div className="px-3 pb-3">
+      <div className="flex items-center gap-2.5 rounded-full border border-line bg-panel px-4 py-2.5">
+        <Eye className="h-3.5 w-3.5 shrink-0 text-mute" strokeWidth={1.75} />
+        <span className="text-ui text-dim">
+          You are watching this work. Ask whoever owns it for more than a look to join in.
+        </span>
       </div>
     </div>
   );
