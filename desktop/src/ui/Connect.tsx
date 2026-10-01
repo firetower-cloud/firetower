@@ -34,13 +34,24 @@ type Stage =
 export function Connect({
   onDone,
   onCancel,
+  at,
 }: {
   /** Handed the new server's id, so the app can switch to it. */
   onDone: (serverId: string) => void;
   onCancel?: () => void;
+  /**
+   * An address already known to be a Firetower: signing in again to a server
+   * this Mac is still connected to, whose token has stopped working.
+   *
+   * The first question is skipped rather than pre-filled. Asking somebody to
+   * confirm an address they got right months ago, because a password changed
+   * in a browser, is asking them to re-answer a question nothing has
+   * invalidated.
+   */
+  at?: string;
 }) {
-  const [typed, setTyped] = useState("");
-  const [stage, setStage] = useState<Stage>({ at: "where" });
+  const [typed, setTyped] = useState(at ?? "");
+  const [stage, setStage] = useState<Stage>(at ? { at: "reaching" } : { at: "where" });
 
   const find = async (address: string) => {
     setStage({ at: "reaching" });
@@ -52,6 +63,13 @@ export function Connect({
     }
     setStage({ at: "who", url: found.url, boot: found.at });
   };
+
+  // Only for the address handed in, and only once. `find` is redefined every
+  // render, so depending on it would reach the server again on each one.
+  useEffect(() => {
+    if (at) void find(at);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [at]);
 
   return (
     <div className="grid h-full min-w-0 flex-1 place-items-center bg-ground px-6">

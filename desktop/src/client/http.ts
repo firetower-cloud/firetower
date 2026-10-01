@@ -7,7 +7,7 @@
  * is exactly what has to change for N servers. Everything here is a real
  * request with the token that server minted; nothing is faked.
  */
-import { servers } from "~/servers";
+import { servers, signedOut } from "~/servers";
 
 export class ApiError extends Error {
   constructor(
@@ -48,6 +48,19 @@ export const token = () => here()?.token ?? "";
    the registry, so these are the web's names for things the desktop does elsewhere. */
 export function rememberToken(_: string) {}
 export function forgetToken() {}
+/**
+ * Whether a refusal means the session is over rather than this one request
+ * being refused.
+ *
+ * Only `Unauthorized`. `Forbidden` is being told no about one thing and must
+ * not end a session — on the web that mistake signed people out at random
+ * while they typed, because a repository the token could not see answered the
+ * same way as a session that had ended.
+ *
+ * Nothing here is exempt by path. The desktop signs in through `probe.ts`
+ * with a plain `fetch`, so a wrong password never reaches this mutator and
+ * cannot be read as a session ending underneath it.
+ */
 export const meansSignedOut = (code: string) => code === "Unauthorized";
 
 /** Called by every generated operation as `http(url, init)`. */
@@ -60,7 +73,21 @@ export const http = async <T>(url: string, init: RequestInit = {}): Promise<T> =
   headers.set("authorization", `Bearer ${server.token}`);
 
   const res = await fetch(`${server.url}${url}`, { ...init, headers });
-  if (!res.ok) throw await ApiError.from(res);
+  if (!res.ok) {
+    const error = await ApiError.from(res);
+
+    // The token this Mac holds is no longer good — replaced in a browser,
+    // reset by an administrator, signed out on another device, expired. Said
+    // once, here, because this is the only place that sees every refusal.
+    //
+    // Without it each screen rendered the server's "sign in to use this
+    // Firetower" in its own corner and the app went on drawing a dashboard
+    // around them, with no way back to a password field short of forgetting
+    // the server and typing its address again.
+    if (meansSignedOut(error.code)) signedOut(server.serverId);
+
+    throw error;
+  }
   if (res.status === 204 || res.headers.get("content-length") === "0") return undefined as T;
   const text = await res.text();
   return (text ? JSON.parse(text) : undefined) as T;
