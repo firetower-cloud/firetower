@@ -323,9 +323,7 @@ function Conversation({ place }: { place: Workspace }) {
         <View style={{ paddingHorizontal: 16, paddingBottom: 16 }}>
           <View className="flex-row items-center gap-2.5 rounded-full border border-line bg-panel px-4 py-3">
             <Eye color={color.mute} size={14} />
-            <Text className="flex-1 font-sans text-ui text-dim">
-              You are watching this work. Ask whoever owns it for more than a look to join in.
-            </Text>
+            <Text className="flex-1 font-sans text-ui text-dim">You are watching this work.</Text>
           </View>
         </View>
       ) : (

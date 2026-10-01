@@ -1145,18 +1145,15 @@ function Questions({ sessionId, asking, onAnswered }: { sessionId: string; askin
  * What somebody shared a look at sees instead of a composer.
  *
  * Stated as what they have rather than as what they lack — "you are watching"
- * is a position, "you cannot type" is a complaint. It says who to ask, because
- * the next thing anybody wants after reading this is to join in, and the owner
- * is the only person who can arrange that.
+ * is a position, "you cannot type" is a complaint. One line: whoever reads
+ * this already knows whose work it is and can ask them without being told to.
  */
 function Watching() {
   return (
     <div className="px-3 pb-3">
       <div className="flex items-center gap-2.5 rounded-full border border-line bg-panel px-4 py-2.5">
         <Eye className="h-3.5 w-3.5 shrink-0 text-mute" strokeWidth={1.75} />
-        <span className="text-ui text-dim">
-          You are watching this work. Ask whoever owns it for more than a look to join in.
-        </span>
+        <span className="text-ui text-dim">You are watching this work.</span>
       </div>
     </div>
   );
