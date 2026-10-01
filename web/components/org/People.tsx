@@ -58,6 +58,7 @@ import {
 import { write } from "@/components/ui/Copy";
 import { Modal } from "@/components/Modal";
 import { Offboard } from "@/components/org/Offboard";
+import { Confirm, type Ask } from "@/components/Confirm";
 import { Trouble, Toolbar } from "./Shared";
 
 const why = (e: unknown) => (e instanceof ApiError ? e.message : "That didn't work.");
@@ -99,6 +100,8 @@ export function People() {
     [users, pick],
   );
 
+  const [asking, setAsking] = useState<Ask | null>(null);
+
   const run = async (over: User[], act: (u: User) => Promise<unknown>) => {
     setTrouble(await eachOf(over, act));
     pick.clear();
@@ -110,18 +113,84 @@ export function People() {
   const setDisabled = (over: User[], disabled: boolean) =>
     run(over, (u) => change.mutateAsync({ id: u.id, data: { disabled } }));
 
+  /* Nothing here happens on the way past. Each of these ends sessions, moves
+     what somebody can reach, or stops a password working, and the body of the
+     question is where the part you would not have guessed is said. */
+  const who = (over: User[]) =>
+    over.length === 1 ? over[0].username : `${over.length} people`;
+
+  const askRole = (over: User[], role: "admin" | "member") =>
+    setAsking({
+      title: role === "admin" ? `Make ${who(over)} an administrator?` : `Make ${who(over)} a member?`,
+      action: role === "admin" ? "Make an administrator" : "Make a member",
+      body:
+        role === "admin" ? (
+          <>
+            <strong className="text-bone">{who(over)}</strong> will be able to add and remove
+            people, change anybody&apos;s role, manage teams and directories, and upgrade this
+            Firetower.
+          </>
+        ) : (
+          <>
+            <strong className="text-bone">{who(over)}</strong> keeps everything they own and every
+            directory they administer. What goes is the organisation&apos;s own: people, teams,
+            directories, and upgrading this Firetower.
+          </>
+        ),
+      run: () => setRole(over, role),
+    });
+
+  const askDisabled = (over: User[], disabled: boolean) =>
+    setAsking({
+      title: disabled ? `Switch off ${who(over)}?` : `Switch ${who(over)} back on?`,
+      action: disabled ? "Switch off" : "Switch on",
+      tone: disabled ? "danger" : undefined,
+      body: disabled ? (
+        <>
+          <strong className="text-bone">{who(over)}</strong> will not be able to sign in, and every
+          session of theirs ends now — on the web, the desktop and the phone. Everything they made
+          stays exactly where it is, and you can switch them back on at any time.
+        </>
+      ) : (
+        <>
+          <strong className="text-bone">{who(over)}</strong> will be able to sign in again, with the
+          password they already had.
+        </>
+      ),
+      run: () => setDisabled(over, disabled),
+    });
+
+  const askReset = (u: User) =>
+    setAsking({
+      title: `Reset ${u.username}'s password?`,
+      action: "Reset password",
+      tone: "danger",
+      body: (
+        <>
+          A new temporary password is made and shown to you <em>once</em>. The one{" "}
+          <strong className="text-bone">{u.username}</strong> has now stops working, every session
+          of theirs ends, and they will have to choose their own the next time they sign in here.
+        </>
+      ),
+      run: () =>
+        reset
+          .mutateAsync({ id: u.id })
+          .then((r) => setHanded({ username: u.username, password: r.password, fresh: false }))
+          .catch((e) => setTrouble(why(e))),
+    });
+
   return (
     <>
       <Panel>
         {pick.count > 0 ? (
           <Bulk count={pick.count} onClear={pick.clear}>
-            <Button size="sm" variant="quiet" icon={Shield} onClick={() => setRole(chosen, "admin")}>
+            <Button size="sm" variant="quiet" icon={Shield} onClick={() => askRole(chosen, "admin")}>
               Make administrator
             </Button>
-            <Button size="sm" variant="quiet" icon={ShieldOff} onClick={() => setRole(chosen, "member")}>
+            <Button size="sm" variant="quiet" icon={ShieldOff} onClick={() => askRole(chosen, "member")}>
               Make member
             </Button>
-            <Button size="sm" variant="quiet" icon={Power} onClick={() => setDisabled(chosen, !chosen.every((u) => u.disabled))}>
+            <Button size="sm" variant="quiet" icon={Power} onClick={() => askDisabled(chosen, !chosen.every((u) => u.disabled))}>
               {chosen.every((u) => u.disabled) ? "Switch on" : "Switch off"}
             </Button>
             {/* No bulk remove. Removing somebody is now a decision about every
@@ -229,24 +298,18 @@ export function People() {
                             {
                               label: u.role === "admin" ? "Make a member" : "Make an administrator",
                               icon: u.role === "admin" ? ShieldOff : Shield,
-                              onClick: () => setRole([u], u.role === "admin" ? "member" : "admin"),
+                              onClick: () => askRole([u], u.role === "admin" ? "member" : "admin"),
                             },
                             {
                               label: "Reset password",
                               icon: KeyRound,
-                              onClick: () =>
-                                reset
-                                  .mutateAsync({ id: u.id })
-                                  .then((r) =>
-                                    setHanded({ username: u.username, password: r.password, fresh: false }),
-                                  )
-                                  .catch((e) => setTrouble(why(e))),
+                              onClick: () => askReset(u),
                             },
                             {
                               label: u.disabled ? "Switch on" : "Switch off",
                               icon: Power,
                               note: u.disabled ? undefined : "Keeps what they made",
-                              onClick: () => setDisabled([u], !u.disabled),
+                              onClick: () => askDisabled([u], !u.disabled),
                             },
                             { separator: true },
                             {
@@ -292,6 +355,11 @@ export function People() {
       )}
 
       {leaving && <Offboard person={leaving} onClose={() => setLeaving(null)} />}
+
+      {/* Last, so it sits over anything else open. Removing somebody has its
+          own screen — `Offboard` is a confirmation with a decision in it — so
+          it is not routed through this. */}
+      <Confirm ask={asking} onClose={() => setAsking(null)} />
     </>
   );
 }
