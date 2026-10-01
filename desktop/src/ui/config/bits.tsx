@@ -1,5 +1,5 @@
 /** The three states a list off a server can be in, drawn the same way everywhere. */
-import { Loader2 } from "lucide-react";
+import { ExternalLink, Loader2 } from "lucide-react";
 
 export function Rows<T>({ feed, empty, children }: { feed: { data: T[]; loading: boolean; error: string | null }; empty: string; children: React.ReactNode }) {
   if (feed.loading) {
@@ -68,3 +68,40 @@ export const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
  * Organization screen lists and what a log line says; a chip reading only
  * "Backend" leaves somebody to guess they are the same thing.
  */
+
+/**
+ * The way out to the administration site, for the things this app does not do.
+ *
+ * **The base address and nothing after it.** Linking at a page would make the
+ * desktop depend on the web's route structure, and that is a contract nobody
+ * agreed to keep — the admin site is free to move its own screens around.
+ *
+ * `backend.url` is already a resolved origin: `probe.ts` tries the schemes,
+ * keeps whichever answered, and only that is stored. So there is no guessing to
+ * do here. It is still parsed before it is offered, because a URL written by an
+ * older build, or edited by hand in `localStorage`, should not produce a button
+ * that goes nowhere.
+ *
+ * Only to an administrator. Sending a member to a screen that will refuse them
+ * is the same mistake as drawing a control the server will not honour.
+ */
+export function ManageOnTheWeb({ url, may }: { url: string; may: boolean }) {
+  if (!may) return null;
+  let origin: string;
+  try {
+    origin = new URL(url).origin;
+  } catch {
+    return null;
+  }
+  return (
+    <a
+      href={origin}
+      target="_blank"
+      rel="noreferrer"
+      className="control border border-line bg-raise text-ui text-dim hover:bg-overlay hover:text-bone"
+    >
+      Manage on the web
+      <ExternalLink className="h-3 w-3" strokeWidth={1.75} />
+    </a>
+  );
+}

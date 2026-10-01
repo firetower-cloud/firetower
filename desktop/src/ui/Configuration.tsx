@@ -57,9 +57,9 @@ function Pane({ at, backend, onForgot }: { at: string; backend: Backend; onForgo
     case "agents":
       return <Agents live />;
     case "people":
-      return <People />;
+      return <People backend={backend} />;
     case "teams":
-      return <Teams />;
+      return <Teams backend={backend} />;
     case "directories":
       return <Directories />;
     case "vault":
