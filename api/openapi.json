@@ -10725,6 +10725,7 @@
           "needsPassword",
           "needsOrganization",
           "needsGithub",
+          "publicUrl",
           "completed"
         ],
         "properties": {
@@ -10753,6 +10754,10 @@
                 "$ref": "#/components/schemas/Organization"
               }
             ]
+          },
+          "publicUrl": {
+            "type": "string",
+            "description": "Where a person reaches this Firetower in a browser.\n\n**Not whatever host served the page.** The interface and the control\nplane are two addresses — in development they are two ports, and in a\ndeployment behind a proxy they can be two names — so a screen that hands\nsomebody a sign-in link cannot read it off its own `window.location`\nand be right anywhere but the installation it happens to be running on.\n\n`FIRETOWER_PUBLIC_URL` when it is set, and the interface's own address\notherwise. It is the same value the session notifications link to."
           }
         }
       },

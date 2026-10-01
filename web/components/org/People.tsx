@@ -25,6 +25,7 @@ import {
   UserPlus,
 } from "lucide-react";
 import { useMe } from "@/src/api/generated/auth/auth";
+import { useSetupState } from "@/src/api/generated/setup/setup";
 import {
   getListUsersQueryKey,
   useChangeUser,
@@ -77,6 +78,7 @@ export function People() {
      once — see `Offboard`. */
   const [leaving, setLeaving] = useState<User | null>(null);
   const [addressing, setAddressing] = useState<User | null>(null);
+  const { data: setup } = useSetupState();
   const [trouble, setTrouble] = useState<string | null>(null);
 
   const shown = useMemo(
@@ -278,11 +280,11 @@ export function People() {
       )}
 
       {handed && (
-        <HandOver
-          who={handed}
-          where={typeof window === "undefined" ? "" : window.location.origin}
-          onClose={() => setHanded(null)}
-        />
+        /* The server's own answer, not this tab's address. The interface and
+           the control plane are two addresses — two ports in development, two
+           names behind a proxy — so a sign-in link read off `window.location`
+           is right only on the installation it happens to be served from. */
+        <HandOver who={handed} where={setup?.publicUrl ?? ""} onClose={() => setHanded(null)} />
       )}
 
       {addressing && (

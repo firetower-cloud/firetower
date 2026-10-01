@@ -16,7 +16,8 @@ export const SetupStateResponse = zod.object({
   "organization": zod.union([zod.null(),zod.object({
   "id": zod.string().describe('Identifies an organisation.'),
   "name": zod.string()
-})]).optional()
+})]).optional(),
+  "publicUrl": zod.string().describe('Where a person reaches this Firetower in a browser.\n\n**Not whatever host served the page.** The interface and the control\nplane are two addresses — in development they are two ports, and in a\ndeployment behind a proxy they can be two names — so a screen that hands\nsomebody a sign-in link cannot read it off its own `window.location`\nand be right anywhere but the installation it happens to be running on.\n\n`FIRETOWER_PUBLIC_URL` when it is set, and the interface\'s own address\notherwise. It is the same value the session notifications link to.')
 }).describe('Which parts of setting up are still outstanding.\n\nRead before anything else, so the interface knows whether to show the\nwizard, and how much of it.')
 
 export const CompleteSetupResponse = zod.void()
