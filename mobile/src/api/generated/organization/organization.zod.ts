@@ -87,27 +87,24 @@ export const ChangeUserResponse = zod.object({
 }).describe('Someone who can sign in.')
 
 /**
- * @summary Hand their work over, then take the account away — in one transaction.
+ * @summary Destroy what was theirs and take the account away — in one transaction.
  */
 export const OffboardUserParams = zod.object({
   "id": zod.string().describe('User id')
 })
 
 export const OffboardUserBody = zod.object({
-  "handOver": zod.array(zod.object({
-  "id": zod.string(),
-  "kind": zod.enum(['workspace', 'machine', 'agentAccount', 'secret']),
-  "to": zod.object({
-  "id": zod.string(),
-  "kind": zod.string().describe('`person` or `directory`.')
-})
-})).optional(),
-  "letGo": zod.array(zod.object({
+  "destroy": zod.array(zod.object({
   "id": zod.string(),
   "kind": zod.enum(['workspace', 'machine', 'agentAccount', 'secret'])
-}).describe('One thing to move, named the way `Filed` names it.\n\n**Not `Placed`.** That is already a schema in this contract — where an\nattached file landed in a workspace — and utoipa registers a type by its\nshort name, so a second `Placed` silently becomes whichever of the two the\ngenerator reached last. The clients then typecheck against a shape the\nserver never sends.')).optional().describe('Acknowledged as going with them. Named rather than implied, so that\nnothing is lost by somebody not having scrolled.'),
+}).describe('One thing to move, named the way `Filed` names it.\n\n**Not `Placed`.** That is already a schema in this contract — where an\nattached file landed in a workspace — and utoipa registers a type by its\nshort name, so a second `Placed` silently becomes whichever of the two the\ngenerator reached last. The clients then typecheck against a shape the\nserver never sends.')).optional().describe('Read back and compared with what is actually theirs, so that agreeing to\na list means agreeing to *that* list. It can change between the screen\ndrawing it and somebody pressing the button.'),
+  "successors": zod.array(zod.object({
+  "directory": zod.string(),
+  "subjectId": zod.string(),
+  "subjectKind": zod.enum(['person', 'team']).describe('A person or a team, as a grant names either.')
+}).describe('Who takes over a directory they were the last administrator of.')).optional(),
   "then": zod.string().describe('Switched off, or removed for good.')
-}).describe('What to do about everything that is theirs, decided before anything happens.\n\n**Every row answered, or none of it runs.** A half-specified offboarding is\nthe thing this exists to prevent: the old path was one `DELETE` behind a\nwarning written in the abstract, and whatever it swept was found out\nafterwards or not at all.\n\nTwo answers per row and not three. *Hand over* moves it; *let go* means it\ngoes with them, which is deletion for a workspace, a subscription or a\nsecret and a move to `Shared` for a machine — compute is real and the\norganisation is still running on it. A third option spelled "delete" would\nbe a lie on the one kind that is never deleted.')
+}).describe('Agreeing to what happens when somebody goes.\n\n**Nothing of theirs can be handed to anybody.** What is filed at\n`u/<them>/…` is theirs, and an administrator removing the account may\ndestroy it — the account is going either way — but may never pass it on.\nHanding somebody\'s private work to a third party is the one outcome its\nowner never agreed to, and the only way out of a personal root is the owner\nmoving it themselves, before they go.\n\nA directory is the opposite: it is the organisation\'s, so being its last\nadministrator is a job to hand on, and that is the one decision here.')
 
 export const OffboardUserResponse = zod.void()
 

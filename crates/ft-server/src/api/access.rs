@@ -593,7 +593,16 @@ pub(super) async fn may_share(
         .await?
         .ok_or_else(|| ApiError::not_found(kind.singular()))?;
 
-    if me.role == "admin" {
+    // **Somebody's own root is theirs, and an administrator is not an
+    // exception.** Everywhere else `role == "admin"` is the way back in when a
+    // directory's last administrator has left; here it would be the way into
+    // somebody's private work. An administrator can destroy what is at
+    // `u/<them>/…` when removing them — that is unavoidable, the account is
+    // going — but they can never *take* it, because handing it to a third
+    // party is the one outcome the owner never agreed to.
+    //
+    // The only way out of a personal root is the owner moving it themselves.
+    if me.role == "admin" && !matches!(at.root(), Some((ft_core::path::PERSONAL, _))) {
         return Ok(at);
     }
 

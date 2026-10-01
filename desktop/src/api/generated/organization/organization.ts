@@ -521,7 +521,7 @@ export const useChangeUser = <TError = ApiError,
 }
 
 /**
- * @summary Hand their work over, then take the account away — in one transaction.
+ * @summary Destroy what was theirs and take the account away — in one transaction.
  */
 export const offboardUser = async (id: string,
     offboarding: Offboarding, options?: Parameters<typeof http>[1]): Promise<void> => {
@@ -588,7 +588,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type OffboardUserMutationVariables = {id: string;data: Offboarding}
 
     /**
- * @summary Hand their work over, then take the account away — in one transaction.
+ * @summary Destroy what was theirs and take the account away — in one transaction.
  */
 export const useOffboardUser = <TError = ApiError,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof offboardUser>>, TError,OffboardUserMutationVariables, TContext>, request?: SecondParameter<typeof http>}

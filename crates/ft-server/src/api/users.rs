@@ -218,55 +218,49 @@ pub(super) async fn user_reach(
     Ok(Json(state.access.reach(id.as_str()).await?))
 }
 
+/// Who takes over a directory they were the last administrator of.
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct Destination {
-    /// `person` or `directory`.
-    pub kind: String,
-    pub id: String,
+pub struct Successor {
+    pub directory: String,
+    /// A person or a team, as a grant names either.
+    pub subject_kind: crate::access::SubjectKind,
+    pub subject_id: String,
 }
 
-#[derive(Debug, Deserialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct HandOver {
-    pub kind: crate::access::FiledKind,
-    pub id: String,
-    pub to: Destination,
-}
-
-/// What to do about everything that is theirs, decided before anything happens.
+/// Agreeing to what happens when somebody goes.
 ///
-/// **Every row answered, or none of it runs.** A half-specified offboarding is
-/// the thing this exists to prevent: the old path was one `DELETE` behind a
-/// warning written in the abstract, and whatever it swept was found out
-/// afterwards or not at all.
+/// **Nothing of theirs can be handed to anybody.** What is filed at
+/// `u/<them>/…` is theirs, and an administrator removing the account may
+/// destroy it — the account is going either way — but may never pass it on.
+/// Handing somebody's private work to a third party is the one outcome its
+/// owner never agreed to, and the only way out of a personal root is the owner
+/// moving it themselves, before they go.
 ///
-/// Two answers per row and not three. *Hand over* moves it; *let go* means it
-/// goes with them, which is deletion for a workspace, a subscription or a
-/// secret and a move to `Shared` for a machine — compute is real and the
-/// organisation is still running on it. A third option spelled "delete" would
-/// be a lie on the one kind that is never deleted.
+/// A directory is the opposite: it is the organisation's, so being its last
+/// administrator is a job to hand on, and that is the one decision here.
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Offboarding {
+    /// Read back and compared with what is actually theirs, so that agreeing to
+    /// a list means agreeing to *that* list. It can change between the screen
+    /// drawing it and somebody pressing the button.
     #[serde(default)]
-    pub hand_over: Vec<HandOver>,
-    /// Acknowledged as going with them. Named rather than implied, so that
-    /// nothing is lost by somebody not having scrolled.
+    pub destroy: Vec<super::access::FiledRef>,
     #[serde(default)]
-    pub let_go: Vec<super::access::FiledRef>,
+    pub successors: Vec<Successor>,
     /// Switched off, or removed for good.
     pub then: String,
 }
 
-/// Hand their work over, then take the account away — in one transaction.
+/// Destroy what was theirs and take the account away — in one transaction.
 #[utoipa::path(
     post, path = "/api/v1/users/{id}/offboard", tag = "organization",
     params(("id" = String, Path, description = "User id")),
     request_body = Offboarding,
     responses(
         (status = 204),
-        (status = 400, body = ApiError, description = "Something of theirs was left undecided"),
+        (status = 400, body = ApiError, description = "The list agreed to is not what is theirs"),
         (status = 403, body = ApiError),
     ),
 )]
@@ -286,34 +280,7 @@ pub(super) async fn offboard_user(
     }
     let user = one_of_ours(&state, me, &id).await?;
 
-    // Asked again here rather than trusted from the screen: what is theirs can
-    // change between drawing the list and agreeing to it, and the whole promise
-    // is that nothing is swept unseen.
     let reach = state.access.reach(id.as_str()).await?;
-    let mut undecided: Vec<String> = Vec::new();
-    for owned in &reach.owns {
-        let decided = request
-            .hand_over
-            .iter()
-            .any(|h| h.kind == owned.kind && h.id == owned.id)
-            || request
-                .let_go
-                .iter()
-                .any(|l| l.kind == owned.kind && l.id == owned.id);
-        if !decided {
-            undecided.push(owned.name.clone());
-        }
-    }
-    if !undecided.is_empty() {
-        return Err(ApiError::new(
-            ErrorCode::InvalidRequest,
-            format!(
-                "nothing happens until everything of theirs is decided — still waiting on {}",
-                undecided.join(", ")
-            ),
-        ));
-    }
-
     let remove = match request.then.as_str() {
         "remove" => true,
         "disable" => false,
@@ -325,38 +292,48 @@ pub(super) async fn offboard_user(
         }
     };
 
-    let mut tx = state.db.pool().begin().await?;
-    for hand in &request.hand_over {
-        let from = state
-            .access
-            .path_of(hand.kind, &hand.id)
-            .await?
-            .ok_or_else(|| ApiError::not_found(hand.kind.singular()))?;
-        let root = match hand.to.kind.as_str() {
-            "directory" => {
-                let d = state
-                    .access
-                    .directory(&hand.to.id)
-                    .await?
-                    .ok_or_else(|| ApiError::not_found("directory"))?;
-                from.moved_to(ft_core::path::DIRECTORY, &d.slug)
-            }
-            _ => {
-                let slug = state.access.personal_root(&hand.to.id).await?;
-                from.moved_to(ft_core::path::PERSONAL, &slug)
-            }
-        };
+    // Agreeing to a list has to mean agreeing to *that* list. What is theirs can
+    // change between the screen drawing it and somebody pressing the button —
+    // they are still working until the moment they are switched off.
+    if remove {
+        let missing: Vec<&str> = reach
+            .owns
+            .iter()
+            .filter(|o| {
+                !request
+                    .destroy
+                    .iter()
+                    .any(|d| d.kind == o.kind && d.id == o.id)
+            })
+            .map(|o| o.name.as_str())
+            .collect();
+        if !missing.is_empty() {
+            return Err(ApiError::new(
+                ErrorCode::InvalidRequest,
+                format!(
+                    "this would also destroy {} — look again before agreeing",
+                    missing.join(", ")
+                ),
+            ));
+        }
+    }
+
+    // Before the account goes, so a directory is never briefly without one.
+    for s in &request.successors {
         state
             .access
-            .transfer_in(&mut tx, &state.vault, hand.kind, &hand.id, &root, &me.username)
+            .set_grant(
+                &s.directory,
+                s.subject_kind,
+                &s.subject_id,
+                crate::access::Level::Admin,
+                &me.id,
+            )
             .await?;
     }
 
+    let mut tx = state.db.pool().begin().await?;
     if remove {
-        // Whatever was let go is still at their root, and this is what takes
-        // it: workspaces and subscriptions cascade, secrets are deleted, and
-        // machines move to `Shared`. Anything handed over above has already
-        // left, so none of it is caught by that.
         state.accounts.delete_user_in(&mut tx, &id).await?;
     } else {
         sqlx::query("UPDATE users SET disabled = true WHERE id = $1")
@@ -368,7 +345,7 @@ pub(super) async fn offboard_user(
 
     tracing::info!(
         by = %me.username, user = %user.username,
-        handed = request.hand_over.len(), let_go = request.let_go.len(),
+        destroyed = reach.owns.len(), successors = request.successors.len(),
         removed = remove, "offboarded"
     );
     Ok(axum::http::StatusCode::NO_CONTENT)

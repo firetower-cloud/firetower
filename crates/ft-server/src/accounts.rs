@@ -495,26 +495,22 @@ impl Accounts {
         // This becomes the fallback rather than the rule once offboarding lands:
         // an administrator reassigns what should survive, and whatever they
         // leave takes this route.
-        for statement in [
-            // `subpath` returns an `ltree`, and `text || ltree` is *ltree*
-            // concatenation — which would read `'d.shared.'` as a path and fail
-            // on its trailing dot. Cast to text and build the string.
-            "UPDATE hosts h SET path = ('d.shared.' || subpath(h.path, 2)::text)::ltree
-              WHERE h.path <@ ('u.' || (SELECT slug FROM principals WHERE id = $1))::ltree
-                AND NOT EXISTS (SELECT 1 FROM hosts o
-                                 WHERE o.path
-                                     = ('d.shared.' || subpath(h.path, 2)::text)::ltree)",
-            "UPDATE hosts h
-                SET path = ('d.shared.' || subpath(h.path, 2)::text || '_' ||
-                            lower(substr(h.id, 3, 8)))::ltree
-              WHERE h.path <@ ('u.' || (SELECT slug FROM principals WHERE id = $1))::ltree",
-        ] {
-            sqlx::query(statement)
-                .bind(id.as_str())
-                .execute(&mut **tx)
-                .await
-                .context("moving their machines somewhere the organisation can still reach")?;
-        }
+        // Deleted, not handed to the organisation.
+        //
+        // These used to be swept into `d/shared`, on the grounds that compute is
+        // real and somebody is still running on it. That is an unconsented
+        // transfer of something personal, and the rule is that what is at
+        // `u/<them>/…` is theirs: an administrator may destroy it along with the
+        // account, and may never pass it to anybody else. The machine itself is
+        // untouched — this is a row, and whoever wants it back adds it again.
+        sqlx::query(
+            "DELETE FROM hosts
+              WHERE path <@ ('u.' || (SELECT slug FROM principals WHERE id = $1))::ltree",
+        )
+        .bind(id.as_str())
+        .execute(&mut **tx)
+        .await
+        .context("removing the machines that were theirs")?;
 
         sqlx::query(
             "DELETE FROM secrets
@@ -984,10 +980,12 @@ mod tests {
 
         accounts.delete_user(&ana).await.unwrap();
 
-        // The machine is the organisation's and is still running: it moves to
-        // the shared directory rather than going with her.
-        let moved = db.host_by_name("fire-01").await.unwrap().unwrap();
-        assert_eq!(moved.path.as_str(), "d/shared/fire_01");
+        // The machine was at her own root, so it goes with her. It used to be
+        // swept into `d/shared` on the grounds that compute is real — but that
+        // is handing something personal to the organisation without asking,
+        // and what is at `u/<them>/…` is theirs. The server itself is
+        // untouched; this is a row, and whoever wants it back adds it again.
+        assert!(db.host_by_name("fire-01").await.unwrap().is_none());
 
         // Her token goes. Nothing else can open it, and a credential nobody can
         // rotate is worse than no credential.

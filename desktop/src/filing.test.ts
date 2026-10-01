@@ -47,9 +47,23 @@ describe("who may move something", () => {
     expect(mayMove("d/nobodys/thing", me, dirs)).toBe(false);
   });
 
-  it("lets an administrator of the organisation unstick anything", () => {
+  it("lets an administrator of the organisation unstick any directory", () => {
     expect(mayMove("d/design/mockups", admin, [])).toBe(true);
-    expect(mayMove("u/ana/invoice_pdf", admin, [])).toBe(true);
+  });
+
+  /**
+   * The hard rule: somebody's own root is theirs. An administrator can destroy
+   * what is there when removing the account — it is going either way — but can
+   * never hand it to a third party, which is the one outcome its owner never
+   * agreed to.
+   */
+  it("does not let even an administrator move somebody's own things", () => {
+    expect(mayMove("u/ana/invoice_pdf", admin, [])).toBe(false);
+    expect(mayMove("u/ana/git/github", admin, [])).toBe(false);
+  });
+
+  it("still lets them move their own", () => {
+    expect(mayMove("u/root/thing", admin, [])).toBe(true);
   });
 
   /** Attached: an agent account's credential, a repository's variables, the

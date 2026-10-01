@@ -6040,7 +6040,7 @@
         "tags": [
           "organization"
         ],
-        "summary": "Hand their work over, then take the account away — in one transaction.",
+        "summary": "Destroy what was theirs and take the account away — in one transaction.",
         "operationId": "offboard_user",
         "parameters": [
           {
@@ -6068,7 +6068,7 @@
             "description": ""
           },
           "400": {
-            "description": "Something of theirs was left undecided",
+            "description": "The list agreed to is not what is theirs",
             "content": {
               "application/json": {
                 "schema": {
@@ -7575,22 +7575,6 @@
         ],
         "description": "What the person decided, when they were asked."
       },
-      "Destination": {
-        "type": "object",
-        "required": [
-          "kind",
-          "id"
-        ],
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "kind": {
-            "type": "string",
-            "description": "`person` or `directory`."
-          }
-        }
-      },
       "Diagnosis": {
         "type": "object",
         "description": "Why a connection didn't happen, in terms of what to do about it.\n\nEach cause has a different fix, and the failure they arrive as — a closed\nstream — distinguishes none of them.",
@@ -8466,25 +8450,6 @@
           "subjectName": {
             "type": "string",
             "description": "The person's username or the team's name, so a list needs one read."
-          }
-        }
-      },
-      "HandOver": {
-        "type": "object",
-        "required": [
-          "kind",
-          "id",
-          "to"
-        ],
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "kind": {
-            "$ref": "#/components/schemas/FiledKind"
-          },
-          "to": {
-            "$ref": "#/components/schemas/Destination"
           }
         }
       },
@@ -9380,23 +9345,23 @@
       },
       "Offboarding": {
         "type": "object",
-        "description": "What to do about everything that is theirs, decided before anything happens.\n\n**Every row answered, or none of it runs.** A half-specified offboarding is\nthe thing this exists to prevent: the old path was one `DELETE` behind a\nwarning written in the abstract, and whatever it swept was found out\nafterwards or not at all.\n\nTwo answers per row and not three. *Hand over* moves it; *let go* means it\ngoes with them, which is deletion for a workspace, a subscription or a\nsecret and a move to `Shared` for a machine — compute is real and the\norganisation is still running on it. A third option spelled \"delete\" would\nbe a lie on the one kind that is never deleted.",
+        "description": "Agreeing to what happens when somebody goes.\n\n**Nothing of theirs can be handed to anybody.** What is filed at\n`u/<them>/…` is theirs, and an administrator removing the account may\ndestroy it — the account is going either way — but may never pass it on.\nHanding somebody's private work to a third party is the one outcome its\nowner never agreed to, and the only way out of a personal root is the owner\nmoving it themselves, before they go.\n\nA directory is the opposite: it is the organisation's, so being its last\nadministrator is a job to hand on, and that is the one decision here.",
         "required": [
           "then"
         ],
         "properties": {
-          "handOver": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/HandOver"
-            }
-          },
-          "letGo": {
+          "destroy": {
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/FiledRef"
             },
-            "description": "Acknowledged as going with them. Named rather than implied, so that\nnothing is lost by somebody not having scrolled."
+            "description": "Read back and compared with what is actually theirs, so that agreeing to\na list means agreeing to *that* list. It can change between the screen\ndrawing it and somebody pressing the button."
+          },
+          "successors": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Successor"
+            }
           },
           "then": {
             "type": "string",
@@ -10994,6 +10959,27 @@
           "person",
           "team"
         ]
+      },
+      "Successor": {
+        "type": "object",
+        "description": "Who takes over a directory they were the last administrator of.",
+        "required": [
+          "directory",
+          "subjectKind",
+          "subjectId"
+        ],
+        "properties": {
+          "directory": {
+            "type": "string"
+          },
+          "subjectId": {
+            "type": "string"
+          },
+          "subjectKind": {
+            "$ref": "#/components/schemas/SubjectKind",
+            "description": "A person or a team, as a grant names either."
+          }
+        }
       },
       "Switch": {
         "type": "object",

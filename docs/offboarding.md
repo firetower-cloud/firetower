@@ -9,54 +9,52 @@ credentials* — true of anybody, silent about this person. What follows replace
 that with: see what is theirs, decide about each of it, and have all of it
 happen or none of it.
 
-## What has to be decided
+## The rule it rests on
 
-Three buckets, and only the first two need an answer.
+> **What is filed at `u/<them>/…` is theirs, and nobody else can ever be given
+> it — including an administrator.**
 
-### 1. Theirs — filed at `u/<their slug>/…`
+Removing the account destroys what is there, and that is unavoidable: the
+account is going either way. What is *not* allowed is passing it on. Handing
+somebody's private work to a third party is the one outcome its owner never
+agreed to, and "they left" does not make it agreed. The only way out of a
+personal root is the owner moving it themselves, before they go.
 
-Workspaces, machines, agent accounts, secrets. **This is what a deletion
-destroys**, and so this is the list that needs a decision per row:
+Enforced in `may_share`, which is the one definition of who may move a thing —
+the administrator bypass there now applies to directories and not to somebody
+else's root — and mirrored in `mayMove` on both clients so the control is never
+drawn.
 
-* **Hand over** — to a person, or to a directory. `Access::transfer` already
-  does exactly this, including re-sealing a secret or an agent account's
-  credential under its new owner.
-* **Delete** — say so explicitly, per row.
+It does not depend on the kind. A workspace, a machine, a subscription and a
+secret are all equally theirs, and the earlier draft that let an administrator
+hand over "a thing" but not "an identity" needed a judgement per scope that
+nobody should have to make twice.
 
-A bulk default sits above the list — *hand everything to…* — because deciding
-forty times is not deciding, it is clicking.
+The cost, stated plainly: **work left in a personal root dies with the person.**
+`u/kevin/ledger_rounding` is destroyed when kevin goes, and the only way to keep
+it is kevin filing it into a directory first. That is the price of the rule and
+it is worth it, but it means "file your work somewhere shared" has to be
+something people are told rather than something they discover.
 
-### 2. Directories they administer
+## What is decided
 
-`delete_user` removes a person's grants with a plain `DELETE` and no
-`keep_an_administrator` check, so removing the last administrator of a directory
-is possible where revoking their grant one at a time is not.
+One thing, and it is not about property.
 
-**It is a warning and not a blocker**, because an organisation administrator can
-administer any directory whether or not anybody granted them anything —
-`may_administer` returns early on `role == "admin"`, and that fallback exists
-precisely so a directory whose last administrator left is fixable. Refusing to
-offboard somebody over a recoverable state would be the wrong trade.
+### Directories where they were the last administrator
 
-What is lost is real but smaller than it first looks: the people who *worked*
-there can no longer file anything out of it or change who it lets in, and only
-an organisation administrator can. So the screen says who would be left — and
-offers to name a replacement, with the field already filled in — without
-standing in the way.
+A directory is the organisation's, so this is a job to hand on rather than a
+possession to take. The screen offers a successor for each; leaving it empty is
+allowed, because `may_administer` returns early for an organisation
+administrator and so a directory is never unreachable.
 
-The same reasoning applies to `d/shared`, which every installation starts with
-and which has no administrator at all: its only grant is writer to the team that
-is everybody. That is not a defect to repair; it is the fallback working.
+### Everything at their own root
 
-### 3. Theirs by creation, filed somewhere else
-
-Anything with `created_by = them` whose path is under `d/…`. **Nothing to
-decide**: filing handed it to the directory, it does not go with them, and
-`created_by` is a record of who made it rather than a claim on it.
-
-Shown anyway, as *stays where it is*. Somebody deciding about a person wants the
-whole picture, and the absence of an action is itself the answer to "what
-happens to the thing ana built for the backend team".
+Listed, counted, and not decided — because there is only one thing it can do.
+Each row says what going actually means for *that* kind: a workspace, a
+subscription or a secret is deleted, and so is a machine. Machines used to be
+swept into `Shared` on the grounds that compute is real; that is an unconsented
+transfer and it is gone. The server itself is untouched — the row is what
+disappears, and whoever wants it back adds it again.
 
 ## What happens with no decision
 

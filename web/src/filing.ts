@@ -47,10 +47,16 @@ export function mayMove(
   directories: Reachable[],
 ): boolean {
   if (!path || !me) return false;
-  if (me.role === "admin") return true;
 
   const [root, label] = path.split("/");
+
+  // Somebody's own root is theirs, and an administrator is not an exception.
+  // Everywhere else being an administrator is the way back in when a
+  // directory's last one has left; here it would be the way into somebody's
+  // private work, and handing that to a third party is the one outcome its
+  // owner never agreed to. The only way out of a personal root is its owner.
   if (root === "u") return label === me.slug;
+  if (me.role === "admin") return true;
   if (root === "d") return directories.some((d) => d.slug === label && d.level === "admin");
   return false;
 }

@@ -6,29 +6,29 @@
  * OpenAPI spec version: 0
  */
 import type { FiledRef } from './filedRef.ts';
-import type { HandOver } from './handOver.ts';
+import type { Successor } from './successor.ts';
 
 /**
- * What to do about everything that is theirs, decided before anything happens.
+ * Agreeing to what happens when somebody goes.
  *
- * **Every row answered, or none of it runs.** A half-specified offboarding is
- * the thing this exists to prevent: the old path was one `DELETE` behind a
- * warning written in the abstract, and whatever it swept was found out
- * afterwards or not at all.
+ * **Nothing of theirs can be handed to anybody.** What is filed at
+ * `u/<them>/…` is theirs, and an administrator removing the account may
+ * destroy it — the account is going either way — but may never pass it on.
+ * Handing somebody's private work to a third party is the one outcome its
+ * owner never agreed to, and the only way out of a personal root is the owner
+ * moving it themselves, before they go.
  *
- * Two answers per row and not three. *Hand over* moves it; *let go* means it
- * goes with them, which is deletion for a workspace, a subscription or a
- * secret and a move to `Shared` for a machine — compute is real and the
- * organisation is still running on it. A third option spelled "delete" would
- * be a lie on the one kind that is never deleted.
+ * A directory is the opposite: it is the organisation's, so being its last
+ * administrator is a job to hand on, and that is the one decision here.
  */
 export interface Offboarding {
-  handOver?: HandOver[];
   /**
-     * Acknowledged as going with them. Named rather than implied, so that
-     * nothing is lost by somebody not having scrolled.
+     * Read back and compared with what is actually theirs, so that agreeing to
+     * a list means agreeing to *that* list. It can change between the screen
+     * drawing it and somebody pressing the button.
      */
-  letGo?: FiledRef[];
+  destroy?: FiledRef[];
+  successors?: Successor[];
   /** Switched off, or removed for good. */
   then: string;
 }
