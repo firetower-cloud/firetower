@@ -125,7 +125,7 @@ export function SignIn() {
         </form>
 
         <p className="mt-6 text-meta leading-[1.6] text-mute">
-          Your password is the one chosen at the end of the CLI installation.
+          Your initial password is the one chosen at the end of the CLI installation.
         </p>
       </div>
     </div>
