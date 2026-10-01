@@ -28,15 +28,33 @@ import type { DiffSince, FileDiff, ListTasksParams, Page, Repo, Session, Task, T
 /** Everything a screen needs to know about where its data came from. */
 export type Feed<T> = { data: T; loading: boolean; error: string | null };
 
-/** What the server said, off any thrown thing. */
+/**
+ * What the server said, off any thrown thing.
+ *
+ * With one substitution. A password that has to be replaced is refused on
+ * every path at once, so every list on screen asks its own question and gets
+ * the same sentence back — and a sentence written as a reason, repeated eight
+ * times down a rail, reads as eight things being broken. The screen that
+ * explains it is already up; these are the places behind it, and what they owe
+ * is to be brief and to agree with it.
+ */
 export function why(e: unknown): string {
-  return (e as { message?: string })?.message ?? "That didn't work.";
+  return said(e) ?? "That didn't work.";
 }
 
+/* The two fallbacks differ on purpose — one ends a sentence of its own, the
+   other is dropped into one — so they are kept, and only the reading of the
+   error is shared. */
 function whyOrNull(e: unknown): string | null {
   if (!e) return null;
-  const m = (e as { message?: string })?.message;
-  return m ?? "that request did not work";
+  return said(e) ?? "that request did not work";
+}
+
+function said(e: unknown): string | null {
+  if ((e as { code?: string })?.code === "PasswordChangeRequired") {
+    return "Replace your password to see this.";
+  }
+  return (e as { message?: string })?.message ?? null;
 }
 
 export function useSessions(): Feed<Session[]> {
