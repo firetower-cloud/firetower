@@ -125,15 +125,29 @@ export function useProviders() {
 }
 
 /**
- * Whether this server still needs something before it is usable: a password
- * that came from a file, or an organisation with no name. Asked on every visit,
- * because both are facts about the server rather than about this Mac.
+ * Whether this server still needs something before it is usable, and which of
+ * two very different somethings it is. Asked on every visit, because both are
+ * facts about the server rather than about this Mac.
+ *
+ * `locked` is a password the server will not accept any work under. It is kept
+ * apart from `setup` rather than folded into one "needs something" flag,
+ * because the two have opposite answers: setting up is finished here, and a
+ * password is replaced in a browser. Folded together, the app showed its own
+ * setup wizard to somebody whose only remaining task it cannot perform.
+ *
+ * It is read from `auth/me` on every visit rather than remembered from the
+ * sign-in. An administrator can reset a password under a running app, and the
+ * stored user would still say everything is fine while every request was being
+ * refused.
  */
-export function useGate(): { setup: boolean; ready: boolean } {
+export function useGate(): { setup: boolean; locked: boolean; ready: boolean } {
   const me = useMe({ query: { staleTime: 60_000 } });
   const setup = useSetupState({ query: { staleTime: 60_000 } });
-  const needs = !!me.data?.user?.mustChangePassword || (!!setup.data && !setup.data.completed);
-  return { setup: needs, ready: !me.isPending && !setup.isPending };
+  return {
+    setup: !!setup.data && !setup.data.completed,
+    locked: !!me.data?.user?.mustChangePassword,
+    ready: !me.isPending && !setup.isPending,
+  };
 }
 
 /** The dot on Updates in the rail. Asked rarely: the answer changes monthly. */

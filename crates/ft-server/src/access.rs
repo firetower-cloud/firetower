@@ -174,7 +174,6 @@ impl Directory {
     }
 }
 
-
 /// How somebody came by the access they have to a directory.
 ///
 /// Not `Route`, which is taken: the sharing sheet already has one, meaning
@@ -1410,21 +1409,19 @@ impl Access {
                 // them equal, and quietly moved nothing — so the account came
                 // home and its key stayed with the directory, where its owner
                 // could no longer see it and no later move could find it either.
-                let credential: String = sqlx::query_scalar(
-                    "SELECT credential_key FROM agent_accounts WHERE id = $1",
-                )
-                .bind(id)
-                .fetch_optional(&mut **tx)
-                .await?
-                .context("no agent account here")?;
+                let credential: String =
+                    sqlx::query_scalar("SELECT credential_key FROM agent_accounts WHERE id = $1")
+                        .bind(id)
+                        .fetch_optional(&mut **tx)
+                        .await?
+                        .context("no agent account here")?;
 
-                let owner: Option<String> = sqlx::query_scalar(
-                    "SELECT owner FROM secrets WHERE scope = $1 AND name = $2",
-                )
-                .bind(crate::vault::AGENT)
-                .bind(&credential)
-                .fetch_optional(&mut **tx)
-                .await?;
+                let owner: Option<String> =
+                    sqlx::query_scalar("SELECT owner FROM secrets WHERE scope = $1 AND name = $2")
+                        .bind(crate::vault::AGENT)
+                        .bind(&credential)
+                        .fetch_optional(&mut **tx)
+                        .await?;
 
                 // The credential follows the subscription. It is attached, not
                 // filed: it has no path, and this is the only thing that ever
@@ -2455,7 +2452,11 @@ mod tests {
 
         for who in [&bob, &ana] {
             vault
-                .put(Key::of("global", "GITHUB_TOKEN", who.as_str()), "t", "a test")
+                .put(
+                    Key::of("global", "GITHUB_TOKEN", who.as_str()),
+                    "t",
+                    "a test",
+                )
                 .await
                 .unwrap();
         }
@@ -2580,7 +2581,7 @@ mod tests {
     /// next move could not find it either.
     #[tokio::test]
     async fn taking_a_subscription_back_brings_its_credential_with_it() {
-        let (db, access, accounts, org, admin) = set_up().await;
+        let (db, access, _accounts, org, admin) = set_up().await;
         let vault = vault(&db);
         let shelf = access
             .create_directory(&org, "Shelf", &admin, &[])
@@ -2600,7 +2601,11 @@ mod tests {
         .unwrap();
         let key = id.to_string();
         vault
-            .put(Key::of(crate::vault::AGENT, &key, admin.as_str()), "t", "a test")
+            .put(
+                Key::of(crate::vault::AGENT, &key, admin.as_str()),
+                "t",
+                "a test",
+            )
             .await
             .unwrap();
 
@@ -2615,20 +2620,27 @@ mod tests {
             .unwrap()
         };
 
-        let there =
-            ft_core::path::ResourcePath::from_stored(format!("d.{}.mine", shelf.slug));
+        let there = ft_core::path::ResourcePath::from_stored(format!("d.{}.mine", shelf.slug));
         access
             .transfer(&vault, FiledKind::AgentAccount, id, &there, "admin")
             .await
             .unwrap();
-        assert_eq!(owner_now().await, shelf.id.as_str(), "filed: the directory holds it");
+        assert_eq!(
+            owner_now().await,
+            shelf.id.as_str(),
+            "filed: the directory holds it"
+        );
 
-        let home = ft_core::path::ResourcePath::from_stored("u.admin.mine".to_string());
+        let home = ft_core::path::ResourcePath::from_stored("u.admin.mine");
         access
             .transfer(&vault, FiledKind::AgentAccount, id, &home, "admin")
             .await
             .unwrap();
-        assert_eq!(owner_now().await, admin.as_str(), "taken back: so is the key");
+        assert_eq!(
+            owner_now().await,
+            admin.as_str(),
+            "taken back: so is the key"
+        );
     }
 
     /// One API key a team shares: filed into a directory, it answers for
@@ -2646,7 +2658,11 @@ mod tests {
         let vault = vault(&db);
 
         vault
-            .put(Key::of(crate::vault::TRACKER, "linear", ana.as_str()), "lin_key", "a test")
+            .put(
+                Key::of(crate::vault::TRACKER, "linear", ana.as_str()),
+                "lin_key",
+                "a test",
+            )
             .await
             .unwrap();
 
@@ -2660,12 +2676,27 @@ mod tests {
             }
         };
 
-        assert_eq!(resolve(ana.to_string()).await.as_deref(), Some(ana.as_str()));
-        assert!(resolve(bob.to_string()).await.is_none(), "not while it is ana's alone");
+        assert_eq!(
+            resolve(ana.to_string()).await.as_deref(),
+            Some(ana.as_str())
+        );
+        assert!(
+            resolve(bob.to_string()).await.is_none(),
+            "not while it is ana's alone"
+        );
 
-        let team = access.create_directory(&org, "Team", &admin, &[]).await.unwrap();
+        let team = access
+            .create_directory(&org, "Team", &admin, &[])
+            .await
+            .unwrap();
         access
-            .set_grant(team.id.as_str(), SubjectKind::Person, bob.as_str(), Level::Viewer, &admin)
+            .set_grant(
+                team.id.as_str(),
+                SubjectKind::Person,
+                bob.as_str(),
+                Level::Viewer,
+                &admin,
+            )
             .await
             .unwrap();
         let there =
@@ -2709,17 +2740,38 @@ mod tests {
         let vault = vault(&db);
 
         let backend = access.create_team(&org, "Backend").await.unwrap();
-        access.add_member(backend.id.as_str(), ana.as_str()).await.unwrap();
-
-        let prod = access.create_directory(&org, "Production", &admin, &[]).await.unwrap();
         access
-            .set_grant(prod.id.as_str(), SubjectKind::Team, backend.id.as_str(), Level::Writer, &admin)
+            .add_member(backend.id.as_str(), ana.as_str())
             .await
             .unwrap();
 
-        let shelf = access.create_directory(&org, "Shelf", &admin, &[]).await.unwrap();
+        let prod = access
+            .create_directory(&org, "Production", &admin, &[])
+            .await
+            .unwrap();
         access
-            .set_grant(shelf.id.as_str(), SubjectKind::Person, ana.as_str(), Level::Viewer, &admin)
+            .set_grant(
+                prod.id.as_str(),
+                SubjectKind::Team,
+                backend.id.as_str(),
+                Level::Writer,
+                &admin,
+            )
+            .await
+            .unwrap();
+
+        let shelf = access
+            .create_directory(&org, "Shelf", &admin, &[])
+            .await
+            .unwrap();
+        access
+            .set_grant(
+                shelf.id.as_str(),
+                SubjectKind::Person,
+                ana.as_str(),
+                Level::Viewer,
+                &admin,
+            )
             .await
             .unwrap();
 
@@ -2755,7 +2807,13 @@ mod tests {
         // Shelf is hers to administer and nobody else's — `admin` holds the
         // grant that created it, so she is not alone there.
         access
-            .set_grant(shelf.id.as_str(), SubjectKind::Person, ana.as_str(), Level::Admin, &admin)
+            .set_grant(
+                shelf.id.as_str(),
+                SubjectKind::Person,
+                ana.as_str(),
+                Level::Admin,
+                &admin,
+            )
             .await
             .unwrap();
         let reach = access.reach(ana.as_str()).await.unwrap();

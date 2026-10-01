@@ -459,7 +459,11 @@ mod tests {
                 .as_str()
                 .to_string(),
         );
-        let member = accounts.create_user(&org, "ana", "ana@example.test", "member").await.unwrap().0;
+        let member = accounts
+            .create_user(&org, "ana", "ana@example.test", "member")
+            .await
+            .unwrap()
+            .0;
 
         vault
             .put(Key::shared("global", "STRIPE"), "the install's", "setup")

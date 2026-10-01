@@ -89,9 +89,10 @@ pub enum ErrorCode {
     /// Nobody is signed in, or the session has ended. The interface shows the
     /// sign-in screen rather than reporting a fault.
     Unauthorized,
-    /// Signed in, with a password that came from a file. Every other request
-    /// is refused until it is replaced — the interface turns this into the
-    /// wizard's first step rather than an error.
+    /// Signed in, with a password somebody else chose. Every other request is
+    /// refused until it is replaced, which happens in a browser: the web
+    /// interface turns this into its one remaining step, and the desktop and
+    /// phone apps turn it into a panel pointing at that address.
     PasswordChangeRequired,
     /// Signed in, and not allowed to do this. Not `Unauthorized`, which the
     /// interface reads as a session that has ended — being refused one thing

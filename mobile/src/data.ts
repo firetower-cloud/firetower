@@ -10,7 +10,6 @@ import { useListAgents } from "~/api/generated/agents/agents";
 import { useListProviderRepos, useListProviders } from "~/api/generated/providers/providers";
 import { useListAccounts } from "~/api/generated/accounts/accounts";
 import { useMe } from "~/api/generated/auth/auth";
-import { useSetupState } from "~/api/generated/setup/setup";
 import { useGetUpdates } from "~/api/generated/updates/updates";
 import { showsDot } from "~/api/updates";
 import { useListTrackers, useListTrackerScopes } from "~/api/generated/trackers/trackers";
@@ -139,15 +138,21 @@ export function useProviderRepos(id: string | null): Feed<RemoteRepo[]> {
 }
 
 /**
- * Whether this server still needs something before it is usable: a password
- * that came from a file, or an organisation with no name. Asked on every visit,
- * because both are facts about the server rather than about this Mac.
+ * Whether this server will accept any work under this account yet.
+ *
+ * Read from `auth/me` on every visit rather than remembered from the sign-in:
+ * an administrator can reset a password under a running app, and the stored
+ * user would go on saying everything is fine while every request was being
+ * refused. That is what this exists to catch — without it the phone shows
+ * "could not reach the control plane" on every screen for a server that is
+ * answering perfectly.
+ *
+ * Only the password. A server that has not finished being set up is set up
+ * from a desk, not from a phone, so there is nothing for this to say about it.
  */
-export function useGate(): { setup: boolean; ready: boolean } {
+export function useGate(): { locked: boolean; ready: boolean } {
   const me = useMe({ query: { staleTime: 60_000 } });
-  const setup = useSetupState({ query: { staleTime: 60_000 } });
-  const needs = !!me.data?.user?.mustChangePassword || (!!setup.data && !setup.data.completed);
-  return { setup: needs, ready: !me.isPending && !setup.isPending };
+  return { locked: !!me.data?.user?.mustChangePassword, ready: !me.isPending };
 }
 
 /** The dot on Updates in the rail. Asked rarely: the answer changes monthly. */

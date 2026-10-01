@@ -154,7 +154,7 @@ export function App() {
                     error rather than sticking on it. */}
                 <Boundary key={path} onReset={() => navigate("/")}>
                   <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-                    <Gate>
+                    <Gate backend={here}>
                       <Routes
                         backend={here}
                         onForgot={() => {

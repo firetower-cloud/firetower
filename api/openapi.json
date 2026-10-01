@@ -10743,7 +10743,7 @@
           },
           "needsPassword": {
             "type": "boolean",
-            "description": "The signed-in account's password came from a file."
+            "description": "The signed-in account's password was chosen by somebody else and has\nto be replaced. The only step of setting up that is not about the\ninstall — it is raised for anybody invited or reset, long after."
           },
           "organization": {
             "oneOf": [
@@ -12225,7 +12225,7 @@
           },
           "mustChangePassword": {
             "type": "boolean",
-            "description": "True while the password came from a file rather than from a person.\nNothing but replacing it is permitted until this clears."
+            "description": "True while the password in use was chosen by somebody other than its\nowner: out of a file for the first administrator, and by an\nadministrator for everybody invited or reset since.\n\nNothing but replacing it is permitted until this clears, and replacing\nit is done on the control plane's own interface — the native clients\nread this to send people there rather than offering a form of their\nown."
           },
           "orgId": {
             "$ref": "#/components/schemas/OrgId"

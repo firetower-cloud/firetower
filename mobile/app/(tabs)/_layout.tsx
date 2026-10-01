@@ -17,6 +17,7 @@
  */
 import { Redirect, Tabs } from "expo-router";
 import { useServer } from "~/native/current";
+import { useGate } from "~/data";
 import { Inbox, ListTodo, Settings2, User } from "lucide-react-native";
 import { color, size } from "~/design/tokens.generated";
 
@@ -32,6 +33,23 @@ export default function TabLayout() {
    */
   const here = useServer();
   if (!here) return <Redirect href="/connect" />;
+  return <Signed />;
+}
+
+/**
+ * Inside the provider, so it can ask the server about the account.
+ *
+ * A second component rather than two more lines above: `useGate` needs the
+ * `QueryClient` that only exists once there is a server, and calling it before
+ * the `!here` return would be a hook behind a condition.
+ */
+function Signed() {
+  const { locked, ready } = useGate();
+
+  /* Signed in with a password the server will not accept any work under. Not
+     rendered here: this layout is a navigator, and returning a panel from it
+     leaves the router with a child route and nowhere to put it. */
+  if (ready && locked) return <Redirect href="/locked" />;
 
   return (
     <Tabs

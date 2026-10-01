@@ -30,7 +30,11 @@ export interface SetupState {
   needsGithub: boolean;
   /** Nobody has named the organisation yet. */
   needsOrganization: boolean;
-  /** The signed-in account's password came from a file. */
+  /**
+     * The signed-in account's password was chosen by somebody else and has
+     * to be replaced. The only step of setting up that is not about the
+     * install — it is raised for anybody invited or reset, long after.
+     */
   needsPassword: boolean;
   organization?: null | Organization;
   /**

@@ -70,8 +70,14 @@ pub struct User {
     /// told apart from a real one that bounces.
     pub email: Option<String>,
     pub role: String,
-    /// True while the password came from a file rather than from a person.
-    /// Nothing but replacing it is permitted until this clears.
+    /// True while the password in use was chosen by somebody other than its
+    /// owner: out of a file for the first administrator, and by an
+    /// administrator for everybody invited or reset since.
+    ///
+    /// Nothing but replacing it is permitted until this clears, and replacing
+    /// it is done on the control plane's own interface — the native clients
+    /// read this to send people there rather than offering a form of their
+    /// own.
     pub must_change_password: bool,
     /// Switched off by an administrator: cannot sign in, keeps what they made.
     #[serde(default)]
@@ -970,7 +976,10 @@ mod tests {
             .create_user(&org, "ana2", "Ana@Westlabs.com", "member")
             .await
             .expect_err("the same mailbox, shouted");
-        assert!(refused.to_string().contains("already somebody's"), "{refused}");
+        assert!(
+            refused.to_string().contains("already somebody's"),
+            "{refused}"
+        );
 
         // And an address is still optional for whoever was here first.
         let first = accounts.user_by_name("admin").await.unwrap().unwrap();
@@ -995,7 +1004,11 @@ mod tests {
         let accounts = Accounts::new(db.pool().clone());
         let org = OrgId::from_stored(db.org().await.unwrap());
 
-        let first = accounts.create_user(&org, "ana", "ana@example.test", "member").await.unwrap().0;
+        let first = accounts
+            .create_user(&org, "ana", "ana@example.test", "member")
+            .await
+            .unwrap()
+            .0;
         assert_eq!(first.slug, "ana");
 
         accounts.delete_user(&first.id).await.unwrap();
@@ -1012,7 +1025,11 @@ mod tests {
         assert!(retired.1.is_some(), "retired, not deleted");
 
         // So the next Ana is a different person, and is named like one.
-        let second = accounts.create_user(&org, "ana", "ana@example.test", "member").await.unwrap().0;
+        let second = accounts
+            .create_user(&org, "ana", "ana@example.test", "member")
+            .await
+            .unwrap()
+            .0;
         assert_eq!(second.slug, "ana_2");
         assert_ne!(second.id.as_str(), first.id.as_str());
     }
@@ -1028,7 +1045,11 @@ mod tests {
         let org = OrgId::from_stored(db.org().await.unwrap());
         let admin = UserId::from_stored(admin);
 
-        let ana = accounts.create_user(&org, "ana", "ana@example.test", "member").await.unwrap().0;
+        let ana = accounts
+            .create_user(&org, "ana", "ana@example.test", "member")
+            .await
+            .unwrap()
+            .0;
         let shelf = access
             .create_directory(&org, "Shelf", &admin, &[])
             .await

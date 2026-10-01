@@ -88,11 +88,13 @@ pub(super) async fn list_trackers(
         // the same thing, so a git token's whereabouts is nobody's business but
         // its owner's and is not sent at all.
         let filed = if held && t.auth == Auth::ApiKey {
-            state.access.path_of(
-                crate::access::FiledKind::Secret,
-                &format!("{}/{}/{}", t.vault_scope(), t.id, holder),
-            )
-            .await?
+            state
+                .access
+                .path_of(
+                    crate::access::FiledKind::Secret,
+                    &format!("{}/{}/{}", t.vault_scope(), t.id, holder),
+                )
+                .await?
         } else {
             None
         };

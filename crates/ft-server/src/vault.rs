@@ -295,7 +295,6 @@ impl Vault {
         to: &str,
         reason: &str,
     ) -> Result<()> {
-
         let row = sqlx::query(
             "SELECT version, wrapped_key, ciphertext FROM secrets
               WHERE scope = $1 AND name = $2 AND owner = $3 FOR UPDATE",

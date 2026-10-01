@@ -23,8 +23,14 @@ export interface User {
   email?: string | null;
   id: UserId;
   /**
-     * True while the password came from a file rather than from a person.
-     * Nothing but replacing it is permitted until this clears.
+     * True while the password in use was chosen by somebody other than its
+     * owner: out of a file for the first administrator, and by an
+     * administrator for everybody invited or reset since.
+     *
+     * Nothing but replacing it is permitted until this clears, and replacing
+     * it is done on the control plane's own interface — the native clients
+     * read this to send people there rather than offering a form of their
+     * own.
      */
   mustChangePassword: boolean;
   orgId: OrgId;
