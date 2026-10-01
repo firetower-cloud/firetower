@@ -9331,9 +9331,14 @@
         "type": "object",
         "required": [
           "username",
+          "email",
           "role"
         ],
         "properties": {
+          "email": {
+            "type": "string",
+            "description": "Where to write to them. Required for anybody added from now on; the\naccounts that predate it keep their absence rather than a guess."
+          },
           "role": {
             "type": "string",
             "description": "`admin` or `member`."
@@ -12203,6 +12208,13 @@
             "type": "boolean",
             "description": "Switched off by an administrator: cannot sign in, keeps what they made."
           },
+          "email": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Where to write to them. Absent on accounts made before one was asked\nfor, and never filled in with a guess: a placeholder address cannot be\ntold apart from a real one that bounces."
+          },
           "id": {
             "$ref": "#/components/schemas/UserId"
           },
@@ -12234,6 +12246,13 @@
               "null"
             ],
             "description": "Switched off, or back on."
+          },
+          "email": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "An address, for an account made before one was asked for, or when\nsomebody's has changed."
           },
           "role": {
             "type": [

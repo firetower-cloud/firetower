@@ -1933,7 +1933,7 @@ mod tests {
 
     async fn person(accounts: &Accounts, org: &OrgId, name: &str) -> UserId {
         accounts
-            .create_user(org, name, "member")
+            .create_user(org, name, &format!("{name}@example.test"), "member")
             .await
             .unwrap()
             .0

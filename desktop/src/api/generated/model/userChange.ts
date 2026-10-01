@@ -13,6 +13,12 @@ export interface UserChange {
      */
   disabled?: boolean | null;
   /**
+     * An address, for an account made before one was asked for, or when
+     * somebody's has changed.
+     * @nullable
+     */
+  email?: string | null;
+  /**
      * `admin` or `member`, when the role changes.
      * @nullable
      */

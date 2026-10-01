@@ -17,6 +17,7 @@ export const LoginResponse = zod.object({
   "token": zod.string().describe('Sent back on every later request. Said once — only its hash is kept.'),
   "user": zod.object({
   "disabled": zod.boolean().optional().describe('Switched off by an administrator: cannot sign in, keeps what they made.'),
+  "email": zod.string().nullish().describe('Where to write to them. Absent on accounts made before one was asked\nfor, and never filled in with a guess: a placeholder address cannot be\ntold apart from a real one that bounces.'),
   "id": zod.string().describe('Identifies someone who can sign in.'),
   "mustChangePassword": zod.boolean().describe('True while the password came from a file rather than from a person.\nNothing but replacing it is permitted until this clears.'),
   "orgId": zod.string().describe('Identifies an organisation.'),
@@ -35,6 +36,7 @@ export const MeResponse = zod.object({
 }).describe('Absent until setting up has finished.')]).optional(),
   "user": zod.object({
   "disabled": zod.boolean().optional().describe('Switched off by an administrator: cannot sign in, keeps what they made.'),
+  "email": zod.string().nullish().describe('Where to write to them. Absent on accounts made before one was asked\nfor, and never filled in with a guess: a placeholder address cannot be\ntold apart from a real one that bounces.'),
   "id": zod.string().describe('Identifies someone who can sign in.'),
   "mustChangePassword": zod.boolean().describe('True while the password came from a file rather than from a person.\nNothing but replacing it is permitted until this clears.'),
   "orgId": zod.string().describe('Identifies an organisation.'),

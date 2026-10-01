@@ -65,6 +65,10 @@ pub struct User {
     /// address; this is derived once and never changes, so renaming somebody
     /// never moves anything.
     pub slug: String,
+    /// Where to write to them. Absent on accounts made before one was asked
+    /// for, and never filled in with a guess: a placeholder address cannot be
+    /// told apart from a real one that bounces.
+    pub email: Option<String>,
     pub role: String,
     /// True while the password came from a file rather than from a person.
     /// Nothing but replacing it is permitted until this clears.
@@ -212,6 +216,9 @@ impl Accounts {
             org_id,
             username: username.to_string(),
             slug,
+            // Made at first boot, before there is anybody to ask. They add one
+            // on the People screen, where the prompt is waiting.
+            email: None,
             role: "admin".into(),
             must_change_password: true,
             disabled: false,
@@ -266,6 +273,7 @@ impl Accounts {
         &self,
         org: &OrgId,
         username: &str,
+        email: &str,
         role: &str,
     ) -> Result<(User, String)> {
         let username = username.trim();
@@ -280,6 +288,20 @@ impl Accounts {
         anyhow::ensure!(
             matches!(role, "admin" | "member"),
             "a role is admin or member"
+        );
+
+        // Shaped, not validated. Anything stricter rejects addresses that work
+        // — plus signs, dots, new top-level domains — and the only test that
+        // settles it is sending a message, which this installation may not yet
+        // be able to do.
+        let email = email.trim();
+        anyhow::ensure!(!email.is_empty(), "a person needs an email address");
+        anyhow::ensure!(email.chars().count() <= 254, "that address is too long");
+        anyhow::ensure!(
+            email.split_once('@').is_some_and(|(before, after)| {
+                !before.is_empty() && after.contains('.') && !after.starts_with('.')
+            }),
+            "that does not look like an email address"
         );
         let password = temporary_password();
         let id = UserId::new();
@@ -299,18 +321,30 @@ impl Accounts {
         .await?;
 
         let done = sqlx::query(
-            "INSERT INTO users (id, org_id, username, password_hash, role,
+            "INSERT INTO users (id, org_id, username, email, password_hash, role,
                                 must_change_password)
-             VALUES ($1, $2, $3, $4, $5, TRUE)
+             VALUES ($1, $2, $3, $4, $5, $6, TRUE)
              ON CONFLICT (org_id, username) DO NOTHING",
         )
         .bind(id.as_str())
         .bind(org.as_str())
         .bind(username)
+        .bind(email)
         .bind(hash_password(&password)?)
         .bind(role)
         .execute(&mut *tx)
-        .await?;
+        .await;
+
+        // Two ways to already exist, and they are different sentences. The
+        // username collision is the `DO NOTHING` above; the address is a unique
+        // index, and a database error nobody translates reads as "that didn't
+        // work" to the person who typed it.
+        let done = match done {
+            Err(e) if is_duplicate_email(&e) => {
+                bail!("{email} is already somebody's here")
+            }
+            other => other?,
+        };
         if done.rows_affected() == 0 {
             bail!("there is already a user called {username}");
         }
@@ -322,6 +356,7 @@ impl Accounts {
                 org_id: org.clone(),
                 username: username.to_string(),
                 slug,
+                email: Some(email.to_string()),
                 role: role.to_string(),
                 must_change_password: true,
                 disabled: false,
@@ -332,6 +367,39 @@ impl Accounts {
 
     /// Admin or member. The last administrator cannot be made a member —
     /// an organisation nobody can administer is a locked room.
+    /// Give somebody an address, or change the one they have.
+    ///
+    /// The same checks `create_user` makes, because an address added later is
+    /// the same thing as one added at the start. The only difference is that
+    /// nobody was asked for it at the time.
+    pub async fn set_email(&self, id: &UserId, email: &str) -> Result<User> {
+        let email = email.trim();
+        anyhow::ensure!(!email.is_empty(), "a person needs an email address");
+        anyhow::ensure!(email.chars().count() <= 254, "that address is too long");
+        anyhow::ensure!(
+            email.split_once('@').is_some_and(|(before, after)| {
+                !before.is_empty() && after.contains('.') && !after.starts_with('.')
+            }),
+            "that does not look like an email address"
+        );
+
+        let row = sqlx::query(
+            "UPDATE users u SET email = $2 FROM principals p
+              WHERE p.id = u.id AND u.id = $1
+          RETURNING u.*, p.slug",
+        )
+        .bind(id.as_str())
+        .bind(email)
+        .fetch_optional(&self.pool)
+        .await;
+        match row {
+            Err(e) if is_duplicate_email(&e) => bail!("{email} is already somebody's here"),
+            other => other?
+                .map(user_from_row)
+                .context("there is nobody here with that id"),
+        }
+    }
+
     pub async fn set_role(&self, id: &UserId, role: &str) -> Result<User> {
         anyhow::ensure!(
             matches!(role, "admin" | "member"),
@@ -789,10 +857,18 @@ fn user_from_row(r: sqlx::postgres::PgRow) -> User {
         org_id: OrgId::from_stored(r.get::<String, _>("org_id")),
         username: r.get("username"),
         slug: r.get("slug"),
+        email: r.try_get("email").ok().flatten(),
         role: r.get("role"),
         must_change_password: r.get("must_change_password"),
         disabled: r.try_get("disabled").unwrap_or(false),
     }
+}
+
+/// Whether a database error is the email index refusing a second copy.
+fn is_duplicate_email(e: &sqlx::Error) -> bool {
+    e.as_database_error()
+        .and_then(|d| d.constraint())
+        .is_some_and(|c| c == "users_by_email")
 }
 
 /// A password for somebody else to replace: long, from the same alphabet as a
@@ -874,13 +950,52 @@ mod tests {
     /// JSON blob to clean it up. If her slug were reissued, the next Ana would
     /// inherit a stranger's access silently, and the workspace's owner would see
     /// nothing change. The retired principal is what makes that impossible.
+    /// One mailbox, one account, whatever the capitalisation.
+    ///
+    /// `Kevin@westlabs.com` and `kevin@westlabs.com` are the same inbox, and
+    /// somebody signing up twice by shifting a key is a support ticket nobody
+    /// should have to answer.
+    #[tokio::test]
+    async fn an_address_belongs_to_one_person() {
+        let (db, _admin) = Db::open_for_test_owned().await.unwrap();
+        let accounts = Accounts::new(db.pool().clone());
+        let org = OrgId::from_stored(db.org().await.unwrap());
+
+        accounts
+            .create_user(&org, "ana", "ana@westlabs.com", "member")
+            .await
+            .unwrap();
+
+        let refused = accounts
+            .create_user(&org, "ana2", "Ana@Westlabs.com", "member")
+            .await
+            .expect_err("the same mailbox, shouted");
+        assert!(refused.to_string().contains("already somebody's"), "{refused}");
+
+        // And an address is still optional for whoever was here first.
+        let first = accounts.user_by_name("admin").await.unwrap().unwrap();
+        assert!(first.email.is_none(), "nothing was invented for them");
+
+        let now = accounts
+            .set_email(&first.id, "  kevin@westlabs.com ")
+            .await
+            .unwrap();
+        assert_eq!(now.email.as_deref(), Some("kevin@westlabs.com"), "trimmed");
+
+        let refused = accounts
+            .set_email(&first.id, "not-an-address")
+            .await
+            .expect_err("shaped like nothing");
+        assert!(refused.to_string().contains("email address"), "{refused}");
+    }
+
     #[tokio::test]
     async fn a_slug_is_never_issued_twice() {
         let (db, _admin) = Db::open_for_test_owned().await.unwrap();
         let accounts = Accounts::new(db.pool().clone());
         let org = OrgId::from_stored(db.org().await.unwrap());
 
-        let first = accounts.create_user(&org, "ana", "member").await.unwrap().0;
+        let first = accounts.create_user(&org, "ana", "ana@example.test", "member").await.unwrap().0;
         assert_eq!(first.slug, "ana");
 
         accounts.delete_user(&first.id).await.unwrap();
@@ -897,7 +1012,7 @@ mod tests {
         assert!(retired.1.is_some(), "retired, not deleted");
 
         // So the next Ana is a different person, and is named like one.
-        let second = accounts.create_user(&org, "ana", "member").await.unwrap().0;
+        let second = accounts.create_user(&org, "ana", "ana@example.test", "member").await.unwrap().0;
         assert_eq!(second.slug, "ana_2");
         assert_ne!(second.id.as_str(), first.id.as_str());
     }
@@ -913,7 +1028,7 @@ mod tests {
         let org = OrgId::from_stored(db.org().await.unwrap());
         let admin = UserId::from_stored(admin);
 
-        let ana = accounts.create_user(&org, "ana", "member").await.unwrap().0;
+        let ana = accounts.create_user(&org, "ana", "ana@example.test", "member").await.unwrap().0;
         let shelf = access
             .create_directory(&org, "Shelf", &admin, &[])
             .await
@@ -955,7 +1070,7 @@ mod tests {
         let accounts = Accounts::new(db.pool().clone());
         let org = OrgId::from_stored(db.org().await.unwrap());
         let ana = accounts
-            .create_user(&org, "ana", "member")
+            .create_user(&org, "ana", "ana@example.test", "member")
             .await
             .unwrap()
             .0
@@ -1000,7 +1115,7 @@ mod tests {
 
         // And the next `ana` inherits nothing, which is the whole point.
         let again = accounts
-            .create_user(&org, "ana", "member")
+            .create_user(&org, "ana", "ana@example.test", "member")
             .await
             .unwrap()
             .0

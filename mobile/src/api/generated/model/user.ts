@@ -14,6 +14,13 @@ import type { UserId } from './userId';
 export interface User {
   /** Switched off by an administrator: cannot sign in, keeps what they made. */
   disabled?: boolean;
+  /**
+     * Where to write to them. Absent on accounts made before one was asked
+     * for, and never filled in with a guess: a placeholder address cannot be
+     * told apart from a real one that bounces.
+     * @nullable
+     */
+  email?: string | null;
   id: UserId;
   /**
      * True while the password came from a file rather than from a person.

@@ -25,6 +25,7 @@ export const RenameOrganizationResponse = zod.object({
  */
 export const ListUsersResponseItem = zod.object({
   "disabled": zod.boolean().optional().describe('Switched off by an administrator: cannot sign in, keeps what they made.'),
+  "email": zod.string().nullish().describe('Where to write to them. Absent on accounts made before one was asked\nfor, and never filled in with a guess: a placeholder address cannot be\ntold apart from a real one that bounces.'),
   "id": zod.string().describe('Identifies someone who can sign in.'),
   "mustChangePassword": zod.boolean().describe('True while the password came from a file rather than from a person.\nNothing but replacing it is permitted until this clears.'),
   "orgId": zod.string().describe('Identifies an organisation.'),
@@ -38,6 +39,7 @@ export const ListUsersResponse = zod.array(ListUsersResponseItem)
  * @summary Add a user. The answer carries their temporary password.
  */
 export const CreateUserBody = zod.object({
+  "email": zod.string().describe('Where to write to them. Required for anybody added from now on; the\naccounts that predate it keep their absence rather than a guess.'),
   "role": zod.string().describe('`admin` or `member`.'),
   "username": zod.string()
 })
@@ -46,6 +48,7 @@ export const CreateUserResponse = zod.object({
   "password": zod.string(),
   "user": zod.object({
   "disabled": zod.boolean().optional().describe('Switched off by an administrator: cannot sign in, keeps what they made.'),
+  "email": zod.string().nullish().describe('Where to write to them. Absent on accounts made before one was asked\nfor, and never filled in with a guess: a placeholder address cannot be\ntold apart from a real one that bounces.'),
   "id": zod.string().describe('Identifies someone who can sign in.'),
   "mustChangePassword": zod.boolean().describe('True while the password came from a file rather than from a person.\nNothing but replacing it is permitted until this clears.'),
   "orgId": zod.string().describe('Identifies an organisation.'),
@@ -73,11 +76,13 @@ export const ChangeUserParams = zod.object({
 
 export const ChangeUserBody = zod.object({
   "disabled": zod.boolean().nullish().describe('Switched off, or back on.'),
+  "email": zod.string().nullish().describe('An address, for an account made before one was asked for, or when\nsomebody\'s has changed.'),
   "role": zod.string().nullish().describe('`admin` or `member`, when the role changes.')
 })
 
 export const ChangeUserResponse = zod.object({
   "disabled": zod.boolean().optional().describe('Switched off by an administrator: cannot sign in, keeps what they made.'),
+  "email": zod.string().nullish().describe('Where to write to them. Absent on accounts made before one was asked\nfor, and never filled in with a guess: a placeholder address cannot be\ntold apart from a real one that bounces.'),
   "id": zod.string().describe('Identifies someone who can sign in.'),
   "mustChangePassword": zod.boolean().describe('True while the password came from a file rather than from a person.\nNothing but replacing it is permitted until this clears.'),
   "orgId": zod.string().describe('Identifies an organisation.'),

@@ -12,6 +12,9 @@
 import { useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
+  Clipboard,
+  Eye,
+  EyeOff,
   KeyRound,
   Power,
   Search,
@@ -39,10 +42,10 @@ import {
   Button,
   Cell,
   Checkbox,
-  Copyable,
   Empty,
   Head,
   HeadCell,
+  IconButton,
   Input,
   Panel,
   RowMenu,
@@ -71,6 +74,7 @@ export function People() {
      that is theirs, and a decision per row cannot be made for four people at
      once — see `Offboard`. */
   const [leaving, setLeaving] = useState<User | null>(null);
+  const [addressing, setAddressing] = useState<User | null>(null);
   const [trouble, setTrouble] = useState<string | null>(null);
 
   const shown = useMemo(
@@ -176,8 +180,25 @@ export function People() {
                     <Cell>
                       <span className="flex items-center gap-2.5">
                         <Avatar name={u.username} />
-                        <span className="truncate text-bone">{u.username}</span>
-                        {self && <span className="text-meta text-mute">you</span>}
+                        <span className="min-w-0">
+                          <span className="flex items-center gap-2">
+                            <span className="truncate text-bone">{u.username}</span>
+                            {self && <span className="text-meta text-mute">you</span>}
+                          </span>
+                          {/* Absent on accounts made before one was asked for.
+                              Said rather than filled in: a placeholder cannot
+                              be told apart from a real address that bounces. */}
+                          {u.email ? (
+                            <span className="block truncate text-meta text-mute">{u.email}</span>
+                          ) : (
+                            <button
+                              onClick={() => setAddressing(u)}
+                              className="block text-meta text-ember hover:underline"
+                            >
+                              no email · add one
+                            </button>
+                          )}
+                        </span>
                       </span>
                     </Cell>
                     <Cell>
@@ -255,23 +276,15 @@ export function People() {
       )}
 
       {handed && (
-        <Modal
-          title={handed.fresh ? `${handed.username} is in` : `A new password for ${handed.username}`}
+        <HandOver
+          who={handed}
+          where={typeof window === "undefined" ? "" : window.location.origin}
           onClose={() => setHanded(null)}
-        >
-          <p className="text-ui text-dim">
-            Pass this on. It is shown once — the server keeps only its hash — and they are asked to
-            replace it when they sign in.
-          </p>
-          <div className="mt-4">
-            <Copyable text={handed.password}>{handed.password}</Copyable>
-          </div>
-          <div className="mt-5 flex justify-end">
-            <Button variant="primary" onClick={() => setHanded(null)}>
-              Done
-            </Button>
-          </div>
-        </Modal>
+        />
+      )}
+
+      {addressing && (
+        <GiveAnAddress person={addressing} onClose={() => setAddressing(null)} onDone={refresh} />
       )}
 
       {leaving && <Offboard person={leaving} onClose={() => setLeaving(null)} />}
@@ -288,13 +301,17 @@ function Add({
 }) {
   const create = useCreateUser();
   const [username, setUsername] = useState("");
+  const [email, setEmail] = useState("");
   const [role, setRole] = useState<"member" | "admin">("member");
+  const ready = username.trim() !== "" && email.trim() !== "";
 
-  const go = () =>
+  const go = () => {
+    if (!ready) return;
     create.mutate(
-      { data: { username: username.trim(), role } },
+      { data: { username: username.trim(), email: email.trim(), role } },
       { onSuccess: (made) => onDone(made.user.username, made.password) },
     );
+  };
 
   return (
     <Modal title="Add a person" onClose={onClose}>
@@ -305,7 +322,9 @@ function Add({
 
       <div className="mt-4 space-y-4">
         <label className="block">
-          <span className="eyebrow">Username</span>
+          <span className="eyebrow">
+            Username <span className="text-ember">required</span>
+          </span>
           <Input
             value={username}
             onChange={setUsername}
@@ -313,8 +332,31 @@ function Add({
             mono
             autoFocus
             className="mt-1.5 w-full"
-            onKeyDown={(e) => e.key === "Enter" && username.trim() && go()}
+            onKeyDown={(e) => e.key === "Enter" && go()}
           />
+          <p className="mt-1.5 text-meta text-mute">
+            What they sign in with. It cannot be changed later.
+          </p>
+        </label>
+
+        {/* Required from now on, and absent on the accounts that predate it.
+            Nothing is invented for those: a placeholder cannot be told apart
+            from a real address that bounces, which is the question that
+            matters the first time anything is sent. */}
+        <label className="block">
+          <span className="eyebrow">
+            Email <span className="text-ember">required</span>
+          </span>
+          <Input
+            value={email}
+            onChange={setEmail}
+            placeholder="ana@westlabs.com"
+            className="mt-1.5 w-full"
+            onKeyDown={(e) => e.key === "Enter" && go()}
+          />
+          <p className="mt-1.5 text-meta text-mute">
+            Where we will write to them. One address, one account.
+          </p>
         </label>
 
         <div>
@@ -342,7 +384,7 @@ function Add({
         <Button variant="quiet" onClick={onClose}>
           Cancel
         </Button>
-        <Button variant="primary" disabled={!username.trim() || create.isPending} onClick={go}>
+        <Button variant="primary" disabled={!ready || create.isPending} onClick={go}>
           {create.isPending ? "Adding…" : "Add"}
         </Button>
       </div>
@@ -382,5 +424,160 @@ function Pick({
         <span className="mt-0.5 block text-meta text-dim">{body}</span>
       </span>
     </button>
+  );
+}
+
+/**
+ * The password, and something to send with it.
+ *
+ * **Shown once, because the server keeps only a hash.** A screen that treats
+ * that casually produces an account nobody can get into, so the password is a
+ * field rather than a sentence: masked, revealable, and copyable without being
+ * selected by hand.
+ *
+ * The message underneath is the thing somebody actually needs: a note they can
+ * paste to a colleague. The password is hidden in it and whole on the
+ * clipboard, so reading the screen over somebody's shoulder gets you nothing
+ * while the paste still works.
+ *
+ * It sends them to the Firetower itself rather than to a download. Signing in
+ * is where the apps are offered, so that is one link instead of two and the
+ * order is the one that works.
+ */
+function HandOver({
+  who,
+  where,
+  onClose,
+}: {
+  who: { username: string; password: string; fresh: boolean };
+  where: string;
+  onClose: () => void;
+}) {
+  const [shown, setShown] = useState(false);
+  const [said, setSaid] = useState<string | null>(null);
+  const hidden = "•".repeat(16);
+  const note = (password: string) =>
+    `Hi ${who.username}, you have an account on Firetower.\n\n` +
+    `Sign in at ${where}\n` +
+    `Username: ${who.username}\n` +
+    `Password: ${password}  (you will be asked to change it)\n\n` +
+    `Once you are signed in there, you can download the Mac or Windows app from the same page.`;
+
+  /* Written here rather than through `Copyable`, which lays its own button over
+     whatever it wraps: around a button that produced two controls in one place,
+     one of them clipping the other's label. */
+  const put = (text: string, confirm: string) => {
+    void navigator.clipboard.writeText(text).then(() => setSaid(confirm));
+  };
+
+  return (
+    <Modal
+      title={who.fresh ? `${who.username} is in` : `A new password for ${who.username}`}
+      onClose={onClose}
+    >
+      <p className="text-ui text-dim">
+        This password is shown once. The server keeps no readable copy.
+      </p>
+
+      <div className="mt-4">
+        <span className="eyebrow">Temporary password</span>
+        <div className="mt-1.5 flex items-stretch gap-2">
+          <div className="flex min-w-0 flex-1 items-center overflow-hidden rounded-lg border border-line bg-ground px-3 py-2 font-mono text-ui text-bone">
+            <span className="truncate">{shown ? who.password : hidden}</span>
+          </div>
+          <IconButton
+            of={shown ? EyeOff : Eye}
+            label={shown ? "Hide it" : "Show it"}
+            onClick={() => setShown((v) => !v)}
+          />
+          <IconButton
+            of={Clipboard}
+            label="Copy the password"
+            onClick={() => put(who.password, "Password copied.")}
+          />
+        </div>
+        <p className="mt-1.5 text-meta text-mute">
+          They are asked to change it the first time they sign in.
+        </p>
+      </div>
+
+      <div className="mt-5">
+        <div className="flex flex-wrap items-center gap-3">
+          <span className="eyebrow">Send them this</span>
+          <Button
+            size="sm"
+            variant="quiet"
+            className="ml-auto"
+            onClick={() => put(note(who.password), "Copied, with the password in it.")}
+          >
+            Copy instructions with password
+          </Button>
+        </div>
+        <pre className="mt-1.5 max-h-44 overflow-y-auto rounded-lg border border-line bg-ground px-3 py-2.5 text-meta leading-relaxed whitespace-pre-wrap text-text">
+          {note(hidden)}
+        </pre>
+        <p className="mt-1.5 text-meta text-mute">
+          {said ?? "The password is hidden here and copied in full."}
+        </p>
+      </div>
+
+      <div className="mt-5 flex justify-end">
+        <Button variant="primary" onClick={onClose}>
+          Done
+        </Button>
+      </div>
+    </Modal>
+  );
+}
+
+/** An address for somebody who predates them being asked for. */
+function GiveAnAddress({
+  person,
+  onClose,
+  onDone,
+}: {
+  person: User;
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const change = useChangeUser();
+  const [email, setEmail] = useState("");
+
+  const go = () => {
+    if (!email.trim()) return;
+    change.mutate(
+      { id: person.id, data: { email: email.trim() } },
+      {
+        onSuccess: () => {
+          onDone();
+          onClose();
+        },
+      },
+    );
+  };
+
+  return (
+    <Modal title={`An email for ${person.username}`} onClose={onClose}>
+      <p className="text-ui text-dim">
+        This account was made before one was asked for. Nothing was invented for it.
+      </p>
+      <Input
+        value={email}
+        onChange={setEmail}
+        placeholder={`${person.username}@westlabs.com`}
+        autoFocus
+        className="mt-4 w-full"
+        onKeyDown={(e) => e.key === "Enter" && go()}
+      />
+      {change.error ? <Trouble>{why(change.error)}</Trouble> : null}
+      <div className="mt-5 flex justify-end gap-2">
+        <Button variant="quiet" onClick={onClose}>
+          Cancel
+        </Button>
+        <Button variant="primary" disabled={!email.trim() || change.isPending} onClick={go}>
+          {change.isPending ? "Saving…" : "Save"}
+        </Button>
+      </div>
+    </Modal>
   );
 }

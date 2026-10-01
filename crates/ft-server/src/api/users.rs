@@ -79,6 +79,9 @@ pub(super) async fn list_users(
 #[serde(rename_all = "camelCase")]
 pub struct NewUser {
     pub username: String,
+    /// Where to write to them. Required for anybody added from now on; the
+    /// accounts that predate it keep their absence rather than a guess.
+    pub email: String,
     /// `admin` or `member`.
     pub role: String,
 }
@@ -105,7 +108,7 @@ pub(super) async fn create_user(
     let me = admin(&principal)?;
     let (user, password) = state
         .accounts
-        .create_user(&me.org_id, &request.username, &request.role)
+        .create_user(&me.org_id, &request.username, &request.email, &request.role)
         .await
         .map_err(|e| ApiError::new(ErrorCode::InvalidRequest, format!("{e:#}")))?;
     tracing::info!(by = %me.username, user = %user.username, role = %user.role, "user added");
@@ -117,6 +120,9 @@ pub(super) async fn create_user(
 pub struct UserChange {
     /// `admin` or `member`, when the role changes.
     pub role: Option<String>,
+    /// An address, for an account made before one was asked for, or when
+    /// somebody's has changed.
+    pub email: Option<String>,
     /// Switched off, or back on.
     pub disabled: Option<bool>,
 }
@@ -147,6 +153,13 @@ pub(super) async fn change_user(
         user = state
             .accounts
             .set_disabled(&id, disabled)
+            .await
+            .map_err(|e| ApiError::new(ErrorCode::InvalidRequest, format!("{e:#}")))?;
+    }
+    if let Some(email) = request.email.as_deref() {
+        user = state
+            .accounts
+            .set_email(&id, email)
             .await
             .map_err(|e| ApiError::new(ErrorCode::InvalidRequest, format!("{e:#}")))?;
     }

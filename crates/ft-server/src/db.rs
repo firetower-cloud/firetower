@@ -4415,7 +4415,7 @@ mod tests {
         let accounts = crate::accounts::Accounts::new(db.pool().clone());
         let org = ft_core::OrgId::from_stored(db.org().await.unwrap());
         accounts
-            .create_user(&org, "somebody-else", "admin")
+            .create_user(&org, "somebody-else", "somebody-else@example.test", "admin")
             .await
             .unwrap()
             .0
@@ -4663,7 +4663,7 @@ mod tests {
         let admin_id = ft_core::UserId::from_stored(admin.clone());
 
         let ana = accounts
-            .create_user(&org, "ana", "member")
+            .create_user(&org, "ana", "ana@example.test", "member")
             .await
             .unwrap()
             .0
