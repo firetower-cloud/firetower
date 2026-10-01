@@ -12,6 +12,7 @@
 import { useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
+  Check,
   Clipboard,
   Eye,
   EyeOff,
@@ -456,6 +457,9 @@ function HandOver({
 }) {
   const [shown, setShown] = useState(false);
   const [said, setSaid] = useState<string | null>(null);
+  /* Flashes on the button that was pressed, and goes away again, so pressing it
+     twice looks like two things rather than one. */
+  const [took, setTook] = useState<"password" | "note" | null>(null);
   const hidden = "•".repeat(16);
   const note = (password: string) =>
     `Hi ${who.username}, you have an account on Firetower.\n\n` +
@@ -469,10 +473,13 @@ function HandOver({
      so when neither works. The first version here called the clipboard directly
      with no catch, so a refusal did nothing and reported nothing — which is
      indistinguishable from a dead button. */
-  const put = (text: string, confirm: string) => {
-    void write(text).then((ok) =>
-      setSaid(ok ? confirm : "That didn't copy. Select it and copy by hand."),
-    );
+  const put = (what: "password" | "note", text: string, confirm: string) => {
+    void write(text).then((ok) => {
+      setSaid(ok ? confirm : "That didn't copy. Select it and copy by hand.");
+      if (!ok) return;
+      setTook(what);
+      window.setTimeout(() => setTook((now) => (now === what ? null : now)), 1600);
+    });
   };
 
   return (
@@ -490,16 +497,23 @@ function HandOver({
           <div className="flex min-w-0 flex-1 items-center overflow-hidden rounded-lg border border-line bg-ground px-3 py-2 font-mono text-ui text-bone">
             <span className="truncate select-all">{shown ? who.password : hidden}</span>
           </div>
-          <IconButton
-            of={shown ? EyeOff : Eye}
-            label={shown ? "Hide it" : "Show it"}
-            onClick={() => setShown((v) => !v)}
-          />
-          <IconButton
-            of={Clipboard}
-            label="Copy the password"
-            onClick={() => put(who.password, "Password copied.")}
-          />
+          {/* The two controls act on the same thing, so they sit together and
+              apart from it. */}
+          <div className="flex shrink-0 items-stretch gap-0.5">
+            <IconButton
+              of={shown ? EyeOff : Eye}
+              label={shown ? "Hide it" : "Show it"}
+              onClick={() => setShown((v) => !v)}
+            />
+            {/* The button answers, not only the line underneath it. A tick two
+                lines away from the thing you pressed is read by nobody. */}
+            <IconButton
+              of={took === "password" ? Check : Clipboard}
+              label={took === "password" ? "Copied" : "Copy the password"}
+              className={took === "password" ? "text-sage" : ""}
+              onClick={() => put("password", who.password, "Password copied.")}
+            />
+          </div>
         </div>
         <p className="mt-1.5 text-meta text-mute">
           {said ?? "They are asked to change it the first time they sign in."}
@@ -513,9 +527,11 @@ function HandOver({
             size="sm"
             variant="quiet"
             className="ml-auto"
-            onClick={() => put(note(who.password), "Copied, with the password in it.")}
+            onClick={() =>
+              put("note", note(who.password), "Copied, with the password in it.")
+            }
           >
-            Copy instructions with password
+            {took === "note" ? "Copied" : "Copy instructions with password"}
           </Button>
         </div>
         <pre className="mt-1.5 max-h-44 overflow-y-auto rounded-lg border border-line bg-ground px-3 py-2.5 text-meta leading-relaxed whitespace-pre-wrap text-text">
