@@ -122,6 +122,13 @@ export function Offboard({ person, onClose }: { person: User; onClose: () => voi
                   <div key={o.id} className="flex items-center gap-2.5 px-3 py-2.5">
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-ui text-bone">{o.name}</span>
+                      {/* The path, because it is the reason. This is destroyed
+                          rather than handed on because of where it is filed,
+                          and `u/<them>/…` on the row is that said rather than
+                          asserted. */}
+                      <span className="block truncate font-mono text-micro text-mute">
+                        {o.path}
+                      </span>
                       <span className="block text-micro text-mute">
                         {KINDS[o.kind] ?? o.kind}
                         {o.detail ? ` · ${o.detail}` : ""}
