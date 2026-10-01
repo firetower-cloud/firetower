@@ -257,6 +257,14 @@ pub(super) async fn list_providers(
                 .get(&format!("{}:{owner}", p.id))
                 .map(|p| p.auth.clone()),
             client_id,
+            // The same question `set_client_id` asks, answered in the same
+            // way: with authentication switched off there is nobody to be an
+            // administrator and nothing to refuse.
+            may_set_application: principal
+                .user
+                .as_ref()
+                .map(|u| u.role == "admin")
+                .unwrap_or(true),
         });
     }
     Ok(Json(out))
