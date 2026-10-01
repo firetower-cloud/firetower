@@ -293,6 +293,13 @@ pub enum FiledKind {
     Machine,
     AgentAccount,
     Secret,
+    /// The one kind that is never in a directory.
+    ///
+    /// It is in this enum because the screens that list what somebody owns,
+    /// and what removing them destroys, read exactly one list. Leaving
+    /// repositories out of it is how they stayed invisible to offboarding
+    /// while being perfectly visible to everybody else.
+    Repository,
 }
 
 impl FiledKind {
@@ -302,6 +309,7 @@ impl FiledKind {
             "machine" => FiledKind::Machine,
             "agentAccount" => FiledKind::AgentAccount,
             "secret" => FiledKind::Secret,
+            "repository" => FiledKind::Repository,
             other => bail!("{other} is not something a directory holds"),
         })
     }
@@ -313,7 +321,19 @@ impl FiledKind {
             FiledKind::Machine => "machine",
             FiledKind::AgentAccount => "agent account",
             FiledKind::Secret => "secret",
+            FiledKind::Repository => "repository",
         }
+    }
+
+    /// Whether a directory can hold one of these at all.
+    ///
+    /// Only repositories cannot. They are personal in the strong sense — what
+    /// opens one is the token of whoever connected it — so there is no filing
+    /// one anywhere, by anybody. `may_share` would refuse it too, because the
+    /// path is personal and personal paths are excluded from the administrator
+    /// bypass, but a sentence that names the rule beats a sentence about roots.
+    pub fn is_filable(self) -> bool {
+        !matches!(self, FiledKind::Repository)
     }
 }
 
@@ -821,6 +841,11 @@ impl Access {
             FiledKind::Machine => "hosts",
             FiledKind::AgentAccount => "agent_accounts",
             FiledKind::Secret => "secrets",
+            // Never reached by a move: `is_filable` refuses before this, and
+            // `may_share` would refuse again on the personal path. Named
+            // anyway, because the one place a kind becomes a table name should
+            // be able to name them all.
+            FiledKind::Repository => "repos",
         }
     }
 
@@ -865,6 +890,10 @@ impl Access {
                     u.name
                FROM secrets s LEFT JOIN principals u ON u.id = s.created_by
               WHERE s.path <@ $1::ltree
+             UNION ALL
+             SELECT 'repository', r.id, r.path::text, r.slug, r.remote, u.name
+               FROM repos r LEFT JOIN principals u ON u.id = r.added_by
+              WHERE r.path <@ $1::ltree
              ORDER BY kind, name",
         )
         .bind(under)

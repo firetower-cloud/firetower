@@ -587,6 +587,21 @@ pub(super) async fn may_share(
     kind: FiledKind,
     id: &str,
 ) -> ApiResult<ResourcePath> {
+    // Before anything about who is asking: some things do not go in a
+    // directory at all. A repository is opened by the token of whoever
+    // connected it, so filing it somewhere would promise access the token
+    // cannot deliver. The rule, rather than the refusal about roots that
+    // would follow it two lines later.
+    if !kind.is_filable() {
+        return Err(ApiError::new(
+            ErrorCode::Forbidden,
+            format!(
+                "a {} belongs to whoever connected it and cannot be filed anywhere",
+                kind.singular()
+            ),
+        ));
+    }
+
     let at = state
         .access
         .path_of(kind, id)

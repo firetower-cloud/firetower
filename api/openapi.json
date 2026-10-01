@@ -8361,7 +8361,8 @@
           "workspace",
           "machine",
           "agentAccount",
-          "secret"
+          "secret",
+          "repository"
         ]
       },
       "FiledRef": {
@@ -10092,6 +10093,7 @@
         "description": "A repository Firetower can cut worktrees from.",
         "required": [
           "id",
+          "path",
           "slug",
           "remote"
         ],
@@ -10119,6 +10121,10 @@
           },
           "id": {
             "$ref": "#/components/schemas/RepoId"
+          },
+          "path": {
+            "$ref": "#/components/schemas/ResourcePath",
+            "description": "Whose it is. Always `u/<slug>`, and never anything else.\n\nUnlike a machine or a workspace, this one does not move. What opens a\nrepository is the token of whoever connected it, so the row is theirs\nin the strong sense: `may_share` refuses to file a personal path\nanywhere, for administrators as much as anybody, and removing somebody\ndestroys these rather than handing them on.\n\nTwo people working on one codebase is two rows, each with its own setup\nscript and its own variables. That is what the unique constraint on\n`(org_id, remote, path)` is for."
           },
           "remote": {
             "type": "string",

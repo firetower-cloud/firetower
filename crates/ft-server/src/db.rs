@@ -7,8 +7,9 @@
 use crate::access::{filed_where, Level};
 use anyhow::{Context, Result};
 use ft_core::{
-    session::Checkout, Agent, AgentMode, AgentPresence, Compute, Event, EventKind, Host, HostId,
-    HostState, Repo, RepoId, Session, SessionId, SessionStatus, WorkspaceId, WorkspaceSize,
+    path::ResourcePath, session::Checkout, Agent, AgentMode, AgentPresence, Compute, Event,
+    EventKind, Host, HostId, HostState, Repo, RepoId, Session, SessionId, SessionStatus,
+    WorkspaceId, WorkspaceSize,
 };
 use sqlx::postgres::PgPoolOptions;
 use sqlx::{PgPool, Row};
@@ -23,6 +24,9 @@ use sqlx::{PgPool, Row};
 /// `EXISTS (...)` clause quoted in the message. Substituting a const is not
 /// re-parsed, so the braces can only be braces.
 const HOST_COLUMNS: &str = "h.*, h.path::text AS path";
+/// The same trick for repositories: `ltree` does not decode as a `String`
+/// without being told to be one.
+const REPO_COLUMNS: &str = "r.*, r.path::text AS path";
 
 /// What one host last said about one agent, and when.
 pub struct StoredPresence {
@@ -684,25 +688,33 @@ impl Db {
 
     /// Keyed on the remote rather than the slug: two hosts can both have an
     /// `acme/backend`, and the URL is the thing that is actually unique.
+    ///
+    /// Unique *per person*. Connecting a remote somebody else has connected
+    /// makes a second row, because the two are opened by two different tokens
+    /// and carry two different setup scripts. Returning the other person's row
+    /// is what the old `(org_id, remote)` constraint forced, and is the whole
+    /// of how repositories became everybody's.
     pub async fn ensure_repo(
         &self,
         slug: &str,
         remote: &str,
         default_branch: Option<&str>,
         setup: Option<&str>,
-        added_by: Option<&str>,
+        added_by: &str,
     ) -> Result<Repo> {
-        if let Some(existing) = self.repo_by_remote(remote).await? {
+        if let Some(existing) = self.repo_of_remote(remote, added_by).await? {
             return Ok(existing);
         }
         sqlx::query(
-            "INSERT INTO repos (id, org_id, added_by, slug, remote, default_branch, setup, created_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+            "INSERT INTO repos (id, org_id, added_by, path, slug, remote, default_branch, setup, created_at)
+             VALUES ($1, $2, $3,
+                     ('u.' || (SELECT slug FROM principals WHERE id = $3))::ltree,
+                     $4, $5, $6, $7, $8)",
         )
         .bind(RepoId::new().as_str())
-        // The organization's, so one row means one setup script and one
-        // mirror. Who connected it is recorded beside it, and what actually
-        // opens it is their token, which is theirs alone.
+        // Theirs, and filed under their own name. The path is built from the
+        // same id that is recorded beside it, in one statement, so the two can
+        // never disagree about whose this is.
         .bind(self.org().await?)
         .bind(added_by)
         .bind(slug)
@@ -713,7 +725,7 @@ impl Db {
         .execute(&self.pool)
         .await?;
 
-        self.repo_by_remote(remote)
+        self.repo_of_remote(remote, added_by)
             .await?
             .context("repo vanished after insert")
     }
@@ -908,11 +920,35 @@ impl Db {
             .collect())
     }
 
-    pub async fn repo_by_remote(&self, remote: &str) -> Result<Option<Repo>> {
-        let row = sqlx::query("SELECT * FROM repos WHERE remote = $1")
-            .bind(remote)
-            .fetch_optional(&self.pool)
-            .await?;
+    /// One person's row for a remote.
+    pub async fn repo_of_remote(&self, remote: &str, person: &str) -> Result<Option<Repo>> {
+        let row = sqlx::query(&format!(
+            "SELECT {REPO_COLUMNS} FROM repos r
+              WHERE r.remote = $1
+                AND r.path <@ ('u.' || (SELECT slug FROM principals WHERE id = $2))::ltree"
+        ))
+        .bind(remote)
+        .bind(person)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.map(repo_from_row))
+    }
+
+    /// Any row for a remote, for the one thing that is the same on all of them.
+    ///
+    /// Several people can have connected the same codebase, and their rows
+    /// differ in everything a person chose — the setup script, the variables,
+    /// who owns it. They do not differ in the remote, which is what the push
+    /// and pull-request paths want: the URL, to pick a provider, so the
+    /// *session owner's* token can be found for it. Deterministic so that two
+    /// identical calls cannot disagree.
+    pub async fn any_repo_for(&self, slug: &str) -> Result<Option<Repo>> {
+        let row = sqlx::query(&format!(
+            "SELECT {REPO_COLUMNS} FROM repos r WHERE r.slug = $1 ORDER BY r.created_at LIMIT 1"
+        ))
+        .bind(slug)
+        .fetch_optional(&self.pool)
+        .await?;
         Ok(row.map(repo_from_row))
     }
 
@@ -942,11 +978,17 @@ impl Db {
         Ok(())
     }
 
-    pub async fn repo_by_slug(&self, slug: &str) -> Result<Option<Repo>> {
-        let row = sqlx::query("SELECT * FROM repos WHERE slug = $1")
-            .bind(slug)
-            .fetch_optional(&self.pool)
-            .await?;
+    /// One person's row for a slug.
+    pub async fn repo_of_slug(&self, slug: &str, person: &str) -> Result<Option<Repo>> {
+        let row = sqlx::query(&format!(
+            "SELECT {REPO_COLUMNS} FROM repos r
+              WHERE r.slug = $1
+                AND r.path <@ ('u.' || (SELECT slug FROM principals WHERE id = $2))::ltree"
+        ))
+        .bind(slug)
+        .bind(person)
+        .fetch_optional(&self.pool)
+        .await?;
         Ok(row.map(repo_from_row))
     }
 
@@ -964,20 +1006,34 @@ impl Db {
     }
 
     pub async fn repo(&self, id: &RepoId) -> Result<Option<Repo>> {
-        let row = sqlx::query("SELECT * FROM repos WHERE id = $1")
-            .bind(id.as_str())
-            .fetch_optional(&self.pool)
-            .await?;
+        let row = sqlx::query(&format!(
+            "SELECT {REPO_COLUMNS} FROM repos r WHERE r.id = $1"
+        ))
+        .bind(id.as_str())
+        .fetch_optional(&self.pool)
+        .await?;
         Ok(row.map(repo_from_row))
     }
 
-    pub async fn repos(&self) -> Result<Vec<Repo>> {
-        Ok(sqlx::query("SELECT * FROM repos ORDER BY slug")
-            .fetch_all(&self.pool)
-            .await?
-            .into_iter()
-            .map(repo_from_row)
-            .collect())
+    /// The repositories one person has connected.
+    ///
+    /// Not `filed_where`: that answers "may I see this", which for every other
+    /// kind depends on directories, teams and exceptions. A repository is
+    /// personal and stays personal, so the question collapses to "is it mine"
+    /// and the predicate should say exactly that much. Anything more would
+    /// imply there is a way to be given one, and there is not.
+    pub async fn repos_of(&self, person: &str) -> Result<Vec<Repo>> {
+        Ok(sqlx::query(&format!(
+            "SELECT {REPO_COLUMNS} FROM repos r
+              WHERE r.path <@ ('u.' || (SELECT slug FROM principals WHERE id = $1))::ltree
+              ORDER BY r.slug"
+        ))
+        .bind(person)
+        .fetch_all(&self.pool)
+        .await?
+        .into_iter()
+        .map(repo_from_row)
+        .collect())
     }
 
     // ── sessions ───────────────────────────────────────────────────────
@@ -2186,6 +2242,7 @@ fn host_from_row(r: sqlx::postgres::PgRow) -> Result<Host> {
 fn repo_from_row(r: sqlx::postgres::PgRow) -> Repo {
     Repo {
         id: RepoId::from_stored(r.get::<String, _>("id")),
+        path: ResourcePath::from(r.get::<String, _>("path")),
         slug: r.get("slug"),
         remote: r.get("remote"),
         default_branch: r.get("default_branch"),
@@ -3157,15 +3214,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn repositories_are_deduplicated_by_slug() {
-        let (db, _owner) = db_with_user().await;
+    async fn repositories_are_deduplicated_per_person() {
+        let (db, owner) = db_with_user().await;
         let a = db
             .ensure_repo(
                 "acme/backend",
                 "git@x:acme/backend",
                 Some("main"),
                 None,
-                None,
+                owner.as_str(),
             )
             .await
             .unwrap();
@@ -3175,12 +3232,81 @@ mod tests {
                 "git@x:acme/backend",
                 Some("main"),
                 None,
-                None,
+                owner.as_str(),
             )
             .await
             .unwrap();
-        assert_eq!(a.id, b.id);
-        assert_eq!(db.repos().await.unwrap().len(), 1);
+        assert_eq!(a.id, b.id, "connecting it twice is the same row");
+        assert_eq!(db.repos_of(owner.as_str()).await.unwrap().len(), 1);
+        assert_eq!(
+            a.path.to_string(),
+            "u/admin",
+            "filed under whoever connected it"
+        );
+    }
+
+    /// The whole of it, in one test.
+    ///
+    /// Repositories had no path, so `SELECT * FROM repos` was the list and
+    /// everybody got everybody's: a member could see which codebases their
+    /// colleagues worked on, read the names of their variables, rewrite their
+    /// setup script and delete the row. What made it invisible is that a
+    /// repository is *opened* by a personal token, so it looked private from
+    /// the outside while being completely public from the inside.
+    #[tokio::test]
+    async fn one_persons_repositories_are_not_another_persons() {
+        let (db, admin) = db_with_user().await;
+        let accounts = crate::accounts::Accounts::new(db.pool().clone());
+        let org = ft_core::OrgId::from_stored(db.org().await.unwrap());
+        let ana = accounts
+            .create_user(&org, "ana", "ana@example.test", "member")
+            .await
+            .unwrap()
+            .0
+            .id;
+
+        let theirs = db
+            .ensure_repo("acme/backend", "git@x:acme/backend", None, None, &admin)
+            .await
+            .unwrap();
+
+        assert!(
+            db.repos_of(ana.as_str()).await.unwrap().is_empty(),
+            "a member sees none of the administrator's"
+        );
+        assert_eq!(db.repos_of(&admin).await.unwrap().len(), 1);
+
+        // The same remote, connected by somebody else, is their own row. The
+        // old `(org_id, remote)` unique constraint made this impossible, which
+        // is why one row had to serve everybody.
+        let hers = db
+            .ensure_repo(
+                "acme/backend",
+                "git@x:acme/backend",
+                None,
+                None,
+                ana.as_str(),
+            )
+            .await
+            .unwrap();
+
+        assert_ne!(theirs.id, hers.id, "two people, two rows");
+        assert_eq!(hers.path.to_string(), "u/ana");
+        assert_eq!(db.repos_of(ana.as_str()).await.unwrap().len(), 1);
+        assert_eq!(
+            db.repos_of(&admin).await.unwrap().len(),
+            1,
+            "and hers did not appear in his list"
+        );
+
+        // Addressed by slug, each gets their own.
+        assert_eq!(
+            db.repo_of_slug("acme/backend", ana.as_str())
+                .await
+                .unwrap()
+                .map(|r| r.id),
+            Some(hers.id),
+        );
     }
 
     #[tokio::test]

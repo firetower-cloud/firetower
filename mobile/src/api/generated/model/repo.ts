@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0
  */
 import type { RepoId } from './repoId';
+import type { ResourcePath } from './resourcePath';
 
 /**
  * A repository Firetower can cut worktrees from.
@@ -36,6 +37,20 @@ export interface Repo {
      */
   envFile?: string | null;
   id: RepoId;
+  /**
+     * Whose it is. Always `u/<slug>`, and never anything else.
+     *
+     * Unlike a machine or a workspace, this one does not move. What opens a
+     * repository is the token of whoever connected it, so the row is theirs
+     * in the strong sense: `may_share` refuses to file a personal path
+     * anywhere, for administrators as much as anybody, and removing somebody
+     * destroys these rather than handing them on.
+     *
+     * Two people working on one codebase is two rows, each with its own setup
+     * script and its own variables. That is what the unique constraint on
+     * `(org_id, remote, path)` is for.
+     */
+  path: ResourcePath;
   /** Where the worker clones from. */
   remote: string;
   /**

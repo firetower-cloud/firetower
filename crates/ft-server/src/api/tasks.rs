@@ -187,7 +187,7 @@ pub(super) async fn list_tasks(
     let connected = match tracker.scope_kind {
         trackers::ScopeKind::Repos => state
             .db
-            .repos()
+            .repos_of(owner(&principal)?)
             .await?
             .into_iter()
             .map(|r| r.slug)

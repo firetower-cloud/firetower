@@ -14,4 +14,5 @@ export const FiledKind = {
   machine: 'machine',
   agentAccount: 'agentAccount',
   secret: 'secret',
+  repository: 'repository',
 } as const;

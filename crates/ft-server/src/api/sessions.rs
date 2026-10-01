@@ -1418,7 +1418,7 @@ async fn act(
     // Only the remote needs one, and only some of these touch it. A bare agent
     // has no remote at all.
     let credential = match session.repo.as_deref() {
-        Some(slug) => match state.db.repo_by_slug(slug).await? {
+        Some(slug) => match state.db.any_repo_for(slug).await? {
             // The session's owner, not whoever asked. It is their branch and
             // their token that has to be able to push it.
             Some(repo) => {
@@ -1614,7 +1614,7 @@ pub(super) async fn push_session(
         // other nor a self-hosted git that needs none. The session's owner
         // rather than whoever pressed the button — it is their branch going up
         // under their name.
-        let credential = match state.db.repo_by_slug(&c.slug).await? {
+        let credential = match state.db.any_repo_for(&c.slug).await? {
             Some(repo) => {
                 credential_for(
                     &state,
@@ -1762,7 +1762,7 @@ pub(super) async fn commit_session(
                 // By the remote, so two checkouts on two hosts each get the
                 // identity that host expects. `Held` carries the slug, and
                 // the remote is what `for_remote` matches on.
-                author: match state.db.repo_by_slug(&c.slug).await? {
+                author: match state.db.any_repo_for(&c.slug).await? {
                     Some(repo) => author_for(&state, &repo.remote, &owner).await,
                     None => None,
                 },
@@ -2609,7 +2609,7 @@ async fn open_one(
 ) -> Result<String, String> {
     let repo = state
         .db
-        .repo_by_slug(slug)
+        .any_repo_for(slug)
         .await
         .map_err(|e| format!("{e:#}"))?
         .ok_or_else(|| format!("{slug} isn't connected any more"))?;
@@ -2653,7 +2653,7 @@ async fn link_up(
 ) -> anyhow::Result<()> {
     let repo = state
         .db
-        .repo_by_slug(slug)
+        .any_repo_for(slug)
         .await?
         .ok_or_else(|| anyhow::anyhow!("{slug} isn't connected"))?;
     let provider = providers::for_remote(&repo.remote)

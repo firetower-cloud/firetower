@@ -295,12 +295,34 @@ grants never need a tie-break rule: the most access anybody was deliberately
 given is what they have. The database compares the numbers; `Level::rank` in
 Rust is what gets interpolated into the predicate, and the two have to agree.
 
-`repos` has **no** path, deliberately. A repository is the organisation's and
-always has been: one row is one setup script and one mirror, and what opens it
-is the token of whoever connected it, which is already theirs alone. Giving it
-one costs an `alter table` and a backfill to `d.shared.<slug>` — left undone
-because nothing asks for it, and a `not null` column nobody reads is a collision
-waiting to happen (two hosts can both have an `acme/backend`).
+`repos` has a path, and it is the one kind that never moves. Always
+`u/<slug>`, never a directory.
+
+This was argued the other way once and written down here as "a repository is
+the organisation's and always has been". The fact was right — what opens one is
+the token of whoever connected it — and the conclusion was backwards. Left
+outside the model, `repos` had no path, so no `filed_where`, so no filter: the
+list was `SELECT *` for anybody signed in, and six handlers never looked at the
+caller at all. A member could read, rewrite or delete any repository in the
+organisation, including its setup script, which the worker runs in every
+session cut from it.
+
+Two consequences worth knowing:
+
+- **One remote per person.** `unique (org_id, remote, path)`, not
+  `(org_id, remote)`. The old constraint is what forced the old behaviour:
+  the second person to connect `acme/backend` could only be handed the first
+  person's row, so the row had to belong to everybody. Two people on one
+  codebase is now two rows, each with its own setup script and variables.
+- **`FiledKind::Repository` is not filable.** `may_share` refuses it by name
+  before it reaches the question about roots, because "a repository belongs to
+  whoever connected it" is a better sentence than one about personal paths.
+  It is still in `FiledKind` so that what somebody owns, and what removing them
+  destroys, is drawn from one list.
+
+`added_by` is `on delete cascade`. Everything personal is destroyed rather than
+handed on when its owner goes, and the database says so itself so that no code
+path can forget.
 
 ---
 

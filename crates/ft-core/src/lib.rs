@@ -1201,6 +1201,18 @@ pub struct FirstRun {
 #[serde(rename_all = "camelCase")]
 pub struct Repo {
     pub id: RepoId,
+    /// Whose it is. Always `u/<slug>`, and never anything else.
+    ///
+    /// Unlike a machine or a workspace, this one does not move. What opens a
+    /// repository is the token of whoever connected it, so the row is theirs
+    /// in the strong sense: `may_share` refuses to file a personal path
+    /// anywhere, for administrators as much as anybody, and removing somebody
+    /// destroys these rather than handing them on.
+    ///
+    /// Two people working on one codebase is two rows, each with its own setup
+    /// script and its own variables. That is what the unique constraint on
+    /// `(org_id, remote, path)` is for.
+    pub path: ResourcePath,
     /// `acme/backend`
     pub slug: String,
     /// Where the worker clones from.

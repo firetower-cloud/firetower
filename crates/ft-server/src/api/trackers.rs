@@ -243,7 +243,7 @@ pub(super) async fn list_tracker_scopes(
         ScopeKind::Repos => Ok(Json(
             state
                 .db
-                .repos()
+                .repos_of(owner(&principal)?)
                 .await?
                 .into_iter()
                 .map(|r| TaskScope {
