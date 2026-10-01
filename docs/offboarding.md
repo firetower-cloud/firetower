@@ -28,13 +28,25 @@ forty times is not deciding, it is clicking.
 
 ### 2. Directories they administer
 
-The sharp one, and currently a hole: `delete_user` removes a person's grants
-with a plain `DELETE` and no `keep_an_administrator` check. Deleting the only
-administrator of a directory leaves a directory **nobody can administer** — its
-grants cannot be changed and nothing can be filed out of it, by anyone.
+`delete_user` removes a person's grants with a plain `DELETE` and no
+`keep_an_administrator` check, so removing the last administrator of a directory
+is possible where revoking their grant one at a time is not.
 
-So: for every directory where they are the last administrator, the screen
-requires a new one before it will proceed. Not a warning — a blocker.
+**It is a warning and not a blocker**, because an organisation administrator can
+administer any directory whether or not anybody granted them anything —
+`may_administer` returns early on `role == "admin"`, and that fallback exists
+precisely so a directory whose last administrator left is fixable. Refusing to
+offboard somebody over a recoverable state would be the wrong trade.
+
+What is lost is real but smaller than it first looks: the people who *worked*
+there can no longer file anything out of it or change who it lets in, and only
+an organisation administrator can. So the screen says who would be left — and
+offers to name a replacement, with the field already filled in — without
+standing in the way.
+
+The same reasoning applies to `d/shared`, which every installation starts with
+and which has no administrator at all: its only grant is writer to the team that
+is everybody. That is not a defect to repair; it is the fallback working.
 
 ### 3. Theirs by creation, filed somewhere else
 
@@ -79,9 +91,10 @@ POST /api/v1/users/{id}/offboard     — new
 ```
 
 Every item in `reach().owns` must appear in exactly one of `hand_over` or
-`delete`, and every directory with `alone: true` must appear in
-`administrators`. The server checks that and refuses the lot otherwise — a
-half-specified offboarding is the thing this exists to prevent.
+`delete`. The server checks that and refuses the lot otherwise — a
+half-specified offboarding is the thing this exists to prevent. `administrators`
+is optional, because a directory left without one is recoverable by an
+organisation administrator.
 
 ## One transaction, which is the real work
 

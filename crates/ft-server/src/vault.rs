@@ -276,6 +276,25 @@ impl Vault {
     /// this handed to, and when" is exactly the question the log exists for.
     pub async fn hand_over(&self, key: Key<'_>, to: &str, reason: &str) -> Result<()> {
         let mut tx = self.pool.begin().await?;
+        self.hand_over_in(&mut tx, key, to, reason).await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
+    /// The same, inside somebody else's transaction.
+    ///
+    /// **Offboarding is one decision, so it has to be one transaction.** Handing
+    /// twelve things over was twelve of them, and a failure on the seventh left
+    /// six done with nothing to say which — the same gap by which a transfer
+    /// could move an agent account's row and leave its credential sealed to
+    /// somebody who no longer holds it.
+    pub async fn hand_over_in(
+        &self,
+        tx: &mut Transaction<'_, Postgres>,
+        key: Key<'_>,
+        to: &str,
+        reason: &str,
+    ) -> Result<()> {
 
         let row = sqlx::query(
             "SELECT version, wrapped_key, ciphertext FROM secrets
@@ -284,7 +303,7 @@ impl Vault {
         .bind(key.scope)
         .bind(key.name)
         .bind(key.owner)
-        .fetch_optional(&mut *tx)
+        .fetch_optional(&mut **tx)
         .await?
         .with_context(|| format!("no {key} to hand over"))?;
 
@@ -326,11 +345,10 @@ impl Vault {
         .bind(key.scope)
         .bind(key.name)
         .bind(key.owner)
-        .execute(&mut *tx)
+        .execute(&mut **tx)
         .await?;
 
-        self.append(&mut tx, key, "Write", reason).await?;
-        tx.commit().await?;
+        self.append(tx, key, "Write", reason).await?;
         Ok(())
     }
 

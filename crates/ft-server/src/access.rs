@@ -1230,6 +1230,22 @@ impl Access {
         kind: FiledKind,
         id: &str,
         to: &ResourcePath,
+        by: &str,
+    ) -> Result<()> {
+        let mut tx = self.pool.begin().await?;
+        self.transfer_in(&mut tx, vault, kind, id, to, by).await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
+    /// The same, inside somebody else's transaction — see [`Vault::hand_over_in`].
+    pub async fn transfer_in(
+        &self,
+        tx: &mut Transaction<'_, Postgres>,
+        vault: &crate::vault::Vault,
+        kind: FiledKind,
+        id: &str,
+        to: &ResourcePath,
         // `by` is who did it, spelled the way a person reads it: it ends up in
         // the vault's access log, which is read by somebody trying to find out
         // who moved a credential, and an id there is a lookup they cannot do.
@@ -1241,14 +1257,14 @@ impl Access {
             Some((ft_core::path::PERSONAL, slug)) => {
                 sqlx::query_scalar("SELECT id FROM principals WHERE slug = $1 AND kind = 'user'")
                     .bind(slug)
-                    .fetch_optional(&self.pool)
+                    .fetch_optional(&mut **tx)
                     .await?
                     .with_context(|| format!("no person at u/{slug}"))?
             }
             Some((ft_core::path::DIRECTORY, slug)) => {
                 sqlx::query_scalar("SELECT id FROM directories WHERE slug = $1")
                     .bind(slug)
-                    .fetch_optional(&self.pool)
+                    .fetch_optional(&mut **tx)
                     .await?
                     .with_context(|| format!("no directory at d/{slug}"))?
             }
@@ -1265,7 +1281,7 @@ impl Access {
                 .bind(scope)
                 .bind(name)
                 .bind(addressed)
-                .fetch_optional(&self.pool)
+                .fetch_optional(&mut **tx)
                 .await?
                 .context("no secret here to hand over")?;
 
@@ -1291,7 +1307,7 @@ impl Access {
                 .bind(scope)
                 .bind(name)
                 .bind(&holder)
-                .execute(&self.pool)
+                .execute(&mut **tx)
                 .await?;
             }
             FiledKind::AgentAccount => {
@@ -1308,7 +1324,7 @@ impl Access {
                     "SELECT credential_key FROM agent_accounts WHERE id = $1",
                 )
                 .bind(id)
-                .fetch_optional(&self.pool)
+                .fetch_optional(&mut **tx)
                 .await?
                 .context("no agent account here")?;
 
@@ -1317,7 +1333,7 @@ impl Access {
                 )
                 .bind(crate::vault::AGENT)
                 .bind(&credential)
-                .fetch_optional(&self.pool)
+                .fetch_optional(&mut **tx)
                 .await?;
 
                 // The credential follows the subscription. It is attached, not
@@ -1337,7 +1353,7 @@ impl Access {
                 sqlx::query("UPDATE agent_accounts SET path = $1::ltree WHERE id = $2")
                     .bind(to.to_ltree())
                     .bind(id)
-                    .execute(&self.pool)
+                    .execute(&mut **tx)
                     .await?;
             }
             other => {
@@ -1347,7 +1363,7 @@ impl Access {
                 ))
                 .bind(to.to_ltree())
                 .bind(id)
-                .execute(&self.pool)
+                .execute(&mut **tx)
                 .await
                 .map_err(|_| anyhow::anyhow!("there is already something filed at {to}"))?;
                 anyhow::ensure!(
