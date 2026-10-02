@@ -177,6 +177,21 @@ pub struct Session {
     /// everybody is a spectator.
     #[serde(default = "yes")]
     pub may_write: bool,
+    /// Whether whoever asked may speak *in this conversation*.
+    ///
+    /// `may_write` is about the place: it says you can work in this workspace
+    /// — add an agent of your own, open a terminal, attach a repository.
+    /// This is about the conversation, and it is true only for the person who
+    /// started it.
+    ///
+    /// They are separate because what they protect is separate. A workspace is
+    /// a directory and can be shared, moved, handed to a team. A conversation
+    /// is a running agent authenticated with one person's subscription, and
+    /// its turns push with that person's git token under that person's name.
+    /// Sharing the room was never meant to hand over the account, and for a
+    /// while it did.
+    #[serde(default = "yes")]
+    pub may_speak: bool,
     /// Assigned once, never reused, and the same for as long as the session
     /// exists. What `name` is derived from, and what a name that has been
     /// changed can always be traced back to.

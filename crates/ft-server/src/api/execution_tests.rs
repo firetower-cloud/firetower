@@ -514,3 +514,178 @@ async fn a_viewer_may_look_and_may_not_steer() {
         "the owner is not refused their own session"
     );
 }
+
+/// Writer on the room is not writer on the conversation.
+///
+/// This is the one that is easy to get wrong, because every session-level
+/// permission used to be read off the workspace. A colleague given writer
+/// could type into somebody's agent — which runs on *their* subscription — and
+/// push the branch with *their* git token, under their name. Sharing a place
+/// was never meant to hand over an account.
+///
+/// What a writer may do instead is start their own agent beside it, which is a
+/// second session with their own credentials in it. That path is untouched.
+#[tokio::test]
+async fn a_writer_may_work_in_the_place_and_not_speak_for_its_owner() {
+    let (state, _owner_principal, host, _ready, owner) = fixture().await;
+
+    let org = ft_core::OrgId::from_stored(state.db.org().await.unwrap());
+    let kevin = state
+        .accounts
+        .create_user(&org, "kevin", "kevin@example.test", "member")
+        .await
+        .unwrap()
+        .0;
+    let writer = crate::auth::Principal {
+        subject: "kevin".into(),
+        via: crate::auth::Via::Session,
+        user: Some(kevin.clone()),
+    };
+
+    let id = ft_core::SessionId::new();
+    state
+        .db
+        .insert_session(
+            &id,
+            &host.id,
+            &owner,
+            None,
+            "Mine",
+            "do a thing",
+            Some("agent/x"),
+            Some("main"),
+            "Shell",
+            ft_core::WorkspaceSize::Medium,
+            ft_core::Share::Equal,
+            &ft_core::Step::plan(true, false),
+            None,
+        )
+        .await
+        .unwrap();
+
+    let workspace = state
+        .db
+        .session(&id)
+        .await
+        .unwrap()
+        .unwrap()
+        .workspace_id
+        .unwrap();
+
+    // Writer on the workspace, by name. The most access anybody short of the
+    // owner can be given.
+    state
+        .access
+        .set_exception(
+            crate::access::FiledKind::Workspace,
+            workspace.as_str(),
+            kevin.id.as_str(),
+            crate::access::Level::Writer,
+        )
+        .await
+        .unwrap();
+
+    // He may work here — that is what the grant said.
+    let seen = state
+        .db
+        .session_to_work_in(kevin.id.as_str(), &id)
+        .await
+        .unwrap()
+        .expect("writer on the workspace");
+    assert!(seen.may_write, "the place is his to work in");
+    assert!(!seen.may_speak, "the conversation is not his to speak in");
+
+    assert!(
+        state
+            .db
+            .session_to_speak_in(kevin.id.as_str(), &id)
+            .await
+            .unwrap()
+            .is_none(),
+        "and the predicate that enforces it agrees"
+    );
+
+    let refused = |label: &str, out: ApiResult<()>| match out {
+        Err(e) => assert!(
+            matches!(e.code, ErrorCode::NotFound),
+            "{label} refused a writer, but with {:?}",
+            e.code
+        ),
+        Ok(()) => panic!("{label} let a writer speak for the owner"),
+    };
+
+    refused(
+        "sending a turn",
+        super::conversation::send_turn(
+            State(state.clone()),
+            Extension(writer.clone()),
+            Path(id.as_str().to_string()),
+            Json(
+                serde_json::from_value(serde_json::json!({ "text": "do as I say", "images": [] }))
+                    .unwrap(),
+            ),
+        )
+        .await
+        .map(|_| ()),
+    );
+
+    refused(
+        "answering a permission prompt",
+        super::conversation::answer_request(
+            State(state.clone()),
+            Extension(writer.clone()),
+            Path(id.as_str().to_string()),
+            Json(
+                serde_json::from_value(serde_json::json!({
+                    "req": "r_1", "decision": { "decision": "Allow" }
+                }))
+                .unwrap(),
+            ),
+        )
+        .await
+        .map(|_| ()),
+    );
+
+    refused(
+        "choosing the model, which spends their subscription",
+        super::conversation::choose_control(
+            State(state.clone()),
+            Extension(writer.clone()),
+            Path(id.as_str().to_string()),
+            Json(
+                serde_json::from_value(serde_json::json!({
+                    "kind": "model", "value": "something-expensive"
+                }))
+                .unwrap(),
+            ),
+        )
+        .await
+        .map(|_| ()),
+    );
+
+    refused(
+        "pushing with their git token",
+        super::sessions::push_session(
+            State(state.clone()),
+            Extension(writer.clone()),
+            Path(id.as_str().to_string()),
+        )
+        .await
+        .map(|_| ()),
+    );
+
+    // Ending the workspace is disposal, and this workspace sits in the
+    // administrator's own space — so it is not a writer's to end.
+    refused(
+        "ending the whole workspace",
+        super::sessions::destroy_session(
+            State(state.clone()),
+            Extension(writer.clone()),
+            Path(id.as_str().to_string()),
+            axum::extract::Query(Default::default()),
+        )
+        .await
+        .map(|_| ())
+        .map_err(|e| ApiError::new(ErrorCode::NotFound, e.message)),
+    );
+}

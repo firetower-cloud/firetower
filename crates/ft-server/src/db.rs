@@ -1411,6 +1411,35 @@ impl Db {
         self.one_session(owner, id, Level::Writer).await
     }
 
+    /// One session, if they may *speak in* it.
+    ///
+    /// Writer on the workspace **and** the person who started it. The second
+    /// half is the whole of this: a conversation runs on its owner's agent
+    /// subscription and pushes with their git token, so somebody given writer
+    /// on the place would otherwise spend a colleague's credit and commit
+    /// under their name by typing into a box.
+    ///
+    /// Not derivable from the path, and deliberately so. A path says who is
+    /// responsible for a resource and can be handed to a directory; this says
+    /// whose credentials are inside a running process, which cannot be handed
+    /// to anybody. A place can be given away. A conversation cannot — which is
+    /// why joining somebody else's work means starting your own agent beside
+    /// it rather than taking theirs over.
+    ///
+    /// **No administrator bypass**, for the same reason personal paths have
+    /// none: being able to administer an organisation is not being able to
+    /// spend somebody's subscription.
+    pub async fn session_to_speak_in(
+        &self,
+        owner: &str,
+        id: &SessionId,
+    ) -> Result<Option<Session>> {
+        Ok(self
+            .one_session(owner, id, Level::Writer)
+            .await?
+            .filter(|s| s.owner.as_str() == owner))
+    }
+
     async fn one_session(
         &self,
         owner: &str,
@@ -2317,10 +2346,11 @@ const SESSION_FIELDS: &str = "\
 fn session_columns(person: Option<usize>) -> String {
     match person {
         Some(n) => format!(
-            "{SESSION_FIELDS}, ({visible}) AS may_write",
+            "{SESSION_FIELDS}, ({visible}) AS may_write, \
+             (({visible}) AND s.user_id = ${n}) AS may_speak",
             visible = filed_where("w", n, Level::Writer)
         ),
-        None => format!("{SESSION_FIELDS}, TRUE AS may_write"),
+        None => format!("{SESSION_FIELDS}, TRUE AS may_write, TRUE AS may_speak"),
     }
 }
 
@@ -2332,6 +2362,7 @@ fn session_from_row(r: sqlx::postgres::PgRow) -> Result<Session> {
 
     Ok(Session {
         may_write: r.get("may_write"),
+        may_speak: r.get("may_speak"),
         number: r.get("number"),
         owner: ft_core::UserId::from_stored(r.get::<String, _>("user_id")),
         // Read here rather than by the caller, because every read of a session

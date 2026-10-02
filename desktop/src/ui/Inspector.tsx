@@ -49,11 +49,12 @@ export function Inspector({
   onClose: () => void;
   width?: number;
 }) {
-  /* Committing, pushing a branch and opening a pull request are all writer on
-     the server, and all act on the world outside using the owner's identity.
-     The diff and the file tree are what watching the work means; this tab is
-     not part of it. */
-  const mayAct = session.mayWrite !== false;
+  /* Committing, pushing a branch and opening a pull request all go out under
+     the *session owner's* git identity, so they are the owner's and not the
+     workspace's — `maySpeak`, not `mayWrite`. Somebody with writer here has
+     their own agent to push from. The diff and the file tree are what watching
+     the work means; this tab is not part of it. */
+  const mayAct = session.maySpeak !== false;
   const tabs = useMemo(() => (mayAct ? TABS : TABS.filter((t) => t.id !== "ship")), [mayAct]);
   /* A tab is remembered across sessions, so somebody who was last on Commit in
      their own workspace must not open somebody else's to an empty panel. */

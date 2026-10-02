@@ -1,6 +1,6 @@
 //! Durable preview feedback. Only the authenticated Firetower UI writes here;
 //! the preview runtime never receives a credential or permission to send turns.
-use super::{sessions::working_context, ApiError, ApiResult, ErrorCode};
+use super::{sessions::speaking_context, ApiError, ApiResult, ErrorCode};
 use crate::{auth::Principal, AppState};
 use axum::{
     extract::{Path, State},
@@ -72,14 +72,17 @@ fn owner(principal: &Principal) -> ApiResult<&str> {
         .owner()
         .ok_or_else(|| ApiError::new(ErrorCode::Unauthorized, "Sign in to annotate a preview."))
 }
-/// Refuse unless they may work in this session.
+/// Refuse unless this conversation is theirs.
 ///
-/// Writer, not viewer: an annotation is a mark left on somebody's preview, and
-/// a grant to look is not a grant to write on what you are looking at.
+/// A note is a draft turn: `send_annotations` below hands the selected ones to
+/// the agent, which spends the session owner's subscription. So the owner's,
+/// not the workspace's — a grant to look is not a grant to write on what you
+/// are looking at, and a grant to work in the room is not a grant to speak for
+/// somebody in it.
 async fn owned(state: &AppState, principal: &Principal, id: &str) -> ApiResult<()> {
     state
         .db
-        .session_to_work_in(owner(principal)?, &SessionId::from_stored(id.to_string()))
+        .session_to_speak_in(owner(principal)?, &SessionId::from_stored(id.to_string()))
         .await?
         .ok_or_else(|| ApiError::new(ErrorCode::NotFound, "no such session"))?;
     Ok(())
@@ -227,7 +230,7 @@ pub(super) async fn send_annotations(
     // Writer. Sending notes turns them into a turn for the agent, which is the
     // same act as typing one — `keep_annotation` has always said so, and this,
     // the one that actually reaches the agent, did not.
-    working_context(&state, &principal, &session_id).await?;
+    speaking_context(&state, &principal, &session_id).await?;
     if selection.notes.is_empty() || selection.notes.len() > 100 {
         return Err(invalid("Choose between 1 and 100 notes."));
     }

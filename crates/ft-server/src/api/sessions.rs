@@ -1065,6 +1065,43 @@ pub(super) async fn destroy_session(
         return Err(ApiError::new(ErrorCode::SessionEnded, "already ended"));
     }
 
+    // Two different things wear one endpoint, and they need two different
+    // rights.
+    //
+    // A workspace is named by the session that cut it, so *that* session's id
+    // is the workspace's id — and ending it ends the place and every agent in
+    // it, including other people's. That is disposal, so it is asked of the
+    // path: the person whose own space it sits in, or an administrator of the
+    // directory it has been handed to. Exactly the question `may_share`
+    // answers about moving it, because deciding where a thing is filed and
+    // deciding that it stops existing are the same right.
+    //
+    // Any other session is one agent, running on one person's subscription.
+    // Ending it is theirs. Writer on the room was enough for both before, so a
+    // colleague could end a workspace somebody else was working in.
+    let the_whole_place = session
+        .workspace_id
+        .as_ref()
+        .is_some_and(|w| w.as_str() == session.id.as_str());
+
+    if the_whole_place {
+        let me = principal
+            .user
+            .as_ref()
+            .ok_or_else(|| ApiError::new(ErrorCode::Unauthorized, "nobody is signed in"))?;
+        super::access::may_share(&state, me, crate::access::FiledKind::Workspace, id.as_str())
+            .await
+            .map_err(|_| {
+                ApiError::new(
+                    ErrorCode::Forbidden,
+                    "ending this workspace ends every agent in it, which is for \
+                     whoever it belongs to",
+                )
+            })?;
+    } else if session.owner.as_str() != owner(&principal)? {
+        return Err(ApiError::not_found("session"));
+    }
+
     // Before anything else, and whether or not the host answers: a port on this
     // machine pointing at a workspace that is being torn down is a link that
     // hangs rather than one that says what happened. A pooled preview
@@ -1368,7 +1405,45 @@ async fn repo_env(
     Ok(out)
 }
 
-/// The session and its host, for somebody about to change something.
+/// The session and its host, for somebody about to speak in it.
+///
+/// **The owner, and nobody else.** Everything reached through this runs on the
+/// owner's agent subscription or pushes with their git token under their name,
+/// so writer on the workspace is not enough — that is a grant to work in the
+/// place, and the place is not the account.
+///
+/// Somebody with writer who wants to work here starts their own agent beside
+/// this one, which is a second session with their own credentials in it. That
+/// path already existed; what was missing was refusing the other one.
+pub(super) async fn speaking_context(
+    state: &AppState,
+    principal: &Principal,
+    id: &SessionId,
+) -> Result<(Session, ft_core::HostId), ApiError> {
+    let session = state
+        .db
+        .session_to_speak_in(owner(principal)?, id)
+        .await?
+        .ok_or_else(|| ApiError::not_found("session"))?;
+
+    if session.status == SessionStatus::Ended {
+        return Err(ApiError::new(
+            ErrorCode::SessionEnded,
+            "that session has ended",
+        ));
+    }
+
+    let host = session.host_id.clone();
+    if !state.fleet.is_connected(&host).await {
+        return Err(ApiError::new(
+            ErrorCode::HostUnreachable,
+            "the host running this session isn't responding",
+        ));
+    }
+    Ok((session, host))
+}
+
+/// The session and its host, for somebody about to change the place.
 ///
 /// **Writer.** `session_context` below is the reader's version and serves the
 /// screens that only look: the diff, the file list, what the agent did. These
@@ -1640,7 +1715,7 @@ pub(super) async fn push_session(
     Path(id): Path<String>,
 ) -> ApiResult<Json<Done>> {
     let id = SessionId::from_stored(id);
-    let (session, _) = working_context(&state, &principal, &id).await?;
+    let (session, _) = speaking_context(&state, &principal, &id).await?;
 
     let mut done = Vec::new();
     let mut refused = Vec::new();
@@ -1731,7 +1806,7 @@ pub(super) async fn commit_session(
     Json(req): Json<Commit>,
 ) -> ApiResult<Json<Done>> {
     let id = SessionId::from_stored(id);
-    let (session, _) = working_context(&state, &principal, &id).await?;
+    let (session, _) = speaking_context(&state, &principal, &id).await?;
 
     let message = req
         .message
@@ -2531,7 +2606,7 @@ pub(super) async fn open_pull_request(
     Json(req): Json<NewPullRequest>,
 ) -> ApiResult<Json<PullRequest>> {
     let id = SessionId::from_stored(id);
-    let (session, _) = working_context(&state, &principal, &id).await?;
+    let (session, _) = speaking_context(&state, &principal, &id).await?;
 
     // Written, or proposed by the agent when it finished — never derived from
     // the prompt. A title cut from the opening sentence of a request reads like

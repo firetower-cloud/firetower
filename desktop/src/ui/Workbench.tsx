@@ -33,6 +33,9 @@ import { Shell } from "~/ui/Shell";
 import { StatusBar } from "~/ui/StatusBar";
 import { Unreachable } from "~/ui/Unreachable";
 import { ContextMenu, useMenu, type MenuItem } from "~/ui/ContextMenu";
+import { mayMove } from "~/filing";
+import { useMe } from "~/api/generated/auth/auth";
+import { useDirectories } from "~/data";
 import { useEndAgent, useEndWorkspace } from "~/ui/end";
 import { useConfirm } from "~/ui/Confirm";
 import { drag } from "~/drag";
@@ -266,6 +269,8 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
   const endWorkspace = useEndWorkspace();
   const confirm = useConfirm();
   const endAgent = useEndAgent();
+  const me = useMe();
+  const directories = useDirectories();
   const tabMenu = useMenu<string>();
   const chipMenu = useMenu<string>();
   const [renaming, setRenaming] = useState<string | null>(null);
@@ -295,10 +300,20 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
   /* Checkouts belong to the workspace rather than to whichever agent is being
      read, so take them from the one the list is freshest on. */
   const checkouts = run.checkouts ?? [];
-  /* Whether this is work to join in or work to watch. `!== false` because a
-     control plane older than this app sends nothing, and the old behaviour is
-     the safe default for the owner. */
+  /* The *place*, not the conversation. Adding an agent, opening a terminal and
+     renaming the workspace are all things a writer may do in a workspace
+     somebody shared with them — what they may not do is type into somebody
+     else's agent, which is `maySpeak` and lives in `Chat`.
+
+     `!== false` because a control plane older than this app sends nothing, and
+     the old behaviour is the safe default for the owner. */
   const mayAct = run.mayWrite !== false;
+  /* Ending the workspace destroys everybody's work in it, so it is asked of
+     the path rather than of the grant: the person whose own space it sits in,
+     or an administrator of the directory it has been handed to. `mayMove` is
+     the client's copy of the server's `may_share`, and this is the same
+     question — who may decide what becomes of this. */
+  const mayEndPlace = mayMove(run.path, me.data?.user, directories.data);
 
 
   if (backend.reach === "unreachable") return <Unreachable org={backend.org} />;
@@ -564,10 +579,17 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
               const id = chipMenu.open!.on;
               const r = place.runs.find((x) => x.id === id);
               const endsEverything = !r || place.runs.length === 1 || id === place.id;
+              // Ending one agent is its owner's; ending the place is whoever
+              // the place belongs to. `mayMove` is the client's copy of the
+              // server's `may_share`, which is the same question: who may
+              // decide what becomes of this.
+              const allowed = endsEverything ? mayEndPlace : r?.maySpeak !== false;
               return {
                 label: endsEverything ? "End workspace" : "End this agent",
                 tone: "danger" as const,
+                disabled: !allowed,
                 onPick: () => {
+                  if (!allowed) return;
                   if (endsEverything) {
                     void endWorkspace(place).then(({ ended }) => ended && navigate("/"));
                     return;

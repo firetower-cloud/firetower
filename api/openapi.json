@@ -10523,6 +10523,10 @@
           "id": {
             "$ref": "#/components/schemas/SessionId"
           },
+          "maySpeak": {
+            "type": "boolean",
+            "description": "Whether whoever asked may speak *in this conversation*.\n\n`may_write` is about the place: it says you can work in this workspace\n— add an agent of your own, open a terminal, attach a repository.\nThis is about the conversation, and it is true only for the person who\nstarted it.\n\nThey are separate because what they protect is separate. A workspace is\na directory and can be shared, moved, handed to a team. A conversation\nis a running agent authenticated with one person's subscription, and\nits turns push with that person's git token under that person's name.\nSharing the room was never meant to hand over the account, and for a\nwhile it did."
+          },
           "mayWrite": {
             "type": "boolean",
             "description": "Whether whoever asked for this may act in it, or only watch.\n\n**Sent, because it cannot be derived.** The level was deliberately left\noff this type once, on the grounds that a client already holds the\ndirectories it can see and can work the answer out from the path. That\nstopped being true the moment a single workspace could be shared to one\nperson by name: an exception lives on the resource, in no directory, so\nthere is nothing on the client that mentions it.\n\nWithout it, a viewer was shown a composer, typed, pressed send, and the\nserver answered 404 — which the screen reported as \"Working — nothing\nheard\", because an echo had already been added optimistically. A\ncontrol that is drawn and then refused is worse than one that is\nabsent: it reads as the product being broken.\n\n`true` by default so that a client talking to a control plane that\npredates this field behaves as it did before, rather than deciding\neverybody is a spectator."

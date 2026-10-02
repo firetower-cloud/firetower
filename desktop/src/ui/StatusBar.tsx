@@ -39,7 +39,8 @@ export function StatusBar({ session, branch, onCommit }: { session: Session; bra
   const uncommitted = (work.data ?? []).reduce((n, c) => n + (c.uncommitted ?? 0), 0);
   const unpushed = (work.data ?? []).reduce((n, c) => n + (c.pushed === false ? c.ahead ?? 0 : 0), 0);
   const ended = session.status === "Ended";
-  const mayAct = session.mayWrite !== false;
+  // The Commit tab this opens is the owner's, so this door is too.
+  const mayAct = session.maySpeak !== false;
   const [card, setCard] = useState(false);
   const hover = useRef<ReturnType<typeof setTimeout>>(undefined);
 

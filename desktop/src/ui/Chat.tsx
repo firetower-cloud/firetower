@@ -141,10 +141,19 @@ export function Chat({
   const [drafting, setDrafting] = useState<Anchor & { item: string } | null>(null);
   /* Or to a second agent, started here on the notes. */
   const [handing, setHanding] = useState(false);
-  /* `!== false`, not truthiness: a control plane older than this app sends no
-     such field, and reading its absence as "you may only watch" would take
-     every control away from the person whose work it is. */
-  const mayAct = session.mayWrite !== false;
+  /* Two questions, not one.
+
+     `mayWrite` is the *place*: may I work in this workspace at all. `maySpeak`
+     is this *conversation*, true only for the person who started it — because
+     the agent runs on their subscription and pushes with their git token.
+     Everything in this file is the conversation, so everything here asks the
+     second one.
+
+     `!== false` on both: a control plane older than this app sends neither,
+     and reading their absence as "you may only watch" would take every control
+     away from the person whose work it is. */
+  const mayAct = session.maySpeak !== false;
+  const mayWorkHere = session.mayWrite !== false;
   const post = useMutation({
     mutationFn: () => sendTurn(session.id, { text: asMessage(notes), images: [] }),
     onSuccess: () => {
@@ -454,7 +463,7 @@ export function Chat({
           />
         </AccountSwitcher>
       ) : (
-        <Watching />
+        <Watching whose={session.ownerName} mayWorkHere={mayWorkHere} onStart={() => setHanding(true)} />
       )}
     </div>
   );
@@ -1180,18 +1189,36 @@ function Questions({ sessionId, asking, onAnswered }: { sessionId: string; askin
 /**
  * What somebody shared a look at sees instead of a composer.
  *
- * Stated as what they have rather than as what they lack — "you are watching"
- * is a position, "you cannot type" is a complaint. One line: whoever reads
- * this already knows whose work it is and can ask them without being told to.
+ * Two different people end up here and are owed different sentences. A viewer
+ * has a look at the place and nothing to do but read. Somebody with writer can
+ * work here — just not in *this* conversation, which runs on somebody else's
+ * subscription — so the way in is an agent of their own, and the card carries
+ * the button for it.
+ *
+ * Stated as what they have rather than as what they lack: "you are watching"
+ * is a position, "you cannot type" is a complaint.
  */
-function Watching() {
+function Watching({ whose, mayWorkHere, onStart }: { whose?: string | null; mayWorkHere: boolean; onStart: () => void }) {
   return (
     // As wide as the sentence and no wider, in the middle. A full-width bar
     // reads as a composer that has lost its text box; a pill reads as a note.
     <div className="flex justify-center px-3 pb-3">
-      <div className="inline-flex items-center gap-2.5 rounded-full border border-line bg-panel px-4 py-2.5">
+      <div className="inline-flex items-center gap-2.5 rounded-full border border-line bg-panel py-2.5 pr-2.5 pl-4">
         <Eye className="h-3.5 w-3.5 shrink-0 text-mute" strokeWidth={1.75} />
-        <span className="text-ui text-dim">You are watching this work.</span>
+        <span className="text-ui text-dim">
+          {whose ? `You are watching ${whose}'s work.` : "You are watching this work."}
+        </span>
+        {/* The way in, for somebody who may work here but not in this
+            conversation: an agent of their own, on their own subscription. */}
+        {mayWorkHere && (
+          <button
+            onClick={onStart}
+            title="A second agent in this workspace, on your own subscription"
+            className="control rounded-full border border-line bg-raise text-ui text-dim hover:bg-overlay hover:text-bone"
+          >
+            <Bot className="h-3.5 w-3.5" strokeWidth={1.75} />Start your own agent
+          </button>
+        )}
       </div>
     </div>
   );

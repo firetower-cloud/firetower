@@ -625,9 +625,10 @@ pub(super) async fn send_turn(
         ));
     }
     let who = owner(&principal)?.to_string();
+    // The owner's. A conversation is not the room it happens in.
     let session = state
         .db
-        .session_to_work_in(&who, &id)
+        .session_to_speak_in(&who, &id)
         .await?
         .ok_or_else(|| ApiError::new(ErrorCode::NotFound, "no such session"))?;
     super::accounts::ensure_not_switching(&state.db, &id).await?;
@@ -676,7 +677,7 @@ pub(super) async fn interrupt_session(
     Path(id): Path<String>,
 ) -> ApiResult<Json<Sent>> {
     let id = SessionId::from_stored(id);
-    let host = host_to_act_in(&state, &principal, &id).await?;
+    let host = host_to_speak_in(&state, &principal, &id).await?;
 
     state
         .fleet
@@ -713,7 +714,7 @@ pub(super) async fn answer_request(
     Json(answer): Json<Answer>,
 ) -> ApiResult<Json<Sent>> {
     let id = SessionId::from_stored(id);
-    let host = host_to_act_in(&state, &principal, &id).await?;
+    let host = host_to_speak_in(&state, &principal, &id).await?;
 
     state
         .fleet
@@ -774,7 +775,7 @@ pub(super) async fn choose_control(
     Json(chosen): Json<Chosen>,
 ) -> ApiResult<Json<Sent>> {
     let id = SessionId::from_stored(id);
-    let host = host_to_act_in(&state, &principal, &id).await?;
+    let host = host_to_speak_in(&state, &principal, &id).await?;
     super::accounts::ensure_not_switching(&state.db, &id).await?;
 
     state
@@ -868,7 +869,7 @@ pub(super) async fn attach_file(
     Json(file): Json<Attachment>,
 ) -> ApiResult<Json<Placed>> {
     let id = SessionId::from_stored(id);
-    let host = host_to_act_in(&state, &principal, &id).await?;
+    let host = host_to_speak_in(&state, &principal, &id).await?;
 
     let path = state
         .fleet
@@ -914,25 +915,21 @@ async fn host_of(
     Ok(session.host_id)
 }
 
-/// The same, for somebody about to change what the agent is doing.
+/// The same, for somebody about to speak in the conversation.
 ///
-/// **Everything below that touches the agent goes through this, not
-/// `host_of`.** Reading a conversation is a viewer's right; steering one is
-/// not, and the three that got this wrong were the three that mattered most:
-/// answering a permission prompt decides what the agent is allowed to do on
-/// somebody else's machine, interrupting stops their work, and choosing the
-/// model picks how much of their subscription the next turn spends.
-///
-/// Refused as `NotFound`, like everything else here: what somebody may not
-/// touch, they are not told is there.
-async fn host_to_act_in(
+/// **The owner, and nobody else.** A turn, an answer to a permission prompt,
+/// an interrupt, a change of model — every one of these drives an agent
+/// running on its owner's subscription. Writer on the workspace is a grant to
+/// work in the place; it was never a grant to spend somebody's account, and
+/// for a while it was both.
+async fn host_to_speak_in(
     state: &AppState,
     principal: &Principal,
     id: &SessionId,
 ) -> ApiResult<ft_core::HostId> {
     let session = state
         .db
-        .session_to_work_in(owner(principal)?, id)
+        .session_to_speak_in(owner(principal)?, id)
         .await
         .map_err(|e| ApiError::new(ErrorCode::Internal, format!("{e:#}")))?
         .ok_or_else(|| ApiError::new(ErrorCode::NotFound, "no such session"))?;
