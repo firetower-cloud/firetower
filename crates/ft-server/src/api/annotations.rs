@@ -1,6 +1,6 @@
 //! Durable preview feedback. Only the authenticated Firetower UI writes here;
 //! the preview runtime never receives a credential or permission to send turns.
-use super::{sessions::session_context, ApiError, ApiResult, ErrorCode};
+use super::{sessions::working_context, ApiError, ApiResult, ErrorCode};
 use crate::{auth::Principal, AppState};
 use axum::{
     extract::{Path, State},
@@ -224,7 +224,10 @@ pub(super) async fn send_annotations(
     Json(selection): Json<AnnotationSelection>,
 ) -> ApiResult<Json<super::conversation::Sent>> {
     let session_id = SessionId::from_stored(id.clone());
-    session_context(&state, &principal, &session_id).await?;
+    // Writer. Sending notes turns them into a turn for the agent, which is the
+    // same act as typing one — `keep_annotation` has always said so, and this,
+    // the one that actually reaches the agent, did not.
+    working_context(&state, &principal, &session_id).await?;
     if selection.notes.is_empty() || selection.notes.len() > 100 {
         return Err(invalid("Choose between 1 and 100 notes."));
     }

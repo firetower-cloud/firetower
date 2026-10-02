@@ -1368,7 +1368,43 @@ async fn repo_env(
     Ok(out)
 }
 
-/// The session, its host, and the credential its remote needs.
+/// The session and its host, for somebody about to change something.
+///
+/// **Writer.** `session_context` below is the reader's version and serves the
+/// screens that only look: the diff, the file list, what the agent did. These
+/// two were one function for a while, and the things that quietly inherited
+/// viewer from it were committing, pushing a branch, opening a pull request
+/// and attaching another repository — none of which a grant to *look* at
+/// somebody's work was ever meant to include.
+pub(super) async fn working_context(
+    state: &AppState,
+    principal: &Principal,
+    id: &SessionId,
+) -> Result<(Session, ft_core::HostId), ApiError> {
+    let session = state
+        .db
+        .session_to_work_in(owner(principal)?, id)
+        .await?
+        .ok_or_else(|| ApiError::not_found("session"))?;
+
+    if session.status == SessionStatus::Ended {
+        return Err(ApiError::new(
+            ErrorCode::SessionEnded,
+            "that session has ended",
+        ));
+    }
+
+    let host = session.host_id.clone();
+    if !state.fleet.is_connected(&host).await {
+        return Err(ApiError::new(
+            ErrorCode::HostUnreachable,
+            "the host running this session isn't responding",
+        ));
+    }
+    Ok((session, host))
+}
+
+/// The session, its host, and the credential its remote needs. For reading.
 pub(super) async fn session_context(
     state: &AppState,
     principal: &Principal,
@@ -1604,7 +1640,7 @@ pub(super) async fn push_session(
     Path(id): Path<String>,
 ) -> ApiResult<Json<Done>> {
     let id = SessionId::from_stored(id);
-    let (session, _) = session_context(&state, &principal, &id).await?;
+    let (session, _) = working_context(&state, &principal, &id).await?;
 
     let mut done = Vec::new();
     let mut refused = Vec::new();
@@ -1695,7 +1731,7 @@ pub(super) async fn commit_session(
     Json(req): Json<Commit>,
 ) -> ApiResult<Json<Done>> {
     let id = SessionId::from_stored(id);
-    let (session, _) = session_context(&state, &principal, &id).await?;
+    let (session, _) = working_context(&state, &principal, &id).await?;
 
     let message = req
         .message
@@ -2104,7 +2140,7 @@ pub(super) async fn add_repo(
     Json(req): Json<ft_core::session::NewCheckout>,
 ) -> ApiResult<Json<Done>> {
     let id = SessionId::from_stored(id);
-    let (session, host) = session_context(&state, &principal, &id).await?;
+    let (session, host) = working_context(&state, &principal, &id).await?;
 
     let repo = state.db.repo(&req.repo_id).await?.ok_or_else(|| {
         ApiError::new(
@@ -2485,7 +2521,7 @@ pub(super) async fn open_pull_request(
     Json(req): Json<NewPullRequest>,
 ) -> ApiResult<Json<PullRequest>> {
     let id = SessionId::from_stored(id);
-    let (session, _) = session_context(&state, &principal, &id).await?;
+    let (session, _) = working_context(&state, &principal, &id).await?;
 
     // Written, or proposed by the agent when it finished — never derived from
     // the prompt. A title cut from the opening sentence of a request reads like

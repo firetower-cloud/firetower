@@ -342,6 +342,10 @@ function Conversation({ place }: { place: Workspace }) {
           stopping(true);
           interrupt.mutate({ id: speaker.id });
         }}
+        // Only to somebody who may act here. The composer is already gone for a
+        // viewer, and these ride above it — an approval is the one control
+        // where being drawn and refused is worst: the agent is stopped, asking
+        // whether it may do something on the owner's machine.
         above={conversation.asked.map((a) => (
           <Approval
             key={a.req}

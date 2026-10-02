@@ -294,6 +294,10 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
   /* Checkouts belong to the workspace rather than to whichever agent is being
      read, so take them from the one the list is freshest on. */
   const checkouts = run.checkouts ?? [];
+  /* Whether this is work to join in or work to watch. `!== false` because a
+     control plane older than this app sends nothing, and the old behaviour is
+     the safe default for the owner. */
+  const mayAct = run.mayWrite !== false;
 
 
   if (backend.reach === "unreachable") return <Unreachable org={backend.org} />;
@@ -319,9 +323,9 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
             className="w-56 rounded-md border border-line bg-ground px-2 py-1 text-ui text-bone focus:outline-none"
           />
         ) : (
-          <button onDoubleClick={() => setRenaming(place.name)} title="Double-click to rename" className="flex min-w-0 items-center gap-1.5 truncate text-ui text-bone">
+          <button onDoubleClick={() => mayAct && setRenaming(place.name)} title={mayAct ? "Double-click to rename" : place.name} className="flex min-w-0 items-center gap-1.5 truncate text-ui text-bone">
             {place.name}
-            <Pencil className="h-3 w-3 shrink-0 text-mute opacity-0 transition-opacity hover:opacity-100" strokeWidth={1.75} />
+            {mayAct && <Pencil className="h-3 w-3 shrink-0 text-mute opacity-0 transition-opacity hover:opacity-100" strokeWidth={1.75} />}
           </button>
         )}
 
@@ -365,13 +369,18 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
               <Signal status={r.status} size={4} />
             </button>
           ))}
-          <button
-            onClick={() => setAdding(true)}
-            title="Add an agent to this workspace"
-            className="grid h-7 w-7 place-items-center rounded-md text-mute transition-colors hover:bg-raise hover:text-bone"
-          >
-            +
-          </button>
+          {/* Starting an agent here is working in somebody's workspace, and the
+              server refuses it below writer. Drawn for a viewer it was a button
+              that opened a form and failed at the end of it. */}
+          {mayAct && (
+            <button
+              onClick={() => setAdding(true)}
+              title="Add an agent to this workspace"
+              className="grid h-7 w-7 place-items-center rounded-md text-mute transition-colors hover:bg-raise hover:text-bone"
+            >
+              +
+            </button>
+          )}
         </span>
 
         <div className="ml-auto flex items-center gap-1">
@@ -381,17 +390,24 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
               shifts its neighbours when a workspace is shared is a control that
               moves under the pointer. */}
           <WhoCanAccess look="toolbar" kind="workspace" id={place.id} path={place.runs[0]?.path} />
-          <button
-            onClick={() => {
-              setShell(true);
-              setTerm(!term);
-            }}
-            title={`Terminal  ${key("J")}`}
-            className={`control ${term ? "bg-overlay text-bone" : "text-mute hover:bg-raise hover:text-bone"}`}
-          >
-            <SquareTerminal className="h-4 w-4" strokeWidth={1.75} />
-          </button>
-          {(
+          {/* A shell on the machine this runs on — which is somebody's own
+              machine. `session_pty` has always required writer; this is the
+              control finally agreeing with it. */}
+          {mayAct && (
+            <button
+              onClick={() => {
+                setShell(true);
+                setTerm(!term);
+              }}
+              title={`Terminal  ${key("J")}`}
+              className={`control ${term ? "bg-overlay text-bone" : "text-mute hover:bg-raise hover:text-bone"}`}
+            >
+              <SquareTerminal className="h-4 w-4" strokeWidth={1.75} />
+            </button>
+          )}
+          {/* Ending somebody else's workspace stops every agent in it. The
+              server refuses it; there is no reason to offer it. */}
+          {mayAct && (
             <button
               onClick={() => void endWorkspace(place).then(({ ended, trouble }) => (ended ? navigate("/") : trouble && void confirm({ title: "It did not end.", body: trouble, action: "OK" })))}
               title="End workspace — every agent in it stops"

@@ -287,3 +287,166 @@ fn both_machine_locations_use_the_ssh_transport() {
         assert_eq!(transport.describe(), "ssh editor@vm");
     }
 }
+
+/// What a grant to *look* at somebody's work does not include.
+///
+/// Every one of these was reachable by a viewer. Answering a permission prompt
+/// is the worst of them — the agent stops and asks before doing something it
+/// thinks is dangerous, and whoever answers decides what runs on the owner's
+/// machine. Interrupting stops their work; choosing a model picks how much of
+/// their subscription the next turn spends; committing, pushing and opening a
+/// pull request all act on the world outside using the owner's identity.
+///
+/// Called through the handlers rather than through `Db`, because the gap was
+/// never in the database: `session_to_work_in` has always refused a viewer.
+/// The handlers simply asked the other question.
+#[tokio::test]
+async fn a_viewer_may_look_and_may_not_steer() {
+    let (state, owner_principal, host, _ready, owner) = fixture().await;
+
+    let org = ft_core::OrgId::from_stored(state.db.org().await.unwrap());
+    let bob = state
+        .accounts
+        .create_user(&org, "bob", "bob@example.test", "member")
+        .await
+        .unwrap()
+        .0;
+    let viewer = crate::auth::Principal {
+        subject: "bob".into(),
+        via: crate::auth::Via::Session,
+        user: Some(bob.clone()),
+    };
+
+    let id = ft_core::SessionId::new();
+    state
+        .db
+        .insert_session(
+            &id,
+            &host.id,
+            &owner,
+            None,
+            "Mine",
+            "do a thing",
+            Some("agent/x"),
+            Some("main"),
+            "Shell",
+            ft_core::WorkspaceSize::Medium,
+            ft_core::Share::Equal,
+            &ft_core::Step::plan(true, false),
+            None,
+        )
+        .await
+        .unwrap();
+
+    // Shared as a viewer, by name, on the workspace itself.
+    let workspace = state
+        .db
+        .session(&id)
+        .await
+        .unwrap()
+        .unwrap()
+        .workspace_id
+        .unwrap();
+    state
+        .access
+        .set_exception(
+            crate::access::FiledKind::Workspace,
+            workspace.as_str(),
+            bob.id.as_str(),
+            crate::access::Level::Viewer,
+        )
+        .await
+        .unwrap();
+
+    // He can see it. That is what was shared.
+    assert!(
+        state
+            .db
+            .session_of(bob.id.as_str(), &id)
+            .await
+            .unwrap()
+            .is_some(),
+        "a viewer can read the session"
+    );
+
+    let refused = |label: &str, out: ApiResult<()>| match out {
+        Err(e) => assert!(
+            matches!(e.code, ErrorCode::NotFound),
+            "{label} refused a viewer, but with {:?} rather than NotFound — what \
+             somebody may not touch, they are not told is there",
+            e.code
+        ),
+        Ok(()) => panic!("{label} let a viewer through"),
+    };
+
+    refused(
+        "answering a permission prompt",
+        super::conversation::answer_request(
+            State(state.clone()),
+            Extension(viewer.clone()),
+            Path(id.as_str().to_string()),
+            Json(
+                serde_json::from_value(serde_json::json!({
+                    "req": "r_1",
+                    "decision": { "decision": "Allow" }
+                }))
+                .unwrap(),
+            ),
+        )
+        .await
+        .map(|_| ()),
+    );
+
+    refused(
+        "interrupting the agent",
+        super::conversation::interrupt_session(
+            State(state.clone()),
+            Extension(viewer.clone()),
+            Path(id.as_str().to_string()),
+        )
+        .await
+        .map(|_| ()),
+    );
+
+    refused(
+        "choosing the model",
+        super::conversation::choose_control(
+            State(state.clone()),
+            Extension(viewer.clone()),
+            Path(id.as_str().to_string()),
+            Json(
+                serde_json::from_value(serde_json::json!({
+                    "kind": "model",
+                    "value": "something-expensive"
+                }))
+                .unwrap(),
+            ),
+        )
+        .await
+        .map(|_| ()),
+    );
+
+    refused(
+        "pushing the branch",
+        super::sessions::push_session(
+            State(state.clone()),
+            Extension(viewer.clone()),
+            Path(id.as_str().to_string()),
+        )
+        .await
+        .map(|_| ()),
+    );
+
+    // And the owner is unaffected: the same call, by the person whose work it
+    // is, gets past the gate and fails later on the fixture's worker.
+    let mine = super::conversation::interrupt_session(
+        State(state.clone()),
+        Extension(owner_principal),
+        Path(id.as_str().to_string()),
+    )
+    .await;
+    assert!(
+        !matches!(mine, Err(ref e) if matches!(e.code, ErrorCode::NotFound)),
+        "the owner is not refused their own session"
+    );
+}

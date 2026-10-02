@@ -141,6 +141,10 @@ export function Chat({
   const [drafting, setDrafting] = useState<Anchor & { item: string } | null>(null);
   /* Or to a second agent, started here on the notes. */
   const [handing, setHanding] = useState(false);
+  /* `!== false`, not truthiness: a control plane older than this app sends no
+     such field, and reading its absence as "you may only watch" would take
+     every control away from the person whose work it is. */
+  const mayAct = session.mayWrite !== false;
   const post = useMutation({
     mutationFn: () => sendTurn(session.id, { text: asMessage(notes), images: [] }),
     onSuccess: () => {
@@ -151,6 +155,10 @@ export function Chat({
   /* Only what the agent said can be annotated; the selection has to start
      inside one of its turns, marked `data-said`. */
   const takeSelection = (e: React.MouseEvent) => {
+    // A note becomes a turn for the agent, so making one is working here, not
+    // watching. Selecting text to copy still works; only the prompt to turn it
+    // into a note is gone.
+    if (!mayAct) return;
     const sel = window.getSelection();
     const quote = sel?.toString().trim();
     if (!quote || quote.length < 2 || !sel?.anchorNode || sel.rangeCount === 0 || !body.current?.contains(sel.anchorNode)) return;
@@ -317,7 +325,7 @@ export function Chat({
           following.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
         }}
       >
-        <SessionContext.Provider value={{ session: session.id }}>
+        <SessionContext.Provider value={{ session: session.id, mayAct }}>
         <ImagesFrom.Provider value={{ session: session.id, onOpen: onOpenFile }}>
         <NotesContext.Provider value={{ notes, drop }}>
         <div ref={body} className="mx-auto w-full max-w-[46rem] px-8 pt-8 pb-4">
@@ -489,7 +497,17 @@ function Node({
 }
 
 /** Which session the turns belong to — for the paths in them. */
-const SessionContext = createContext<{ session: string | null }>({ session: null });
+/**
+ * Which session is being read, and whether the reader may steer it.
+ *
+ * `mayAct` rides along with the id because every control that needs it already
+ * needs the id, and the alternative was a second prop threaded through four
+ * components that have no other reason to know about permissions.
+ */
+const SessionContext = createContext<{ session: string | null; mayAct: boolean }>({
+  session: null,
+  mayAct: true,
+});
 
 /** The notes so far, and how to take one back — read by the turn it is on. */
 const NotesContext = createContext<{ notes: Note[]; drop: (id: string) => void }>({ notes: [], drop: () => {} });
@@ -1026,6 +1044,7 @@ function Relaunch({ session }: { session: Session }) {
 
 function Approval({ sessionId, asked, onAnswered }: { sessionId: string; asked: Asked; onAnswered: () => void }) {
   const answer = useAnswerRequest();
+  const { mayAct } = useContext(SessionContext);
   const [reason, setReason] = useState("");
   const [explaining, setExplaining] = useState(false);
   const [done, setDone] = useState<string | null>(null);
@@ -1054,7 +1073,17 @@ function Approval({ sessionId, asked, onAnswered }: { sessionId: string; asked: 
         </div>
         <pre className="scroll-slim mt-3 max-h-44 overflow-auto rounded-lg bg-ground/60 px-3.5 py-2.5 font-mono text-code whitespace-pre-wrap text-bone">{what(asked)}</pre>
       </div>
-      {explaining ? (
+      {/* **Shown, never answerable, to somebody watching.** The agent has
+          stopped and is asking whether it may do something it thinks is
+          dangerous, on somebody else's machine. Reading the question is part
+          of watching the work; deciding it is not, and the server refuses it
+          either way — so a row of live buttons here would only mean a refusal
+          arriving after the click. */}
+      {!mayAct ? (
+        <div className="mt-3 border-t border-ember-deep/40 px-5 py-3 text-meta text-mute">
+          Waiting on whoever owns this work.
+        </div>
+      ) : explaining ? (
         <div className="mt-3 flex items-center gap-2 border-t border-ember-deep/40 px-5 py-3">
           <input
             autoFocus value={reason} onChange={(e) => setReason(e.target.value)}
@@ -1077,6 +1106,7 @@ function Approval({ sessionId, asked, onAnswered }: { sessionId: string; asked: 
 
 function Questions({ sessionId, asking, onAnswered }: { sessionId: string; asking: Questionnaire; onAnswered: () => void }) {
   const answer = useAnswerRequest();
+  const { mayAct } = useContext(SessionContext);
   const [chosen, setChosen] = useState<Record<string, string[]>>({});
   const [written, setWritten] = useState<Record<string, string | undefined>>({});
 
@@ -1112,7 +1142,7 @@ function Questions({ sessionId, asking, onAnswered }: { sessionId: string; askin
     <div className="mt-8 overflow-hidden rounded-xl border border-ember-deep bg-ember-tint shadow-(--shadow-float)">
       <div className="flex items-center gap-2.5 px-5 pt-4">
         <span className="ember-pulse h-2 w-2 rounded-full bg-ember" />
-        <span className="text-meta font-semibold text-ember-soft">Waiting on you</span>
+        <span className="text-meta font-semibold text-ember-soft">{mayAct ? "Waiting on you" : "Waiting on whoever owns this work"}</span>
       </div>
       <div className="space-y-5 px-5 pt-3 pb-4">
         {asking.questions.map((q) => (
@@ -1122,20 +1152,26 @@ function Questions({ sessionId, asking, onAnswered }: { sessionId: string; askin
               {q.options.map((o) => {
                 const on = (chosen[q.question] ?? []).includes(o.label);
                 return (
-                  <button key={o.label} onClick={() => pick(q.question, o.label, !!q.multiSelect)} className={`flex items-start gap-3 rounded-lg border px-3.5 py-3 text-left transition-colors duration-150 ${on ? "border-ember-deep bg-ground/80" : "border-ember-deep/50 bg-ground/50 hover:border-ember-deep hover:bg-ground/80"}`}>
+                  <button key={o.label} disabled={!mayAct} onClick={() => pick(q.question, o.label, !!q.multiSelect)} className={`flex items-start gap-3 rounded-lg border px-3.5 py-3 text-left transition-colors duration-150 ${on ? "border-ember-deep bg-ground/80" : "border-ember-deep/50 bg-ground/50"} ${mayAct ? "hover:border-ember-deep hover:bg-ground/80" : "cursor-default"}`}>
                     <span className={`mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-md border border-ember-deep text-micro font-semibold ${on ? "bg-ember text-ground" : "bg-ember-tint text-ember-soft"}`}>{on ? <Check className="h-3 w-3" strokeWidth={3} /> : o.label[0]}</span>
                     <span className="min-w-0"><span className="block text-ui font-medium text-bone">{o.label}</span>{o.description && <span className="mt-0.5 block text-meta text-dim">{o.description}</span>}</span>
                   </button>
                 );
               })}
             </div>
-            <input value={written[q.question] ?? ""} onChange={(e) => setWritten((c) => ({ ...c, [q.question]: e.target.value }))} placeholder="Or answer in your own words" className="mt-2 w-full rounded-lg border border-ember-deep/40 bg-ground/40 px-3 py-2 text-ui text-bone placeholder:text-mute focus:border-ember-deep focus:outline-none" />
+            {mayAct && <input value={written[q.question] ?? ""} onChange={(e) => setWritten((c) => ({ ...c, [q.question]: e.target.value }))} placeholder="Or answer in your own words" className="mt-2 w-full rounded-lg border border-ember-deep/40 bg-ground/40 px-3 py-2 text-ui text-bone placeholder:text-mute focus:border-ember-deep focus:outline-none" />}
           </div>
         ))}
       </div>
       <div className="flex items-center gap-2 border-t border-ember-deep/40 px-5 py-3">
-        <button disabled={!ready} onClick={send} className="control bg-bone font-medium text-ground hover:opacity-90 disabled:bg-raise disabled:text-mute">Answer</button>
-        <span className="text-micro text-mute">{asking.questions.length > 1 ? `${asking.questions.length} questions` : ""}</span>
+        {mayAct ? (
+          <>
+            <button disabled={!ready} onClick={send} className="control bg-bone font-medium text-ground hover:opacity-90 disabled:bg-raise disabled:text-mute">Answer</button>
+            <span className="text-micro text-mute">{asking.questions.length > 1 ? `${asking.questions.length} questions` : ""}</span>
+          </>
+        ) : (
+          <span className="text-meta text-mute">You can read what it asked; answering is theirs.</span>
+        )}
       </div>
     </div>
   );
