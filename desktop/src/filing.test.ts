@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { destinations, mayMove, pathSlug, where } from "~/filing";
+import { destinations, isPersonal, mayMove, pathSlug, where } from "~/filing";
 
 const me = { slug: "kevin", role: "member" };
 const admin = { slug: "root", role: "admin" };
@@ -113,5 +113,35 @@ describe("the label a name becomes", () => {
   it("never gives back nothing", () => {
     expect(pathSlug("")).toBe("untitled");
     expect(pathSlug("!!!")).toBe("untitled");
+  });
+});
+
+/**
+ * What the rail splits on.
+ *
+ * Personal is your own space and nothing else. A directory you administer is
+ * still a directory: being responsible for what is filed in `d/backend` does
+ * not make a colleague's workspace there yours, and a heading that said so
+ * would file their work under *Personal*.
+ */
+describe("isPersonal", () => {
+  const me = { slug: "kevin", role: "admin" };
+
+  it("is your own space", () => {
+    expect(isPersonal("u/kevin/ledger_rounding", me)).toBe(true);
+  });
+
+  it("is not somebody else's, even for an administrator", () => {
+    expect(isPersonal("u/ana/invoice_pdf", me)).toBe(false);
+  });
+
+  it("is not a directory, however much of it you run", () => {
+    expect(isPersonal("d/shared/fire_01", me)).toBe(false);
+    expect(isPersonal("d/kevin/anything", me)).toBe(false);
+  });
+
+  it("is false for nothing to go on", () => {
+    expect(isPersonal(null, me)).toBe(false);
+    expect(isPersonal("u/kevin/x", null)).toBe(false);
   });
 });

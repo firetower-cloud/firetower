@@ -77,6 +77,24 @@ export function rootOf(path: string): [string, string] {
   return [parts[0] ?? "", parts[1] ?? ""];
 }
 
+/**
+ * Whether this is in somebody's own space rather than a directory's.
+ *
+ * The one question the rail splits on. `u/<you>/…` is yours; everything else
+ * — any directory, and anybody else's personal space you have been named on —
+ * is somebody else's place that you can reach.
+ *
+ * Deliberately not "a directory you administer". Administering `d/backend`
+ * makes you responsible for what is filed there; it does not make the work in
+ * it yours, and a heading that said otherwise would put a colleague's
+ * workspace under *Personal*.
+ */
+export function isPersonal(path: string | null | undefined, me: Whoever): boolean {
+  if (!path || !me) return false;
+  const [root, label] = rootOf(path);
+  return root === "u" && label === me.slug;
+}
+
 /** What a chip says: `yours`, or the directory root as it appears in the path. */
 export function where(path: string | null | undefined, me: Whoever): string {
   if (!path) return "";

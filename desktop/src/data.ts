@@ -57,8 +57,28 @@ function said(e: unknown): string | null {
   return (e as { message?: string })?.message ?? null;
 }
 
+/**
+ * Every session this person can see.
+ *
+ * **Polled, because this one list is most of the app.** The rail, the chip
+ * strip in a workspace and the dashboard all read it, so anything that happens
+ * to somebody else's fleet — a colleague starting a second agent in a
+ * workspace you are in, a workspace being shared with you — only appeared when
+ * something else happened to invalidate it. Which in practice meant
+ * navigating away and back.
+ *
+ * Ten seconds: below what anybody reads as stale, and one small request per
+ * client per ten seconds is not worth a second mechanism. The transcript is
+ * already live over the socket, so this is for the shape of the fleet rather
+ * than for anything inside a conversation.
+ *
+ * A broadcast on that socket would be cheaper and instant, and needs the
+ * server to work out who should hear about each change — the access predicate,
+ * per connected client. Worth it when polling proves too slow or too chatty,
+ * and not before.
+ */
 export function useSessions(): Feed<Session[]> {
-  const q = useListSessions();
+  const q = useListSessions(undefined, { query: { refetchInterval: 10_000 } });
   return { data: q.data ?? [], loading: q.isPending, error: q.error ? why(q.error) : null };
 }
 
