@@ -437,6 +437,70 @@ async fn a_viewer_may_look_and_may_not_steer() {
         .map(|_| ()),
     );
 
+    refused(
+        "committing",
+        super::sessions::commit_session(
+            State(state.clone()),
+            Extension(viewer.clone()),
+            Path(id.as_str().to_string()),
+            Json(
+                serde_json::from_value(serde_json::json!({ "message": "theirs, signed by them" }))
+                    .unwrap(),
+            ),
+        )
+        .await
+        .map(|_| ()),
+    );
+
+    refused(
+        "opening a pull request",
+        super::sessions::open_pull_request(
+            State(state.clone()),
+            Extension(viewer.clone()),
+            Path(id.as_str().to_string()),
+            Json(
+                serde_json::from_value(
+                    serde_json::json!({ "title": "x", "body": "y", "draft": false }),
+                )
+                .unwrap(),
+            ),
+        )
+        .await
+        .map(|_| ()),
+    );
+
+    refused(
+        "attaching another repository",
+        super::sessions::add_repo(
+            State(state.clone()),
+            Extension(viewer.clone()),
+            Path(id.as_str().to_string()),
+            Json(
+                serde_json::from_value(serde_json::json!({ "repoId": "r_1", "branch": null }))
+                    .unwrap(),
+            ),
+        )
+        .await
+        .map(|_| ()),
+    );
+
+    refused(
+        "sending preview notes",
+        super::annotations::send_annotations(
+            State(state.clone()),
+            Extension(viewer.clone()),
+            Path(id.as_str().to_string()),
+            Json(
+                serde_json::from_value(serde_json::json!({
+                    "notes": [{ "id": "a_1", "revision": 1 }]
+                }))
+                .unwrap(),
+            ),
+        )
+        .await
+        .map(|_| ()),
+    );
+
     // And the owner is unaffected: the same call, by the person whose work it
     // is, gets past the gate and fails later on the fixture's worker.
     let mine = super::conversation::interrupt_session(
