@@ -440,16 +440,19 @@ export function Chat({
           and the transcript sat there saying "Working — nothing heard". There
           is nothing to type, so there is no box.
 
-          `mayWrite` comes from the server, computed with the predicate that
-          enforces it. It cannot be worked out here: being named on a single
-          workspace is an exception on the resource, in no directory, so
-          nothing this client holds mentions it.
+          `maySpeak`, not `mayWrite`. The second is the room — whether you may
+          work in this workspace at all. This is the conversation, which runs
+          on its owner's subscription and pushes with their git token, so it is
+          theirs whatever the room was shared at. Both come from the server,
+          computed with the predicates that enforce them; neither can be worked
+          out here, because being named on one workspace is an exception on the
+          resource, in no directory, and nothing this client holds mentions it.
 
           `!== false`, not truthiness: a control plane older than this app does
           not send the field at all, and reading its absence as "you may only
           watch" would take the composer away from everybody on it — which it
           promptly did, to the owner of the workspace. */}
-      {session.mayWrite !== false ? (
+      {mayAct ? (
         <AccountSwitcher session={session} working={working}>
           <Composer
             session={session}
