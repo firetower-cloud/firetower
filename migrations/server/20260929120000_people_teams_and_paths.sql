@@ -274,13 +274,11 @@ alter table hosts          add column path ltree, add column created_by text ref
 alter table agent_accounts add column path ltree;
 alter table secrets        add column path ltree, add column created_by text references principals(id);
 
--- Not `repos`, deliberately. A repository is the organisation's and always has
--- been: one row is one setup script and one mirror, and what actually opens it
--- is the token of whoever connected it, which is already theirs alone. Giving it
--- a path is the obvious next step and costs one `alter table` plus a backfill to
--- `d.shared.<slug>` — it is left undone because nothing asks for it yet, and a
--- `not null` column nobody reads is a collision waiting to happen (two hosts can
--- both have an `acme/backend`).
+-- `repos` gets one too, and it is the kind that never moves: always
+-- `u/<slug>`, never a directory. What opens a repository is the token of
+-- whoever connected it, so the row is theirs in the strong sense. The backfill
+-- and the constraints are at the end of this file, after principals have their
+-- slugs.
 
 -- One organisation, one directory everything shared starts in.
 insert into directories (id, org_id, name, slug)
@@ -407,3 +405,80 @@ create unique index workspaces_path_unique     on workspaces (path);
 create unique index hosts_path_unique          on hosts (path);
 create unique index agent_accounts_path_unique on agent_accounts (path);
 create unique index secrets_path_unique        on secrets (path) where path is not null;
+
+-- ── repositories are personal ────────────────────────────────────
+--
+-- A repository belongs to whoever connected it, and to nobody else.
+--
+-- Left outside the model, `repos` had no path, so no `filed_where`, so no
+-- filter: the list was `SELECT *` for anybody signed in, and six handlers
+-- never looked at the caller. A member could read, rewrite or delete any
+-- repository in the organisation, including its setup script — a shell command
+-- the worker runs in every session cut from it.
+--
+-- These are personal in the strong sense. They live under `u/<slug>`, which
+-- `may_share` refuses to move for anybody, administrators included. There is
+-- no sharing them and no handing them on; when their owner goes, they go.
+
+alter table repos add column path ltree;
+
+
+-- `added_by` has carried this since the first migration, for display. It was
+-- the answer all along.
+update repos r
+   set path = ('u.' || p.slug)::ltree
+  from principals p
+ where p.id = r.added_by;
+
+-- A repository whose owner has already left belongs to nobody, and under the
+-- rule above it cannot be handed to anyone. There is nothing to do but let it
+-- go. The `on delete cascade` below is what stops this case recurring.
+delete from repos where path is null;
+
+alter table repos alter column path set not null;
+create index repos_by_path on repos using gist (path);
+
+-- `on delete set null` was right while a repository was the organisation's:
+-- the row outlived the person, because it was never theirs. Now it is theirs,
+-- and the rule for everything personal is that removing somebody destroys what
+-- is under their name rather than passing it on. The database says so itself,
+-- so no code path can forget.
+alter table repos drop constraint repos_added_by_fkey;
+alter table repos add constraint repos_added_by_fkey
+    foreign key (added_by) references users(id) on delete cascade;
+alter table repos alter column added_by set not null;
+
+-- One remote per person, not one per organisation.
+--
+-- This is the constraint that made the old behaviour inevitable: with
+-- `(org_id, remote)` unique, the second person to connect `acme/backend` could
+-- only ever be given the first person's row — so the row had to be everybody's.
+-- Two people on one codebase is now two rows, each with its own setup script
+-- and its own variables, which is what "personal" means when you say it out
+-- loud.
+alter table repos drop constraint repos_org_id_remote_key;
+alter table repos add constraint repos_org_id_remote_path_key unique (org_id, remote, path);
+
+-- Written in the very first migration for exactly this question and never once
+-- read: `visibility` appears nowhere in the server. A column that can still say
+-- 'org' is a column that contradicts the rule, and leaving it is an invitation
+-- to implement the wrong one later.
+alter table repos drop column visibility;
+
+-- ── one mailbox, one account ───────────────────────────────────
+--
+-- `users.email` has been here since the first migration, nullable and unique
+-- per organisation. What it was not is case-insensitive, so
+-- `Kevin@westlabs.com` and `kevin@westlabs.com` could both exist: one inbox,
+-- two accounts, and a support ticket nobody should have to answer. Addresses
+-- are required for anybody added from now on, so this is the moment to settle
+-- it.
+--
+-- Nulls still do not collide, which is what lets the accounts made before
+-- anybody was asked for one carry on with none. Nothing is invented for them:
+-- a placeholder like `changeme@…` cannot be told apart from a real address
+-- that bounces, and the first time this installation sends anything, "who have
+-- we actually failed to reach" is precisely the question.
+
+drop index users_by_email;
+create unique index users_by_email on users (org_id, lower(email));
