@@ -13,7 +13,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { getListSessionsQueryKey, useRenameSession } from "~/api/generated/sessions/sessions";
 import { Signal } from "~/components/Signal";
 import { AgentMark } from "~/components/AgentMark";
-import { group } from "~/api/workspaces";
+import { group, placeOf } from "~/api/workspaces";
 import type { Backend } from "~/fleet";
 import { useSession, useSessions } from "~/data";
 import { navigate } from "~/shims/next-navigation";
@@ -216,11 +216,14 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
      id is the header's truth even before the list has caught up — the moment
      after "Start it" the list may not hold it yet, but `get_session` does. */
   const running = sessions.filter((s) => s.status !== "Ended");
-  /* By the workspace's id, or by any run in it: a second agent is opened by
-     its own id and belongs to the place its sibling made. */
-  const found = group(running)
-    .groups.flatMap(([, ps]) => ps)
-    .find((p) => p.id === workspace || p.runs.some((r) => r.id === workspace));
+  /* By the workspace's id, by any run in it, or by the workspace the run in
+     the address belongs to — which is the one that still answers after that
+     run has ended. See `placeOf`. */
+  const found = placeOf(
+    group(running).groups.flatMap(([, ps]) => ps),
+    workspace,
+    opened.data?.workspaceId,
+  );
   const place =
     found ??
     (opened.data
