@@ -256,7 +256,8 @@ export const DestroySessionParams = zod.object({
 })
 
 export const DestroySessionQueryParams = zod.object({
-  "force": zod.boolean().optional().describe('Remove it here even though its host isn\'t answering')
+  "force": zod.boolean().optional().describe('Remove it here even though its host isn\'t answering'),
+  "workspace": zod.boolean().optional().describe('End every agent in the workspace, not only this one')
 })
 
 export const DestroySessionResponse = zod.void()

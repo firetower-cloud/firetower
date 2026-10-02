@@ -689,3 +689,87 @@ async fn a_writer_may_work_in_the_place_and_not_speak_for_its_owner() {
         .map_err(|e| ApiError::new(ErrorCode::NotFound, e.message)),
     );
 }
+
+/// Ending an agent ends that agent, including the one that is also the place.
+///
+/// A workspace is named by the session that cut it, so that session's id is
+/// also the workspace's id. The control plane used to read that coincidence as
+/// an instruction and take every sibling down with it — so the person who
+/// started a workspace could not finish their own first agent without ending
+/// everybody's work, and in a directory they did not administer, could not end
+/// it at all.
+///
+/// The worker has always known when a place is finished: "the worktree belongs
+/// to the workspace, not to this agent — the last agent out reclaims it". So a
+/// single teardown was already safe; what was wrong was the control plane
+/// pre-empting it.
+#[tokio::test]
+async fn ending_the_first_agent_leaves_the_others_running() {
+    let (state, principal, host, _ready, owner) = fixture().await;
+
+    let first = ft_core::SessionId::new();
+    state
+        .db
+        .insert_session(
+            &first,
+            &host.id,
+            &owner,
+            None,
+            "The one that cut it",
+            "do a thing",
+            Some("agent/x"),
+            Some("main"),
+            "Shell",
+            ft_core::WorkspaceSize::Medium,
+            ft_core::Share::Equal,
+            &ft_core::Step::plan(true, false),
+            None,
+        )
+        .await
+        .unwrap();
+
+    let workspace = state
+        .db
+        .session(&first)
+        .await
+        .unwrap()
+        .unwrap()
+        .workspace_id
+        .unwrap();
+    assert_eq!(
+        workspace.as_str(),
+        first.as_str(),
+        "the workspace is named by the session that cut it"
+    );
+
+    let second = ft_core::SessionId::new();
+    state
+        .db
+        .insert_run(crate::db::NewRun {
+            id: &second,
+            workspace_id: &workspace,
+            owner: &owner,
+            title: "The one that joined",
+            prompt: "and another thing",
+            agent: "Shell",
+            steps: &ft_core::Step::plan(true, false),
+        })
+        .await
+        .unwrap();
+
+    // Ending the first one, without asking for the workspace.
+    super::sessions::destroy_session(
+        State(state.clone()),
+        Extension(principal.clone()),
+        Path(first.as_str().to_string()),
+        axum::extract::Query(Default::default()),
+    )
+    .await
+    .expect("its owner may end their own agent");
+
+    let left = state.db.live_sessions(&owner).await.unwrap();
+    assert!(
+        left.iter().any(|s| s.id.as_str() == second.as_str()),
+        "the agent that joined is still running"
+    );
+}

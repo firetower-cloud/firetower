@@ -2791,6 +2791,15 @@
             "schema": {
               "type": "boolean"
             }
+          },
+          {
+            "name": "workspace",
+            "in": "query",
+            "description": "End every agent in the workspace, not only this one",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
           }
         ],
         "responses": {

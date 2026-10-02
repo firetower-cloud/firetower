@@ -1045,6 +1045,7 @@ async fn start_another_agent(
     params(
         ("id" = String, Path, description = "Session id"),
         ("force" = Option<bool>, Query, description = "Remove it here even though its host isn't answering"),
+        ("workspace" = Option<bool>, Query, description = "End every agent in the workspace, not only this one"),
     ),
     responses((status = 202), (status = 404, body = ApiError), (status = 409, body = ApiError)),
 )]
@@ -1065,31 +1066,38 @@ pub(super) async fn destroy_session(
         return Err(ApiError::new(ErrorCode::SessionEnded, "already ended"));
     }
 
-    // Two different things wear one endpoint, and they need two different
-    // rights.
+    // Two different things wear one endpoint, told apart by `workspace` and
+    // not by which session happens to be named.
     //
-    // A workspace is named by the session that cut it, so *that* session's id
-    // is the workspace's id — and ending it ends the place and every agent in
-    // it, including other people's. That is disposal, so it is asked of the
-    // path: the person whose own space it sits in, or an administrator of the
-    // directory it has been handed to. Exactly the question `may_share`
-    // answers about moving it, because deciding where a thing is filed and
-    // deciding that it stops existing are the same right.
+    // **Ending an agent ends that agent.** Whichever one it is. A workspace is
+    // named by the session that cut it, so that session's id is also the
+    // workspace's id — and this used to read that coincidence as an
+    // instruction, taking every sibling down with it. Which meant the person
+    // who started a workspace could not finish their own first agent without
+    // ending everybody's work, and in a directory they did not administer,
+    // could not end it at all. The strip showed agents, and one of them was
+    // secretly the container.
     //
-    // Any other session is one agent, running on one person's subscription.
-    // Ending it is theirs. Writer on the room was enough for both before, so a
-    // colleague could end a workspace somebody else was working in.
-    let the_whole_place = session
-        .workspace_id
-        .as_ref()
-        .is_some_and(|w| w.as_str() == session.id.as_str());
-
-    if the_whole_place {
+    // The worker has always been the one that knows when a place is finished:
+    // "the worktree belongs to the workspace, not to this agent — the last
+    // agent out reclaims it". So a single teardown is already safe, and the
+    // control plane stops pre-empting that decision.
+    //
+    // Ending the *place* is still a thing somebody can ask for — the button in
+    // the toolbar does — and it is disposal: asked of the path, the person
+    // whose own space it sits in or an administrator of the directory it was
+    // handed to. That is `may_share`, the same question as moving it.
+    if req.workspace {
         let me = principal
             .user
             .as_ref()
             .ok_or_else(|| ApiError::new(ErrorCode::Unauthorized, "nobody is signed in"))?;
-        super::access::may_share(&state, me, crate::access::FiledKind::Workspace, id.as_str())
+        let place = session
+            .workspace_id
+            .as_ref()
+            .map(|w| w.as_str().to_string())
+            .unwrap_or_else(|| id.as_str().to_string());
+        super::access::may_share(&state, me, crate::access::FiledKind::Workspace, &place)
             .await
             .map_err(|_| {
                 ApiError::new(
@@ -1101,6 +1109,7 @@ pub(super) async fn destroy_session(
     } else if session.owner.as_str() != owner(&principal)? {
         return Err(ApiError::not_found("session"));
     }
+    let the_whole_place = req.workspace;
 
     // Before anything else, and whether or not the host answers: a port on this
     // machine pointing at a workspace that is being torn down is a link that
@@ -1135,24 +1144,16 @@ pub(super) async fn destroy_session(
         // Removed here, and owed a teardown there. The debt is paid the next
         // time that host connects; see `Fleet`'s reconnect.
         //
-        // Ending the workspace's own session ends the workspace, and that has
-        // to hold whether or not the machine is answering. On the connected
-        // path below the others are destroyed; here they are forgotten, so
-        // that the workspace really is finished — otherwise a sibling left
-        // running keeps it alive in the database for good, and the data it
-        // was removed to reclaim is never reclaimed.
-        if session
-            .workspace_id
-            .as_ref()
-            .is_some_and(|w| w.as_str() == session.id.as_str())
-        {
+        // Ending the whole place has to mean the whole place whether or not
+        // the machine is answering. On the connected path below the others are
+        // destroyed; here they are forgotten, so that the workspace really is
+        // finished — otherwise a sibling left running keeps it alive in the
+        // database for good, and the data it was removed to reclaim is never
+        // reclaimed.
+        if let (true, Some(workspace)) = (the_whole_place, session.workspace_id.as_ref()) {
             for run in state
                 .db
-                .live_runs_beside(
-                    owner(&principal)?,
-                    session.workspace_id.as_ref().expect("checked just above"),
-                    &id,
-                )
+                .live_runs_beside(owner(&principal)?, workspace, &id)
                 .await?
             {
                 state.db.forget_session(&run).await?;
@@ -1163,26 +1164,19 @@ pub(super) async fn destroy_session(
         return Ok(StatusCode::ACCEPTED);
     }
 
-    // Ending the workspace's own session ends the workspace, so the other
-    // agents in it go too. They share its directory, and it is about to be
-    // reclaimed; left running they would be working in a place that no longer
-    // exists, and nothing would list them, because a session is only reachable
-    // through the workspace it belongs to.
+    // Ending the *place* takes the other agents in it with it. They share its
+    // directory, and it is about to be reclaimed; left running they would be
+    // working somewhere that no longer exists, and nothing would list them,
+    // because a session is only reachable through the workspace it belongs to.
     //
-    // Ending one of the others is just that one agent — the place and its
-    // neighbours carry on.
+    // Ending one agent is just that one agent — the place and its neighbours
+    // carry on, and the worker reclaims the worktree when the last of them
+    // leaves, which it has always decided for itself.
     let workspace = session.workspace_id.clone();
-    if workspace
-        .as_ref()
-        .is_some_and(|w| w.as_str() == session.id.as_str())
-    {
+    if let (true, Some(workspace)) = (the_whole_place, workspace.as_ref()) {
         for run in state
             .db
-            .live_runs_beside(
-                owner(&principal)?,
-                workspace.as_ref().expect("checked just above"),
-                &id,
-            )
+            .live_runs_beside(owner(&principal)?, workspace, &id)
             .await?
         {
             state
@@ -1218,6 +1212,14 @@ pub(super) struct Removal {
     /// Take it off the inbox without the machine being told.
     #[serde(default)]
     force: bool,
+    /// End the whole workspace: every agent in it, whoever started them.
+    ///
+    /// Asked for explicitly rather than inferred from the session named. The
+    /// workspace shares an id with the session that cut it, and reading that
+    /// coincidence as "end everything" meant the only way to finish your own
+    /// first agent was to end everybody's.
+    #[serde(default)]
+    pub workspace: bool,
 }
 
 #[derive(Debug, Serialize, ToSchema)]

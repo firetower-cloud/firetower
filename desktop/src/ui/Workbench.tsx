@@ -424,9 +424,10 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
               <SquareTerminal className="h-4 w-4" strokeWidth={1.75} />
             </button>
           )}
-          {/* Ending somebody else's workspace stops every agent in it. The
-              server refuses it; there is no reason to offer it. */}
-          {mayAct && (
+          {/* Ending the workspace stops every agent in it, including other
+              people's, so it is asked of the path rather than of the grant —
+              and drawn only to somebody the server will take it from. */}
+          {mayEndPlace && (
             <button
               onClick={() => void endWorkspace(place).then(({ ended, trouble }) => (ended ? navigate("/") : trouble && void confirm({ title: "It did not end.", body: trouble, action: "OK" })))}
               title="End workspace — every agent in it stops"
@@ -569,34 +570,23 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
           items={[
             { label: "Read this conversation", onPick: () => setReading(chipMenu.open!.on) },
             "-",
-            /* **One chip is the workspace.** A workspace is named by the
-               session that cut it, so that session's id *is* the workspace's
-               id — and the server's rule is that ending it ends the place and
-               everything in it. This menu offered "End this agent" for that
-               chip and confirmed with "the other agents keep working", and
-               then took the whole workspace down.
+            /* Every chip is an agent, including the one that happens to share
+               its id with the workspace. Ending it ends it — the control plane
+               no longer reads that coincidence as "end everything", and the
+               worker reclaims the worktree when the last agent leaves.
 
-               Which chip it is, is knowable right here: `r.id === place.id`.
-               So the menu says what will happen instead of discovering it. */
+               Ending the *place* is the toolbar's button, which is a
+               different act with a different right. */
             (() => {
               const id = chipMenu.open!.on;
               const r = place.runs.find((x) => x.id === id);
-              const endsEverything = !r || place.runs.length === 1 || id === place.id;
-              // Ending one agent is its owner's; ending the place is whoever
-              // the place belongs to. `mayMove` is the client's copy of the
-              // server's `may_share`, which is the same question: who may
-              // decide what becomes of this.
-              const allowed = endsEverything ? mayEndPlace : r?.maySpeak !== false;
+              const mine = r?.maySpeak !== false;
               return {
-                label: endsEverything ? "End workspace" : "End this agent",
+                label: "End this agent",
                 tone: "danger" as const,
-                disabled: !allowed,
+                disabled: !r || !mine,
                 onPick: () => {
-                  if (!allowed) return;
-                  if (endsEverything) {
-                    void endWorkspace(place).then(({ ended }) => ended && navigate("/"));
-                    return;
-                  }
+                  if (!r || !mine) return;
                   void endAgent(id, `${r.agent === "ClaudeCode" ? "Claude Code" : r.agent} — ${r.title}`, place.runs.length - 1).then(
                     (ended) => ended && id === run.id && setReading(place.runs.find((x) => x.id !== id)?.id ?? null),
                   );

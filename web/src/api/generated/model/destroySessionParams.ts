@@ -11,4 +11,8 @@ export type DestroySessionParams = {
  * Remove it here even though its host isn't answering
  */
 force?: boolean;
+/**
+ * End every agent in the workspace, not only this one
+ */
+workspace?: boolean;
 };
