@@ -2289,11 +2289,21 @@ pub(super) async fn session_work(
         .await?
         .unwrap_or(session);
 
-    let summaries = state
-        .fleet
-        .summarize(&host, &id)
-        .await
-        .map_err(|e| ApiError::new(ErrorCode::HostUnreachable, format!("{e:#}")))?;
+    // `HostUnreachable` only when it is. Every failure here used to be stamped
+    // with it, so a machine that answered and said "I could not read that
+    // worktree" was reported as a machine that was gone — and the one sentence
+    // that would have explained the screen was the one thrown away.
+    let summaries = match state.fleet.summarize(&host, &id).await {
+        Ok(summaries) => summaries,
+        Err(e) => {
+            let code = if state.fleet.is_connected(&host).await {
+                ErrorCode::ActionFailed
+            } else {
+                ErrorCode::HostUnreachable
+            };
+            return Err(ApiError::new(code, format!("{e:#}")));
+        }
+    };
 
     // The host says what is unsaved; the control plane says where it went. A
     // checkout the worker could not read still gets a row, because a repository

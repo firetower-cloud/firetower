@@ -551,17 +551,33 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
           items={[
             { label: "Read this conversation", onPick: () => setReading(chipMenu.open!.on) },
             "-",
-            {
-              label: place.runs.length > 1 ? "End this agent" : "End workspace",
-              tone: "danger",
-              onPick: () => {
-                const id = chipMenu.open!.on;
-                const r = place.runs.find((x) => x.id === id);
-                if (place.runs.length > 1 && r) {
-                  void endAgent(id, `${r.agent === "ClaudeCode" ? "Claude Code" : r.agent} — ${r.title}`, place.runs.length - 1).then((ended) => ended && id === run.id && setReading(place.runs.find((x) => x.id !== id)?.id ?? null));
-                } else void endWorkspace(place).then(({ ended }) => ended && navigate("/"));
-              },
-            },
+            /* **One chip is the workspace.** A workspace is named by the
+               session that cut it, so that session's id *is* the workspace's
+               id — and the server's rule is that ending it ends the place and
+               everything in it. This menu offered "End this agent" for that
+               chip and confirmed with "the other agents keep working", and
+               then took the whole workspace down.
+
+               Which chip it is, is knowable right here: `r.id === place.id`.
+               So the menu says what will happen instead of discovering it. */
+            (() => {
+              const id = chipMenu.open!.on;
+              const r = place.runs.find((x) => x.id === id);
+              const endsEverything = !r || place.runs.length === 1 || id === place.id;
+              return {
+                label: endsEverything ? "End workspace" : "End this agent",
+                tone: "danger" as const,
+                onPick: () => {
+                  if (endsEverything) {
+                    void endWorkspace(place).then(({ ended }) => ended && navigate("/"));
+                    return;
+                  }
+                  void endAgent(id, `${r.agent === "ClaudeCode" ? "Claude Code" : r.agent} — ${r.title}`, place.runs.length - 1).then(
+                    (ended) => ended && id === run.id && setReading(place.runs.find((x) => x.id !== id)?.id ?? null),
+                  );
+                },
+              };
+            })(),
           ]}
         />
       )}
