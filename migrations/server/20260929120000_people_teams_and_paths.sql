@@ -480,5 +480,28 @@ alter table repos drop column visibility;
 -- that bounces, and the first time this installation sends anything, "who have
 -- we actually failed to reach" is precisely the question.
 
+-- **The ones that already collide, first.** The old index compared the text,
+-- so an installation can be sitting on `Kevin@westlabs.com` and
+-- `kevin@westlabs.com` right now — and creating the new index on a database
+-- holding both fails, which fails the migration, which stops the control plane
+-- from starting. An upgrade that bricks an install over a duplicate address is
+-- a far worse outcome than the duplicate.
+--
+-- The earliest account keeps the address; the later ones lose it and keep
+-- everything else. That is the same answer this file gives to accounts made
+-- before anybody was asked for one: no address, and a prompt on the People
+-- screen. Nothing is invented for them, and nobody is locked out.
+update users u
+   set email = null
+ where u.email is not null
+   and exists (
+     select 1
+       from users other
+      where other.org_id = u.org_id
+        and other.email is not null
+        and lower(other.email) = lower(u.email)
+        and other.id < u.id
+   );
+
 drop index users_by_email;
 create unique index users_by_email on users (org_id, lower(email));
