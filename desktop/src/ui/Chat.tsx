@@ -430,6 +430,10 @@ export function Chat({
           </div>
         </div>
       )}
+      {/* Two ways in, and only one of them carries notes. From the notes bar
+          this hands the selected ones to a new agent; from the card somebody
+          watching gets, there are none and it is simply "start an agent here".
+          `asMessage` answers both. */}
       {handing && <AddAgent session={session} workspaceId={session.workspaceId ?? session.id} prompt={asMessage(notes)} onClose={() => setHanding(false)} onStarted={clear} />}
       </div>
 
