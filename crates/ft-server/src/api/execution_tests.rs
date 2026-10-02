@@ -155,10 +155,11 @@ async fn launch_is_rejected_before_creating_a_workspace_when_requirements_are_mi
 
 #[tokio::test]
 async fn recheck_observes_manual_repairs_and_reports_the_execution_account() {
-    let (state, _, host, ready, _) = fixture().await;
+    let (state, principal, host, ready, _) = fixture().await;
     let read = || {
         hosts::host_readiness(
             State(state.clone()),
+            Extension(principal.clone()),
             Path(host.id.to_string()),
             Query(hosts::ReadinessQuery {
                 agent: Some(Agent::ClaudeCode),
@@ -175,10 +176,11 @@ async fn recheck_observes_manual_repairs_and_reports_the_execution_account() {
 
 #[tokio::test]
 async fn missing_native_worker_has_native_setup_instructions_and_stays_unready() {
-    let (state, _, host, _, _) = fixture().await;
+    let (state, principal, host, _, _) = fixture().await;
     state.fleet.stop_supervising(&host.id).await;
     let report = hosts::host_readiness(
         State(state),
+        Extension(principal),
         Path(host.id.to_string()),
         Query(hosts::ReadinessQuery { agent: None }),
     )
@@ -771,5 +773,86 @@ async fn ending_the_first_agent_leaves_the_others_running() {
     assert!(
         left.iter().any(|s| s.id.as_str() == second.as_str()),
         "the agent that joined is still running"
+    );
+}
+
+/// A machine is somebody's, and the endpoints that act on one now know it.
+///
+/// Eight of the ten handlers in `hosts.rs` took no principal at all. A machine
+/// became personal when paths arrived — `u/<whoever added it>/…` — and these
+/// did not notice, so any member could rename, drain, forget or install onto
+/// any machine in the organisation, including a colleague's own.
+#[tokio::test]
+async fn a_machine_is_not_every_members_to_change() {
+    let (state, _principal, host, _ready, _owner) = fixture().await;
+
+    let org = ft_core::OrgId::from_stored(state.db.org().await.unwrap());
+    let ana = state
+        .accounts
+        .create_user(&org, "ana", "ana@example.test", "member")
+        .await
+        .unwrap()
+        .0;
+    let member = crate::auth::Principal {
+        subject: "ana".into(),
+        via: crate::auth::Via::Session,
+        user: Some(ana.clone()),
+    };
+
+    // The fixture's machine was added by the administrator, so it is filed in
+    // their own space and nobody else's to touch.
+    let refused = |label: &str, out: ApiResult<()>| match out {
+        Err(e) => assert!(
+            matches!(e.code, ErrorCode::Forbidden | ErrorCode::NotFound),
+            "{label} refused a member, but with {:?}",
+            e.code
+        ),
+        Ok(()) => panic!("{label} let a member change somebody else's machine"),
+    };
+
+    refused(
+        "renaming it",
+        super::hosts::rename_host(
+            State(state.clone()),
+            Extension(member.clone()),
+            Path(host.id.as_str().to_string()),
+            Json(serde_json::from_value(serde_json::json!({ "name": "mine now" })).unwrap()),
+        )
+        .await
+        .map(|_| ()),
+    );
+
+    refused(
+        "draining it",
+        super::hosts::drain_host(
+            State(state.clone()),
+            Extension(member.clone()),
+            Path(host.id.as_str().to_string()),
+            Json(serde_json::from_value(serde_json::json!({ "drained": true })).unwrap()),
+        )
+        .await
+        .map(|_| ()),
+    );
+
+    refused(
+        "forgetting it",
+        super::hosts::delete_host(
+            State(state.clone()),
+            Extension(member.clone()),
+            Path(host.id.as_str().to_string()),
+            axum::extract::Query(super::hosts::Removal { force: false }),
+        )
+        .await
+        .map(|_| ()),
+    );
+
+    // And it is not even in their list, which is what `list_hosts` has always
+    // said. The two answers have to agree.
+    let seen = super::hosts::list_hosts(State(state.clone()), Extension(member))
+        .await
+        .unwrap();
+    assert!(
+        seen.0.is_empty(),
+        "a member sees none of the administrator's machines"
     );
 }

@@ -205,9 +205,11 @@ fn given(value: Option<String>) -> Option<String> {
 )]
 pub(super) async fn rename_host(
     State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
     Path(id): Path<String>,
     Json(req): Json<Rename>,
 ) -> ApiResult<Json<Host>> {
+    let _ = to_administer(&state, &principal, &id).await?;
     let id = ft_core::HostId::from_stored(id);
 
     let name = req.name.trim();
@@ -260,9 +262,11 @@ pub struct Rename {
 )]
 pub(super) async fn drain_host(
     State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
     Path(id): Path<String>,
     Json(req): Json<Drain>,
 ) -> ApiResult<StatusCode> {
+    let _ = to_administer(&state, &principal, &id).await?;
     let id = ft_core::HostId::from_stored(id);
     state.db.set_drained(&id, req.drained).await?;
     Ok(StatusCode::NO_CONTENT)
@@ -301,9 +305,11 @@ pub struct Removal {
 )]
 pub(super) async fn delete_host(
     State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
     Path(id): Path<String>,
     Query(req): Query<Removal>,
 ) -> ApiResult<StatusCode> {
+    let _ = to_administer(&state, &principal, &id).await?;
     let id = ft_core::HostId::from_stored(id);
     let hosts = state.db.hosts().await?;
     let host = hosts
@@ -367,6 +373,59 @@ pub(super) async fn delete_host(
     // worker reported, and the worker is what is being removed.
     state.db.delete_host(&id).await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// The machine, if this person may decide *about* it.
+///
+/// Renaming it, draining it, installing a worker on it, forgetting it: all
+/// administrative, all felt by everybody running on it. So the same question
+/// `may_share` answers about moving it — the person whose own space it sits
+/// in, or an administrator of the directory it has been handed to. Writer is
+/// deliberately not enough: a member may put their own server into the shared
+/// directory and may not drain the fleet's out from under everybody.
+///
+/// Eight of the ten handlers in this file took no principal at all before
+/// this. A machine became personal when paths arrived, and the endpoints that
+/// act on one did not notice — so any member could delete, rename or drain any
+/// machine in the organisation, including a colleague's own.
+async fn to_administer(
+    state: &AppState,
+    principal: &Principal,
+    id: &str,
+) -> ApiResult<ft_core::HostId> {
+    let me = whoever(principal)?;
+    super::access::may_share(state, me, crate::access::FiledKind::Machine, id)
+        .await
+        .map_err(|e| match e.code {
+            ErrorCode::NotFound => e,
+            _ => ApiError::new(
+                ErrorCode::Forbidden,
+                "that machine is somebody else's to change",
+            ),
+        })?;
+    Ok(ft_core::HostId::from_stored(id.to_string()))
+}
+
+/// The machine, if this person may see it at all.
+///
+/// For the two that only look: whether it is ready, and nudging a connection
+/// the supervisor would retry anyway. Both are about using a machine rather
+/// than deciding its fate, and both are useless to somebody the list already
+/// hides it from.
+async fn to_look_at(
+    state: &AppState,
+    principal: &Principal,
+    id: &str,
+) -> ApiResult<ft_core::HostId> {
+    let me = whoever(principal)?;
+    state
+        .db
+        .hosts_for(me.id.as_str(), crate::access::Level::Viewer)
+        .await?
+        .into_iter()
+        .find(|h| h.id.as_str() == id)
+        .map(|h| h.id)
+        .ok_or_else(|| ApiError::not_found("machine"))
 }
 
 #[utoipa::path(
@@ -440,8 +499,10 @@ pub struct Installed {
 )]
 pub(super) async fn install_worker(
     State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
     Path(id): Path<String>,
 ) -> ApiResult<Json<Installed>> {
+    let _ = to_administer(&state, &principal, &id).await?;
     let id = ft_core::HostId::from_stored(id);
     let host = state
         .db
@@ -481,8 +542,10 @@ pub(super) async fn install_worker(
 )]
 pub(super) async fn connect_host(
     State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
     Path(id): Path<String>,
 ) -> ApiResult<StatusCode> {
+    let _ = to_look_at(&state, &principal, &id).await?;
     let id = ft_core::HostId::from_stored(id);
     state
         .db
@@ -710,9 +773,11 @@ pub struct ReadinessQuery {
 )]
 pub(super) async fn host_readiness(
     State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
     Path(id): Path<String>,
     Query(query): Query<ReadinessQuery>,
 ) -> ApiResult<Json<ft_core::Readiness>> {
+    let _ = to_look_at(&state, &principal, &id).await?;
     let id = ft_core::HostId::from_stored(id);
     let host = state
         .db
