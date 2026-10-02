@@ -236,7 +236,8 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
         setOpen((o) => !o);
       }
       const to: Record<string, Side> = { "1": "diff", "2": "files", "3": "ship" };
-      if (to[e.key]) {
+      // The Commit panel is not a viewer's; neither is the shortcut to it.
+      if (to[e.key] && !(to[e.key] === "ship" && !mayAct)) {
         e.preventDefault();
         setSide(to[e.key]);
         setOpen(true);
