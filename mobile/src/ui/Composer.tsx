@@ -587,7 +587,7 @@ export function Composer({
               id: k.value,
               label: k.label,
               detail: k.note ?? undefined,
-              grave: k.grave,
+              caution: k.caution,
             }))}
             chosen={inForce(c)}
             onPick={(id) => pick(c.kind, id)}

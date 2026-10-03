@@ -142,7 +142,7 @@ impl Default for Fence {
 ///
 /// Two requests rather than one because the second needs the first: an
 /// app-server answers nothing until it has been introduced.
-pub fn opening(cwd: &str) -> Vec<Value> {
+pub fn opening(cwd: &str, preferred: &crate::controls::Preferred) -> Vec<Value> {
     vec![
         serde_json::json!({
             "id": INITIALIZE_ID,
@@ -171,8 +171,14 @@ pub fn opening(cwd: &str) -> Vec<Value> {
                 // Still sandboxed to the workspace underneath. Being asked is
                 // not the same as being unconfined: an approval somebody grants
                 // in a hurry should not be able to reach the rest of the host.
-                "approvalPolicy": "on-request",
-                "sandbox": Fence::default().word(),
+                "approvalPolicy": preferred
+                    .mode
+                    .clone()
+                    .unwrap_or_else(|| "on-request".to_string()),
+                "sandbox": preferred
+                    .sandbox
+                    .clone()
+                    .unwrap_or_else(|| Fence::default().word().to_string()),
             },
         }),
     ]
@@ -391,6 +397,8 @@ pub struct CodexNormaliser {
     reported: Settings,
     /// What this build can run, as it said.
     models: Vec<crate::controls::Choice>,
+    /// Which effort the default model starts on, as the agent reported it.
+    default_effort: Option<String>,
     /// The efforts the default model supports. Per model rather than one list
     /// for everything, which is what it says.
     efforts: Vec<crate::controls::Choice>,
@@ -482,6 +490,11 @@ impl CodexNormaliser {
     /// being drawn with nothing in it.
     pub fn models(&self) -> &[crate::controls::Choice] {
         &self.models
+    }
+
+    /// The effort the default model starts on, if it said.
+    pub fn default_effort(&self) -> Option<&str> {
+        self.default_effort.as_deref()
     }
 
     /// The efforts the model now in force supports.
@@ -780,6 +793,15 @@ impl CodexNormaliser {
                     .and_then(Value::as_array)
                     .map(|efforts| efforts.iter().filter_map(effort).collect())
                     .unwrap_or_default();
+                // And which of them it starts on. `thread/started` carries no
+                // settings — the opening answer has an empty `result` — so
+                // without this nothing ever filled the effort picker and a
+                // Codex session showed the word "Effort" over a running turn.
+                // The agent's own answer, like everything else here.
+                self.default_effort = model
+                    .get("defaultReasoningEffort")
+                    .and_then(Value::as_str)
+                    .map(str::to_string);
             }
         }
     }

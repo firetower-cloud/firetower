@@ -64,6 +64,12 @@ remember to prepare.
   harder. `curl` and `tar` are the budget.
 - Add the directory name in both `runtime.rs` and `worker_main.rs` —
   `agents add <name>` resolves through it.
+- Put the publisher's address in `ft_core::releases`, not in `runtime.rs`. The
+  control plane asks the same service what the newest version is so it can say
+  when a host is behind one — `newest_url` is where it looks, and an agent
+  missing from it is an agent that silently never goes stale. If the version is
+  not a bare string at `<base>/latest`, `updates::agents` needs a reader for
+  whatever shape it is, the way Codex's release list has one.
 
 ## Sign it in from the control plane
 
@@ -128,6 +134,104 @@ remember to prepare.
 - If a change in flight blocks the next one, make sure the block can clear. An
   agent that never answers must not lock the pickers for the life of the
   connection.
+
+### Marking a choice as risky
+
+Two reasons a choice is drawn apart, and they are not interchangeable —
+`controls::Caution`:
+
+- **`grants`** — it lets the agent do more than it could: the fence comes down,
+  or something that needed a person stops needing one. `Everything` and
+  `Accept edits`. Drawn in brick, and the only one shown on the composer chip
+  while it is in force, because that is the state somebody comes back to.
+- **`neverAsks`** — it will not stop to ask, and nothing new becomes permitted.
+  Claude Code's `dontAsk` *refuses* what it is not already allowed to do;
+  Codex's `never` *fails*. Deliberately **not coloured at all**: a session that
+  stalls is worth knowing about and is not an alarm, the note under the label
+  already says what happens, and the obvious second tone is the one
+  `desktop/STYLE.md` forbids borrowing — ember answers "is something waiting on
+  you" and stops answering it the moment it answers anything else. The variant
+  exists so nobody paints this red again, not so it can have a colour.
+
+This was one flag for both, so `Never ask` was painted the colour of a sandbox
+being removed. If every risky-looking option is the same red, the red stops
+meaning anything — and the one that matters, `Everything`, is the one it stops
+meaning it about.
+
+**Agent-reported choices cannot be marked.** Kimi's options arrive over ACP and
+the protocol says nothing about risk, so nothing in its pickers is ever
+coloured — including an option as permissive as `Everything`. Firetower is not
+in a position to classify a list it did not write, and guessing from the label
+would be worse than the silence. If you add an agent whose options come from
+the agent, say so in its section rather than inventing a heuristic.
+
+### Settings are remembered, per person and per agent
+
+**A session opens on the settings that person last chose for that agent.** Not
+on the house default, and not on what the previous session happened to end on.
+Somebody who works in `plan` mode at `max` should get `plan` and `max` on their
+next session without touching three pickers, and a default they have already
+corrected once should not come back.
+
+**A remembered value that is no longer offered falls back to the default.**
+Models are retired and renamed, and an effort belongs to a model — so a stored
+preference outlives the thing it named often enough that sending it blind would
+turn "open where I left off" into a session that will not start.
+`Preferred::keeping_only` is that rule, and an *empty* list is not evidence: an
+agent that has not listed its models yet has not retired anything.
+
+How it reaches the agent, when you add one:
+
+- The preference is stored per `(person, agent, control)` and written whenever a
+  choice is accepted — `Db::prefer_control`.
+- It travels in the session's environment as `FIRETOWER_AGENT_SETTINGS`, JSON of
+  `controls::Preferred`. The worker launches every agent and already inherits
+  that environment, so there is no launch frame to version and no fleet to
+  upgrade in step. Read it with `Preferred::from_env`.
+- **Then use it where that agent takes its settings.** This is the part that is
+  per agent and the part that is easy to half-do. Claude Code is told once, on
+  the command line, so the preference goes into `launch_headless`'s argv. Codex
+  is told on every turn, so it goes into `thread/start` *and* into the `Settings`
+  the turn carries. An agent told in only one of its two places shows a picker
+  that disagrees with what is running, which is worse than not remembering at
+  all.
+
+Pickers are the *last* place to apply it, not the first. What the agent reports
+it is running always wins; the preference only fills in what the agent has not
+said. If you find yourself overriding the agent's own answer with a stored one,
+the setting did not reach the agent and the fix is upstream.
+
+### When a model ships
+
+Codex and Kimi list their own models, so a new one appears in the picker on its
+own — that is why nothing is written down for them. Claude Code offers no way to
+ask: there is no subcommand that lists models, and the `init` line names only the
+one it is running. So its catalogue is ours, in
+`crates/ft-core/src/controls.rs`, and it is the one list in this repository that
+goes stale by itself.
+
+Most releases need nothing. `--model` takes an alias for the newest model in a
+family — `opus`, `sonnet`, `fable` — and every value in `claude_models()` is
+one, so a new Opus is picked up without a change here or a newer CLI. It is a
+new *family*, or a new effort level, that needs a person.
+
+What to touch, and in this order:
+
+1. `claude_models()` — the alias, not a resolved name. A resolved name pins
+   every session to one build of one model.
+2. `claude_efforts()` — check against `claude --help`, which lists the levels
+   the installed CLI accepts. This list was missing `xhigh` for months.
+3. `BIGGEST` in `crates/ft-core/src/lib.rs`, if the default should move.
+4. Nothing else. `claude_choice_for` derives its matching from
+   `claude_models()`, so a family added above is recognised without being named
+   twice.
+
+Worth knowing why this is worth catching: Claude Code does **not** refuse a
+model it has never heard of. It prints `isn't described by this version's model
+catalog`, carries on, and assumes a 200k context window. A stale entry here, or
+a CLI too old for a name we send it, costs a session most of its window and
+reports nothing — so the Agents screen showing a host as behind is the only
+warning anybody gets.
 
 ## Every client
 

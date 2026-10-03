@@ -99,18 +99,75 @@ const HOSTS = [
   },
 ];
 
+/* `latestVersion` and `behind` are the published-against-installed pair the
+   control plane now works out for itself — see `updates::agents`. The numbers
+   here are the ones a real check produced: Claude Code 2.1.273 installed
+   against 2.1.285 published, which is a host that has quietly been behind
+   since the day it was added. Codex is left current, so both states can be
+   looked at on one screen. */
 const AGENTS = [
   {
     kind: "ClaudeCode",
     label: "Claude Code",
     enabled: true,
-    hosts: [{ hostId: "h_1", hostName: "this Mac", installed: true, coveredByToken: true, loggedIn: true, account: "kevin@acme.com", version: "2.1.273" }],
+    supported: true,
+    needsCredential: true,
+    credentialSet: true,
+    latestVersion: "2.1.285",
+    hosts: [{ hostId: "h_1", hostName: "this Mac", installed: true, coveredByToken: true, loggedIn: true, account: "kevin@acme.com", version: "2.1.273 (Claude Code)", behind: true, mayUpdate: true }],
   },
   {
     kind: "Codex",
     label: "Codex",
     enabled: true,
-    hosts: [{ hostId: "h_1", hostName: "this Mac", installed: true, coveredByToken: true, loggedIn: true, account: "kevin@acme.com", version: "0.155.1" }],
+    supported: true,
+    needsCredential: true,
+    credentialSet: true,
+    latestVersion: "0.159.2",
+    hosts: [{ hostId: "h_1", hostName: "this Mac", installed: true, coveredByToken: true, loggedIn: true, account: "kevin@acme.com", version: "0.159.2", behind: false, mayUpdate: true }],
+  },
+];
+
+/* What a Claude Code session's pickers hold. The agent lists none of this —
+   it is told rather than asked — so the choices are Firetower's own and the
+   current value is the model it reported, mapped back onto the choice it
+   answers to by `controls::claude_choice_for`. Before that mapping the picker
+   matched nothing and drew the word "Model" over a running session. */
+const CLAUDE_CONTROLS = [
+  {
+    kind: "model",
+    fallback: "Model",
+    current: "opus[1m]",
+    choices: [
+      { label: "Opus", value: "opus[1m]", note: "The flagship, long context" },
+      { label: "Fable", value: "fable[1m]", note: "More capable, more expensive" },
+      { label: "Sonnet", value: "sonnet[1m]", note: "Quicker, cheaper" },
+      { label: "Haiku", value: "haiku", note: "Fastest, for small things" },
+      { label: "Opus plan", value: "opusplan", note: "Plans with Opus, works with Sonnet" },
+    ],
+  },
+  {
+    kind: "mode",
+    fallback: "Permissions",
+    current: "auto",
+    choices: [
+      { label: "Auto", value: "auto", note: "Approves the ordinary, asks about the rest" },
+      { label: "Ask everything", value: "default", note: "Nothing runs unasked" },
+      { label: "Plan", value: "plan", note: "Explores and proposes, changes nothing" },
+      { label: "Accept edits", value: "acceptEdits", note: "Writes files without asking. Commands still ask", grave: true },
+      { label: "Never ask", value: "dontAsk", note: "Refuses anything not already allowed, rather than asking", grave: true },
+    ],
+  },
+  {
+    kind: "effort",
+    fallback: "Effort",
+    choices: [
+      { label: "Low", value: "low", note: "Quick, for small things" },
+      { label: "Medium", value: "medium" },
+      { label: "High", value: "high" },
+      { label: "Extra high", value: "xhigh", note: "The usual, for work like this" },
+      { label: "Max", value: "max", note: "Slow, and as good as it gets" },
+    ],
   },
 ];
 
@@ -358,7 +415,7 @@ const server = createServer(async (req, res) => {
     "/api/v1/sessions/s_1/diff": bigDiff(url.searchParams.get("namesOnly") === "true"),
     "/api/v1/sessions/s_1/files": BIG ? listing(url.searchParams.get("path") ?? "") : [],
     "/api/v1/sessions/s_1/conversation": conversation(),
-    "/api/v1/sessions/s_1/controls": [],
+    "/api/v1/sessions/s_1/controls": scene.startsWith("codex") ? [] : CLAUDE_CONTROLS,
     "/api/v1/sessions/s_1/account": { account: ACCOUNTS[0], limits: [], switches: [] },
     "/api/v1/sessions/s_1/annotations": [],
     "/api/v1/repos": REPOS,

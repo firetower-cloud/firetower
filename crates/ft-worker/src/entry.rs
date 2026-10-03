@@ -47,7 +47,10 @@ pub async fn run_agent(session: &str, workspace: PathBuf, agent: &str) -> Result
                 ],
             });
         }
-        kind.launch_headless(session, &asking, start)
+        // What this person last chose, off the session's own environment —
+        // see `ft_core::PREFERRED_ENV`.
+        let preferred = ft_core::controls::Preferred::from_env();
+        kind.launch_headless(session, &asking, start, &preferred)
             .map(|argv| crate::agentd::Launch {
                 session_id: session.to_string(),
                 workspace: workspace.clone(),

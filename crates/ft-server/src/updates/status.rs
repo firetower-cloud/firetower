@@ -17,8 +17,18 @@ pub const EVERY: Duration = Duration::from_secs(6 * 60 * 60);
 const NOTIFIED: &str = "updates.notified";
 
 /// Ask the feed, remember the answer, and say so once if it is new.
+///
+/// The agents' own publishers are asked on the same pass. They are a different
+/// question with the same shape — what is published, against what is installed
+/// — and one timer asking both is one thing to reason about instead of two.
+/// Nothing here depends on the answer, so a publisher being down is a warning
+/// inside [`super::agents::Releases::refresh`] and not a failed check.
 pub async fn check(state: &AppState) -> Result<Checked> {
     let updates = &state.updates;
+    updates
+        .agent_releases
+        .refresh(&updates.http, &updates.agent_feeds)
+        .await;
     let found = match check::latest(&updates.http, &updates.feed).await {
         Ok(latest) => {
             let cli_minimum =

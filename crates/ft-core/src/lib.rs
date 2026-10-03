@@ -19,6 +19,7 @@ mod ids;
 pub mod normalise;
 pub mod path;
 pub mod quota;
+pub mod releases;
 pub mod session;
 mod status;
 pub mod turn;
@@ -42,11 +43,20 @@ pub const SESSION_ENV: &str = "FIRETOWER_SESSION";
 /// Where the worker on this machine keeps its state.
 pub const WORKER_ROOT_ENV: &str = "FIRETOWER_WORKER_ROOT";
 
+/// What this person last chose about this agent, as JSON.
+///
+/// The session's environment rather than a field on the launch frame: both
+/// agents are started by the worker, the worker already inherits the session's
+/// environment, and a frame that predates the choice is a protocol version
+/// every worker in a fleet has to be upgraded past. Absent or unreadable means
+/// nobody has chosen anything, which is the ordinary state.
+pub const PREFERRED_ENV: &str = "FIRETOWER_AGENT_SETTINGS";
+
 /// Which agent runs inside a workspace.
 ///
 /// Serialised as the variant name — see the wire conventions in the brief: a
 /// field takes the consumer's casing, an enum value stays the symbol it is.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
 pub enum Agent {
     ClaudeCode,
     Codex,
@@ -138,6 +148,7 @@ impl Agent {
         session_id: &str,
         asking: &Asking,
         start: Start,
+        preferred: &crate::controls::Preferred,
     ) -> Option<Vec<String>> {
         let agent_session = agent_session_uuid(session_id);
         match self {
@@ -175,7 +186,19 @@ impl Agent {
                 // because usage-based switching is a thing and nothing said so.
                 // A session that takes an hour should not be run by whichever
                 // model was cheapest at the moment it started.
-                argv.extend(["--model".into(), BIGGEST.into()]);
+                argv.extend([
+                    "--model".into(),
+                    preferred.model.clone().unwrap_or_else(|| BIGGEST.into()),
+                ]);
+
+                // The same argument, and one more: this is the only setting
+                // Claude Code never reports back, so a session that was not
+                // told what to think with has no way of saying what it is
+                // thinking with. See [`EFFORT`].
+                argv.extend([
+                    "--effort".into(),
+                    preferred.effort.clone().unwrap_or_else(|| EFFORT.into()),
+                ]);
 
                 if let Start::Carrying(before) = &start {
                     argv.extend(["--append-system-prompt".into(), before.clone()]);
@@ -195,7 +218,7 @@ impl Agent {
                     // anybody is asked.
                     Asking::Ask { tool, config } => argv.extend([
                         "--permission-mode".into(),
-                        "auto".into(),
+                        preferred.mode.clone().unwrap_or_else(|| ASKING_MODE.into()),
                         "--permission-prompt-tool".into(),
                         tool.clone(),
                         "--mcp-config".into(),
@@ -226,7 +249,12 @@ impl Agent {
     /// arrange. Codex needs a conversation opened first, and its prompt cannot
     /// go out until that has answered — so the prompt is not here, and the
     /// control plane sends it when the thread exists.
-    pub fn opening(&self, prompt: &str, cwd: &str) -> Vec<serde_json::Value> {
+    pub fn opening(
+        &self,
+        prompt: &str,
+        cwd: &str,
+        preferred: &crate::controls::Preferred,
+    ) -> Vec<serde_json::Value> {
         match self {
             Agent::ClaudeCode => {
                 if prompt.trim().is_empty() {
@@ -235,7 +263,7 @@ impl Agent {
                     vec![crate::turn::user_message(prompt)]
                 }
             }
-            Agent::Codex => crate::codex::opening(cwd),
+            Agent::Codex => crate::codex::opening(cwd, preferred),
             Agent::KimiCode => {
                 if prompt.trim().is_empty() {
                     Vec::new()
@@ -282,8 +310,13 @@ impl Agent {
     /// tab a session gets, whether it is watched or attached to, and whether
     /// it is asked to report on itself.
     pub fn speaks_a_protocol(&self) -> bool {
-        self.launch_headless("probe", &Asking::CannotAsk, Start::Fresh)
-            .is_some()
+        self.launch_headless(
+            "probe",
+            &Asking::CannotAsk,
+            Start::Fresh,
+            &crate::controls::Preferred::default(),
+        )
+        .is_some()
     }
 }
 
@@ -914,6 +947,31 @@ pub enum AgentMode {
 /// Changeable per session — see the composer — so this is a starting point
 /// rather than a policy.
 pub const BIGGEST: &str = "opus[1m]";
+
+/// How hard a session thinks unless somebody changes it.
+///
+/// Asked for rather than inherited, for the same reason as [`BIGGEST`]: left to
+/// itself the CLI picks, and what it picks is free to move between releases.
+///
+/// There is a second reason here. Claude Code reports the model and the
+/// permission mode it is running on every turn, so a picker showing either can
+/// be *told* what is true. It never reports an effort — the `init` line has no
+/// such field — so the only thing that can honestly fill that picker is the
+/// value this process passed on the command line. Not passing one left it
+/// permanently blank.
+///
+/// `xhigh` because this is unattended work on a repository, which is what the
+/// level is for.
+pub const EFFORT: &str = "xhigh";
+
+/// The permission mode a session is launched under.
+///
+/// `Asking::Ask` is the only arrangement a worker makes — see
+/// `ft_worker::entry::arrange_asking` — so this is what every driven session
+/// starts on. Named here because two places need to agree about it: the argv
+/// below, and the picker that has to show something before the agent has said
+/// anything.
+pub const ASKING_MODE: &str = "auto";
 
 /// Whether this agent is beginning a conversation or picking one back up.
 ///
