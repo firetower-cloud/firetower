@@ -2947,8 +2947,10 @@ impl Fleet {
     /// A real process exit is different from losing its watcher. Persist a
     /// terminal status so historical permissions cannot survive this boundary.
     async fn agent_closed(&self, session_id: &SessionId) {
+        // Share the replay publication lock until the terminal status is durable.
+        let mut readers = self.progress.write().await;
         self.asked.write().await.remove(session_id.as_str());
-        let held = self.progress.write().await.remove(session_id.as_str());
+        let held = readers.remove(session_id.as_str());
         if let Some(note) = held.and_then(|p| p.resting) {
             announce_status(
                 &self.db,
@@ -2973,6 +2975,7 @@ impl Fleet {
         {
             announce_status(&self.db, &self.events, session_id, SessionStatus::Failed, Some("The agent process exited. Restart it to continue; pending permissions were cancelled.")).await;
         }
+        drop(readers);
         if let Some(tx) = self.conversations.write().await.remove(session_id.as_str()) {
             let _ = tx.send(AgentSpeech::Closed);
         }
@@ -3140,6 +3143,7 @@ impl Fleet {
             }
         }
 
+        let mut readers = self.progress.write().await;
         // Only a live blocked/in-flight turn can have answerable questions.
         // AgentClosed persists a terminal status even when stdout ended before
         // the provider journal could record a response or failure.
@@ -3155,7 +3159,6 @@ impl Fleet {
         {
             pending.clear();
         }
-        let mut readers = self.progress.write().await;
         if let std::collections::hash_map::Entry::Vacant(entry) =
             readers.entry(session_id.to_string())
         {
