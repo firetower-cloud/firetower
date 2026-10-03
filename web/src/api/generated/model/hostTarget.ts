@@ -9,6 +9,17 @@
 export interface HostTarget {
   drained: boolean;
   hostId: string;
+  /**
+     * Whether the person asking may bring this machine up to the control
+     * plane, right now, and it would do something.
+     *
+     * Two things at once, because one button is being drawn: they administer
+     * this machine — by owning it, by administering the directory it is filed
+     * in, or by administering the organisation — *and* it is behind the
+     * control plane. A machine level with the control plane has nowhere to go
+     * until the deployment itself moves.
+     */
+  mayUpgrade?: boolean;
   name: string;
   online: boolean;
   /** @nullable */

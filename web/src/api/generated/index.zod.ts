@@ -1,3 +1,4 @@
+export * from './access/access.zod';
 export * from './accounts/accounts.zod';
 export * from './agents/agents.zod';
 export * from './auth/auth.zod';

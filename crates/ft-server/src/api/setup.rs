@@ -24,13 +24,26 @@ use utoipa::ToSchema;
 #[derive(Debug, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct SetupState {
-    /// The signed-in account's password came from a file.
+    /// The signed-in account's password was chosen by somebody else and has
+    /// to be replaced. The only step of setting up that is not about the
+    /// install — it is raised for anybody invited or reset, long after.
     pub needs_password: bool,
     /// Nobody has named the organisation yet.
     pub needs_organization: bool,
     /// No GitHub application is configured. Not a blocker — it is skippable,
     /// and pasting a repository URL works without one.
     pub needs_github: bool,
+    /// Where a person reaches this Firetower in a browser.
+    ///
+    /// **Not whatever host served the page.** The interface and the control
+    /// plane are two addresses — in development they are two ports, and in a
+    /// deployment behind a proxy they can be two names — so a screen that hands
+    /// somebody a sign-in link cannot read it off its own `window.location`
+    /// and be right anywhere but the installation it happens to be running on.
+    ///
+    /// `FIRETOWER_PUBLIC_URL` when it is set, and the interface's own address
+    /// otherwise. It is the same value the session notifications link to.
+    pub public_url: String,
     /// Somebody has been through onboarding, however much they skipped.
     ///
     /// Once true it stays true: the steps after the organisation exist to point
@@ -64,6 +77,7 @@ pub(super) async fn setup_state(
             .await
             .is_none(),
         completed: state.accounts.onboarded().await?,
+        public_url: state.public_url.to_string(),
         organization,
     }))
 }

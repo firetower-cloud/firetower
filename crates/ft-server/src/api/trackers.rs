@@ -44,6 +44,16 @@ pub struct TrackerStatus {
     pub kinds: Vec<TaskKind>,
     /// Where somebody goes to make a key, when that is how it connects.
     pub key_url: Option<String>,
+    /// The key that answers for this person, as the vault addresses it —
+    /// `scope/name/owner`. Absent when nothing is held.
+    ///
+    /// A handle, so a screen can ask who can reach it and offer to file it
+    /// somewhere. It is the *resolved* one: their own if they have connected
+    /// one, otherwise whatever a directory they work in holds.
+    pub secret: Option<String>,
+    /// Where that key is filed, and so who else it answers for. Set only
+    /// alongside `secret`: the two describe the same shareable thing.
+    pub path: Option<String>,
 }
 
 /// One thing the list can be narrowed to: a repository, or a team.
@@ -68,18 +78,43 @@ pub(super) async fn list_trackers(
 
     let mut out = Vec::new();
     for t in trackers::TRACKERS {
+        // Whose key answers here — theirs, or one filed where they work. The
+        // same resolution the reads do, so the screen cannot say "not
+        // connected" about a key a session would happily have used.
+        let holder = super::tasks::whose(&state, t, owner).await?;
+        let key = Key::of(t.vault_scope(), t.id, &holder);
+        let held = state.vault.holds(key).await?;
+        // Only for the kind that can be shared: `path` and `secret` describe
+        // the same thing, so a git token's whereabouts is nobody's business but
+        // its owner's and is not sent at all.
+        let filed = if held && t.auth == Auth::ApiKey {
+            state
+                .access
+                .path_of(
+                    crate::access::FiledKind::Secret,
+                    &format!("{}/{}/{}", t.vault_scope(), t.id, holder),
+                )
+                .await?
+        } else {
+            None
+        };
+
         out.push(TrackerStatus {
             id: t.id.to_string(),
             label: t.label.to_string(),
             // Whether one is held, never the value: this only renders a screen.
-            connected: state
-                .vault
-                .holds(Key::of(t.vault_scope(), t.id, owner))
-                .await?,
+            connected: held,
             auth: t.auth,
             scope_kind: t.scope_kind,
             kinds: t.kinds.to_vec(),
             key_url: t.key_url.map(str::to_string),
+            // Only an API key is a thing a team shares. A git host's credential
+            // is a token that pushes commits, and a commit has to be
+            // attributable to a person — so that one stays personal and is
+            // offered to nobody.
+            secret: (held && t.auth == Auth::ApiKey)
+                .then(|| format!("{}/{}/{}", t.vault_scope(), t.id, holder)),
+            path: filed.map(|p| p.as_str().to_string()),
         });
     }
     Ok(Json(out))
@@ -208,7 +243,7 @@ pub(super) async fn list_tracker_scopes(
         ScopeKind::Repos => Ok(Json(
             state
                 .db
-                .repos()
+                .repos_of(owner(&principal)?)
                 .await?
                 .into_iter()
                 .map(|r| TaskScope {

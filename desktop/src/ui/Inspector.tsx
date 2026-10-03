@@ -49,6 +49,17 @@ export function Inspector({
   onClose: () => void;
   width?: number;
 }) {
+  /* Committing, pushing a branch and opening a pull request all go out under
+     the *session owner's* git identity, so they are the owner's and not the
+     workspace's — `maySpeak`, not `mayWrite`. Somebody with writer here has
+     their own agent to push from. The diff and the file tree are what watching
+     the work means; this tab is not part of it. */
+  const mayAct = session.maySpeak !== false;
+  const tabs = useMemo(() => (mayAct ? TABS : TABS.filter((t) => t.id !== "ship")), [mayAct]);
+  /* A tab is remembered across sessions, so somebody who was last on Commit in
+     their own workspace must not open somebody else's to an empty panel. */
+  const shown: TabId = tab === "ship" && !mayAct ? "diff" : tab;
+
   const diff = useDiff(session);
   const pending = useDiff(session, "Head");
   const files: Changed[] = useMemo(
@@ -62,8 +73,8 @@ export function Inspector({
     <aside style={{ width: width ?? 368 }} className="flex shrink-0 flex-col border-l border-line bg-panel">
       <div className="flex h-11 shrink-0 items-center gap-1 border-b border-line px-2">
         <div className="track">
-          {TABS.map((t) => (
-            <button key={t.id} data-on={tab === t.id} onClick={() => onTab(t.id)}>
+          {tabs.map((t) => (
+            <button key={t.id} data-on={shown === t.id} onClick={() => onTab(t.id)}>
               <span className="flex items-center gap-1.5">
                 <t.icon className="h-3.5 w-3.5" strokeWidth={1.75} />
                 {t.label}
@@ -78,9 +89,9 @@ export function Inspector({
       </div>
 
       <div className="scroll-slim min-h-0 flex-1 overflow-y-auto">
-        {tab === "diff" && <DiffList session={session} files={files} loading={diff.loading} error={diff.error} onOpenFile={onOpenFile} />}
-        {tab === "files" && <LiveTree sessionId={session.id} changed={changed} onOpenFile={onOpenFile} />}
-        {tab === "ship" && <Ship session={session} branch={branch} files={files} />}
+        {shown === "diff" && <DiffList session={session} files={files} loading={diff.loading} error={diff.error} onOpenFile={onOpenFile} />}
+        {shown === "files" && <LiveTree sessionId={session.id} changed={changed} onOpenFile={onOpenFile} />}
+        {shown === "ship" && <Ship session={session} branch={branch} files={files} />}
       </div>
     </aside>
   );

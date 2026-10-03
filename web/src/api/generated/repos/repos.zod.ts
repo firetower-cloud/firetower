@@ -13,6 +13,7 @@ export const ListReposResponseItem = zod.object({
   "env": zod.array(zod.string()).optional().describe('The names of the variables held for it, never the values.\n\nDerived per request from the vault rather than stored, so that a screen\ncan say what a session will bring without opening anything.'),
   "envFile": zod.string().nullish().describe('Where to write this repository\'s variables in the workspace.\n\nAbsent for most: the environment is enough for anything that reads\n`process.env`. Present — usually `.env` — for tooling that only reads\nfiles, and then it is written before setup runs and excluded from git.'),
   "id": zod.string().describe('Identifies a connected repository.'),
+  "path": zod.string().describe('Whose it is. Always `u/<slug>`, and never anything else.\n\nUnlike a machine or a workspace, this one does not move. What opens a\nrepository is the token of whoever connected it, so the row is theirs\nin the strong sense: `may_share` refuses to file a personal path\nanywhere, for administrators as much as anybody, and removing somebody\ndestroys these rather than handing them on.\n\nTwo people working on one codebase is two rows, each with its own setup\nscript and its own variables. That is what the unique constraint on\n`(org_id, remote, path)` is for.'),
   "remote": zod.string().describe('Where the worker clones from.'),
   "setup": zod.string().nullish().describe('Runs once per session before the agent starts.'),
   "slug": zod.string().describe('`acme/backend`')
@@ -30,6 +31,7 @@ export const CreateRepoResponse = zod.object({
   "env": zod.array(zod.string()).optional().describe('The names of the variables held for it, never the values.\n\nDerived per request from the vault rather than stored, so that a screen\ncan say what a session will bring without opening anything.'),
   "envFile": zod.string().nullish().describe('Where to write this repository\'s variables in the workspace.\n\nAbsent for most: the environment is enough for anything that reads\n`process.env`. Present — usually `.env` — for tooling that only reads\nfiles, and then it is written before setup runs and excluded from git.'),
   "id": zod.string().describe('Identifies a connected repository.'),
+  "path": zod.string().describe('Whose it is. Always `u/<slug>`, and never anything else.\n\nUnlike a machine or a workspace, this one does not move. What opens a\nrepository is the token of whoever connected it, so the row is theirs\nin the strong sense: `may_share` refuses to file a personal path\nanywhere, for administrators as much as anybody, and removing somebody\ndestroys these rather than handing them on.\n\nTwo people working on one codebase is two rows, each with its own setup\nscript and its own variables. That is what the unique constraint on\n`(org_id, remote, path)` is for.'),
   "remote": zod.string().describe('Where the worker clones from.'),
   "setup": zod.string().nullish().describe('Runs once per session before the agent starts.'),
   "slug": zod.string().describe('`acme/backend`')
@@ -77,6 +79,7 @@ export const UpdateRepoResponse = zod.object({
   "env": zod.array(zod.string()).optional().describe('The names of the variables held for it, never the values.\n\nDerived per request from the vault rather than stored, so that a screen\ncan say what a session will bring without opening anything.'),
   "envFile": zod.string().nullish().describe('Where to write this repository\'s variables in the workspace.\n\nAbsent for most: the environment is enough for anything that reads\n`process.env`. Present — usually `.env` — for tooling that only reads\nfiles, and then it is written before setup runs and excluded from git.'),
   "id": zod.string().describe('Identifies a connected repository.'),
+  "path": zod.string().describe('Whose it is. Always `u/<slug>`, and never anything else.\n\nUnlike a machine or a workspace, this one does not move. What opens a\nrepository is the token of whoever connected it, so the row is theirs\nin the strong sense: `may_share` refuses to file a personal path\nanywhere, for administrators as much as anybody, and removing somebody\ndestroys these rather than handing them on.\n\nTwo people working on one codebase is two rows, each with its own setup\nscript and its own variables. That is what the unique constraint on\n`(org_id, remote, path)` is for.'),
   "remote": zod.string().describe('Where the worker clones from.'),
   "setup": zod.string().nullish().describe('Runs once per session before the agent starts.'),
   "slug": zod.string().describe('`acme/backend`')

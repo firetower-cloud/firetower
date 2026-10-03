@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0
  */
 import type { Limit } from './limit';
+import type { ResourcePath } from './resourcePath';
 
 export interface Account {
   credentialSet: boolean;
@@ -18,6 +19,23 @@ export interface Account {
   limits: Limit[];
   mode: string;
   name: string;
+  /**
+     * What to call the owner, so a list can say whose an account is.
+     * @nullable
+     */
+  ownerName?: string | null;
+  /**
+     * Where it is filed, and therefore who may pick it.
+     *
+     * A `ResourcePath`, like every other kind sends — **not** the `String` that
+     * used to be here. `a.path::text` is the text of an `ltree`, so it comes
+     * back dotted (`d.backend.mine`), and a client that splits a path on `/`
+     * to read its root found one part, matched neither `u` nor `d`, and fell
+     * through to printing a bare `d/`. Every agent account showed the same
+     * wrong directory whoever owned it, because the path was never read at
+     * all.
+     */
+  path: ResourcePath;
   revision: number;
   state: string;
 }

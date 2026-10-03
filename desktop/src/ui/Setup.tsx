@@ -1,52 +1,35 @@
 /**
  * A fresh server, set up from the Mac.
  *
- * `setup_state` says what is still outstanding — a password that came from a
- * file, an organisation with no name — and this asks for exactly those, in that
- * order, then calls `complete_setup`. The GitHub step the web offers here is
- * skipped: it lives in Configuration and is one click away.
+ * `setup_state` says what is still outstanding and this asks for it, then calls
+ * `complete_setup`. The GitHub step the web offers here is skipped: it lives in
+ * Configuration and is one click away.
+ *
+ * **The password step is not here.** A password that came from a file is
+ * replaced on the control plane's own interface, like every other password in
+ * the product, and `Gate` sends people there before this screen is reached.
+ * Which also means `needsOrganization` is the only question left: naming an
+ * organisation is refused by the server while a password is outstanding, so
+ * this screen could never have been the one to ask both.
  */
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Check, Loader2 } from "lucide-react";
-import { useChangePassword } from "~/api/generated/auth/auth";
 import { getSetupStateQueryKey, useCompleteSetup, useNameOrganization, useSetupState } from "~/api/generated/setup/setup";
-import { useBackendKey } from "~/backend";
-import { updateToken } from "~/servers";
 
 import { why } from "~/data";
 
 export function Setup({ onDone }: { onDone: () => void }) {
-  const key = useBackendKey();
   const cache = useQueryClient();
   const state = useSetupState();
-  const change = useChangePassword();
   const name = useNameOrganization();
   const complete = useCompleteSetup();
-  const [current, setCurrent] = useState("");
-  const [next, setNext] = useState("");
   const [org, setOrg] = useState("");
-  const [trouble, setTrouble] = useState<string | null>(null);
   const refresh = () => cache.invalidateQueries({ queryKey: getSetupStateQueryKey() });
 
   if (state.isPending) return <Frame><p className="flex items-center gap-2 text-read text-mute"><Loader2 className="h-4 w-4 animate-spin" strokeWidth={2} />Asking what is left to do…</p></Frame>;
   if (state.error) return <Frame><p className="text-read text-brick">{why(state.error)}</p></Frame>;
   const s = state.data!;
-
-  if (s.needsPassword) {
-    return (
-      <Frame>
-        <h1 className="text-display text-bone">Choose a password</h1>
-        <p className="mt-2 text-read text-dim">The one you signed in with came from a file on the server. Replace it, and the file stops being the real credential.</p>
-        <div className="mt-5 space-y-2">
-          <input type="password" value={current} onChange={(e) => setCurrent(e.target.value)} placeholder="The password from the file" className="w-full rounded-xl border border-line bg-panel px-4 py-2.5 text-ui text-bone placeholder:text-mute focus:border-slate-deep focus:outline-none" />
-          <input type="password" value={next} onChange={(e) => setNext(e.target.value)} placeholder="A new one" className="w-full rounded-xl border border-line bg-panel px-4 py-2.5 text-ui text-bone placeholder:text-mute focus:border-slate-deep focus:outline-none" />
-        </div>
-        {trouble && <p className="mt-2 text-meta text-brick">{trouble}</p>}
-        <button disabled={!current || next.length < 8 || change.isPending} onClick={() => change.mutate({ data: { current, new: next } }, { onSuccess: (r) => { updateToken(key, r.token); refresh(); }, onError: (e) => setTrouble(why(e)) })} className="control mt-4 w-full justify-center bg-bone font-medium text-ground hover:opacity-90 disabled:bg-raise disabled:text-mute">{change.isPending ? "Changing…" : "Use this password"}</button>
-      </Frame>
-    );
-  }
 
   if (s.needsOrganization) {
     return (

@@ -23,6 +23,8 @@ export const ListAccountsResponseItem = zod.object({
 })),
   "mode": zod.string(),
   "name": zod.string(),
+  "ownerName": zod.string().nullish().describe('What to call the owner, so a list can say whose an account is.'),
+  "path": zod.string().describe('Where it is filed, and therefore who may pick it.\n\nA `ResourcePath`, like every other kind sends — **not** the `String` that\nused to be here. `a.path::text` is the text of an `ltree`, so it comes\nback dotted (`d.backend.mine`), and a client that splits a path on `/`\nto read its root found one part, matched neither `u` nor `d`, and fell\nthrough to printing a bare `d/`. Every agent account showed the same\nwrong directory whoever owned it, because the path was never read at\nall.'),
   "revision": zod.int(),
   "state": zod.string()
 })
@@ -50,6 +52,8 @@ export const CreateAccountResponse = zod.object({
 })),
   "mode": zod.string(),
   "name": zod.string(),
+  "ownerName": zod.string().nullish().describe('What to call the owner, so a list can say whose an account is.'),
+  "path": zod.string().describe('Where it is filed, and therefore who may pick it.\n\nA `ResourcePath`, like every other kind sends — **not** the `String` that\nused to be here. `a.path::text` is the text of an `ltree`, so it comes\nback dotted (`d.backend.mine`), and a client that splits a path on `/`\nto read its root found one part, matched neither `u` nor `d`, and fell\nthrough to printing a bare `d/`. Every agent account showed the same\nwrong directory whoever owned it, because the path was never read at\nall.'),
   "revision": zod.int(),
   "state": zod.string()
 })
@@ -80,6 +84,8 @@ export const UpdateAccountResponse = zod.object({
 })),
   "mode": zod.string(),
   "name": zod.string(),
+  "ownerName": zod.string().nullish().describe('What to call the owner, so a list can say whose an account is.'),
+  "path": zod.string().describe('Where it is filed, and therefore who may pick it.\n\nA `ResourcePath`, like every other kind sends — **not** the `String` that\nused to be here. `a.path::text` is the text of an `ltree`, so it comes\nback dotted (`d.backend.mine`), and a client that splits a path on `/`\nto read its root found one part, matched neither `u` nor `d`, and fell\nthrough to printing a bare `d/`. Every agent account showed the same\nwrong directory whoever owned it, because the path was never read at\nall.'),
   "revision": zod.int(),
   "state": zod.string()
 })
@@ -104,6 +110,8 @@ export const SessionAccountResponse = zod.object({
 })),
   "mode": zod.string(),
   "name": zod.string(),
+  "ownerName": zod.string().nullish().describe('What to call the owner, so a list can say whose an account is.'),
+  "path": zod.string().describe('Where it is filed, and therefore who may pick it.\n\nA `ResourcePath`, like every other kind sends — **not** the `String` that\nused to be here. `a.path::text` is the text of an `ltree`, so it comes\nback dotted (`d.backend.mine`), and a client that splits a path on `/`\nto read its root found one part, matched neither `u` nor `d`, and fell\nthrough to printing a bare `d/`. Every agent account showed the same\nwrong directory whoever owned it, because the path was never read at\nall.'),
   "revision": zod.int(),
   "state": zod.string()
 })]).optional(),

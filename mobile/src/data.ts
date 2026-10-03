@@ -10,7 +10,6 @@ import { useListAgents } from "~/api/generated/agents/agents";
 import { useListProviderRepos, useListProviders } from "~/api/generated/providers/providers";
 import { useListAccounts } from "~/api/generated/accounts/accounts";
 import { useMe } from "~/api/generated/auth/auth";
-import { useSetupState } from "~/api/generated/setup/setup";
 import { useGetUpdates } from "~/api/generated/updates/updates";
 import { showsDot } from "~/api/updates";
 import { useListTrackers, useListTrackerScopes } from "~/api/generated/trackers/trackers";
@@ -37,15 +36,33 @@ import type {
 /** Everything a screen needs to know about where its data came from. */
 export type Feed<T> = { data: T; loading: boolean; error: string | null };
 
-/** What the server said, off any thrown thing. */
+/**
+ * What the server said, off any thrown thing.
+ *
+ * With one substitution. A password that has to be replaced is refused on
+ * every path at once, so every list on screen asks its own question and gets
+ * the same sentence back — and a sentence written as a reason, repeated eight
+ * times down a rail, reads as eight things being broken. The screen that
+ * explains it is already up; these are the places behind it, and what they owe
+ * is to be brief and to agree with it.
+ */
 export function why(e: unknown): string {
-  return (e as { message?: string })?.message ?? "That didn't work.";
+  return said(e) ?? "That didn't work.";
 }
 
+/* The two fallbacks differ on purpose — one ends a sentence of its own, the
+   other is dropped into one — so they are kept, and only the reading of the
+   error is shared. */
 function whyOrNull(e: unknown): string | null {
   if (!e) return null;
-  const m = (e as { message?: string })?.message;
-  return m ?? "that request did not work";
+  return said(e) ?? "that request did not work";
+}
+
+function said(e: unknown): string | null {
+  if ((e as { code?: string })?.code === "PasswordChangeRequired") {
+    return "Replace your password to see this.";
+  }
+  return (e as { message?: string })?.message ?? null;
 }
 
 export function useSessions(): Feed<Session[]> {
@@ -139,15 +156,21 @@ export function useProviderRepos(id: string | null): Feed<RemoteRepo[]> {
 }
 
 /**
- * Whether this server still needs something before it is usable: a password
- * that came from a file, or an organisation with no name. Asked on every visit,
- * because both are facts about the server rather than about this Mac.
+ * Whether this server will accept any work under this account yet.
+ *
+ * Read from `auth/me` on every visit rather than remembered from the sign-in:
+ * an administrator can reset a password under a running app, and the stored
+ * user would go on saying everything is fine while every request was being
+ * refused. That is what this exists to catch — without it the phone shows
+ * "could not reach the control plane" on every screen for a server that is
+ * answering perfectly.
+ *
+ * Only the password. A server that has not finished being set up is set up
+ * from a desk, not from a phone, so there is nothing for this to say about it.
  */
-export function useGate(): { setup: boolean; ready: boolean } {
+export function useGate(): { locked: boolean; ready: boolean } {
   const me = useMe({ query: { staleTime: 60_000 } });
-  const setup = useSetupState({ query: { staleTime: 60_000 } });
-  const needs = !!me.data?.user?.mustChangePassword || (!!setup.data && !setup.data.completed);
-  return { setup: needs, ready: !me.isPending && !setup.isPending };
+  return { locked: !!me.data?.user?.mustChangePassword, ready: !me.isPending };
 }
 
 /** The dot on Updates in the rail. Asked rarely: the answer changes monthly. */

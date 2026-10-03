@@ -8,6 +8,12 @@
 import type { UpdaterView } from './updaterView.ts';
 
 export interface ControlPlaneTarget {
+  /**
+     * Whether the person asking may move it. Only an administrator of the
+     * organisation: the control plane is the whole deployment, not a resource
+     * anybody holds a grant on.
+     */
+  mayUpgrade?: boolean;
   /** @nullable */
   reason?: string | null;
   /** Sessions on this machine, by title. They end when it is recreated. */

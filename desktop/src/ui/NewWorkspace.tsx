@@ -28,7 +28,9 @@ import { machineLabel, machines } from "~/api/environments";
 import type { Agent, Share } from "~/api/generated/model";
 import { useCreateSession } from "~/api/generated/sessions/sessions";
 import { usable } from "~/api/accounts";
-import { useAccounts, useAgents, useHosts, useRepos } from "~/data";
+import { useAccounts, useAgents, useDirectories, useHosts, useRepos } from "~/data";
+import { destinations } from "~/filing";
+import { useMe } from "~/api/generated/auth/auth";
 import { ConnectAccount } from "~/ui/config/ConnectAccount";
 import type { Backend } from "~/fleet";
 import { navigate } from "~/shims/next-navigation";
@@ -79,6 +81,13 @@ export function NewWorkspace({
   const [where, setWhere] = useState<Where>({ machine: "", hostId: "", agent: "" });
   const [accountId, setAccountId] = useState("");
   const [share, setShare] = useState<Share>("equal" as Share);
+  /** Empty for your own space, which is where a workspace has always gone. */
+  const [directoryId, setDirectoryId] = useState("");
+  const { data: directories } = useDirectories();
+  const me = useMe();
+  // Only the ones work can be put in: a directory somebody let you look at is
+  // not somewhere to file your own workspace.
+  const filable = destinations(directories);
   const [adding, setAdding] = useState(false);
   const [connecting, setConnecting] = useState(false);
 
@@ -142,6 +151,9 @@ export function NewWorkspace({
           branch: shown.trim() || undefined,
           hostId: host?.id,
           share,
+          // Omitted is your own space. Naming one hands the workspace to that
+          // directory, at the one moment nobody has to be told it changed hands.
+          directoryId: directoryId || undefined,
         },
       },
       {
@@ -405,6 +417,45 @@ export function NewWorkspace({
               </div>
             )}
           </Field>
+
+          {/* Who will be able to see this, and whose it will be. Filing a
+              workspace in a directory hands it to that directory — the hint says
+              so, because a transfer nobody was told about is what this must not
+              be.
+
+              Only shown when there is somewhere to put it: on a Firetower
+              nobody has shared anything on the answer is always "mine", and a
+              select with one option is furniture. */}
+          {filable.length > 0 && (
+            <Field
+              label="Filed in"
+              hint={
+                directoryId
+                  ? "everybody with access to that directory can open this, and it belongs to them"
+                  : "your own space — nobody else can see it"
+              }
+            >
+              <div className="relative">
+                <select
+                  aria-label="Directory"
+                  value={directoryId}
+                  onChange={(e) => setDirectoryId(e.target.value)}
+                  className="w-full appearance-none rounded-lg border border-line bg-ground py-2 pr-8 pl-3 text-ui text-bone focus:border-slate-deep focus:outline-none"
+                >
+                  <option value="">Yours</option>
+                  {filable.map((d) => (
+                    <option key={d.id} value={d.id}>
+                      {d.name}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown
+                  className="pointer-events-none absolute top-1/2 right-3 h-3.5 w-3.5 -translate-y-1/2 text-mute"
+                  strokeWidth={2}
+                />
+              </div>
+            </Field>
+          )}
 
           <Field label="When the machine is busy">
             <div className="track w-full">

@@ -16,7 +16,19 @@ import { ApiError, rememberToken } from "@/src/api/http";
 
 /* ── replacing the password ────────────────────────────────────────── */
 
-export function StepPassword({ onNext }: { onNext: () => void }) {
+/**
+ * Replacing a password, for the two different people who have to.
+ *
+ * `fromFile` is the install's first administrator, whose password is sitting in
+ * an environment file on the server. Everybody else was handed one by an
+ * administrator — invited, or reset — and telling them to go and delete
+ * `ADMIN_INITIAL_PASSWORD` would be advice about a file they have never seen
+ * and cannot reach.
+ *
+ * Both are the same form. Only the reason differs, and the reason is the half
+ * that decides whether somebody believes the screen.
+ */
+export function StepPassword({ onNext, fromFile = true }: { onNext: () => void; fromFile?: boolean }) {
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
   const [again, setAgain] = useState("");
@@ -54,15 +66,22 @@ export function StepPassword({ onNext }: { onNext: () => void }) {
   return (
     <div>
       <h1 className="text-display font-semibold text-bone">Choose a password</h1>
-      <p className="mt-2 max-w-[54ch] text-ui leading-[1.6] text-dim">
-        The one you signed in with came from a file on the server, where anyone
-        who can read that file can read it. Replace it and it stops mattering
-        who has seen it — then delete{" "}
-        <code className="font-mono text-meta text-slate">
-          ADMIN_INITIAL_PASSWORD
-        </code>{" "}
-        from that file.
-      </p>
+      {fromFile ? (
+        <p className="mt-2 max-w-[54ch] text-ui leading-[1.6] text-dim">
+          The one you signed in with came from a file on the server, where anyone
+          who can read that file can read it. Replace it and it stops mattering
+          who has seen it, then delete{" "}
+          <code className="font-mono text-meta text-slate">
+            ADMIN_INITIAL_PASSWORD
+          </code>{" "}
+          from that file.
+        </p>
+      ) : (
+        <p className="mt-2 max-w-[54ch] text-ui leading-[1.6] text-dim">
+          The one you signed in with was given to you by an administrator, who
+          has seen it. Choose your own and theirs stops working.
+        </p>
+      )}
 
       <form onSubmit={submit} className="mt-6 max-w-[340px]">
         <Field

@@ -107,7 +107,9 @@ export function Copyable({
  * Firetower is often reached over plain http on a private address — where the
  * modern API is simply `undefined` and the old one still works.
  */
-async function write(text: string): Promise<boolean> {
+/// Exported because a clipboard that refuses has to be reportable from
+/// anywhere, not only from this file's own button.
+export async function write(text: string): Promise<boolean> {
   try {
     if (navigator.clipboard?.writeText) {
       await navigator.clipboard.writeText(text);

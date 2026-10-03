@@ -39,18 +39,32 @@ export function StatusBar({ session, branch, onCommit }: { session: Session; bra
   const uncommitted = (work.data ?? []).reduce((n, c) => n + (c.uncommitted ?? 0), 0);
   const unpushed = (work.data ?? []).reduce((n, c) => n + (c.pushed === false ? c.ahead ?? 0 : 0), 0);
   const ended = session.status === "Ended";
+  // The Commit tab this opens is the owner's, so this door is too.
+  const mayAct = session.maySpeak !== false;
   const [card, setCard] = useState(false);
   const hover = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   return (
     <div className="relative flex h-6 shrink-0 items-center gap-4 border-t border-line bg-panel px-3 font-mono text-micro text-mute select-none">
-      {/* The branch, and what is not saved on it. */}
-      <button onClick={onCommit} title="Open the Commit tab" className="flex min-w-0 items-center gap-1.5 hover:text-bone">
-        <GitBranch className="h-3 w-3 shrink-0" strokeWidth={1.75} />
-        <span className="truncate">{branch ?? "—"}</span>
-        {!ended && uncommitted > 0 && <span className="shrink-0 text-dim">· {uncommitted} uncommitted</span>}
-        {!ended && unpushed > 0 && <span className="shrink-0 text-dim">· {unpushed} unpushed</span>}
-      </button>
+      {/* The branch, and what is not saved on it.
+          Still worth reading when you are only watching — "3 uncommitted" is
+          part of knowing where the work is. It just stops being a way into the
+          Commit tab, which a viewer does not have. */}
+      {mayAct ? (
+        <button onClick={onCommit} title="Open the Commit tab" className="flex min-w-0 items-center gap-1.5 hover:text-bone">
+          <GitBranch className="h-3 w-3 shrink-0" strokeWidth={1.75} />
+          <span className="truncate">{branch ?? "—"}</span>
+          {!ended && uncommitted > 0 && <span className="shrink-0 text-dim">· {uncommitted} uncommitted</span>}
+          {!ended && unpushed > 0 && <span className="shrink-0 text-dim">· {unpushed} unpushed</span>}
+        </button>
+      ) : (
+        <span className="flex min-w-0 items-center gap-1.5">
+          <GitBranch className="h-3 w-3 shrink-0" strokeWidth={1.75} />
+          <span className="truncate">{branch ?? "—"}</span>
+          {!ended && uncommitted > 0 && <span className="shrink-0 text-dim">· {uncommitted} uncommitted</span>}
+          {!ended && unpushed > 0 && <span className="shrink-0 text-dim">· {unpushed} unpushed</span>}
+        </span>
+      )}
 
       {/* The machine. */}
       {where && (

@@ -90,7 +90,30 @@ pub struct Held {
     pub scope: String,
     pub name: String,
     /// Whose. Empty for the install's own.
+    ///
+    /// A person's id, or — once it has been filed into a directory — that
+    /// directory's. It is half of the primary key and half of what the value is
+    /// sealed against, which is why handing one over re-seals it rather than
+    /// updating a column: see [`Vault::hand_over`].
     pub owner: String,
+    /// Where it is filed, and so who may reach it.
+    ///
+    /// Absent for an *attached* secret — an agent account's credential, a
+    /// repository's variable, the install's own. Those belong to something else
+    /// and move when it moves, so a path of their own is a second answer that
+    /// could disagree with the first.
+    pub path: Option<ft_core::ResourcePath>,
+}
+
+fn held_from_row(r: &sqlx::postgres::PgRow) -> Held {
+    Held {
+        scope: r.get("scope"),
+        name: r.get("name"),
+        owner: r.get("owner"),
+        path: r
+            .get::<Option<String>, _>("path")
+            .map(ft_core::ResourcePath::from_stored),
+    }
 }
 
 /// One entry in the access log. Note what is absent.
@@ -117,6 +140,34 @@ pub enum Verification {
         at: i64,
     },
 }
+
+/// Where a secret somebody stores lands: `u.<them>.<scope>.<name>`.
+///
+/// Computed in SQL rather than in Rust because this is the only place a secret
+/// row is created and the owner is an id, not a slug — reading the slug back
+/// first would be a second round trip inside a transaction that already has the
+/// one fact it needs.
+///
+/// Three ways this is deliberately `NULL`, which is what *attached* means:
+///
+/// * the **`agent` scope** is an agent account's own credential. It moves when
+///   the account moves ([`crate::access::Access::transfer`]) and a path of its
+///   own would be a second answer that could disagree;
+/// * the **`env:` scopes** are a repository's variables, which belong to the
+///   repository for the same reason — and `env:r_01…` is not a legal ltree
+///   label anyway, the colon ends it;
+/// * an **owner who is not a person** — the install's own (`''`), or a
+///   directory, which only happens by transfer and which already set the path.
+///
+/// `ON CONFLICT` deliberately leaves `path` alone: replacing the value of a
+/// secret that has been filed into a directory must not quietly take it back.
+const WHERE_A_NEW_SECRET_LANDS: &str = "CASE \
+     WHEN $1 <> 'agent' AND $1 NOT LIKE 'env:%' \
+     THEN (SELECT ('u.' || u.slug || '.' || \
+                   trim(both '_' from regexp_replace(lower($1), '[^a-z0-9]+', '_', 'g')) || '.' || \
+                   trim(both '_' from regexp_replace(lower($2), '[^a-z0-9]+', '_', 'g')))::ltree \
+             FROM principals u WHERE u.id = $3) \
+   END";
 
 /// Postgres serialises appends to the log on this. A fixed number rather than a
 /// row lock, because the first append has no row to lock and two of them would
@@ -184,21 +235,115 @@ impl Vault {
             value.as_bytes(),
         )?;
 
-        sqlx::query(
-            "INSERT INTO secrets (scope, name, owner, version, wrapped_key, ciphertext, updated_at)
-             VALUES ($1, $2, $3, $4, $5, $6, now())
+        sqlx::query(&format!(
+            "INSERT INTO secrets (scope, name, owner, version, wrapped_key, ciphertext,
+                                  updated_at, path, created_by)
+             VALUES ($1, $2, $3, $4, $5, $6, now(), {WHERE_A_NEW_SECRET_LANDS},
+                     (SELECT id FROM users WHERE id = $3))
              ON CONFLICT (scope, name, owner)
              DO UPDATE SET version     = excluded.version,
                            wrapped_key = excluded.wrapped_key,
                            ciphertext  = excluded.ciphertext,
-                           updated_at  = excluded.updated_at",
-        )
+                           updated_at  = excluded.updated_at"
+        ))
         .bind(key.scope)
         .bind(key.name)
         .bind(key.owner)
         .bind(version)
         .bind(&sealed.wrapped_key)
         .bind(&sealed.ciphertext)
+        .execute(&mut **tx)
+        .await?;
+
+        self.append(tx, key, "Write", reason).await?;
+        Ok(())
+    }
+
+    /// Hand a secret to somebody else, re-sealing it on the way.
+    ///
+    /// **Why this cannot be an `UPDATE`.** The owner is in the associated data
+    /// of both layers — the wrap and the value — so the tags commit to it. Move
+    /// the row to another owner and neither opens: not the value, and not even
+    /// the key that would decrypt it. There is no way to recompute an AEAD tag
+    /// without the plaintext, so a transfer is open-then-seal, with a fresh key
+    /// and a fresh nonce.
+    ///
+    /// That is the protection working, not a limitation: it is what stops
+    /// somebody with write access to the database moving a row into another
+    /// person's name and reading it.
+    ///
+    /// Logged, because the plaintext passes through memory here, and "who was
+    /// this handed to, and when" is exactly the question the log exists for.
+    pub async fn hand_over(&self, key: Key<'_>, to: &str, reason: &str) -> Result<()> {
+        let mut tx = self.pool.begin().await?;
+        self.hand_over_in(&mut tx, key, to, reason).await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
+    /// The same, inside somebody else's transaction.
+    ///
+    /// **Offboarding is one decision, so it has to be one transaction.** Handing
+    /// twelve things over was twelve of them, and a failure on the seventh left
+    /// six done with nothing to say which — the same gap by which a transfer
+    /// could move an agent account's row and leave its credential sealed to
+    /// somebody who no longer holds it.
+    pub async fn hand_over_in(
+        &self,
+        tx: &mut Transaction<'_, Postgres>,
+        key: Key<'_>,
+        to: &str,
+        reason: &str,
+    ) -> Result<()> {
+        let row = sqlx::query(
+            "SELECT version, wrapped_key, ciphertext FROM secrets
+              WHERE scope = $1 AND name = $2 AND owner = $3 FOR UPDATE",
+        )
+        .bind(key.scope)
+        .bind(key.name)
+        .bind(key.owner)
+        .fetch_optional(&mut **tx)
+        .await?
+        .with_context(|| format!("no {key} to hand over"))?;
+
+        let version: i32 = row.get("version");
+        let plain = self.root.open(
+            Identity {
+                scope: key.scope,
+                name: key.name,
+                owner: key.owner,
+                version,
+            },
+            &Sealed {
+                wrapped_key: row.get("wrapped_key"),
+                ciphertext: row.get("ciphertext"),
+            },
+        )?;
+
+        let sealed = self.root.seal(
+            Identity {
+                scope: key.scope,
+                name: key.name,
+                owner: to,
+                version: version + 1,
+            },
+            &plain,
+        )?;
+
+        // The owner is half the primary key, so this moves the row rather than
+        // editing a column beside it.
+        sqlx::query(
+            "UPDATE secrets SET owner = $1, version = $2, wrapped_key = $3, ciphertext = $4,
+                                updated_at = now()
+              WHERE scope = $5 AND name = $6 AND owner = $7",
+        )
+        .bind(to)
+        .bind(version + 1)
+        .bind(&sealed.wrapped_key)
+        .bind(&sealed.ciphertext)
+        .bind(key.scope)
+        .bind(key.name)
+        .bind(key.owner)
         .execute(&mut **tx)
         .await?;
 
@@ -319,20 +464,72 @@ impl Vault {
         Ok(())
     }
 
-    /// What has been stored, for a screen. Names only.
+    /// What this person may see, for a screen. Names only.
+    ///
+    /// Filtered by the same predicate as everything else
+    /// ([`crate::access::filed_where`]), plus the rows they own outright. Both
+    /// halves are needed and neither is redundant: a secret they stored is
+    /// theirs by owner *and* filed in their own root, but one they filed into a
+    /// directory has that directory as its owner and is reached only by the
+    /// grant — and an *attached* one has no path at all, so only the owner
+    /// clause can find it.
+    ///
+    /// The install's own (`owner = ''`) is never here. It is not anybody's to
+    /// read, and [`crate::api::secrets`] decides who may ask for it.
+    pub async fn names_for(
+        &self,
+        person: &str,
+        at_least: crate::access::Level,
+    ) -> Result<Vec<Held>> {
+        let rows = sqlx::query(&format!(
+            "SELECT s.scope, s.name, s.owner, s.path::text AS path
+               FROM secrets s
+              WHERE (s.owner = $1 OR {visible})
+              ORDER BY s.scope, s.name, s.owner",
+            visible = crate::access::filed_where("s", 1, at_least)
+        ))
+        .bind(person)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows.iter().map(held_from_row).collect())
+    }
+
+    /// Which row a scope and a name mean, for the person asking.
+    ///
+    /// A scope and a name are not unique — that is the point of an owner being
+    /// half the key, so two people can each authorize GitHub as themselves — so
+    /// something has to choose, and what chooses is who is asking. Their own
+    /// first, then one filed where they may work. The install's own is not
+    /// considered: it belongs to the deployment and is asked for by name.
+    pub async fn owner_for(
+        &self,
+        scope: &str,
+        name: &str,
+        person: &str,
+        at_least: crate::access::Level,
+    ) -> Result<Option<String>> {
+        Ok(sqlx::query_scalar(&format!(
+            "SELECT s.owner FROM secrets s
+              WHERE s.scope = $2 AND s.name = $3 AND (s.owner = $1 OR {visible})
+              ORDER BY (s.owner = $1) DESC LIMIT 1",
+            visible = crate::access::filed_where("s", 1, at_least)
+        ))
+        .bind(person)
+        .bind(scope)
+        .bind(name)
+        .fetch_optional(&self.pool)
+        .await?)
+    }
+
+    /// Every row, whoever may see it. For a sweep, never for a screen.
     pub async fn names(&self) -> Result<Vec<Held>> {
-        let rows =
-            sqlx::query("SELECT scope, name, owner FROM secrets ORDER BY scope, name, owner")
-                .fetch_all(&self.pool)
-                .await?;
-        Ok(rows
-            .iter()
-            .map(|r| Held {
-                scope: r.get("scope"),
-                name: r.get("name"),
-                owner: r.get("owner"),
-            })
-            .collect())
+        let rows = sqlx::query(
+            "SELECT s.scope, s.name, s.owner, s.path::text AS path
+               FROM secrets s ORDER BY s.scope, s.name, s.owner",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows.iter().map(held_from_row).collect())
     }
 
     /// The log, most recent first.

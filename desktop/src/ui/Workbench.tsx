@@ -7,12 +7,13 @@
  * diff hid the conversation that explained it. They are two halves of one job.
  */
 import { useEffect, useRef, useState } from "react";
-import { Globe, PanelRight, Pencil, SquareTerminal, Trash2, X } from "lucide-react";
+import { Globe, PanelRight, Pencil, Share2, SquareTerminal, Trash2, X } from "lucide-react";
+import { WhoCanAccess } from "~/ui/Sharing";
 import { useQueryClient } from "@tanstack/react-query";
 import { getListSessionsQueryKey, useRenameSession } from "~/api/generated/sessions/sessions";
 import { Signal } from "~/components/Signal";
 import { AgentMark } from "~/components/AgentMark";
-import { group } from "~/api/workspaces";
+import { group, placeOf } from "~/api/workspaces";
 import type { Backend } from "~/fleet";
 import { useSession, useSessions } from "~/data";
 import { navigate } from "~/shims/next-navigation";
@@ -32,6 +33,9 @@ import { Shell } from "~/ui/Shell";
 import { StatusBar } from "~/ui/StatusBar";
 import { Unreachable } from "~/ui/Unreachable";
 import { ContextMenu, useMenu, type MenuItem } from "~/ui/ContextMenu";
+import { mayMove } from "~/filing";
+import { useMe } from "~/api/generated/auth/auth";
+import { useDirectories } from "~/data";
 import { useEndAgent, useEndWorkspace } from "~/ui/end";
 import { useConfirm } from "~/ui/Confirm";
 import { drag } from "~/drag";
@@ -212,11 +216,14 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
      id is the header's truth even before the list has caught up — the moment
      after "Start it" the list may not hold it yet, but `get_session` does. */
   const running = sessions.filter((s) => s.status !== "Ended");
-  /* By the workspace's id, or by any run in it: a second agent is opened by
-     its own id and belongs to the place its sibling made. */
-  const found = group(running)
-    .groups.flatMap(([, ps]) => ps)
-    .find((p) => p.id === workspace || p.runs.some((r) => r.id === workspace));
+  /* By the workspace's id, by any run in it, or by the workspace the run in
+     the address belongs to — which is the one that still answers after that
+     run has ended. See `placeOf`. */
+  const found = placeOf(
+    group(running).groups.flatMap(([, ps]) => ps),
+    workspace,
+    opened.data?.workspaceId,
+  );
   const place =
     found ??
     (opened.data
@@ -235,7 +242,8 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
         setOpen((o) => !o);
       }
       const to: Record<string, Side> = { "1": "diff", "2": "files", "3": "ship" };
-      if (to[e.key]) {
+      // The Commit panel is not a viewer's; neither is the shortcut to it.
+      if (to[e.key] && !(to[e.key] === "ship" && !mayAct)) {
         e.preventDefault();
         setSide(to[e.key]);
         setOpen(true);
@@ -264,6 +272,8 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
   const endWorkspace = useEndWorkspace();
   const confirm = useConfirm();
   const endAgent = useEndAgent();
+  const me = useMe();
+  const directories = useDirectories();
   const tabMenu = useMenu<string>();
   const chipMenu = useMenu<string>();
   const [renaming, setRenaming] = useState<string | null>(null);
@@ -293,6 +303,20 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
   /* Checkouts belong to the workspace rather than to whichever agent is being
      read, so take them from the one the list is freshest on. */
   const checkouts = run.checkouts ?? [];
+  /* The *place*, not the conversation. Adding an agent, opening a terminal and
+     renaming the workspace are all things a writer may do in a workspace
+     somebody shared with them — what they may not do is type into somebody
+     else's agent, which is `maySpeak` and lives in `Chat`.
+
+     `!== false` because a control plane older than this app sends nothing, and
+     the old behaviour is the safe default for the owner. */
+  const mayAct = run.mayWrite !== false;
+  /* Ending the workspace destroys everybody's work in it, so it is asked of
+     the path rather than of the grant: the person whose own space it sits in,
+     or an administrator of the directory it has been handed to. `mayMove` is
+     the client's copy of the server's `may_share`, and this is the same
+     question — who may decide what becomes of this. */
+  const mayEndPlace = mayMove(run.path, me.data?.user, directories.data);
 
 
   if (backend.reach === "unreachable") return <Unreachable org={backend.org} />;
@@ -318,9 +342,9 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
             className="w-56 rounded-md border border-line bg-ground px-2 py-1 text-ui text-bone focus:outline-none"
           />
         ) : (
-          <button onDoubleClick={() => setRenaming(place.name)} title="Double-click to rename" className="flex min-w-0 items-center gap-1.5 truncate text-ui text-bone">
+          <button onDoubleClick={() => mayAct && setRenaming(place.name)} title={mayAct ? "Double-click to rename" : place.name} className="flex min-w-0 items-center gap-1.5 truncate text-ui text-bone">
             {place.name}
-            <Pencil className="h-3 w-3 shrink-0 text-mute opacity-0 transition-opacity hover:opacity-100" strokeWidth={1.75} />
+            {mayAct && <Pencil className="h-3 w-3 shrink-0 text-mute opacity-0 transition-opacity hover:opacity-100" strokeWidth={1.75} />}
           </button>
         )}
 
@@ -364,27 +388,46 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
               <Signal status={r.status} size={4} />
             </button>
           ))}
-          <button
-            onClick={() => setAdding(true)}
-            title="Add an agent to this workspace"
-            className="grid h-7 w-7 place-items-center rounded-md text-mute transition-colors hover:bg-raise hover:text-bone"
-          >
-            +
-          </button>
+          {/* Starting an agent here is working in somebody's workspace, and the
+              server refuses it below writer. Drawn for a viewer it was a button
+              that opened a form and failed at the end of it. */}
+          {mayAct && (
+            <button
+              onClick={() => setAdding(true)}
+              title="Add an agent to this workspace"
+              className="grid h-7 w-7 place-items-center rounded-md text-mute transition-colors hover:bg-raise hover:text-bone"
+            >
+              +
+            </button>
+          )}
         </span>
 
         <div className="ml-auto flex items-center gap-1">
-          <button
-            onClick={() => {
-              setShell(true);
-              setTerm(!term);
-            }}
-            title={`Terminal  ${key("J")}`}
-            className={`control ${term ? "bg-overlay text-bone" : "text-mute hover:bg-raise hover:text-bone"}`}
-          >
-            <SquareTerminal className="h-4 w-4" strokeWidth={1.75} />
-          </button>
-          {(
+          {/* Who can reach this. First in the group, because it is the only
+              one carrying a word rather than a glyph: the icons keep their
+              places when a path appears beside this one, and a control that
+              shifts its neighbours when a workspace is shared is a control that
+              moves under the pointer. */}
+          <WhoCanAccess look="toolbar" kind="workspace" id={place.id} path={place.runs[0]?.path} />
+          {/* A shell on the machine this runs on — which is somebody's own
+              machine. `session_pty` has always required writer; this is the
+              control finally agreeing with it. */}
+          {mayAct && (
+            <button
+              onClick={() => {
+                setShell(true);
+                setTerm(!term);
+              }}
+              title={`Terminal  ${key("J")}`}
+              className={`control ${term ? "bg-overlay text-bone" : "text-mute hover:bg-raise hover:text-bone"}`}
+            >
+              <SquareTerminal className="h-4 w-4" strokeWidth={1.75} />
+            </button>
+          )}
+          {/* Ending the workspace stops every agent in it, including other
+              people's, so it is asked of the path rather than of the grant —
+              and drawn only to somebody the server will take it from. */}
+          {mayEndPlace && (
             <button
               onClick={() => void endWorkspace(place).then(({ ended, trouble }) => (ended ? navigate("/") : trouble && void confirm({ title: "It did not end.", body: trouble, action: "OK" })))}
               title="End workspace — every agent in it stops"
@@ -527,17 +570,29 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
           items={[
             { label: "Read this conversation", onPick: () => setReading(chipMenu.open!.on) },
             "-",
-            {
-              label: place.runs.length > 1 ? "End this agent" : "End workspace",
-              tone: "danger",
-              onPick: () => {
-                const id = chipMenu.open!.on;
-                const r = place.runs.find((x) => x.id === id);
-                if (place.runs.length > 1 && r) {
-                  void endAgent(id, `${r.agent === "ClaudeCode" ? "Claude Code" : r.agent} — ${r.title}`, place.runs.length - 1).then((ended) => ended && id === run.id && setReading(place.runs.find((x) => x.id !== id)?.id ?? null));
-                } else void endWorkspace(place).then(({ ended }) => ended && navigate("/"));
-              },
-            },
+            /* Every chip is an agent, including the one that happens to share
+               its id with the workspace. Ending it ends it — the control plane
+               no longer reads that coincidence as "end everything", and the
+               worker reclaims the worktree when the last agent leaves.
+
+               Ending the *place* is the toolbar's button, which is a
+               different act with a different right. */
+            (() => {
+              const id = chipMenu.open!.on;
+              const r = place.runs.find((x) => x.id === id);
+              const mine = r?.maySpeak !== false;
+              return {
+                label: "End this agent",
+                tone: "danger" as const,
+                disabled: !r || !mine,
+                onPick: () => {
+                  if (!r || !mine) return;
+                  void endAgent(id, `${r.agent === "ClaudeCode" ? "Claude Code" : r.agent} — ${r.title}`, place.runs.length - 1).then(
+                    (ended) => ended && id === run.id && setReading(place.runs.find((x) => x.id !== id)?.id ?? null),
+                  );
+                },
+              };
+            })(),
           ]}
         />
       )}

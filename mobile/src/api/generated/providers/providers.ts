@@ -332,6 +332,14 @@ export const useAuthorizeProvider = <TError = ApiError,
  * and again on the connect-a-repository screen at the moment somebody wants
  * the thing it enables. Stored rather than configured, so it takes effect
  * without a restart.
+ *
+ * **The application is the installation's, so changing it is an
+ * administrator's.** The id itself is public — a device-flow application has
+ * no paired secret — and it is shared by everybody here by construction,
+ * which is the point: one application, and each person's own token under it.
+ * That is also why this was worth closing. Anyone at all could point the
+ * whole installation at an application they controlled, and the next person
+ * to connect would authorize it.
  * @summary Register an application to authorize against.
  */
 export const setClientId = async (id: string,

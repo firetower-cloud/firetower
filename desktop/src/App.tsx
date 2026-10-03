@@ -8,7 +8,7 @@ import { Fleet } from "~/ui/Fleet";
 import { useFleet, waitingIn, asBackend as liveBackend } from "~/fleet";
 import { lazy, Suspense } from "react";
 import type { Backend } from "~/fleet";
-import { BackendProvider } from "~/backend";
+import { BackendProvider, dropCache } from "~/backend";
 import { bridge } from "~/bridge";
 import { StartProvider } from "~/start";
 import { Connect } from "~/ui/Connect";
@@ -114,6 +114,12 @@ export function App() {
     if (scope !== "all" && !here) setScope(real$[0]?.serverId ?? "all");
   }, [scope, here, real$]);
   const none = real$.length === 0;
+  /* A server this Mac is still connected to whose token has stopped working:
+     a password replaced in a browser ends every other session, and so does an
+     administrator resetting one. The address is still right, so what is owed
+     is a password field for *that* server, not the whole app drawn around a
+     refusal repeated in every pane. */
+  const adrift = scope === "all" ? null : (real$.find((s) => s.serverId === scope && !s.token) ?? null);
 
   return (
     <>
@@ -130,6 +136,21 @@ export function App() {
                 navigate("/");
               }}
               onCancel={none ? undefined : () => navigate("/")}
+            />
+          ) : adrift ? (
+            /* No way to cancel: there is nothing behind this to go back to.
+               The strip is still on the left, so another server is one click
+               away — this is one server's door, not the app's. */
+            <Connect
+              at={adrift.url}
+              onDone={(serverId) => {
+                // The cache for this server is full of the refusals that
+                // arrived while the token was dead; keeping it would render
+                // them once more under a session that now works.
+                dropCache(serverId);
+                setScope(serverId as Scope);
+                navigate("/");
+              }}
             />
           ) : style ? (
             <Suspense fallback={null}>
@@ -154,7 +175,7 @@ export function App() {
                     error rather than sticking on it. */}
                 <Boundary key={path} onReset={() => navigate("/")}>
                   <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-                    <Gate>
+                    <Gate backend={here}>
                       <Routes
                         backend={here}
                         onForgot={() => {

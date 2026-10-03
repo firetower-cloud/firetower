@@ -10,6 +10,7 @@ const host = (id: string, compute: Host["compute"], extra: Partial<Host> = {}): 
   name: id,
   compute,
   state: "Online",
+  path: "d/shared/localhost",
   drained: false,
   reconnecting: false,
   docker: { status: "Unknown" },

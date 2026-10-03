@@ -14,7 +14,7 @@ import Animated, { useAnimatedStyle } from "react-native-reanimated";
 import { useReanimatedKeyboardAnimation } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { router, useLocalSearchParams } from "expo-router";
-import { ChevronLeft, MoreHorizontal } from "lucide-react-native";
+import { ChevronLeft, Eye, MoreHorizontal } from "lucide-react-native";
 import { delegating, interruptible, useConversation } from "~/api/conversation";
 import { useListEvents } from "~/api/generated/events/events";
 import type { Attached, Event } from "~/api/generated/model";
@@ -314,6 +314,19 @@ function Conversation({ place }: { place: Workspace }) {
         />
       ) : null}
 
+      {/* A viewer gets no composer here either. Same reason as the desk: a box
+          that takes a message the server will refuse reads as the product
+          being broken, not as a permission somebody does not have. */}
+      {/* `=== false`, not falsiness: an older control plane sends no such field,
+          and treating that as read-only hides the composer from everybody. */}
+      {session && session.maySpeak === false ? (
+        <View style={{ paddingHorizontal: 16, paddingBottom: 16, alignItems: "center" }}>
+          <View className="flex-row items-center gap-2.5 rounded-full border border-line bg-panel px-4 py-3">
+            <Eye color={color.mute} size={14} />
+            <Text className="font-sans text-ui text-dim">You are watching this work.</Text>
+          </View>
+        </View>
+      ) : (
       <Composer
         sessionId={speaker.id}
         acp={speaker.agent === "KimiCode"}
@@ -329,6 +342,10 @@ function Conversation({ place }: { place: Workspace }) {
           stopping(true);
           interrupt.mutate({ id: speaker.id });
         }}
+        // Only to somebody who may act here. The composer is already gone for a
+        // viewer, and these ride above it — an approval is the one control
+        // where being drawn and refused is worst: the agent is stopped, asking
+        // whether it may do something on the owner's machine.
         above={conversation.asked.map((a) => (
           <Approval
             key={a.req}
@@ -343,6 +360,7 @@ function Conversation({ place }: { place: Workspace }) {
           />
         ))}
       />
+      )}
     </View>
   );
 }

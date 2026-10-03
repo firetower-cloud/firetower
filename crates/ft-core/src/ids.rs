@@ -76,6 +76,12 @@ id_type!(HostId, "h", "Identifies a host.");
 id_type!(RepoId, "r", "Identifies a connected repository.");
 id_type!(UserId, "u", "Identifies someone who can sign in.");
 id_type!(OrgId, "o", "Identifies an organisation.");
+id_type!(TeamId, "t", "Identifies a team — a named group of people.");
+id_type!(
+    DirectoryId,
+    "d",
+    "Identifies a directory — the things a grant is held over."
+);
 
 #[cfg(test)]
 mod tests {

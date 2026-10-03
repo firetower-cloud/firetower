@@ -1,5 +1,19 @@
-//! Named, owner-scoped agent connections. Secrets retain their vault identity.
+//! Named agent connections — somebody's Claude or Codex subscription.
+//!
+//! **An account can be lent without being handed over.** Filed in a directory
+//! like everything else, so granting a team a look at the directory holding your
+//! subscription lets them pick it for a run. What does *not* move is the
+//! credential: the vault seals a secret against its owner, so the token still
+//! opens under the person who authorized it, and the run that borrows it is
+//! spending their quota with their name on it.
+//!
+//! Which is why reads and writes part company here. [`usable`] is grant-aware —
+//! somebody else's account, selected for your run. [`mine`] is not, and every
+//! mutation goes through it: renaming, reconnecting, disabling and choosing a
+//! default are decisions about somebody's own subscription, and a grant to use
+//! one is not a grant to reorganise it.
 use super::{ApiError, ApiResult, ErrorCode};
+use crate::access::{filed_where, Level};
 use crate::{
     auth::Principal,
     vault::{self, Key},
@@ -9,7 +23,7 @@ use axum::{
     extract::{Path, State},
     Extension, Json,
 };
-use ft_core::{Agent, AgentMode, SessionId, TurnEvent};
+use ft_core::{Agent, AgentMode, ResourcePath, SessionId, TurnEvent};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use utoipa::ToSchema;
@@ -18,12 +32,38 @@ use utoipa::ToSchema;
 #[serde(rename_all = "camelCase")]
 pub struct Account {
     pub id: String,
+    /// Whose subscription this is.
+    ///
+    /// Not sent: an id is no use to a client and the name beside it is. What it
+    /// is for is the vault — a borrowed account's credential opens under its
+    /// owner, never under whoever is running.
+    #[serde(skip)]
+    #[schema(ignore)]
+    pub user_id: String,
+    /// What to call the owner, so a list can say whose an account is.
+    pub owner_name: Option<String>,
+    /// Where it is filed, and therefore who may pick it.
+    ///
+    /// A `ResourcePath`, like every other kind sends — **not** the `String` that
+    /// used to be here. `a.path::text` is the text of an `ltree`, so it comes
+    /// back dotted (`d.backend.mine`), and a client that splits a path on `/`
+    /// to read its root found one part, matched neither `u` nor `d`, and fell
+    /// through to printing a bare `d/`. Every agent account showed the same
+    /// wrong directory whoever owned it, because the path was never read at
+    /// all.
+    #[sqlx(try_from = "String")]
+    pub path: ResourcePath,
     pub kind: String,
     pub name: String,
     pub mode: String,
     #[serde(skip)]
     #[schema(ignore)]
     pub credential_key: String,
+    /// Who its credential is sealed against — see [`ACCOUNT_COLUMNS`]. Absent
+    /// when nothing is stored yet.
+    #[serde(skip)]
+    #[schema(ignore)]
+    pub credential_owner: Option<String>,
     pub is_default: bool,
     pub enabled: bool,
     pub state: String,
@@ -32,6 +72,25 @@ pub struct Account {
     pub credential_set: bool,
     #[sqlx(skip)]
     pub limits: Vec<Limit>,
+}
+
+impl Account {
+    /// The vault key its credential is under.
+    ///
+    /// **Never build one of these by hand.** The owner is not the person asking
+    /// and it is not always `user_id`: a borrowed account opens under whoever
+    /// holds it, and a filed one under the directory. Every place that got this
+    /// wrong reported a connected subscription as needing to be set up.
+    ///
+    /// Falls back to `user_id` for an account with nothing stored yet, which is
+    /// where a first `connect` writes.
+    pub(super) fn credential(&self) -> Key<'_> {
+        Key::of(
+            vault::AGENT,
+            &self.credential_key,
+            self.credential_owner.as_deref().unwrap_or(&self.user_id),
+        )
+    }
 }
 
 pub(super) fn owner(p: &Principal) -> Result<&str, ApiError> {
@@ -54,26 +113,102 @@ fn name(value: &str) -> Result<&str, ApiError> {
     }
     Ok(value)
 }
-pub(super) async fn find(db: &crate::db::Db, owner: &str, id: &str) -> Result<Account, ApiError> {
-    sqlx::query_as::<_, Account>("SELECT a.*, EXISTS(SELECT 1 FROM secrets WHERE scope='agent' AND name=a.credential_key AND owner=a.user_id) AS credential_set FROM agent_accounts a WHERE user_id=$1 AND id=$2")
-        .bind(owner).bind(id).fetch_optional(db.pool()).await?
-        .ok_or_else(|| ApiError::not_found("account"))
+/// What every read of an account selects.
+///
+/// `credential_set` is asked of the vault's table rather than decrypting
+/// anything — a screen saying whether a connection is complete has no business
+/// opening it. `owner_name` is here because a borrowed account has to be able to
+/// say whose it is, and looking the organisation's people up is an
+/// administrator's request.
+/// `credential_owner` is asked rather than assumed. It used to be `a.user_id`,
+/// and that was true until an account could change hands: filing a subscription
+/// into a directory re-seals its credential under that directory
+/// ([`crate::access::Access::transfer`]), so the owner half of the vault key is
+/// no longer the person who connected it. Reading it back from the row that
+/// exists is the only account of it that cannot drift.
+///
+/// `a.path::text` after `a.*` on purpose, and it has to come second: `a.*`
+/// brings `path` through as an `ltree`, which nothing here can decode, and a
+/// later column of the same name is the one a lookup by name finds.
+const ACCOUNT_COLUMNS: &str = "a.*, a.path::text AS path, \
+     (SELECT s.owner FROM secrets s \
+       WHERE s.scope='agent' AND s.name=a.credential_key) AS credential_owner, \
+     EXISTS(SELECT 1 FROM secrets \
+             WHERE scope='agent' AND name=a.credential_key) AS credential_set, \
+     (SELECT username FROM users WHERE users.id=a.user_id) AS owner_name";
+
+/// One of this person's own accounts.
+///
+/// Every mutation starts here. A grant lets somebody *use* a subscription, and
+/// nothing more — renaming or disconnecting one is its owner's.
+pub(super) async fn mine(db: &crate::db::Db, owner: &str, id: &str) -> Result<Account, ApiError> {
+    sqlx::query_as::<_, Account>(&format!(
+        "SELECT {ACCOUNT_COLUMNS} FROM agent_accounts a WHERE a.user_id=$1 AND a.id=$2"
+    ))
+    .bind(owner)
+    .bind(id)
+    .fetch_optional(db.pool())
+    .await?
+    .ok_or_else(|| ApiError::not_found("account"))
+}
+
+/// One account this person may run on — their own, or one lent to them.
+///
+/// Writer, not viewer. Picking somebody's subscription spends their quota and
+/// puts their name on what it does, so being allowed to see that it exists is
+/// deliberately not enough.
+pub(super) async fn usable(
+    db: &crate::db::Db,
+    person: &str,
+    id: &str,
+) -> Result<Account, ApiError> {
+    sqlx::query_as::<_, Account>(&format!(
+        "SELECT {ACCOUNT_COLUMNS} FROM agent_accounts a WHERE a.id=$2 AND {visible}",
+        visible = filed_where("a", 1, Level::Writer)
+    ))
+    .bind(person)
+    .bind(id)
+    .fetch_optional(db.pool())
+    .await?
+    .ok_or_else(|| ApiError::not_found("account"))
 }
 pub(super) async fn selected(
     db: &crate::db::Db,
     owner: &str,
     session: &SessionId,
 ) -> anyhow::Result<Option<Account>> {
-    Ok(sqlx::query_as::<_, Account>("SELECT a.*, EXISTS(SELECT 1 FROM secrets WHERE scope='agent' AND name=a.credential_key AND owner=a.user_id) AS credential_set FROM sessions s JOIN agent_accounts a ON a.id=s.agent_account_id AND a.user_id=s.user_id WHERE s.user_id=$1 AND s.id=$2")
-        .bind(owner).bind(session.as_str()).fetch_optional(db.pool()).await?)
+    // Which account a run is on, for anybody who may read the run. Reached
+    // through the session's workspace rather than through the account's own
+    // directory: a colleague watching a shared session is being told what it is
+    // authenticating as, which is a fact about the session in front of them.
+    Ok(sqlx::query_as::<_, Account>(&format!(
+        "SELECT {ACCOUNT_COLUMNS} FROM sessions s
+           JOIN workspaces w ON w.id = s.workspace_id
+           JOIN agent_accounts a ON a.id = s.agent_account_id
+          WHERE s.id=$2 AND {visible}",
+        visible = filed_where("w", 1, Level::Viewer)
+    ))
+    .bind(owner)
+    .bind(session.as_str())
+    .fetch_optional(db.pool())
+    .await?)
 }
 pub(super) async fn default_account(
     db: &crate::db::Db,
     owner: &str,
     kind: Agent,
 ) -> anyhow::Result<Option<Account>> {
-    Ok(sqlx::query_as::<_, Account>("SELECT a.*, EXISTS(SELECT 1 FROM secrets WHERE scope='agent' AND name=a.credential_key AND owner=a.user_id) AS credential_set FROM agent_accounts a WHERE user_id=$1 AND kind=$2 AND is_default AND enabled AND state='connected'")
-        .bind(owner).bind(format!("{kind:?}")).fetch_optional(db.pool()).await?)
+    // Their own, always. A default is a preference somebody set for themselves,
+    // and inheriting a colleague's would start runs on a subscription nobody
+    // chose in the moment.
+    Ok(sqlx::query_as::<_, Account>(&format!(
+        "SELECT {ACCOUNT_COLUMNS} FROM agent_accounts a
+          WHERE a.user_id=$1 AND a.kind=$2 AND a.is_default AND a.enabled AND a.state='connected'"
+    ))
+    .bind(owner)
+    .bind(format!("{kind:?}"))
+    .fetch_optional(db.pool())
+    .await?)
 }
 pub(super) async fn validate(
     state: &AppState,
@@ -81,15 +216,16 @@ pub(super) async fn validate(
     id: &str,
     kind: Agent,
 ) -> Result<Account, ApiError> {
-    let a = find(&state.db, owner, id).await?;
+    let a = usable(&state.db, owner, id).await?;
     if a.kind != format!("{kind:?}") || !a.enabled || a.state != "connected" {
         return Err(invalid("that account is not connected for this agent"));
     }
-    if !state
-        .vault
-        .holds(Key::of(vault::AGENT, &a.credential_key, owner))
-        .await?
-    {
+    // `a.credential()`, never a key built here. On a borrowed or filed account
+    // the owner half is not the person asking, and the vault seals against
+    // whoever it was stored for — asking under the borrower's name finds
+    // nothing, which would report a connected subscription as needing to be set
+    // up.
+    if !state.vault.holds(a.credential()).await? {
         return Err(invalid("this account uses host-local authentication; connect a portable credential before selecting it"));
     }
     Ok(a)
@@ -116,8 +252,18 @@ pub(super) async fn list_accounts(
     State(state): State<AppState>,
     Extension(p): Extension<Principal>,
 ) -> ApiResult<Json<Vec<Account>>> {
-    let mut rows = sqlx::query_as::<_, Account>("SELECT a.*, EXISTS(SELECT 1 FROM secrets WHERE scope='agent' AND name=a.credential_key AND owner=a.user_id) AS credential_set FROM agent_accounts a WHERE user_id=$1 ORDER BY kind, is_default DESC, created_at")
-        .bind(owner(&p)?).fetch_all(state.db.pool()).await?;
+    // Theirs and anything lent to them, their own first — a list that buried
+    // somebody's own subscription among a team's would be a list nobody could
+    // pick from quickly.
+    let mut rows = sqlx::query_as::<_, Account>(&format!(
+        "SELECT {ACCOUNT_COLUMNS} FROM agent_accounts a
+          WHERE {visible}
+          ORDER BY (a.user_id=$1) DESC, a.kind, a.is_default DESC, a.created_at",
+        visible = filed_where("a", 1, Level::Viewer)
+    ))
+    .bind(owner(&p)?)
+    .fetch_all(state.db.pool())
+    .await?;
     for account in &mut rows {
         account.limits =
             sqlx::query_as("SELECT * FROM agent_account_limits WHERE account_id=$1 ORDER BY scope")
@@ -165,8 +311,20 @@ pub(super) async fn create_account(
     }
     let id = ulid::Ulid::new().to_string();
     let key = format!("account:{id}");
-    let result = sqlx::query("INSERT INTO agent_accounts(id,user_id,kind,name,mode,credential_key,state) VALUES($1,$2,$3,$4,$5,$6,'pending')")
-        .bind(&id).bind(owner).bind(format!("{:?}", req.kind)).bind(label).bind(format!("{:?}",req.mode)).bind(&key).execute(state.db.pool()).await;
+    // Filed in this person's own space. Lending it is a later, deliberate move
+    // — the same as a workspace, and for the same reason.
+    //
+    // The name is slugged and the id's first characters go on the end: two
+    // subscriptions can be called the same thing in two directories, and the
+    // path has to stay unique without the name having to be.
+    let path = format!(
+        "u.{}.{}_{}",
+        state.db.slug_of(owner).await?,
+        ft_core::slug(&req.name),
+        id[..8].to_lowercase()
+    );
+    let result = sqlx::query("INSERT INTO agent_accounts(id,user_id,kind,name,mode,credential_key,state,path) VALUES($1,$2,$3,$4,$5,$6,'pending',$7::ltree)")
+        .bind(&id).bind(owner).bind(format!("{:?}", req.kind)).bind(label).bind(format!("{:?}",req.mode)).bind(&key).bind(&path).execute(state.db.pool()).await;
     if let Err(e) = result {
         if e.as_database_error()
             .is_some_and(|e| e.is_unique_violation())
@@ -184,7 +342,7 @@ pub(super) async fn create_account(
             return Err(e);
         }
     }
-    Ok(Json(find(&state.db, owner, &id).await?))
+    Ok(Json(mine(&state.db, owner, &id).await?))
 }
 
 /// Store first, then publish the connection. Serializing by owner also prevents
@@ -196,7 +354,7 @@ pub(super) async fn connect(
     id: &str,
     secret: &str,
 ) -> Result<(), ApiError> {
-    let a = find(db, owner, id).await?;
+    let a = mine(db, owner, id).await?;
     let parsed: serde_json::Value = serde_json::from_str(secret).unwrap_or_default();
     let identity = parsed
         .pointer("/tokens/account_id")
@@ -245,7 +403,7 @@ pub(super) async fn connect(
     vault
         .put_in(
             &mut tx,
-            Key::of(vault::AGENT, &a.credential_key, owner),
+            a.credential(),
             secret,
             &format!("connecting {}", a.name),
         )
@@ -274,7 +432,7 @@ pub(super) async fn update_account(
     Json(req): Json<UpdateAccount>,
 ) -> ApiResult<Json<Account>> {
     let owner = owner(&p)?;
-    let a = find(&state.db, owner, &id).await?;
+    let a = mine(&state.db, owner, &id).await?;
     if let Some(secret) = req.secret.as_deref() {
         if a.kind == "Codex" && a.mode == "Subscription" {
             return Err(invalid("use device sign-in to reconnect this account"));
@@ -319,7 +477,7 @@ pub(super) async fn update_account(
         return Err(e.into());
     }
     tx.commit().await?;
-    Ok(Json(find(&state.db, owner, &id).await?))
+    Ok(Json(mine(&state.db, owner, &id).await?))
 }
 
 #[derive(Debug, Clone, Serialize, ToSchema, sqlx::FromRow)]
@@ -416,13 +574,13 @@ async fn switch_for(
 ) -> ApiResult<Json<SwitchedAccount>> {
     let session = state
         .db
-        .session_of(owner, &id)
+        .session_to_work_in(owner, &id)
         .await?
         .ok_or_else(|| ApiError::not_found("session"))?;
     if session.forgotten_at.is_some() {
         return Err(invalid("this workspace has been removed"));
     }
-    let target = find(&state.db, owner, &req.account_id).await?;
+    let target = usable(&state.db, owner, &req.account_id).await?;
     let kind = Agent::from_name(&target.kind).ok_or_else(|| invalid("unknown agent"))?;
     validate(state, owner, &target.id, kind).await?;
     if kind != session.agent && !req.accept_permission_change {
@@ -576,7 +734,7 @@ pub(super) async fn set_fallback(
     let owner = owner(&p)?;
     state
         .db
-        .session_of(owner, &SessionId::from_stored(id.clone()))
+        .session_to_work_in(owner, &SessionId::from_stored(id.clone()))
         .await?
         .ok_or_else(|| ApiError::not_found("session"))?;
     if req.account_ids.len() > 10 || (req.enabled && req.account_ids.is_empty()) {
@@ -587,7 +745,7 @@ pub(super) async fn set_fallback(
         if !seen.insert(account) {
             return Err(invalid("each fallback account can only appear once"));
         }
-        let a = find(&state.db, owner, account).await?;
+        let a = usable(&state.db, owner, account).await?;
         let kind = Agent::from_name(&a.kind).ok_or_else(|| invalid("unknown agent"))?;
         if req.enabled {
             validate(&state, owner, account, kind).await?;
@@ -685,12 +843,12 @@ mod tests {
     use super::*;
     use crate::db::Db;
     async fn account(db: &Db, owner: &str, id: &str, label: &str) {
-        sqlx::query("INSERT INTO agent_accounts(id,user_id,kind,name,mode,credential_key,state) VALUES($1,$2,'ClaudeCode',$3,'Subscription',$1,'pending')")
+        sqlx::query("INSERT INTO agent_accounts(id,user_id,kind,name,mode,credential_key,state,path) VALUES($1,$2,'ClaudeCode',$3,'Subscription',$1,'pending',('u.' || (SELECT slug FROM principals WHERE id=$2) || '.' || $1)::ltree)")
             .bind(id).bind(owner).bind(label).execute(db.pool()).await.unwrap();
     }
     async fn session(db: &Db, owner: &str) -> SessionId {
         let host = db
-            .ensure_host("test", ft_core::Compute::Local)
+            .ensure_host("test", ft_core::Compute::Local, owner)
             .await
             .unwrap();
         let id = SessionId::new();
@@ -743,7 +901,11 @@ mod tests {
             selected(&db, &owner, &second).await.unwrap().unwrap().id,
             "second"
         );
-        assert!(find(&db, "another-user", "first").await.is_err());
+        assert!(mine(&db, "another-user", "first").await.is_err());
+        assert!(
+            usable(&db, "another-user", "first").await.is_err(),
+            "nor may somebody it was never lent to run on it"
+        );
         assert!(selected(&db, "another-user", &first)
             .await
             .unwrap()
@@ -770,7 +932,7 @@ mod tests {
         .unwrap();
         assert_eq!(first_env[0].1 .0, "team-token");
         assert_eq!(second_env[0].1 .0, "personal-token");
-        let public = serde_json::to_string(&find(&db, &owner, "first").await.unwrap()).unwrap();
+        let public = serde_json::to_string(&mine(&db, &owner, "first").await.unwrap()).unwrap();
         assert!(!public.contains("credentialKey"));
         assert!(!public.contains("team-token"));
     }
@@ -790,7 +952,7 @@ mod tests {
             .holds(Key::of(vault::AGENT, "b", &owner))
             .await
             .unwrap());
-        assert_eq!(find(&db, &owner, "a").await.unwrap().revision, 1);
+        assert_eq!(mine(&db, &owner, "a").await.unwrap().revision, 1);
     }
     #[tokio::test]
     async fn migration_preserves_credentials_sessions_and_host_local_auth() {
@@ -824,6 +986,24 @@ mod tests {
         sqlx::raw_sql(include_str!(
             "../../../../migrations/server/20260910130000_agent_accounts.sql"
         ))
+        .execute(db.pool())
+        .await
+        .unwrap();
+        // `agent_accounts` has just been rebuilt from the migration that created
+        // it, so the `path` a later one adds went with it. Put it back, filed
+        // where the later migration files it, or every read below is about a
+        // column that is missing rather than about anything this test came to
+        // check.
+        sqlx::raw_sql(
+            // The ids this migration invents are `legacy:<user>:<kind>`, and a
+            // colon is not a label — which is exactly why a path is slugged
+            // rather than assembled from whatever a row happens to hold.
+            "ALTER TABLE agent_accounts ADD COLUMN path ltree; \
+             UPDATE agent_accounts a SET path = ('u.' || u.slug || '.' || \
+                 trim(both '_' from regexp_replace(lower(a.name || '_' || a.id), \
+                                                   '[^a-z0-9]+', '_', 'g')))::ltree \
+               FROM principals u WHERE u.id = a.user_id;",
+        )
         .execute(db.pool())
         .await
         .unwrap();

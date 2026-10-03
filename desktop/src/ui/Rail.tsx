@@ -9,17 +9,20 @@
  * name, since which server you are on is the question a multi-server client has
  * to answer on every screen.
  */
-import { BookOpen, CircleDashed, CircleFadingArrowUp, LayoutList, ListTodo, Plus, Settings2 } from "lucide-react";
+import { BookOpen, ChevronLeft, CircleDashed, CircleFadingArrowUp, LayoutList, ListTodo, Plus, Settings2 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { AgentMark } from "~/components/AgentMark";
 import { Blocks } from "~/island/Blocks";
 import { GithubMark, Icon } from "~/components/ui";
-import { doing, group, shortRepo, type Workspace } from "~/api/workspaces";
+import { doing, group, shortRepo, type Repositories, type Workspace } from "~/api/workspaces";
 import { beatOf, elapsed, minutesSince } from "~/api/view";
 import type { Backend } from "~/fleet";
 import { useSessions, useUpdatesDot } from "~/data";
+import { isPersonal } from "~/filing";
+import { useMe } from "~/api/generated/auth/auth";
 import { navigate, usePathname } from "~/shims/next-navigation";
 import { useStart } from "~/start";
+import { PANES, paneAt } from "~/ui/config/panes";
 import { useNow } from "~/ui/clock";
 import { useQueryClient } from "@tanstack/react-query";
 import { getListSessionsQueryKey, renameSession } from "~/api/generated/sessions/sessions";
@@ -39,74 +42,88 @@ const NAV: { href: string; label: string; icon: LucideIcon }[] = [
 
 export function Rail({ backend }: { backend: Backend }) {
   const path = usePathname();
+  const inConfig = path.startsWith("/configuration");
   const start = useStart();
   const { data: sessions, loading, error } = useSessions();
+  const me = useMe();
   const updates = useUpdatesDot();
   // The ages below are read off the clock, so the rail has to be told the clock
   // moved — nothing else re-renders a workspace that is quietly working.
   useNow();
 
   const running = sessions.filter((s) => s.status !== "Ended");
-  const repos = group(running);
+  /* Two sections, split on the one question the path answers: is this in your
+     own space, or in a place somebody shared with you. Both are grouped by
+     repository inside, because that is what makes a long list readable — the
+     split is about whose work it is, not about how it is sorted. */
+  const mine = group(running.filter((s) => isPersonal(s.path, me.data?.user)));
+  const theirs = group(running.filter((s) => !isPersonal(s.path, me.data?.user)));
+  const nothing = mine.groups.length === 0 && theirs.groups.length === 0;
   const dark = backend.reach === "unreachable";
 
   return (
     <aside className="flex w-[16rem] shrink-0 flex-col overflow-hidden border-r border-line bg-(--color-panel-vibrant)">
-      <nav className="flex shrink-0 flex-col gap-0.5 px-2 pt-2">
-        {NAV.map((n) => (
-          <NavLink
-            key={n.href}
-            {...n}
-            on={n.href === "/" ? path === "/" || path.startsWith("/sessions") : path.startsWith(n.href)}
-          />
-        ))}
-      </nav>
+      {inConfig ? (
+        <Settings path={path} />
+      ) : (
+        <nav className="flex shrink-0 flex-col gap-0.5 px-2 pt-2">
+          {NAV.map((n) => (
+            <NavLink
+              key={n.href}
+              {...n}
+              on={n.href === "/" ? path === "/" || path.startsWith("/sessions") : path.startsWith(n.href)}
+            />
+          ))}
+        </nav>
+      )}
 
+      {!inConfig && (
       <div className="mt-4 flex min-h-0 flex-1 flex-col">
-        <div className="flex shrink-0 items-center gap-2 px-4 pb-1">
-          <span className="eyebrow">Workspaces</span>
-          <button
-            onClick={() => start()}
-            title={`New workspace  ${key("N")}`}
-            className="-mr-1 ml-auto grid h-7 w-7 place-items-center rounded-md text-mute transition-colors hover:bg-raise hover:text-bone"
-          >
-            <Icon of={Plus} size={12} />
-          </button>
-        </div>
+        {/* **A section with nothing in it is not drawn.** Most people on most
+            days have no shared work, and a standing empty heading is a
+            standing reminder of a feature they are not using — and the same
+            in reverse for somebody who only ever works in a directory.
 
+            So the `+` travels: it hangs off whichever heading comes first,
+            because it means "new workspace" rather than "new one of these",
+            and it has to stay reachable whichever section exists. With
+            nothing at all, the personal heading is what is left standing,
+            which is where "nothing running" belongs. */}
         <div className={`scroll-slim min-h-0 flex-1 overflow-y-auto px-2 pb-3 ${dark ? "stale" : ""}`}>
           {loading && <p className="px-2.5 py-1 text-ui text-mute">Loading…</p>}
           {error && <p className="px-2.5 py-1 text-meta text-brick">{error}</p>}
-          {!loading && !error && repos.groups.length === 0 && (
-            <p className="px-2.5 py-1 text-ui text-mute">Nothing running.</p>
+
+          {(mine.groups.length > 0 || nothing) && (
+            <>
+              <Heading label="Personal workspaces" onNew={() => start()} />
+              {nothing ? (
+                <p className="px-2.5 py-1 text-ui text-mute">Nothing running.</p>
+              ) : (
+                <Repos repos={mine} path={path} />
+              )}
+            </>
           )}
 
-          {repos.groups.map(([repo, places]) => (
-            <div key={repo} className="mb-2.5">
-              <div className="flex items-center gap-1.5 px-2.5 py-1">
-                {repo === "no repository" ? (
-                  <Icon of={CircleDashed} size={12} className="text-mute" />
-                ) : (
-                  <GithubMark size={12} className="text-dim" />
-                )}
-                <span className="min-w-0 flex-1 truncate text-ui font-medium text-bone">
-                  {shortRepo(repo)}
-                </span>
-                <RepoTally places={places} />
-              </div>
-              {places.map((place) => (
-                <Row key={place.id} place={place} on={path === `/sessions/${place.id}`} />
-              ))}
-            </div>
-          ))}
+          {theirs.groups.length > 0 && (
+            <>
+              <Heading
+                label="Shared workspaces"
+                onNew={mine.groups.length === 0 && !nothing ? () => start() : undefined}
+              />
+              <Repos repos={theirs} path={path} />
+            </>
+          )}
         </div>
       </div>
+      )}
 
-      <div className="shrink-0 border-t border-line px-2 py-1.5">
-        <NavLink href="/configuration" label="Configuration" icon={Settings2} on={path.startsWith("/configuration")} />
-        <NavLink href="/updates" label="Updates" icon={CircleFadingArrowUp} on={path.startsWith("/updates")} dot={updates} />
-        {import.meta.env.DEV && <NavLink href="/style" label="Style guide" icon={BookOpen} on={path.startsWith("/style")} />}
-      </div>
+      {!inConfig && (
+        <div className="shrink-0 border-t border-line px-2 py-1.5">
+          <NavLink href="/configuration" label="Configuration" icon={Settings2} on={false} />
+          <NavLink href="/updates" label="Updates" icon={CircleFadingArrowUp} on={path.startsWith("/updates")} dot={updates} />
+          {import.meta.env.DEV && <NavLink href="/style" label="Style guide" icon={BookOpen} on={path.startsWith("/style")} />}
+        </div>
+      )}
 
       {/* Who you are *here*. Two servers means two accounts, so this is not
           furniture — it answers whose credentials a session would use. */}
@@ -115,6 +132,49 @@ export function Rail({ backend }: { backend: Backend }) {
         <div className="truncate text-meta text-mute">{backend.org}</div>
       </button>
     </aside>
+  );
+}
+
+/**
+ * The rail, while you are in configuration.
+ *
+ * It *replaces* the workspaces rather than standing beside them. Two rails at
+ * once was a busy screen where one of them was always irrelevant — nobody
+ * reading "who is in Ledger work" is also picking a session to open — and the
+ * way back is one button at the top rather than a column you have to keep.
+ */
+function Settings({ path }: { path: string }) {
+  const at = paneAt(path);
+  return (
+    <div className="scroll-slim flex min-h-0 flex-1 flex-col overflow-y-auto pb-3">
+      {/* Not "Configuration": a button labelled with the place you are already
+          standing is one nobody can guess the effect of, and the pane's own
+          heading says which screen this is. */}
+      <button
+        onClick={() => navigate("/")}
+        className="flex shrink-0 items-center gap-1.5 px-3 py-2.5 text-left text-ui text-dim transition-colors hover:text-bone"
+      >
+        <Icon of={ChevronLeft} size={14} />
+        Back
+      </button>
+
+      {PANES.map((g) => (
+        <div key={g.group} className="mt-3.5 px-2 first:mt-1">
+          <p className="px-2.5 pb-1 text-micro tracking-[0.09em] text-mute uppercase">{g.group}</p>
+          {g.items.map((i) => (
+            <button
+              key={i.at}
+              onClick={() => navigate(`/configuration/${i.at}`)}
+              className={`block w-full rounded-md px-2.5 py-1.5 text-left text-ui transition-colors ${
+                i.at === at ? "bg-raise text-bone" : "text-dim hover:bg-raise/60 hover:text-text"
+              }`}
+            >
+              {i.label}
+            </button>
+          ))}
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -260,5 +320,49 @@ function Where({ place }: { place: Workspace }) {
       <Icon className={`h-3 w-3 ${where.quiet ? "text-brick" : "text-mute"}`} strokeWidth={1.75} />
       {card && <HostCard host={host} where={where} at={card} />}
     </span>
+  );
+}
+
+/** One section's worth: a heading per repository, with its workspaces under it. */
+function Repos({ repos, path }: { repos: Repositories; path: string }) {
+  return (
+    <>
+      {repos.groups.map(([repo, places]) => (
+        <div key={repo} className="mb-2.5">
+          <div className="flex items-center gap-1.5 px-2.5 py-1">
+            {repo === "no repository" ? (
+              <Icon of={CircleDashed} size={12} className="text-mute" />
+            ) : (
+              <GithubMark size={12} className="text-dim" />
+            )}
+            <span className="min-w-0 flex-1 truncate text-ui font-medium text-bone">
+              {shortRepo(repo)}
+            </span>
+            <RepoTally places={places} />
+          </div>
+          {places.map((place) => (
+            <Row key={place.id} place={place} on={path === `/sessions/${place.id}`} />
+          ))}
+        </div>
+      ))}
+    </>
+  );
+}
+
+/** A section's name, and the one button that belongs to the first of them. */
+function Heading({ label, onNew }: { label: string; onNew?: () => void }) {
+  return (
+    <div className="flex items-center gap-2 px-2.5 pt-1 pb-1">
+      <span className="eyebrow">{label}</span>
+      {onNew && (
+        <button
+          onClick={onNew}
+          title={`New workspace  ${key("N")}`}
+          className="-mr-1 ml-auto grid h-7 w-7 place-items-center rounded-md text-mute transition-colors hover:bg-raise hover:text-bone"
+        >
+          <Icon of={Plus} size={12} />
+        </button>
+      )}
+    </div>
   );
 }

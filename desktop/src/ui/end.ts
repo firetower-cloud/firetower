@@ -37,7 +37,11 @@ export function useEndWorkspace() {
     });
     if (!ok) return { ended: false };
     try {
-      await destroySession(place.id, undefined);
+      // `workspace`, explicitly. Naming the session that cut the place used to
+      // be enough, because the control plane read the shared id as "end
+      // everything" — which is the same reason you could not end that agent on
+      // its own.
+      await destroySession(place.id, { workspace: true });
       await cache.invalidateQueries({ queryKey: getListSessionsQueryKey() });
       return { ended: true };
     } catch (e) {

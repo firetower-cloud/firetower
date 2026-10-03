@@ -14,6 +14,7 @@ export const ListProvidersResponseItem = zod.object({
   "connected": zod.boolean().describe('We hold a token for it.'),
   "id": zod.string(),
   "label": zod.string(),
+  "maySetApplication": zod.boolean().describe('Whether the caller may register the application this whole installation\nauthorizes against.\n\nSent rather than worked out by each client, the way `may_upgrade` is.\nThe rule is the server\'s — one application, no owner, and whoever sets\nit decides what everybody here authorizes next — and a copy of it in\nthree interfaces is three copies to keep in step. It was drawn for\neverybody once, so a member filled the field in and was refused by the\ntime they pressed Save.'),
   "pending": zod.union([zod.null(),zod.object({
   "userCode": zod.string().describe('The short code to type. Shown, not clicked.'),
   "verificationUri": zod.string().describe('Where to type it.')
@@ -58,6 +59,14 @@ export const AuthorizeProviderResponse = zod.object({
  * and again on the connect-a-repository screen at the moment somebody wants
  * the thing it enables. Stored rather than configured, so it takes effect
  * without a restart.
+ *
+ * **The application is the installation's, so changing it is an
+ * administrator's.** The id itself is public — a device-flow application has
+ * no paired secret — and it is shared by everybody here by construction,
+ * which is the point: one application, and each person's own token under it.
+ * That is also why this was worth closing. Anyone at all could point the
+ * whole installation at an application they controlled, and the next person
+ * to connect would authorize it.
  * @summary Register an application to authorize against.
  */
 export const SetClientIdParams = zod.object({

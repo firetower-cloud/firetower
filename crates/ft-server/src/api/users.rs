@@ -8,6 +8,7 @@
 //! person they are for has to replace them the first time they sign in.
 
 use super::{ApiError, ApiResult, ErrorCode};
+use crate::access::Reach;
 use crate::accounts::{Organization, User};
 use crate::auth::Principal;
 use crate::AppState;
@@ -78,6 +79,9 @@ pub(super) async fn list_users(
 #[serde(rename_all = "camelCase")]
 pub struct NewUser {
     pub username: String,
+    /// Where to write to them. Required for anybody added from now on; the
+    /// accounts that predate it keep their absence rather than a guess.
+    pub email: String,
     /// `admin` or `member`.
     pub role: String,
 }
@@ -104,7 +108,7 @@ pub(super) async fn create_user(
     let me = admin(&principal)?;
     let (user, password) = state
         .accounts
-        .create_user(&me.org_id, &request.username, &request.role)
+        .create_user(&me.org_id, &request.username, &request.email, &request.role)
         .await
         .map_err(|e| ApiError::new(ErrorCode::InvalidRequest, format!("{e:#}")))?;
     tracing::info!(by = %me.username, user = %user.username, role = %user.role, "user added");
@@ -116,6 +120,9 @@ pub(super) async fn create_user(
 pub struct UserChange {
     /// `admin` or `member`, when the role changes.
     pub role: Option<String>,
+    /// An address, for an account made before one was asked for, or when
+    /// somebody's has changed.
+    pub email: Option<String>,
     /// Switched off, or back on.
     pub disabled: Option<bool>,
 }
@@ -146,6 +153,13 @@ pub(super) async fn change_user(
         user = state
             .accounts
             .set_disabled(&id, disabled)
+            .await
+            .map_err(|e| ApiError::new(ErrorCode::InvalidRequest, format!("{e:#}")))?;
+    }
+    if let Some(email) = request.email.as_deref() {
+        user = state
+            .accounts
+            .set_email(&id, email)
             .await
             .map_err(|e| ApiError::new(ErrorCode::InvalidRequest, format!("{e:#}")))?;
     }
@@ -190,6 +204,166 @@ pub(super) async fn reset_user_password(
     Ok(Json(TemporaryPassword { password }))
 }
 
+/// Everything one person reaches, and everything that is theirs.
+///
+/// **For deciding about them, which is the one time this question is asked.**
+/// Every other read goes the other way — "may this person see this thing",
+/// answered per row by `filed_where`. Offboarding needs the reverse, because
+/// removing somebody without being shown what goes with them is a decision
+/// taken blind.
+///
+/// An administrator's. It names things across the whole installation,
+/// including ones the person asking may not be able to reach themselves, which
+/// is exactly what makes it useful and exactly why it is gated.
+#[utoipa::path(
+    get, path = "/api/v1/users/{id}/reach", tag = "organization",
+    params(("id" = String, Path, description = "User id")),
+    responses((status = 200, body = Reach), (status = 403, body = ApiError), (status = 404, body = ApiError)),
+)]
+pub(super) async fn user_reach(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Path(id): Path<String>,
+) -> ApiResult<Json<Reach>> {
+    let me = admin(&principal)?;
+    let id = UserId::from_stored(id);
+    one_of_ours(&state, me, &id).await?;
+    Ok(Json(state.access.reach(id.as_str()).await?))
+}
+
+/// Who takes over a directory they were the last administrator of.
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct Successor {
+    pub directory: String,
+    /// A person or a team, as a grant names either.
+    pub subject_kind: crate::access::SubjectKind,
+    pub subject_id: String,
+}
+
+/// Agreeing to what happens when somebody goes.
+///
+/// **Nothing of theirs can be handed to anybody.** What is filed at
+/// `u/<them>/…` is theirs, and an administrator removing the account may
+/// destroy it — the account is going either way — but may never pass it on.
+/// Handing somebody's private work to a third party is the one outcome its
+/// owner never agreed to, and the only way out of a personal root is the owner
+/// moving it themselves, before they go.
+///
+/// A directory is the opposite: it is the organisation's, so being its last
+/// administrator is a job to hand on, and that is the one decision here.
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct Offboarding {
+    /// Read back and compared with what is actually theirs, so that agreeing to
+    /// a list means agreeing to *that* list. It can change between the screen
+    /// drawing it and somebody pressing the button.
+    #[serde(default)]
+    pub destroy: Vec<super::access::FiledRef>,
+    #[serde(default)]
+    pub successors: Vec<Successor>,
+    /// Switched off, or removed for good.
+    pub then: String,
+}
+
+/// Destroy what was theirs and take the account away — in one transaction.
+#[utoipa::path(
+    post, path = "/api/v1/users/{id}/offboard", tag = "organization",
+    params(("id" = String, Path, description = "User id")),
+    request_body = Offboarding,
+    responses(
+        (status = 204),
+        (status = 400, body = ApiError, description = "The list agreed to is not what is theirs"),
+        (status = 403, body = ApiError),
+    ),
+)]
+pub(super) async fn offboard_user(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Path(id): Path<String>,
+    Json(request): Json<Offboarding>,
+) -> ApiResult<axum::http::StatusCode> {
+    let me = admin(&principal)?;
+    let id = UserId::from_stored(id);
+    if id == me.id {
+        return Err(ApiError::new(
+            ErrorCode::InvalidRequest,
+            "you cannot offboard yourself",
+        ));
+    }
+    let user = one_of_ours(&state, me, &id).await?;
+
+    let reach = state.access.reach(id.as_str()).await?;
+    let remove = match request.then.as_str() {
+        "remove" => true,
+        "disable" => false,
+        other => {
+            return Err(ApiError::new(
+                ErrorCode::InvalidRequest,
+                format!("{other} is not something to do with an account"),
+            ))
+        }
+    };
+
+    // Agreeing to a list has to mean agreeing to *that* list. What is theirs can
+    // change between the screen drawing it and somebody pressing the button —
+    // they are still working until the moment they are switched off.
+    if remove {
+        let missing: Vec<&str> = reach
+            .owns
+            .iter()
+            .filter(|o| {
+                !request
+                    .destroy
+                    .iter()
+                    .any(|d| d.kind == o.kind && d.id == o.id)
+            })
+            .map(|o| o.name.as_str())
+            .collect();
+        if !missing.is_empty() {
+            return Err(ApiError::new(
+                ErrorCode::InvalidRequest,
+                format!(
+                    "this would also destroy {} — look again before agreeing",
+                    missing.join(", ")
+                ),
+            ));
+        }
+    }
+
+    // Before the account goes, so a directory is never briefly without one.
+    for s in &request.successors {
+        state
+            .access
+            .set_grant(
+                &s.directory,
+                s.subject_kind,
+                &s.subject_id,
+                crate::access::Level::Admin,
+                &me.id,
+            )
+            .await?;
+    }
+
+    let mut tx = state.db.pool().begin().await?;
+    if remove {
+        state.accounts.delete_user_in(&mut tx, &id).await?;
+    } else {
+        sqlx::query("UPDATE users SET disabled = true WHERE id = $1")
+            .bind(id.as_str())
+            .execute(&mut *tx)
+            .await?;
+    }
+    tx.commit().await?;
+
+    tracing::info!(
+        by = %me.username, user = %user.username,
+        destroyed = reach.owns.len(), successors = request.successors.len(),
+        removed = remove, "offboarded"
+    );
+    Ok(axum::http::StatusCode::NO_CONTENT)
+}
+
 /// Remove a user for good. Their workspaces go with them; prefer switching off.
 #[utoipa::path(
     delete, path = "/api/v1/users/{id}", tag = "organization",
@@ -210,6 +384,26 @@ pub(super) async fn delete_user(
         ));
     }
     let user = one_of_ours(&state, me, &id).await?;
+
+    // Refused while anything is still theirs. This used to sweep: workspaces
+    // and secrets deleted, machines moved, and the only warning a sentence true
+    // of anybody — *their workspaces go too* — which told you nothing about
+    // this person. What is theirs now has to be decided row by row, through
+    // `offboard`, and this stays as the short path for somebody who holds
+    // nothing.
+    let theirs = state.access.reach(id.as_str()).await?.owns;
+    if !theirs.is_empty() {
+        return Err(ApiError::new(
+            ErrorCode::InvalidRequest,
+            format!(
+                "{} still has {} thing{} of their own. Decide what happens to each before removing them.",
+                user.username,
+                theirs.len(),
+                if theirs.len() == 1 { "" } else { "s" }
+            ),
+        ));
+    }
+
     state
         .accounts
         .delete_user(&id)

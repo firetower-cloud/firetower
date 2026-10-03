@@ -4,7 +4,13 @@
  * Names and scopes are listed; a value is only ever shown by asking
  * (`reveal_secret`), which is logged on the server — the access trail is the
  * point of having a vault rather than a file. Keep and remove are the two
- * writes, and `keep` is one `PUT` whether the name is new or already held.
+ * A list, not a form. Every secret the product uses is made where it is used —
+ * a git token by connecting an account, an agent's credential by connecting a
+ * subscription, a repository's variables on the repository, the voice key on
+ * the composer. Nothing reads a scope somebody invented here, so a control that
+ * made one was a trap: you stored the thing, reasonably expected an agent to be
+ * given it, and it never was. What is left is seeing what is held, replacing a
+ * value, and taking one away.
  *
  * Every write says out loud when it is refused. A silent mutation here is how
  * "clicking Keep does nothing" got reported as the button being dead, when the
@@ -12,10 +18,12 @@
  */
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Eye, EyeOff, Plus, Trash2 } from "lucide-react";
+import { Eye, EyeOff, Trash2 } from "lucide-react";
 import { Icon } from "~/components/ui";
 import { getListSecretsQueryKey, useListSecrets, useRemoveSecret, useReplaceSecret, useRevealSecret } from "~/api/generated/secrets/secrets";
+import type { HeldSecret } from "~/api/generated/model";
 import { Section } from "~/ui/config/bits";
+import { WhoCanAccess } from "~/ui/Sharing";
 
 import { why } from "~/data";
 import { useConfirm } from "~/ui/Confirm";
@@ -23,45 +31,33 @@ import { useConfirm } from "~/ui/Confirm";
 export function Secrets() {
   const cache = useQueryClient();
   const { data, isPending, error } = useListSecrets();
-  const replace = useReplaceSecret();
-  const [adding, setAdding] = useState(false);
-  const [scope, setScope] = useState("global");
-  const [name, setName] = useState("");
-  const [value, setValue] = useState("");
   const refresh = () => cache.invalidateQueries({ queryKey: getListSecretsQueryKey() });
 
-  const held = (data as { held?: { scope: string; name: string; mine: boolean }[]; intact?: boolean } | undefined)?.held ?? [];
+  // The generated type, not a hand-written copy of it: this was spelled out
+  // here and so did not learn about `id` when the server grew one.
+  const held = (data as { held?: HeldSecret[] } | undefined)?.held ?? [];
 
   return (
     <Section
       title="Secrets"
-      note="Held encrypted, revealed only by asking, and every read is logged."
-      action={<button onClick={() => { setAdding(!adding); replace.reset(); }} className="control border border-line bg-raise text-ui text-bone hover:bg-overlay"><Icon of={Plus} size={12} />Add</button>}
+      note="Held encrypted, revealed only by asking, and every read is logged. Each one is made where it is used."
     >
       {isPending && <p className="px-3.5 py-4 text-ui text-mute">Reading the vault…</p>}
       {error ? <p className="px-3.5 py-4 text-ui text-brick">{why(error)}</p> : null}
-      {!isPending && !error && held.length === 0 && !adding && <p className="px-3.5 py-4 text-ui text-mute">Nothing held yet.</p>}
-
-      {adding && (
-        <div className="px-3.5 py-2.5">
-          <div className="flex items-center gap-2">
-            <input value={scope} onChange={(e) => setScope(e.target.value)} placeholder="scope" className="w-28 rounded-md border border-line bg-ground px-2 py-1 font-mono text-ui text-bone focus:outline-none" />
-            <input value={name} onChange={(e) => setName(e.target.value.toUpperCase())} placeholder="NAME" className="w-40 rounded-md border border-line bg-ground px-2 py-1 font-mono text-ui text-bone focus:outline-none" />
-            <input value={value} onChange={(e) => setValue(e.target.value)} type="password" placeholder="value" className="min-w-0 flex-1 rounded-md border border-line bg-ground px-2 py-1 font-mono text-ui text-bone focus:outline-none" />
-            <button disabled={!scope || !name || !value || replace.isPending} onClick={() => replace.mutate({ scope, name, data: { value } }, { onSuccess: () => { setName(""); setValue(""); setAdding(false); refresh(); } })} className="control border border-line bg-raise text-bone hover:bg-overlay disabled:text-mute">Keep</button>
-          </div>
-          {replace.isError && <p className="mt-1.5 text-meta text-brick">{why(replace.error)}</p>}
-        </div>
-      )}
+      {!isPending && !error && held.length === 0 && <p className="px-3.5 py-4 text-ui text-mute">Nothing held yet.</p>}
 
       {held.map((s) => (
-        <Row key={`${s.scope}/${s.name}`} scope={s.scope} name={s.name} mine={s.mine} onGone={refresh} />
+        <Row key={s.id} id={s.id} scope={s.scope} name={s.name} mine={s.mine} path={s.path} onGone={refresh} />
       ))}
     </Section>
   );
 }
 
-function Row({ scope, name, mine, onGone }: { scope: string; name: string; mine: boolean; onGone: () => void }) {
+/* `id` is `scope/name/owner`, which is the whole key. Scope and name alone are
+   not unique — two people each authorizing GitHub as themselves is the point —
+   so they are what the row *says* and `id` is what addresses it, here and as
+   the React key. */
+function Row({ id, scope, name, mine, path, onGone }: { id: string; scope: string; name: string; mine: boolean; path?: string | null; onGone: () => void }) {
   const confirm = useConfirm();
   const reveal = useRevealSecret();
   const remove = useRemoveSecret();
@@ -72,7 +68,23 @@ function Row({ scope, name, mine, onGone }: { scope: string; name: string; mine:
   return (
     <div className="flex items-center gap-2.5 px-3.5 py-2.5">
       <span className="w-24 shrink-0 truncate font-mono text-micro text-mute">{scope}</span>
-      <span className="min-w-0 flex-1 truncate font-mono text-ui text-text">{name}{!mine && <span className="ml-1.5 text-micro text-mute">· someone else's</span>}</span>
+      {/* What it says when it is not simply yours. A secret filed into a
+          directory has that directory as its owner — that is what handing it
+          over means — so `mine` goes false the moment it is shared, and
+          "someone else's" would be a lie about your own credential. The chip
+          beside it already says where it is; the only thing left to name is the
+          installation's own, which belongs to the deployment and to nobody. */}
+      <span className="min-w-0 flex-1 truncate font-mono text-ui text-text">{name}{!mine && !path && <span className="ml-1.5 text-micro text-mute">· this installation's</span>}</span>
+      {/* Filing a secret re-seals it: the owner is in the associated data of
+          both crypto layers, so it is opened under the old identity and sealed
+          under the new. That is why moving one is a real transfer and not a
+          second reader being added.
+
+          Never an `agent` one, and never a repository's `env:` variable. Those
+          are *attached* — they belong to an account or a repository and move when
+          it moves — so they arrive here with no path and the chip draws
+          nothing. Sharing the account is what sharing one of those means. */}
+      <WhoCanAccess look="chip" kind="secret" id={id} path={path} />
       {editing !== null ? (
         <>
           <input autoFocus value={editing} onChange={(e) => setEditing(e.target.value)} type="password" onKeyDown={(e) => { if (e.key === "Enter" && editing) replace.mutate({ scope, name, data: { value: editing } }, { onSuccess: () => setEditing(null) }); if (e.key === "Escape") setEditing(null); }} placeholder="new value" className="w-48 rounded-md border border-line bg-ground px-2 py-1 font-mono text-micro text-bone focus:outline-none" />

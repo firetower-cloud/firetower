@@ -149,6 +149,13 @@ function write(session: string, notes: Note[]) {
  * containing its own punctuation cannot be mistaken for the note.
  */
 export function asMessage(notes: Note[]): string {
+  // Nothing to say rather than a header with nothing under it. Every caller
+  // used to be behind a `notes.length > 0` render guard, so this could not
+  // happen — until one of them was a button on a card that is drawn whether
+  // or not anybody has written a note, and a new agent was started with
+  // "0 notes on what you said:" as its opening prompt.
+  if (notes.length === 0) return "";
+
   const parts = notes.map((n, i) => {
     const quote = n.quote
       .split("\n")

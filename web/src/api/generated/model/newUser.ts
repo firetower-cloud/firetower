@@ -7,6 +7,11 @@
  */
 
 export interface NewUser {
+  /**
+     * Where to write to them. Required for anybody added from now on; the
+     * accounts that predate it keep their absence rather than a guess.
+     */
+  email: string;
   /** `admin` or `member`. */
   role: string;
   username: string;

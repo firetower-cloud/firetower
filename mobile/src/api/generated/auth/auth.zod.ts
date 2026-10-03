@@ -17,10 +17,12 @@ export const LoginResponse = zod.object({
   "token": zod.string().describe('Sent back on every later request. Said once — only its hash is kept.'),
   "user": zod.object({
   "disabled": zod.boolean().optional().describe('Switched off by an administrator: cannot sign in, keeps what they made.'),
+  "email": zod.string().nullish().describe('Where to write to them. Absent on accounts made before one was asked\nfor, and never filled in with a guess: a placeholder address cannot be\ntold apart from a real one that bounces.'),
   "id": zod.string().describe('Identifies someone who can sign in.'),
-  "mustChangePassword": zod.boolean().describe('True while the password came from a file rather than from a person.\nNothing but replacing it is permitted until this clears.'),
+  "mustChangePassword": zod.boolean().describe('True while the password in use was chosen by somebody other than its\nowner: out of a file for the first administrator, and by an\nadministrator for everybody invited or reset since.\n\nNothing but replacing it is permitted until this clears, and replacing\nit is done on the control plane\'s own interface — the native clients\nread this to send people there rather than offering a form of their\nown.'),
   "orgId": zod.string().describe('Identifies an organisation.'),
   "role": zod.string(),
+  "slug": zod.string().describe('The label their own space is named with — the `kevin` in\n`u/kevin/ledger_rounding`.\n\nSent because a client cannot otherwise tell whether a path it is looking\nat is *theirs*. "Is this mine" is the first half of "may I decide where\nthis goes", and a client that has to guess gets it wrong in the generous\ndirection: it offers a control that the server then refuses.\n\nNot the username. That is chosen by people and may yet become an email\naddress; this is derived once and never changes, so renaming somebody\nnever moves anything.'),
   "username": zod.string()
 }).describe('Someone who can sign in.')
 }).describe('What a browser gets for a correct password.')
@@ -34,10 +36,12 @@ export const MeResponse = zod.object({
 }).describe('Absent until setting up has finished.')]).optional(),
   "user": zod.object({
   "disabled": zod.boolean().optional().describe('Switched off by an administrator: cannot sign in, keeps what they made.'),
+  "email": zod.string().nullish().describe('Where to write to them. Absent on accounts made before one was asked\nfor, and never filled in with a guess: a placeholder address cannot be\ntold apart from a real one that bounces.'),
   "id": zod.string().describe('Identifies someone who can sign in.'),
-  "mustChangePassword": zod.boolean().describe('True while the password came from a file rather than from a person.\nNothing but replacing it is permitted until this clears.'),
+  "mustChangePassword": zod.boolean().describe('True while the password in use was chosen by somebody other than its\nowner: out of a file for the first administrator, and by an\nadministrator for everybody invited or reset since.\n\nNothing but replacing it is permitted until this clears, and replacing\nit is done on the control plane\'s own interface — the native clients\nread this to send people there rather than offering a form of their\nown.'),
   "orgId": zod.string().describe('Identifies an organisation.'),
   "role": zod.string(),
+  "slug": zod.string().describe('The label their own space is named with — the `kevin` in\n`u/kevin/ledger_rounding`.\n\nSent because a client cannot otherwise tell whether a path it is looking\nat is *theirs*. "Is this mine" is the first half of "may I decide where\nthis goes", and a client that has to guess gets it wrong in the generous\ndirection: it offers a control that the server then refuses.\n\nNot the username. That is chosen by people and may yet become an email\naddress; this is derived once and never changes, so renaming somebody\nnever moves anything.'),
   "username": zod.string()
 }).describe('Someone who can sign in.')
 }).describe('Who the caller is, and what they belong to.')

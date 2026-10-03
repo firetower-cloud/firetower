@@ -104,7 +104,7 @@ async fn write_new(path: &Path, key: &RootKey) -> Result<()> {
     // readable, and it is avoidable.
     let temp = path.with_extension("key.new");
     restrict(&temp).await?;
-    tokio::fs::write(&temp, format!("{}\n", &*key.encode()))
+    tokio::fs::write(&temp, format!("{}\n", *key.encode()))
         .await
         .with_context(|| format!("writing {}", temp.display()))?;
 

@@ -97,13 +97,7 @@ pub(crate) async fn agent_credential(
         return Ok(Vec::new());
     };
 
-    let Some(secret) = vault
-        .get(
-            Key::of(crate::vault::AGENT, &account.credential_key, owner),
-            why,
-        )
-        .await?
-    else {
+    let Some(secret) = vault.get(account.credential(), why).await? else {
         return Ok(Vec::new());
     };
 
@@ -139,7 +133,7 @@ pub(super) async fn agent_home(
     let Some(secret) = state
         .vault
         .get(
-            Key::of(vault::AGENT, &account.credential_key, owner),
+            account.credential(),
             &format!("starting {session} with {}", kind.label()),
         )
         .await?
@@ -275,17 +269,20 @@ pub(super) async fn list_agents(
         // The vault answers whether one is set without decrypting anything, so
         // rendering this screen never touches a credential.
         let default = super::accounts::default_account(&state.db, owner, kind).await?;
-        let credential_set = state
-            .vault
-            .holds(Key::of(
-                vault::AGENT,
-                default
-                    .as_ref()
-                    .map(|a| a.credential_key.as_str())
-                    .unwrap_or(&agent_key(kind)),
-                owner,
-            ))
-            .await?;
+        let credential_set = match default.as_ref() {
+            // Through the account, so that a subscription filed into a
+            // directory still reads as connected: its credential is sealed
+            // under the directory now, not under whoever connected it.
+            Some(a) => state.vault.holds(a.credential()).await?,
+            // Nothing selected: the pre-accounts row, which is still keyed by
+            // agent kind under the person.
+            None => {
+                state
+                    .vault
+                    .holds(Key::of(vault::AGENT, &agent_key(kind), owner))
+                    .await?
+            }
+        };
 
         views.push(AgentView {
             kind,
@@ -507,7 +504,7 @@ pub(super) async fn sign_agent_in(
             "create the account first, then sign it in",
         )
     })?;
-    let account = super::accounts::find(&state.db, &owner, &account_id).await?;
+    let account = super::accounts::mine(&state.db, &owner, &account_id).await?;
     if account.kind != agent_key(kind) || account.mode != "Subscription" {
         return Err(ApiError::new(
             ErrorCode::InvalidRequest,

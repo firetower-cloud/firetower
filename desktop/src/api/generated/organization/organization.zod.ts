@@ -25,10 +25,12 @@ export const RenameOrganizationResponse = zod.object({
  */
 export const ListUsersResponseItem = zod.object({
   "disabled": zod.boolean().optional().describe('Switched off by an administrator: cannot sign in, keeps what they made.'),
+  "email": zod.string().nullish().describe('Where to write to them. Absent on accounts made before one was asked\nfor, and never filled in with a guess: a placeholder address cannot be\ntold apart from a real one that bounces.'),
   "id": zod.string().describe('Identifies someone who can sign in.'),
-  "mustChangePassword": zod.boolean().describe('True while the password came from a file rather than from a person.\nNothing but replacing it is permitted until this clears.'),
+  "mustChangePassword": zod.boolean().describe('True while the password in use was chosen by somebody other than its\nowner: out of a file for the first administrator, and by an\nadministrator for everybody invited or reset since.\n\nNothing but replacing it is permitted until this clears, and replacing\nit is done on the control plane\'s own interface — the native clients\nread this to send people there rather than offering a form of their\nown.'),
   "orgId": zod.string().describe('Identifies an organisation.'),
   "role": zod.string(),
+  "slug": zod.string().describe('The label their own space is named with — the `kevin` in\n`u/kevin/ledger_rounding`.\n\nSent because a client cannot otherwise tell whether a path it is looking\nat is *theirs*. "Is this mine" is the first half of "may I decide where\nthis goes", and a client that has to guess gets it wrong in the generous\ndirection: it offers a control that the server then refuses.\n\nNot the username. That is chosen by people and may yet become an email\naddress; this is derived once and never changes, so renaming somebody\nnever moves anything.'),
   "username": zod.string()
 }).describe('Someone who can sign in.')
 export const ListUsersResponse = zod.array(ListUsersResponseItem)
@@ -37,6 +39,7 @@ export const ListUsersResponse = zod.array(ListUsersResponseItem)
  * @summary Add a user. The answer carries their temporary password.
  */
 export const CreateUserBody = zod.object({
+  "email": zod.string().describe('Where to write to them. Required for anybody added from now on; the\naccounts that predate it keep their absence rather than a guess.'),
   "role": zod.string().describe('`admin` or `member`.'),
   "username": zod.string()
 })
@@ -45,10 +48,12 @@ export const CreateUserResponse = zod.object({
   "password": zod.string(),
   "user": zod.object({
   "disabled": zod.boolean().optional().describe('Switched off by an administrator: cannot sign in, keeps what they made.'),
+  "email": zod.string().nullish().describe('Where to write to them. Absent on accounts made before one was asked\nfor, and never filled in with a guess: a placeholder address cannot be\ntold apart from a real one that bounces.'),
   "id": zod.string().describe('Identifies someone who can sign in.'),
-  "mustChangePassword": zod.boolean().describe('True while the password came from a file rather than from a person.\nNothing but replacing it is permitted until this clears.'),
+  "mustChangePassword": zod.boolean().describe('True while the password in use was chosen by somebody other than its\nowner: out of a file for the first administrator, and by an\nadministrator for everybody invited or reset since.\n\nNothing but replacing it is permitted until this clears, and replacing\nit is done on the control plane\'s own interface — the native clients\nread this to send people there rather than offering a form of their\nown.'),
   "orgId": zod.string().describe('Identifies an organisation.'),
   "role": zod.string(),
+  "slug": zod.string().describe('The label their own space is named with — the `kevin` in\n`u/kevin/ledger_rounding`.\n\nSent because a client cannot otherwise tell whether a path it is looking\nat is *theirs*. "Is this mine" is the first half of "may I decide where\nthis goes", and a client that has to guess gets it wrong in the generous\ndirection: it offers a control that the server then refuses.\n\nNot the username. That is chosen by people and may yet become an email\naddress; this is derived once and never changes, so renaming somebody\nnever moves anything.'),
   "username": zod.string()
 }).describe('Someone who can sign in.')
 }).describe('A user, and the password made for them — shown once, never again.')
@@ -71,17 +76,42 @@ export const ChangeUserParams = zod.object({
 
 export const ChangeUserBody = zod.object({
   "disabled": zod.boolean().nullish().describe('Switched off, or back on.'),
+  "email": zod.string().nullish().describe('An address, for an account made before one was asked for, or when\nsomebody\'s has changed.'),
   "role": zod.string().nullish().describe('`admin` or `member`, when the role changes.')
 })
 
 export const ChangeUserResponse = zod.object({
   "disabled": zod.boolean().optional().describe('Switched off by an administrator: cannot sign in, keeps what they made.'),
+  "email": zod.string().nullish().describe('Where to write to them. Absent on accounts made before one was asked\nfor, and never filled in with a guess: a placeholder address cannot be\ntold apart from a real one that bounces.'),
   "id": zod.string().describe('Identifies someone who can sign in.'),
-  "mustChangePassword": zod.boolean().describe('True while the password came from a file rather than from a person.\nNothing but replacing it is permitted until this clears.'),
+  "mustChangePassword": zod.boolean().describe('True while the password in use was chosen by somebody other than its\nowner: out of a file for the first administrator, and by an\nadministrator for everybody invited or reset since.\n\nNothing but replacing it is permitted until this clears, and replacing\nit is done on the control plane\'s own interface — the native clients\nread this to send people there rather than offering a form of their\nown.'),
   "orgId": zod.string().describe('Identifies an organisation.'),
   "role": zod.string(),
+  "slug": zod.string().describe('The label their own space is named with — the `kevin` in\n`u/kevin/ledger_rounding`.\n\nSent because a client cannot otherwise tell whether a path it is looking\nat is *theirs*. "Is this mine" is the first half of "may I decide where\nthis goes", and a client that has to guess gets it wrong in the generous\ndirection: it offers a control that the server then refuses.\n\nNot the username. That is chosen by people and may yet become an email\naddress; this is derived once and never changes, so renaming somebody\nnever moves anything.'),
   "username": zod.string()
 }).describe('Someone who can sign in.')
+
+/**
+ * @summary Destroy what was theirs and take the account away — in one transaction.
+ */
+export const OffboardUserParams = zod.object({
+  "id": zod.string().describe('User id')
+})
+
+export const OffboardUserBody = zod.object({
+  "destroy": zod.array(zod.object({
+  "id": zod.string(),
+  "kind": zod.enum(['workspace', 'machine', 'agentAccount', 'secret', 'repository'])
+}).describe('One thing to move, named the way `Filed` names it.\n\n**Not `Placed`.** That is already a schema in this contract — where an\nattached file landed in a workspace — and utoipa registers a type by its\nshort name, so a second `Placed` silently becomes whichever of the two the\ngenerator reached last. The clients then typecheck against a shape the\nserver never sends.')).optional().describe('Read back and compared with what is actually theirs, so that agreeing to\na list means agreeing to *that* list. It can change between the screen\ndrawing it and somebody pressing the button.'),
+  "successors": zod.array(zod.object({
+  "directory": zod.string(),
+  "subjectId": zod.string(),
+  "subjectKind": zod.enum(['person', 'team']).describe('A person or a team, as a grant names either.')
+}).describe('Who takes over a directory they were the last administrator of.')).optional(),
+  "then": zod.string().describe('Switched off, or removed for good.')
+}).describe('Agreeing to what happens when somebody goes.\n\n**Nothing of theirs can be handed to anybody.** What is filed at\n`u/<them>/…` is theirs, and an administrator removing the account may\ndestroy it — the account is going either way — but may never pass it on.\nHanding somebody\'s private work to a third party is the one outcome its\nowner never agreed to, and the only way out of a personal root is the owner\nmoving it themselves, before they go.\n\nA directory is the opposite: it is the organisation\'s, so being its last\nadministrator is a job to hand on, and that is the one decision here.')
+
+export const OffboardUserResponse = zod.void()
 
 /**
  * @summary Give a user a new temporary password. Their sessions end; they replace it on sign-in.
@@ -93,4 +123,79 @@ export const ResetUserPasswordParams = zod.object({
 export const ResetUserPasswordResponse = zod.object({
   "password": zod.string()
 }).describe('What a reset hands back: the new temporary password, said once.')
+
+/**
+ * **For deciding about them, which is the one time this question is asked.**
+ * Every other read goes the other way — "may this person see this thing",
+ * answered per row by `filed_where`. Offboarding needs the reverse, because
+ * removing somebody without being shown what goes with them is a decision
+ * taken blind.
+ *
+ * An administrator's. It names things across the whole installation,
+ * including ones the person asking may not be able to reach themselves, which
+ * is exactly what makes it useful and exactly why it is gated.
+ * @summary Everything one person reaches, and everything that is theirs.
+ */
+export const UserReachParams = zod.object({
+  "id": zod.string().describe('User id')
+})
+
+export const UserReachResponse = zod.object({
+  "administers": zod.array(zod.object({
+  "alone": zod.boolean().describe('Nobody else administers it. Not a blocker — an organisation\nadministrator can administer any directory, which is the fallback that\nmakes a directory whose last administrator left fixable. It is said\nbecause the people who *work* there would lose the ability to file\nanything out of it.'),
+  "directoryId": zod.string(),
+  "name": zod.string(),
+  "slug": zod.string()
+}).describe('Everything one person can reach, and everything that is theirs.\n\n**Answered for a person, which is the opposite of how access is stored.**\nEvery other read asks "may this person see this thing" and lets\n[`filed_where`] answer it per row. This asks the reverse, and nothing else\nneeds it — only offboarding, where deciding about somebody means seeing what\ngoes with them before it goes.\n\nEach field is a list so the shape can grow a kind without breaking a client:\na reader that does not know about a new one ignores it rather than failing.')).describe('Directories they administer, and whether anybody else does.'),
+  "created": zod.array(zod.object({
+  "detail": zod.string().nullish().describe('The second line: the repository, the agent, the scope.'),
+  "id": zod.string().describe('What identifies it. A secret has no id of its own — it is keyed by\nscope, name and owner — so for one of those this is `scope/name/owner`,\nand\nthe owner is whoever is asking. See `Access::place`.'),
+  "kind": zod.enum(['workspace', 'machine', 'agentAccount', 'secret', 'repository']),
+  "name": zod.string(),
+  "ownerName": zod.string().nullish().describe('Whose it is. Absent for a machine, which is the organisation\'s.'),
+  "path": zod.string().describe('Where it is filed — and so who can reach it.')
+}).describe('One of the things a directory holds.\n\nFour kinds in one list, because "what is in here" is one question and\nanswering it four times is how a screen ends up with four tables nobody\nreads. What differs between them is only what the second line says.')).describe('They made these and then filed them somewhere else, so the directory\nowns them now and they do not go with them. Nothing to decide — shown\nbecause somebody deciding about a person wants the whole picture, and\nthe absence of an action is the answer to "what happens to the thing\nana built for the backend team".'),
+  "directories": zod.array(zod.object({
+  "directoryId": zod.string(),
+  "level": zod.enum(['viewer', 'writer', 'admin']).describe('The most generous of the routes below.'),
+  "name": zod.string(),
+  "slug": zod.string(),
+  "through": zod.array(zod.union([zod.object({
+  "how": zod.enum(['direct'])
+}).describe('A grant naming them.'),zod.object({
+  "how": zod.enum(['team']),
+  "name": zod.string()
+}).describe('A grant naming a team they are in.'),zod.object({
+  "how": zod.enum(['everyone'])
+}).describe('A grant naming the team that is everybody. Leaving is not possible;\nonly the grant can go.')]).describe('How somebody came by the access they have to a directory.\n\nNot `Route`, which is taken: the sharing sheet already has one, meaning\n*owner, directory or exception*. Two schemas of the same name do not\ncollide loudly — one silently replaces the other in every generated client,\nand the first sign is a field typed as something unrelated.\n\nFlattened, `directory_access` answers *what* they may do and loses *why* —\nwhich is the only thing that matters when the question is how to take it\naway. Revoking a grant that was never theirs to begin with changes nothing;\nthe team is what has to be left.'))
+})).describe('Directories they can work in, and how they came by each.'),
+  "exceptions": zod.array(zod.object({
+  "id": zod.string(),
+  "kind": zod.enum(['workspace', 'machine', 'agentAccount', 'secret', 'repository']),
+  "level": zod.enum(['viewer', 'writer', 'admin']).describe('How much somebody may do in a directory.\n\nOrdered, and the order is the point — every check is "at least this much".\n`Ord` comes from the declaration order, so `Viewer < Writer < Admin` without\na comparison written anywhere.'),
+  "name": zod.string(),
+  "through": zod.union([zod.object({
+  "how": zod.enum(['direct'])
+}).describe('A grant naming them.'),zod.object({
+  "how": zod.enum(['team']),
+  "name": zod.string()
+}).describe('A grant naming a team they are in.'),zod.object({
+  "how": zod.enum(['everyone'])
+}).describe('A grant naming the team that is everybody. Leaving is not possible;\nonly the grant can go.')]).describe('Named personally, or through a team they are in.')
+})).describe('Resources naming them personally, or naming a team they are in.'),
+  "owns": zod.array(zod.object({
+  "detail": zod.string().nullish().describe('The second line: the repository, the agent, the scope.'),
+  "id": zod.string().describe('What identifies it. A secret has no id of its own — it is keyed by\nscope, name and owner — so for one of those this is `scope/name/owner`,\nand\nthe owner is whoever is asking. See `Access::place`.'),
+  "kind": zod.enum(['workspace', 'machine', 'agentAccount', 'secret', 'repository']),
+  "name": zod.string(),
+  "ownerName": zod.string().nullish().describe('Whose it is. Absent for a machine, which is the organisation\'s.'),
+  "path": zod.string().describe('Where it is filed — and so who can reach it.')
+}).describe('One of the things a directory holds.\n\nFour kinds in one list, because "what is in here" is one question and\nanswering it four times is how a screen ends up with four tables nobody\nreads. What differs between them is only what the second line says.')).describe('Filed in their own root. This is what a deletion takes with it.'),
+  "teams": zod.array(zod.object({
+  "everyone": zod.boolean().describe('True for the one team that is everybody in the organisation. It has no\nmembership rows: whoever exists now is who it means.'),
+  "id": zod.string().describe('Identifies a team — a named group of people.'),
+  "members": zod.int().describe('How many people are in it. The whole organisation, for `everyone`.'),
+  "name": zod.string()
+}).describe('A named group of people.'))
+})
 

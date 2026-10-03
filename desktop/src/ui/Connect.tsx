@@ -17,6 +17,7 @@ import { ArrowRight, CircleSlash2, Loader2, Lock } from "lucide-react";
 import { Mark } from "~/ui/Mark";
 import { MIN_SERVER, packaged, reach, signIn, type Bootstrap } from "~/probe";
 import { remember } from "~/servers";
+import { ReplacePassword } from "~/ui/ReplacePassword";
 
 type Stage =
   | { at: "where" }
@@ -24,18 +25,33 @@ type Stage =
   | { at: "unreachable"; typed: string; detail: string }
   | { at: "refused"; typed: string; detail: string }
   | { at: "who"; url: string; boot: Bootstrap }
+  // The password was right and is temporary. A third question, after where and
+  // who: nothing is stored, because a server this Mac cannot yet use is not a
+  // server this Mac has been connected to.
+  | { at: "locked"; url: string; boot: Bootstrap; user: string }
   | { at: "joining" };
 
 export function Connect({
   onDone,
   onCancel,
+  at,
 }: {
   /** Handed the new server's id, so the app can switch to it. */
   onDone: (serverId: string) => void;
   onCancel?: () => void;
+  /**
+   * An address already known to be a Firetower: signing in again to a server
+   * this Mac is still connected to, whose token has stopped working.
+   *
+   * The first question is skipped rather than pre-filled. Asking somebody to
+   * confirm an address they got right months ago, because a password changed
+   * in a browser, is asking them to re-answer a question nothing has
+   * invalidated.
+   */
+  at?: string;
 }) {
-  const [typed, setTyped] = useState("");
-  const [stage, setStage] = useState<Stage>({ at: "where" });
+  const [typed, setTyped] = useState(at ?? "");
+  const [stage, setStage] = useState<Stage>(at ? { at: "reaching" } : { at: "where" });
 
   const find = async (address: string) => {
     setStage({ at: "reaching" });
@@ -47,6 +63,13 @@ export function Connect({
     }
     setStage({ at: "who", url: found.url, boot: found.at });
   };
+
+  // Only for the address handed in, and only once. `find` is redefined every
+  // render, so depending on it would reach the server again on each one.
+  useEffect(() => {
+    if (at) void find(at);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [at]);
 
   return (
     <div className="grid h-full min-w-0 flex-1 place-items-center bg-ground px-6">
@@ -80,11 +103,23 @@ export function Connect({
           />
         )}
 
+        {stage.at === "locked" && (
+          <ReplacePassword
+            url={stage.url}
+            username={stage.user}
+            retryLabel="Sign in again"
+            onRetry={() => setStage({ at: "who", url: stage.url, boot: stage.boot })}
+            onBack={() => setStage({ at: "where" })}
+            backLabel="Use a different address"
+          />
+        )}
+
         {stage.at === "who" && (
           <Who
             url={stage.url}
             boot={stage.boot}
             onBack={() => setStage({ at: "where" })}
+            onLocked={(user) => setStage({ at: "locked", url: stage.url, boot: stage.boot, user })}
             onIn={(token, user) => {
               const serverId = stage.boot.serverId ?? stage.url;
               remember({
@@ -300,11 +335,14 @@ function Who({
   url,
   boot,
   onIn,
+  onLocked,
   onBack,
 }: {
   url: string;
   boot: Bootstrap;
   onIn: (token: string, user: string) => void;
+  /** The password was correct and has to be replaced before anything else. */
+  onLocked: (user: string) => void;
   onBack: () => void;
 }) {
   const [username, setUsername] = useState("");
@@ -327,6 +365,12 @@ function Who({
     setBusy(false);
     if (!out.ok) {
       setWrong(out.why);
+      return;
+    }
+    // Not `setWrong`: the password was right. Saying so under the field they
+    // just filled in would send them to look for a typo that is not there.
+    if (out.mustChangePassword) {
+      onLocked(out.user);
       return;
     }
     onIn(out.token, out.user);

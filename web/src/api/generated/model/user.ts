@@ -14,13 +14,40 @@ import type { UserId } from './userId';
 export interface User {
   /** Switched off by an administrator: cannot sign in, keeps what they made. */
   disabled?: boolean;
+  /**
+     * Where to write to them. Absent on accounts made before one was asked
+     * for, and never filled in with a guess: a placeholder address cannot be
+     * told apart from a real one that bounces.
+     * @nullable
+     */
+  email?: string | null;
   id: UserId;
   /**
-     * True while the password came from a file rather than from a person.
-     * Nothing but replacing it is permitted until this clears.
+     * True while the password in use was chosen by somebody other than its
+     * owner: out of a file for the first administrator, and by an
+     * administrator for everybody invited or reset since.
+     *
+     * Nothing but replacing it is permitted until this clears, and replacing
+     * it is done on the control plane's own interface — the native clients
+     * read this to send people there rather than offering a form of their
+     * own.
      */
   mustChangePassword: boolean;
   orgId: OrgId;
   role: string;
+  /**
+     * The label their own space is named with — the `kevin` in
+     * `u/kevin/ledger_rounding`.
+     *
+     * Sent because a client cannot otherwise tell whether a path it is looking
+     * at is *theirs*. "Is this mine" is the first half of "may I decide where
+     * this goes", and a client that has to guess gets it wrong in the generous
+     * direction: it offers a control that the server then refuses.
+     *
+     * Not the username. That is chosen by people and may yet become an email
+     * address; this is derived once and never changes, so renaming somebody
+     * never moves anything.
+     */
+  slug: string;
   username: string;
 }

@@ -30,7 +30,24 @@ export interface SetupState {
   needsGithub: boolean;
   /** Nobody has named the organisation yet. */
   needsOrganization: boolean;
-  /** The signed-in account's password came from a file. */
+  /**
+     * The signed-in account's password was chosen by somebody else and has
+     * to be replaced. The only step of setting up that is not about the
+     * install — it is raised for anybody invited or reset, long after.
+     */
   needsPassword: boolean;
   organization?: null | Organization;
+  /**
+     * Where a person reaches this Firetower in a browser.
+     *
+     * **Not whatever host served the page.** The interface and the control
+     * plane are two addresses — in development they are two ports, and in a
+     * deployment behind a proxy they can be two names — so a screen that hands
+     * somebody a sign-in link cannot read it off its own `window.location`
+     * and be right anywhere but the installation it happens to be running on.
+     *
+     * `FIRETOWER_PUBLIC_URL` when it is set, and the interface's own address
+     * otherwise. It is the same value the session notifications link to.
+     */
+  publicUrl: string;
 }
