@@ -856,3 +856,108 @@ async fn a_machine_is_not_every_members_to_change() {
         "a member sees none of the administrator's machines"
     );
 }
+
+/// Updating an agent on a machine is the machine's question, not the agent's.
+///
+/// `update_agent` moves every host that is behind onto the published version.
+/// Read as "every host in the organisation" it would let one member reinstall
+/// Claude Code under a colleague's running sessions — the same hole
+/// [`a_machine_is_not_every_members_to_change`] closed for renaming and
+/// draining, arriving by a different door.
+///
+/// What the screen is told and what the endpoint does come from one predicate,
+/// so this pins the flag: a button offered to somebody the action would skip is
+/// the failure worth catching.
+#[tokio::test]
+async fn an_agent_is_only_updated_on_machines_somebody_administers() {
+    let (state, owner_principal, host, _ready, _owner) = fixture().await;
+
+    let org = ft_core::OrgId::from_stored(state.db.org().await.unwrap());
+    let ana = state
+        .accounts
+        .create_user(&org, "ana", "ana@example.test", "member")
+        .await
+        .unwrap()
+        .0;
+    let member = crate::auth::Principal {
+        subject: "ana".into(),
+        via: crate::auth::Via::Session,
+        user: Some(ana.clone()),
+    };
+
+    // Installed, and behind: the pair that puts a button on the row.
+    state
+        .db
+        .record_presence(
+            &host.id,
+            &[ft_core::AgentPresence {
+                kind: Agent::ClaudeCode,
+                installed: true,
+                version: Some("2.1.273 (Claude Code)".into()),
+                logged_in: Some(true),
+                account: None,
+            }],
+        )
+        .await
+        .unwrap();
+
+    let claude = |views: Vec<super::agents::AgentView>| {
+        views
+            .into_iter()
+            .find(|v| v.kind == Agent::ClaudeCode)
+            .expect("Claude Code is always listed")
+    };
+
+    // The fixture's machine was added by the administrator, so it sits in their
+    // own space. Ana may be told it is stale; it is not hers to move.
+    let hers = claude(
+        super::agents::list_agents(State(state.clone()), Extension(member.clone()))
+            .await
+            .unwrap()
+            .0,
+    );
+    let row = hers
+        .hosts
+        .iter()
+        .find(|h| h.host_id == host.id.as_str())
+        .expect("she can see the machine exists");
+    assert!(
+        !row.may_update,
+        "a member was offered an update on somebody else's machine"
+    );
+
+    // And its owner is offered it, or the flag would be saying no to everybody.
+    let theirs = claude(
+        super::agents::list_agents(State(state.clone()), Extension(owner_principal))
+            .await
+            .unwrap()
+            .0,
+    );
+    let row = theirs
+        .hosts
+        .iter()
+        .find(|h| h.host_id == host.id.as_str())
+        .expect("their own machine");
+    assert!(
+        row.may_update,
+        "the machine's owner was refused their own machine"
+    );
+
+    // And the per-host button behind the same flag, or the fleet-wide gate is
+    // decoration: both fetch the same binary onto the same machine.
+    match super::agents::install_agent(
+        State(state.clone()),
+        Extension(member),
+        Path("ClaudeCode".to_string()),
+        Json(serde_json::from_value(serde_json::json!({ "hostId": host.id.as_str() })).unwrap()),
+    )
+    .await
+    {
+        Err(e) => assert!(
+            matches!(e.code, ErrorCode::Forbidden | ErrorCode::NotFound),
+            "installing onto somebody else's machine was refused, but with {:?}",
+            e.code
+        ),
+        Ok(_) => panic!("a member installed an agent onto somebody else's machine"),
+    }
+}

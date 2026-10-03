@@ -272,6 +272,7 @@ async fn credential_for(
         RemoteRepo,
         AgentMode,
         AgentPresence,
+        agents::Updated,
         ft_core::WorkSummary,
         ft_core::CheckoutSummary,
         ft_core::CheckoutWork,
@@ -393,6 +394,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(agents::check_agents))
         .routes(routes!(agents::sign_agent_in))
         .routes(routes!(agents::install_agent))
+        .routes(routes!(agents::update_agent))
         .routes(routes!(secrets::list_secrets))
         .routes(routes!(secrets::replace_secret, secrets::remove_secret))
         .routes(routes!(secrets::reveal_secret))

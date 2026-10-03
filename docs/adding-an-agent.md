@@ -64,6 +64,12 @@ remember to prepare.
   harder. `curl` and `tar` are the budget.
 - Add the directory name in both `runtime.rs` and `worker_main.rs` —
   `agents add <name>` resolves through it.
+- Put the publisher's address in `ft_core::releases`, not in `runtime.rs`. The
+  control plane asks the same service what the newest version is so it can say
+  when a host is behind one — `newest_url` is where it looks, and an agent
+  missing from it is an agent that silently never goes stale. If the version is
+  not a bare string at `<base>/latest`, `updates::agents` needs a reader for
+  whatever shape it is, the way Codex's release list has one.
 
 ## Sign it in from the control plane
 
@@ -128,6 +134,38 @@ remember to prepare.
 - If a change in flight blocks the next one, make sure the block can clear. An
   agent that never answers must not lock the pickers for the life of the
   connection.
+
+### When a model ships
+
+Codex and Kimi list their own models, so a new one appears in the picker on its
+own — that is why nothing is written down for them. Claude Code offers no way to
+ask: there is no subcommand that lists models, and the `init` line names only the
+one it is running. So its catalogue is ours, in
+`crates/ft-core/src/controls.rs`, and it is the one list in this repository that
+goes stale by itself.
+
+Most releases need nothing. `--model` takes an alias for the newest model in a
+family — `opus`, `sonnet`, `fable` — and every value in `claude_models()` is
+one, so a new Opus is picked up without a change here or a newer CLI. It is a
+new *family*, or a new effort level, that needs a person.
+
+What to touch, and in this order:
+
+1. `claude_models()` — the alias, not a resolved name. A resolved name pins
+   every session to one build of one model.
+2. `claude_efforts()` — check against `claude --help`, which lists the levels
+   the installed CLI accepts. This list was missing `xhigh` for months.
+3. `BIGGEST` in `crates/ft-core/src/lib.rs`, if the default should move.
+4. Nothing else. `claude_choice_for` derives its matching from
+   `claude_models()`, so a family added above is recognised without being named
+   twice.
+
+Worth knowing why this is worth catching: Claude Code does **not** refuse a
+model it has never heard of. It prints `isn't described by this version's model
+catalog`, carries on, and assumes a 200k context window. A stale entry here, or
+a CLI too old for a name we send it, costs a session most of its window and
+reports nothing — so the Agents screen showing a host as behind is the only
+warning anybody gets.
 
 ## Every client
 

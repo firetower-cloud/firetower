@@ -31,7 +31,8 @@ import type {
   ConfigureAgent,
   InstallAgent,
   PendingAuth,
-  SignIn
+  SignIn,
+  Updated
 } from '../model';
 
 import { http } from '../../../client/http.ts';
@@ -586,4 +587,99 @@ export const useSignAgentIn = <TError = ApiError,
         TContext
       > => {
       return useMutation(getSignAgentInMutationOptions(options), queryClient);
+    }
+    export const getUpdateAgentUrl = (kind: string,) => {
+
+
+
+
+  return `/api/v1/agents/${kind}/update`
+}
+
+/**
+ * One press for a fleet, because the alternative is the same button once per
+ * machine and a list of which ones you have already done.
+ *
+ * Three decisions worth stating:
+ *
+ * * **The version is resolved once, here, and every host is given it by name.**
+ *   Asking each of them for `latest` instead would split a fleet across two
+ *   versions if a release landed in the middle of the run — the same reason the
+ *   worker pins Codex's sidecar to the CLI that will spawn it.
+ * * **Only hosts that are behind.** A host already on it is not reinstalled,
+ *   and a host with a build somebody pinned *ahead* of the feed is left alone:
+ *   [`crate::updates::agents::behind`] refuses to call either one stale.
+ * * **One at a time, and a failure does not stop the rest.** Clearer about
+ *   which host went wrong, and it keeps several hundred-megabyte downloads off
+ *   one uplink. A run where two of five hosts failed is a useful answer.
+ * * **Only machines this person administers.** Installing an agent is felt by
+ *   everybody running on the machine, so it is the question `may_share` answers
+ *   about a machine's fate rather than about using one — see
+ *   `api::hosts::to_administer`. Without this, "every host that is behind"
+ *   would mean every host in the organisation, and one member could reinstall
+ *   under a colleague's running sessions. Skipped rather than refused, so a
+ *   fleet somebody part-owns still moves the part that is theirs.
+ * @summary Bring every host that is behind onto the published version.
+ */
+export const updateAgent = async (kind: string, options?: Parameters<typeof http>[1]): Promise<Updated[]> => {
+
+  return http<Updated[]>(getUpdateAgentUrl(kind),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getUpdateAgentMutationKey = () => ['updateAgent'] as const;
+
+export const getUpdateAgentMutationOptions = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateAgent>>, TError,UpdateAgentMutationVariables, TContext>, request?: SecondParameter<typeof http>}
+): UseMutationOptions<Awaited<ReturnType<typeof updateAgent>>, TError,UpdateAgentMutationVariables, TContext> => {
+
+const mutationKey = getUpdateAgentMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateAgent>>, UpdateAgentMutationVariables> = (props) => {
+          const {kind} = props ?? {};
+
+          return  updateAgent(kind,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateAgentMutationResult = NonNullable<Awaited<ReturnType<typeof updateAgent>>>
+
+    export type UpdateAgentMutationError = ApiError
+    export type UpdateAgentMutationVariables = {kind: string}
+
+    /**
+ * @summary Bring every host that is behind onto the published version.
+ */
+export const useUpdateAgent = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateAgent>>, TError,UpdateAgentMutationVariables, TContext>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof updateAgent>>,
+        TError,
+        UpdateAgentMutationVariables,
+        TContext
+      > => {
+      return useMutation(getUpdateAgentMutationOptions(options), queryClient);
     }

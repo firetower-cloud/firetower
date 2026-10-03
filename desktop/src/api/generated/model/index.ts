@@ -214,6 +214,7 @@ export * from './turnEvent.ts';
 export * from './turnId.ts';
 export * from './turnStatus.ts';
 export * from './updateAccount.ts';
+export * from './updated.ts';
 export * from './updateRun.ts';
 export * from './updaterView.ts';
 export * from './updateStatus.ts';

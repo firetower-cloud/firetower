@@ -231,7 +231,23 @@ impl Progress {
                 reader.efforts().to_vec(),
                 reader.reported().clone(),
             ),
-            ft_core::normalise::Reader::Claude(_) | ft_core::normalise::Reader::Acp(_) => {
+            // Claude Code lists nothing — it is told which model to use rather
+            // than asked what it has — so the only thing there is to report is
+            // the one it said it was running, mapped back onto the choice it
+            // answers to. It reports a resolved name and the picker offers
+            // aliases, and until that was bridged the picker matched nothing
+            // and drew the word "Model" over every Claude session.
+            ft_core::normalise::Reader::Claude(reader) => (
+                Vec::new(),
+                Vec::new(),
+                ft_core::codex::Settings {
+                    model: reader
+                        .model()
+                        .and_then(ft_core::controls::claude_choice_for),
+                    ..Default::default()
+                },
+            ),
+            ft_core::normalise::Reader::Acp(_) => {
                 (Vec::new(), Vec::new(), ft_core::codex::Settings::default())
             }
         };
@@ -239,8 +255,7 @@ impl Progress {
         let mut controls = ft_core::controls::for_agent(self.agent, models, efforts);
 
         // What somebody chose, so a picker shows it rather than the default it
-        // was drawn with. Claude Code restates its own at the start of every
-        // turn and this stays empty for it.
+        // was drawn with.
         for control in &mut controls {
             // What somebody chose, or failing that what the session said it
             // was running. A picker showing neither looks broken.
@@ -3765,6 +3780,49 @@ mod progress_tests {
             .map(|c| c.value.as_str())
             .collect();
         assert!(models.contains(&"opus[1m]"));
+    }
+
+    /// The bug: the picker said "Model" over a session plainly running one.
+    ///
+    /// Claude Code offers no list, so its choices are ours and its *current*
+    /// value is the only thing it reports — as a resolved name, against a
+    /// picker built from aliases. Nothing bridged the two, so nothing matched.
+    #[test]
+    fn a_claude_session_reports_the_model_it_said_it_was_running() {
+        use ft_core::controls::ControlKind as K;
+        let mut progress = Progress::for_agent(ft_core::Agent::ClaudeCode, "go".into());
+        let picker = |controls: &[ft_core::controls::Control], kind: K| {
+            controls
+                .iter()
+                .find(|c| c.kind == kind)
+                .expect("the picker is offered")
+                .current
+                .clone()
+        };
+
+        // Before it has said anything, nothing is claimed.
+        assert_eq!(picker(&progress.controls(), K::Model), None);
+
+        progress.read(r#"{"type":"system","subtype":"init","model":"claude-haiku-4-5-20251001","permissionMode":"auto"}"#);
+        assert_eq!(
+            picker(&progress.controls(), K::Model).as_deref(),
+            Some("haiku"),
+            "a dated name is still Haiku"
+        );
+
+        // A later turn on another model moves it.
+        progress.read(
+            r#"{"type":"system","subtype":"init","model":"claude-opus-5[1m]","permissionMode":"auto"}"#,
+        );
+        assert_eq!(
+            picker(&progress.controls(), K::Model).as_deref(),
+            Some("opus[1m]")
+        );
+
+        // And the two it has no way of knowing stay empty, rather than
+        // borrowing the model's certainty.
+        assert_eq!(picker(&progress.controls(), K::Mode), None);
+        assert_eq!(picker(&progress.controls(), K::Effort), None);
     }
 
     /// Stopping names the turn, and a session between turns has nothing to

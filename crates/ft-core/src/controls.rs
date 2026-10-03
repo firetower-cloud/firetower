@@ -95,6 +95,43 @@ fn claude_models() -> Vec<Choice> {
     ]
 }
 
+/// Which of the choices above a model Claude Code named is.
+///
+/// The picker offers aliases — `opus[1m]` — and Claude Code reports whatever
+/// that resolved to: `claude-opus-5[1m]` one week, `claude-haiku-4-5-20251001`
+/// the next. Neither is any of the values above, so the picker matched nothing
+/// and drew the word "Model" over a session that was plainly running something.
+///
+/// Matched on the family alone, which is the part that does not move. The
+/// alternative is a table of resolved names, and that is the thing this avoids
+/// having: a model released on a Tuesday would be absent from it, which is
+/// exactly the case the picker was already getting wrong.
+///
+/// Long context is deliberately not part of the comparison. `claude-opus-5` and
+/// `claude-opus-5[1m]` are both Opus and the label says "Opus" either way; it
+/// is the note underneath, seen only when the menu is open, that mentions the
+/// window. A right family beats a blank picker.
+pub fn claude_choice_for(reported: &str) -> Option<String> {
+    let family = family_of(reported)?;
+    claude_models()
+        .into_iter()
+        .find(|choice| family_of(&choice.value) == Some(family))
+        .map(|choice| choice.value)
+}
+
+/// The family a model name belongs to — the word before any version.
+///
+/// Reads an alias and a resolved name the same way, which is the point:
+/// `opus[1m]`, `claude-opus-5` and `claude-opus-5[1m]` are all `opus`.
+fn family_of(name: &str) -> Option<&str> {
+    // The window suffix first, because it is the only part that is not
+    // hyphen-separated and would otherwise ride along on the last segment.
+    let name = name.split('[').next()?;
+    let name = name.strip_prefix("claude-").unwrap_or(name);
+    let family = name.split('-').next()?;
+    (!family.is_empty()).then_some(family)
+}
+
 /// `bypassPermissions` is deliberately absent. It is a flag for a sandbox
 /// somebody built on purpose rather than an item in a menu — and Claude Code
 /// refuses it as root anyway, which is what the worker container runs as.
@@ -118,11 +155,19 @@ fn claude_modes() -> Vec<Choice> {
     ]
 }
 
+/// All five the CLI takes, which is one more than this used to offer.
+///
+/// `xhigh` was missing, and it is the one a session here actually runs: nothing
+/// passes `--effort` at launch, so Claude Code's own default applies, and its
+/// default for coding is `xhigh`. So the menu both left out the level most of
+/// this work wants and called the one below it "the usual" — a picker
+/// describing a session that was never running.
 fn claude_efforts() -> Vec<Choice> {
     vec![
         Choice::new("Low", "low", "Quick, for small things"),
         Choice::new("Medium", "medium", ""),
-        Choice::new("High", "high", "The usual"),
+        Choice::new("High", "high", ""),
+        Choice::new("Extra high", "xhigh", "The usual, for work like this"),
         Choice::new("Max", "max", "Slow, and as good as it gets"),
     ]
 }
@@ -297,6 +342,57 @@ mod tests {
                 assert!(!choice.value.contains("opus"), "{:?}", choice.value);
             }
         }
+    }
+
+    /// The bug this half exists for: the picker showed the word "Model" over a
+    /// session that was visibly running one.
+    #[test]
+    fn a_model_claude_code_reported_is_matched_to_the_choice_it_answers_to() {
+        // What it actually says: a resolved name, sometimes dated, sometimes
+        // carrying the window.
+        for (reported, expected) in [
+            ("claude-opus-5[1m]", "opus[1m]"),
+            ("claude-opus-5", "opus[1m]"),
+            ("claude-sonnet-5", "sonnet[1m]"),
+            ("claude-haiku-4-5-20251001", "haiku"),
+            ("claude-fable-5-1", "fable[1m]"),
+            // A value straight off the picker reads as itself, which is what
+            // makes this safe to run over either.
+            ("opus[1m]", "opus[1m]"),
+        ] {
+            assert_eq!(
+                claude_choice_for(reported).as_deref(),
+                Some(expected),
+                "{reported}"
+            );
+        }
+    }
+
+    /// A family nothing here offers has no answer, rather than the nearest one.
+    ///
+    /// Codex's names go through the same function on a session that has both
+    /// agents' history behind it, and quietly reading `gpt-5.6-sol` as Opus is
+    /// the bug this file was written to end.
+    #[test]
+    fn a_model_from_somewhere_else_matches_nothing() {
+        for reported in ["gpt-5.6-sol", "kimi-k2", "definitely-not-a-model", ""] {
+            assert_eq!(claude_choice_for(reported), None, "{reported}");
+        }
+    }
+
+    /// Every level the CLI takes, and no level it does not.
+    ///
+    /// `xhigh` is the one that was missing, and the one a session runs by
+    /// default — see [`claude_efforts`].
+    #[test]
+    fn the_effort_levels_are_the_ones_the_cli_accepts() {
+        let claude = for_agent(crate::Agent::ClaudeCode, Vec::new(), Vec::new());
+        let efforts: Vec<_> = claude
+            .iter()
+            .filter(|c| c.kind == ControlKind::Effort)
+            .flat_map(|c| c.choices.iter().map(|ch| ch.value.as_str()))
+            .collect();
+        assert_eq!(efforts, ["low", "medium", "high", "xhigh", "max"]);
     }
 
     /// Codex has a fence and Claude Code does not, so the picker exists for

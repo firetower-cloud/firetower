@@ -226,6 +226,15 @@ pub struct ClaudeNormaliser {
     /// A request, by contrast, states the whole window it saw in one number.
     /// Subagents are excluded — they read a window of their own.
     last_request: Option<Request>,
+    /// The model it last said it was running, as it spelled it.
+    ///
+    /// Kept because nothing else keeps it. Claude Code is told which model to
+    /// use and never asked what it has, so the only statement of what a session
+    /// is actually running is the `init` line at the start of each turn — and
+    /// that was read for the event and then dropped, which left every picker
+    /// drawing the word "Model" over a running session. See
+    /// [`crate::controls::claude_choice_for`].
+    model: Option<String>,
 }
 
 /// One request's view of the window, kept so the turn can report the last one.
@@ -246,6 +255,15 @@ impl ClaudeNormaliser {
     /// Whether a turn is open — see [`Reader::working`].
     pub fn working(&self) -> bool {
         self.active_turn.is_some()
+    }
+
+    /// The model it last said it was running, if it has said yet.
+    ///
+    /// A resolved name rather than one of the picker's aliases —
+    /// `claude-haiku-4-5-20251001`, not `haiku`. [`crate::controls::claude_choice_for`]
+    /// is what bridges the two.
+    pub fn model(&self) -> Option<&str> {
+        self.model.as_deref()
     }
 
     /// Read one line and report everything it means.
@@ -290,14 +308,24 @@ impl ClaudeNormaliser {
 
     fn system(&mut self, v: &Value, out: &mut Vec<TurnEvent>) {
         match str_at(v, "subtype") {
-            Some("init") => out.push(TurnEvent::SessionConfigured {
-                model: str_at(v, "model").unwrap_or_default().to_string(),
-                mode: str_at(v, "permissionMode").unwrap_or_default().to_string(),
-                tools: string_list(v.get("tools")),
-                // `slash_commands`, not `commands`. Reading the wrong key cost
-                // nothing visible until something started drawing the menu.
-                commands: slash_commands(v.get("slash_commands")),
-            }),
+            Some("init") => {
+                let model = str_at(v, "model").unwrap_or_default();
+                // Only here, and only when it said something. The `status`
+                // restatement below carries no model on purpose, and letting it
+                // through would blank what the last `init` established.
+                if !model.is_empty() {
+                    self.model = Some(model.to_string());
+                }
+                out.push(TurnEvent::SessionConfigured {
+                    model: model.to_string(),
+                    mode: str_at(v, "permissionMode").unwrap_or_default().to_string(),
+                    tools: string_list(v.get("tools")),
+                    // `slash_commands`, not `commands`. Reading the wrong key
+                    // cost nothing visible until something started drawing the
+                    // menu.
+                    commands: slash_commands(v.get("slash_commands")),
+                })
+            }
             Some("task_started") => {
                 let (Some(task_id), Some(tool_use_id)) =
                     (str_at(v, "task_id"), str_at(v, "tool_use_id"))
@@ -1238,6 +1266,33 @@ mod tests {
         let quiet = reader
             .push(r#"{"type":"system","subtype":"status","status":null,"thinking_tokens":10}"#);
         assert!(matches!(quiet.as_slice(), [TurnEvent::Raw { .. }]));
+
+        // The event was allowed to leave the model out; the reader was not
+        // allowed to forget it. A picker reads this one.
+        assert_eq!(reader.model(), Some("claude-opus-5[1m]"));
+    }
+
+    /// Nothing is claimed before the agent has said anything.
+    ///
+    /// A picker that showed a model the moment a session was created would be
+    /// guessing — and it would be right only for as long as nobody changed the
+    /// default this launches with.
+    #[test]
+    fn a_reader_that_has_heard_nothing_reports_no_model() {
+        let mut reader = ClaudeNormaliser::new();
+        assert_eq!(reader.model(), None);
+
+        reader.push(r#"{"type":"system","subtype":"status","permissionMode":"auto"}"#);
+        assert_eq!(reader.model(), None, "a restatement establishes nothing");
+
+        reader.push(r#"{"type":"system","subtype":"init","model":"claude-haiku-4-5-20251001","permissionMode":"auto"}"#);
+        assert_eq!(reader.model(), Some("claude-haiku-4-5-20251001"));
+
+        // A later turn that changed model replaces it rather than adding to it.
+        reader.push(
+            r#"{"type":"system","subtype":"init","model":"claude-sonnet-5","permissionMode":"auto"}"#,
+        );
+        assert_eq!(reader.model(), Some("claude-sonnet-5"));
     }
 
     #[test]

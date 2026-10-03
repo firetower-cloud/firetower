@@ -19,6 +19,7 @@ mod ids;
 pub mod normalise;
 pub mod path;
 pub mod quota;
+pub mod releases;
 pub mod session;
 mod status;
 pub mod turn;
@@ -46,7 +47,7 @@ pub const WORKER_ROOT_ENV: &str = "FIRETOWER_WORKER_ROOT";
 ///
 /// Serialised as the variant name — see the wire conventions in the brief: a
 /// field takes the consumer's casing, an enum value stays the symbol it is.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
 pub enum Agent {
     ClaudeCode,
     Codex,

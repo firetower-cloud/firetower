@@ -214,6 +214,7 @@ export * from './turnEvent';
 export * from './turnId';
 export * from './turnStatus';
 export * from './updateAccount';
+export * from './updated';
 export * from './updateRun';
 export * from './updaterView';
 export * from './updateStatus';

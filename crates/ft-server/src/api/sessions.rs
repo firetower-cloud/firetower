@@ -2861,6 +2861,14 @@ pub(super) async fn continue_with_account(
                 }
             }
         }
+        // Back to the alias it answers to, because what was replayed is the
+        // resolved name — and handing that back pins the session to one build
+        // of one model. `opus[1m]` follows the family; `claude-opus-5[1m]` is
+        // Opus 5 for as long as the session lives. Worse than that, a resolved
+        // name the installed CLI has never heard of is not refused: it warns
+        // and carries on assuming a 200k window. So an unmapped model sends
+        // nothing at all, and the launch flag stays in force.
+        claude_model = ft_core::controls::claude_choice_for(&claude_model).unwrap_or_default();
     }
     let stopped = state
         .fleet
@@ -2875,6 +2883,17 @@ pub(super) async fn continue_with_account(
         // its later usage to the previous account.
         relaunch(state, session, owner).await?;
         for control in controls {
+            // Claude Code's model is sent below instead, from the replay. Both
+            // say the same thing when this snapshot's reader has seen the log,
+            // and only the replay is certain to have — a reader rebuilt for a
+            // session that was already running is not fed the transcript. Sent
+            // from both, it arrives twice, and `/model` is an ordinary message:
+            // the transcript would grow two of them on every account change.
+            if session.agent == ft_core::Agent::ClaudeCode
+                && control.kind == ft_core::controls::ControlKind::Model
+            {
+                continue;
+            }
             if let Some(value) = control.current {
                 state
                     .fleet
