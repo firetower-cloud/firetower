@@ -155,6 +155,13 @@ try {
       console.log("PASS: real Task activity and rejected Task response are visible");
     }
   }
+  if (process.env.FIRETOWER_E2E_FAILED_SESSION) {
+    await page.goto(`${renderer}/#/sessions/${encodeURIComponent(process.env.FIRETOWER_E2E_FAILED_SESSION)}`);
+    await page.getByText(/Authentication required/).last().waitFor({ timeout: 30_000 });
+    await page.getByRole("button", { name: "Start it again", exact: true }).waitFor();
+    await page.screenshot({ path: `${output}/cursor-auth-error.png`, fullPage: true });
+    console.log("PASS: stored real provider authentication failure and recovery action are visible");
+  }
 } finally {
   await browser.close();
 }
