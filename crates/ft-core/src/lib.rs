@@ -2040,7 +2040,10 @@ index 587be6b..b77b4eb 100644\n\
 new file mode 100644\n\
 index 0000000..ba01f6b\n\
 Binary files /dev/null and b/demo files/clip one.mp4 differ\n";
-        assert_eq!(split_diff(diff, usize::MAX)[0].path, "demo files/clip one.mp4");
+        assert_eq!(
+            split_diff(diff, usize::MAX)[0].path,
+            "demo files/clip one.mp4"
+        );
     }
 
     #[test]
