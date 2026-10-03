@@ -29,6 +29,12 @@ function what(asked: Asked): string {
     const value = args?.[key];
     if (typeof value === "string" && value.trim()) return value;
   }
+  // ACP wraps the operation in toolCall alongside protocol options. Showing
+  // that entire envelope can push both decision buttons off a phone's screen.
+  const toolCall = args?.toolCall as Record<string, unknown> | undefined;
+  if (typeof toolCall?.title === "string" && toolCall.title.trim()) {
+    return toolCall.title;
+  }
   return JSON.stringify(asked.args ?? {}, null, 2);
 }
 
