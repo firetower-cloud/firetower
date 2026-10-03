@@ -73,6 +73,22 @@ try {
     await page.screenshot({ path: `${output}/cursor-turn.png`, fullPage: true });
     assert.equal(failures.length, 0, `Page errors: ${failures.join("; ")}`);
     console.log("PASS: real Cursor ACP turn through the Desktop renderer");
+
+    if (process.env.FIRETOWER_E2E_FOLLOWUP === "1") {
+      const answer = page.getByText("Playwright Cursor ACP smoke test.", { exact: false });
+      const before = await answer.count();
+      await page.getByPlaceholder("Say something to the agent").fill("What was the exact README line you just returned? Reply with that line only.");
+      await page.getByRole("button", { name: "Send" }).click();
+      await answer.nth(before).waitFor({ timeout: 120_000 });
+      await page.getByText("Working", { exact: true }).waitFor({ state: "hidden", timeout: 120_000 });
+      const after = await answer.count();
+      assert.ok(after > before, "the follow-up must recall the file line");
+      await page.reload();
+      await answer.last().waitFor({ timeout: 30_000 });
+      assert.equal(await answer.count(), after, "reconnect must not duplicate the recalled answer");
+      await page.screenshot({ path: `${output}/cursor-followup.png`, fullPage: true });
+      console.log("PASS: follow-up memory and page reconnect without duplicate answer");
+    }
   }
 } finally {
   await browser.close();

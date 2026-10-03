@@ -913,7 +913,8 @@ impl Worker {
                 message,
             } => {
                 if let Err(e) =
-                    structured::tell(&session_id, &agentd::ToAgent::Send { message }).await
+                    structured::tell_when_listening(&session_id, &agentd::ToAgent::Send { message })
+                        .await
                 {
                     tracing::warn!(session = %session_id, "sending a turn: {e:#}");
                     out.send(ToServer::Error {
