@@ -23,6 +23,7 @@ use ft_core::normalise::Reader;
 use ft_core::{SessionId, TurnEvent};
 use futures::stream::{Stream, StreamExt};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeSet;
 use tokio_stream::wrappers::BroadcastStream;
 use utoipa::ToSchema;
 
@@ -282,6 +283,7 @@ async fn paged(
     // normaliser holds that. Cheaper than it looks — this is a fold over lines
     // already in memory — and correct, which the alternative is not.
     let mut all: Vec<ConversationEvent> = Vec::new();
+    let mut pending = PendingPrompts::default();
     // Where each exchange starts, as an index into `all`.
     let mut opens: Vec<usize> = Vec::new();
     let mut last_line = 0;
@@ -295,6 +297,7 @@ async fn paged(
         let began = all.len();
         let mut opened = false;
         for event in normaliser.push(&line) {
+            pending.observe(&event);
             if !opened && opens_an_exchange(&event) {
                 opens.push(began);
                 opened = true;
@@ -311,13 +314,26 @@ async fn paged(
     // same page again for ever.
     let first_line = all.get(start).map(|held| held.line_no).unwrap_or(last_line);
 
-    let events = all
+    let mut events: Vec<_> = all
         .into_iter()
         .enumerate()
         .filter(|(at, _)| (*at >= start && *at < end) || keep.contains(at))
         .map(|(_, held)| held)
         .filter(|held| held.line_no > since.since_line)
         .collect();
+
+    // AgentClosed is a worker lifecycle message, not an ACP line, so it cannot
+    // be folded by the normaliser above. Keep the historical RequestOpened in
+    // the transcript, then resolve it in the snapshot whenever the session is
+    // no longer live. This lets a reloaded client draw the history faithfully
+    // without reviving a card for a process that has already exited.
+    let status = db.session_status(id).await?;
+    if !matches!(
+        status,
+        Some(ft_core::SessionStatus::Working | ft_core::SessionStatus::NeedsYou)
+    ) {
+        events.extend(pending.close(last_line, status == Some(ft_core::SessionStatus::Failed)));
+    }
 
     Ok(Conversation {
         events,
@@ -371,15 +387,13 @@ pub(crate) async fn conversation_events(
     };
 
     let stored = state.db.agent_lines_since(id, 0).await.unwrap_or_default();
-    // Anything the agent is already blocked on, so opening a waiting session
-    // shows the question rather than a transcript that stops for no reason.
-    let waiting = state.fleet.asked(id).await;
 
     // One normaliser for the whole connection: the backlog leaves it holding
     // the state the live lines are about to need.
     let mut normaliser = reader_for(state, id).await;
     let mut backlog: Vec<Vec<ConversationEvent>> = Vec::new();
     let mut replayed = 0u64;
+    let mut pending = PendingPrompts::default();
     let mut echoed: Vec<String> = Vec::new();
     let mut gathering: std::collections::HashMap<String, String> = Default::default();
     for (line_no, line) in stored {
@@ -387,6 +401,7 @@ pub(crate) async fn conversation_events(
         replayed = line_no;
         let mut batch = Vec::new();
         for event in normaliser.push(&line) {
+            pending.observe(&event);
             // What the agent has said back, so a message still waiting to be
             // echoed can be told from one that already has been. The text
             // arrives as deltas against the item, so it has to be gathered
@@ -418,6 +433,29 @@ pub(crate) async fn conversation_events(
         deliver(&mut backlog, batch);
     }
 
+    // Anything the agent is already blocked on, so opening a waiting session
+    // shows the question rather than a transcript that stops for no reason.
+    // A terminal status takes precedence: AgentClosed is outside the ACP line
+    // journal, so its only durable projection is the session status.
+    let status = state.db.session_status(id).await;
+    let can_answer = match &status {
+        Ok(Some(status)) => matches!(
+            status,
+            ft_core::SessionStatus::Working | ft_core::SessionStatus::NeedsYou
+        ),
+        Ok(None) => false,
+        Err(error) => {
+            tracing::warn!(session = %id, "checking whether a conversation request is still answerable: {error:#}");
+            true
+        }
+    };
+    let failed = matches!(status, Ok(Some(ft_core::SessionStatus::Failed)));
+    let waiting = if can_answer {
+        state.fleet.asked(id).await
+    } else {
+        Vec::new()
+    };
+
     // Anything typed at this session that the agent has not repeated back yet.
     //
     // A transcript is the agent's own output replayed, so until the echo
@@ -443,16 +481,26 @@ pub(crate) async fn conversation_events(
             _ => None,
         })
         .collect();
+    for event in &asking {
+        pending.observe(&event.event);
+    }
     deliver(&mut backlog, asking);
+
+    if !can_answer {
+        deliver(&mut backlog, pending.close(replayed, failed));
+    }
 
     let following = BroadcastStream::new(live)
         .filter_map(|frame| async move { frame.ok() })
         .filter_map(move |speech| {
-            let events = match speech {
+            let events: Vec<ConversationEvent> = match speech {
                 AgentSpeech::Line { line_no, line } if line_no > replayed => normaliser
                     .push(&line)
                     .into_iter()
-                    .map(|event| ConversationEvent { line_no, event })
+                    .map(|event| {
+                        pending.observe(&event);
+                        ConversationEvent { line_no, event }
+                    })
                     .collect(),
                 // Already replayed from the table above.
                 AgentSpeech::Line { .. } => Vec::new(),
@@ -464,11 +512,19 @@ pub(crate) async fn conversation_events(
                     req,
                     tool_name,
                     input,
-                } => vec![ConversationEvent {
-                    line_no: replayed,
-                    event: wanted(req, tool_name, input),
-                }],
-                AgentSpeech::Closed => Vec::new(),
+                } => {
+                    let event = wanted(req, tool_name, input);
+                    pending.observe(&event);
+                    vec![ConversationEvent {
+                        line_no: replayed,
+                        event,
+                    }]
+                }
+                // A process exit has no ACP response line to resolve outstanding
+                // requests. Emit terminal resolutions at the current cursor so
+                // clients that already drew the cards can clear them before the
+                // stream resets and reconnects.
+                AgentSpeech::Closed => pending.close(replayed, true),
             };
             // Every event here came off one line, so the batch is already a
             // whole one. An empty batch is a line that drew nothing.
@@ -476,6 +532,86 @@ pub(crate) async fn conversation_events(
         });
 
     futures::stream::iter(backlog).chain(following)
+}
+
+/// Protocol requests remain historical transcript events after a process exits.
+/// Track which ones still need a synthetic terminal resolution for live clients.
+#[derive(Default)]
+struct PendingPrompts {
+    approvals: BTreeSet<String>,
+    questions: BTreeSet<String>,
+    active_turn: Option<String>,
+}
+
+impl PendingPrompts {
+    fn observe(&mut self, event: &TurnEvent) {
+        match event {
+            TurnEvent::RequestOpened { req, .. } => {
+                self.approvals.insert(req.as_str().to_owned());
+            }
+            TurnEvent::RequestResolved { req, .. } => {
+                self.approvals.remove(req.as_str());
+            }
+            TurnEvent::UserInputRequested { req, .. } => {
+                self.questions.insert(req.as_str().to_owned());
+            }
+            TurnEvent::UserInputResolved { req, .. } => {
+                self.questions.remove(req.as_str());
+            }
+            TurnEvent::TurnStarted { turn } => {
+                self.active_turn = Some(turn.as_str().to_owned());
+            }
+            TurnEvent::TurnCompleted { .. } => {
+                self.active_turn = None;
+            }
+            _ => {}
+        }
+    }
+
+    fn close(&mut self, line_no: u64, failed: bool) -> Vec<ConversationEvent> {
+        let mut events = Vec::with_capacity(
+            self.approvals.len() + self.questions.len() + self.active_turn.is_some() as usize,
+        );
+        events.extend(self.approvals.iter().cloned().map(|req| ConversationEvent {
+            line_no,
+            event: TurnEvent::RequestResolved {
+                req: ft_core::RequestId::new(req),
+                decision: None,
+            },
+        }));
+        events.extend(self.questions.iter().cloned().map(|req| ConversationEvent {
+            line_no,
+            event: TurnEvent::UserInputResolved {
+                req: ft_core::RequestId::new(req),
+                answers: serde_json::json!({}),
+            },
+        }));
+        if let Some(turn) = self.active_turn.take() {
+            events.push(ConversationEvent {
+                line_no,
+                event: TurnEvent::TurnCompleted {
+                    turn: ft_core::turn::TurnId::new(turn),
+                    status: if failed {
+                        ft_core::turn::TurnStatus::Failed
+                    } else {
+                        ft_core::turn::TurnStatus::Interrupted
+                    },
+                    usage: None,
+                    detail: Some(
+                        if failed {
+                            "The agent process exited before the turn finished."
+                        } else {
+                            "The agent stopped before the turn finished."
+                        }
+                        .into(),
+                    ),
+                },
+            });
+        }
+        self.approvals.clear();
+        self.questions.clear();
+        events
+    }
 }
 
 /// Pending echoes are not durable log lines. They must not consume the cursor
@@ -1391,6 +1527,173 @@ mod tests {
         }
 
         (db, id)
+    }
+
+    #[tokio::test]
+    async fn an_exited_acp_permission_is_resolved_in_history_and_reload() {
+        use ft_core::{EventKind, SessionStatus};
+        use serde_json::json;
+
+        let (db, owner) = crate::db::Db::open_for_test_owned().await.unwrap();
+        let host = db
+            .ensure_host("localhost", ft_core::Compute::Local)
+            .await
+            .unwrap();
+        let id = SessionId::new();
+        db.insert_session(
+            &id,
+            &host.id,
+            &owner,
+            None,
+            "Exited ACP permission",
+            "write a proof",
+            None,
+            None,
+            "CursorAgent",
+            ft_core::WorkspaceSize::Medium,
+            ft_core::Share::Equal,
+            &[],
+            None,
+        )
+        .await
+        .unwrap();
+
+        let records = [
+            json!({"acp":"Started", "epoch":"original"}),
+            json!({"acp":"Ready", "session":"provider-session"}),
+            json!({"acp":"Sent", "message":{"jsonrpc":"2.0", "id":4, "method":"session/prompt", "params":{"prompt":[{"type":"text","text":"write a proof"}]}}}),
+            json!({"acp":"Received", "replay":false, "message":{"jsonrpc":"2.0", "method":"session/update", "params":{"sessionId":"provider-session", "update":{"sessionUpdate":"agent_message_chunk", "content":{"type":"text", "text":"This historical reply stays visible."}}}}}),
+            json!({"acp":"Received", "replay":false, "message":{"jsonrpc":"2.0", "id":0, "method":"session/request_permission", "params":{"sessionId":"provider-session", "toolCall":{"title":"write proof"}, "options":[{"kind":"allow_once","optionId":"allow-once"}]}}}),
+        ];
+        for (line, record) in records.iter().enumerate() {
+            db.record_agent_line(&id, line as i64 + 1, &record.to_string())
+                .await
+                .unwrap();
+        }
+        for status in [SessionStatus::Working, SessionStatus::NeedsYou] {
+            db.record_local_event(
+                &id,
+                &EventKind::StatusChanged { status, note: None },
+                chrono::Utc::now(),
+            )
+            .await
+            .unwrap();
+        }
+
+        let waiting = paged(
+            &db,
+            &id,
+            Reader::for_agent(ft_core::Agent::CursorAgent),
+            &want(None, None),
+        )
+        .await
+        .unwrap();
+        assert!(waiting.events.iter().any(|held| matches!(
+            &held.event,
+            TurnEvent::RequestOpened { req, .. } if req.as_str() == "original:0"
+        )));
+        assert!(
+            !waiting.events.iter().any(|held| matches!(
+                &held.event,
+                TurnEvent::RequestResolved { req, .. } if req.as_str() == "original:0"
+            )),
+            "a live NeedsYou session must retain its pending permission"
+        );
+
+        db.record_local_event(
+            &id,
+            &EventKind::StatusChanged {
+                status: SessionStatus::Failed,
+                note: Some("The agent process exited.".into()),
+            },
+            chrono::Utc::now(),
+        )
+        .await
+        .unwrap();
+
+        // `get_conversation` folds the same stored lines afresh on every reload.
+        // The old request remains in the historical stream, followed by an
+        // explicit close resolution so the reducer removes its approval card.
+        for _ in 0..2 {
+            let page = paged(
+                &db,
+                &id,
+                Reader::for_agent(ft_core::Agent::CursorAgent),
+                &want(None, None),
+            )
+            .await
+            .unwrap();
+            let opened = page.events.iter().position(|held| {
+                matches!(
+                    &held.event,
+                    TurnEvent::RequestOpened { req, .. } if req.as_str() == "original:0"
+                )
+            });
+            let resolved = page.events.iter().position(|held| {
+                matches!(
+                    &held.event,
+                    TurnEvent::RequestResolved { req, decision: None } if req.as_str() == "original:0"
+                )
+            });
+            assert!(
+                opened.is_some(),
+                "historical permission must remain in the transcript"
+            );
+            assert!(
+                resolved.is_some_and(|at| at > opened.unwrap()),
+                "terminal close resolution must follow the historical request"
+            );
+            assert!(page.events.iter().any(|held| matches!(
+                &held.event,
+                TurnEvent::ContentDelta { delta, .. } if delta == "This historical reply stays visible."
+            )));
+
+            // A client reconnecting from its last real log line still receives
+            // the synthetic resolution, even though AgentClosed has no line id.
+            let mut since_last_line = want(None, None);
+            since_last_line.since_line = page.last_line;
+            let resumed = paged(
+                &db,
+                &id,
+                Reader::for_agent(ft_core::Agent::CursorAgent),
+                &since_last_line,
+            )
+            .await
+            .unwrap();
+            assert!(resumed.events.iter().any(|held| matches!(
+                &held.event,
+                TurnEvent::RequestResolved { req, decision: None } if req.as_str() == "original:0"
+            )));
+        }
+    }
+
+    #[test]
+    fn a_live_close_resolves_open_prompts_and_fails_the_active_turn() {
+        let mut pending = PendingPrompts::default();
+        pending.observe(&TurnEvent::RequestOpened {
+            req: ft_core::RequestId::new("epoch:permission"),
+            kind: ft_core::turn::RequestKind::Tool,
+            detail: "write proof".into(),
+            args: serde_json::json!({}),
+        });
+        pending.observe(&TurnEvent::TurnStarted {
+            turn: ft_core::turn::TurnId::new("epoch:prompt"),
+        });
+
+        let closed = pending.close(7, true);
+
+        assert!(closed.iter().any(|held| matches!(
+            &held.event,
+            TurnEvent::RequestResolved { req, decision: None } if req.as_str() == "epoch:permission"
+        )));
+        assert!(closed.iter().any(|held| matches!(
+            &held.event,
+            TurnEvent::TurnCompleted {
+                turn,
+                status: ft_core::turn::TurnStatus::Failed,
+                ..
+            } if turn.as_str() == "epoch:prompt"
+        )));
     }
 
     fn claude() -> Reader {
