@@ -2155,6 +2155,40 @@ index 587be6b..b77b4eb 100644\n\
         }
     }
 
+    /// A names-only answer crosses the worker-to-server hop as JSON of this
+    /// type, written by `changed_since` and read back by `session_diff`. There
+    /// is no stub fleet to test that hop against, so what is pinned here is the
+    /// shape it depends on — including that a field added later without a
+    /// default would break a worker and a control plane of different ages.
+    #[test]
+    fn a_file_survives_the_trip_the_worker_sends_it_on() {
+        let sent = vec![FileDiff {
+            path: "src/café.rs".to_string(),
+            added: 12,
+            removed: 3,
+            patch: String::new(),
+            fresh: true,
+            truncated: false,
+        }];
+        let wire = serde_json::to_string(&sent).unwrap();
+        let back: Vec<FileDiff> = serde_json::from_str(&wire).unwrap();
+
+        assert_eq!(back[0].path, "src/café.rs");
+        assert_eq!((back[0].added, back[0].removed), (12, 3));
+        assert!(back[0].fresh);
+        assert!(!back[0].truncated);
+        // camelCase on the wire, which is what every client is generated from.
+        assert!(wire.contains("\"fresh\":true"), "{wire}");
+        assert!(wire.contains("\"truncated\":false"), "{wire}");
+
+        // And an answer from something that predates the two newer fields
+        // still reads, rather than failing the whole sheet.
+        let older = r#"[{"path":"a.rs","added":1,"removed":0,"patch":""}]"#;
+        let read: Vec<FileDiff> = serde_json::from_str(older).unwrap();
+        assert!(!read[0].fresh);
+        assert!(!read[0].truncated);
+    }
+
     #[test]
     fn a_patch_exactly_the_size_of_the_budget_is_left_alone() {
         // The trailing newline is not in the patch — chunks are trimmed as
