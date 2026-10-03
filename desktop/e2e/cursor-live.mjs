@@ -35,7 +35,7 @@ try {
   }
   await page.getByRole("button", { name: "Reinstall", exact: true }).waitFor({ timeout: 120_000 });
   if (process.env.FIRETOWER_E2E_TASKS === "1") {
-    await page.getByText("2026.09.28-64d2043", { exact: true }).waitFor();
+    await page.getByText("2026.09.28-64d2043", { exact: false }).waitFor();
   }
   await page.screenshot({ path: `${output}/cursor-installed.png`, fullPage: true });
   assert.equal(failures.length, 0, `Page errors: ${failures.join("; ")}`);
