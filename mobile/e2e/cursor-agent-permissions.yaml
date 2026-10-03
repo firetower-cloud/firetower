@@ -4,6 +4,7 @@ appId: com.usefiretower.app
 ---
 - assertVisible: "Answer the agent"
 - tapOn: { id: composer }
+- eraseText: 1000
 - inputText: 'Use only Shell to run: printf "MOBILE APPROVED" > firetower-cursor-pw-repo/mobile-approved.txt . Do not use Edit File or any fallback and do not commit.'
 - hideKeyboard
 - tapOn: { id: send }
@@ -18,6 +19,7 @@ appId: com.usefiretower.app
     timeout: 120000
 - takeScreenshot: cursor-agent-mobile-approved
 - tapOn: { id: composer }
+- eraseText: 1000
 - inputText: 'Use only Shell to run: printf "MUST NOT EXIST" > firetower-cursor-pw-repo/mobile-denied.txt . On denial stop with no retry, fallback or file edit. Do not commit.'
 - hideKeyboard
 - tapOn: { id: send }
@@ -31,6 +33,7 @@ appId: com.usefiretower.app
 - assertNotVisible: "Allow"
 - takeScreenshot: cursor-agent-mobile-denied
 - tapOn: { id: composer }
+- eraseText: 1000
 - inputText: 'Use only Shell to run: sleep 30 . This is a disposable cancellation test. Do not change files.'
 - hideKeyboard
 - tapOn: { id: send }
