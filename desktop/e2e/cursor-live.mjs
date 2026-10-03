@@ -34,6 +34,9 @@ try {
     await page.getByRole("button", { name: "Install", exact: true }).click();
   }
   await page.getByRole("button", { name: "Reinstall", exact: true }).waitFor({ timeout: 120_000 });
+  if (process.env.FIRETOWER_E2E_TASKS === "1") {
+    await page.getByText("2026.09.28-64d2043", { exact: true }).waitFor();
+  }
   await page.screenshot({ path: `${output}/cursor-installed.png`, fullPage: true });
   assert.equal(failures.length, 0, `Page errors: ${failures.join("; ")}`);
   console.log("PASS: real server login, Cursor Agent row, and install action");
@@ -145,7 +148,7 @@ try {
       await page.screenshot({ path: `${output}/cursor-task.png`, fullPage: true });
       const successful = await tasks.count();
       await send("Call exactly one Task with subagent_type explore. Do not retry with another type or use fallback tools. Return PLAYWRIGHT ERROR and the exact tool rejection.");
-      await page.getByText(/PLAYWRIGHT ERROR[\s\S]*explore/).last().waitFor({ timeout: 120_000 });
+      await page.getByText(/PLAYWRIGHT ERROR[\s\S]*Invalid arguments:[\s\S]*Invalid enum value[\s\S]*explore/).last().waitFor({ timeout: 120_000 });
       await idle();
       assert.ok(await tasks.count() > successful, "the provider must actually attempt the rejected Task");
       await page.screenshot({ path: `${output}/cursor-error.png`, fullPage: true });
