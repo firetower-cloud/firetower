@@ -183,6 +183,7 @@ export default function NewWorkspace() {
       >
         <Field label="Name" hint="What this branch is for">
           <TextInput
+            testID="workspace-name"
             value={name}
             onChangeText={setName}
             placeholder="auth refactor"
