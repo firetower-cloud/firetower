@@ -20,8 +20,9 @@ if (!password) throw new Error("Set FIRETOWER_E2E_PASSWORD for the isolated serv
 
 await mkdir(output, { recursive: true });
 const browser = await chromium.launch({ headless: true });
+let page;
 try {
-  const page = await browser.newPage({ viewport: { width: 1440, height: 960 } });
+  page = await browser.newPage({ viewport: { width: 1440, height: 960 } });
   const failures = [];
   page.on("pageerror", (error) => failures.push(error.message));
   await page.goto(renderer);
@@ -168,6 +169,7 @@ try {
       await page.getByText("Working", { exact: true }).waitFor({ state: "hidden" });
       await page.reload();
       await page.getByRole("button", { name: "Start it again", exact: true }).waitFor();
+      await page.getByText("Working", { exact: true }).waitFor({ state: "hidden" });
       assert.equal(await page.getByRole("button", { name: "Allow", exact: true }).count(), 0, "reload must not revive the exited agent's permission");
       await page.screenshot({ path: `${output}/cursor-closed.png`, fullPage: true });
       console.log("PASS: real agent exit clears pending permission and Working, including reload");
@@ -180,6 +182,9 @@ try {
     await page.screenshot({ path: `${output}/cursor-auth-error.png`, fullPage: true });
     console.log("PASS: stored real provider authentication failure and recovery action are visible");
   }
+} catch (error) {
+  await page?.screenshot({ path: `${output}/cursor-failure.png`, fullPage: true });
+  throw error;
 } finally {
   await browser.close();
 }
