@@ -1,0 +1,29 @@
+# Run after cursor-agent.yaml in its active conversation.
+# Requires Cursor CLI 2026.09.28-64d2043; no mocked provider events.
+appId: com.usefiretower.app
+---
+- assertVisible: "Answer the agent"
+- tapOn:
+    id: composer
+- inputText: "Use one generalPurpose Task subagent to read README.md and return MOBILE TASK followed by its exact line. Read only; no shell, edits or commits."
+- tapOn:
+    id: send
+- extendedWaitUntil:
+    visible: "(?s).*MOBILE TASK.*Playwright Cursor ACP smoke test.*"
+    timeout: 120000
+- extendedWaitUntil:
+    visible: "(?s).*Handed it back.*"
+    timeout: 120000
+- takeScreenshot: cursor-agent-mobile-task
+- tapOn:
+    id: composer
+- inputText: "Call exactly one Task with subagent_type explore. Do not retry with another type or use fallback tools. Return MOBILE ERROR and the exact rejection."
+- tapOn:
+    id: send
+- extendedWaitUntil:
+    visible: "(?s).*MOBILE ERROR.*Invalid arguments:.*Invalid enum value.*explore.*"
+    timeout: 120000
+- extendedWaitUntil:
+    visible: "(?s).*Handed it back.*"
+    timeout: 120000
+- takeScreenshot: cursor-agent-mobile-error
