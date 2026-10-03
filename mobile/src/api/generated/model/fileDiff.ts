@@ -12,9 +12,30 @@
 export interface FileDiff {
   /** @minimum 0 */
   added: number;
-  /** The hunks, as git printed them. */
+  /**
+     * Whether the file was created rather than changed.
+     *
+     * Said here rather than left to be read back out of the patch, because a
+     * names-only answer has no patch to read it out of — and because every
+     * client was running the same regex over a megabyte of text to learn one
+     * bit that the header already knew.
+     */
+  fresh?: boolean;
+  /**
+     * The hunks, as git printed them. Empty when only the names were asked
+     * for, and cut short when [`FileDiff::truncated`] is set.
+     */
   patch: string;
   path: string;
   /** @minimum 0 */
   removed: number;
+  /**
+     * Set when the patch was cut for being too long — never merely because
+     * the caller asked for names and got no patch at all.
+     *
+     * `added` and `removed` still count the whole file, because they are what
+     * the sheet totals and a total that quietly stopped at a cut is a wrong
+     * number rather than a missing one.
+     */
+  truncated?: boolean;
 }

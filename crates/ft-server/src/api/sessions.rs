@@ -2498,6 +2498,7 @@ struct Held {
         ("id" = String, Path, description = "Session id"),
         ("checkout" = Option<String>, Query, description = "Which checkout, by its path in the workspace. Every one when omitted."),
         ("since" = Option<ft_core::DiffSince>, Query, description = "Measured from the base of the branch (the default) or from the last commit."),
+        ("namesOnly" = Option<bool>, Query, description = "Which files changed and by how much, with no hunks — for marking a tree rather than drawing a diff. Orders of magnitude smaller, and the worker never builds the patch."),
     ),
     responses((status = 200, body = Vec<ft_core::FileDiff>), (status = 404, body = ApiError)),
 )]
@@ -2523,6 +2524,7 @@ pub(super) async fn session_diff(
     };
 
     let many = wanted.len() > 1;
+    let names_only = which.names_only.unwrap_or(false);
     let mut files = Vec::new();
     let mut refused: Vec<String> = Vec::new();
     let asked = wanted.len();
@@ -2535,6 +2537,7 @@ pub(super) async fn session_diff(
                 ft_proto::Action::Diff {
                     checkout: c.path.clone(),
                     since: which.since.unwrap_or_default(),
+                    names_only,
                 },
                 None,
             )
@@ -2551,7 +2554,21 @@ pub(super) async fn session_diff(
             }
         };
 
-        for mut file in ft_core::split_diff(&diff) {
+        // A names-only answer is already the list; anything else is a unified
+        // diff to be split, with any one file's patch cut to a size a screen
+        // can actually be handed.
+        let listed = if names_only {
+            serde_json::from_str::<Vec<ft_core::FileDiff>>(&diff).map_err(|e| {
+                ApiError::new(
+                    ErrorCode::ActionFailed,
+                    format!("could not read what this session changed — {e}"),
+                )
+            })?
+        } else {
+            ft_core::split_diff(&diff, ft_core::MOST_OF_A_PATCH)
+        };
+
+        for mut file in listed {
             if many && !c.path.is_empty() {
                 file.path = format!("{}/{}", c.path, file.path);
             }
@@ -2577,6 +2594,7 @@ pub(super) async fn session_diff(
 
 /// Which checkout a diff means, and where it is measured from.
 #[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub(super) struct Which {
     /// The checkout's path inside the workspace. Absent means all of them.
     #[serde(default)]
@@ -2584,6 +2602,10 @@ pub(super) struct Which {
     /// From the base of the branch unless said otherwise.
     #[serde(default)]
     pub since: Option<ft_core::DiffSince>,
+    /// Which files changed, without the hunks — for a caller that only marks
+    /// the tree and never draws a patch.
+    #[serde(default)]
+    pub names_only: Option<bool>,
 }
 
 /// Open a pull request for this session's branch.

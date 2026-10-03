@@ -43,9 +43,6 @@ export function addedLines(patch: string): Set<number> {
   return out;
 }
 
-/** Whether the patch creates the file rather than changing one that was there. */
-export const isNew = (patch: string) => /^new file mode/m.test(patch);
-
 /**
  * The lines the patch removed, keyed by the line in the new file they sat
  * before — so a file can show what was there, in place, the way the diff
