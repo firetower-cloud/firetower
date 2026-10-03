@@ -494,16 +494,21 @@ pub(crate) async fn conversation_events(
         .filter_map(|frame| async move { frame.ok() })
         .filter_map(move |speech| {
             let events: Vec<ConversationEvent> = match speech {
-                AgentSpeech::Line { line_no, line } if line_no > replayed => normaliser
-                    .push(&line)
-                    .into_iter()
-                    .map(|event| {
-                        pending.observe(&event);
-                        ConversationEvent { line_no, event }
-                    })
-                    .collect(),
-                // Already replayed from the table above.
-                AgentSpeech::Line { .. } => Vec::new(),
+                AgentSpeech::Line { line_no, line } => {
+                    if advance_live_cursor(&mut replayed, line_no) {
+                        normaliser
+                            .push(&line)
+                            .into_iter()
+                            .map(|event| {
+                                pending.observe(&event);
+                                ConversationEvent { line_no, event }
+                            })
+                            .collect()
+                    } else {
+                        // Already replayed from the table above.
+                        Vec::new()
+                    }
+                }
                 // A question is not in the log — the agent is blocked rather
                 // than talking — so it carries the line it interrupted. That
                 // keeps the resume cursor monotonic: a question stamped zero
@@ -612,6 +617,16 @@ impl PendingPrompts {
         self.questions.clear();
         events
     }
+}
+
+/// Accept each durable log line once while keeping out-of-band events at the
+/// latest line that has actually been delivered on this connection.
+fn advance_live_cursor(cursor: &mut u64, line_no: u64) -> bool {
+    if line_no <= *cursor {
+        return false;
+    }
+    *cursor = line_no;
+    true
 }
 
 /// Pending echoes are not durable log lines. They must not consume the cursor
@@ -1670,6 +1685,9 @@ mod tests {
     #[test]
     fn a_live_close_resolves_open_prompts_and_fails_the_active_turn() {
         let mut pending = PendingPrompts::default();
+        let mut cursor = 4;
+        assert!(advance_live_cursor(&mut cursor, 7));
+        assert!(!advance_live_cursor(&mut cursor, 6));
         pending.observe(&TurnEvent::RequestOpened {
             req: ft_core::RequestId::new("epoch:permission"),
             kind: ft_core::turn::RequestKind::Tool,
@@ -1680,7 +1698,8 @@ mod tests {
             turn: ft_core::turn::TurnId::new("epoch:prompt"),
         });
 
-        let closed = pending.close(7, true);
+        let closed = pending.close(cursor, true);
+        assert!(closed.iter().all(|held| held.line_no == 7));
 
         assert!(closed.iter().any(|held| matches!(
             &held.event,
