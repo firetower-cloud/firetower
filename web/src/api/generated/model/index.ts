@@ -27,6 +27,7 @@ export * from './bootstrap';
 export * from './branches';
 export * from './capacity';
 export * from './cause';
+export * from './caution';
 export * from './changedWhat';
 export * from './checkout';
 export * from './checkoutSummary';

@@ -1757,7 +1757,11 @@ You are in the directory that holds them, not inside one of them.              P
             .await
             .unwrap_or_default();
         let after_line = previous_log.lines().count();
-        let mut opening = agent.opening(prompt, &path.to_string_lossy());
+        let mut opening = agent.opening(
+            prompt,
+            &path.to_string_lossy(),
+            &ft_core::controls::Preferred::from_env(),
+        );
         if agent == ft_core::Agent::Codex {
             let mut reader = ft_core::codex::CodexNormaliser::default();
             for line in previous_log.lines() {

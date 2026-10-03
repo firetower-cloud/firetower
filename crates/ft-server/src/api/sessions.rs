@@ -616,6 +616,7 @@ pub(super) async fn create_session(
     // there is nothing better to do: one process, one environment. What each
     // repository asked for in a *file* stays its own, inside its own checkout.
     let mut env: Vec<(String, String)> = Vec::new();
+    carry_preferences(&state, &mut env, &owner, req.agent).await;
     for vars in &per_repo_env {
         for v in vars {
             env.retain(|(existing, _)| *existing != v.name);
@@ -769,6 +770,38 @@ pub(super) async fn relaunch_session(
     }))
 }
 
+/// Carry what this person last chose about this agent into the session.
+///
+/// The rule: a session opens on the settings you were last working with. Both
+/// agents are launched by the worker, which inherits this environment, so this
+/// is where the preference crosses over — see [`ft_core::PREFERRED_ENV`].
+///
+/// Nothing chosen means nothing added, and the agent's own defaults apply. A
+/// read that fails is the same as nothing chosen: starting a session on the
+/// defaults is a small surprise, and refusing to start one is not.
+async fn carry_preferences(
+    state: &AppState,
+    env: &mut Vec<(String, String)>,
+    user_id: &str,
+    agent: ft_core::Agent,
+) {
+    let pairs = match state.db.preferred_controls(user_id, agent).await {
+        Ok(pairs) => pairs,
+        Err(e) => {
+            tracing::warn!("reading remembered settings for {}: {e:#}", agent.label());
+            return;
+        }
+    };
+    let preferred = ft_core::controls::Preferred::from_pairs(pairs);
+    if preferred.is_empty() {
+        return;
+    }
+    if let Ok(json) = serde_json::to_string(&preferred) {
+        env.retain(|(name, _)| name != ft_core::PREFERRED_ENV);
+        env.push((ft_core::PREFERRED_ENV.to_string(), json));
+    }
+}
+
 /// The work behind [`relaunch_session`], so a turn can do it without a request.
 ///
 /// Everything is resolved fresh rather than remembered: the credential comes
@@ -831,6 +864,7 @@ pub(crate) async fn relaunch(
     };
 
     let mut env: Vec<(String, String)> = Vec::new();
+    carry_preferences(state, &mut env, owner, session.agent).await;
     for (name, value) in agent_env(state, session.agent, &session.id, owner).await? {
         env.retain(|(existing, _)| *existing != name);
         env.push((name, value));
@@ -996,6 +1030,7 @@ async fn start_another_agent(
     // Its own credential and its own environment, resolved against this session
     // so the vault's log names the run that spent it.
     let mut env: Vec<(String, String)> = Vec::new();
+    carry_preferences(&state, &mut env, &owner, req.agent).await;
     if let Some(account) = &req.account_id {
         super::accounts::pin(&state, &owner, &id, account, req.agent).await?;
     }

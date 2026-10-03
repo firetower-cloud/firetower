@@ -27,7 +27,7 @@ export const SessionControlsParams = zod.object({
 
 export const SessionControlsResponseItem = zod.object({
   "choices": zod.array(zod.object({
-  "grave": zod.boolean().optional().describe('Drawn apart, because it changes what the agent may do unsupervised.'),
+  "caution": zod.union([zod.null(),zod.enum(['grants', 'neverAsks']).describe('Why this one is drawn apart from the rest, when it is.')]).optional(),
   "label": zod.string().describe('What the picker shows when this is in force.'),
   "note": zod.string().nullish().describe('Why somebody would pick it, when that is not obvious.'),
   "value": zod.string().describe('What gets sent.')

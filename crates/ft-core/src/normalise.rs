@@ -235,6 +235,12 @@ pub struct ClaudeNormaliser {
     /// drawing the word "Model" over a running session. See
     /// [`crate::controls::claude_choice_for`].
     model: Option<String>,
+    /// The permission mode it last said it was running under.
+    ///
+    /// Kept for the same reason as `model`, and from both places it is said:
+    /// `init` at the top of every turn, and the `status` line a change
+    /// mid-turn produces.
+    mode: Option<String>,
 }
 
 /// One request's view of the window, kept so the turn can report the last one.
@@ -264,6 +270,14 @@ impl ClaudeNormaliser {
     /// is what bridges the two.
     pub fn model(&self) -> Option<&str> {
         self.model.as_deref()
+    }
+
+    /// The permission mode it last said it was running under, if it has said.
+    ///
+    /// Already one of the picker's own values — `auto`, `plan`, `acceptEdits` —
+    /// so unlike the model it needs no mapping.
+    pub fn mode(&self) -> Option<&str> {
+        self.mode.as_deref()
     }
 
     /// Read one line and report everything it means.
@@ -316,9 +330,13 @@ impl ClaudeNormaliser {
                 if !model.is_empty() {
                     self.model = Some(model.to_string());
                 }
+                let mode = str_at(v, "permissionMode").unwrap_or_default();
+                if !mode.is_empty() {
+                    self.mode = Some(mode.to_string());
+                }
                 out.push(TurnEvent::SessionConfigured {
                     model: model.to_string(),
-                    mode: str_at(v, "permissionMode").unwrap_or_default().to_string(),
+                    mode: mode.to_string(),
                     tools: string_list(v.get("tools")),
                     // `slash_commands`, not `commands`. Reading the wrong key
                     // cost nothing visible until something started drawing the
@@ -368,14 +386,20 @@ impl ClaudeNormaliser {
             // next turn — long after they moved the picker and are watching to
             // see whether it took. Nothing else in here is worth a card.
             Some("status") => match str_at(v, "permissionMode") {
-                Some(mode) => out.push(TurnEvent::SessionConfigured {
-                    // Only what it said. A restatement fills in what it leaves
-                    // out, and this one is about the mode alone.
-                    model: String::new(),
-                    mode: mode.to_string(),
-                    tools: Vec::new(),
-                    commands: Vec::new(),
-                }),
+                Some(mode) => {
+                    // Unlike the model, this one *is* restated mid-turn — it is
+                    // how a change made from the picker comes back — so it has
+                    // to land here as well as on `init`.
+                    self.mode = Some(mode.to_string());
+                    out.push(TurnEvent::SessionConfigured {
+                        // Only what it said. A restatement fills in what it
+                        // leaves out, and this one is about the mode alone.
+                        model: String::new(),
+                        mode: mode.to_string(),
+                        tools: Vec::new(),
+                        commands: Vec::new(),
+                    })
+                }
                 None => out.push(raw(v)),
             },
             // `task_updated` repeats what `task_notification` says with less in

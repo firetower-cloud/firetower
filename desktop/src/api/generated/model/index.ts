@@ -27,6 +27,7 @@ export * from './bootstrap.ts';
 export * from './branches.ts';
 export * from './capacity.ts';
 export * from './cause.ts';
+export * from './caution.ts';
 export * from './changedWhat.ts';
 export * from './checkout.ts';
 export * from './checkoutSummary.ts';

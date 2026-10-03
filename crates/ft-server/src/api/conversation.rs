@@ -784,6 +784,25 @@ pub(super) async fn choose_control(
         .await
         .map_err(|e| ApiError::new(ErrorCode::InvalidRequest, format!("{e:#}")))?;
 
+    // And keep it as this person's preference for this agent, so their next
+    // session opens where they left off rather than back on a default they
+    // have already corrected once. Only after the change was accepted — a
+    // refused one is not a preference.
+    //
+    // Not fatal if it cannot be written: the change itself has happened, and
+    // failing the request would say otherwise.
+    if let (Some(me), Ok(session)) = (principal.user.as_ref(), state.db.session(&id).await) {
+        if let Some(session) = session {
+            if let Err(e) = state
+                .db
+                .prefer_control(me.id.as_str(), session.agent, chosen.kind, &chosen.value)
+                .await
+            {
+                tracing::warn!(session = %id, "remembering the choice for next time: {e:#}");
+            }
+        }
+    }
+
     Ok(Json(Sent { sent: true }))
 }
 

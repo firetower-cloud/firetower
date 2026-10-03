@@ -1998,6 +1998,65 @@ impl Db {
         Ok(())
     }
 
+    /// Remember what somebody chose about an agent, for their next session.
+    ///
+    /// Per person and per agent. The rule is that a session opens on the
+    /// settings you were last working with, whichever session that was —
+    /// otherwise every new one starts on a default you have already rejected
+    /// once and have to correct again.
+    ///
+    /// Unlike [`Db::remember_control`], this is kept for *every* agent. The
+    /// invariant that Claude Code is never written down is about what a session
+    /// is **running** — it answers that itself, and a second record could only
+    /// disagree. What somebody prefers is a different fact, it is about the
+    /// person rather than the session, and nothing else holds it.
+    pub async fn prefer_control(
+        &self,
+        user_id: &str,
+        agent: ft_core::Agent,
+        kind: ft_core::controls::ControlKind,
+        value: &str,
+    ) -> Result<()> {
+        sqlx::query(
+            "INSERT INTO agent_control_preferences (user_id, agent, kind, value) \
+             VALUES ($1, $2, $3, $4) \
+             ON CONFLICT (user_id, agent, kind) DO UPDATE SET value = $4, chosen_at = now()",
+        )
+        .bind(user_id)
+        .bind(format!("{agent:?}"))
+        .bind(control_kind(kind))
+        .bind(value)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// What this person last chose about this agent.
+    ///
+    /// A kind this build no longer offers is skipped, for the same reason
+    /// [`Db::chosen_controls`] skips one.
+    pub async fn preferred_controls(
+        &self,
+        user_id: &str,
+        agent: ft_core::Agent,
+    ) -> Result<Vec<(ft_core::controls::ControlKind, String)>> {
+        let rows: Vec<(String, String)> = sqlx::query_as(
+            "SELECT kind, value FROM agent_control_preferences WHERE user_id = $1 AND agent = $2",
+        )
+        .bind(user_id)
+        .bind(format!("{agent:?}"))
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows
+            .into_iter()
+            .filter_map(|(kind, value)| {
+                serde_json::from_str(&format!("\"{kind}\""))
+                    .ok()
+                    .map(|k| (k, value))
+            })
+            .collect())
+    }
+
     /// Everything somebody has chosen about a session, for a reader being built.
     ///
     /// A kind we no longer have is skipped rather than refused: a row written by

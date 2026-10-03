@@ -6945,6 +6945,14 @@
           "Unknown"
         ]
       },
+      "Caution": {
+        "type": "string",
+        "description": "Why a choice is drawn apart, and they are not the same why.\n\nThis was one flag called `grave`, documented as \"changes what the agent may\ndo unsupervised\" and then used for two unrelated things. Both \"never ask\"\noptions were marked with it, and neither widens anything: Claude Code's\n*refuses* what it is not already allowed to do, and Codex's *fails* — the\nnotes beside them have always said so. They were painted the colour of a\nsandbox being taken down.\n\nTwo axes, which the Codex modes above already describe in prose: when it\ncomes to you, and what it can do without needing to. Colouring a point on\nthe first with the alarm reserved for the second spends the alarm in the\nwrong place, and an alarm spent in the wrong place is one people stop\nreading.",
+        "enum": [
+          "grants",
+          "neverAsks"
+        ]
+      },
       "ChangedWhat": {
         "type": "string",
         "description": "What changed in a workspace, when the socket says something did.",
@@ -7136,9 +7144,16 @@
           "value"
         ],
         "properties": {
-          "grave": {
-            "type": "boolean",
-            "description": "Drawn apart, because it changes what the agent may do unsupervised."
+          "caution": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Caution",
+                "description": "Why this one is drawn apart from the rest, when it is."
+              }
+            ]
           },
           "label": {
             "type": "string",
