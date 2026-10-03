@@ -8,6 +8,8 @@
 import assert from "node:assert/strict";
 import { mkdir, readdir, readFile, access } from "node:fs/promises";
 import path from "node:path";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { chromium } from "playwright-core";
 
 const server = process.env.FIRETOWER_E2E_SERVER ?? "127.0.0.1:4400";
@@ -153,6 +155,22 @@ try {
       assert.ok(await tasks.count() > successful, "the provider must actually attempt the rejected Task");
       await page.screenshot({ path: `${output}/cursor-error.png`, fullPage: true });
       console.log("PASS: real Task activity and rejected Task response are visible");
+    }
+    if (process.env.FIRETOWER_E2E_CLOSE === "1") {
+      const session = page.url().split("/").at(-1);
+      assert.match(session, /^s_[a-z0-9]+$/, "only this disposable test session may be stopped");
+      await page.getByPlaceholder("Say something to the agent").fill("Use only Shell to run: sleep 30 . This tests closing a disposable agent while permission is pending. Do not change files.");
+      await page.getByRole("button", { name: "Send", exact: true }).click();
+      await page.getByRole("button", { name: "Allow", exact: true }).waitFor({ timeout: 120_000 });
+      await promisify(execFile)("tmux", ["kill-session", "-t", `firetower-${session}`]);
+      await page.getByRole("button", { name: "Start it again", exact: true }).waitFor({ timeout: 30_000 });
+      await page.getByRole("button", { name: "Allow", exact: true }).waitFor({ state: "hidden" });
+      await page.getByText("Working", { exact: true }).waitFor({ state: "hidden" });
+      await page.reload();
+      await page.getByRole("button", { name: "Start it again", exact: true }).waitFor();
+      assert.equal(await page.getByRole("button", { name: "Allow", exact: true }).count(), 0, "reload must not revive the exited agent's permission");
+      await page.screenshot({ path: `${output}/cursor-closed.png`, fullPage: true });
+      console.log("PASS: real agent exit clears pending permission and Working, including reload");
     }
   }
   if (process.env.FIRETOWER_E2E_FAILED_SESSION) {
