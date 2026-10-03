@@ -564,11 +564,11 @@ mod tests {
 
         let fences = marked(codex, ControlKind::Sandbox);
         assert_eq!(
-            of(&fences, SANDBOX_EVERYTHING.into()),
+            of(&fences, SANDBOX_EVERYTHING),
             Some(Caution::Grants),
             "the one that really does take the fence down"
         );
-        assert_eq!(of(&fences, SANDBOX_WORKSPACE.into()), None);
+        assert_eq!(of(&fences, SANDBOX_WORKSPACE), None);
     }
 
     /// The rule, both halves: last time's choice, unless it has gone away.

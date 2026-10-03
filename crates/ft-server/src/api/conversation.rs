@@ -791,15 +791,13 @@ pub(super) async fn choose_control(
     //
     // Not fatal if it cannot be written: the change itself has happened, and
     // failing the request would say otherwise.
-    if let (Some(me), Ok(session)) = (principal.user.as_ref(), state.db.session(&id).await) {
-        if let Some(session) = session {
-            if let Err(e) = state
-                .db
-                .prefer_control(me.id.as_str(), session.agent, chosen.kind, &chosen.value)
-                .await
-            {
-                tracing::warn!(session = %id, "remembering the choice for next time: {e:#}");
-            }
+    if let (Some(me), Ok(Some(session))) = (principal.user.as_ref(), state.db.session(&id).await) {
+        if let Err(e) = state
+            .db
+            .prefer_control(me.id.as_str(), session.agent, chosen.kind, &chosen.value)
+            .await
+        {
+            tracing::warn!(session = %id, "remembering the choice for next time: {e:#}");
         }
     }
 
