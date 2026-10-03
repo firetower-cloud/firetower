@@ -1690,6 +1690,23 @@ You are in the directory that holds them, not inside one of them.              P
                     Ok(structured::Ended::WatcherStopped) => {
                         let _ = out.send(ToServer::AgentUnwatched { session_id: id }).await;
                     }
+                    Ok(structured::Ended::SocketClosed) => {
+                        // EOF is ambiguous: a watcher can lose its socket while
+                        // the agent keeps writing. Only an explicit negative
+                        // tmux probe proves that the supervised agent is gone.
+                        match tmux::Tmux::for_session(id.as_str()).checked_exists().await {
+                            Ok(false) => {
+                                let _ = out.send(ToServer::AgentClosed { session_id: id }).await;
+                            }
+                            Ok(true) => {
+                                let _ = out.send(ToServer::AgentUnwatched { session_id: id }).await;
+                            }
+                            Err(error) => {
+                                tracing::warn!(session = %id, "agent watcher ended but tmux liveness is unknown: {error:#}");
+                                let _ = out.send(ToServer::AgentUnwatched { session_id: id }).await;
+                            }
+                        }
+                    }
                     Err(e) => {
                         // Ordinary rather than exceptional: a session running
                         // in a terminal has no agent to watch, and the control
@@ -3314,10 +3331,80 @@ mod watcher_tests {
         worker.watching.lock().await.insert(id.to_string(), over);
 
         worker.watch_agent(&id, 0, &out).await;
+        let event = tokio::time::timeout(std::time::Duration::from_millis(500), heard.recv())
+            .await
+            .expect("a watcher should report that its initial connection failed")
+            .expect("the worker should send an event");
         assert!(
-            started(&mut heard).await,
-            "a dead entry stopped a real watcher from starting"
+            matches!(event, ToServer::AgentUnwatched { session_id } if session_id == id),
+            "an initial socket failure must remain an unwatch, not an agent close"
         );
+    }
+
+    /// A socket that disappears after Watch was accepted is ambiguous on its
+    /// own. A real matching tmux session keeps the conversation open; a tmux
+    /// session killed under an established socket proves the agent is gone.
+    #[tokio::test]
+    async fn abrupt_established_socket_eof_closes_only_when_tmux_is_absent() {
+        async fn disconnect(id: SessionId, kill_tmux: bool) -> ToServer {
+            use tokio::io::AsyncBufReadExt;
+
+            let dir = tempfile::tempdir().unwrap();
+            let tmux = tmux::Tmux::for_session(id.as_str());
+            tmux.start(dir.path(), "sleep 30", &[]).await.unwrap();
+
+            let socket = agentd::socket_path(id.as_str());
+            tokio::fs::create_dir_all(socket.parent().unwrap())
+                .await
+                .unwrap();
+            let _ = tokio::fs::remove_file(&socket).await;
+            let listener = tokio::net::UnixListener::bind(&socket).unwrap();
+            let (accepted_tx, accepted_rx) = tokio::sync::oneshot::channel();
+            let (close_tx, close_rx) = tokio::sync::oneshot::channel();
+            let server = tokio::spawn(async move {
+                let (stream, _) = listener.accept().await.unwrap();
+                let mut reader = tokio::io::BufReader::new(stream);
+                let mut frame = String::new();
+                reader.read_line(&mut frame).await.unwrap();
+                let frame: serde_json::Value = serde_json::from_str(&frame).unwrap();
+                assert_eq!(frame["frame"], "Watch");
+                accepted_tx.send(()).unwrap();
+                let _ = close_rx.await;
+                drop(reader);
+            });
+
+            let worker = Worker::open(dir.path()).await.unwrap();
+            let (tx, mut heard) = mpsc::channel(8);
+            let out = Out::merged(tx);
+            worker.watch_agent(&id, 0, &out).await;
+            accepted_rx.await.unwrap();
+
+            if kill_tmux {
+                tmux.kill().await.unwrap();
+            }
+            close_tx.send(()).unwrap();
+
+            let event = tokio::time::timeout(std::time::Duration::from_secs(3), heard.recv()).await;
+            let _ = server.await;
+            let _ = tmux.kill().await;
+            let _ = tokio::fs::remove_file(&socket).await;
+
+            event
+                .expect("the watcher should report the established socket EOF")
+                .expect("the worker should send an event")
+        }
+
+        let exited = SessionId::new();
+        assert!(matches!(
+            disconnect(exited.clone(), true).await,
+            ToServer::AgentClosed { session_id } if session_id == exited
+        ));
+
+        let still_running = SessionId::new();
+        assert!(matches!(
+            disconnect(still_running.clone(), false).await,
+            ToServer::AgentUnwatched { session_id } if session_id == still_running
+        ));
     }
 }
 

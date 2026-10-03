@@ -197,6 +197,10 @@ pub enum Ended {
     /// Only the watching stopped. The agent is still there and still writing,
     /// so somebody asking again will pick up where this left off.
     WatcherStopped,
+    /// An established socket reached EOF without a protocol exit frame. The
+    /// caller must check whether the agent's tmux session still exists before
+    /// deciding whether this was an agent exit or only a broken watcher.
+    SocketClosed,
 }
 
 pub async fn watch(session_id: SessionId, since_line: u64, out: Out) -> Result<Ended> {
@@ -249,9 +253,10 @@ pub async fn watch(session_id: SessionId, since_line: u64, out: Out) -> Result<E
         }
     }
 
-    // The frames ran out without the agent saying it had exited: agentd hung
-    // up, or the read ended. The agent is still running.
-    Ok(Ended::WatcherStopped)
+    // The frames ran out without the agent saying it had exited. This is
+    // ambiguous until the caller checks whether the supervised tmux session
+    // still exists: agentd may have gone down abruptly, or only this watcher.
+    Ok(Ended::SocketClosed)
 }
 
 #[cfg(test)]
