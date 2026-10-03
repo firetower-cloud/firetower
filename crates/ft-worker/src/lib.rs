@@ -328,7 +328,10 @@ impl Worker {
                     Some(frame) = pending.recv() => frame,
                     else => break,
                 };
-                outbound.write(&frame).await?;
+                outbound
+                    .write(&frame)
+                    .await
+                    .context("writing control-plane frame")?;
             }
             Ok::<(), anyhow::Error>(())
         };
@@ -422,7 +425,7 @@ impl Worker {
                                     .await;
                                 continue;
                             }
-                            Err(e) => return Err(e.into()),
+                            Err(e) => return Err(anyhow::Error::from(e).context("reading control-plane frame")),
                         };
 
                         // Anything that takes real time runs on its own task.
