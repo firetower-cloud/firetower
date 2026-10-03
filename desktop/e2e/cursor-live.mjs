@@ -6,7 +6,8 @@
  * No API route is mocked. The provider sign-in itself needs browser approval.
  */
 import assert from "node:assert/strict";
-import { mkdir } from "node:fs/promises";
+import { mkdir, readdir, readFile, access } from "node:fs/promises";
+import path from "node:path";
 import { chromium } from "playwright-core";
 
 const server = process.env.FIRETOWER_E2E_SERVER ?? "127.0.0.1:4400";
@@ -60,7 +61,7 @@ try {
       await page.getByRole("button", { name: "Add it" }).click({ timeout: 30_000 });
     }
     await page.getByRole("button", { name: /New workspace/ }).click();
-    await page.getByPlaceholder("auth refactor").fill("Cursor ACP Playwright");
+    await page.getByPlaceholder("auth refactor").fill(`Cursor ACP Playwright ${Date.now()}`);
     await page.locator("button").filter({ hasText: "Choose a repository" }).click();
     await page.getByPlaceholder("Find a repository").fill("firetower-cursor-pw-repo");
     await page.getByText("firetower-cursor-pw-repo", { exact: false }).last().click();
@@ -73,6 +74,46 @@ try {
     await page.screenshot({ path: `${output}/cursor-turn.png`, fullPage: true });
     assert.equal(failures.length, 0, `Page errors: ${failures.join("; ")}`);
     console.log("PASS: real Cursor ACP turn through the Desktop renderer");
+
+    if (process.env.FIRETOWER_E2E_PERMISSIONS === "1") {
+      const root = process.env.FIRETOWER_E2E_WORKER_ROOT;
+      if (!root) throw new Error("Set FIRETOWER_E2E_WORKER_ROOT to this isolated local worker's root");
+      const session = page.url().split("/").at(-1);
+      const candidates = (await readdir(path.join(root, "worktrees")))
+        .filter((name) => name.endsWith(session.slice(-8)));
+      assert.equal(candidates.length, 1, "find exactly this session's disposable worktree");
+      const checkout = path.join(root, "worktrees", candidates[0], "firetower-cursor-pw-repo");
+      const absent = async (name) => {
+        try { await access(path.join(checkout, name)); return false; }
+        catch (error) { if (error.code === "ENOENT") return true; throw error; }
+      };
+      const send = async (prompt) => {
+        await page.getByPlaceholder("Say something to the agent").fill(prompt);
+        await page.getByRole("button", { name: "Send", exact: true }).click();
+      };
+      const idle = () => page.getByRole("button", { name: "Send", exact: true }).waitFor({ timeout: 120_000 });
+      assert.ok(await absent("shell-approved.txt"));
+      await send('Use only the Shell tool to run: printf "SHELL APPROVED" > firetower-cursor-pw-repo/shell-approved.txt . No Edit File fallback or commits.');
+      await page.getByRole("button", { name: "Allow", exact: true }).waitFor({ timeout: 120_000 });
+      assert.ok(await absent("shell-approved.txt"), "no side effect before approval");
+      await page.getByRole("button", { name: "Allow", exact: true }).click();
+      await idle();
+      assert.equal(await readFile(path.join(checkout, "shell-approved.txt"), "utf8"), "SHELL APPROVED");
+      await page.screenshot({ path: `${output}/cursor-approved.png`, fullPage: true });
+      await send('Use only the Shell tool to run: printf "MUST NOT EXIST" > firetower-cursor-pw-repo/shell-denied.txt . I will deny it. On denial stop, do not write this file with any fallback or retry. No commits.');
+      await page.getByRole("button", { name: "Deny", exact: true }).click({ timeout: 120_000 });
+      await page.getByPlaceholder("Why not? The agent reads this.").fill("Disposable denial test: stop without creating this file.");
+      await page.getByRole("button", { name: "Deny", exact: true }).click();
+      await idle();
+      assert.ok(await absent("shell-denied.txt"), "denial must prevent the file effect");
+      await page.screenshot({ path: `${output}/cursor-denied.png`, fullPage: true });
+      await send('Use only Shell to run: sleep 30 . This is a disposable cancellation test. Do not change files.');
+      await page.getByRole("button", { name: "Allow", exact: true }).waitFor({ timeout: 120_000 });
+      await page.getByRole("button", { name: "Interrupt the agent", exact: true }).click();
+      await idle();
+      await page.screenshot({ path: `${output}/cursor-cancelled.png`, fullPage: true });
+      console.log("PASS: live permission approval effect, denial prevents effect, and cancellation leaves Working");
+    }
 
     if (process.env.FIRETOWER_E2E_FOLLOWUP === "1") {
       const answer = page.getByText("Playwright Cursor ACP smoke test.", { exact: false });

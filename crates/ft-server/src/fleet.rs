@@ -2966,6 +2966,7 @@ impl Fleet {
 
     /// What this session is blocked on, if anything.
     pub async fn asked(&self, session_id: &SessionId) -> Vec<AgentSpeech> {
+        self.ensure_reader(session_id).await;
         self.asked
             .read()
             .await
@@ -3081,12 +3082,13 @@ impl Fleet {
         // Everything this session has already said, so a control plane that
         // restarted knows where the conversation got to.
         //
-        // Nothing here is acted on: the questions were answered or are still
-        // in `asked`, and the frames were sent by whoever was running at the
-        // time. What is being rebuilt is what only the reader knows — for
-        // Codex, the thread every later turn has to name, which was said once
-        // in a line that has long gone past.
+        // Never send frames while replaying. Rebuild only the reader and
+        // unanswered protocol questions: `asked` is lost on server restart,
+        // while the provider can still be waiting in its tmux supervisor.
+        // This also restores Codex's thread, needed by later turns but
+        // announced only once in an earlier line.
         let mut opened = false;
+        let mut pending = Vec::new();
         for (_, line) in self
             .db
             .agent_lines_since(session_id, 0)
@@ -3097,6 +3099,10 @@ impl Fleet {
             // A turn that already started is the proof the first prompt went
             // out. Without this, reconnecting would send it a second time.
             opened |= matches!(read.moved, Some((SessionStatus::Working, _)));
+            pending.retain(
+                |q| !matches!(q, AgentSpeech::Asks { req, .. } if read.resolved.contains(req)),
+            );
+            pending.extend(read.asks);
         }
         if opened {
             progress.opening_prompt = None;
@@ -3120,11 +3126,26 @@ impl Fleet {
             }
         }
 
-        self.progress
-            .write()
-            .await
-            .entry(session_id.to_string())
-            .or_insert(progress);
+        let mut readers = self.progress.write().await;
+        if let std::collections::hash_map::Entry::Vacant(entry) =
+            readers.entry(session_id.to_string())
+        {
+            // Publish the restored questions with their reader. A concurrent
+            // rebuild must not resurrect a question the live reader resolved.
+            let mut held = self.asked.write().await;
+            let waiting = held.entry(session_id.to_string()).or_default();
+            for question in pending {
+                if let AgentSpeech::Asks { req, .. } = &question {
+                    if !waiting
+                        .iter()
+                        .any(|q| matches!(q, AgentSpeech::Asks { req: seen, .. } if seen == req))
+                    {
+                        waiting.push(question);
+                    }
+                }
+            }
+            entry.insert(progress);
+        }
     }
 
     /// End the turn in progress, leaving the session alive.
@@ -4032,6 +4053,61 @@ mod tests {
         fleet.supervise(host.clone(), Arc::new(Never)).await;
         assert!(fleet.try_now(&host).await);
         fleet.stop_supervising(&host).await;
+    }
+
+    #[tokio::test]
+    async fn an_acp_permission_survives_a_control_plane_restart() {
+        use serde_json::json;
+        let (db, owner) = Db::open_for_test_owned().await.unwrap();
+        let host = db
+            .ensure_host("fire-01", ft_core::Compute::Local)
+            .await
+            .unwrap();
+        let session = SessionId::new();
+        db.insert_session(
+            &session,
+            &host.id,
+            &owner,
+            None,
+            "Cursor permission",
+            "",
+            None,
+            None,
+            "CursorAgent",
+            ft_core::WorkspaceSize::Medium,
+            ft_core::Share::Equal,
+            &ft_core::Step::plan(false, false),
+            None,
+        )
+        .await
+        .unwrap();
+        let records = [
+            json!({"acp":"Started", "epoch":"original"}),
+            json!({"acp":"Ready", "session":"provider-session"}),
+            json!({"acp":"Sent", "message":{"jsonrpc":"2.0", "id":4, "method":"session/prompt", "params":{"prompt":[{"type":"text","text":"write a test file"}]}}}),
+            json!({"acp":"Received", "replay":false, "message":{"jsonrpc":"2.0", "id":0, "method":"session/request_permission", "params":{"sessionId":"provider-session","toolCall":{"title":"printf proof"},"options":[{"kind":"allow_once","optionId":"allow-once"}]}}}),
+        ];
+        for (i, record) in records.iter().enumerate() {
+            db.record_agent_line(&session, (i + 1) as i64, &record.to_string())
+                .await
+                .unwrap();
+        }
+        let restarted = Fleet::new(db.clone());
+        assert!(
+            restarted
+                .asked(&session)
+                .await
+                .iter()
+                .any(|q| matches!(q, AgentSpeech::Asks { req, .. } if req == "original:0")),
+            "the original permission must remain answerable after restart"
+        );
+
+        db.record_agent_line(&session, 5, &json!({"acp":"Sent", "message":{"jsonrpc":"2.0","id":0,"result":{"outcome":{"outcome":"selected","optionId":"allow-once"}}}}).to_string()).await.unwrap();
+        let after_decision = Fleet::new(db);
+        assert!(
+            after_decision.asked(&session).await.is_empty(),
+            "replay must not resurrect an answered permission"
+        );
     }
 
     /// The other half of the issue: a choice that only the reader knew about.
