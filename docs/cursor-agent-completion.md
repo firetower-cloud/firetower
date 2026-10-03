@@ -2,7 +2,7 @@
 
 ## Correction and regression
 
-A real native Tauri permission was left pending across a control-plane/local-worker restart. The UI replayed its approval card, but Fleet had lost its in-memory pending questions. A decision therefore failed before reaching Cursor. Fleet now restores unanswered protocol requests while replaying its stored journal, retaining the original epoch/request ID and removing resolved requests. Replay sends no provider frames. The database regression failed before this change and passed after it; it also verifies that a responded permission is not resurrected.
+A real native Tauri permission was left pending across a control-plane/local-worker restart. The UI replayed its approval card, but Fleet had lost its in-memory pending questions. A decision therefore failed before reaching Cursor. Fleet now restores unanswered protocol requests while replaying its stored journal, retaining the original epoch/request ID and removing resolved requests. Replay sends no provider frames. A real agent exit persists a terminal status; historical questions are not restored outside a blocked/in-flight turn. The database regression failed before this change and passed after it; it also verifies that a responded permission is not resurrected.
 
 ## Authenticated live observations, macOS arm64
 
@@ -14,7 +14,7 @@ CLI `2026.09.28-64d2043`, isolated PostgreSQL 14, Firetower local worker, dispos
 - After the fix, another permission was opened, the server/local worker restarted, and native Deny reached Cursor. The provider completed and `restart-denied.txt` remained absent.
 - A Task using `explore` was rejected by this running CLI, which listed its allowed types. Retrying a read-only Task using `generalPurpose` returned the README line. The parent stream contains Task tool updates and `cursor/task`; it does not expose the child's own tool/progress events. This remains an open provider capability gap.
 
-Playwright's opt-in `FIRETOWER_E2E_PERMISSIONS=1` now checks a real Shell approval with before/after filesystem assertions, a denied Shell with no resulting file, cancellation while waiting for a permission, then follow-up memory and reload without duplicate answers. Set `FIRETOWER_E2E_WORKER_ROOT` to the isolated local worker root. These scenarios do not mock API/provider responses.
+Playwright's opt-in `FIRETOWER_E2E_PERMISSIONS=1` now checks a real Shell approval with before/after filesystem assertions, a denied Shell with no resulting file, cancellation while waiting for a permission. With `FIRETOWER_E2E_FOLLOWUP=1`, it also checks follow-up memory and reload without duplicate answers. Both flags require `FIRETOWER_E2E_RUN=1`. Set `FIRETOWER_E2E_WORKER_ROOT` to the isolated local worker root. These scenarios do not mock API/provider responses.
 
 ## Remaining gates
 
