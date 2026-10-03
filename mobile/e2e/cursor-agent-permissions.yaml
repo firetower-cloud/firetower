@@ -9,6 +9,7 @@ appId: com.usefiretower.app
 - extendedWaitUntil:
     visible: "Allow"
     timeout: 120000
+- assertVisible: '(?s).*printf.*MOBILE APPROVED.*'
 - takeScreenshot: cursor-agent-mobile-pending
 - tapOn: "Allow"
 - extendedWaitUntil:
