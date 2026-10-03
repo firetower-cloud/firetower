@@ -130,6 +130,27 @@ try {
       await page.screenshot({ path: `${output}/cursor-followup.png`, fullPage: true });
       console.log("PASS: follow-up memory and page reconnect without duplicate answer");
     }
+    if (process.env.FIRETOWER_E2E_TASKS === "1") {
+      const send = async (prompt) => {
+        await page.getByPlaceholder("Say something to the agent").fill(prompt);
+        await page.getByRole("button", { name: "Send", exact: true }).click();
+      };
+      const idle = () => page.getByRole("button", { name: "Send", exact: true }).waitFor({ timeout: 120_000 });
+      const tasks = page.getByRole("button", { name: /Task:/ });
+      const before = await tasks.count();
+      await send("Use one generalPurpose Task subagent to read firetower-cursor-pw-repo/README.md and return PLAYWRIGHT TASK followed by its exact line. Read only; no shell, edits or commits.");
+      await page.getByText(/PLAYWRIGHT TASK[\s\S]*Playwright Cursor ACP smoke test\./).last().waitFor({ timeout: 120_000 });
+      await idle();
+      assert.ok(await tasks.count() > before, "a real Task must be rendered");
+      await page.screenshot({ path: `${output}/cursor-task.png`, fullPage: true });
+      const successful = await tasks.count();
+      await send("Call exactly one Task with subagent_type explore. Do not retry with another type or use fallback tools. Return PLAYWRIGHT ERROR and the exact tool rejection.");
+      await page.getByText(/PLAYWRIGHT ERROR[\s\S]*explore/).last().waitFor({ timeout: 120_000 });
+      await idle();
+      assert.ok(await tasks.count() > successful, "the provider must actually attempt the rejected Task");
+      await page.screenshot({ path: `${output}/cursor-error.png`, fullPage: true });
+      console.log("PASS: real Task activity and rejected Task response are visible");
+    }
   }
 } finally {
   await browser.close();
