@@ -2,7 +2,7 @@
 # Verify mobile-approved.txt contents and mobile-denied.txt absence on the worker.
 appId: com.usefiretower.app
 ---
-- assertVisible: "Answer the agent"
+- assertVisible: { id: composer }
 - tapOn: { id: composer }
 - eraseText: 1000
 - inputText: 'Use only Shell to run: printf "MOBILE APPROVED" > firetower-cursor-pw-repo/mobile-approved.txt . Do not use Edit File or any fallback and do not commit.'
