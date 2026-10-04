@@ -121,6 +121,66 @@ pub struct SkillVersion {
     pub pinned_by: i64,
 }
 
+/// What an import found already here, for one bundle somebody dropped.
+///
+/// Answered before anything is written, so the review screen can say what
+/// will happen rather than finding out afterwards.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct Match {
+    /// The name that was asked about, so a batch can be read in any order.
+    pub name: String,
+    /// Absent when nothing of this name is reachable: it is simply new.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub found: Option<Found>,
+}
+
+/// The skill an imported bundle turned out to be another copy of.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct Found {
+    pub id: SkillId,
+    pub path: String,
+    /// The version it is on now.
+    pub version: i32,
+    /// Whether the bundle is byte-for-byte what that version already holds.
+    pub identical: bool,
+    /// Or an older one, which is worth saying differently: this was yours
+    /// once and has been superseded.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub identical_to_version: Option<i32>,
+    /// Whether this person may add a version to it. False for somebody else's,
+    /// shared into a directory they can only read.
+    pub may_write: bool,
+    /// Whether it is in this person's own space, which decides whether a new
+    /// skill of this name could be made at all.
+    pub mine: bool,
+    /// How the two bundles differ, for a row that has to say what changes.
+    pub unchanged: i32,
+    pub changed: i32,
+    pub added: i32,
+    pub removed: i32,
+}
+
+/// One file of a bundle somebody is about to import, as the match asks about it.
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct FileAt {
+    pub path: String,
+    /// sha256 of the contents, as the client computed it.
+    pub hash: String,
+    #[serde(default)]
+    pub executable: bool,
+}
+
+/// What is about to be imported, named and fingerprinted but not yet sent.
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct Asking {
+    pub name: String,
+    pub files: Vec<FileAt>,
+}
+
 /// One file of a bundle, without its bytes.
 #[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
@@ -201,6 +261,26 @@ pub fn tokens_for(name: &str, description: &str) -> i32 {
         // skill. Four characters a token is the usual English ratio.
         Err(_) => (entry.len() / 4) as i32,
     }
+}
+
+/// A fingerprint for a bundle: every path, the hash of its contents, and
+/// whether it runs.
+///
+/// Over the manifest rather than over the bytes, because the bytes are already
+/// hashed one file at a time — so two versions that differ in one file are
+/// told apart without reading any of them.
+///
+/// **The format is pinned and the migration computes the identical string.**
+/// `path:hash:1|0` per file, joined with commas, sorted by path as bytes.
+/// Change either side and every stored digest silently stops matching, which
+/// would read as every skill suddenly being new.
+pub fn digest_of(files: &[(String, String, bool)]) -> String {
+    let mut lines: Vec<String> = files
+        .iter()
+        .map(|(path, hash, runs)| format!("{path}:{hash}:{}", if *runs { '1' } else { '0' }))
+        .collect();
+    lines.sort();
+    format!("{:x}", Sha256::digest(lines.join(",").as_bytes()))
 }
 
 /// What this bundle will do to a session, read from the bundle itself.
@@ -669,6 +749,161 @@ impl Skills {
         Ok(())
     }
 
+    /// What this person already has, for each bundle they are about to import.
+    ///
+    /// Asked before anything is written, so the review screen can say what
+    /// *will* happen. The server refuses an exact duplicate on write as well,
+    /// because this answer can be a second old — somebody else may add a
+    /// version in between, and a screen deciding on its own is how two rows of
+    /// one name appear.
+    ///
+    /// Matched on **name, among what this person can reach**, then content
+    /// decides the rest. Not on content alone: two skills with identical bytes
+    /// under different names are a fork, and somebody kept them apart.
+    pub async fn matching(&self, person: &str, asking: &[Asking]) -> Result<Vec<Match>> {
+        let mut out = Vec::with_capacity(asking.len());
+        for one in asking {
+            out.push(Match {
+                name: one.name.clone(),
+                found: self.first_of_that_name(person, one).await?,
+            });
+        }
+        Ok(out)
+    }
+
+    /// The skill of this name this person would be adding to, if any.
+    ///
+    /// Theirs first. A skill in their own space is the one a new version would
+    /// go to; one merely shared with them is somebody else's, and worth
+    /// reporting for a different reason — the names will collide in a picker.
+    async fn first_of_that_name(&self, person: &str, asking: &Asking) -> Result<Option<Found>> {
+        let sql = format!(
+            "SELECT k.id, k.path::text AS path, v.version, v.digest, v.id AS version_id, \
+                    (k.path <@ ('u.' || me.slug)::ltree) AS mine, \
+                    {writable} AS may_write \
+               FROM skills k \
+               JOIN principals me ON me.id = $1 \
+               LEFT JOIN skill_versions v ON v.id = k.current_version_id \
+              WHERE k.name = $2 AND {visible} \
+              ORDER BY (k.path <@ ('u.' || me.slug)::ltree) DESC, k.created_at \
+              LIMIT 1",
+            visible = filed_where("k", 1, Level::Viewer),
+            writable = filed_where("k", 1, Level::Writer),
+        );
+        let Some(row) = sqlx::query(&sql)
+            .bind(person)
+            .bind(&asking.name)
+            .fetch_optional(&self.pool)
+            .await
+            .context("looking for a skill of that name")?
+        else {
+            return Ok(None);
+        };
+
+        let files: Vec<(String, String, bool)> = asking
+            .files
+            .iter()
+            .map(|f| (f.path.clone(), f.hash.clone(), f.executable))
+            .collect();
+        let digest = digest_of(&files);
+        let current: Option<String> = row.try_get("digest").ok().flatten();
+        let version_id: Option<String> = row.try_get("version_id").ok().flatten();
+
+        // An older version holding exactly these bytes is worth saying
+        // differently: this was yours once and has been superseded since.
+        let older: Option<i32> = sqlx::query_scalar(
+            "SELECT version FROM skill_versions \
+              WHERE skill_id = $1 AND digest = $2 AND id <> coalesce($3, '') \
+              ORDER BY version DESC LIMIT 1",
+        )
+        .bind(row.get::<String, _>("id"))
+        .bind(&digest)
+        .bind(&version_id)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        let (unchanged, changed, added, removed) = match &version_id {
+            Some(id) => self.difference(id, &files).await?,
+            None => (0, 0, files.len() as i32, 0),
+        };
+
+        Ok(Some(Found {
+            id: SkillId::from_stored(row.get::<String, _>("id")),
+            path: ft_core::ResourcePath::from_stored(row.get::<String, _>("path")).to_string(),
+            version: row.try_get("version").unwrap_or(0),
+            identical: current.as_deref() == Some(digest.as_str()),
+            identical_to_version: older,
+            may_write: row.try_get("may_write").unwrap_or(false),
+            mine: row.try_get("mine").unwrap_or(false),
+            unchanged,
+            changed,
+            added,
+            removed,
+        }))
+    }
+
+    /// How a bundle differs from what a version already holds, by path.
+    ///
+    /// Hashes only. Nothing is read, and the answer is what a row needs to
+    /// say: three files the same, two rewritten, one new.
+    async fn difference(
+        &self,
+        version_id: &str,
+        files: &[(String, String, bool)],
+    ) -> Result<(i32, i32, i32, i32)> {
+        let here: std::collections::HashMap<String, String> =
+            sqlx::query("SELECT path, hash FROM skill_files WHERE version_id = $1")
+                .bind(version_id)
+                .fetch_all(&self.pool)
+                .await?
+                .into_iter()
+                .map(|r| (r.get("path"), r.get("hash")))
+                .collect();
+
+        let (mut unchanged, mut changed, mut added) = (0, 0, 0);
+        for (path, hash, _) in files {
+            match here.get(path) {
+                Some(was) if was == hash => unchanged += 1,
+                Some(_) => changed += 1,
+                None => added += 1,
+            }
+        }
+        let removed = here
+            .keys()
+            .filter(|path| !files.iter().any(|(p, _, _)| p == *path))
+            .count() as i32;
+        Ok((unchanged, changed, added, removed))
+    }
+
+    /// The fingerprint a skill's current version holds, for refusing a
+    /// duplicate at the moment of writing rather than a moment before it.
+    pub async fn current_digest(&self, skill: &str) -> Result<Option<String>> {
+        Ok(sqlx::query_scalar(
+            "SELECT v.digest FROM skills k \
+               JOIN skill_versions v ON v.id = k.current_version_id \
+              WHERE k.id = $1",
+        )
+        .bind(skill)
+        .fetch_optional(&self.pool)
+        .await?
+        .flatten())
+    }
+
+    /// The fingerprint a bundle on its way in will have.
+    pub fn digest_of_new(new: &NewSkill) -> Result<String> {
+        let mut files = Vec::with_capacity(new.files.len());
+        for f in &new.files {
+            let bytes = ft_proto::decode(&f.contents)
+                .with_context(|| format!("{} did not arrive intact", f.path))?;
+            files.push((
+                f.path.clone(),
+                format!("{:x}", Sha256::digest(&bytes)),
+                f.executable,
+            ));
+        }
+        Ok(digest_of(&files))
+    }
+
     // ── defaults ────────────────────────────────────────────────────────
 
     /// Turn a default on or off. A null repository means every workspace.
@@ -822,6 +1057,8 @@ async fn write_version(
     let vid = SkillVersionId::new();
     let paths: Vec<String> = new.files.iter().map(|f| f.path.clone()).collect();
     let mut total: i64 = 0;
+    // Path, hash and whether it runs — what the fingerprint is taken over.
+    let mut written: Vec<(String, String, bool)> = Vec::new();
 
     sqlx::query(
         "INSERT INTO skill_versions \
@@ -846,6 +1083,7 @@ async fn write_version(
             .with_context(|| format!("{} did not arrive intact", f.path))?;
         let hash = format!("{:x}", Sha256::digest(&bytes));
         total += bytes.len() as i64;
+        written.push((f.path.clone(), hash.clone(), f.executable));
 
         // The bytes once, under a hash of themselves. A file that has not
         // changed between two versions is one row here, not two.
@@ -873,9 +1111,13 @@ async fn write_version(
         .context("recording a file")?;
     }
 
-    sqlx::query("UPDATE skill_versions SET bytes = $2 WHERE id = $1")
+    // The fingerprint, once every file's hash is known. Same string the
+    // migration builds, so a backfilled version and a freshly written one are
+    // comparable.
+    sqlx::query("UPDATE skill_versions SET bytes = $2, digest = $3 WHERE id = $1")
         .bind(vid.as_str())
         .bind(total)
+        .bind(digest_of(&written))
         .execute(&mut **tx)
         .await?;
 
@@ -941,6 +1183,33 @@ fn read_skill(r: sqlx::postgres::PgRow) -> Result<Skill> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The two sides of the fingerprint have to agree, so the format is
+    /// pinned here as a literal rather than as whatever the code happens to
+    /// build. The migration computes the identical string in SQL.
+    #[test]
+    fn the_fingerprint_is_over_the_manifest() {
+        let bundle = |runs: bool| {
+            vec![
+                ("SKILL.md".to_string(), "aaa".to_string(), false),
+                ("scripts/go.sh".to_string(), "bbb".to_string(), runs),
+            ]
+        };
+        // Order of the files does not change it; their contents do.
+        let mut shuffled = bundle(true);
+        shuffled.reverse();
+        assert_eq!(digest_of(&bundle(true)), digest_of(&shuffled));
+        // Whether a file runs is part of what a bundle is.
+        assert_ne!(digest_of(&bundle(true)), digest_of(&bundle(false)));
+        // And it is the hash of exactly this string.
+        assert_eq!(
+            digest_of(&bundle(true)),
+            format!(
+                "{:x}",
+                Sha256::digest("SKILL.md:aaa:0,scripts/go.sh:bbb:1".as_bytes())
+            )
+        );
+    }
 
     #[test]
     fn a_name_follows_the_standard() {

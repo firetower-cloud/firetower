@@ -4970,6 +4970,54 @@
         }
       }
     },
+    "/api/v1/skills/match": {
+      "post": {
+        "tags": [
+          "skills"
+        ],
+        "summary": "What this person already has, for a set of bundles about to be imported.",
+        "description": "Its own request rather than a flag on the import, because the answer is\nwhat somebody reads *before* deciding — a row that says \"you already have\nthis, unchanged\" has to be drawn while there is still a choice.",
+        "operationId": "match_skills",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/Asking"
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Match"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/skills/{id}": {
       "delete": {
         "tags": [
@@ -7126,6 +7174,25 @@
           }
         }
       },
+      "Asking": {
+        "type": "object",
+        "description": "What is about to be imported, named and fingerprinted but not yet sent.",
+        "required": [
+          "name",
+          "files"
+        ],
+        "properties": {
+          "files": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FileAt"
+            }
+          },
+          "name": {
+            "type": "string"
+          }
+        }
+      },
       "Attached": {
         "type": "object",
         "description": "An image somebody put in the composer.",
@@ -8665,6 +8732,26 @@
           }
         }
       },
+      "FileAt": {
+        "type": "object",
+        "description": "One file of a bundle somebody is about to import, as the match asks about it.",
+        "required": [
+          "path",
+          "hash"
+        ],
+        "properties": {
+          "executable": {
+            "type": "boolean"
+          },
+          "hash": {
+            "type": "string",
+            "description": "sha256 of the contents, as the client computed it."
+          },
+          "path": {
+            "type": "string"
+          }
+        }
+      },
       "FileChoice": {
         "type": "object",
         "required": [
@@ -8876,6 +8963,72 @@
           "url": {
             "type": "string",
             "description": "Ready to paste, because that is what it is for."
+          }
+        }
+      },
+      "Found": {
+        "type": "object",
+        "description": "The skill an imported bundle turned out to be another copy of.",
+        "required": [
+          "id",
+          "path",
+          "version",
+          "identical",
+          "mayWrite",
+          "mine",
+          "unchanged",
+          "changed",
+          "added",
+          "removed"
+        ],
+        "properties": {
+          "added": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "changed": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "id": {
+            "$ref": "#/components/schemas/SkillId"
+          },
+          "identical": {
+            "type": "boolean",
+            "description": "Whether the bundle is byte-for-byte what that version already holds."
+          },
+          "identicalToVersion": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Or an older one, which is worth saying differently: this was yours\nonce and has been superseded."
+          },
+          "mayWrite": {
+            "type": "boolean",
+            "description": "Whether this person may add a version to it. False for somebody else's,\nshared into a directory they can only read."
+          },
+          "mine": {
+            "type": "boolean",
+            "description": "Whether it is in this person's own space, which decides whether a new\nskill of this name could be made at all."
+          },
+          "path": {
+            "type": "string"
+          },
+          "removed": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "unchanged": {
+            "type": "integer",
+            "format": "int32",
+            "description": "How the two bundles differ, for a row that has to say what changes."
+          },
+          "version": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The version it is on now."
           }
         }
       },
@@ -9337,6 +9490,30 @@
               "null"
             ],
             "format": "int32"
+          }
+        }
+      },
+      "Match": {
+        "type": "object",
+        "description": "What an import found already here, for one bundle somebody dropped.\n\nAnswered before anything is written, so the review screen can say what\nwill happen rather than finding out afterwards.",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "found": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Found",
+                "description": "Absent when nothing of this name is reachable: it is simply new."
+              }
+            ]
+          },
+          "name": {
+            "type": "string",
+            "description": "The name that was asked about, so a batch can be read in any order."
           }
         }
       },

@@ -17,11 +17,34 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight, FolderDown } from "lucide-react";
-import { createSkill } from "~/api/generated/skills/skills";
+import { addVersion, createSkill, matchSkills } from "~/api/generated/skills/skills";
 import { why } from "~/data";
 import { readDrop, readFiles, size, skillsIn, RISK_SAYS, type Found } from "~/skills";
 
 type Step = "waiting" | "reading" | "review" | "saving";
+
+/** Whether a bundle has anything to do when Import is pressed. */
+function importable(s: Found): boolean {
+  if (s.errors.length > 0) return false;
+  // Already here, unchanged. Nothing would be written, and the server refuses
+  // it — so it arrives unticked rather than as a row that fails on import.
+  if (s.match?.identical) return false;
+  return true;
+}
+
+/** What will happen to this bundle, in a few words. */
+function verdict(s: Found): { tone: "ok" | "wait" | "bad"; says: string } {
+  if (s.errors.length > 0) return { tone: "bad", says: "cannot import" };
+  const m = s.match;
+  if (!m) return { tone: "ok", says: "new" };
+  if (m.identical)
+    return { tone: "wait", says: `already yours, unchanged at v${m.version}` };
+  if (m.identicalToVersion !== undefined && m.identicalToVersion !== null)
+    return { tone: "wait", says: `this is your v${m.identicalToVersion}, since superseded` };
+  if (m.mine && m.mayWrite) return { tone: "ok", says: `new version — v${m.version + 1}` };
+  if (!m.mine) return { tone: "wait", says: "a skill of this name is shared with you" };
+  return { tone: "ok", says: "new" };
+}
 
 export function AddSkill({
   seed,
@@ -46,9 +69,38 @@ export function AddSkill({
     setStep("reading");
     setFailed(null);
     const raw = await job;
-    const skills = skillsIn(raw);
+    const skills = await skillsIn(raw);
+
+    /* What the library already holds under each of these names, asked once,
+       before anything is written. It is what lets a row say "you already have
+       this, unchanged" while there is still a choice about it — and dropping
+       the same folder twice is how four pairs of identical skills got into a
+       library that had no way to tell them apart. */
+    try {
+      const answers = await matchSkills(
+        skills
+          .filter((s) => s.errors.length === 0)
+          .map((s) => ({
+            name: s.name,
+            files: s.files.map((f) => ({
+              path: f.path,
+              hash: f.hash,
+              executable: f.executable,
+            })),
+          })),
+      );
+      for (const answer of answers) {
+        const one = skills.find((s) => s.name === answer.name);
+        if (one && answer.found) one.match = answer.found;
+      }
+    } catch {
+      /* Best effort. Without it the review is what it was before — the server
+         still refuses an exact duplicate, so the worst case is finding out a
+         moment later rather than a moment earlier. */
+    }
+
     setFound(skills);
-    setTake(new Set(skills.map((_, i) => i).filter((i) => skills[i]!.errors.length === 0)));
+    setTake(new Set(skills.map((_, i) => i).filter((i) => importable(skills[i]!))));
     setOpen(skills.length === 1 ? 0 : null);
     setStep("review");
   }, []);
@@ -67,13 +119,22 @@ export function AddSkill({
     try {
       for (const i of [...take]) {
         const s = found[i]!;
-        await createSkill({
+        const bundle = {
           name: s.name,
           description: s.description,
           frontmatter: s.frontmatter,
           body: s.body,
           files: s.files,
-        });
+        };
+        /* A bundle that matches something already yours becomes the next
+           version of it rather than a second row with the same name. Only
+           when it is yours to write to: adding a version to a colleague's
+           skill changes what everybody else reads. */
+        if (s.match && s.match.mine && s.match.mayWrite && !s.match.identical) {
+          await addVersion(s.match.id, bundle);
+        } else {
+          await createSkill(bundle);
+        }
       }
       onDone();
     } catch (e) {
@@ -82,7 +143,25 @@ export function AddSkill({
     }
   };
 
-  const ready = [...take].filter((i) => found[i]?.errors.length === 0);
+  const ready = [...take].filter((i) => found[i] && importable(found[i]!));
+
+  /* Two bundles in one drop cannot both become skills of one name, and nor can
+     one that would make a second copy of something already in your own space.
+     The database refuses it either way; catching it here is what lets somebody
+     fix it in the name field rather than read a failure afterwards. */
+  const clashes = (() => {
+    const seen = new Map<string, number>();
+    const out: string[] = [];
+    for (const i of ready) {
+      const s = found[i]!;
+      const n = seen.get(s.name);
+      if (n !== undefined) out.push(s.name);
+      seen.set(s.name, i);
+      // A new skill of a name already yours, where a version is not possible.
+      if (s.match?.mine && !s.match.mayWrite) out.push(s.name);
+    }
+    return [...new Set(out)];
+  })();
 
   return (
     <section
@@ -195,15 +274,26 @@ export function AddSkill({
 
           <div className="mt-4 flex items-center gap-2 border-t border-line pt-3">
             <span className="flex-1 text-meta text-dim">
-              Importing <b className="font-semibold text-bone">{ready.length}</b>{" "}
-              {ready.length === 1 ? "skill" : "skills"} into your own space. Nobody else can see them until
-              you file one into a directory.
+              {clashes.length > 0 ? (
+                <span className="text-brick">
+                  Two of these would be called <span className="font-mono">{clashes[0]}</span>. A name is
+                  what the agent answers to, so give one of them its own.
+                </span>
+              ) : (
+                <>
+                  Importing <b className="font-semibold text-bone">{ready.length}</b>{" "}
+                  {ready.length === 1 ? "skill" : "skills"}
+                  {found.some((s) => s.match?.mine && s.match.mayWrite && !s.match.identical)
+                    ? ", some as new versions of skills you already have."
+                    : " into your own space. Nobody else can see them until you file one into a directory."}
+                </>
+              )}
             </span>
             <button className="control text-ui text-mute hover:text-bone" onClick={onClose}>
               Cancel
             </button>
             <button
-              disabled={ready.length === 0 || step === "saving"}
+              disabled={ready.length === 0 || clashes.length > 0 || step === "saving"}
               onClick={confirm}
               className="control bg-overlay text-ui font-semibold text-bone shadow-raise disabled:bg-raise disabled:font-normal disabled:text-mute"
             >
@@ -243,6 +333,8 @@ function Entry({
   onEdit: (patch: Partial<Found>) => void;
 }) {
   const broken = found.errors.length > 0;
+  const said = verdict(found);
+  const m = found.match;
   return (
     <div className="border-b border-line-soft">
       <div className="flex items-start gap-3 py-3">
@@ -263,8 +355,10 @@ function Entry({
               {found.name}
             </span>
             <span className="flex items-center gap-1.5 text-micro text-dim">
-              <span className={`h-1.5 w-1.5 rounded-full ${broken ? "bg-brick" : found.warnings.length ? "bg-slate" : "bg-sage"}`} />
-              {broken ? "cannot import" : found.warnings.length ? "worth a look" : "ready"}
+              <span className={`h-1.5 w-1.5 rounded-full ${
+                said.tone === "bad" ? "bg-brick" : said.tone === "wait" ? "bg-slate" : "bg-sage"
+              }`} />
+              {said.says}
             </span>
             <span className="text-micro text-mute">
               from <span className="font-mono">{found.from}</span>
@@ -283,6 +377,33 @@ function Entry({
               {w}
             </span>
           ))}
+          {m && !m.identical && m.mine && m.mayWrite && (
+            <span className="mt-2 block max-w-prose border-l-2 border-line pl-3 text-meta leading-relaxed text-dim">
+              You have this at v{m.version}. Importing adds v{m.version + 1}; what it is on now stays
+              where it is, and any session reading it keeps that version.
+              {" "}
+              <span className="text-mute">
+                {m.unchanged} unchanged
+                {m.changed > 0 && ` · ${m.changed} changed`}
+                {m.added > 0 && ` · ${m.added} added`}
+                {m.removed > 0 && ` · ${m.removed} removed`}
+              </span>
+            </span>
+          )}
+          {m?.identical && (
+            <span className="mt-2 block max-w-prose border-l-2 border-slate-deep pl-3 text-meta leading-relaxed text-slate">
+              Every file is the one you already have at v{m.version}, so there is nothing to import.
+              Untick it or leave it — it will be skipped either way.
+            </span>
+          )}
+          {m && !m.mine && (
+            <span className="mt-2 block max-w-prose border-l-2 border-slate-deep pl-3 text-meta leading-relaxed text-slate">
+              A skill called <span className="font-mono">{found.name}</span> is already shared with you
+              from <span className="font-mono">{m.path.split("/").slice(0, 2).join("/")}</span>. You can
+              keep your own copy, but the two cannot both be on in one session — give yours a name of its
+              own if you want that.
+            </span>
+          )}
           <span className="mt-2 flex flex-wrap items-center gap-2">
             <Pill>{found.files.length} files</Pill>
             <Pill>{size(found.bytes)}</Pill>

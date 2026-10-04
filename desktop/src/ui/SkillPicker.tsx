@@ -81,10 +81,26 @@ export function SkillPicker({ session, onClose }: { session: Session; onClose: (
     ].filter((g) => g.rows.length > 0);
   }, [all.data, query]);
 
+  /* Two skills of one name cannot both be on. The agent answers to the name,
+     so `/code-review` would be ambiguous and only one folder can be written —
+     and the two may be legitimately different things, one yours and one shared
+     with you. Refused here rather than resolved by renaming something behind
+     somebody's back. */
+  const clash = (() => {
+    const seen = new Map<string, string>();
+    for (const s of all.data.filter((s) => picked.has(s.id))) {
+      const was = seen.get(s.name);
+      if (was) return s.name;
+      seen.set(s.name, s.id);
+    }
+    return null;
+  })();
+
   const added = [...picked].filter((id) => !live.data.includes(id));
   const gone = live.data.filter((id) => !picked.has(id));
   const dirty = added.length > 0 || gone.length > 0;
   const over = spend > budget;
+  const blocked = over || clash !== null;
 
   const confirm = async () => {
     setSaving(true);
@@ -196,6 +212,11 @@ export function SkillPicker({ session, onClose }: { session: Session; onClose: (
             <span className="text-meta text-mute">
               {failed ? (
                 <span className="text-brick">{failed}</span>
+              ) : clash ? (
+                <span className="text-brick">
+                  Two of these are called <span className="font-mono">{clash}</span>. The agent answers
+                  to the name, so only one of them can be on.
+                </span>
               ) : over ? (
                 <span className="text-brick">
                   Over. Past the limit an agent drops every skill description rather than the last one.
@@ -224,11 +245,19 @@ export function SkillPicker({ session, onClose }: { session: Session; onClose: (
               Cancel
             </button>
             <button
-              disabled={!dirty || over || saving}
+              disabled={!dirty || blocked || saving}
               onClick={confirm}
               className="control bg-overlay text-ui font-semibold text-bone shadow-raise disabled:bg-raise disabled:font-normal disabled:text-mute"
             >
-              {over ? "Over budget" : saving ? "Confirming…" : dirty ? `Confirm ${picked.size} skills` : "Nothing to confirm"}
+              {clash
+                ? "Two of one name"
+                : over
+                  ? "Over budget"
+                  : saving
+                    ? "Confirming…"
+                    : dirty
+                      ? `Confirm ${picked.size} skills`
+                      : "Nothing to confirm"}
             </button>
           </div>
         </div>

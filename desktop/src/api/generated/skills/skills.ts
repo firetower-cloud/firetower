@@ -27,8 +27,10 @@ import type {
 
 import type {
   ApiError,
+  Asking,
   ChooseSkills,
   DefaultIn,
+  Match,
   NewSkill,
   SessionSkills,
   Skill,
@@ -431,6 +433,96 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
         TContext
       > => {
       return useMutation(getCreateSkillMutationOptions(options), queryClient);
+    }
+    export const getMatchSkillsUrl = () => {
+
+
+
+
+  return `/api/v1/skills/match`
+}
+
+/**
+ * Its own request rather than a flag on the import, because the answer is
+ * what somebody reads *before* deciding — a row that says "you already have
+ * this, unchanged" has to be drawn while there is still a choice.
+ * @summary What this person already has, for a set of bundles about to be imported.
+ */
+export const matchSkills = async (asking: Asking[], options?: Parameters<typeof http>[1]): Promise<Match[]> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return http<Match[]>(getMatchSkillsUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(asking)
+  }
+);}
+
+
+
+
+
+export const getMatchSkillsMutationKey = () => ['matchSkills'] as const;
+
+export const getMatchSkillsMutationOptions = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof matchSkills>>, TError,MatchSkillsMutationVariables, TContext>, request?: SecondParameter<typeof http>}
+): UseMutationOptions<Awaited<ReturnType<typeof matchSkills>>, TError,MatchSkillsMutationVariables, TContext> => {
+
+const mutationKey = getMatchSkillsMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof matchSkills>>, MatchSkillsMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  matchSkills(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type MatchSkillsMutationResult = NonNullable<Awaited<ReturnType<typeof matchSkills>>>
+    export type MatchSkillsMutationBody = Asking[]
+    export type MatchSkillsMutationError = ApiError
+    export type MatchSkillsMutationVariables = {data: Asking[]}
+
+    /**
+ * @summary What this person already has, for a set of bundles about to be imported.
+ */
+export const useMatchSkills = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof matchSkills>>, TError,MatchSkillsMutationVariables, TContext>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof matchSkills>>,
+        TError,
+        MatchSkillsMutationVariables,
+        TContext
+      > => {
+      return useMutation(getMatchSkillsMutationOptions(options), queryClient);
     }
     export const getDeleteSkillUrl = (id: string,) => {
 

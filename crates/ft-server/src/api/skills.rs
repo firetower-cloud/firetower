@@ -8,7 +8,7 @@
 use super::access::whoever;
 use super::{ApiError, ApiResult, ErrorCode};
 use crate::auth::Principal;
-use crate::skills::{NewSkill, Skill, SkillDetail, SkillVersion};
+use crate::skills::{Asking, Match, NewSkill, Skill, SkillDetail, SkillVersion};
 use crate::AppState;
 use axum::{
     extract::{Path, State},
@@ -53,6 +53,45 @@ pub(super) async fn create_skill(
     let me = whoever(&principal)?;
     crate::skills::check(&new).map_err(refused)?;
 
+    // Asked again here, a moment after the review screen asked. That screen's
+    // answer can be a second old — somebody else may have added a version in
+    // between — and two library rows of one name is the thing this exists to
+    // prevent.
+    let digest = crate::skills::Skills::digest_of_new(&new)?;
+    if let Some(found) = state
+        .skills
+        .matching(
+            me.id.as_str(),
+            &[Asking {
+                name: new.name.clone(),
+                files: Vec::new(),
+            }],
+        )
+        .await?
+        .into_iter()
+        .next()
+        .and_then(|m| m.found)
+    {
+        if found.mine {
+            let same = state.skills.current_digest(found.id.as_str()).await?;
+            return Err(ApiError::new(
+                ErrorCode::InvalidRequest,
+                if same.as_deref() == Some(digest.as_str()) {
+                    format!(
+                        "you already have {} at v{}, and this is the same bundle",
+                        new.name, found.version
+                    )
+                } else {
+                    format!(
+                        "you already have a skill called {} — add a version to it, \
+                         or give this one a name of its own",
+                        new.name
+                    )
+                },
+            ));
+        }
+    }
+
     let id = state
         .skills
         .create(me.org_id.as_str(), me.id.as_str(), &me.slug, &new)
@@ -64,6 +103,25 @@ pub(super) async fn create_skill(
         .await?
         .ok_or_else(|| ApiError::not_found("skill"))?;
     Ok((StatusCode::CREATED, Json(made)))
+}
+
+/// What this person already has, for a set of bundles about to be imported.
+///
+/// Its own request rather than a flag on the import, because the answer is
+/// what somebody reads *before* deciding — a row that says "you already have
+/// this, unchanged" has to be drawn while there is still a choice.
+#[utoipa::path(
+    post, path = "/api/v1/skills/match", tag = "skills",
+    request_body = Vec<Asking>,
+    responses((status = 200, body = Vec<Match>), (status = 401, body = ApiError)),
+)]
+pub(super) async fn match_skills(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Json(asking): Json<Vec<Asking>>,
+) -> ApiResult<Json<Vec<Match>>> {
+    let me = whoever(&principal)?;
+    Ok(Json(state.skills.matching(me.id.as_str(), &asking).await?))
 }
 
 /// What is being changed about a skill without making a version of it.
@@ -195,6 +253,17 @@ pub(super) async fn add_version(
         .await?
         .ok_or_else(|| ApiError::not_found("skill"))?;
     crate::skills::check(&new).map_err(refused)?;
+
+    // Nothing to add. An unchanged re-drop should leave the history alone
+    // rather than writing a version that differs from the one before it in
+    // nothing but its date.
+    let digest = crate::skills::Skills::digest_of_new(&new)?;
+    if state.skills.current_digest(&id).await? == Some(digest) {
+        return Err(ApiError::new(
+            ErrorCode::InvalidRequest,
+            "this is the bundle it already has, so there is no version to add",
+        ));
+    }
 
     state.skills.add_version(&id, me.id.as_str(), &new).await?;
     let made = state

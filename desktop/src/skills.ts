@@ -20,8 +20,9 @@
 import { unzip } from "fflate";
 
 /** A file on its way to the server. `contents` is base64, because a bundle may
- *  hold a font. */
-export type Incoming = { path: string; contents: string; executable: boolean };
+ *  hold a font. `hash` is sha256 of the bytes — the same fingerprint the
+ *  server stores, so the two can be compared without sending anything. */
+export type Incoming = { path: string; contents: string; executable: boolean; hash: string };
 
 /** One skill found in a drop, and whatever is wrong with it. */
 export type Found = {
@@ -39,6 +40,24 @@ export type Found = {
   warnings: string[];
   /** What it will do to a session, read from the bundle. */
   risk: string[];
+  /** What the library already has under this name. Filled in after the drop
+   *  has been read, by asking the server. */
+  match?: SkillMatch;
+};
+
+/** What the server found under the same name, if anything. */
+export type SkillMatch = {
+  id: string;
+  path: string;
+  version: number;
+  identical: boolean;
+  identicalToVersion?: number | null;
+  mayWrite: boolean;
+  mine: boolean;
+  unchanged: number;
+  changed: number;
+  added: number;
+  removed: number;
 };
 
 /** Frontmatter fields only Claude Code reads. Preserved, and worth saying. */
@@ -95,6 +114,12 @@ export async function readFiles(files: FileList | null): Promise<Raw[]> {
     out.push(...(await readOne(file, path)));
   }
   return out;
+}
+
+/** sha256 of some bytes, hex — the same thing the server stores per file. */
+export async function sha256Hex(bytes: Uint8Array): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", bytes as unknown as ArrayBuffer);
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
 async function readOne(file: File, path: string): Promise<Raw[]> {
@@ -163,7 +188,7 @@ function openZip(bytes: Uint8Array, name: string): Promise<Raw[]> {
  * A drop with no `SKILL.md` anywhere is still reported — as one bundle that
  * cannot be imported, which is a better answer than an empty screen.
  */
-export function skillsIn(raw: Raw[]): Found[] {
+export async function skillsIn(raw: Raw[]): Promise<Found[]> {
   const roots = raw
     .filter((f) => f.path.endsWith("/SKILL.md") || f.path === "SKILL.md")
     .map((f) => f.path.slice(0, Math.max(0, f.path.length - "SKILL.md".length - 1)));
@@ -186,23 +211,26 @@ export function skillsIn(raw: Raw[]): Found[] {
     ];
   }
 
-  return roots.map((root) => bundle(root, raw.filter((f) => inside(f.path, root))));
+  return Promise.all(
+    roots.map((root) => bundle(root, raw.filter((f) => inside(f.path, root)))),
+  );
 }
 
 const inside = (path: string, root: string) => (root === "" ? !path.includes("/") || true : path.startsWith(`${root}/`));
 
-function bundle(root: string, raw: Raw[]): Found {
+async function bundle(root: string, raw: Raw[]): Promise<Found> {
   const folder = root.split("/").filter(Boolean).pop() ?? "skill";
-  const files: Incoming[] = raw.map((f) => ({
+  const files: Incoming[] = await Promise.all(raw.map(async (f) => ({
     path: root === "" ? f.path : f.path.slice(root.length + 1),
     contents: toBase64(f.bytes),
+    hash: await sha256Hex(f.bytes),
     /* A dropped folder carries no POSIX mode — Tauri hands us HTML5 entries
        rather than OS paths — so it is inferred from a shebang. Nothing is shown
        for it: the standard has no field for it, and in `anthropics/skills` 404
        files are not executable to 26 that are, because every SKILL.md invokes
        through an interpreter. */
     executable: looksExecutable(f.bytes),
-  }));
+  })));
 
   const skillMd = raw.find((f) => f.path.endsWith("SKILL.md"));
   const text = skillMd ? new TextDecoder().decode(skillMd.bytes) : "";

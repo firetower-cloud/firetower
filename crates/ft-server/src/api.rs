@@ -395,6 +395,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(agents::sign_agent_in))
         .routes(routes!(agents::install_agent))
         .routes(routes!(skills::list_skills, skills::create_skill))
+        .routes(routes!(skills::match_skills))
         .routes(routes!(skills::rename_skill, skills::delete_skill))
         .routes(routes!(skills::skill_detail))
         .routes(routes!(skills::list_versions, skills::add_version))

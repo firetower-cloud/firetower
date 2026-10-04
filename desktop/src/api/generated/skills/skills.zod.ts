@@ -80,6 +80,40 @@ export const CreateSkillResponse = zod.object({
   "versionId": zod.string().describe('Identifies one version of a skill. Append-only: a session pins one.')
 }).describe('One row of the library.\n\n`name` and `description` are copied down from the current version rather\nthan joined per row: this list is three hundred long and those two fields\nare what every one of them draws.')
 
+/**
+ * Its own request rather than a flag on the import, because the answer is
+ * what somebody reads *before* deciding — a row that says "you already have
+ * this, unchanged" has to be drawn while there is still a choice.
+ * @summary What this person already has, for a set of bundles about to be imported.
+ */
+export const MatchSkillsBodyItem = zod.object({
+  "files": zod.array(zod.object({
+  "executable": zod.boolean().optional(),
+  "hash": zod.string().describe('sha256 of the contents, as the client computed it.'),
+  "path": zod.string()
+}).describe('One file of a bundle somebody is about to import, as the match asks about it.')),
+  "name": zod.string()
+}).describe('What is about to be imported, named and fingerprinted but not yet sent.')
+export const MatchSkillsBody = zod.array(MatchSkillsBodyItem)
+
+export const MatchSkillsResponseItem = zod.object({
+  "found": zod.union([zod.null(),zod.object({
+  "added": zod.int(),
+  "changed": zod.int(),
+  "id": zod.string().describe('Identifies a skill — a folder of instructions an agent loads when it needs one.'),
+  "identical": zod.boolean().describe('Whether the bundle is byte-for-byte what that version already holds.'),
+  "identicalToVersion": zod.int().nullish().describe('Or an older one, which is worth saying differently: this was yours\nonce and has been superseded.'),
+  "mayWrite": zod.boolean().describe('Whether this person may add a version to it. False for somebody else\'s,\nshared into a directory they can only read.'),
+  "mine": zod.boolean().describe('Whether it is in this person\'s own space, which decides whether a new\nskill of this name could be made at all.'),
+  "path": zod.string(),
+  "removed": zod.int(),
+  "unchanged": zod.int().describe('How the two bundles differ, for a row that has to say what changes.'),
+  "version": zod.int().describe('The version it is on now.')
+}).describe('Absent when nothing of this name is reachable: it is simply new.')]).optional(),
+  "name": zod.string().describe('The name that was asked about, so a batch can be read in any order.')
+}).describe('What an import found already here, for one bundle somebody dropped.\n\nAnswered before anything is written, so the review screen can say what\nwill happen rather than finding out afterwards.')
+export const MatchSkillsResponse = zod.array(MatchSkillsResponseItem)
+
 export const DeleteSkillParams = zod.object({
   "id": zod.string().describe('The skill')
 })
