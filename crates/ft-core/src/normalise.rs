@@ -100,8 +100,11 @@ pub fn classify(tool_name: &str) -> ItemKind {
 ///   `cat …/skills/frontend-design/SKILL.md` in a shell. So the evidence is a
 ///   *command*, and anything that only looked at tool names would never see
 ///   a Codex skill at all.
-/// * **Kimi, over ACP**, has no skill tool either — it reads the `SKILL.md`
-///   like any other file, so the evidence is the path.
+/// * **Kimi, over ACP**, has a tool and announces it in three stages: a call
+///   titled `Skill` with no name, then the arguments streaming as text, and
+///   only at the end `rawInput: {"skill": "frontend-design"}` with the title
+///   rewritten to `Invoke skill frontend-design`. So the name is not there
+///   when the item opens, and whatever reads it has to cope with that.
 ///
 /// Which leaves one rule doing most of the work: **a path ending in
 /// `SKILL.md` under a `skills/` directory**, wherever it turns up — a tool's
@@ -110,6 +113,23 @@ pub fn classify(tool_name: &str) -> ItemKind {
 pub fn skill_reached_for(tool_name: &str, input: &Value) -> Option<String> {
     let at = |key: &str| input.get(key).and_then(Value::as_str);
     let name = tool_name.to_ascii_lowercase();
+
+    // Arguments one level down, which is where ACP puts them once they have
+    // finished arriving.
+    for nested in ["rawInput", "arguments", "input"] {
+        if let Some(found) = input
+            .get(nested)
+            .and_then(|o| o.get("skill"))
+            .and_then(Value::as_str)
+            .filter(|s| !s.is_empty())
+        {
+            return Some(skill_from(found));
+        }
+    }
+    // `Invoke skill frontend-design`, which is Kimi's title once it knows.
+    if let Some(found) = at("title").and_then(|t| t.strip_prefix("Invoke skill ")) {
+        return Some(found.trim().to_string());
+    }
 
     if name == "skill" || name.starts_with("skills.") {
         // `package` is Codex's word for which skill a read belongs to.
@@ -1312,7 +1332,10 @@ mod skill_tests {
         // Codex names its two `skills.read` and `skills.list`.
         assert_eq!(classify("skills.read"), ItemKind::SkillUse);
         assert_eq!(
-            skill_reached_for("skills.read", &serde_json::json!({"package": "rust-review"})),
+            skill_reached_for(
+                "skills.read",
+                &serde_json::json!({"package": "rust-review"})
+            ),
             Some("rust-review".into())
         );
 
@@ -1353,6 +1376,38 @@ mod skill_tests {
             Some("frontend-design".into()),
             "the one thing a Codex skill looks like has to be recognised"
         );
+    }
+
+    /// Kimi's three stages, copied out of the journal of the session that
+    /// prompted this. The item opens before the name exists, which is the
+    /// whole difficulty.
+    #[test]
+    fn the_three_updates_kimi_actually_sent() {
+        let opening: Value = serde_json::from_str(
+            r#"{"kind":"other","sessionUpdate":"tool_call","status":"pending",
+                "title":"Skill","toolCallId":"1:tool_5JaTlacj"}"#,
+        )
+        .unwrap();
+        // Nothing to name yet — and it still has to be a skill, because an
+        // item cannot change what it is halfway through.
+        assert_eq!(skill_reached_for("", &opening), None);
+
+        let named: Value = serde_json::from_str(
+            r#"{"kind":"other","status":"in_progress",
+                "title":"Invoke skill frontend-design",
+                "rawInput":{"args":"analyze the website","skill":"frontend-design"},
+                "toolCallId":"1:tool_5JaTlacj"}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            skill_reached_for("", &named),
+            Some("frontend-design".into())
+        );
+
+        // The title alone is enough, for the update that carries no rawInput.
+        let by_title: Value =
+            serde_json::from_str(r#"{"title":"Invoke skill house-prose"}"#).unwrap();
+        assert_eq!(skill_reached_for("", &by_title), Some("house-prose".into()));
     }
 
     /// A read is still a read. Treating every file as a skill would put the

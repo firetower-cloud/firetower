@@ -2065,7 +2065,10 @@ You are in the directory that holds them, not inside one of them.              P
         // before the agent starts, or the first skill turned on mid-session
         // lands somewhere nothing is watching.
         if let Err(e) = crate::skills::apply(&path, &id, spec.agent, &spec.skills).await {
-            tracing::warn!("{}: writing this session's skills: {e:#}", spec.agent.label());
+            tracing::warn!(
+                "{}: writing this session's skills: {e:#}",
+                spec.agent.label()
+            );
         }
 
         self.launch_agent(
@@ -2226,7 +2229,10 @@ You are in the directory that holds them, not inside one of them.              P
         .await?;
 
         if let Err(e) = crate::skills::apply(&path, &id, spec.agent, &spec.skills).await {
-            tracing::warn!("{}: writing this session's skills: {e:#}", spec.agent.label());
+            tracing::warn!(
+                "{}: writing this session's skills: {e:#}",
+                spec.agent.label()
+            );
         }
 
         // In order, and each one is allowed to fail on its own: a session that
@@ -2309,7 +2315,11 @@ You are in the directory that holds them, not inside one of them.              P
     /// Read rather than recomputed: the directory is named by whoever started
     /// the session, so there is nothing to derive it from.
     /// Put exactly this set of skills where this session's agent reads them.
-    async fn skills_for(&self, session_id: &SessionId, skills: &[ft_proto::SkillBundle]) -> Result<()> {
+    async fn skills_for(
+        &self,
+        session_id: &SessionId,
+        skills: &[ft_proto::SkillBundle],
+    ) -> Result<()> {
         let workspace = self.workspace_of(session_id).await?;
         let (agent, _) = self.store.session_brief(session_id).await?;
         crate::skills::apply(&workspace, session_id, agent, skills).await
@@ -4475,7 +4485,7 @@ mod tests {
             workspace: id.as_str().to_string(),
             env: vec![],
             agent_home: vec![],
-                    skills: vec![],
+            skills: vec![],
         }))
     }
 
@@ -4806,7 +4816,7 @@ mod tests {
                             share: ft_core::Share::Equal,
                             env: vec![],
                             agent_home: vec![],
-                    skills: vec![],
+                            skills: vec![],
                             workspace_session: None,
                         }),
                     },

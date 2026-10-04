@@ -45,9 +45,28 @@ pub const BIGGEST_DESCRIPTION: usize = 1024;
 
 /// Names an agent ships itself, which a skill of the same name would shadow.
 const RESERVED: &[&str] = &[
-    "code-review", "review", "doctor", "debug", "batch", "run", "verify", "loop", "init",
-    "security-review", "simplify", "compact", "clear", "config", "model", "help", "imagegen",
-    "plan", "skill-creator", "skill-installer", "plugin-creator", "review-agent",
+    "code-review",
+    "review",
+    "doctor",
+    "debug",
+    "batch",
+    "run",
+    "verify",
+    "loop",
+    "init",
+    "security-review",
+    "simplify",
+    "compact",
+    "clear",
+    "config",
+    "model",
+    "help",
+    "imagegen",
+    "plan",
+    "skill-creator",
+    "skill-installer",
+    "plugin-creator",
+    "review-agent",
 ];
 
 // ── what a skill is, on the wire ────────────────────────────────────────
@@ -267,7 +286,9 @@ pub fn check(new: &NewSkill) -> Result<(), Refused> {
                 .as_object()
                 .and_then(|m| m.keys().find(|k| one_edit_from(k, "name")).cloned());
             return Err(Refused(match typo {
-                Some(k) => format!("its SKILL.md has no `name` field — there is a `{k}:`, which nothing reads"),
+                Some(k) => format!(
+                    "its SKILL.md has no `name` field — there is a `{k}:`, which nothing reads"
+                ),
                 None => "its SKILL.md has no `name` field, and the standard requires one".into(),
             }));
         }
@@ -382,7 +403,7 @@ fn check_path(path: &str) -> Result<(), Refused> {
             "{path} is not a name inside the skill's own folder"
         )));
     }
-    if path.split('/').any(|seg| seg.is_empty() || seg == "." ) {
+    if path.split('/').any(|seg| seg.is_empty() || seg == ".") {
         return Err(Refused(format!("{path} is not a usable path")));
     }
     Ok(())
@@ -591,12 +612,14 @@ impl Skills {
         let version = last.unwrap_or(0) + 1;
         write_version(&mut tx, id, person, new, version).await?;
         // The two editable fields follow the version that introduced them.
-        sqlx::query("UPDATE skills SET name = $2, description = $3, updated_at = now() WHERE id = $1")
-            .bind(id)
-            .bind(&new.name)
-            .bind(&new.description)
-            .execute(&mut *tx)
-            .await?;
+        sqlx::query(
+            "UPDATE skills SET name = $2, description = $3, updated_at = now() WHERE id = $1",
+        )
+        .bind(id)
+        .bind(&new.name)
+        .bind(&new.description)
+        .execute(&mut *tx)
+        .await?;
         tx.commit().await?;
         Ok(version)
     }
@@ -826,13 +849,15 @@ async fn write_version(
 
         // The bytes once, under a hash of themselves. A file that has not
         // changed between two versions is one row here, not two.
-        sqlx::query("INSERT INTO blobs (hash, bytes, size) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING")
-            .bind(&hash)
-            .bind(&bytes)
-            .bind(bytes.len() as i64)
-            .execute(&mut **tx)
-            .await
-            .context("storing a file")?;
+        sqlx::query(
+            "INSERT INTO blobs (hash, bytes, size) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING",
+        )
+        .bind(&hash)
+        .bind(&bytes)
+        .bind(bytes.len() as i64)
+        .execute(&mut **tx)
+        .await
+        .context("storing a file")?;
 
         sqlx::query(
             "INSERT INTO skill_files (version_id, path, hash, executable, size) \
@@ -865,8 +890,7 @@ async fn write_version(
 /// Stands in for "there is something under `scripts/`", which the query
 /// answered so that a list of three hundred does not read three hundred
 /// bundles to find out.
-static SCRIPTS: std::sync::LazyLock<String> =
-    std::sync::LazyLock::new(|| "scripts/".to_string());
+static SCRIPTS: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| "scripts/".to_string());
 
 /// One row of a skills query.
 ///
@@ -874,9 +898,8 @@ static SCRIPTS: std::sync::LazyLock<String> =
 /// that panicked over a missing column once took down every request that
 /// reached it.
 fn read_skill(r: sqlx::postgres::PgRow) -> Result<Skill> {
-    let frontmatter: serde_json::Value = r
-        .try_get("frontmatter")
-        .unwrap_or(serde_json::Value::Null);
+    let frontmatter: serde_json::Value =
+        r.try_get("frontmatter").unwrap_or(serde_json::Value::Null);
     let body: String = r.try_get("body").unwrap_or_default();
     // Whether the bundle ships anything under `scripts/`, answered by the
     // query rather than by loading every path of every skill in the list.
@@ -891,7 +914,9 @@ fn read_skill(r: sqlx::postgres::PgRow) -> Result<Skill> {
         slug: r.get("slug"),
         version: r.try_get("version").unwrap_or(0),
         version_id: SkillVersionId::from_stored(version_id.unwrap_or_default()),
-        tokens: r.try_get("tokens").unwrap_or_else(|_| tokens_for(&name, &description)),
+        tokens: r
+            .try_get("tokens")
+            .unwrap_or_else(|_| tokens_for(&name, &description)),
         files: r.try_get("files").unwrap_or(0),
         bytes: r.try_get("bytes").unwrap_or(0),
         risk: risk_of(
@@ -983,7 +1008,10 @@ mod tests {
 
     #[test]
     fn a_listing_entry_is_counted_in_tokens() {
-        let n = tokens_for("rust-review", "Review Rust for the conventions this codebase uses.");
+        let n = tokens_for(
+            "rust-review",
+            "Review Rust for the conventions this codebase uses.",
+        );
         // Tokens, not characters: the entry is ~75 characters.
         assert!(n > 5 && n < 40, "{n} tokens is not a plausible count");
     }

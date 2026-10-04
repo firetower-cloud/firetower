@@ -23,7 +23,7 @@ export default defineConfig({
   esbuild: { target: "es2022" },
   plugins: [react(), tailwindcss()],
   clearScreen: false,
-  server: { port: 5293, strictPort: true },
+  server: { port: 5273, strictPort: true },
   resolve: {
     alias: [{ find: /^~\/(.*)$/, replacement: path.resolve(here, "src") + "/$1" }],
   },

@@ -207,7 +207,10 @@ mod tests {
             &id,
             Agent::ClaudeCode,
             &[
-                bundle("rust-review", &[("SKILL.md", "---\nname: rust-review\n---\n", false)]),
+                bundle(
+                    "rust-review",
+                    &[("SKILL.md", "---\nname: rust-review\n---\n", false)],
+                ),
                 bundle("house-prose", &[("SKILL.md", "x", false)]),
             ],
         )
@@ -230,7 +233,9 @@ mod tests {
 
         // And an empty set leaves the directory itself, because a watcher
         // already knows about it and would not notice a new one.
-        apply(dir.path(), &id, Agent::ClaudeCode, &[]).await.unwrap();
+        apply(dir.path(), &id, Agent::ClaudeCode, &[])
+            .await
+            .unwrap();
         assert!(root.exists());
         assert!(!root.join("rust-review").exists());
     }
@@ -245,7 +250,10 @@ mod tests {
             Agent::Codex,
             &[bundle(
                 "release",
-                &[("SKILL.md", "x", false), ("scripts/go.sh", "#!/bin/sh\n", true)],
+                &[
+                    ("SKILL.md", "x", false),
+                    ("scripts/go.sh", "#!/bin/sh\n", true),
+                ],
             )],
         )
         .await
@@ -256,7 +264,11 @@ mod tests {
         {
             use std::os::unix::fs::PermissionsExt;
             let mode = |p: &str| {
-                std::fs::metadata(root.join(p)).unwrap().permissions().mode() & 0o777
+                std::fs::metadata(root.join(p))
+                    .unwrap()
+                    .permissions()
+                    .mode()
+                    & 0o777
             };
             assert_eq!(mode("release/scripts/go.sh"), 0o755);
             assert_eq!(mode("release/SKILL.md"), 0o644);
@@ -282,12 +294,23 @@ mod tests {
     async fn two_sessions_in_one_workspace_do_not_share() {
         let dir = tempfile::tempdir().unwrap();
         let (a, b) = (SessionId::from_stored("s_a"), SessionId::from_stored("s_b"));
-        apply(dir.path(), &a, Agent::ClaudeCode, &[bundle("mine", &[("SKILL.md", "x", false)])])
-            .await
-            .unwrap();
+        apply(
+            dir.path(),
+            &a,
+            Agent::ClaudeCode,
+            &[bundle("mine", &[("SKILL.md", "x", false)])],
+        )
+        .await
+        .unwrap();
         apply(dir.path(), &b, Agent::ClaudeCode, &[]).await.unwrap();
 
-        assert!(root(dir.path(), &a, Agent::ClaudeCode).unwrap().join("mine").exists());
-        assert!(!root(dir.path(), &b, Agent::ClaudeCode).unwrap().join("mine").exists());
+        assert!(root(dir.path(), &a, Agent::ClaudeCode)
+            .unwrap()
+            .join("mine")
+            .exists());
+        assert!(!root(dir.path(), &b, Agent::ClaudeCode)
+            .unwrap()
+            .join("mine")
+            .exists());
     }
 }

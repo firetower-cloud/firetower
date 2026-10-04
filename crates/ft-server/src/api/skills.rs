@@ -105,7 +105,10 @@ pub(super) async fn rename_skill(
         ));
     }
 
-    state.skills.rename(&id, &body.name, &body.description).await?;
+    state
+        .skills
+        .rename(&id, &body.name, &body.description)
+        .await?;
     state
         .skills
         .one(me.id.as_str(), &id, Level::Viewer)
