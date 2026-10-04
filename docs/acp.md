@@ -168,7 +168,7 @@ reconnect and agent restart. Inspect both the authenticated conversation API
 and the UI. A handshake or fixture run is not a substitute for live acceptance.
 
 Upgrade workers and clients with the control plane: the worker protocol version
-is 18 because older workers cannot deserialize the new agent variant, its
+is 19 because older workers cannot deserialize the new agent variant, its
 configuration command, or a sign-in that names which agent it is for.
 The released desktop client also rejects ACP conversation frames under its old
 schema, leaving a session apparently working after the agent has replied. For
