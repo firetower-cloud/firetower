@@ -9240,6 +9240,7 @@
           "WebSearch",
           "SubagentCall",
           "Question",
+          "SkillUse",
           "Unknown"
         ]
       },

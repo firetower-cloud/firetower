@@ -31,5 +31,6 @@ export const ItemKind = {
   WebSearch: 'WebSearch',
   SubagentCall: 'SubagentCall',
   Question: 'Question',
+  SkillUse: 'SkillUse',
   Unknown: 'Unknown',
 } as const;

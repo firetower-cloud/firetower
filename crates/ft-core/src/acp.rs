@@ -39,6 +39,21 @@ pub enum Input {
     },
 }
 
+/// Which skill an ACP tool call opened, if it opened one.
+///
+/// A read reports where it read from in `locations`, and names it in `title`;
+/// either will do, and both are checked because Kimi fills the title in before
+/// the locations arrive.
+fn skill_in(update: &Value) -> Option<String> {
+    if let Some(found) = crate::normalise::skill_reached_for("read", update) {
+        return Some(found);
+    }
+    update["locations"]
+        .as_array()?
+        .iter()
+        .find_map(|at| crate::normalise::skill_reached_for("read", at))
+}
+
 pub fn prompt(text: &str) -> Value {
     json!(Input::Prompt { text: text.into() })
 }
@@ -362,8 +377,16 @@ impl AcpNormaliser {
                     return;
                 };
                 let item = ItemId::new(format!("{turn}:tool:{id}"));
+                // ACP has no skill tool. Kimi reads a `SKILL.md` like any
+                // other file, so what says a skill was reached for is the
+                // path — in the title, or in the locations a read reports.
+                // Checked before `kind`, because the agent is honestly calling
+                // it a read and it is honestly not work done to the workspace.
+                let reached = skill_in(update);
+
                 if self.items.insert(item.clone()) {
                     let kind = match update["kind"].as_str() {
+                        _ if reached.is_some() => ItemKind::SkillUse,
                         Some("read") => ItemKind::FileRead,
                         Some("edit" | "delete" | "move") => ItemKind::FileChange,
                         Some("execute") => ItemKind::CommandExecution,
@@ -373,13 +396,20 @@ impl AcpNormaliser {
                     events.push(TurnEvent::ItemStarted {
                         item: item.clone(),
                         kind,
-                        title: update["title"].as_str().map(str::to_owned),
+                        title: reached
+                            .clone()
+                            .or_else(|| update["title"].as_str().map(str::to_owned)),
                         task: None,
                     });
                 }
+                // The same one key every other reader writes.
+                let mut data = update.clone();
+                if let (Some(found), Some(fields)) = (reached, data.as_object_mut()) {
+                    fields.insert("skill".into(), Value::String(found));
+                }
                 events.push(TurnEvent::ItemUpdated {
                     item: item.clone(),
-                    data: update.clone(),
+                    data,
                 });
                 // ACP tool content is a replacement snapshot, not a delta.
                 // Kimi streams growing argument snapshots here; only the

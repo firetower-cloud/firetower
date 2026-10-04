@@ -106,6 +106,14 @@ pub enum ItemKind {
     /// the *result*: what the agent asked matters far less than what somebody
     /// told it, and a generic card puts that inside a fold.
     Question,
+    /// The agent reaching for a skill — loading its instructions, rather than
+    /// doing anything to the workspace.
+    ///
+    /// Its own kind because it is the one call in a turn that is not work: a
+    /// Grep or an Edit is something that happened to the repository, and this
+    /// is the agent deciding *how* to do the rest. It is also the only
+    /// evidence that a skill somebody is paying context for is earning it.
+    SkillUse,
     /// A tool we have no shape for. Draws generically, on purpose.
     Unknown,
 }

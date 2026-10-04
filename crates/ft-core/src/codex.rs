@@ -332,6 +332,9 @@ fn classify(item_type: &str) -> ItemKind {
         "commandExecution" => ItemKind::CommandExecution,
         "fileChange" => ItemKind::FileChange,
         "mcpToolCall" | "dynamicToolCall" => ItemKind::McpToolCall,
+        // Codex has no item type of its own for this; what arrives is a tool
+        // call named `skills.read`, which `refine` turns into a skill below.
+        "skillCall" => ItemKind::SkillUse,
         "webSearch" => ItemKind::WebSearch,
         "collabAgentToolCall" | "subAgentActivity" => ItemKind::SubagentCall,
         _ => ItemKind::Unknown,
@@ -350,6 +353,41 @@ fn title_for(kind: ItemKind, item: &Value) -> Option<String> {
         ItemKind::McpToolCall => field("tool").or_else(|| field("toolName")),
         _ => field("type"),
     }
+}
+
+/// Second look at an item, once its tool name is known.
+///
+/// Codex reports `skills.read` as an ordinary tool call, so what it *is* can
+/// only be told from the name — and the name is on the item rather than on its
+/// type. Returns the kind to use and, when it is a skill, which one.
+fn refine(kind: ItemKind, item: &Value) -> (ItemKind, Option<String>) {
+    let tool = item
+        .get("tool")
+        .or_else(|| item.get("toolName"))
+        .or_else(|| item.get("name"))
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+
+    // Codex has a `skills.read` tool and, in the build we drive, does not use
+    // it: what it actually does is `cat …/skills/<name>/SKILL.md` in a shell.
+    // So the item to look at is a command execution, and the name is in the
+    // command — which is why this asks `skill_reached_for` about the whole
+    // item rather than about a tool's arguments.
+    if let Some(found) = crate::normalise::skill_reached_for(tool, item) {
+        return (ItemKind::SkillUse, Some(found));
+    }
+    if !tool.is_empty() && crate::normalise::classify(tool) == ItemKind::SkillUse {
+        let input = item
+            .get("arguments")
+            .or_else(|| item.get("input"))
+            .cloned()
+            .unwrap_or(Value::Null);
+        return (
+            ItemKind::SkillUse,
+            crate::normalise::skill_reached_for(tool, &input),
+        );
+    }
+    (kind, None)
 }
 
 /// Codex's four statuses, of which we have three.
@@ -1026,10 +1064,22 @@ impl CodexNormaliser {
             return events;
         }
 
+        // A tool call whose name says it is opening a skill is not a tool
+        // call as far as the transcript is concerned — see `ItemKind::SkillUse`.
+        let (kind, named) = refine(kind, item);
+        self.open.insert(id.to_string(), kind);
+        if let Some(found) = &named {
+            // One key, the same one every other reader writes.
+            events.push(TurnEvent::ItemUpdated {
+                item: ItemId::new(id),
+                data: serde_json::json!({ "skill": found }),
+            });
+        }
+
         events.push(TurnEvent::ItemStarted {
             item: ItemId::new(id),
             kind,
-            title: title_for(kind, item),
+            title: named.clone().or_else(|| title_for(kind, item)),
             task: self.owning_task(params),
         });
 
