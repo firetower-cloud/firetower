@@ -1,4 +1,16 @@
-# Cursor Agent remaining acceptance work
+# Cursor Agent acceptance — current result (2026-10-04)
+
+Upstream draft: [feat: add Cursor Agent through ACP](https://github.com/firetower-cloud/firetower/pull/207). Current verified implementation is `65f76585`; subsequent evidence commits do not change product source.
+
+- **Fixed and proven:** reproduced native first-launch/requirements failure caused by inherited stdin; version/auth/readiness probes are isolated. Real pinned CLI flags and failing-before/passing-after regression are recorded.
+- **PASS:** full live Playwright lifecycle; fresh unsigned macOS Tauri first launch and correct provider reply; Android API34 arm64 debug build plus fresh launch, memory, Task/error, approval/refusal/cancellation and filesystem read-back.
+- **PASS:** 247 worker tests (one real-network Kimi test ignored), strict workspace Clippy, workspace/all-targets check, 429 Desktop tests and web/Desktop/Mobile typechecks. The full local Rust run additionally passed core 140, server 421 and proto 21, but its installed-Codex contract test fails because SubAgentActivityKind lacks completed. This is not hidden or counted as green.
+- **CI:** all executed upstream checks passed on preceding `dd5866bd`; the final pushed evidence head must be read back independently. Fork checks cannot start because GitHub reports an account billing lock.
+- **BLOCKED — NOT PROVEN:** genuinely expired/unentitled Cursor account requires dedicated credentials; the pinned provider emits parent Task activity/completion but the child's own tools/progress were not exposed in the observed ACP stream. Invalid credentials and invalid Task types are different, established error cases.
+
+Current screenshots, test logs, provider field counts and filesystem assertions: [cursor-validation](evidence/cursor-validation). Connection instructions: [ACP setup](acp.md). The PR stays draft and tracking issue stays open until the outstanding provider acceptance gates have real evidence. No account subscription was changed.
+
+## Earlier observations and detailed correction history
 
 ## Correction and regression
 
@@ -27,7 +39,7 @@ Playwright's opt-in `FIRETOWER_E2E_PERMISSIONS=1` now checks a real Shell approv
 - Backend final-source tests: server 364 passed; core 117 passed; proto 21 passed; worker 237 passed, 1 ignored, 1 failed (existing Linux-only memory-capacity test reads /proc and /sys unavailable on macOS). ACP fixtures 7 + 12 passed. Desktop tests 385 passed; web/desktop/mobile typechecks passed. Do not interpret this as an entirely green cross-platform suite.
 - Both completion review agents found no blocking issues in the final worker/approval changes. A custom tmux remain-on-exit setting remains a documented edge.
 
-## Remaining gates — BLOCKED / NOT PROVEN
+## Historical remaining gates (2026-10-03) — BLOCKED / NOT PROVEN
 
 Original first-launch failure: successful fresh repeats do not establish its correction. Provider Task parent activity is visible, but Cursor did not emit child tool/progress events. Expired/unentitled subscription acceptance is untested. GitHub fork runners are absent, jobs queued; CI must run on the pushed final head before readiness. PR remains draft and issue remains open.
 
@@ -39,3 +51,23 @@ Verified product subtree identities (unchanged by evidence/test-orchestration co
 - `desktop/src`: `7a043d6f60592c7f585040e5805eb1720d9ddc59`
 - `mobile/src`: `332498557da7006c9b882226f5aadc11f757decd`
 - `web/src`: `fd2d7988327bded36993b54dc707c4724c138acb`
+
+## Upstream synchronization and renewed validation (2026-10-04)
+
+The feature was merged with upstream main `61a51b9`; protocol version is now 19 because upstream already used 18. Current pushed source is `dd5866bd`. The upstream draft is [feat: add Cursor Agent through ACP](https://github.com/firetower-cloud/firetower/pull/207). Older observations above refer to their stated source versions and do not establish acceptance of this merged build.
+
+Corrections include macOS kernel memory measurements (unknown reads remain `(0,0)`), killing expired diagnostic subprocesses, and hosted runners for cross-fork pull requests while keeping Depot for upstream same-repository work. Native macOS worker tests now have their own CI job.
+
+Renewed local validation: workspace/all-targets check passed; core 140, server 421, proto 21, worker 246 passed (one ignored), ACP fixtures 7 + 12 passed. Desktop 429 tests passed. The full Rust workspace run has one live installed-Codex schema failure: `SubAgentActivityKind no longer has completed`. This is reported rather than hidden by changing PATH. Android arm64 debug build and Tauri unsigned app build passed.
+
+A fresh launch in the newly built Tauri app did NOT pass: its worker journal stops after StepStarted/Launch, and the worker exits on a control-plane frame read with Resource temporarily unavailable (macOS error 35). Reconnect retains Starting without a live agent. Playwright independently encounters a dropped worker while checking requirements, disabling Start it. This is concrete evidence of an unresolved launch/transport failure; it is not yet proof of the historical failure's exact cause. This observation is preserved as the failing baseline; the corrected native launch is recorded below.
+
+On `dd5866bd`, upstream backend, native-macos, installer, image, contract/spec/three clients, web/mobile checks and macOS/Windows desktop builds passed. Android CI subsequently passed too; all executed upstream checks are green on this source. Fork CI is blocked before execution by GitHub's explicit account billing-lock annotation, rather than absent runners. No entirely-green final acceptance is claimed.
+
+Parent Task activity and live invalid-type errors are established in the earlier source; child progress/tool streaming and expired/unentitled account behavior still require real provider evidence. A dedicated account is required for the latter without changing the active subscription.
+
+### Launch root cause and correction
+
+The pinned Cursor CLI briefly puts inherited stdin into O_NONBLOCK while answering `--version`; polling a disposable pipe observed flags `[0,4]`, restored to 0 on exit. Null stdin kept that same pipe at `[0]`. Tokio's `Command::output` inherits stdin, which in a worker is the control-plane frame pipe. The resulting EAGAIN/error 35 was fatal to the frame loop and aborted a launch after StepStarted/Launch. Both agent version/auth detection and the separate readiness commands now use null stdin. A subprocess regression preserves a sentinel frame through all three probe paths: it failed before each correction and passes after them without changing the test runner's stdin. The final worker library run passes 247 tests, one ignored; strict workspace Clippy passes.
+
+The complete renewed Playwright flow passes on this implementation: real turn, approval with before/after filesystem read-back, refusal with file absence, cancellation, recalled follow-up/reload without duplicates, real Task/invalid-type response, and abrupt agent exit clearing Working/pending questions before and after reload. Fresh native Tauri reaches Workspace ready on its first attempt. Native Android fresh launch, real README response and recalled follow-up now pass on the matching build (Maestro exit 0). A prior attempt encountered an Expo development warning during the backend-restart window; the clean run does not suppress that warning. Native Task/rejected Task and approval/refusal/cancellation also pass (both Maestro runs exit 0). The approved file reads exactly MOBILE APPROVED; denied file remains absent. Provider journal confirms session/cancel and stopReason cancelled.
