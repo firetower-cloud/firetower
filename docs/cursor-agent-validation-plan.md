@@ -9,10 +9,10 @@ First native failure reached Launch without TmuxOpened; later fresh starts pass,
 ## Scope and decisions
 
 1. Bound diagnostic subprocess lifetime (kill on dropped timeout) and add a real stalled-child regression. Add native macOS memory reporting without weakening Linux cgroup logic, and prove the formerly failing test.
-2. Use GitHub hosted runners for fork PR checks only, preserving upstream Depot selection. Inspect required packages and actual final-head job results; do not alter billing or install self-hosted runners.
+2. Use GitHub hosted runners for fork PR checks only, preserving Depot for upstream same-repository PRs and manual jobs. Inspect required packages and actual final-head job results; do not alter billing or install self-hosted runners.
 3. Repeat fresh native Tauri first launches with lifecycle read-back on matching rebuilt backend. Do not claim the original cause fixed from a successful repeat.
 4. Probe/document official provider Task capability; faithfully display emitted data, never synthesize child events. Valid expired/unentitled provider proof requires a dedicated account; user input requested.
-5. Review independently against this baseline, then full affected tests and live evidence, update tracking issue/PR and create authorized upstream draft with honest checklist.
+5. Synchronize with current maintainer main and resolve integration conflicts without discarding work. Review independently against this baseline, then full affected tests and live evidence, update tracking issue/PR and create authorized upstream draft with honest checklist.
 
 ## Acceptance
 

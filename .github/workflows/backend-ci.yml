@@ -32,7 +32,7 @@ jobs:
     # changelogs, nothing a build would catch. `branches-ignore` above filters
     # the *target* branch, so this is the check that actually skips it.
     if: ${{ !startsWith(github.head_ref, 'release-please--') }}
-    runs-on: ${{ github.repository == 'firetower-cloud/firetower' && 'depot-ubuntu-22.04' || 'ubuntu-22.04' }}
+    runs-on: ${{ github.repository == 'firetower-cloud/firetower' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && 'depot-ubuntu-22.04' || 'ubuntu-22.04' }}
     services:
       postgres:
         image: postgres:17-alpine
@@ -78,7 +78,7 @@ jobs:
     # changelogs, nothing a build would catch. `branches-ignore` above filters
     # the *target* branch, so this is the check that actually skips it.
     if: ${{ !startsWith(github.head_ref, 'release-please--') }}
-    runs-on: ${{ github.repository == 'firetower-cloud/firetower' && 'depot-ubuntu-22.04' || 'ubuntu-22.04' }}
+    runs-on: ${{ github.repository == 'firetower-cloud/firetower' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && 'depot-ubuntu-22.04' || 'ubuntu-22.04' }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
@@ -137,7 +137,7 @@ jobs:
     # changelogs, nothing a build would catch. `branches-ignore` above filters
     # the *target* branch, so this is the check that actually skips it.
     if: ${{ !startsWith(github.head_ref, 'release-please--') }}
-    runs-on: ${{ github.repository == 'firetower-cloud/firetower' && 'depot-ubuntu-22.04' || 'ubuntu-22.04' }}
+    runs-on: ${{ github.repository == 'firetower-cloud/firetower' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && 'depot-ubuntu-22.04' || 'ubuntu-22.04' }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3
