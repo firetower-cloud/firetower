@@ -107,14 +107,16 @@ where
         let mut stdin = child.stdin.take().context("ACP stdin")?;
         let mut stdout = BufReader::new(child.stdout.take().context("ACP stdout")?).lines();
         let result = connection(
-            session,
-            workspace,
-            &epoch,
+            Session {
+                session,
+                workspace,
+                epoch: &epoch,
+                agent,
+            },
             &mut stdin,
             &mut stdout,
             input,
             &mut output,
-            agent,
         )
         .await;
         // Ending the bridge must not leave an agent holding credentials and
@@ -242,20 +244,30 @@ async fn save(path: &Path, value: &Saved) -> Result<()> {
     Ok(())
 }
 
+struct Session<'a> {
+    session: &'a str,
+    workspace: &'a Path,
+    epoch: &'a str,
+    agent: ft_core::Agent,
+}
+
 async fn connection<R, W>(
-    session: &str,
-    workspace: &Path,
-    epoch: &str,
+    session: Session<'_>,
     stdin: &mut ChildStdin,
     stdout: &mut Lines<BufReader<ChildStdout>>,
     input: R,
     out: &mut W,
-    agent: ft_core::Agent,
 ) -> Result<()>
 where
     R: AsyncBufRead + Unpin,
     W: AsyncWrite + Unpin,
 {
+    let Session {
+        session,
+        workspace,
+        epoch,
+        agent,
+    } = session;
     let dir = crate::agentd::dir_for(workspace);
     tokio::fs::create_dir_all(&dir).await?;
     let state_path = dir.join(format!("acp-{session}.json"));

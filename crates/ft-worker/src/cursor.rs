@@ -93,10 +93,7 @@ pub async fn prepare_home(home: &Path) -> Result<()> {
         match tokio::fs::symlink_metadata(&alias).await {
             Ok(meta)
                 if meta.file_type().is_symlink()
-                    && tokio::fs::read_link(&alias).await? == Path::new(".cursor") =>
-            {
-                ()
-            }
+                    && tokio::fs::read_link(&alias).await? == Path::new(".cursor") => {}
             Ok(_) => bail!("Cursor credential alias is not the expected private symlink"),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => symlink(".cursor", &alias)?,
             Err(e) => return Err(e.into()),
