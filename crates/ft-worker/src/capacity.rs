@@ -63,6 +63,7 @@ pub async fn read() -> Capacity {
 ///
 /// `/proc/meminfo` is the fallback and is not namespaced, so in a container
 /// with no ceiling it correctly reports the machine the container is on.
+#[cfg(not(target_os = "macos"))]
 fn memory() -> (u64, u64) {
     let limit = std::fs::read_to_string("/sys/fs/cgroup/memory.max")
         .ok()
@@ -95,6 +96,69 @@ fn memory() -> (u64, u64) {
         .unwrap_or(0);
 
     (total, used.min(total))
+}
+
+/// Native workers have no Linux procfs or cgroups. Use the kernel's memory
+/// counters instead; free and inactive pages are reclaimable, compressed pages
+/// remain used. No subprocess is needed on the periodic reporting path.
+#[cfg(target_os = "macos")]
+fn memory() -> (u64, u64) {
+    // mach2 exposes task ports and deallocation, but not this host-port entry.
+    unsafe extern "C" {
+        fn mach_host_self() -> libc::mach_port_t;
+    }
+    // SAFETY: this kernel entry takes no arguments and returns our host port.
+    let host = unsafe { mach_host_self() };
+    let value = memory_for_host(host);
+    // SAFETY: release the send right acquired above, on this task.
+    unsafe { mach2::mach_port::mach_port_deallocate(mach2::traps::mach_task_self(), host) };
+    value
+}
+
+#[cfg(target_os = "macos")]
+fn memory_for_host(host: libc::mach_port_t) -> (u64, u64) {
+    let mut bytes = 0_u64;
+    let mut length = std::mem::size_of_val(&bytes);
+    // SAFETY: hw.memsize writes a u64 into the initialized, correctly sized
+    // buffer; the constant name is NUL-terminated and no new value is supplied.
+    let result = unsafe {
+        libc::sysctlbyname(
+            c"hw.memsize".as_ptr(),
+            (&mut bytes as *mut u64).cast(),
+            &mut length,
+            std::ptr::null_mut(),
+            0,
+        )
+    };
+    if result != 0 || length != std::mem::size_of_val(&bytes) {
+        return (0, 0);
+    }
+    let total = bytes / 1024 / 1024;
+    // SAFETY: the zeroed structure is valid for integer kernel counters, and
+    // count describes its size in the integer units host_statistics64 expects.
+    let mut stats: libc::vm_statistics64 = unsafe { std::mem::zeroed() };
+    let mut count = libc::HOST_VM_INFO64_COUNT;
+    let result = unsafe {
+        libc::host_statistics64(
+            host,
+            libc::HOST_VM_INFO64,
+            (&mut stats as *mut libc::vm_statistics64).cast(),
+            &mut count,
+        )
+    };
+    if result != libc::KERN_SUCCESS {
+        return (0, 0);
+    }
+    // SAFETY: sysconf has no memory arguments; a failed lookup is nonpositive.
+    let page_size = unsafe { libc::sysconf(libc::_SC_PAGESIZE) };
+    if page_size <= 0 {
+        return (0, 0);
+    }
+    let reclaimable = u64::from(stats.free_count)
+        + u64::from(stats.inactive_count)
+        + u64::from(stats.speculative_count);
+    let available = reclaimable.saturating_mul(page_size as u64) / 1024 / 1024;
+    (total, total.saturating_sub(available))
 }
 
 /// The disk the daemon keeps its images on, which on a worker is also the disk
@@ -182,7 +246,9 @@ fn megabytes(size: &str) -> u64 {
 
 /// Run a command, or give up on it. See [`PATIENCE`].
 async fn run(command: &mut Command) -> Option<std::process::Output> {
-    command.stdin(std::process::Stdio::null());
+    command
+        .stdin(std::process::Stdio::null())
+        .kill_on_drop(true);
     match tokio::time::timeout(PATIENCE, command.output()).await {
         Ok(Ok(out)) if out.status.success() => Some(out),
         _ => None,
@@ -192,6 +258,41 @@ async fn run(command: &mut Command) -> Option<std::process::Output> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn unavailable_kernel_stats_do_not_report_all_memory_free() {
+        // A null host port is rejected by the real kernel statistics call.
+        assert_eq!(memory_for_host(0), (0, 0));
+    }
+
+    /// A daemon that never replies must not leave a process behind each tick.
+    #[tokio::test]
+    async fn a_timed_out_diagnostic_is_terminated() {
+        let dir = tempfile::tempdir().unwrap();
+        let pid_file = dir.path().join("pid");
+        let mut command = Command::new("sh");
+        command.args(["-c", "echo $$ > \"$1\"; exec sleep 60", "diagnostic"]);
+        command.arg(&pid_file);
+        assert!(run(&mut command).await.is_none());
+        let pid: i32 = std::fs::read_to_string(pid_file)
+            .unwrap()
+            .trim()
+            .parse()
+            .unwrap();
+        for _ in 0..100 {
+            // SAFETY: signal 0 checks existence only, and this is our child PID.
+            if unsafe { libc::kill(pid, 0) } == -1 {
+                assert_eq!(
+                    std::io::Error::last_os_error().raw_os_error(),
+                    Some(libc::ESRCH)
+                );
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        panic!("timed-out diagnostic still exists");
+    }
 
     #[test]
     fn dockers_sizes_are_read_in_its_own_units() {

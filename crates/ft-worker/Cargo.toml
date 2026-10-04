@@ -30,3 +30,6 @@ tracing.workspace = true
 [dev-dependencies]
 tempfile.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+mach2 = "0.4"

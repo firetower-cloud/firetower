@@ -23,12 +23,12 @@ export const ListAgentsResponseItem = zod.object({
   "mayUpdate": zod.boolean().describe('Whether the person asking may actually move this one.\n\nInstalling an agent is administrative and felt by everybody running on\nthe machine, so it is the same question `may_share` answers about a\nmachine\'s fate — see `api::hosts::to_administer`. Answered here rather\nthan in `status`, because this is the layer that knows who is asking;\nthe Updates screen settles `may_upgrade` the same way.\n\nSeparate from `behind` on purpose. A colleague\'s machine being stale is\nworth seeing; it is not yours to fix, and a button that 403s is worse\nthan no button.'),
   "version": zod.string().nullish()
 })),
-  "kind": zod.enum(['ClaudeCode', 'Codex', 'KimiCode', 'Shell']).describe('Which agent runs inside a workspace.\n\nSerialised as the variant name — see the wire conventions in the brief: a\nfield takes the consumer\'s casing, an enum value stays the symbol it is.'),
+  "kind": zod.enum(['ClaudeCode', 'Codex', 'KimiCode', 'CursorAgent', 'Shell']).describe('Which agent runs inside a workspace.\n\nSerialised as the variant name — see the wire conventions in the brief: a\nfield takes the consumer\'s casing, an enum value stays the symbol it is.'),
   "label": zod.string(),
   "latestVersion": zod.string().nullish().describe('The newest version its publisher is serving, when the control plane has\nmanaged to ask.\n\nOne per kind rather than per host: what is published does not depend on\nwhich machine is behind it. `None` means nobody has asked yet, or the\npublisher could not be reached — neither of which is "up to date".'),
   "mode": zod.union([zod.null(),zod.enum(['Subscription', 'ApiKey', 'NotNeeded']).describe('`None` until someone configures it.')]).optional(),
   "needsCredential": zod.boolean().describe('True when nothing needs configuring, which is only the plain shell.'),
-  "signsInWithACode": zod.boolean().describe('Whether this one signs a machine in with a code instead.\n\nSeparate from `supported`: a credential is worth having before there is\na driver to spend it, and it is the half that needs a person.'),
+  "signsInWithACode": zod.boolean().describe('Whether this one uses a worker-mediated browser sign-in, with or without a short code.\n\nSeparate from `supported`: a credential is worth having before there is\na driver to spend it, and it is the half that needs a person.'),
   "supported": zod.boolean().describe('Whether Firetower can actually run this one.\n\nAn agent Firetower has no driver for is still listed — it is installed\non your hosts and you can see that it is — but a session cannot be\nstarted on it, and a row that does not say so is a row that lets\nsomebody find out the hard way.'),
   "tokenCommand": zod.string().nullish().describe('What to run locally to get a token, when this agent works that way.')
 }).describe('One agent kind, its configuration, and where it\'s actually present.\n\nJoined here rather than left to the interface: the screen shows one row per\nkind, so it should cost one request.')
@@ -54,12 +54,12 @@ export const CheckAgentsResponseItem = zod.object({
   "mayUpdate": zod.boolean().describe('Whether the person asking may actually move this one.\n\nInstalling an agent is administrative and felt by everybody running on\nthe machine, so it is the same question `may_share` answers about a\nmachine\'s fate — see `api::hosts::to_administer`. Answered here rather\nthan in `status`, because this is the layer that knows who is asking;\nthe Updates screen settles `may_upgrade` the same way.\n\nSeparate from `behind` on purpose. A colleague\'s machine being stale is\nworth seeing; it is not yours to fix, and a button that 403s is worse\nthan no button.'),
   "version": zod.string().nullish()
 })),
-  "kind": zod.enum(['ClaudeCode', 'Codex', 'KimiCode', 'Shell']).describe('Which agent runs inside a workspace.\n\nSerialised as the variant name — see the wire conventions in the brief: a\nfield takes the consumer\'s casing, an enum value stays the symbol it is.'),
+  "kind": zod.enum(['ClaudeCode', 'Codex', 'KimiCode', 'CursorAgent', 'Shell']).describe('Which agent runs inside a workspace.\n\nSerialised as the variant name — see the wire conventions in the brief: a\nfield takes the consumer\'s casing, an enum value stays the symbol it is.'),
   "label": zod.string(),
   "latestVersion": zod.string().nullish().describe('The newest version its publisher is serving, when the control plane has\nmanaged to ask.\n\nOne per kind rather than per host: what is published does not depend on\nwhich machine is behind it. `None` means nobody has asked yet, or the\npublisher could not be reached — neither of which is "up to date".'),
   "mode": zod.union([zod.null(),zod.enum(['Subscription', 'ApiKey', 'NotNeeded']).describe('`None` until someone configures it.')]).optional(),
   "needsCredential": zod.boolean().describe('True when nothing needs configuring, which is only the plain shell.'),
-  "signsInWithACode": zod.boolean().describe('Whether this one signs a machine in with a code instead.\n\nSeparate from `supported`: a credential is worth having before there is\na driver to spend it, and it is the half that needs a person.'),
+  "signsInWithACode": zod.boolean().describe('Whether this one uses a worker-mediated browser sign-in, with or without a short code.\n\nSeparate from `supported`: a credential is worth having before there is\na driver to spend it, and it is the half that needs a person.'),
   "supported": zod.boolean().describe('Whether Firetower can actually run this one.\n\nAn agent Firetower has no driver for is still listed — it is installed\non your hosts and you can see that it is — but a session cannot be\nstarted on it, and a row that does not say so is a row that lets\nsomebody find out the hard way.'),
   "tokenCommand": zod.string().nullish().describe('What to run locally to get a token, when this agent works that way.')
 }).describe('One agent kind, its configuration, and where it\'s actually present.\n\nJoined here rather than left to the interface: the screen shows one row per\nkind, so it should cost one request.')
@@ -124,12 +124,12 @@ export const InstallAgentResponseItem = zod.object({
   "mayUpdate": zod.boolean().describe('Whether the person asking may actually move this one.\n\nInstalling an agent is administrative and felt by everybody running on\nthe machine, so it is the same question `may_share` answers about a\nmachine\'s fate — see `api::hosts::to_administer`. Answered here rather\nthan in `status`, because this is the layer that knows who is asking;\nthe Updates screen settles `may_upgrade` the same way.\n\nSeparate from `behind` on purpose. A colleague\'s machine being stale is\nworth seeing; it is not yours to fix, and a button that 403s is worse\nthan no button.'),
   "version": zod.string().nullish()
 })),
-  "kind": zod.enum(['ClaudeCode', 'Codex', 'KimiCode', 'Shell']).describe('Which agent runs inside a workspace.\n\nSerialised as the variant name — see the wire conventions in the brief: a\nfield takes the consumer\'s casing, an enum value stays the symbol it is.'),
+  "kind": zod.enum(['ClaudeCode', 'Codex', 'KimiCode', 'CursorAgent', 'Shell']).describe('Which agent runs inside a workspace.\n\nSerialised as the variant name — see the wire conventions in the brief: a\nfield takes the consumer\'s casing, an enum value stays the symbol it is.'),
   "label": zod.string(),
   "latestVersion": zod.string().nullish().describe('The newest version its publisher is serving, when the control plane has\nmanaged to ask.\n\nOne per kind rather than per host: what is published does not depend on\nwhich machine is behind it. `None` means nobody has asked yet, or the\npublisher could not be reached — neither of which is "up to date".'),
   "mode": zod.union([zod.null(),zod.enum(['Subscription', 'ApiKey', 'NotNeeded']).describe('`None` until someone configures it.')]).optional(),
   "needsCredential": zod.boolean().describe('True when nothing needs configuring, which is only the plain shell.'),
-  "signsInWithACode": zod.boolean().describe('Whether this one signs a machine in with a code instead.\n\nSeparate from `supported`: a credential is worth having before there is\na driver to spend it, and it is the half that needs a person.'),
+  "signsInWithACode": zod.boolean().describe('Whether this one uses a worker-mediated browser sign-in, with or without a short code.\n\nSeparate from `supported`: a credential is worth having before there is\na driver to spend it, and it is the half that needs a person.'),
   "supported": zod.boolean().describe('Whether Firetower can actually run this one.\n\nAn agent Firetower has no driver for is still listed — it is installed\non your hosts and you can see that it is — but a session cannot be\nstarted on it, and a row that does not say so is a row that lets\nsomebody find out the hard way.'),
   "tokenCommand": zod.string().nullish().describe('What to run locally to get a token, when this agent works that way.')
 }).describe('One agent kind, its configuration, and where it\'s actually present.\n\nJoined here rather than left to the interface: the screen shows one row per\nkind, so it should cost one request.')
@@ -155,7 +155,7 @@ export const SignAgentInBody = zod.object({
 }).describe('What a sign-in needs from the caller.')
 
 export const SignAgentInResponse = zod.object({
-  "userCode": zod.string().describe('The short code to type. Shown, not clicked.'),
+  "userCode": zod.string().describe('The short code to type, or empty for a link-only agent login.'),
   "verificationUri": zod.string().describe('Where to type it.')
 }).describe('A device authorization waiting for someone to approve it in a browser.')
 

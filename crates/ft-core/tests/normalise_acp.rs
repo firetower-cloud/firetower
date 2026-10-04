@@ -127,6 +127,59 @@ fn a_prompt_streams_and_only_its_own_response_completes_it() {
 }
 
 #[test]
+fn cursor_task_is_a_subagent_with_identity_and_completion() {
+    use ft_core::turn::{ItemKind, ItemStatus};
+    let mut reader = AcpNormaliser::default();
+    let records = [
+        Record::Started {
+            epoch: "cursor".into(),
+        },
+        Record::Ready {
+            session: "s".into(),
+        },
+        Record::Sent {
+            message: json!({"id":4,"method":"session/prompt","params":{"sessionId":"s","prompt":[{"type":"text","text":"delegate"}]}}),
+        },
+        Record::Received {
+            message: json!({"method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"tool_call","toolCallId":"call-1","title":"Task: inspect","kind":"other","status":"pending","rawInput":{"prompt":"inspect"}}}}),
+            replay: false,
+        },
+        Record::Received {
+            message: json!({"method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"tool_call_update","toolCallId":"call-1","status":"completed"}}}),
+            replay: false,
+        },
+        Record::Received {
+            message: json!({"method":"cursor/task","params":{"toolCallId":"call-1","description":"inspected","agentId":"agent-42","durationMs":123}}),
+            replay: false,
+        },
+    ];
+    let events: Vec<_> = records
+        .iter()
+        .flat_map(|record| reader.push(&serde_json::to_string(record).unwrap()))
+        .collect();
+    assert!(events.iter().any(|e| matches!(
+        e,
+        TurnEvent::ItemStarted {
+            kind: ItemKind::SubagentCall,
+            ..
+        }
+    )));
+    assert!(events
+        .iter()
+        .any(|e| matches!(e, TurnEvent::TaskStarted { task, .. } if task.as_str() == "call-1")));
+    assert!(events.iter().any(
+        |e| matches!(e, TurnEvent::TaskProgress { detail, .. } if detail.contains("agent-42"))
+    ));
+    assert!(events.iter().any(|e| matches!(
+        e,
+        TurnEvent::TaskCompleted {
+            status: ItemStatus::Completed,
+            ..
+        }
+    )));
+}
+
+#[test]
 fn permissions_use_the_offered_ids_and_never_upgrade_a_one_off_allow() {
     use ft_core::{acp::permission_outcome, turn::Decision};
     let options = json!([{"kind":"allow_always","optionId":"forever"},{"kind":"reject_once","optionId":"no"}]);

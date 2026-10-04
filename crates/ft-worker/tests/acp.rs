@@ -11,6 +11,10 @@ struct Peer {
 }
 impl Peer {
     async fn start(scenario: &str, saved: bool) -> Self {
+        Self::start_agent(scenario, saved, ft_core::Agent::KimiCode).await
+    }
+
+    async fn start_agent(scenario: &str, saved: bool, agent: ft_core::Agent) -> Self {
         let workspace = tempfile::tempdir().unwrap();
         if saved {
             std::fs::create_dir(workspace.path().join(".firetower")).unwrap();
@@ -56,7 +60,15 @@ impl Peer {
         let (writer, output) = tokio::io::duplex(65536);
         let path = workspace.path().to_owned();
         let task = tokio::spawn(async move {
-            ft_worker::acp::serve(command, "test", &path, BufReader::new(reader), writer).await
+            ft_worker::acp::serve_agent(
+                command,
+                "test",
+                &path,
+                BufReader::new(reader),
+                writer,
+                agent,
+            )
+            .await
         });
         Self {
             input,
@@ -108,6 +120,77 @@ impl Peer {
             .unwrap()
             .unwrap();
     }
+}
+
+#[tokio::test]
+async fn cursor_uses_preloaded_credentials_and_preserves_extension_requests() {
+    let mut peer = Peer::start_agent("cursor-extension", false, ft_core::Agent::CursorAgent).await;
+    let records = peer.ready().await;
+    let methods: Vec<_> = records
+        .iter()
+        .filter_map(|r| match r {
+            Record::Sent { message } => message["method"].as_str(),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(methods, ["initialize", "session/new"]);
+    peer.send(Input::Prompt {
+        text: "safe question".into(),
+    })
+    .await;
+    peer.sent("session/prompt").await;
+    let mut saw_request = false;
+    loop {
+        match peer.record().await {
+            Record::Received { message, .. } if message["method"] == "cursor/ask_question" => {
+                saw_request = true
+            }
+            Record::Sent { message }
+                if message["id"] == "cursor-question" && message.get("method").is_none() =>
+            {
+                assert!(saw_request);
+                assert_eq!(message["error"]["code"], -32601);
+                break;
+            }
+            _ => (),
+        }
+    }
+    peer.finish().await;
+}
+
+#[tokio::test]
+async fn cursor_missing_pre_first_turn_session_opens_a_new_one() {
+    let mut peer = Peer::start_agent("cursor-missing", true, ft_core::Agent::CursorAgent).await;
+    let records = peer.ready().await;
+    let methods: Vec<_> = records
+        .iter()
+        .filter_map(|r| match r {
+            Record::Sent { message } => message["method"].as_str(),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(methods, ["initialize", "session/load", "session/new"]);
+    peer.finish().await;
+}
+
+#[tokio::test]
+async fn cursor_missing_account_fails_without_starting_browser_auth() {
+    let mut peer = Peer::start_agent("auth", false, ft_core::Agent::CursorAgent).await;
+    let mut methods = Vec::new();
+    loop {
+        match peer.record().await {
+            Record::Sent { message } => {
+                methods.push(message["method"].as_str().unwrap().to_owned())
+            }
+            Record::Failed { detail } => {
+                assert!(detail.contains("Authentication required"));
+                break;
+            }
+            _ => (),
+        }
+    }
+    assert_eq!(methods, ["initialize", "session/new"]);
+    assert!(peer.task.await.unwrap().is_err());
 }
 
 #[tokio::test]

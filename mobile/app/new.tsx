@@ -136,6 +136,8 @@ export default function NewWorkspace() {
   const branchValue = touched ? branch : suggested;
 
   const host = hosts.find((h) => h.id === hostId);
+  const agentView = agents.find((a) => a.kind === agent);
+  const agentOnHost = agentView?.hosts.find((h) => h.hostId === hostId);
   const account = accounts.find((a) => a.id === accountId);
   const chosenRepos = repos.filter((r) => picked.includes(r.id));
 
@@ -151,12 +153,15 @@ export default function NewWorkspace() {
           id: a.id,
           label: a.name,
           detail: a.identity ?? (a.isDefault ? "default" : undefined),
-          blocked: a.credentialSet ? undefined : "No credential set",
+          blocked: !a.enabled ? "Account disabled" : a.state !== "connected" || !a.credentialSet ? "Account not connected" : undefined,
         })),
     [agent, accounts],
   );
 
-  const ready = name.trim().length > 0 && picked.length > 0 && !!hostId && !!agent && !create.isPending;
+  const ready = name.trim().length > 0 && picked.length > 0 && !!hostId
+    && !!agentView?.supported && !!agentOnHost?.installed
+    && (!agentView.needsCredential || (!!account?.enabled && account.state === "connected" && account.credentialSet))
+    && !create.isPending;
 
   return (
     <View className="flex-1 bg-ground" style={{ paddingTop: insets.top }}>
@@ -178,6 +183,7 @@ export default function NewWorkspace() {
       >
         <Field label="Name" hint="What this branch is for">
           <TextInput
+            testID="workspace-name"
             value={name}
             onChangeText={setName}
             placeholder="auth refactor"
@@ -250,10 +256,11 @@ export default function NewWorkspace() {
               onPress={() => setOpen("host")}
             />
             <Trigger
-              value={agents.find((a) => a.kind === agent)?.label}
+              value={agentView?.label}
               placeholder="Choose an agent"
               onPress={() => setOpen("agent")}
             />
+            {agent && hostId && !agentOnHost?.installed && <Text className="text-meta text-brick">{agentView?.label} is not installed on this machine.</Text>}
           </View>
         </Field>
 
@@ -383,12 +390,15 @@ export default function NewWorkspace() {
         waiting={findingAgents ? "Reading the agents" : undefined}
         empty="No agent is installed on this Firetower yet."
         chosen={agent}
-        choices={agents.map((a) => ({
-          id: a.kind,
-          label: a.label,
-          detail: a.hosts?.[0]?.version ?? undefined,
-          blocked: a.supported ? undefined : "Not supported on this server",
-        }))}
+        choices={agents.map((a) => {
+          const onHost = a.hosts.find((h) => h.hostId === hostId);
+          return {
+            id: a.kind,
+            label: a.label,
+            detail: onHost?.version ?? undefined,
+            blocked: !a.supported ? "Not supported on this server" : !hostId ? "Choose a machine first" : !onHost?.installed ? "Not installed on this machine" : undefined,
+          };
+        })}
         onPick={(id) => {
           setAgent(id);
           // The account belonged to the old agent; it cannot belong to this one.

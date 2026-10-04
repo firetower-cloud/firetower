@@ -156,7 +156,7 @@ export function Composer({
   const attach = useAttachFile();
   const interrupt = useInterruptSession();
   const choose = useChooseControl();
-  const acp = session.agent === "KimiCode";
+  const acp = session.agent === "KimiCode" || session.agent === "CursorAgent";
   const controls = useSessionControls(session.id, { query: { refetchInterval: acp ? 2000 : false } });
 
   // What a session can be asked to change is not known when it opens: an

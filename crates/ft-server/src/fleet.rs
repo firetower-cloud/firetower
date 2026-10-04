@@ -2085,27 +2085,7 @@ impl Fleet {
                             ).await;
                         }
                         Ok(ToServer::AgentClosed { session_id }) => {
-                            asked.write().await.remove(session_id.as_str());
-                            let held = progress.write().await.remove(session_id.as_str());
-                            // A turn that ended while a subagent was still
-                            // running does not rest the session — the subagent
-                            // reporting does. If the agent goes away first,
-                            // that report is never coming, and without this
-                            // the session sits under a breathing "Working"
-                            // light for ever with nothing left to move it.
-                            if let Some(note) = held.and_then(|p| p.resting) {
-                                announce_status(
-                                    &db,
-                                    &events,
-                                    &session_id,
-                                    SessionStatus::HandedBack,
-                                    note.as_deref(),
-                                )
-                                .await;
-                            }
-                            if let Some(tx) = conversations.write().await.remove(session_id.as_str()) {
-                                let _ = tx.send(AgentSpeech::Closed);
-                            }
+                            replying.agent_closed(&session_id).await;
                         }
                         Ok(ToServer::AgentUnwatched { session_id }) => {
                             // The agent is still there. So what it is blocked
@@ -2943,19 +2923,19 @@ impl Fleet {
                                 Ok(ft_core::acp::Record::ConfigurationRejected { id: rejected, detail }) if id == rejected => anyhow::bail!("{detail}"),
                                 Ok(ft_core::acp::Record::Received { message, .. }) if message.get("method").is_none() && message["id"] == id => {
                                     if let Some(error) = message.get("error") {
-                                        anyhow::bail!("Kimi refused the setting: {error}");
+                                        anyhow::bail!("ACP agent refused the setting: {error}");
                                     }
-                                    anyhow::ensure!(message["result"]["configOptions"].is_array(), "Kimi did not confirm its configuration");
+                                    anyhow::ensure!(message["result"]["configOptions"].is_array(), "ACP agent did not confirm its configuration");
                                     return Ok(());
                                 }
                                 _ => {}
                             }
                         }
-                        AgentSpeech::Closed => anyhow::bail!("Kimi stopped before confirming the setting"),
+                        AgentSpeech::Closed => anyhow::bail!("ACP agent stopped before confirming the setting"),
                         _ => {}
                     }
                 }
-            }).await.context("Kimi did not confirm the setting in time; refresh its current configuration before retrying")??;
+            }).await.context("ACP agent did not confirm the setting in time; refresh its current configuration before retrying")??;
         }
         Ok(())
     }
@@ -3048,8 +3028,46 @@ impl Fleet {
         }
     }
 
+    /// A real process exit is different from losing its watcher. Persist a
+    /// terminal status so historical permissions cannot survive this boundary.
+    async fn agent_closed(&self, session_id: &SessionId) {
+        // Share the replay publication lock until the terminal status is durable.
+        let mut readers = self.progress.write().await;
+        self.asked.write().await.remove(session_id.as_str());
+        let held = readers.remove(session_id.as_str());
+        if let Some(note) = held.and_then(|p| p.resting) {
+            announce_status(
+                &self.db,
+                &self.events,
+                session_id,
+                SessionStatus::HandedBack,
+                note.as_deref(),
+            )
+            .await;
+        } else if self
+            .db
+            .session_status(session_id)
+            .await
+            .ok()
+            .flatten()
+            .is_some_and(|status| {
+                matches!(
+                    status,
+                    SessionStatus::Starting | SessionStatus::Working | SessionStatus::NeedsYou
+                )
+            })
+        {
+            announce_status(&self.db, &self.events, session_id, SessionStatus::Failed, Some("The agent process exited. Restart it to continue; pending permissions were cancelled.")).await;
+        }
+        drop(readers);
+        if let Some(tx) = self.conversations.write().await.remove(session_id.as_str()) {
+            let _ = tx.send(AgentSpeech::Closed);
+        }
+    }
+
     /// What this session is blocked on, if anything.
     pub async fn asked(&self, session_id: &SessionId) -> Vec<AgentSpeech> {
+        self.ensure_reader(session_id).await;
         self.asked
             .read()
             .await
@@ -3165,12 +3183,13 @@ impl Fleet {
         // Everything this session has already said, so a control plane that
         // restarted knows where the conversation got to.
         //
-        // Nothing here is acted on: the questions were answered or are still
-        // in `asked`, and the frames were sent by whoever was running at the
-        // time. What is being rebuilt is what only the reader knows — for
-        // Codex, the thread every later turn has to name, which was said once
-        // in a line that has long gone past.
+        // Never send frames while replaying. Rebuild only the reader and
+        // unanswered protocol questions: `asked` is lost on server restart,
+        // while the provider can still be waiting in its tmux supervisor.
+        // This also restores Codex's thread, needed by later turns but
+        // announced only once in an earlier line.
         let mut opened = false;
+        let mut pending = Vec::new();
         for (_, line) in self
             .db
             .agent_lines_since(session_id, 0)
@@ -3181,6 +3200,10 @@ impl Fleet {
             // A turn that already started is the proof the first prompt went
             // out. Without this, reconnecting would send it a second time.
             opened |= matches!(read.moved, Some((SessionStatus::Working, _)));
+            pending.retain(
+                |q| !matches!(q, AgentSpeech::Asks { req, .. } if read.resolved.contains(req)),
+            );
+            pending.extend(read.asks);
         }
         if opened {
             progress.opening_prompt = None;
@@ -3242,11 +3265,41 @@ impl Fleet {
             }
         }
 
-        self.progress
-            .write()
+        let mut readers = self.progress.write().await;
+        // Only a live blocked/in-flight turn can have answerable questions.
+        // AgentClosed persists a terminal status even when stdout ended before
+        // the provider journal could record a response or failure.
+        if !self
+            .db
+            .session_status(session_id)
             .await
-            .entry(session_id.to_string())
-            .or_insert(progress);
+            .ok()
+            .flatten()
+            .is_some_and(|status| {
+                matches!(status, SessionStatus::Working | SessionStatus::NeedsYou)
+            })
+        {
+            pending.clear();
+        }
+        if let std::collections::hash_map::Entry::Vacant(entry) =
+            readers.entry(session_id.to_string())
+        {
+            // Publish the restored questions with their reader. A concurrent
+            // rebuild must not resurrect a question the live reader resolved.
+            let mut held = self.asked.write().await;
+            let waiting = held.entry(session_id.to_string()).or_default();
+            for question in pending {
+                if let AgentSpeech::Asks { req, .. } = &question {
+                    if !waiting
+                        .iter()
+                        .any(|q| matches!(q, AgentSpeech::Asks { req: seen, .. } if seen == req))
+                    {
+                        waiting.push(question);
+                    }
+                }
+            }
+            entry.insert(progress);
+        }
     }
 
     /// End the turn in progress, leaving the session alive.
@@ -4268,6 +4321,85 @@ mod tests {
         fleet.supervise(host.clone(), Arc::new(Never)).await;
         assert!(fleet.try_now(&host).await);
         fleet.stop_supervising(&host).await;
+    }
+
+    #[tokio::test]
+    async fn an_acp_permission_survives_a_control_plane_restart() {
+        use serde_json::json;
+        let (db, owner) = Db::open_for_test_owned().await.unwrap();
+        let host = db
+            .ensure_host("fire-01", ft_core::Compute::Local, &owner)
+            .await
+            .unwrap();
+        let session = SessionId::new();
+        db.insert_session(
+            &session,
+            &host.id,
+            &owner,
+            None,
+            "Cursor permission",
+            "",
+            None,
+            None,
+            "CursorAgent",
+            ft_core::WorkspaceSize::Medium,
+            ft_core::Share::Equal,
+            &ft_core::Step::plan(false, false),
+            None,
+        )
+        .await
+        .unwrap();
+        let records = [
+            json!({"acp":"Started", "epoch":"original"}),
+            json!({"acp":"Ready", "session":"provider-session"}),
+            json!({"acp":"Sent", "message":{"jsonrpc":"2.0", "id":4, "method":"session/prompt", "params":{"prompt":[{"type":"text","text":"write a test file"}]}}}),
+            json!({"acp":"Received", "replay":false, "message":{"jsonrpc":"2.0", "id":0, "method":"session/request_permission", "params":{"sessionId":"provider-session","toolCall":{"title":"printf proof"},"options":[{"kind":"allow_once","optionId":"allow-once"}]}}}),
+        ];
+        for (i, record) in records.iter().enumerate() {
+            db.record_agent_line(&session, (i + 1) as i64, &record.to_string())
+                .await
+                .unwrap();
+        }
+        db.record_local_event(
+            &session,
+            &EventKind::StatusChanged {
+                status: SessionStatus::NeedsYou,
+                note: None,
+            },
+            chrono::Utc::now(),
+        )
+        .await
+        .unwrap();
+        let restarted = Fleet::new(db.clone());
+        assert!(
+            restarted
+                .asked(&session)
+                .await
+                .iter()
+                .any(|q| matches!(q, AgentSpeech::Asks { req, .. } if req == "original:0")),
+            "the original permission must remain answerable after restart"
+        );
+
+        restarted.agent_closed(&session).await;
+        let after_exit = Fleet::new(db.clone());
+        assert!(after_exit.asked(&session).await.is_empty(), "a real process exit must invalidate historical permissions across another server restart");
+        db.record_local_event(
+            &session,
+            &EventKind::StatusChanged {
+                status: SessionStatus::NeedsYou,
+                note: None,
+            },
+            chrono::Utc::now(),
+        )
+        .await
+        .unwrap();
+
+        db.record_agent_line(&session, 5, &json!({"acp":"Sent", "message":{"jsonrpc":"2.0","id":0,"result":{"outcome":{"outcome":"selected","optionId":"allow-once"}}}}).to_string()).await.unwrap();
+        let after_decision = Fleet::new(db);
+        assert!(
+            after_decision.asked(&session).await.is_empty(),
+            "replay must not resurrect an answered permission"
+        );
     }
 
     /// The other half of the issue: a choice that only the reader knew about.

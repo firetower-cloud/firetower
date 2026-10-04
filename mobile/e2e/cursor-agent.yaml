@@ -1,0 +1,66 @@
+# Run against an installed development build, a matching control plane and
+# worker, and a connected Cursor Agent account on a disposable repository.
+#
+# maestro --device emulator-5554 test --test-output-dir=../docs/evidence/mobile \
+#   -e ADDRESS=localhost:4400 -e USER=admin -e PASS=<test-password> \
+#   -e WORKSPACE_NAME='Cursor ACP Mobile <unique-suffix>' \
+#   e2e/cursor-agent.yaml
+appId: com.usefiretower.app
+---
+- launchApp:
+    permissions: { all: allow }
+
+- assertVisible: "Connect to a Firetower"
+- tapOn:
+    id: "address"
+- inputText: "${ADDRESS}"
+- tapOn: "Connect"
+- assertVisible: "Sign in"
+- tapOn:
+    id: "username"
+- inputText: "${USER}"
+- tapOn:
+    id: "password"
+- inputText: "${PASS}"
+- hideKeyboard
+- tapOn: "Sign in"
+- assertVisible: "Inbox"
+
+- tapOn:
+    id: "new-workspace"
+- assertVisible: "New workspace"
+- tapOn:
+    id: "workspace-name"
+- inputText: "${WORKSPACE_NAME}"
+- hideKeyboard
+- tapOn: "Choose a repository"
+- tapOn: "firetower-cursor-pw-repo"
+- pressKey: Back
+- tapOn: "Choose a machine"
+- tapOn: "localhost"
+- tapOn: "Choose an agent"
+- tapOn: "Cursor Agent"
+- tapOn: "Choose an account"
+- tapOn: "Cursor Playwright"
+- tapOn: "Start the workspace"
+
+- assertVisible: "Answer the agent"
+- tapOn:
+    id: "composer"
+- inputText: "Read README.md and reply with its exact one-line content. Do not edit any files."
+- tapOn:
+    id: "send"
+- extendedWaitUntil:
+    visible: "(?s).*Playwright Cursor ACP smoke test.*"
+    timeout: 120000
+- takeScreenshot: cursor-agent-mobile-turn
+
+- tapOn:
+    id: "composer"
+- inputText: "What was the exact README line you just returned? Reply with MOBILE FOLLOWUP followed by that line."
+- tapOn:
+    id: "send"
+- extendedWaitUntil:
+    visible: "(?s).*MOBILE FOLLOWUP.*Playwright Cursor ACP smoke test.*"
+    timeout: 120000
+- takeScreenshot: cursor-agent-mobile-followup

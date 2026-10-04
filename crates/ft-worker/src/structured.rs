@@ -161,6 +161,30 @@ pub async fn tell(session_id: &SessionId, frame: &ToAgent) -> Result<()> {
         .await
 }
 
+/// A newly ready ACP process can briefly lose its socket after session/new.
+/// Retry only connection failures: once a socket
+/// accepts the frame, its delivery is ambiguous and must never be replayed.
+pub async fn tell_when_listening(session_id: &SessionId, frame: &ToAgent) -> Result<()> {
+    let deadline = std::time::Instant::now() + STARTUP;
+    loop {
+        match AgentClient::connect(session_id.as_str()).await {
+            Ok(mut client) => return client.send(frame).await,
+            Err(error) if std::time::Instant::now() < deadline => {
+                tracing::debug!(session = %session_id, "waiting for the agent socket: {error:#}");
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+            Err(error) => {
+                return Err(error).with_context(|| {
+                    format!(
+                        "no agent is listening for {session_id} after {}s",
+                        STARTUP.as_secs()
+                    )
+                });
+            }
+        }
+    }
+}
+
 /// Forward everything an agent says to the control plane, until it stops.
 ///
 /// Returns when the agent exits or the connection drops. The caller runs this
@@ -173,6 +197,10 @@ pub enum Ended {
     /// Only the watching stopped. The agent is still there and still writing,
     /// so somebody asking again will pick up where this left off.
     WatcherStopped,
+    /// An established socket reached EOF without a protocol exit frame. The
+    /// caller must check whether the agent's tmux session still exists before
+    /// deciding whether this was an agent exit or only a broken watcher.
+    SocketClosed,
 }
 
 pub async fn watch(session_id: SessionId, since_line: u64, out: Out) -> Result<Ended> {
@@ -225,14 +253,49 @@ pub async fn watch(session_id: SessionId, since_line: u64, out: Out) -> Result<E
         }
     }
 
-    // The frames ran out without the agent saying it had exited: agentd hung
-    // up, or the read ended. The agent is still running.
-    Ok(Ended::WatcherStopped)
+    // The frames ran out without the agent saying it had exited. This is
+    // ambiguous until the caller checks whether the supervised tmux session
+    // still exists: agentd may have gone down abruptly, or only this watcher.
+    Ok(Ended::SocketClosed)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn a_turn_waits_for_a_restarting_agent_socket_and_sends_once() {
+        use tokio::io::AsyncBufReadExt;
+
+        let id = SessionId::from_stored(format!("s_retry-{}", std::process::id()));
+        let socket = crate::agentd::socket_path(id.as_str());
+        tokio::fs::create_dir_all(socket.parent().unwrap())
+            .await
+            .unwrap();
+        let _ = tokio::fs::remove_file(&socket).await;
+        let server = tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(250)).await;
+            let listener = tokio::net::UnixListener::bind(&socket).unwrap();
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut line = String::new();
+            let mut reader = tokio::io::BufReader::new(stream);
+            reader.read_line(&mut line).await.unwrap();
+            drop(listener);
+            tokio::fs::remove_file(&socket).await.unwrap();
+            line
+        });
+
+        let frame = ToAgent::Send {
+            message: serde_json::json!({"method":"session/prompt"}),
+        };
+        tell_when_listening(&id, &frame).await.unwrap();
+        let line = server.await.unwrap();
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&line).unwrap()["frame"],
+            "Send"
+        );
+        assert!(line.contains("session/prompt"));
+    }
 
     #[test]
     fn a_launch_line_survives_a_path_with_a_space_in_it() {

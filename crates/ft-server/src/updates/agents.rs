@@ -49,8 +49,8 @@ impl Feeds {
             Agent::ClaudeCode => Some(&self.claude),
             Agent::Codex => Some(&self.codex),
             Agent::KimiCode => Some(&self.kimi),
-            // Nothing publishes a shell.
-            Agent::Shell => None,
+            // Shell has no publisher; Cursor uses verified pinned archives.
+            Agent::Shell | Agent::CursorAgent => None,
         }
     }
 }

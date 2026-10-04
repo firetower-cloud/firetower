@@ -48,7 +48,8 @@ use serde::{Deserialize, Serialize};
 /// 18 — `Diff` can ask for the names alone. An older worker ignores the field
 /// and answers with a unified diff, which is not what the caller would then
 /// try to read — so the version moves rather than the reader guessing.
-pub const PROTOCOL_VERSION: u32 = 18;
+/// 19 — Cursor Agent and its account/login frames require a Cursor-aware worker.
+pub const PROTOCOL_VERSION: u32 = 19;
 
 mod codec;
 pub use codec::{Codec, CodecError, FrameReader, FrameWriter};
@@ -995,15 +996,12 @@ pub enum ToServer {
     Pong,
 }
 
-/// A device code somebody has to approve before Codex is signed in.
-///
-/// The two things worth showing and nothing else: this is what a person reads
-/// off a screen and types somewhere else.
+/// Browser sign-in details, with a code for providers that use device codes.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LoginPending {
-    /// The short code. Shown, not clicked.
+    /// The short code to type, or empty for Cursor's link-only flow.
     pub user_code: String,
-    /// Where to type it.
+    /// The verification link to open.
     pub verification_url: String,
 }
 

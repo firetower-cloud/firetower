@@ -54,6 +54,7 @@ export default function Inbox() {
       <View className="flex-row items-center justify-between px-4 pb-3 pt-2">
         <ServerChip org={here?.org ?? "—"} reach={error ? "unreachable" : "live"} onPress={() => router.push("/you")} />
         <Pressable
+          testID="new-workspace"
           onPress={() => router.push("/new")}
           className="h-9 w-9 items-center justify-center rounded-md bg-raise"
           hitSlop={6}

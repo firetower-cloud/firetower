@@ -1,4 +1,63 @@
-# Kimi Code through ACP (experimental)
+# ACP agents (experimental)
+
+## Connect Cursor Agent
+
+Cursor Agent uses the official `cursor-agent acp` CLI and ACP protocol v1. The
+host installs the complete vendor archive, including its bundled Node runtime
+and native modules. Firetower pins build `2026.09.28-64d2043` and verifies the
+archive digest before unpacking it. Verified archives cover macOS arm64/x64
+and glibc Linux arm64/x64. Musl Linux and other platforms are refused at
+install time.
+
+1. Update the server, workers and clients together; the worker protocol is 19.
+2. In **Configuration → Agents → Cursor Agent**, install the CLI on a host.
+3. Connect a **Cursor Agent** subscription account. Firetower starts
+   `cursor-agent login` with a private file-backed credential store and shows
+   its browser link. Open the link and complete Cursor sign-in. Cursor's flow
+   has no device code to type.
+4. Wait until the account says **connected**, then select it for a new Cursor
+   Agent workspace. Firetower puts only `.cursor/auth.json` into the account
+   vault and writes it into a private home for each session. No worker needs a
+   manual Cursor login. API-key mode is not exposed.
+
+This uses the signed-in Cursor account's agent usage and plan limits. If that
+account has on-demand usage enabled, charges beyond included usage may apply;
+check the [Cursor usage and billing documentation](https://prod.cursor.com/help/account-and-billing/overages)
+and the account dashboard before running long unattended sessions. Firetower
+does not turn a subscription login into an unlimited allowance or impose a
+separate Cursor spending cap.
+
+The file credential store is selected with
+`AGENT_CLI_CREDENTIAL_STORE=file`; `HOME`, `CURSOR_CONFIG_DIR`,
+`CURSOR_DATA_DIR` and `XDG_CONFIG_HOME` are private to the login or session.
+The private `cursor` directory alias makes Linux's XDG credential path and
+macOS's `.cursor/auth.json` refer to the same file. Cursor's default macOS
+Keychain store is unsuitable for moving an account to a different worker. A
+credential copied from a Mac home authenticated a Linux arm64 container. A
+fresh Firetower worker root installed the pinned CLI without a global copy on
+`PATH`; its ACP wrapper completed a harmless turn, then restarted with
+`session/load` and one explicit follow-up that remembered the first answer.
+A separate remote worker host and each production client still need live
+acceptance.
+Sessions read the restored file during `session/new`. Firetower does not call
+ACP `authenticate(cursor_login)` while starting a workspace, because that RPC
+can open a fresh browser login when the file is missing; the account connection
+flow is the only place that creates a login link.
+
+Cursor can send extension requests such as `cursor/ask_question` and
+`cursor/create_plan`. Firetower currently returns an unsupported-method error
+for extension requests it cannot serve; it never leaves them unanswered. ACP
+permission requests are routed through the normal Firetower approval path.
+
+In a live read-only delegation probe, Cursor emitted a `Task:` tool call and a
+matching `cursor/task` notification with a subagent ID and duration after the
+call ended. Firetower maps that pair to a subagent card and completion status.
+The observed parent ACP stream carried the Task call and its result, but no
+separate child tool calls or child progress. Firetower cannot show the child's
+own tool activity from that stream; this remains an acceptance gap until the
+provider emits it or a supported API exposes it.
+
+## Kimi Code
 
 Firetower drives the Kimi Code CLI through `kimi acp`. This is an additional
 transport; Claude Code retains stream-json and Codex retains its app-server.
@@ -109,7 +168,7 @@ reconnect and agent restart. Inspect both the authenticated conversation API
 and the UI. A handshake or fixture run is not a substitute for live acceptance.
 
 Upgrade workers and clients with the control plane: the worker protocol version
-is 17 because older workers cannot deserialize the new agent variant, its
+is 19 because older workers cannot deserialize the new agent variant, its
 configuration command, or a sign-in that names which agent it is for.
 The released desktop client also rejects ACP conversation frames under its old
 schema, leaving a session apparently working after the agent has replied. For

@@ -100,7 +100,10 @@ const ENOUGH_ISSUE: usize = 4_000;
 /// an empty box.
 pub async fn propose(about: About<'_>) -> Result<Proposal> {
     anyhow::ensure!(
-        about.agent != ft_core::Agent::KimiCode,
+        !matches!(
+            about.agent,
+            ft_core::Agent::KimiCode | ft_core::Agent::CursorAgent
+        ),
         "Automatic change descriptions are not supported for ACP sessions yet"
     );
     let diff = about.diff.trim();
@@ -322,7 +325,9 @@ fn invocation(
         }
         // Not offered, and has no answer to give. Reached only by a session
         // recorded before `Shell` stopped being startable.
-        ft_core::Agent::KimiCode => unreachable!("ACP descriptions are rejected before invocation"),
+        ft_core::Agent::KimiCode | ft_core::Agent::CursorAgent => {
+            unreachable!("ACP descriptions are rejected before invocation")
+        }
         ft_core::Agent::Shell => {
             command.args(["-c", "exit 1"]);
         }

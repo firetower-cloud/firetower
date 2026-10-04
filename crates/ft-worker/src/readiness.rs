@@ -6,7 +6,13 @@ use tokio::process::Command;
 
 async fn output(program: &str, args: &[&str], path: &OsStr) -> Option<String> {
     let mut command = Command::new(program);
-    command.args(args).env("PATH", path).kill_on_drop(true);
+    // The daemon's stdin carries frames. A CLI probe may temporarily put its
+    // inherited stdin in nonblocking mode; give it no access to that pipe.
+    command
+        .args(args)
+        .env("PATH", path)
+        .stdin(std::process::Stdio::null())
+        .kill_on_drop(true);
     let result = tokio::time::timeout(Duration::from_secs(3), command.output())
         .await
         .ok()?

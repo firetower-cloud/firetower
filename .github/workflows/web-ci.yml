@@ -27,7 +27,7 @@ jobs:
     # changelogs, nothing a build would catch. `branches-ignore` above filters
     # the *target* branch, so this is the check that actually skips it.
     if: ${{ !startsWith(github.head_ref, 'release-please--') }}
-    runs-on: depot-ubuntu-22.04
+    runs-on: ${{ github.repository == 'firetower-cloud/firetower' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && 'depot-ubuntu-22.04' || 'ubuntu-22.04' }}
     defaults:
       run:
         working-directory: web

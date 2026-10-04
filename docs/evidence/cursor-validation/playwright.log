@@ -1,0 +1,6 @@
+PASS: real server login, Cursor Agent row, and install action
+PASS: real Cursor ACP turn through the Desktop renderer
+PASS: live permission approval effect, denial prevents effect, and cancellation leaves Working
+PASS: follow-up memory and page reconnect without duplicate answer
+PASS: real Task activity and rejected Task response are visible
+PASS: real agent exit clears pending permission and Working, including reload

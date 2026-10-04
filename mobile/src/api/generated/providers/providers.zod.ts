@@ -16,7 +16,7 @@ export const ListProvidersResponseItem = zod.object({
   "label": zod.string(),
   "maySetApplication": zod.boolean().describe('Whether the caller may register the application this whole installation\nauthorizes against.\n\nSent rather than worked out by each client, the way `may_upgrade` is.\nThe rule is the server\'s — one application, no owner, and whoever sets\nit decides what everybody here authorizes next — and a copy of it in\nthree interfaces is three copies to keep in step. It was drawn for\neverybody once, so a member filled the field in and was refused by the\ntime they pressed Save.'),
   "pending": zod.union([zod.null(),zod.object({
-  "userCode": zod.string().describe('The short code to type. Shown, not clicked.'),
+  "userCode": zod.string().describe('The short code to type, or empty for a link-only agent login.'),
   "verificationUri": zod.string().describe('Where to type it.')
 }).describe('Set while an authorization is in flight.')]).optional()
 }).describe('What the interface shows on the connect screen.')
@@ -50,7 +50,7 @@ export const AuthorizeProviderParams = zod.object({
 })
 
 export const AuthorizeProviderResponse = zod.object({
-  "userCode": zod.string().describe('The short code to type. Shown, not clicked.'),
+  "userCode": zod.string().describe('The short code to type, or empty for a link-only agent login.'),
   "verificationUri": zod.string().describe('Where to type it.')
 }).describe('A device authorization waiting for someone to approve it in a browser.')
 

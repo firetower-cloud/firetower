@@ -9,7 +9,7 @@
  * The two buttons are 48pt and far apart. This is the one place in Firetower
  * where a mis-tap runs a command somebody did not agree to.
  */
-import { Pressable, Text, View } from "react-native";
+import { Pressable, ScrollView, Text, View } from "react-native";
 import * as Haptics from "expo-haptics";
 import type { Asked } from "~/api/conversation";
 import { Code } from "~/ui/Prose";
@@ -28,6 +28,18 @@ function what(asked: Asked): string {
   for (const key of ["command", "file_path", "path", "url"]) {
     const value = args?.[key];
     if (typeof value === "string" && value.trim()) return value;
+  }
+  // ACP wraps the operation in toolCall alongside protocol options. Showing
+  // that entire envelope can push both decision buttons off a phone's screen.
+  const toolCall = args?.toolCall as Record<string, unknown> | undefined;
+  if (toolCall) {
+    // Keep the actual input/content visible: ACP titles may be generic labels.
+    const input = toolCall.rawInput as Record<string, unknown> | undefined;
+    for (const key of ["command", "file_path", "path", "url"]) {
+      const value = input?.[key];
+      if (typeof value === "string" && value.trim()) return value;
+    }
+    return JSON.stringify(toolCall, null, 2);
   }
   return JSON.stringify(asked.args ?? {}, null, 2);
 }
@@ -57,7 +69,9 @@ export function Approval({ asked, onAnswer }: { asked: Asked; onAnswer: (yes: bo
         {/* The question, at lede size. It is what you came back to answer. */}
         <Text className="font-medium text-title leading-[24px] text-bone">{asked.detail}</Text>
 
-        <Code text={what(asked)} />
+        <ScrollView style={{ maxHeight: 180 }} nestedScrollEnabled>
+          <Code text={what(asked)} />
+        </ScrollView>
 
         <View className="mt-1 flex-row gap-3">
           <Pressable

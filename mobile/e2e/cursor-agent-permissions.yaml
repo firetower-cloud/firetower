@@ -1,0 +1,48 @@
+# Run after cursor-agent.yaml in its active disposable conversation.
+# Verify mobile-approved.txt contents and mobile-denied.txt absence on the worker.
+appId: com.usefiretower.app
+---
+- assertVisible: { id: composer }
+- tapOn: { id: composer }
+- eraseText: 1000
+- inputText: 'Use only Shell to run: printf "MOBILE APPROVED" > firetower-cursor-pw-repo/mobile-approved.txt . Do not use Edit File or any fallback and do not commit.'
+- hideKeyboard
+- tapOn: { id: send }
+- extendedWaitUntil:
+    visible: "Allow"
+    timeout: 120000
+- assertVisible: '(?s).*printf.*MOBILE APPROVED.*'
+- takeScreenshot: cursor-agent-mobile-pending
+- tapOn: "Allow"
+- extendedWaitUntil:
+    visible: "(?s).*Handed it back.*"
+    timeout: 120000
+- takeScreenshot: cursor-agent-mobile-approved
+- tapOn: { id: composer }
+- eraseText: 1000
+- inputText: 'Use only Shell to run: printf "MUST NOT EXIST" > firetower-cursor-pw-repo/mobile-denied.txt . On denial stop with no retry, fallback or file edit. Do not commit.'
+- hideKeyboard
+- tapOn: { id: send }
+- extendedWaitUntil:
+    visible: "No"
+    timeout: 120000
+- tapOn: "No"
+- extendedWaitUntil:
+    visible: "(?s).*Handed it back.*"
+    timeout: 120000
+- assertNotVisible: "Allow"
+- takeScreenshot: cursor-agent-mobile-denied
+- tapOn: { id: composer }
+- eraseText: 1000
+- inputText: 'Use only Shell to run: sleep 30 . This is a disposable cancellation test. Do not change files.'
+- hideKeyboard
+- tapOn: { id: send }
+- extendedWaitUntil:
+    visible: "Allow"
+    timeout: 120000
+- tapOn: { id: stop }
+- extendedWaitUntil:
+    visible: "(?s).*Handed it back.*"
+    timeout: 120000
+- assertNotVisible: "Allow"
+- takeScreenshot: cursor-agent-mobile-cancelled

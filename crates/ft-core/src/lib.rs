@@ -61,6 +61,7 @@ pub enum Agent {
     ClaudeCode,
     Codex,
     KimiCode,
+    CursorAgent,
     /// A plain shell. Not offered — see [`Agent::all`].
     Shell,
 }
@@ -79,8 +80,13 @@ impl Agent {
     /// network, and a session row that already says `Shell` still decodes.
     ///
     /// [`Shell`]: Agent::Shell
-    pub fn all() -> [Agent; 3] {
-        [Agent::ClaudeCode, Agent::Codex, Agent::KimiCode]
+    pub fn all() -> [Agent; 4] {
+        [
+            Agent::ClaudeCode,
+            Agent::Codex,
+            Agent::KimiCode,
+            Agent::CursorAgent,
+        ]
     }
 
     /// What it's called in the interface.
@@ -89,6 +95,7 @@ impl Agent {
             Agent::ClaudeCode => "Claude Code",
             Agent::Codex => "Codex",
             Agent::KimiCode => "Kimi Code",
+            Agent::CursorAgent => "Cursor Agent",
             Agent::Shell => "Shell",
         }
     }
@@ -104,6 +111,7 @@ impl Agent {
             Agent::ClaudeCode => "claude",
             Agent::Codex => "codex",
             Agent::KimiCode => "kimi",
+            Agent::CursorAgent => "cursor-agent",
             Agent::Shell => "bash",
         }
     }
@@ -115,7 +123,7 @@ impl Agent {
     /// one, and fetching it would be absurd.
     pub fn installable(&self) -> bool {
         match self {
-            Agent::ClaudeCode | Agent::Codex | Agent::KimiCode => true,
+            Agent::ClaudeCode | Agent::Codex | Agent::KimiCode | Agent::CursorAgent => true,
             Agent::Shell => false,
         }
     }
@@ -239,6 +247,7 @@ impl Agent {
             // in `thread/start` here, which is why this is so short.
             Agent::Codex => Some(vec![self.command().to_string(), "app-server".to_string()]),
             Agent::KimiCode => Some(vec!["kimi".into(), "acp".into()]),
+            Agent::CursorAgent => Some(vec!["cursor-agent".into(), "acp".into()]),
             Agent::Shell => None,
         }
     }
@@ -264,7 +273,7 @@ impl Agent {
                 }
             }
             Agent::Codex => crate::codex::opening(cwd, preferred),
-            Agent::KimiCode => {
+            Agent::KimiCode | Agent::CursorAgent => {
                 if prompt.trim().is_empty() {
                     Vec::new()
                 } else {
@@ -288,11 +297,12 @@ impl Agent {
     /// [`all`](Agent::all) must not turn an old row into an error.
     ///
     /// [`Shell`]: Agent::Shell
-    pub fn every() -> [Agent; 4] {
+    pub fn every() -> [Agent; 5] {
         [
             Agent::ClaudeCode,
             Agent::Codex,
             Agent::KimiCode,
+            Agent::CursorAgent,
             Agent::Shell,
         ]
     }
@@ -1069,7 +1079,7 @@ impl Agent {
     pub fn auth_status_command(&self) -> Option<&'static [&'static str]> {
         match self {
             Agent::ClaudeCode => Some(&["auth", "status"]),
-            Agent::Codex | Agent::KimiCode | Agent::Shell => None,
+            Agent::Codex | Agent::KimiCode | Agent::CursorAgent | Agent::Shell => None,
         }
     }
 
@@ -1082,7 +1092,7 @@ impl Agent {
     pub fn token_setup(&self) -> Option<(&'static str, &'static str)> {
         match self {
             Agent::ClaudeCode => Some(("claude setup-token", "CLAUDE_CODE_OAUTH_TOKEN")),
-            Agent::Codex | Agent::KimiCode | Agent::Shell => None,
+            Agent::Codex | Agent::KimiCode | Agent::CursorAgent | Agent::Shell => None,
         }
     }
 
@@ -1093,12 +1103,14 @@ impl Agent {
     /// command that prints a credential, so the only way to get one is to let a
     /// machine ask for it and approve that from a browser.
     ///
-    /// Separate from [`speaks_a_protocol`](Agent::speaks_a_protocol) because
+    /// Cursor's browser link has no short code; this predicate also covers
+    /// that worker-mediated login flow. Separate from
+    /// [`speaks_a_protocol`](Agent::speaks_a_protocol) because
     /// they answer different questions. Signing in is worth offering before
     /// there is a driver to use it — it is the longer half of the setup, and
     /// nothing about it depends on being able to start a session yet.
     pub fn signs_in_with_a_code(&self) -> bool {
-        matches!(self, Agent::Codex | Agent::KimiCode)
+        matches!(self, Agent::Codex | Agent::KimiCode | Agent::CursorAgent)
     }
 
     /// The file this agent keeps its credential in, for the ones that use a
@@ -1123,6 +1135,7 @@ impl Agent {
     pub fn credential_file(&self) -> Option<&'static str> {
         match self {
             Agent::Codex => Some("auth.json"),
+            Agent::CursorAgent => Some(".cursor/auth.json"),
             Agent::ClaudeCode | Agent::KimiCode | Agent::Shell => None,
         }
     }
@@ -1135,6 +1148,7 @@ impl Agent {
         match self {
             Agent::Codex => Some("CODEX_HOME"),
             Agent::KimiCode => Some("KIMI_CODE_HOME"),
+            Agent::CursorAgent => Some("HOME"),
             Agent::ClaudeCode | Agent::Shell => None,
         }
     }
@@ -1144,7 +1158,7 @@ impl Agent {
         match self {
             Agent::ClaudeCode => Some("ANTHROPIC_API_KEY"),
             Agent::Codex => Some("OPENAI_API_KEY"),
-            Agent::KimiCode | Agent::Shell => None,
+            Agent::KimiCode | Agent::CursorAgent | Agent::Shell => None,
         }
     }
 
@@ -1187,7 +1201,7 @@ impl Agent {
             }),
             // Not because they don't have one, but because nobody has worked
             // out what it wants. An unanswered first run costs a keypress.
-            Agent::Codex | Agent::KimiCode | Agent::Shell => None,
+            Agent::Codex | Agent::KimiCode | Agent::CursorAgent | Agent::Shell => None,
         }
     }
 
@@ -1223,7 +1237,7 @@ impl Agent {
             ],
             // No hooks. See `status_for` — nothing will move these off
             // `Working` and the interface should admit that.
-            Agent::Codex | Agent::KimiCode | Agent::Shell => &[],
+            Agent::Codex | Agent::KimiCode | Agent::CursorAgent | Agent::Shell => &[],
         }
     }
 
@@ -1231,7 +1245,7 @@ impl Agent {
     pub fn hooks_file(&self) -> Option<&'static str> {
         match self {
             Agent::ClaudeCode => Some(".claude/settings.json"),
-            Agent::Codex | Agent::KimiCode | Agent::Shell => None,
+            Agent::Codex | Agent::KimiCode | Agent::CursorAgent | Agent::Shell => None,
         }
     }
 }

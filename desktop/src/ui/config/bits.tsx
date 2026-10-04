@@ -34,11 +34,11 @@ export function Section({ title, note, action, children }: { title: string; note
 export function DeviceCode({ code, url, note }: { code: string; url: string; note?: string }) {
   return (
     <div className="rounded-xl border border-line bg-ground px-4 py-4 text-center">
-      <p className="text-meta text-dim">Enter this code at <a href={url} target="_blank" rel="noreferrer" className="text-bone underline decoration-line underline-offset-2">{url.replace(/^https?:\/\//, "")}</a></p>
-      <div className="mx-auto mt-3 inline-flex items-center gap-2 rounded-lg border border-line bg-panel px-4 py-2 font-mono text-display tracking-[0.2em] text-bone">
+      <p className="text-meta text-dim">{code ? "Enter this code at" : "Open this sign-in link:"} <a href={url} target="_blank" rel="noreferrer" className="text-bone underline decoration-line underline-offset-2">{code ? url.replace(/^https?:\/\//, "") : "Continue with Cursor"}</a></p>
+      {code && <div className="mx-auto mt-3 inline-flex items-center gap-2 rounded-lg border border-line bg-panel px-4 py-2 font-mono text-display tracking-[0.2em] text-bone">
         {code}
         <button onClick={() => navigator.clipboard?.writeText(code)} className="text-micro tracking-normal text-mute hover:text-bone">copy</button>
-      </div>
+      </div>}
       <p className="mt-3 flex items-center justify-center gap-2 text-meta text-mute"><Loader2 className="h-3.5 w-3.5 animate-spin" strokeWidth={2} />Waiting for you to approve it…</p>
       {note && <p className="mt-2 text-micro text-mute">{note}</p>}
     </div>

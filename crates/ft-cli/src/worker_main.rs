@@ -62,7 +62,7 @@ struct Cli {
 enum AgentsCommand {
     /// Fetch one, or replace it with another version.
     Add {
-        /// `claude-code` or `codex`.
+        /// For example `claude-code`, `codex`, `kimi`, or `cursor-agent`.
         kind: String,
         /// Which version. The newest published one by default.
         #[arg(long)]
@@ -70,7 +70,7 @@ enum AgentsCommand {
     },
     /// Remove every copy of one from this machine.
     Remove {
-        /// `claude-code` or `codex`.
+        /// For example `claude-code`, `codex`, `kimi`, or `cursor-agent`.
         kind: String,
     },
 }
@@ -162,6 +162,8 @@ enum Command {
         session: String,
         #[arg(long)]
         workspace: std::path::PathBuf,
+        #[arg(long, default_value = "KimiCode")]
+        agent: String,
     },
     /// Answer the agent's permission prompts. Run by the agent, never by hand.
     ///
@@ -249,8 +251,13 @@ async fn main() -> Result<()> {
 
             return ft_worker::entry::run_agent(&session, workspace, &agent).await;
         }
-        Some(Command::AcpRun { session, workspace }) => {
-            return ft_worker::acp::run(&session, &workspace).await;
+        Some(Command::AcpRun {
+            session,
+            workspace,
+            agent,
+        }) => {
+            let kind = ft_core::Agent::from_name(&agent).context("unknown ACP agent")?;
+            return ft_worker::acp::run(&session, &workspace, kind).await;
         }
         Some(Command::McpApprove { session, workspace }) => {
             return ft_worker::approver::serve(&session, &workspace).await;
@@ -444,6 +451,7 @@ fn directory_name(kind: ft_core::Agent) -> &'static str {
         ft_core::Agent::ClaudeCode => "claude-code",
         ft_core::Agent::Codex => "codex",
         ft_core::Agent::KimiCode => "kimi",
+        ft_core::Agent::CursorAgent => "cursor-agent",
         ft_core::Agent::Shell => "shell",
     }
 }

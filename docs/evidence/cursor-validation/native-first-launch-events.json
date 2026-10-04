@@ -1,0 +1,48 @@
+[
+  {
+    "type": "SessionCreated",
+    "repo": "firetower-cursor-pw-repo",
+    "prompt": ""
+  },
+  {
+    "type": "StepStarted",
+    "step": "Workspace"
+  },
+  {
+    "type": "WorkspaceStarted",
+    "detail": "2 CPU / 4 GB"
+  },
+  {
+    "type": "StepStarted",
+    "step": "Fetch"
+  },
+  {
+    "type": "RepoFetched",
+    "detail": "firetower-cursor-pw-repo \u00b7 from the mirror \u00b7 0.2s"
+  },
+  {
+    "type": "StepStarted",
+    "step": "Worktree"
+  },
+  {
+    "type": "WorktreeAdded",
+    "branch": "agent/cursor-native-stdin-fixed",
+    "repo": "firetower-cursor-pw-repo"
+  },
+  {
+    "type": "StepStarted",
+    "step": "Launch"
+  },
+  {
+    "type": "TmuxOpened",
+    "name": "firetower-s_01m434nbvytnny9y8wrfqavxtc"
+  },
+  {
+    "type": "AgentLaunched",
+    "agent": "CursorAgent"
+  },
+  {
+    "type": "StatusChanged",
+    "status": "Ready"
+  }
+]

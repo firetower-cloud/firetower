@@ -1,0 +1,50 @@
+{
+  "received_methods": {
+    "response": 9,
+    "session/update": 115,
+    "cursor/task": 2,
+    "session/request_permission": 3
+  },
+  "sent_methods": {
+    "initialize": 1,
+    "session/new": 1,
+    "session/prompt": 7,
+    "response": 5,
+    "session/cancel": 1
+  },
+  "update_types": {
+    "available_commands_update": 1,
+    "session_info_update": 1,
+    "agent_thought_chunk": 66,
+    "agent_message_chunk": 26,
+    "tool_call": 7,
+    "tool_call_update": 14
+  },
+  "task_fields": [
+    [
+      "agentId",
+      "description",
+      "durationMs",
+      "model",
+      "prompt",
+      "subagentType",
+      "toolCallId"
+    ],
+    [
+      "description",
+      "prompt",
+      "subagentType",
+      "toolCallId"
+    ]
+  ],
+  "stop_reasons": [
+    "end_turn",
+    "end_turn",
+    "end_turn",
+    "end_turn",
+    "end_turn",
+    "end_turn",
+    "cancelled"
+  ],
+  "note": "Actual mobile Task, rejected Task, approval, denial and cancellation. Counts/field names only; no credentials."
+}

@@ -11,13 +11,20 @@ for line in sys.stdin:
     method = m.get("method")
     if method == "initialize":
         emit({"id": m["id"], "result": {"protocolVersion": 1, "agentCapabilities": {"loadSession": scenario != "no-load"}}})
+    elif method == "authenticate":
+        if scenario == "cursor-auth-fail":
+            emit({"id": m["id"], "error": {"code": -32000, "message": "Authentication required"}})
+        else:
+            emit({"id": m["id"], "result": {}})
     elif method == "session/new":
         if scenario == "auth":
             emit({"id": m["id"], "error": {"code": -32000, "message": "Authentication required"}})
         else:
             emit({"id": m["id"], "result": {"sessionId": "fixture-session"}})
     elif method == "session/load":
-        if scenario == "missing":
+        if scenario == "cursor-missing":
+            emit({"id":m["id"], "error":{"code":-32602,"message":"Invalid params","data":{"message":'Session "old-session" not found'}}})
+        elif scenario == "missing":
             emit({"id":m["id"], "error":{"code":-32602,"message":"Invalid params: Unknown sessionId: old-session","data":{"sessionId":"old-session"}}})
         elif scenario == "load-auth":
             emit({"id":m["id"], "error":{"code":-32000,"message":"Authentication required"}})
@@ -32,6 +39,8 @@ for line in sys.stdin:
             sys.exit(1)
         elif scenario == "permission":
             emit({"id":"permit-1","method":"session/request_permission","params":{"sessionId":m["params"]["sessionId"],"toolCall":{"toolCallId":"tool-1","title":"read a file"},"options":[{"kind":"allow_once","optionId":"yes"},{"kind":"reject_once","optionId":"no"}]}})
+        elif scenario == "cursor-extension":
+            emit({"id":"cursor-question","method":"cursor/ask_question","params":{"sessionId":m["params"]["sessionId"],"question":"Proceed?"}})
         elif scenario != "cancel":
             emit({"method":"session/update","params":{"sessionId":m["params"]["sessionId"],"update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"hello back"}}}})
             emit({"id":active,"result":{"stopReason":"end_turn"}})
@@ -47,5 +56,8 @@ for line in sys.stdin:
         else:
             emit({"id":m["id"], "result":{"configOptions":[{"id":"thinking","category":"thought_level","name":"Thinking","type":"select","currentValue":m["params"]["value"],"options":[{"value":"low","name":"Low"}]}]}})
     elif method is None and m.get("id") == "permit-1":
+        emit({"id":active,"result":{"stopReason":"end_turn"}})
+        active = None
+    elif method is None and m.get("id") == "cursor-question":
         emit({"id":active,"result":{"stopReason":"end_turn"}})
         active = None

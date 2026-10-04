@@ -32,7 +32,7 @@ pub async fn run_agent(session: &str, workspace: PathBuf, agent: &str) -> Result
     };
 
     let launch = |start| {
-        if kind == ft_core::Agent::KimiCode {
+        if matches!(kind, ft_core::Agent::KimiCode | ft_core::Agent::CursorAgent) {
             return Ok(crate::agentd::Launch {
                 session_id: session.to_string(),
                 workspace: workspace.clone(),
@@ -44,6 +44,8 @@ pub async fn run_agent(session: &str, workspace: PathBuf, agent: &str) -> Result
                     session.into(),
                     "--workspace".into(),
                     workspace.to_string_lossy().into_owned(),
+                    "--agent".into(),
+                    format!("{kind:?}"),
                 ],
             });
         }
