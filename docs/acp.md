@@ -9,7 +9,7 @@ archive digest before unpacking it. Verified archives cover macOS arm64/x64
 and glibc Linux arm64/x64. Musl Linux and other platforms are refused at
 install time.
 
-1. Update the server, workers and clients together; the worker protocol is 18.
+1. Update the server, workers and clients together; the worker protocol is 19.
 2. In **Configuration → Agents → Cursor Agent**, install the CLI on a host.
 3. Connect a **Cursor Agent** subscription account. Firetower starts
    `cursor-agent login` with a private file-backed credential store and shows
