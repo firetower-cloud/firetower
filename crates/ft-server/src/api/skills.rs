@@ -348,6 +348,37 @@ pub(super) async fn choose_skills(
         {
             tracing::warn!(session = %id, "telling the worker its skills changed: {e:#}");
         }
+
+        // Kimi, and only Kimi, has to be told in words.
+        //
+        // The other two notice on their own: Claude Code re-injects the list
+        // of skills before each message, and Codex watches the directory and
+        // re-lists. Kimi reacts to the directory changing by refreshing the
+        // `/skill:` menu it sends *us* — verified in a live session, where it
+        // sent a fresh command list each time while the model went on
+        // answering from the set it had when the conversation opened.
+        //
+        // So this is a turn, which means the agent will answer it. That cost
+        // is the point: an agent that says what it can now see is an agent
+        // that has looked.
+        if session.agent == ft_core::Agent::KimiCode {
+            let note = format!(
+                "The skills available to you have just changed — there are now {} of them. \
+                 Re-read what you have rather than relying on the list from earlier in this \
+                 conversation, and say which skills you can see now.",
+                chosen.len()
+            );
+            if let Err(e) = state
+                .fleet
+                .send_turn(&session.host_id, &id, &note, &[])
+                .await
+            {
+                // Not a failure of the change — the skills are on disk and
+                // pinned either way. The likeliest cause is a turn already in
+                // flight, which cannot take a second prompt.
+                tracing::warn!(session = %id, "could not tell Kimi its skills changed: {e:#}");
+            }
+        }
     }
 
     Ok(Json(SessionSkills { selected: chosen }))

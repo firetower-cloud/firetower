@@ -35,6 +35,7 @@ import { RISK_SAYS } from "~/skills";
  */
 const BUDGET: Record<string, number> = { ClaudeCode: 3000, Codex: 2000, KimiCode: 2250 };
 
+
 export function SkillPicker({ session, onClose }: { session: Session; onClose: () => void }) {
   const all = useSkills();
   const live = useSessionSkillIds(session.id);
