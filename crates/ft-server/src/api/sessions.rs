@@ -231,6 +231,12 @@ pub(super) async fn create_session(
     // everything afterwards — who may open it, whose token pushes its branch,
     // whose name goes on its commits — is answered from here.
     let owner = owner(&principal)?.to_string();
+    // The same person, in words, for the vault's log — see `Access::transfer`.
+    let whose = principal
+        .user
+        .as_ref()
+        .map(|u| u.username.clone())
+        .unwrap_or_else(|| owner.clone());
 
     // Another agent in a place that already exists, which is a different job
     // from making one: the host, the repositories, the branch and the directory
@@ -305,7 +311,17 @@ pub(super) async fn create_session(
 
     // Scheduling is the control plane's job — it is the only thing that sees
     // every host. Today there is one, so this is the whole scheduler.
-    let hosts = state.db.hosts().await?;
+    //
+    // Narrowed to the machines this person may work on, which for every
+    // installation that has not deliberately narrowed one is all of them: a
+    // host is filed in the shared directory and everybody works there. Asking
+    // for one by id gets the same list, so naming a machine somebody was not
+    // given is `no host is available` rather than a refusal that confirms it
+    // exists.
+    let hosts = state
+        .db
+        .hosts_for(&owner, crate::access::Level::Writer)
+        .await?;
     let host = match &req.host_id {
         // Named explicitly, so a drained one is still refused below rather
         // than silently swapped for another.
@@ -546,6 +562,42 @@ pub(super) async fn create_session(
         state.db.bind_task(&id, key, url).await?;
     }
 
+    // Shared from the start, when that is what was asked for. `insert_session`
+    // files it in the creator's own space; this hands it to a directory, which
+    // is the same operation the Access screen performs later — at the one
+    // moment when nobody has to be told it changed hands.
+    //
+    // After the place exists, for the same reason `bind_task` is here rather
+    // than inside the insert. The failure is the safe one: a filing that does
+    // not happen leaves the workspace private.
+    if let Some(directory) = &req.directory_id {
+        let target = state
+            .access
+            .directory(directory.as_str())
+            .await?
+            .ok_or_else(|| ApiError::not_found("directory"))?;
+        match state.access.level_on(&owner, directory.as_str()).await? {
+            Some(level) if level >= crate::access::Level::Writer => {
+                let from = state
+                    .access
+                    .path_of(crate::access::FiledKind::Workspace, id.as_str())
+                    .await?
+                    .ok_or_else(|| ApiError::not_found("workspace"))?;
+                state
+                    .access
+                    .transfer(
+                        &state.vault,
+                        crate::access::FiledKind::Workspace,
+                        id.as_str(),
+                        &from.moved_to(ft_core::path::DIRECTORY, &target.slug),
+                        &whose,
+                    )
+                    .await?;
+            }
+            _ => return Err(ApiError::not_found("directory")),
+        }
+    }
+
     state.db.record_checkouts(&id, &checkouts).await?;
 
     // Each repository's own variables, opened once. Every read is a line in the
@@ -564,6 +616,7 @@ pub(super) async fn create_session(
     // there is nothing better to do: one process, one environment. What each
     // repository asked for in a *file* stays its own, inside its own checkout.
     let mut env: Vec<(String, String)> = Vec::new();
+    carry_preferences(&state, &mut env, &owner, req.agent).await;
     for vars in &per_repo_env {
         for v in vars {
             env.retain(|(existing, _)| *existing != v.name);
@@ -705,7 +758,7 @@ pub(super) async fn relaunch_session(
     let owner = owner(&principal)?.to_string();
     let session = state
         .db
-        .session_of(&owner, &id)
+        .session_to_work_in(&owner, &id)
         .await?
         .ok_or_else(|| ApiError::not_found("session"))?;
 
@@ -715,6 +768,38 @@ pub(super) async fn relaunch_session(
     Ok(Json(Done {
         detail: format!("{} is starting again", session.agent.label()),
     }))
+}
+
+/// Carry what this person last chose about this agent into the session.
+///
+/// The rule: a session opens on the settings you were last working with. Both
+/// agents are launched by the worker, which inherits this environment, so this
+/// is where the preference crosses over — see [`ft_core::PREFERRED_ENV`].
+///
+/// Nothing chosen means nothing added, and the agent's own defaults apply. A
+/// read that fails is the same as nothing chosen: starting a session on the
+/// defaults is a small surprise, and refusing to start one is not.
+async fn carry_preferences(
+    state: &AppState,
+    env: &mut Vec<(String, String)>,
+    user_id: &str,
+    agent: ft_core::Agent,
+) {
+    let pairs = match state.db.preferred_controls(user_id, agent).await {
+        Ok(pairs) => pairs,
+        Err(e) => {
+            tracing::warn!("reading remembered settings for {}: {e:#}", agent.label());
+            return;
+        }
+    };
+    let preferred = ft_core::controls::Preferred::from_pairs(pairs);
+    if preferred.is_empty() {
+        return;
+    }
+    if let Ok(json) = serde_json::to_string(&preferred) {
+        env.retain(|(name, _)| name != ft_core::PREFERRED_ENV);
+        env.push((ft_core::PREFERRED_ENV.to_string(), json));
+    }
 }
 
 /// The work behind [`relaunch_session`], so a turn can do it without a request.
@@ -779,6 +864,7 @@ pub(crate) async fn relaunch(
     };
 
     let mut env: Vec<(String, String)> = Vec::new();
+    carry_preferences(state, &mut env, owner, session.agent).await;
     for (name, value) in agent_env(state, session.agent, &session.id, owner).await? {
         env.retain(|(existing, _)| *existing != name);
         env.push((name, value));
@@ -944,6 +1030,7 @@ async fn start_another_agent(
     // Its own credential and its own environment, resolved against this session
     // so the vault's log names the run that spent it.
     let mut env: Vec<(String, String)> = Vec::new();
+    carry_preferences(&state, &mut env, &owner, req.agent).await;
     if let Some(account) = &req.account_id {
         super::accounts::pin(&state, &owner, &id, account, req.agent).await?;
     }
@@ -993,6 +1080,7 @@ async fn start_another_agent(
     params(
         ("id" = String, Path, description = "Session id"),
         ("force" = Option<bool>, Query, description = "Remove it here even though its host isn't answering"),
+        ("workspace" = Option<bool>, Query, description = "End every agent in the workspace, not only this one"),
     ),
     responses((status = 202), (status = 404, body = ApiError), (status = 409, body = ApiError)),
 )]
@@ -1005,13 +1093,58 @@ pub(super) async fn destroy_session(
     let id = SessionId::from_stored(id);
     let session = state
         .db
-        .session_of(owner(&principal)?, &id)
+        .session_to_work_in(owner(&principal)?, &id)
         .await?
         .ok_or_else(|| ApiError::not_found("session"))?;
 
     if session.status == SessionStatus::Ended {
         return Err(ApiError::new(ErrorCode::SessionEnded, "already ended"));
     }
+
+    // Two different things wear one endpoint, told apart by `workspace` and
+    // not by which session happens to be named.
+    //
+    // **Ending an agent ends that agent.** Whichever one it is. A workspace is
+    // named by the session that cut it, so that session's id is also the
+    // workspace's id — and this used to read that coincidence as an
+    // instruction, taking every sibling down with it. Which meant the person
+    // who started a workspace could not finish their own first agent without
+    // ending everybody's work, and in a directory they did not administer,
+    // could not end it at all. The strip showed agents, and one of them was
+    // secretly the container.
+    //
+    // The worker has always been the one that knows when a place is finished:
+    // "the worktree belongs to the workspace, not to this agent — the last
+    // agent out reclaims it". So a single teardown is already safe, and the
+    // control plane stops pre-empting that decision.
+    //
+    // Ending the *place* is still a thing somebody can ask for — the button in
+    // the toolbar does — and it is disposal: asked of the path, the person
+    // whose own space it sits in or an administrator of the directory it was
+    // handed to. That is `may_share`, the same question as moving it.
+    if req.workspace {
+        let me = principal
+            .user
+            .as_ref()
+            .ok_or_else(|| ApiError::new(ErrorCode::Unauthorized, "nobody is signed in"))?;
+        let place = session
+            .workspace_id
+            .as_ref()
+            .map(|w| w.as_str().to_string())
+            .unwrap_or_else(|| id.as_str().to_string());
+        super::access::may_share(&state, me, crate::access::FiledKind::Workspace, &place)
+            .await
+            .map_err(|_| {
+                ApiError::new(
+                    ErrorCode::Forbidden,
+                    "ending this workspace ends every agent in it, which is for \
+                     whoever it belongs to",
+                )
+            })?;
+    } else if session.owner.as_str() != owner(&principal)? {
+        return Err(ApiError::not_found("session"));
+    }
+    let the_whole_place = req.workspace;
 
     // Before anything else, and whether or not the host answers: a port on this
     // machine pointing at a workspace that is being torn down is a link that
@@ -1046,24 +1179,16 @@ pub(super) async fn destroy_session(
         // Removed here, and owed a teardown there. The debt is paid the next
         // time that host connects; see `Fleet`'s reconnect.
         //
-        // Ending the workspace's own session ends the workspace, and that has
-        // to hold whether or not the machine is answering. On the connected
-        // path below the others are destroyed; here they are forgotten, so
-        // that the workspace really is finished — otherwise a sibling left
-        // running keeps it alive in the database for good, and the data it
-        // was removed to reclaim is never reclaimed.
-        if session
-            .workspace_id
-            .as_ref()
-            .is_some_and(|w| w.as_str() == session.id.as_str())
-        {
+        // Ending the whole place has to mean the whole place whether or not
+        // the machine is answering. On the connected path below the others are
+        // destroyed; here they are forgotten, so that the workspace really is
+        // finished — otherwise a sibling left running keeps it alive in the
+        // database for good, and the data it was removed to reclaim is never
+        // reclaimed.
+        if let (true, Some(workspace)) = (the_whole_place, session.workspace_id.as_ref()) {
             for run in state
                 .db
-                .live_runs_beside(
-                    owner(&principal)?,
-                    session.workspace_id.as_ref().expect("checked just above"),
-                    &id,
-                )
+                .live_runs_beside(owner(&principal)?, workspace, &id)
                 .await?
             {
                 state.db.forget_session(&run).await?;
@@ -1074,26 +1199,19 @@ pub(super) async fn destroy_session(
         return Ok(StatusCode::ACCEPTED);
     }
 
-    // Ending the workspace's own session ends the workspace, so the other
-    // agents in it go too. They share its directory, and it is about to be
-    // reclaimed; left running they would be working in a place that no longer
-    // exists, and nothing would list them, because a session is only reachable
-    // through the workspace it belongs to.
+    // Ending the *place* takes the other agents in it with it. They share its
+    // directory, and it is about to be reclaimed; left running they would be
+    // working somewhere that no longer exists, and nothing would list them,
+    // because a session is only reachable through the workspace it belongs to.
     //
-    // Ending one of the others is just that one agent — the place and its
-    // neighbours carry on.
+    // Ending one agent is just that one agent — the place and its neighbours
+    // carry on, and the worker reclaims the worktree when the last of them
+    // leaves, which it has always decided for itself.
     let workspace = session.workspace_id.clone();
-    if workspace
-        .as_ref()
-        .is_some_and(|w| w.as_str() == session.id.as_str())
-    {
+    if let (true, Some(workspace)) = (the_whole_place, workspace.as_ref()) {
         for run in state
             .db
-            .live_runs_beside(
-                owner(&principal)?,
-                workspace.as_ref().expect("checked just above"),
-                &id,
-            )
+            .live_runs_beside(owner(&principal)?, workspace, &id)
             .await?
         {
             state
@@ -1129,6 +1247,14 @@ pub(super) struct Removal {
     /// Take it off the inbox without the machine being told.
     #[serde(default)]
     force: bool,
+    /// End the whole workspace: every agent in it, whoever started them.
+    ///
+    /// Asked for explicitly rather than inferred from the session named. The
+    /// workspace shares an id with the session that cut it, and reading that
+    /// coincidence as "end everything" meant the only way to finish your own
+    /// first agent was to end everybody's.
+    #[serde(default)]
+    pub workspace: bool,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -1316,7 +1442,81 @@ async fn repo_env(
     Ok(out)
 }
 
-/// The session, its host, and the credential its remote needs.
+/// The session and its host, for somebody about to speak in it.
+///
+/// **The owner, and nobody else.** Everything reached through this runs on the
+/// owner's agent subscription or pushes with their git token under their name,
+/// so writer on the workspace is not enough — that is a grant to work in the
+/// place, and the place is not the account.
+///
+/// Somebody with writer who wants to work here starts their own agent beside
+/// this one, which is a second session with their own credentials in it. That
+/// path already existed; what was missing was refusing the other one.
+pub(super) async fn speaking_context(
+    state: &AppState,
+    principal: &Principal,
+    id: &SessionId,
+) -> Result<(Session, ft_core::HostId), ApiError> {
+    let session = state
+        .db
+        .session_to_speak_in(owner(principal)?, id)
+        .await?
+        .ok_or_else(|| ApiError::not_found("session"))?;
+
+    if session.status == SessionStatus::Ended {
+        return Err(ApiError::new(
+            ErrorCode::SessionEnded,
+            "that session has ended",
+        ));
+    }
+
+    let host = session.host_id.clone();
+    if !state.fleet.is_connected(&host).await {
+        return Err(ApiError::new(
+            ErrorCode::HostUnreachable,
+            "the host running this session isn't responding",
+        ));
+    }
+    Ok((session, host))
+}
+
+/// The session and its host, for somebody about to change the place.
+///
+/// **Writer.** `session_context` below is the reader's version and serves the
+/// screens that only look: the diff, the file list, what the agent did. These
+/// two were one function for a while, and the things that quietly inherited
+/// viewer from it were committing, pushing a branch, opening a pull request
+/// and attaching another repository — none of which a grant to *look* at
+/// somebody's work was ever meant to include.
+pub(super) async fn working_context(
+    state: &AppState,
+    principal: &Principal,
+    id: &SessionId,
+) -> Result<(Session, ft_core::HostId), ApiError> {
+    let session = state
+        .db
+        .session_to_work_in(owner(principal)?, id)
+        .await?
+        .ok_or_else(|| ApiError::not_found("session"))?;
+
+    if session.status == SessionStatus::Ended {
+        return Err(ApiError::new(
+            ErrorCode::SessionEnded,
+            "that session has ended",
+        ));
+    }
+
+    let host = session.host_id.clone();
+    if !state.fleet.is_connected(&host).await {
+        return Err(ApiError::new(
+            ErrorCode::HostUnreachable,
+            "the host running this session isn't responding",
+        ));
+    }
+    Ok((session, host))
+}
+
+/// The session, its host, and the credential its remote needs. For reading.
 pub(super) async fn session_context(
     state: &AppState,
     principal: &Principal,
@@ -1366,7 +1566,7 @@ async fn act(
     // Only the remote needs one, and only some of these touch it. A bare agent
     // has no remote at all.
     let credential = match session.repo.as_deref() {
-        Some(slug) => match state.db.repo_by_slug(slug).await? {
+        Some(slug) => match state.db.any_repo_for(slug).await? {
             // The session's owner, not whoever asked. It is their branch and
             // their token that has to be able to push it.
             Some(repo) => {
@@ -1430,7 +1630,7 @@ pub(super) async fn rename_session(
     let owner = owner(&principal)?;
     state
         .db
-        .session_of(owner, &id)
+        .session_to_work_in(owner, &id)
         .await?
         .ok_or_else(|| ApiError::not_found("session"))?;
 
@@ -1438,7 +1638,7 @@ pub(super) async fn rename_session(
 
     state
         .db
-        .session_of(owner, &id)
+        .session_to_work_in(owner, &id)
         .await?
         .map(Json)
         .ok_or_else(|| ApiError::not_found("session"))
@@ -1480,7 +1680,7 @@ pub(super) async fn set_share(
     // guessing an id.
     let session = state
         .db
-        .session_of(owner, &id)
+        .session_to_work_in(owner, &id)
         .await?
         .ok_or_else(|| ApiError::not_found("session"))?;
 
@@ -1506,7 +1706,7 @@ pub(super) async fn set_share(
 
     state
         .db
-        .session_of(owner, &id)
+        .session_to_work_in(owner, &id)
         .await?
         .map(Json)
         .ok_or_else(|| ApiError::not_found("session"))
@@ -1552,7 +1752,7 @@ pub(super) async fn push_session(
     Path(id): Path<String>,
 ) -> ApiResult<Json<Done>> {
     let id = SessionId::from_stored(id);
-    let (session, _) = session_context(&state, &principal, &id).await?;
+    let (session, _) = speaking_context(&state, &principal, &id).await?;
 
     let mut done = Vec::new();
     let mut refused = Vec::new();
@@ -1562,7 +1762,7 @@ pub(super) async fn push_session(
         // other nor a self-hosted git that needs none. The session's owner
         // rather than whoever pressed the button — it is their branch going up
         // under their name.
-        let credential = match state.db.repo_by_slug(&c.slug).await? {
+        let credential = match state.db.any_repo_for(&c.slug).await? {
             Some(repo) => {
                 credential_for(
                     &state,
@@ -1643,7 +1843,7 @@ pub(super) async fn commit_session(
     Json(req): Json<Commit>,
 ) -> ApiResult<Json<Done>> {
     let id = SessionId::from_stored(id);
-    let (session, _) = session_context(&state, &principal, &id).await?;
+    let (session, _) = speaking_context(&state, &principal, &id).await?;
 
     let message = req
         .message
@@ -1710,7 +1910,7 @@ pub(super) async fn commit_session(
                 // By the remote, so two checkouts on two hosts each get the
                 // identity that host expects. `Held` carries the slug, and
                 // the remote is what `for_remote` matches on.
-                author: match state.db.repo_by_slug(&c.slug).await? {
+                author: match state.db.any_repo_for(&c.slug).await? {
                     Some(repo) => author_for(&state, &repo.remote, &owner).await,
                     None => None,
                 },
@@ -2010,10 +2210,16 @@ async fn tracked(state: &AppState, session: &Session) -> Option<ft_proto::Tracke
 async fn read_task(state: &AppState, session: &Session, url: &str) -> anyhow::Result<tasks::Task> {
     let tracker =
         crate::trackers::for_url(url).ok_or_else(|| anyhow::anyhow!("nothing tracks {url}"))?;
+    // Whose key, resolved rather than assumed: a team that shares one Linear
+    // workspace key files it into a directory, and a session started by anybody
+    // there has to find it. See `tasks::whose`.
+    let holder = super::tasks::whose(state, tracker, session.owner.as_str())
+        .await
+        .map_err(|e| anyhow::anyhow!("{e:?}"))?;
     let credential = state
         .vault
         .get(
-            Key::of(tracker.vault_scope(), tracker.id, session.owner.as_str()),
+            Key::of(tracker.vault_scope(), tracker.id, &holder),
             "reading the issue a session was started from",
         )
         .await?
@@ -2046,7 +2252,7 @@ pub(super) async fn add_repo(
     Json(req): Json<ft_core::session::NewCheckout>,
 ) -> ApiResult<Json<Done>> {
     let id = SessionId::from_stored(id);
-    let (session, host) = session_context(&state, &principal, &id).await?;
+    let (session, host) = working_context(&state, &principal, &id).await?;
 
     let repo = state.db.repo(&req.repo_id).await?.ok_or_else(|| {
         ApiError::new(
@@ -2195,11 +2401,21 @@ pub(super) async fn session_work(
         .await?
         .unwrap_or(session);
 
-    let summaries = state
-        .fleet
-        .summarize(&host, &id)
-        .await
-        .map_err(|e| ApiError::new(ErrorCode::HostUnreachable, format!("{e:#}")))?;
+    // `HostUnreachable` only when it is. Every failure here used to be stamped
+    // with it, so a machine that answered and said "I could not read that
+    // worktree" was reported as a machine that was gone — and the one sentence
+    // that would have explained the screen was the one thrown away.
+    let summaries = match state.fleet.summarize(&host, &id).await {
+        Ok(summaries) => summaries,
+        Err(e) => {
+            let code = if state.fleet.is_connected(&host).await {
+                ErrorCode::ActionFailed
+            } else {
+                ErrorCode::HostUnreachable
+            };
+            return Err(ApiError::new(code, format!("{e:#}")));
+        }
+    };
 
     // The host says what is unsaved; the control plane says where it went. A
     // checkout the worker could not read still gets a row, because a repository
@@ -2317,6 +2533,7 @@ struct Held {
         ("id" = String, Path, description = "Session id"),
         ("checkout" = Option<String>, Query, description = "Which checkout, by its path in the workspace. Every one when omitted."),
         ("since" = Option<ft_core::DiffSince>, Query, description = "Measured from the base of the branch (the default) or from the last commit."),
+        ("namesOnly" = Option<bool>, Query, description = "Which files changed and by how much, with no hunks — for marking a tree rather than drawing a diff. Orders of magnitude smaller, and the worker never builds the patch."),
     ),
     responses((status = 200, body = Vec<ft_core::FileDiff>), (status = 404, body = ApiError)),
 )]
@@ -2342,6 +2559,7 @@ pub(super) async fn session_diff(
     };
 
     let many = wanted.len() > 1;
+    let names_only = which.names_only.unwrap_or(false);
     let mut files = Vec::new();
     let mut refused: Vec<String> = Vec::new();
     let asked = wanted.len();
@@ -2354,6 +2572,7 @@ pub(super) async fn session_diff(
                 ft_proto::Action::Diff {
                     checkout: c.path.clone(),
                     since: which.since.unwrap_or_default(),
+                    names_only,
                 },
                 None,
             )
@@ -2370,7 +2589,21 @@ pub(super) async fn session_diff(
             }
         };
 
-        for mut file in ft_core::split_diff(&diff) {
+        // A names-only answer is already the list; anything else is a unified
+        // diff to be split, with any one file's patch cut to a size a screen
+        // can actually be handed.
+        let listed = if names_only {
+            serde_json::from_str::<Vec<ft_core::FileDiff>>(&diff).map_err(|e| {
+                ApiError::new(
+                    ErrorCode::ActionFailed,
+                    format!("could not read what this session changed — {e}"),
+                )
+            })?
+        } else {
+            ft_core::split_diff(&diff, ft_core::MOST_OF_A_PATCH)
+        };
+
+        for mut file in listed {
             if many && !c.path.is_empty() {
                 file.path = format!("{}/{}", c.path, file.path);
             }
@@ -2396,6 +2629,7 @@ pub(super) async fn session_diff(
 
 /// Which checkout a diff means, and where it is measured from.
 #[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub(super) struct Which {
     /// The checkout's path inside the workspace. Absent means all of them.
     #[serde(default)]
@@ -2403,6 +2637,10 @@ pub(super) struct Which {
     /// From the base of the branch unless said otherwise.
     #[serde(default)]
     pub since: Option<ft_core::DiffSince>,
+    /// Which files changed, without the hunks — for a caller that only marks
+    /// the tree and never draws a patch.
+    #[serde(default)]
+    pub names_only: Option<bool>,
 }
 
 /// Open a pull request for this session's branch.
@@ -2427,7 +2665,7 @@ pub(super) async fn open_pull_request(
     Json(req): Json<NewPullRequest>,
 ) -> ApiResult<Json<PullRequest>> {
     let id = SessionId::from_stored(id);
-    let (session, _) = session_context(&state, &principal, &id).await?;
+    let (session, _) = speaking_context(&state, &principal, &id).await?;
 
     // Written, or proposed by the agent when it finished — never derived from
     // the prompt. A title cut from the opening sentence of a request reads like
@@ -2551,7 +2789,7 @@ async fn open_one(
 ) -> Result<String, String> {
     let repo = state
         .db
-        .repo_by_slug(slug)
+        .any_repo_for(slug)
         .await
         .map_err(|e| format!("{e:#}"))?
         .ok_or_else(|| format!("{slug} isn't connected any more"))?;
@@ -2595,7 +2833,7 @@ async fn link_up(
 ) -> anyhow::Result<()> {
     let repo = state
         .db
-        .repo_by_slug(slug)
+        .any_repo_for(slug)
         .await?
         .ok_or_else(|| anyhow::anyhow!("{slug} isn't connected"))?;
     let provider = providers::for_remote(&repo.remote)
@@ -2680,6 +2918,14 @@ pub(super) async fn continue_with_account(
                 }
             }
         }
+        // Back to the alias it answers to, because what was replayed is the
+        // resolved name — and handing that back pins the session to one build
+        // of one model. `opus[1m]` follows the family; `claude-opus-5[1m]` is
+        // Opus 5 for as long as the session lives. Worse than that, a resolved
+        // name the installed CLI has never heard of is not refused: it warns
+        // and carries on assuming a 200k window. So an unmapped model sends
+        // nothing at all, and the launch flag stays in force.
+        claude_model = ft_core::controls::claude_choice_for(&claude_model).unwrap_or_default();
     }
     let stopped = state
         .fleet
@@ -2694,6 +2940,17 @@ pub(super) async fn continue_with_account(
         // its later usage to the previous account.
         relaunch(state, session, owner).await?;
         for control in controls {
+            // Claude Code's model is sent below instead, from the replay. Both
+            // say the same thing when this snapshot's reader has seen the log,
+            // and only the replay is certain to have — a reader rebuilt for a
+            // session that was already running is not fed the transcript. Sent
+            // from both, it arrives twice, and `/model` is an ordinary message:
+            // the transcript would grow two of them on every account change.
+            if session.agent == ft_core::Agent::ClaudeCode
+                && control.kind == ft_core::controls::ControlKind::Model
+            {
+                continue;
+            }
             if let Some(value) = control.current {
                 state
                     .fleet

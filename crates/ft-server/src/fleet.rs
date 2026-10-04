@@ -185,6 +185,13 @@ struct Progress {
     /// Whether a turn is open, so a subagent reporting knows whether the
     /// session is coming to rest or the agent is already off again.
     in_turn: bool,
+    /// What the person who started this chose last time, for the pickers to
+    /// fall back to before the agent has said anything of its own.
+    ///
+    /// Claude Code says nothing until its first turn and never says anything
+    /// about effort at all, so without this a session launched on somebody's
+    /// settings would still draw the house defaults over them.
+    preferred: ft_core::controls::Preferred,
 }
 
 impl Progress {
@@ -216,6 +223,7 @@ impl Progress {
                 _ => None,
             },
             settings: ft_core::codex::Settings::default(),
+            preferred: ft_core::controls::Preferred::default(),
             next_id: ft_core::codex::FIRST_TURN_ID,
         }
     }
@@ -226,12 +234,71 @@ impl Progress {
             return reader.controls();
         }
         let (models, efforts, reported) = match &self.reader {
-            ft_core::normalise::Reader::Codex(reader) => (
-                reader.models().to_vec(),
-                reader.efforts().to_vec(),
-                reader.reported().clone(),
+            ft_core::normalise::Reader::Codex(reader) => {
+                let mut reported = reader.reported().clone();
+                // What it starts on, when the opening did not say. Codex's
+                // `thread/started` carries no settings, so the effort picker
+                // had nothing in it until somebody chose — see
+                // `CodexNormaliser::default_effort`.
+                if reported.effort.is_none() {
+                    reported.effort = reader.default_effort().map(str::to_string);
+                }
+                // Below the agent's own answer and below anything chosen on
+                // this session, which `settings` holds — this is only the
+                // starting point for a session nobody has touched yet.
+                if reported.model.is_none() {
+                    reported.model = self.preferred.model.clone();
+                }
+                if reported.approval.is_none() {
+                    reported.approval = self.preferred.mode.clone();
+                }
+                (
+                    reader.models().to_vec(),
+                    reader.efforts().to_vec(),
+                    reported,
+                )
+            }
+            // Claude Code lists nothing — it is told which model to use rather
+            // than asked what it has — so the only thing there is to report is
+            // what it said it was running, mapped back onto the choice it
+            // answers to. It reports a resolved name and the picker offers
+            // aliases, and until that was bridged the picker matched nothing
+            // and drew the word "Model" over every Claude session.
+            //
+            // What it has not said yet is what it was *launched* with, which
+            // this process chose and passed on the command line. Claude Code
+            // writes nothing at all until its first turn, so without this a
+            // session sat behind three empty pickers until somebody typed —
+            // where Codex, asked as its thread opens, has all of its filled in
+            // before anybody looks. The agent's own answer replaces these the
+            // moment there is one.
+            //
+            // Effort never gets that answer: no line Claude Code writes carries
+            // one. The flag is the only honest source, which is why there is
+            // now a flag — see [`ft_core::EFFORT`].
+            ft_core::normalise::Reader::Claude(reader) => (
+                Vec::new(),
+                Vec::new(),
+                ft_core::codex::Settings {
+                    model: reader
+                        .model()
+                        .and_then(ft_core::controls::claude_choice_for)
+                        .or_else(|| self.preferred.model.clone())
+                        .or_else(|| Some(ft_core::BIGGEST.to_string())),
+                    approval: reader
+                        .mode()
+                        .map(str::to_string)
+                        .or_else(|| self.preferred.mode.clone())
+                        .or_else(|| Some(ft_core::ASKING_MODE.to_string())),
+                    effort: self
+                        .preferred
+                        .effort
+                        .clone()
+                        .or_else(|| Some(ft_core::EFFORT.to_string())),
+                    ..Default::default()
+                },
             ),
-            ft_core::normalise::Reader::Claude(_) | ft_core::normalise::Reader::Acp(_) => {
+            ft_core::normalise::Reader::Acp(_) => {
                 (Vec::new(), Vec::new(), ft_core::codex::Settings::default())
             }
         };
@@ -239,8 +306,7 @@ impl Progress {
         let mut controls = ft_core::controls::for_agent(self.agent, models, efforts);
 
         // What somebody chose, so a picker shows it rather than the default it
-        // was drawn with. Claude Code restates its own at the start of every
-        // turn and this stays empty for it.
+        // was drawn with.
         for control in &mut controls {
             // What somebody chose, or failing that what the session said it
             // was running. A picker showing neither looks broken.
@@ -264,6 +330,24 @@ impl Progress {
                     Some(self.settings.fence.unwrap_or_default().name().to_string())
                 }
             };
+        }
+
+        // Never a value the picker cannot show. A model somebody preferred and
+        // the agent has since retired would otherwise sit here matching
+        // nothing, which draws the empty picker this all started with — and it
+        // would be worse than the original, because it would look chosen.
+        //
+        // An empty list is not evidence: Codex answers `model/list` a moment
+        // after the session opens, and clearing a value in that window would
+        // lose it on every reconnect.
+        for control in &mut controls {
+            if control.choices.is_empty() {
+                continue;
+            }
+            let shown = control.current.as_deref();
+            if shown.is_some_and(|v| !control.choices.iter().any(|c| c.value == v)) {
+                control.current = None;
+            }
         }
         controls
     }
@@ -3125,6 +3209,44 @@ impl Fleet {
             progress.opening_prompt = None;
         }
 
+        // What this person last chose about this agent, which is where a new
+        // session starts from. Before the per-session choices below, so that
+        // anything chosen *on this session* still wins — a preference is the
+        // starting point, not an override.
+        //
+        // The session was launched on these too (`carry_preferences`), so this
+        // is the pickers agreeing with the agent rather than a second opinion.
+        if let Ok(Some(session)) = self.db.session(session_id).await {
+            let pairs = self
+                .db
+                .preferred_controls(session.owner.as_str(), agent)
+                .await
+                .unwrap_or_default();
+            // Dropped here if this build no longer offers it. Claude Code's
+            // lists are ours and always present, so a retired model falls away
+            // at once; Codex's arrive with `model/list`, so nothing of its is
+            // dropped yet and the guard at the end of `controls` catches it
+            // once there is a list to check against.
+            progress.preferred = ft_core::controls::Preferred::from_pairs(pairs)
+                .keeping_only(&ft_core::controls::for_agent(agent, Vec::new(), Vec::new()));
+            // Codex takes these as parameters on every turn, so a preference
+            // only reaches it by being put in `settings`. Claude Code was told
+            // at launch and needs nothing here.
+            if agent == ft_core::Agent::Codex {
+                let it = progress.preferred.clone();
+                for (kind, value) in [
+                    (ft_core::controls::ControlKind::Model, it.model),
+                    (ft_core::controls::ControlKind::Effort, it.effort),
+                    (ft_core::controls::ControlKind::Mode, it.mode),
+                    (ft_core::controls::ControlKind::Sandbox, it.sandbox),
+                ] {
+                    if let Some(value) = value {
+                        let _ = progress.remember(kind, &value);
+                    }
+                }
+            }
+        }
+
         // And what somebody chose, which is not in the lines: it was never said
         // to the agent, because this is the agent that takes it as a parameter
         // on the next turn. Applied after the replay so that a choice wins over
@@ -3802,6 +3924,53 @@ mod progress_tests {
         );
     }
 
+    /// The shape a real Codex sends: an opening that settles nothing.
+    ///
+    /// `thread/started` arrives as a notification with no settings in it at
+    /// all, so `reported` stays empty and the effort picker had nothing to
+    /// show — a session sat on the word "Effort" until somebody chose one.
+    /// The model list is where the answer is: the default model names both the
+    /// efforts it supports and the one it starts on.
+    #[test]
+    fn a_codex_session_starts_on_the_effort_its_model_names() {
+        let log = [
+            r#"{"id":1,"result":{"userAgent":"firetower/0.42.0","codexHome":"/tmp"}}"#,
+            r#"{"id":3,"result":{"data":[
+                {"id":"gpt-6.1-sol","displayName":"GPT-6.1-Sol","description":"Latest.","isDefault":true,"hidden":false,
+                 "defaultReasoningEffort":"medium",
+                 "supportedReasoningEfforts":[{"reasoningEffort":"low","description":"Fast"},
+                                              {"reasoningEffort":"medium","description":"Balanced"},
+                                              {"reasoningEffort":"high","description":"Deeper"}]}
+            ],"nextCursor":null}}"#,
+            // What it really answers the opening with: a notification, and no
+            // settings anywhere in it.
+            r#"{"method":"thread/started","params":{"thread":{"id":"th_1","environments":[]}}}"#,
+        ];
+        let mut progress = Progress::for_agent(ft_core::Agent::Codex, "go".into());
+        for line in log {
+            progress.read(line);
+        }
+
+        use ft_core::controls::ControlKind as K;
+        let controls = progress.controls();
+        let current = |kind: K| {
+            controls
+                .iter()
+                .find(|c| c.kind == kind)
+                .and_then(|c| c.current.clone())
+        };
+        assert_eq!(current(K::Effort).as_deref(), Some("medium"));
+        // The list still arrived, so the picker has something to offer even
+        // though the opening settled nothing.
+        assert_eq!(
+            controls
+                .iter()
+                .find(|c| c.kind == K::Model)
+                .map(|c| c.choices.len()),
+            Some(1)
+        );
+    }
+
     /// Claude Code keeps exactly what it had, including having no fence.
     #[test]
     fn a_claude_session_is_unchanged_by_any_of_this() {
@@ -3818,6 +3987,73 @@ mod progress_tests {
             .map(|c| c.value.as_str())
             .collect();
         assert!(models.contains(&"opus[1m]"));
+    }
+
+    /// The bug: the picker said "Model" over a session plainly running one.
+    ///
+    /// Claude Code offers no list, so its choices are ours and its *current*
+    /// value is the only thing it reports — as a resolved name, against a
+    /// picker built from aliases. Nothing bridged the two, so nothing matched.
+    #[test]
+    fn a_claude_session_reports_the_model_it_said_it_was_running() {
+        use ft_core::controls::ControlKind as K;
+        let mut progress = Progress::for_agent(ft_core::Agent::ClaudeCode, "go".into());
+        let picker = |controls: &[ft_core::controls::Control], kind: K| {
+            controls
+                .iter()
+                .find(|c| c.kind == kind)
+                .expect("the picker is offered")
+                .current
+                .clone()
+        };
+
+        // Before it has said anything, the pickers show what the session was
+        // launched with. Claude Code writes nothing until its first turn, and
+        // three empty pickers over a session that is plainly configured is the
+        // thing this replaced — see `Progress::controls`.
+        let fresh = progress.controls();
+        assert_eq!(picker(&fresh, K::Model).as_deref(), Some(ft_core::BIGGEST));
+        assert_eq!(
+            picker(&fresh, K::Mode).as_deref(),
+            Some(ft_core::ASKING_MODE)
+        );
+        assert_eq!(picker(&fresh, K::Effort).as_deref(), Some(ft_core::EFFORT));
+
+        progress.read(r#"{"type":"system","subtype":"init","model":"claude-haiku-4-5-20251001","permissionMode":"auto"}"#);
+        assert_eq!(
+            picker(&progress.controls(), K::Model).as_deref(),
+            Some("haiku"),
+            "a dated name is still Haiku"
+        );
+
+        // A later turn on another model moves it.
+        progress.read(
+            r#"{"type":"system","subtype":"init","model":"claude-opus-5[1m]","permissionMode":"auto"}"#,
+        );
+        assert_eq!(
+            picker(&progress.controls(), K::Model).as_deref(),
+            Some("opus[1m]")
+        );
+
+        // The mode is reported too, and a change mid-turn restates it alone.
+        progress
+            .read(r#"{"type":"system","subtype":"status","status":null,"permissionMode":"plan"}"#);
+        assert_eq!(
+            picker(&progress.controls(), K::Mode).as_deref(),
+            Some("plan")
+        );
+        assert_eq!(
+            picker(&progress.controls(), K::Model).as_deref(),
+            Some("opus[1m]"),
+            "a restatement about the mode must not disturb the model"
+        );
+
+        // Effort is the one it never answers about, so it stays on what the
+        // launch asked for rather than going blank.
+        assert_eq!(
+            picker(&progress.controls(), K::Effort).as_deref(),
+            Some(ft_core::EFFORT)
+        );
     }
 
     /// Stopping names the turn, and a session between turns has nothing to
@@ -3962,7 +4198,7 @@ mod tests {
     async fn fleet() -> (Fleet, HostId) {
         let (db, _owner) = Db::open_for_test_owned().await.unwrap();
         let host = db
-            .ensure_host("fire-01", ft_core::Compute::Local)
+            .ensure_host("fire-01", ft_core::Compute::Local, _owner.as_str())
             .await
             .unwrap();
         (Fleet::new(db), host.id)
@@ -4181,7 +4417,7 @@ mod tests {
 
         let (db, owner) = Db::open_for_test_owned().await.unwrap();
         let host = db
-            .ensure_host("fire-01", ft_core::Compute::Local)
+            .ensure_host("fire-01", ft_core::Compute::Local, owner.as_str())
             .await
             .unwrap();
         let session = SessionId::new();
@@ -4401,7 +4637,7 @@ mod supervisor_tests {
     async fn a_tunnel_nobody_waited_for_is_closed_on_the_worker() {
         let (db, _owner) = Db::open_for_test_owned().await.unwrap();
         let host = db
-            .ensure_host("fire-01", ft_core::Compute::Local)
+            .ensure_host("fire-01", ft_core::Compute::Local, _owner.as_str())
             .await
             .unwrap();
         let fleet = Fleet::new(db);
@@ -4524,7 +4760,7 @@ mod supervisor_tests {
     async fn an_answer_of_the_wrong_kind_does_not_wedge_the_reader() {
         let (db, _owner) = Db::open_for_test_owned().await.unwrap();
         let host = db
-            .ensure_host("fire-01", ft_core::Compute::Local)
+            .ensure_host("fire-01", ft_core::Compute::Local, _owner.as_str())
             .await
             .unwrap();
         let fleet = Fleet::new(db);
@@ -4568,7 +4804,7 @@ mod supervisor_tests {
     async fn supervising_returns_while_the_host_is_still_connected() {
         let (db, _owner) = Db::open_for_test_owned().await.unwrap();
         let host = db
-            .ensure_host("fire-01", ft_core::Compute::Local)
+            .ensure_host("fire-01", ft_core::Compute::Local, _owner.as_str())
             .await
             .unwrap();
         let fleet = Fleet::new(db);

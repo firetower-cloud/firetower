@@ -6,6 +6,9 @@ import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useListRepos, useRepoBranches } from "@/src/api/generated/repos/repos";
 import { useListAgents } from "@/src/api/generated/agents/agents";
+import { useListDirectories } from "@/src/api/generated/access/access";
+import { useMe } from "@/src/api/generated/auth/auth";
+import { destinations } from "@/src/filing";
 import { useHostReadiness, useListHosts } from "@/src/api/generated/hosts/hosts";
 import {
   useCreateSession,
@@ -113,6 +116,8 @@ export function NewWorkspace({
   });
   const [addingMachine, setAddingMachine] = useState(false);
   const [share, setShare] = useState<Share>(Share.equal);
+  /** Empty for your own directory, which is where a workspace has always gone. */
+  const [directoryId, setDirectoryId] = useState("");
   const [adding, setAdding] = useState(false);
 
   const first = useRef<HTMLInputElement>(null);
@@ -126,6 +131,12 @@ export function NewWorkspace({
   const { data: allHosts = [] } = useListHosts({
     query: { refetchInterval: 3000 },
   });
+  const { data: me } = useMe();
+  // Only the ones work can actually be put in. A directory somebody let you
+  // look at is not somewhere to file your own workspace — you would not be able
+  // to follow it there.
+  const { data: directories = [] } = useListDirectories();
+  const filable = destinations(directories);
 
   useEffect(() => first.current?.focus(), []);
 
@@ -215,6 +226,10 @@ export function NewWorkspace({
         branch: checkouts.length ? shownBranch.trim() || undefined : undefined,
         hostId: host?.id,
         share,
+        // Omitted is your own space, which is what the server does with none.
+        // Naming one hands it over at the only moment nobody has to be told it
+        // changed hands — see `NewSession::directory_id`.
+        directoryId: directoryId || undefined,
       },
     });
   };
@@ -315,10 +330,45 @@ export function NewWorkspace({
               <option key={a.id} value={a.id}>
                 {a.name}
                 {a.isDefault ? " · Default" : ""}
+                {a.ownerName && a.ownerName !== me?.user.username
+                  ? ` · ${a.ownerName}'s`
+                  : ""}
               </option>
             ))}
         </select>
       </Row>
+      {/* Who will be able to see this, and — deliberately — whose it will be.
+          Filing a workspace in a directory hands it to that directory; you keep
+          it through whatever grant you hold there. The hint says so, because a
+          transfer nobody was told about is the one thing this must not be.
+
+          Only offered when there is somewhere to put it. On a Firetower nobody
+          has shared anything on, the answer is always "mine" and a select with
+          one option in it is furniture. */}
+      {filable.length > 0 && (
+        <Row
+          label="Filed in"
+          hint={
+            directoryId
+              ? "everybody with access to that directory can open this, and it belongs to them"
+              : "your own space — nobody else can see it"
+          }
+        >
+          <select
+            aria-label="Directory"
+            value={directoryId}
+            onChange={(e) => setDirectoryId(e.target.value)}
+            className="w-full rounded-md border border-line bg-ground px-3 py-2 text-ui text-bone"
+          >
+            <option value="">Yours</option>
+            {filable.map((d) => (
+              <option key={d.id} value={d.id}>
+                {d.name}
+              </option>
+            ))}
+          </select>
+        </Row>
+      )}
       <ShareRow share={share} onChange={setShare} host={host} busy={busyHere} />
 
       {create.isError && (

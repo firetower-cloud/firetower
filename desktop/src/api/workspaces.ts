@@ -79,6 +79,38 @@ export function group(sessions: Session[]): Repositories {
 }
 
 /** The last part of `owner/name`, which is what a rail has room for. */
+/**
+ * The place an id in the address belongs to.
+ *
+ * The id may name the workspace or any one run in it — a second agent is
+ * opened by its own id and belongs to the place its sibling made. Both have
+ * always worked.
+ *
+ * **And it still has to work once that run has ended.** Ending the agent you
+ * were reading takes its id out of the running list, so an address naming it
+ * matched no group at all: the workbench fell back to rebuilding the place
+ * from the one session it could still fetch, and a workspace with six agents
+ * in it drew one dead chip. Reopening fixed it, because the address was a live
+ * id again — which is exactly the shape of a lookup that depends on the thing
+ * it is looking for still existing.
+ *
+ * `belongsTo` is that session's `workspaceId`, which survives it. The group is
+ * keyed by the same value, so the place is findable by what it *is* rather
+ * than by which of its runs happened to be in the address.
+ */
+export function placeOf(
+  places: Workspace[],
+  id: string,
+  belongsTo?: string | null,
+): Workspace | undefined {
+  return places.find(
+    (p) =>
+      p.id === id ||
+      (!!belongsTo && p.id === belongsTo) ||
+      p.runs.some((r) => r.id === id),
+  );
+}
+
 export function shortRepo(slug: string): string {
   const cut = slug.lastIndexOf("/");
   return cut === -1 ? slug : slug.slice(cut + 1);

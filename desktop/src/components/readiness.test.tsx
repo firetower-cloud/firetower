@@ -11,6 +11,7 @@ const server = (online: boolean | string = true): Host => ({
   name: "video-vm",
   compute: { type: "Server", host: "192.0.2.10", user: "editor", key: { type: "Managed" } },
   state: online ? "Online" : "Unreachable",
+  path: "d/shared/localhost",
   drained: false,
   reconnecting: false,
   docker: { status: "Unknown" },

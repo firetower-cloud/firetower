@@ -11,16 +11,19 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Check, ChevronDown, Download, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { AgentMark } from "~/components/AgentMark";
 import { Icon } from "~/components/ui";
-import type { Account, AgentView } from "~/api/generated/model";
-import { getListAgentsQueryKey, useCheckAgents, useConfigureAgent, useForgetAgent, useInstallAgent } from "~/api/generated/agents/agents";
+import type { Account, AgentView, Updated } from "~/api/generated/model";
+import { getListAgentsQueryKey, useCheckAgents, useConfigureAgent, useForgetAgent, useInstallAgent, useUpdateAgent } from "~/api/generated/agents/agents";
 import { getListAccountsQueryKey, useUpdateAccount } from "~/api/generated/accounts/accounts";
 import { quota } from "~/api/accounts";
 import { useAccounts, useAgents, useHosts } from "~/data";
 import { Rows, Section } from "~/ui/config/bits";
+import { WhoCanAccess } from "~/ui/Sharing";
+import { useDirectories } from "~/data";
 import { ConnectAccount } from "~/ui/config/ConnectAccount";
 import { useConfirm } from "~/ui/Confirm";
 
 export function Agents({ live }: { live: boolean }) {
+
   const cache = useQueryClient();
   const agents = useAgents();
   const accounts = useAccounts();
@@ -58,20 +61,52 @@ export function Agents({ live }: { live: boolean }) {
 }
 
 function AgentDetail({ agent, accounts, onConnect }: { agent: AgentView; accounts: Account[]; onConnect: (account?: Account) => void }) {
+
   const confirm = useConfirm();
   const cache = useQueryClient();
   const hosts = useHosts();
   const install = useInstallAgent();
+  const update = useUpdateAgent();
   const configure = useConfigureAgent();
   const forget = useForgetAgent();
   const change = useUpdateAccount();
   const refresh = () => Promise.all([cache.invalidateQueries({ queryKey: getListAgentsQueryKey() }), cache.invalidateQueries({ queryKey: getListAccountsQueryKey() })]);
   const [renaming, setRenaming] = useState<{ id: string; name: string } | null>(null);
+  // Hosts the control plane can say are behind — never a host whose version it
+  // could not read, and never one ahead of the feed. See `updates::agents`.
+  // ...and that this person may actually move. A colleague's machine being
+  // stale is worth seeing; offering a button that the endpoint would skip is
+  // not. `mayUpdate` and the gate on the endpoint are one predicate.
+  const stale = agent.hosts.filter((h) => h.behind && h.mayUpdate);
+  // What an update run could not do. Shown rather than left to the rows: a host
+  // that stayed behind because its update failed looks exactly like one nobody
+  // pressed the button for.
+  const [failed, setFailed] = useState<Updated[]>([]);
+  // The version on screen is the version installed, even if a release lands
+  // between the check and the press.
+  const wanted = agent.latestVersion ?? undefined;
 
   return (
     <div className="space-y-3 border-t border-line-soft bg-ground/40 px-3.5 py-3">
       <div>
-        <span className="text-meta text-dim">On each machine</span>
+        <div className="flex items-center gap-2">
+          <span className="text-meta text-dim">On each machine</span>
+          {agent.latestVersion && <span className="font-mono text-micro text-mute">{agent.latestVersion} published</span>}
+          {stale.length > 0 && agent.supported && (
+            <button
+              disabled={update.isPending}
+              onClick={() => void confirm({
+                title: `Update ${agent.label} on ${stale.length} machine${stale.length === 1 ? "" : "s"}?`,
+                body: <>Fetches {agent.latestVersion} onto {stale.map((h) => h.hostName).join(", ")}. Sessions already running keep the copy they started with.</>,
+                action: "Update all",
+              }).then((ok) => ok && update.mutate({ kind: agent.kind }, { onSuccess: (results) => { setFailed(results.filter((r) => r.error)); void refresh(); } }))}
+              className="control ml-auto h-6 border border-line bg-raise text-micro text-bone hover:bg-overlay disabled:text-mute"
+            >
+              <Icon of={Download} size={12} />{update.isPending ? "Updating…" : `Update all (${stale.length})`}
+            </button>
+          )}
+        </div>
+        {failed.length > 0 && <p className="mt-1.5 text-meta text-kind-data">{failed.map((r) => `${r.hostName}: ${r.error}`).join(" · ")}</p>}
         <div className="mt-1.5 space-y-1">
           {hosts.data.map((h) => {
             const on = agent.hosts.find((x) => x.hostId === h.id);
@@ -79,7 +114,8 @@ function AgentDetail({ agent, accounts, onConnect }: { agent: AgentView; account
               <div key={h.id} className="flex items-center gap-2 rounded-md bg-ground px-2.5 py-1.5 text-ui">
                 <span className="min-w-0 flex-1 truncate text-text">{h.name}</span>
                 <span className="font-mono text-micro text-mute">{on?.installed ? (on.version ?? "installed") : "not installed"}{on?.loggedIn ? " · signed in" : ""}</span>
-                <button disabled={install.isPending || !agent.supported} onClick={() => install.mutate({ kind: agent.kind, data: { hostId: h.id } }, { onSuccess: refresh })} className="control h-6 border border-line bg-raise text-micro text-bone hover:bg-overlay disabled:text-mute"><Icon of={Download} size={12} />{on?.installed ? "Reinstall" : "Install"}</button>
+                {on?.behind && agent.latestVersion ? <span className="font-mono text-micro text-kind-data">→ {agent.latestVersion}</span> : null}
+                <button disabled={install.isPending || update.isPending || !agent.supported || !on?.mayUpdate} onClick={() => install.mutate({ kind: agent.kind, data: { hostId: h.id, version: wanted } }, { onSuccess: refresh })} className="control h-6 border border-line bg-raise text-micro text-bone hover:bg-overlay disabled:text-mute"><Icon of={Download} size={12} />{on?.behind ? "Update" : on?.installed ? "Reinstall" : "Install"}</button>
               </div>
             );
           })}
@@ -112,6 +148,11 @@ function AgentDetail({ agent, accounts, onConnect }: { agent: AgentView; account
                       </span>
                     </span>
                   )}
+                  {/* A subscription is shared by filing it where a team can
+                      reach it. Its credential goes with it — re-sealed under the
+                      directory — and a borrowed one still spends the quota of
+                      whoever's subscription it is. */}
+                  <WhoCanAccess look="chip" kind="agentAccount" id={a.id} path={a.path} />
                   {renaming?.id !== a.id && <button onClick={() => setRenaming({ id: a.id, name: a.name })} className="text-micro text-mute hover:text-bone">rename</button>}
                   <button onClick={() => onConnect(a)} className="text-micro text-mute hover:text-bone">{connected ? "reconnect" : "finish connecting"}</button>
                   {!a.isDefault && a.enabled && connected && <button onClick={() => change.mutate({ id: a.id, data: { isDefault: true } }, { onSuccess: refresh })} className="text-micro text-mute hover:text-bone">make default</button>}

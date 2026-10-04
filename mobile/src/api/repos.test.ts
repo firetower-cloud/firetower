@@ -12,6 +12,9 @@ const seen = (slug: string, pushedAt: string | null = null): RemoteRepo => ({
 
 const have = (slug: string, remote = `https://github.com/${slug}.git`): Repo => ({
   id: `r_${slug}`,
+  // Always `u/<somebody>`: a repository belongs to whoever connected it and is
+  // never filed anywhere else.
+  path: "u/kev",
   slug,
   remote,
 });

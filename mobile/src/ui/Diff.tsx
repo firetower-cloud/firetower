@@ -134,6 +134,20 @@ export function Diff({ files, onOpen }: { files: ChangedFile[]; onOpen?: (path: 
             </Pressable>
 
             {showing ? <Hunks patch={file.patch} /> : null}
+            {/* The control plane cuts a patch that runs to megabytes, and a
+                diff that stops without saying so reads as a diff that ended —
+                which is the one thing it must not do. Said at the foot, where
+                it stops, with the way to the whole file. */}
+            {showing && file.truncated ? (
+              <View className="flex-row items-center gap-2 border-t border-line-soft px-3 py-3">
+                <Text className="flex-1 text-meta text-mute">Too much changed here to draw it all.</Text>
+                {onOpen ? (
+                  <Pressable onPress={() => onOpen(file.at)} android_ripple={{ color: color.overlay }}>
+                    <Text className="text-meta text-dim">Open the file</Text>
+                  </Pressable>
+                ) : null}
+              </View>
+            ) : null}
           </View>
         );
       })}

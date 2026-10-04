@@ -24,8 +24,10 @@ export const ListSecretsResponse = zod.object({
 }).describe('One line of the access log.')),
   "brokenAt": zod.int().nullish().describe('The first entry that doesn\'t follow from the one before it, if any.'),
   "held": zod.array(zod.object({
-  "mine": zod.boolean().describe('Yours rather than the install\'s. What the screen says, so it never has\nto show an account id.'),
+  "id": zod.string().describe('`scope/name/owner`, which is how everything else addresses it.\n\nA secret has no id column: it is keyed by all three, because two people\neach authorizing GitHub as themselves is the point. So a screen that\nwants to file one or say who can reach it has to name the owner too —\n`scope/name` names a *set* of rows, and addressing it that way let\nsomebody be named on everybody\'s at once.\n\nA handle, not a label. `mine` is what the screen says.'),
+  "mine": zod.boolean().describe('Yours rather than somebody else\'s or the install\'s. What the screen\nsays, so it never has to show an account id.'),
   "name": zod.string(),
+  "path": zod.string().nullish().describe('Where it is filed, so a screen can say who else can reach it and offer\nto file it elsewhere.\n\nAbsent for an *attached* one — an agent account\'s credential, a\nrepository\'s variable, the install\'s own. Those move with what they\nbelong to and cannot be filed on their own.'),
   "scope": zod.string()
 }).describe('A credential Firetower holds. Its name, and nothing else.')),
   "intact": zod.boolean().describe('Whether the log\'s chain of digests still holds end to end.'),

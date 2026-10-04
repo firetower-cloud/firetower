@@ -11,6 +11,7 @@ import type { Diagnosis } from './diagnosis';
 import type { DockerState } from './dockerState';
 import type { HostId } from './hostId';
 import type { HostState } from './hostState';
+import type { ResourcePath } from './resourcePath';
 
 /**
  * A machine that can run workspaces.
@@ -51,6 +52,13 @@ export interface Host {
   memoryMb?: number | null;
   /** What the user calls it. `localhost` is a real host, not a special case. */
   name: string;
+  /**
+     * Where this machine is filed, and therefore who may run on it.
+     *
+     * `u/kevin/fire-01` for a connection somebody added and kept;
+     * `d/shared/fire-01` once it has been handed to the organisation.
+     */
+  path: ResourcePath;
   /**
      * Whether we are still trying to reach it.
      *

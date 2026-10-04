@@ -9,6 +9,7 @@
 //! only what every one of them needs: the error type, the document, and the
 //! router that puts them in order.
 
+mod access;
 pub(crate) mod accounts;
 pub(crate) mod agents;
 mod annotations;
@@ -88,9 +89,10 @@ pub enum ErrorCode {
     /// Nobody is signed in, or the session has ended. The interface shows the
     /// sign-in screen rather than reporting a fault.
     Unauthorized,
-    /// Signed in, with a password that came from a file. Every other request
-    /// is refused until it is replaced — the interface turns this into the
-    /// wizard's first step rather than an error.
+    /// Signed in, with a password somebody else chose. Every other request is
+    /// refused until it is replaced, which happens in a browser: the web
+    /// interface turns this into its one remaining step, and the desktop and
+    /// phone apps turn it into a panel pointing at that address.
     PasswordChangeRequired,
     /// Signed in, and not allowed to do this. Not `Unauthorized`, which the
     /// interface reads as a session that has ended — being refused one thing
@@ -270,6 +272,7 @@ async fn credential_for(
         RemoteRepo,
         AgentMode,
         AgentPresence,
+        agents::Updated,
         ft_core::WorkSummary,
         ft_core::CheckoutSummary,
         ft_core::CheckoutWork,
@@ -279,6 +282,21 @@ async fn credential_for(
         ft_core::DiffSince,
         users::OrganizationName,
         users::NewUser,
+        crate::access::Team,
+        crate::access::Directory,
+        crate::access::Grant,
+        ft_core::Level,
+        ft_core::SubjectKind,
+        access::Colleague,
+        access::NewTeam,
+        access::TeamName,
+        access::NewDirectory,
+        access::DirectoryName,
+        access::NewGrant,
+        access::Placement,
+        access::FiledRef,
+        crate::access::Filed,
+        crate::access::FiledKind,
         users::CreatedUser,
         users::UserChange,
         users::TemporaryPassword,
@@ -332,7 +350,25 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(users::rename_organization))
         .routes(routes!(users::list_users, users::create_user))
         .routes(routes!(users::change_user, users::delete_user))
+        .routes(routes!(users::user_reach))
+        .routes(routes!(users::offboard_user))
         .routes(routes!(users::reset_user_password))
+        .routes(routes!(access::list_colleagues))
+        .routes(routes!(access::list_teams, access::create_team))
+        .routes(routes!(access::rename_team, access::delete_team))
+        .routes(routes!(access::list_team_members))
+        .routes(routes!(access::add_team_member, access::remove_team_member))
+        .routes(routes!(access::list_directories, access::create_directory))
+        .routes(routes!(access::rename_directory, access::delete_directory))
+        .routes(routes!(access::list_grants, access::set_grant))
+        .routes(routes!(access::revoke_grant))
+        .routes(routes!(access::access_of))
+        .routes(routes!(access::set_exception, access::drop_exception))
+        .routes(routes!(
+            access::list_items,
+            access::file_items,
+            access::unfile_items
+        ))
         .routes(routes!(hosts::list_hosts, hosts::create_host))
         .routes(routes!(hosts::delete_host))
         .routes(routes!(hosts::rename_host))
@@ -358,6 +394,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(agents::check_agents))
         .routes(routes!(agents::sign_agent_in))
         .routes(routes!(agents::install_agent))
+        .routes(routes!(agents::update_agent))
         .routes(routes!(secrets::list_secrets))
         .routes(routes!(secrets::replace_secret, secrets::remove_secret))
         .routes(routes!(secrets::reveal_secret))

@@ -36,7 +36,8 @@ export type Choice = {
    * "never ask me again" look identical is the one place in a picker where
    * getting it wrong costs something.
    */
-  grave?: boolean;
+  /// Why it is drawn apart, when it is — see `controls::Caution`.
+  caution?: "grants" | "neverAsks" | null;
 };
 
 export function Field({
@@ -215,7 +216,12 @@ export function Picker({
                 <Text
                   numberOfLines={1}
                   className={`font-medium text-title ${
-                    c.blocked ? "text-mute" : c.grave ? "text-ember" : "text-bone"
+                    // Only `grants` is coloured, and never in ember — see the
+                    // note beside `CAUTION` in the desktop composer. This arm
+                    // used to paint every marked choice ember, which spent the
+                    // one signal the style guide reserves for "waiting on you"
+                    // on a permissions menu.
+                    c.blocked ? "text-mute" : c.caution === "grants" ? "text-brick" : "text-bone"
                   }`}
                 >
                   {c.label}

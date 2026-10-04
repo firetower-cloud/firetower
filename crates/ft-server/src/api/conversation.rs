@@ -776,9 +776,10 @@ pub(super) async fn send_turn(
         ));
     }
     let who = owner(&principal)?.to_string();
+    // The owner's. A conversation is not the room it happens in.
     let session = state
         .db
-        .session_of(&who, &id)
+        .session_to_speak_in(&who, &id)
         .await?
         .ok_or_else(|| ApiError::new(ErrorCode::NotFound, "no such session"))?;
     super::accounts::ensure_not_switching(&state.db, &id).await?;
@@ -827,7 +828,7 @@ pub(super) async fn interrupt_session(
     Path(id): Path<String>,
 ) -> ApiResult<Json<Sent>> {
     let id = SessionId::from_stored(id);
-    let host = host_of(&state, &principal, &id).await?;
+    let host = host_to_speak_in(&state, &principal, &id).await?;
 
     state
         .fleet
@@ -864,7 +865,7 @@ pub(super) async fn answer_request(
     Json(answer): Json<Answer>,
 ) -> ApiResult<Json<Sent>> {
     let id = SessionId::from_stored(id);
-    let host = host_of(&state, &principal, &id).await?;
+    let host = host_to_speak_in(&state, &principal, &id).await?;
 
     state
         .fleet
@@ -925,7 +926,7 @@ pub(super) async fn choose_control(
     Json(chosen): Json<Chosen>,
 ) -> ApiResult<Json<Sent>> {
     let id = SessionId::from_stored(id);
-    let host = host_of(&state, &principal, &id).await?;
+    let host = host_to_speak_in(&state, &principal, &id).await?;
     super::accounts::ensure_not_switching(&state.db, &id).await?;
 
     state
@@ -933,6 +934,23 @@ pub(super) async fn choose_control(
         .choose(&host, &id, chosen.kind, &chosen.value)
         .await
         .map_err(|e| ApiError::new(ErrorCode::InvalidRequest, format!("{e:#}")))?;
+
+    // And keep it as this person's preference for this agent, so their next
+    // session opens where they left off rather than back on a default they
+    // have already corrected once. Only after the change was accepted — a
+    // refused one is not a preference.
+    //
+    // Not fatal if it cannot be written: the change itself has happened, and
+    // failing the request would say otherwise.
+    if let (Some(me), Ok(Some(session))) = (principal.user.as_ref(), state.db.session(&id).await) {
+        if let Err(e) = state
+            .db
+            .prefer_control(me.id.as_str(), session.agent, chosen.kind, &chosen.value)
+            .await
+        {
+            tracing::warn!(session = %id, "remembering the choice for next time: {e:#}");
+        }
+    }
 
     Ok(Json(Sent { sent: true }))
 }
@@ -1019,7 +1037,7 @@ pub(super) async fn attach_file(
     Json(file): Json<Attachment>,
 ) -> ApiResult<Json<Placed>> {
     let id = SessionId::from_stored(id);
-    let host = host_of(&state, &principal, &id).await?;
+    let host = host_to_speak_in(&state, &principal, &id).await?;
 
     let path = state
         .fleet
@@ -1049,7 +1067,7 @@ fn owner(principal: &Principal) -> Result<&str, ApiError> {
     })
 }
 
-/// Which machine is holding this session's agent.
+/// Which machine is holding this session's agent, for somebody reading.
 async fn host_of(
     state: &AppState,
     principal: &Principal,
@@ -1058,6 +1076,28 @@ async fn host_of(
     let session = state
         .db
         .session_of(owner(principal)?, id)
+        .await
+        .map_err(|e| ApiError::new(ErrorCode::Internal, format!("{e:#}")))?
+        .ok_or_else(|| ApiError::new(ErrorCode::NotFound, "no such session"))?;
+
+    Ok(session.host_id)
+}
+
+/// The same, for somebody about to speak in the conversation.
+///
+/// **The owner, and nobody else.** A turn, an answer to a permission prompt,
+/// an interrupt, a change of model — every one of these drives an agent
+/// running on its owner's subscription. Writer on the workspace is a grant to
+/// work in the place; it was never a grant to spend somebody's account, and
+/// for a while it was both.
+async fn host_to_speak_in(
+    state: &AppState,
+    principal: &Principal,
+    id: &SessionId,
+) -> ApiResult<ft_core::HostId> {
+    let session = state
+        .db
+        .session_to_speak_in(owner(principal)?, id)
         .await
         .map_err(|e| ApiError::new(ErrorCode::Internal, format!("{e:#}")))?
         .ok_or_else(|| ApiError::new(ErrorCode::NotFound, "no such session"))?;
@@ -1507,7 +1547,7 @@ mod tests {
     async fn session_holding(name: &str) -> (crate::db::Db, SessionId) {
         let (db, owner) = crate::db::Db::open_for_test_owned().await.unwrap();
         let host = db
-            .ensure_host("localhost", ft_core::Compute::Local)
+            .ensure_host("localhost", ft_core::Compute::Local, &owner)
             .await
             .unwrap();
 
@@ -1796,7 +1836,7 @@ mod tests {
     async fn an_empty_session_pages_to_nothing() {
         let (db, owner) = crate::db::Db::open_for_test_owned().await.unwrap();
         let host = db
-            .ensure_host("localhost", ft_core::Compute::Local)
+            .ensure_host("localhost", ft_core::Compute::Local, &owner)
             .await
             .unwrap();
         let id = SessionId::new();

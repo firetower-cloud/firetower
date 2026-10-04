@@ -84,6 +84,31 @@ function draw(trackers: TrackerStatus[], seed?: [ListTasksParams, Page]) {
   );
 }
 
+describe("a tracker that stops answering for you", () => {
+  /**
+   * The report: a Linear key shared through a directory was filed back out,
+   * and the person it had been reaching for still saw every ticket — under a
+   * panel telling them Linear was not connected.
+   *
+   * Nothing was persisted and the server refused them outright. The page
+   * disables the query when the tracker stops reporting itself connected, and
+   * a disabled query hands back its last good answer just as a failing one
+   * does — so it never errored, and the cache answered as if nothing had
+   * changed.
+   */
+  it("shows nothing once the tracker is no longer connected for them", () => {
+    const tickets = [ticket("WES-1", "Get familiar with Linear")];
+    const reachable = draw([linear(true)], [opening("linear", "ticket"), page(tickets)]);
+    expect(reachable).toContain("Get familiar with Linear");
+
+    // The same cache, the same person, one grant taken away.
+    const revoked = draw([linear(false)], [opening("linear", "ticket"), page(tickets)]);
+    expect(revoked).not.toContain("Get familiar with Linear");
+    expect(revoked).not.toContain("WES-1");
+    expect(revoked).toContain("isn&#x27;t connected yet");
+  });
+});
+
 describe("which tracker the page asks", () => {
   /** The regression: Linear connected, and the page asked GitHub anyway. */
   it("asks the connected tracker rather than defaulting to GitHub", () => {

@@ -75,7 +75,7 @@ async fn drive_terminal(
     session_id: SessionId,
     size: TerminalSize,
 ) {
-    let Ok(Some(session)) = state.db.session_of(&owner, &session_id).await else {
+    let Ok(Some(session)) = state.db.session_to_work_in(&owner, &session_id).await else {
         let _ = socket
             .send(Message::Text("no such session".to_string().into()))
             .await;

@@ -31,5 +31,17 @@ export interface ProviderStatus {
   connected: boolean;
   id: string;
   label: string;
+  /**
+     * Whether the caller may register the application this whole installation
+     * authorizes against.
+     *
+     * Sent rather than worked out by each client, the way `may_upgrade` is.
+     * The rule is the server's — one application, no owner, and whoever sets
+     * it decides what everybody here authorizes next — and a copy of it in
+     * three interfaces is three copies to keep in step. It was drawn for
+     * everybody once, so a member filled the field in and was refused by the
+     * time they pressed Save.
+     */
+  maySetApplication: boolean;
   pending?: null | PendingAuth;
 }

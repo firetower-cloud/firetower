@@ -8,6 +8,7 @@
 import type { Agent } from './agent';
 import type { Checkout } from './checkout';
 import type { HostId } from './hostId';
+import type { ResourcePath } from './resourcePath';
 import type { SessionId } from './sessionId';
 import type { SessionStatus } from './sessionStatus';
 import type { Share } from './share';
@@ -53,6 +54,43 @@ export interface Session {
   hostId: HostId;
   id: SessionId;
   /**
+     * Whether whoever asked may speak *in this conversation*.
+     *
+     * `may_write` is about the place: it says you can work in this workspace
+     * — add an agent of your own, open a terminal, attach a repository.
+     * This is about the conversation, and it is true only for the person who
+     * started it.
+     *
+     * They are separate because what they protect is separate. A workspace is
+     * a directory and can be shared, moved, handed to a team. A conversation
+     * is a running agent authenticated with one person's subscription, and
+     * its turns push with that person's git token under that person's name.
+     * Sharing the room was never meant to hand over the account, and for a
+     * while it did.
+     */
+  maySpeak?: boolean;
+  /**
+     * Whether whoever asked for this may act in it, or only watch.
+     *
+     * **Sent, because it cannot be derived.** The level was deliberately left
+     * off this type once, on the grounds that a client already holds the
+     * directories it can see and can work the answer out from the path. That
+     * stopped being true the moment a single workspace could be shared to one
+     * person by name: an exception lives on the resource, in no directory, so
+     * there is nothing on the client that mentions it.
+     *
+     * Without it, a viewer was shown a composer, typed, pressed send, and the
+     * server answered 404 — which the screen reported as "Working — nothing
+     * heard", because an echo had already been added optimistically. A
+     * control that is drawn and then refused is worse than one that is
+     * absent: it reads as the product being broken.
+     *
+     * `true` by default so that a client talking to a control plane that
+     * predates this field behaves as it did before, rather than deciding
+     * everybody is a spectator.
+     */
+  mayWrite?: boolean;
+  /**
      * What to call it. `Agent 3` until somebody says otherwise.
      *
      * Separate from `title`, which is cut from the prompt and describes the
@@ -86,6 +124,20 @@ export interface Session {
      * loaded.
      */
   owner: UserId;
+  /**
+     * What to call the owner, so a shared list can say whose this is.
+     *
+     * Sent because it cannot be looked up: listing the people in an
+     * organisation is an administrator's request, and a member seeing a
+     * colleague's workspace still has to be told a name rather than an id.
+     * @nullable
+     */
+  ownerName?: string | null;
+  /**
+     * Which directory the workspace is filed in — `u/kevin/…` for somebody's
+     * own, `d/backend/…` once it has been handed to a directory.
+     */
+  path: ResourcePath;
   prompt: string;
   /** @nullable */
   proposedBody?: string | null;

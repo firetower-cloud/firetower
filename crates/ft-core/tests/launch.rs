@@ -10,7 +10,12 @@ use ft_core::{agent_session_uuid, Agent, Asking, Start};
 
 fn argv(start: Start) -> Vec<String> {
     Agent::ClaudeCode
-        .launch_headless("s_01example", &Asking::CannotAsk, start)
+        .launch_headless(
+            "s_01example",
+            &Asking::CannotAsk,
+            start,
+            &Default::default(),
+        )
         .expect("Claude Code is driven headless")
 }
 
@@ -82,6 +87,7 @@ fn a_restarted_agent_is_handed_the_conversation() {
             "s_01example",
             &Asking::CannotAsk,
             Start::Carrying("they asked for drawings".into()),
+            &Default::default(),
         )
         .expect("Claude Code is driven headless");
 
@@ -100,7 +106,52 @@ fn a_restarted_agent_is_handed_the_conversation() {
 /// nothing here to vary — its resume is a different mechanism, in `thread/start`.
 #[test]
 fn codex_takes_no_flags_either_way() {
-    let fresh = Agent::Codex.launch_headless("s_01example", &Asking::CannotAsk, Start::Fresh);
-    let resumed = Agent::Codex.launch_headless("s_01example", &Asking::CannotAsk, Start::Resume);
+    let fresh = Agent::Codex.launch_headless(
+        "s_01example",
+        &Asking::CannotAsk,
+        Start::Fresh,
+        &Default::default(),
+    );
+    let resumed = Agent::Codex.launch_headless(
+        "s_01example",
+        &Asking::CannotAsk,
+        Start::Resume,
+        &Default::default(),
+    );
     assert_eq!(fresh, resumed);
+}
+
+/// What the session is launched with is what the picker shows before the agent
+/// has spoken, so the two have to come from one place.
+///
+/// Claude Code reports its model and its permission mode on every turn, and
+/// never reports an effort — so the effort flag is the only thing that can ever
+/// fill that picker. A launch that stopped passing one would leave it blank
+/// again, and nothing else would fail.
+#[test]
+fn claude_is_launched_with_the_settings_its_pickers_show() {
+    let argv = ft_core::Agent::ClaudeCode
+        .launch_headless(
+            "s_1",
+            &ft_core::Asking::Ask {
+                tool: "approve".into(),
+                config: "/tmp/mcp.json".into(),
+            },
+            ft_core::Start::Fresh,
+            &Default::default(),
+        )
+        .expect("Claude Code is driven");
+
+    let after = |flag: &str| {
+        argv.iter()
+            .position(|a| a == flag)
+            .and_then(|i| argv.get(i + 1))
+            .cloned()
+    };
+    assert_eq!(after("--model").as_deref(), Some(ft_core::BIGGEST));
+    assert_eq!(after("--effort").as_deref(), Some(ft_core::EFFORT));
+    assert_eq!(
+        after("--permission-mode").as_deref(),
+        Some(ft_core::ASKING_MODE)
+    );
 }

@@ -18,12 +18,57 @@ use ft_proto::ProbeFailure;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
+/// Whoever is asking, and the repository they are asking about — if it is
+/// theirs.
+///
+/// A repository is personal and does not move, so "may I see it" and "is it
+/// mine" are the same question, and there is nothing to be granted. Every
+/// write below goes through this. They went through nothing at all before, and
+/// a member could rewrite any repository's setup script — a shell command the
+/// worker runs in every session cut from it.
+///
+/// `not_found` rather than `Forbidden`: somebody else's repository is not
+/// something you are being refused, it is something that does not exist as far
+/// as you are concerned. Telling them apart tells a member which codebases
+/// their colleagues work on.
+/// Whose repositories these are. There is no connecting one as nobody: with
+/// authentication off there is no owner to file it under, and a repository
+/// with no owner is the state this module exists to prevent.
+fn owner(principal: &Principal) -> ApiResult<&str> {
+    principal.owner().ok_or_else(|| {
+        ApiError::new(
+            ErrorCode::Unauthorized,
+            "a repository belongs to whoever connected it, so this needs signing in",
+        )
+    })
+}
+
+async fn mine(state: &AppState, principal: &Principal, id: &RepoId) -> ApiResult<Repo> {
+    // The slug off the principal, not a lookup: it is the same label the path
+    // was built from, and it is already in hand on every request.
+    let slug = principal
+        .user
+        .as_ref()
+        .map(|u| u.slug.as_str())
+        .ok_or_else(|| ApiError::new(ErrorCode::Unauthorized, "nobody is signed in"))?;
+
+    state
+        .db
+        .repo(id)
+        .await?
+        .filter(|r| r.path.root() == Some((ft_core::path::PERSONAL, slug)))
+        .ok_or_else(|| ApiError::not_found("repository"))
+}
+
 #[utoipa::path(
     get, path = "/api/v1/repos", tag = "repos",
     responses((status = 200, body = Vec<Repo>)),
 )]
-pub(super) async fn list_repos(State(state): State<AppState>) -> ApiResult<Json<Vec<Repo>>> {
-    let mut repos = state.db.repos().await?;
+pub(super) async fn list_repos(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+) -> ApiResult<Json<Vec<Repo>>> {
+    let mut repos = state.db.repos_of(owner(&principal)?).await?;
     // Names only, and from one read of the vault rather than one per
     // repository. Nothing is decrypted: a screen that says how many variables a
     // session will bring has no business opening any of them.
@@ -73,15 +118,15 @@ pub struct RepoChanges {
 )]
 pub(super) async fn update_repo(
     State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
     Path(id): Path<String>,
     Json(req): Json<RepoChanges>,
 ) -> ApiResult<Json<Repo>> {
     let id = RepoId::from_stored(id);
-    state
-        .db
-        .repo(&id)
-        .await?
-        .ok_or_else(|| ApiError::not_found("repository"))?;
+    // The setup script is a shell command the worker runs in every session cut
+    // from this repository. Of everything here, this is the one that had to be
+    // closed first.
+    mine(&state, &principal, &id).await?;
 
     // A path out of the workspace is not a path in it. The worker joins this
     // onto the worktree, and `../../.ssh/authorized_keys` would be joined just
@@ -107,7 +152,7 @@ pub(super) async fn update_repo(
         )
         .await?;
 
-    let repos = list_repos(State(state)).await?;
+    let repos = list_repos(State(state), Extension(principal)).await?;
     repos
         .0
         .into_iter()
@@ -127,14 +172,11 @@ pub(super) async fn update_repo(
 )]
 pub(super) async fn list_repo_env(
     State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
     Path(id): Path<String>,
 ) -> ApiResult<Json<Vec<String>>> {
     let id = RepoId::from_stored(id);
-    state
-        .db
-        .repo(&id)
-        .await?
-        .ok_or_else(|| ApiError::not_found("repository"))?;
+    mine(&state, &principal, &id).await?;
 
     let scope = env_scope(&id);
     Ok(Json(
@@ -190,15 +232,15 @@ pub struct StoredEnv {
 )]
 pub(super) async fn put_repo_env(
     State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
     Path(id): Path<String>,
     Json(req): Json<NewEnv>,
 ) -> ApiResult<Json<StoredEnv>> {
     let id = RepoId::from_stored(id);
-    let repo = state
-        .db
-        .repo(&id)
-        .await?
-        .ok_or_else(|| ApiError::not_found("repository"))?;
+    // Values here are never readable back through the API, which made writing
+    // them look harmless. It is not: overwriting somebody's variables changes
+    // what their next session runs against.
+    let repo = mine(&state, &principal, &id).await?;
 
     let mut keeping: Vec<ft_core::dotenv::Variable> = Vec::new();
     let mut skipped: Vec<String> = Vec::new();
@@ -251,7 +293,9 @@ pub(super) async fn put_repo_env(
             .await?;
     }
 
-    let names = list_repo_env(State(state), Path(id.to_string())).await?.0;
+    let names = list_repo_env(State(state), Extension(principal), Path(id.to_string()))
+        .await?
+        .0;
     Ok(Json(StoredEnv { names, skipped }))
 }
 
@@ -265,14 +309,11 @@ pub(super) async fn put_repo_env(
 )]
 pub(super) async fn remove_repo_env(
     State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
     Path((id, name)): Path<(String, String)>,
 ) -> ApiResult<StatusCode> {
     let id = RepoId::from_stored(id);
-    let repo = state
-        .db
-        .repo(&id)
-        .await?
-        .ok_or_else(|| ApiError::not_found("repository"))?;
+    let repo = mine(&state, &principal, &id).await?;
 
     state
         .vault
@@ -594,9 +635,10 @@ pub(super) async fn create_repo(
             remote,
             trunk.as_deref(),
             req.setup.as_deref(),
-            // Recorded so the list can say who brought it in. Absent only when
-            // authentication is off and there is nobody to name.
-            principal.owner(),
+            // Whose it is, not merely who brought it in. Required: with
+            // authentication off there is nobody to own one, and a repository
+            // with no owner is the state this whole change exists to remove.
+            owner(&principal)?,
         )
         .await?;
 
@@ -673,14 +715,11 @@ pub struct Branches {
 )]
 pub(super) async fn delete_repo(
     State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
     Path(id): Path<String>,
 ) -> ApiResult<StatusCode> {
     let id = RepoId::from_stored(id);
-    let repo = state
-        .db
-        .repo(&id)
-        .await?
-        .ok_or_else(|| ApiError::not_found("repository"))?;
+    let repo = mine(&state, &principal, &id).await?;
 
     let live = state.db.live_sessions_for_repo(&repo.slug).await?;
     if !live.is_empty() {
@@ -735,6 +774,7 @@ mod tests {
             id: ft_core::HostId::new(),
             name: name.into(),
             state: ft_core::HostState::Online,
+            path: ft_core::ResourcePath::personal("kevin", "localhost"),
             compute,
             drained: false,
             cpus: None,

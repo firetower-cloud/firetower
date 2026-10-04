@@ -25,6 +25,16 @@ export interface AgentView {
   hosts: AgentOnHost[];
   kind: Agent;
   label: string;
+  /**
+     * The newest version its publisher is serving, when the control plane has
+     * managed to ask.
+     *
+     * One per kind rather than per host: what is published does not depend on
+     * which machine is behind it. `None` means nobody has asked yet, or the
+     * publisher could not be reached — neither of which is "up to date".
+     * @nullable
+     */
+  latestVersion?: string | null;
   mode?: null | AgentMode;
   /** True when nothing needs configuring, which is only the plain shell. */
   needsCredential: boolean;

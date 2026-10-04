@@ -99,6 +99,33 @@ export function updateToken(serverId: string, token: string) {
   write(rows().map((s) => (s.serverId === serverId ? { ...s, token } : s)));
 }
 
+/**
+ * The token this Mac holds for a server is no longer good.
+ *
+ * Kept, not forgotten: the address is still right and the organisation is
+ * still whose it is — the only thing that died is the credential. Forgetting
+ * would make somebody type an address they never got wrong, and on a Mac that
+ * knows several servers it would quietly lose one of them.
+ *
+ * Happens without anybody here doing anything: a password replaced in a
+ * browser ends every other session, an administrator can reset one, another
+ * device can sign out, a session can simply expire. So this is reached from
+ * the one place that sees every refusal rather than from a button.
+ */
+export function signedOut(serverId: string) {
+  // `servers()`, not `rows()`: in the native shell the file never holds a
+  // token and the real one is in memory from the keychain, so reading the file
+  // would say "already signed out" every time and this would never fire.
+  if (!servers().find((s) => s.serverId === serverId)?.token) return;
+
+  const kc = keychain();
+  if (kc) {
+    tokens.delete(serverId);
+    void kc.delete(serverId).catch(() => {});
+  }
+  write(rows().map((s) => (s.serverId === serverId ? { ...s, token: "" } : s)));
+}
+
 export function forget(serverId: string) {
   const kc = keychain();
   if (kc) {

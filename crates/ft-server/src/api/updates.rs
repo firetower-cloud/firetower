@@ -4,7 +4,9 @@
 //! Administrators only. Recreating the control plane and every worker is the
 //! one action here that touches every person's work at once.
 
+use super::access::may_share;
 use super::{ApiError, ApiResult, ErrorCode};
+use crate::access::FiledKind;
 use crate::auth::Principal;
 use crate::updates::{runs, status, store, version, NewRun, UpdateRun, UpdateStatus, UpgradePlan};
 use crate::AppState;
@@ -16,6 +18,11 @@ use axum::{
 use serde::Deserialize;
 use utoipa::ToSchema;
 
+/// Moving the deployment itself.
+///
+/// The control plane is not a resource anybody holds a grant on — it is the
+/// whole installation, and the machine every other machine is reached from. So
+/// this one stays the organisation's.
 fn admin_only(principal: &Principal) -> ApiResult<()> {
     match &principal.user {
         // Authentication off is a development mode; there is nobody to be.
@@ -23,12 +30,92 @@ fn admin_only(principal: &Principal) -> ApiResult<()> {
         Some(user) if user.role == "admin" => Ok(()),
         Some(_) => Err(ApiError::new(
             ErrorCode::Forbidden,
-            "only an administrator can upgrade Firetower",
+            "only an administrator of this Firetower can upgrade the control plane",
         )),
     }
 }
 
+/// The deployment as one person sees it.
+///
+/// **Reading is not upgrading.** Everybody can see what this Firetower is
+/// running and whether a release is out — a member who cannot tell that their
+/// work runs on something months old cannot ask for anything about it. What
+/// narrows is the machines, to the ones they could already see, and the
+/// controls, to the ones the server would actually honour.
+///
+/// Administering a machine is `may_share`, which is the single definition of it
+/// everywhere else: they own it, they administer the directory it is filed in,
+/// or they administer the organisation. There is no second rule here.
+async fn as_seen_by(
+    state: &AppState,
+    principal: &Principal,
+    mut status: UpdateStatus,
+) -> ApiResult<UpdateStatus> {
+    let Some(me) = principal.user.as_ref() else {
+        // Development mode, nobody to be, nothing to hide.
+        status.control_plane.may_upgrade = true;
+        for h in &mut status.hosts {
+            h.may_upgrade = h.upgradable;
+        }
+        return Ok(status);
+    };
+
+    status.control_plane.may_upgrade = me.role == "admin";
+
+    let visible: std::collections::HashSet<String> = state
+        .db
+        .hosts_for(me.id.as_str(), crate::access::Level::Viewer)
+        .await?
+        .into_iter()
+        .map(|h| h.id.as_str().to_string())
+        .collect();
+    status.hosts.retain(|h| visible.contains(&h.host_id));
+
+    // Behind the *control plane*, not behind the newest release. A worker may
+    // be brought up to what the deployment is running and no further: one taken
+    // past it is a worker talking to a control plane that does not know the
+    // protocol yet, and whoever did it may have no way to move the control
+    // plane after them.
+    for h in &mut status.hosts {
+        let behind = h
+            .version
+            .as_deref()
+            .and_then(version::parse)
+            .map(|theirs| version::is_newer(&version::current(), &theirs))
+            .unwrap_or(true);
+        h.may_upgrade = behind
+            && may_share(state, me, FiledKind::Machine, &h.host_id)
+                .await
+                .is_ok();
+    }
+
+    Ok(status)
+}
+
+/// What a workers-only run is allowed to move to.
+///
+/// The version the control plane is on, and only that. A machine behind it can
+/// be brought level; nothing can be taken past it, by anybody — an
+/// administrator doing a workers-only run to the newest release would strand
+/// them just as thoroughly, and would then have to upgrade the control plane to
+/// rescue machines that had stopped being able to talk to it.
+fn level_with_the_control_plane(to: &str) -> ApiResult<()> {
+    let current = version::current().to_string();
+    if to == current {
+        return Ok(());
+    }
+    Err(ApiError::new(
+        ErrorCode::InvalidRequest,
+        format!(
+            "a machine can be brought up to {current}, which is what this Firetower is running, \
+             and no further. Upgrading the control plane is what moves everything to {to}."
+        ),
+    ))
+}
+
 /// Where everything stands against the newest release.
+///
+/// Readable by anybody. What it says is narrowed to them — see [`as_seen_by`].
 #[utoipa::path(
     get, path = "/api/v1/updates", tag = "updates",
     responses((status = 200, body = UpdateStatus)),
@@ -37,8 +124,8 @@ pub(super) async fn get_updates(
     State(state): State<AppState>,
     Extension(principal): Extension<Principal>,
 ) -> ApiResult<Json<UpdateStatus>> {
-    admin_only(&principal)?;
-    Ok(Json(status::status(&state).await?))
+    let status = status::status(&state).await?;
+    Ok(Json(as_seen_by(&state, &principal, status).await?))
 }
 
 /// Ask the releases feed now rather than waiting for the next check.
@@ -50,9 +137,9 @@ pub(super) async fn check_updates(
     State(state): State<AppState>,
     Extension(principal): Extension<Principal>,
 ) -> ApiResult<Json<UpdateStatus>> {
-    admin_only(&principal)?;
     status::check(&state).await?;
-    Ok(Json(status::status(&state).await?))
+    let status = status::status(&state).await?;
+    Ok(Json(as_seen_by(&state, &principal, status).await?))
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -86,7 +173,11 @@ pub(super) async fn plan_update(
     Extension(principal): Extension<Principal>,
     Json(req): Json<PlanRequest>,
 ) -> ApiResult<Json<UpgradePlan>> {
-    admin_only(&principal)?;
+    // A plan is the deployment's files. A workers-only run rewrites none of
+    // them, so there is nothing here a member could learn by asking.
+    if req.control_plane {
+        admin_only(&principal)?;
+    }
     let to = version::parse(&req.version).ok_or_else(|| {
         ApiError::new(
             ErrorCode::InvalidRequest,
@@ -114,7 +205,17 @@ pub(super) async fn create_run(
     Extension(principal): Extension<Principal>,
     Json(req): Json<NewRun>,
 ) -> ApiResult<(StatusCode, Json<UpdateRun>)> {
-    admin_only(&principal)?;
+    // Asked per target, not once for the run. Moving the deployment is the
+    // organisation's; moving a machine belongs to whoever administers that
+    // machine, which is the same question the sharing sheet asks.
+    if req.control_plane {
+        admin_only(&principal)?;
+    }
+    if let Some(me) = principal.user.as_ref() {
+        for host_id in &req.host_ids {
+            may_share(&state, me, FiledKind::Machine, host_id).await?;
+        }
+    }
 
     let to = version::parse(&req.version).ok_or_else(|| {
         ApiError::new(
@@ -123,18 +224,22 @@ pub(super) async fn create_run(
         )
     })?;
     let current = status::status(&state).await?;
-    if current.latest.as_ref().map(|l| l.version.as_str()) != Some(to.to_string().as_str()) {
-        return Err(ApiError::new(
-            ErrorCode::InvalidRequest,
-            format!(
-                "{to} is not the release the last check found{}. Check again and choose that one.",
-                current
-                    .latest
-                    .as_ref()
-                    .map(|l| format!(" ({})", l.version))
-                    .unwrap_or_default()
-            ),
-        ));
+    if req.control_plane {
+        if current.latest.as_ref().map(|l| l.version.as_str()) != Some(to.to_string().as_str()) {
+            return Err(ApiError::new(
+                ErrorCode::InvalidRequest,
+                format!(
+                    "{to} is not the release the last check found{}. Check again and choose that one.",
+                    current
+                        .latest
+                        .as_ref()
+                        .map(|l| format!(" ({})", l.version))
+                        .unwrap_or_default()
+                ),
+            ));
+        }
+    } else {
+        level_with_the_control_plane(&to.to_string())?;
     }
     if !req.control_plane && req.host_ids.is_empty() {
         return Err(ApiError::new(
@@ -245,6 +350,21 @@ pub(super) async fn create_run(
 }
 
 /// Past and present runs, newest first.
+/// A run somebody may watch or stop.
+///
+/// Theirs, or anybody's if they administer the organisation. A member who
+/// upgrades a machine has to be able to see what they started — an action whose
+/// progress is invisible to whoever took it is an action nobody trusts twice —
+/// and a run nobody may look at is a run nobody can cancel either.
+fn ours(principal: &Principal, run: &UpdateRun) -> ApiResult<()> {
+    match &principal.user {
+        None => Ok(()),
+        Some(me) if me.role == "admin" => Ok(()),
+        Some(me) if run.started_by.as_deref() == Some(me.id.as_str()) => Ok(()),
+        Some(_) => Err(ApiError::not_found("run")),
+    }
+}
+
 #[utoipa::path(
     get, path = "/api/v1/updates/runs", tag = "updates",
     responses((status = 200, body = Vec<UpdateRun>)),
@@ -253,11 +373,13 @@ pub(super) async fn list_runs(
     State(state): State<AppState>,
     Extension(principal): Extension<Principal>,
 ) -> ApiResult<Json<Vec<UpdateRun>>> {
-    admin_only(&principal)?;
     let mut views = Vec::new();
     for run in state.updates.store.runs().await? {
         let steps = state.updates.store.steps(&run.id).await?;
-        views.push(UpdateRun::from_store(run, steps));
+        let view = UpdateRun::from_store(run, steps);
+        if ours(&principal, &view).is_ok() {
+            views.push(view);
+        }
     }
     Ok(Json(views))
 }
@@ -272,8 +394,9 @@ pub(super) async fn get_run(
     Extension(principal): Extension<Principal>,
     Path(id): Path<String>,
 ) -> ApiResult<Json<UpdateRun>> {
-    admin_only(&principal)?;
-    Ok(Json(read_run(&state, &id).await?))
+    let run = read_run(&state, &id).await?;
+    ours(&principal, &run)?;
+    Ok(Json(run))
 }
 
 /// Stop a run that has not started changing anything yet.
@@ -291,8 +414,8 @@ pub(super) async fn cancel_run(
     Extension(principal): Extension<Principal>,
     Path(id): Path<String>,
 ) -> ApiResult<Json<UpdateRun>> {
-    admin_only(&principal)?;
     let run = read_run(&state, &id).await?;
+    ours(&principal, &run)?;
     if run.state.is_over() {
         return Ok(Json(run));
     }
@@ -320,8 +443,8 @@ pub(super) async fn continue_run(
     Extension(principal): Extension<Principal>,
     Path(id): Path<String>,
 ) -> ApiResult<Json<UpdateRun>> {
-    admin_only(&principal)?;
     let run = read_run(&state, &id).await?;
+    ours(&principal, &run)?;
     if run.state != crate::updates::RunState::WaitingDecision {
         return Err(ApiError::new(
             ErrorCode::ActionFailed,
@@ -374,4 +497,26 @@ async fn read_run(state: &AppState, id: &str) -> ApiResult<UpdateRun> {
         .ok_or_else(|| ApiError::not_found("run"))?;
     let steps = state.updates.store.steps(id).await?;
     Ok(UpdateRun::from_store(run, steps))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The rule that stops somebody stranding a machine ahead of the control
+    /// plane — which they may then have no right to move after it.
+    #[test]
+    fn a_machine_may_be_brought_level_and_no_further() {
+        let running = version::current().to_string();
+        assert!(level_with_the_control_plane(&running).is_ok());
+
+        let ahead = "99.0.0";
+        let refused = level_with_the_control_plane(ahead).expect_err("past the control plane");
+        let said = format!("{refused:?}");
+        assert!(said.contains(&running), "says what it is running: {said}");
+        assert!(
+            said.contains("Upgrading the control plane"),
+            "and what would move it: {said}"
+        );
+    }
 }

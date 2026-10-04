@@ -391,21 +391,30 @@ function NotConfigured({
 }) {
   const providers = useListProviders();
 
+  /* The application is install-wide and has no owner, so the server only takes
+     it from an administrator. Drawing the form for everybody meant a member
+     spent five minutes registering an application and was refused at Save. */
+  const mine = providers.data?.find((p) => p.id === provider.id)?.maySetApplication ?? false;
+
   return (
     <>
       <p className="max-w-[54ch] text-ui leading-[1.6] text-dim">
         No application is registered for {provider.label} yet, so there is nothing to
-        authorize against. It takes about five minutes, once, and this is the whole of
-        it — a device-flow application needs no secret and no callback URL.
+        authorize against.
+        {mine
+          ? " It takes about five minutes, once, and this is the whole of it — a device-flow application needs no secret and no callback URL."
+          : " Registering one is an administrator’s to do, for everybody on this Firetower. Until then you can still paste a repository’s URL."}
       </p>
 
-      <div className="mt-4">
-        {/* Asked here rather than sent somewhere else to be asked: this is the
-            moment somebody wants the thing it enables, and a link to the README
-            is where that intention goes to die. Saved to the database, so it
-            works immediately and survives a restart. */}
-        <ClientIdForm onDone={() => void providers.refetch()} />
-      </div>
+      {mine && (
+        <div className="mt-4">
+          {/* Asked here rather than sent somewhere else to be asked: this is the
+              moment somebody wants the thing it enables, and a link to the README
+              is where that intention goes to die. Saved to the database, so it
+              works immediately and survives a restart. */}
+          <ClientIdForm onDone={() => void providers.refetch()} />
+        </div>
+      )}
 
       <Foot>
         <Go onClick={onManual}>Paste a URL instead</Go>

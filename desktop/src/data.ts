@@ -9,6 +9,7 @@ import { useListHosts } from "~/api/generated/hosts/hosts";
 import { useListAgents } from "~/api/generated/agents/agents";
 import { useListProviders } from "~/api/generated/providers/providers";
 import { useListAccounts } from "~/api/generated/accounts/accounts";
+import { useListDirectories } from "~/api/generated/access/access";
 import { useMe } from "~/api/generated/auth/auth";
 import { useSetupState } from "~/api/generated/setup/setup";
 import { useGetUpdates } from "~/api/generated/updates/updates";
@@ -27,19 +28,57 @@ import type { DiffSince, FileDiff, ListTasksParams, Page, Repo, Session, Task, T
 /** Everything a screen needs to know about where its data came from. */
 export type Feed<T> = { data: T; loading: boolean; error: string | null };
 
-/** What the server said, off any thrown thing. */
+/**
+ * What the server said, off any thrown thing.
+ *
+ * With one substitution. A password that has to be replaced is refused on
+ * every path at once, so every list on screen asks its own question and gets
+ * the same sentence back — and a sentence written as a reason, repeated eight
+ * times down a rail, reads as eight things being broken. The screen that
+ * explains it is already up; these are the places behind it, and what they owe
+ * is to be brief and to agree with it.
+ */
 export function why(e: unknown): string {
-  return (e as { message?: string })?.message ?? "That didn't work.";
+  return said(e) ?? "That didn't work.";
 }
 
+/* The two fallbacks differ on purpose — one ends a sentence of its own, the
+   other is dropped into one — so they are kept, and only the reading of the
+   error is shared. */
 function whyOrNull(e: unknown): string | null {
   if (!e) return null;
-  const m = (e as { message?: string })?.message;
-  return m ?? "that request did not work";
+  return said(e) ?? "that request did not work";
 }
 
+function said(e: unknown): string | null {
+  if ((e as { code?: string })?.code === "PasswordChangeRequired") {
+    return "Replace your password to see this.";
+  }
+  return (e as { message?: string })?.message ?? null;
+}
+
+/**
+ * Every session this person can see.
+ *
+ * **Polled, because this one list is most of the app.** The rail, the chip
+ * strip in a workspace and the dashboard all read it, so anything that happens
+ * to somebody else's fleet — a colleague starting a second agent in a
+ * workspace you are in, a workspace being shared with you — only appeared when
+ * something else happened to invalidate it. Which in practice meant
+ * navigating away and back.
+ *
+ * Ten seconds: below what anybody reads as stale, and one small request per
+ * client per ten seconds is not worth a second mechanism. The transcript is
+ * already live over the socket, so this is for the shape of the fleet rather
+ * than for anything inside a conversation.
+ *
+ * A broadcast on that socket would be cheaper and instant, and needs the
+ * server to work out who should hear about each change — the access predicate,
+ * per connected client. Worth it when polling proves too slow or too chatty,
+ * and not before.
+ */
 export function useSessions(): Feed<Session[]> {
-  const q = useListSessions();
+  const q = useListSessions(undefined, { query: { refetchInterval: 10_000 } });
   return { data: q.data ?? [], loading: q.isPending, error: q.error ? why(q.error) : null };
 }
 
@@ -79,7 +118,18 @@ export function useTasks(ask: ListTasksParams, enabled = true): Tasks {
   const q = useListTasks(ask, { query: { enabled } });
   const page = q.data as Page | undefined;
   return {
-    data: page?.tasks ?? [],
+    /* Nothing, unless this question is one we are currently allowed to ask.
+       React Query hands back the last good answer for a query that is failing
+       *and* for one that has been switched off, and a revoked key produces the
+       second: the tracker stops reporting itself as connected, so the screen
+       disables the query, so it never errors, so the cache answers as if
+       nothing had happened. A shared Linear key filed back out of a directory
+       left everybody who had reached through it reading the tasks it had
+       fetched, under a panel telling them Linear was not connected.
+
+       Right for a flaky network, wrong for access that has been taken away:
+       that has to look like it has been taken away. */
+    data: enabled && !q.error ? (page?.tasks ?? []) : [],
     // `isPending` stays true for a query that was never allowed to run, which
     // would leave "Reading your trackers…" on screen for a tracker nobody has
     // connected yet.
@@ -113,15 +163,29 @@ export function useProviders() {
 }
 
 /**
- * Whether this server still needs something before it is usable: a password
- * that came from a file, or an organisation with no name. Asked on every visit,
- * because both are facts about the server rather than about this Mac.
+ * Whether this server still needs something before it is usable, and which of
+ * two very different somethings it is. Asked on every visit, because both are
+ * facts about the server rather than about this Mac.
+ *
+ * `locked` is a password the server will not accept any work under. It is kept
+ * apart from `setup` rather than folded into one "needs something" flag,
+ * because the two have opposite answers: setting up is finished here, and a
+ * password is replaced in a browser. Folded together, the app showed its own
+ * setup wizard to somebody whose only remaining task it cannot perform.
+ *
+ * It is read from `auth/me` on every visit rather than remembered from the
+ * sign-in. An administrator can reset a password under a running app, and the
+ * stored user would still say everything is fine while every request was being
+ * refused.
  */
-export function useGate(): { setup: boolean; ready: boolean } {
+export function useGate(): { setup: boolean; locked: boolean; ready: boolean } {
   const me = useMe({ query: { staleTime: 60_000 } });
   const setup = useSetupState({ query: { staleTime: 60_000 } });
-  const needs = !!me.data?.user?.mustChangePassword || (!!setup.data && !setup.data.completed);
-  return { setup: needs, ready: !me.isPending && !setup.isPending };
+  return {
+    setup: !!setup.data && !setup.data.completed,
+    locked: !!me.data?.user?.mustChangePassword,
+    ready: !me.isPending && !setup.isPending,
+  };
 }
 
 /** The dot on Updates in the rail. Asked rarely: the answer changes monthly. */
@@ -133,6 +197,23 @@ export function useUpdatesDot(): boolean {
 /** Named agent connections — whose subscription a session runs on. */
 export function useAccounts() {
   const q = useListAccounts();
+  return { data: q.data ?? [], loading: q.isPending, error: q.error ? why(q.error) : null };
+}
+
+/**
+ * The directories this person can reach, with what they may do in each.
+ *
+ * Where something is filed decides who can see it, so this is what the "Filed
+ * in" choice is built from and what turns the `d/<slug>` in a path into a name.
+ * Match on `slug`, not on `id`: the slug is the part that appears in a path, and
+ * the name is free to change without anything moving.
+ *
+ * Only the ones that can be worked in are somewhere to put new work — being
+ * allowed to look at a directory is not being allowed to file your own work
+ * there, where you could then not follow it.
+ */
+export function useDirectories() {
+  const q = useListDirectories();
   return { data: q.data ?? [], loading: q.isPending, error: q.error ? why(q.error) : null };
 }
 
@@ -167,9 +248,17 @@ export type ChangedFile = FileDiff & { at: string };
  * front. The tree and the tabs are workspace-relative either way, so `at` is
  * the path with the directory always in front.
  */
-export function useDiff(session: Pick<Session, "id" | "checkouts"> | null, since: DiffSince = "Base") {
+export function useDiff(
+  session: Pick<Session, "id" | "checkouts"> | null,
+  since: DiffSince = "Base",
+  /* For a caller that marks a tree rather than drawing a patch. The answer
+     carries `fresh` and the line counts and nothing else, which is a few
+     hundred bytes where the patches were megabytes — on an eight-second
+     poll — and the worker never runs `git diff` at all. */
+  namesOnly = false,
+) {
   const on = !!session;
-  const q = useSessionDiff(session?.id ?? "", { since }, { query: { enabled: on, refetchInterval: 8000 } });
+  const q = useSessionDiff(session?.id ?? "", { since, ...(namesOnly ? { namesOnly } : {}) }, { query: { enabled: on, refetchInterval: 8000 } });
   const data = useMemo<ChangedFile[]>(() => {
     const files = (q.data ?? []) as FileDiff[];
     const dirs = (session?.checkouts ?? []).map((c) => c.path).filter((p): p is string => !!p);

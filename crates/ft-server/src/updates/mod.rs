@@ -26,6 +26,7 @@
 //! Nothing here is automatic. A check every few hours says what is available;
 //! a person starts a run.
 
+pub mod agents;
 pub mod check;
 pub mod client;
 pub mod deploy;
@@ -44,6 +45,9 @@ pub struct Updates {
     pub store: store::Store,
     pub updater: Result<client::Updater, client::Absent>,
     pub feed: check::Feed,
+    /// Where each agent publishes itself, and what it last said.
+    pub agent_feeds: agents::Feeds,
+    pub agent_releases: agents::Releases,
     pub http: reqwest::Client,
     pub notify: crate::notify::Notifier,
     /// Runs this process is driving, so one is never driven twice.
@@ -73,6 +77,8 @@ impl Updates {
             store: store::Store::new(pool),
             updater,
             feed: check::Feed::from_env(),
+            agent_feeds: agents::Feeds::from_env(),
+            agent_releases: Default::default(),
             http: check::client(),
             notify: crate::notify::Notifier::from_env(),
             driving: Default::default(),
@@ -205,6 +211,11 @@ pub struct UpdaterView {
 pub struct ControlPlaneTarget {
     pub version: String,
     pub upgradable: bool,
+    /// Whether the person asking may move it. Only an administrator of the
+    /// organisation: the control plane is the whole deployment, not a resource
+    /// anybody holds a grant on.
+    #[serde(default)]
+    pub may_upgrade: bool,
     pub reason: Option<String>,
     /// Sessions on this machine, by title. They end when it is recreated.
     pub sessions: Vec<String>,
@@ -220,6 +231,16 @@ pub struct HostTarget {
     pub online: bool,
     pub drained: bool,
     pub upgradable: bool,
+    /// Whether the person asking may bring this machine up to the control
+    /// plane, right now, and it would do something.
+    ///
+    /// Two things at once, because one button is being drawn: they administer
+    /// this machine — by owning it, by administering the directory it is filed
+    /// in, or by administering the organisation — *and* it is behind the
+    /// control plane. A machine level with the control plane has nowhere to go
+    /// until the deployment itself moves.
+    #[serde(default)]
+    pub may_upgrade: bool,
     pub reason: Option<String>,
     /// Sessions on this machine, by title. They end when it is reinstalled.
     pub sessions: Vec<String>,

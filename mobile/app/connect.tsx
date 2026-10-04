@@ -32,6 +32,7 @@ import { ArrowRight, CircleSlash2, Lock, ShieldOff } from "lucide-react-native";
 import { cleartext, reach, signIn, type Bootstrap } from "~/api/probe";
 import { remember } from "~/native/servers";
 import { Mark } from "~/ui/Mark";
+import { ReplacePassword } from "~/ui/ReplacePassword";
 import { color, size } from "~/design/tokens.generated";
 
 type Stage =
@@ -39,7 +40,11 @@ type Stage =
   | { at: "reaching" }
   | { at: "unreachable"; typed: string; detail: string }
   | { at: "wrong"; typed: string; detail: string }
-  | { at: "who"; url: string; boot: Bootstrap };
+  | { at: "who"; url: string; boot: Bootstrap }
+  // The password was right and is temporary. A third question, after where and
+  // who: nothing is stored, because a server this phone cannot yet use is not
+  // a server this phone has been connected to.
+  | { at: "locked"; url: string; boot: Bootstrap; user: string };
 
 export default function Connect() {
   const insets = useSafeAreaInsets();
@@ -103,11 +108,21 @@ export default function Connect() {
           detail={stage.detail}
           onBack={() => setStage({ at: "where" })}
         />
+      ) : stage.at === "locked" ? (
+        <ReplacePassword
+          url={stage.url}
+          username={stage.user}
+          retryLabel="Sign in again"
+          onRetry={() => setStage({ at: "who", url: stage.url, boot: stage.boot })}
+          onBack={() => setStage({ at: "where" })}
+          backLabel="Use a different address"
+        />
       ) : (
         <Who
           url={stage.url}
           boot={stage.boot}
           onBack={() => setStage({ at: "where" })}
+          onLocked={(user) => setStage({ at: "locked", url: stage.url, boot: stage.boot, user })}
           onIn={(token, user) => {
             const serverId = stage.boot.serverId ?? stage.url;
             remember(
@@ -337,11 +352,14 @@ function Who({
   url,
   boot,
   onIn,
+  onLocked,
   onBack,
 }: {
   url: string;
   boot: Bootstrap;
   onIn: (token: string, user: string) => void;
+  /** The password was correct and has to be replaced before anything else. */
+  onLocked: (user: string) => void;
   onBack: () => void;
 }) {
   const [username, setUsername] = useState("");
@@ -363,6 +381,9 @@ function Who({
     const out = await signIn(url, username.trim(), password);
     setBusy(false);
     if (!out.ok) return setWrong(out.why);
+    // Not `setWrong`: the password was right. Saying so under the field they
+    // just filled in would send them looking for a typo that is not there.
+    if (out.mustChangePassword) return onLocked(out.user);
     onIn(out.token, out.user);
   };
 

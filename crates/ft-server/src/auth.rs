@@ -264,7 +264,12 @@ pub async fn require(State(gate): State<Gate>, mut request: Request, next: Next)
     if principal.must_change_password() && !permitted_while_locked(&request) {
         return refusal(
             crate::api::ErrorCode::PasswordChangeRequired,
-            "this password came from a file and has to be replaced before anything else",
+            // Not "came from a file". That is true of the first administrator's
+            // and of nobody else's: the same refusal is raised for somebody
+            // invited last week and for somebody whose password an
+            // administrator reset this morning, and telling either of them to
+            // go and find a file is advice about a machine they cannot reach.
+            "this password has to be replaced before anything else",
         );
     }
 
@@ -275,11 +280,16 @@ pub async fn require(State(gate): State<Gate>, mut request: Request, next: Next)
     next.run(request).await
 }
 
-/// What an account with a file-supplied password may still reach.
+/// What an account whose password has to be replaced may still reach.
 ///
 /// Replacing the password, leaving, and the two reads the screen that does it
-/// is built from. Anything else would be acting on a credential that is sitting
-/// in a file on the server.
+/// is built from. Anything else would be acting on a credential somebody else
+/// chose: a file on the server for the first administrator, and an
+/// administrator who read it out for everybody since.
+///
+/// `setup` is in the list for its `publicUrl` as much as its flags. A native
+/// client that has just been refused needs to be able to say where to go and
+/// fix it, and this is the only call it has left.
 fn permitted_while_locked(request: &Request) -> bool {
     matches!(
         request.uri().path(),

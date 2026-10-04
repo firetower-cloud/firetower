@@ -4,7 +4,10 @@
 //! route, and that one writes to the access log before it answers — which is
 //! the only thing standing between a stored token and a quiet copy of it.
 
+use super::access::whoever;
 use super::{ApiError, ApiResult, ErrorCode};
+use crate::access::Level;
+use crate::accounts::User;
 use crate::auth::Principal;
 use crate::vault::{Key, Vault};
 use crate::{vault, AppState};
@@ -20,11 +23,28 @@ use utoipa::ToSchema;
 #[derive(Debug, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct HeldSecret {
+    /// `scope/name/owner`, which is how everything else addresses it.
+    ///
+    /// A secret has no id column: it is keyed by all three, because two people
+    /// each authorizing GitHub as themselves is the point. So a screen that
+    /// wants to file one or say who can reach it has to name the owner too —
+    /// `scope/name` names a *set* of rows, and addressing it that way let
+    /// somebody be named on everybody's at once.
+    ///
+    /// A handle, not a label. `mine` is what the screen says.
+    pub id: String,
     pub scope: String,
     pub name: String,
-    /// Yours rather than the install's. What the screen says, so it never has
-    /// to show an account id.
+    /// Yours rather than somebody else's or the install's. What the screen
+    /// says, so it never has to show an account id.
     pub mine: bool,
+    /// Where it is filed, so a screen can say who else can reach it and offer
+    /// to file it elsewhere.
+    ///
+    /// Absent for an *attached* one — an agent account's credential, a
+    /// repository's variable, the install's own. Those move with what they
+    /// belong to and cannot be filed on their own.
+    pub path: Option<String>,
 }
 
 /// One line of the access log.
@@ -66,28 +86,44 @@ pub(super) async fn list_secrets(
     State(state): State<AppState>,
     Extension(principal): Extension<Principal>,
 ) -> ApiResult<Json<VaultView>> {
-    // Yours, and the install's own. Somebody else's git token is not something
-    // this screen has any business naming, let alone revealing.
-    let mine = principal.owner().unwrap_or("");
+    // Theirs, and whatever is filed where they may work. Somebody else's git
+    // token is not something this screen has any business naming, let alone
+    // revealing — and the install's own is nobody's to read, so it is here only
+    // for an administrator.
+    let me = whoever(&principal)?;
+    let mine = me.id.as_str();
     let (intact, broken_at) = match state.vault.verify().await? {
         vault::Verification::Intact { .. } => (true, None),
         vault::Verification::Broken { at } => (false, Some(at)),
     };
 
+    let mut held = state.vault.names_for(mine, Level::Viewer).await?;
+    if me.role == "admin" {
+        // The deployment's own: the SSH identity every worker is reached with,
+        // the OAuth client this install registered. An administrator's, because
+        // one of them opens every machine in the fleet.
+        held.extend(
+            state
+                .vault
+                .names()
+                .await?
+                .into_iter()
+                .filter(|h| h.owner.is_empty()),
+        );
+    }
+
     Ok(Json(VaultView {
         root_key: state.key_source.to_string(),
-        held: state
-            .vault
-            .names()
-            .await?
+        held: held
             .into_iter()
-            .filter(|held| held.owner.is_empty() || held.owner == mine)
             .map(|held| HeldSecret {
+                path: held.path.as_ref().map(|p| p.as_str().to_string()),
+                id: format!("{}/{}/{}", held.scope, held.name, held.owner),
                 scope: held.scope,
                 name: held.name,
                 // So the screen can say "yours" rather than showing an
                 // account id nobody reads.
-                mine: held.owner == mine && !held.owner.is_empty(),
+                mine: held.owner == mine,
             })
             .collect(),
         access: state
@@ -95,7 +131,7 @@ pub(super) async fn list_secrets(
             .access(100)
             .await?
             .into_iter()
-            .filter(|a| a.owner.is_empty() || a.owner == mine)
+            .filter(|a| a.owner == mine || (a.owner.is_empty() && me.role == "admin"))
             .map(|a| AccessEntry {
                 id: a.id,
                 scope: a.scope,
@@ -126,24 +162,31 @@ pub struct RevealedSecret {
     pub value: String,
 }
 
-/// Which row a screen means by a scope and a name.
+/// Whose row a screen means by a scope and a name.
 ///
-/// Yours if you have one, the install's otherwise — and never anybody else's,
-/// because the path carries no owner and so there is no way to ask for one.
-/// Two people both looking at `git/github` are each looking at their own.
-async fn which<'a>(
-    vault: &Vault,
-    scope: &'a str,
-    name: &'a str,
-    mine: &'a str,
-) -> Result<Key<'a>, ApiError> {
-    if !mine.is_empty() {
-        let yours = Key::of(scope, name, mine);
-        if vault.holds(yours).await? {
-            return Ok(yours);
-        }
+/// A scope and a name do not identify a row — the owner is the third part of the
+/// key, so two people can each authorize GitHub as themselves — and the request
+/// carries no owner, so something has to choose. What chooses is who is asking:
+/// their own first, then one filed where they may work, and the install's own
+/// only for an administrator.
+///
+/// Returns an owner rather than a [`Key`] because the answer is a `String` the
+/// caller has to keep alive; a `Key` borrows it.
+///
+/// **Never anybody else's.** A member asking for `git/github` gets their own or
+/// nothing, which is what stops this route being a way to read a colleague's
+/// token by guessing its name.
+async fn whose(vault: &Vault, scope: &str, name: &str, me: &User) -> Result<String, ApiError> {
+    if let Some(owner) = vault
+        .owner_for(scope, name, me.id.as_str(), Level::Writer)
+        .await?
+    {
+        return Ok(owner);
     }
-    Ok(Key::shared(scope, name))
+    if me.role == "admin" && vault.holds(Key::shared(scope, name)).await? {
+        return Ok(String::new());
+    }
+    Err(ApiError::not_found("secret"))
 }
 
 /// Which row a write means, and whether anything is there yet.
@@ -157,30 +200,22 @@ async fn which<'a>(
 ///
 /// The `bool` is what the caller would otherwise ask for a third time: whether
 /// this is a replacement or something new.
-async fn which_to_store<'a>(
+async fn which_to_store(
     vault: &Vault,
-    scope: &'a str,
-    name: &'a str,
-    mine: &'a str,
-) -> Result<(Key<'a>, bool), ApiError> {
-    if !mine.is_empty() {
-        let yours = Key::of(scope, name, mine);
-        if vault.holds(yours).await? {
-            return Ok((yours, true));
-        }
+    scope: &str,
+    name: &str,
+    me: &User,
+) -> Result<(String, bool), ApiError> {
+    if let Some(owner) = vault
+        .owner_for(scope, name, me.id.as_str(), Level::Writer)
+        .await?
+    {
+        return Ok((owner, true));
     }
-
-    let shared = Key::shared(scope, name);
-    if vault.holds(shared).await? {
-        return Ok((shared, true));
+    if me.role == "admin" && vault.holds(Key::shared(scope, name)).await? {
+        return Ok((String::new(), true));
     }
-
-    let new = if mine.is_empty() {
-        shared
-    } else {
-        Key::of(scope, name, mine)
-    };
-    Ok((new, false))
+    Ok((me.id.as_str().to_string(), false))
 }
 
 /// A scope or a name somebody can type again tomorrow.
@@ -224,12 +259,15 @@ pub(super) async fn reveal_secret(
     Extension(principal): Extension<Principal>,
     Path((scope, name)): Path<(String, String)>,
 ) -> ApiResult<Json<RevealedSecret>> {
-    let mine = principal.owner().unwrap_or("");
-    let key = which(&state.vault, &scope, &name, mine).await?;
+    let me = whoever(&principal)?;
+    let owner = whose(&state.vault, &scope, &name, me).await?;
 
     let value = state
         .vault
-        .reveal(key, "shown on the Secrets screen")
+        .reveal(
+            Key::of(&scope, &name, &owner),
+            "shown on the Secrets screen",
+        )
         .await?
         .ok_or_else(|| ApiError::not_found("secret"))?;
 
@@ -266,7 +304,7 @@ pub(super) async fn replace_secret(
     Path((scope, name)): Path<(String, String)>,
     Json(req): Json<ReplaceSecret>,
 ) -> ApiResult<StatusCode> {
-    let mine = principal.owner().unwrap_or("");
+    let me = whoever(&principal)?;
     let value = req.value.trim();
     if value.is_empty() {
         return Err(ApiError::new(
@@ -275,7 +313,7 @@ pub(super) async fn replace_secret(
         ));
     }
 
-    let (key, held) = which_to_store(&state.vault, &scope, &name, mine).await?;
+    let (owner, held) = which_to_store(&state.vault, &scope, &name, me).await?;
     if !held {
         nameable("scope", &scope)?;
         nameable("name", &name)?;
@@ -288,7 +326,10 @@ pub(super) async fn replace_secret(
     } else {
         "added on the Secrets screen"
     };
-    state.vault.put(key, value, reason).await?;
+    state
+        .vault
+        .put(Key::of(&scope, &name, &owner), value, reason)
+        .await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -309,11 +350,14 @@ pub(super) async fn remove_secret(
     Extension(principal): Extension<Principal>,
     Path((scope, name)): Path<(String, String)>,
 ) -> ApiResult<StatusCode> {
-    let mine = principal.owner().unwrap_or("");
-    let key = which(&state.vault, &scope, &name, mine).await?;
+    let me = whoever(&principal)?;
+    let owner = whose(&state.vault, &scope, &name, me).await?;
     state
         .vault
-        .forget(key, "removed on the Secrets screen")
+        .forget(
+            Key::of(&scope, &name, &owner),
+            "removed on the Secrets screen",
+        )
         .await?;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -321,13 +365,23 @@ pub(super) async fn remove_secret(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::accounts::Accounts;
     use crate::db::Db;
     use crate::vault::crypto::RootKey;
     use crate::vault::GIT;
 
-    async fn vault() -> Vault {
-        let db = Db::open_for_test().await.unwrap();
-        Vault::new(db.pool().clone(), RootKey::generate())
+    /// A vault over a database with people in it.
+    ///
+    /// Real rows rather than a bare pool, because resolving whose secret a scope
+    /// and a name mean now goes through `users.slug` and the grant view — the
+    /// thing being tested is which row is chosen, and that question does not
+    /// exist without somebody to ask it for.
+    async fn set_up() -> (Vault, Accounts, User) {
+        let (db, _) = Db::open_for_test_owned().await.unwrap();
+        let accounts = Accounts::new(db.pool().clone());
+        let admin = accounts.user_by_name("admin").await.unwrap().unwrap();
+        let vault = Vault::new(db.pool().clone(), RootKey::generate());
+        (vault, accounts, admin)
     }
 
     /// The bug this file was opened for: adding refused every name.
@@ -337,68 +391,96 @@ mod tests {
     /// work for the one thing it was there to do.
     #[tokio::test]
     async fn a_name_nothing_holds_is_created_as_your_own() {
-        let vault = vault().await;
+        let (vault, _accounts, me) = set_up().await;
 
-        let (key, held) = which_to_store(&vault, "global", "STRIPE", "u_alice")
+        let (owner, held) = which_to_store(&vault, "global", "STRIPE", &me)
             .await
             .unwrap();
 
         assert!(!held, "nothing is stored under that name yet");
-        assert_eq!(key, Key::of("global", "STRIPE", "u_alice"));
+        assert_eq!(owner, me.id.as_str());
     }
 
     /// Replacing the install's own value must not fork a personal copy.
     ///
-    /// The next read resolves yours first, so a second row would leave the
+    /// The next read resolves theirs first, so a second row would leave the
     /// original where it is, read by nobody and rotated by nobody.
     #[tokio::test]
     async fn an_existing_shared_row_is_replaced_where_it_is() {
-        let vault = vault().await;
+        let (vault, _accounts, admin) = set_up().await;
         vault
             .put(Key::shared("repo:r_1", "DATABASE_URL"), "before", "setup")
             .await
             .unwrap();
 
-        let (key, held) = which_to_store(&vault, "repo:r_1", "DATABASE_URL", "u_alice")
+        let (owner, held) = which_to_store(&vault, "repo:r_1", "DATABASE_URL", &admin)
             .await
             .unwrap();
 
         assert!(held);
-        assert_eq!(key, Key::shared("repo:r_1", "DATABASE_URL"));
+        assert_eq!(owner, "", "the install's own row, not a copy of it");
     }
 
-    /// Yours wins over the install's, the same order `which` reads in.
+    /// Theirs wins over the install's, the same order `whose` reads in.
     #[tokio::test]
     async fn your_own_row_is_the_one_you_write_to() {
-        let vault = vault().await;
+        let (vault, _accounts, me) = set_up().await;
         vault
             .put(Key::shared(GIT, "github"), "the install's", "setup")
             .await
             .unwrap();
         vault
-            .put(Key::of(GIT, "github", "u_alice"), "hers", "setup")
+            .put(Key::of(GIT, "github", me.id.as_str()), "hers", "setup")
             .await
             .unwrap();
 
-        let (key, held) = which_to_store(&vault, GIT, "github", "u_alice")
-            .await
-            .unwrap();
+        let (owner, held) = which_to_store(&vault, GIT, "github", &me).await.unwrap();
 
         assert!(held);
-        assert_eq!(key, Key::of(GIT, "github", "u_alice"));
+        assert_eq!(owner, me.id.as_str());
     }
 
-    /// A principal with no owner of its own writes the install's row.
+    /// The install's own is an administrator's, and nobody else can even find it.
+    ///
+    /// It is not a credential somebody authorized — it is the deployment's, and
+    /// one of them (`firetower/ssh-identity`) opens every machine in the fleet.
+    /// A member asking for it by name gets their own row or nothing, which is
+    /// what stops this route being a way to read one by guessing its name.
     #[tokio::test]
-    async fn without_an_owner_a_new_name_belongs_to_the_install() {
-        let vault = vault().await;
+    async fn the_installs_own_row_is_not_a_members_to_find() {
+        let (vault, accounts, _admin) = set_up().await;
+        let org = ft_core::OrgId::from_stored(
+            accounts
+                .user_by_name("admin")
+                .await
+                .unwrap()
+                .unwrap()
+                .org_id
+                .as_str()
+                .to_string(),
+        );
+        let member = accounts
+            .create_user(&org, "ana", "ana@example.test", "member")
+            .await
+            .unwrap()
+            .0;
 
-        let (key, held) = which_to_store(&vault, "global", "STRIPE", "")
+        vault
+            .put(Key::shared("global", "STRIPE"), "the install's", "setup")
             .await
             .unwrap();
 
+        assert!(
+            whose(&vault, "global", "STRIPE", &member).await.is_err(),
+            "a member cannot reach the deployment's own credential"
+        );
+
+        // And a write under that name becomes theirs rather than landing on it.
+        let (owner, held) = which_to_store(&vault, "global", "STRIPE", &member)
+            .await
+            .unwrap();
         assert!(!held);
-        assert_eq!(key, Key::shared("global", "STRIPE"));
+        assert_eq!(owner, member.id.as_str());
     }
 
     /// What a new name may be. The scopes Firetower writes itself have to pass.

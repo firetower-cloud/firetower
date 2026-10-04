@@ -130,6 +130,16 @@ pub struct ProviderStatus {
     /// the address of it contains the client id. Public by design: a
     /// device-flow application has no paired secret.
     pub client_id: Option<String>,
+    /// Whether the caller may register the application this whole installation
+    /// authorizes against.
+    ///
+    /// Sent rather than worked out by each client, the way `may_upgrade` is.
+    /// The rule is the server's — one application, no owner, and whoever sets
+    /// it decides what everybody here authorizes next — and a copy of it in
+    /// three interfaces is three copies to keep in step. It was drawn for
+    /// everybody once, so a member filled the field in and was refused by the
+    /// time they pressed Save.
+    pub may_set_application: bool,
 }
 
 /// A device authorization waiting for someone to approve it in a browser.
@@ -180,10 +190,15 @@ mod tests {
             configured: true,
             pending: None,
             client_id: Some("Ov23liEXAMPLE".into()),
+            may_set_application: false,
         };
 
         let json = serde_json::to_value(&status).unwrap();
         assert_eq!(json["clientId"], "Ov23liEXAMPLE");
+        // Carried in the shape the interfaces read it under. Spelled out here
+        // because it decides whether a field is drawn at all, and a rename
+        // would quietly draw it for everybody again.
+        assert_eq!(json["maySetApplication"], false);
 
         // Nothing registered is `null` rather than an empty string, which
         // would build an address to a page that does not exist.

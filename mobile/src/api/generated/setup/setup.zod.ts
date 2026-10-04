@@ -12,11 +12,12 @@ export const SetupStateResponse = zod.object({
   "completed": zod.boolean().describe('Somebody has been through onboarding, however much they skipped.\n\nOnce true it stays true: the steps after the organisation exist to point\nsomewhere, and a tour that reappears every time this page is opened is a\ntour nobody finishes twice. Connecting GitHub later is asked for on the\nscreen that needs it, where there is no skipping it.'),
   "needsGithub": zod.boolean().describe('No GitHub application is configured. Not a blocker — it is skippable,\nand pasting a repository URL works without one.'),
   "needsOrganization": zod.boolean().describe('Nobody has named the organisation yet.'),
-  "needsPassword": zod.boolean().describe('The signed-in account\'s password came from a file.'),
+  "needsPassword": zod.boolean().describe('The signed-in account\'s password was chosen by somebody else and has\nto be replaced. The only step of setting up that is not about the\ninstall — it is raised for anybody invited or reset, long after.'),
   "organization": zod.union([zod.null(),zod.object({
   "id": zod.string().describe('Identifies an organisation.'),
   "name": zod.string()
-})]).optional()
+})]).optional(),
+  "publicUrl": zod.string().describe('Where a person reaches this Firetower in a browser.\n\n**Not whatever host served the page.** The interface and the control\nplane are two addresses — in development they are two ports, and in a\ndeployment behind a proxy they can be two names — so a screen that hands\nsomebody a sign-in link cannot read it off its own `window.location`\nand be right anywhere but the installation it happens to be running on.\n\n`FIRETOWER_PUBLIC_URL` when it is set, and the interface\'s own address\notherwise. It is the same value the session notifications link to.')
 }).describe('Which parts of setting up are still outstanding.\n\nRead before anything else, so the interface knows whether to show the\nwizard, and how much of it.')
 
 export const CompleteSetupResponse = zod.void()

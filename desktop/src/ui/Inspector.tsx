@@ -9,7 +9,7 @@
  * a time off `list_files`, the diff off `session_diff`, the commit off
  * `session_work`.
  */
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { ChevronRight, FileCode2, FileDiff, FolderTree, MessageSquarePlus, PanelRightClose, Ship as ShipIcon } from "lucide-react";
 import { useListFiles } from "~/api/generated/sessions/sessions";
@@ -17,7 +17,7 @@ import type { FileEntry, Session } from "~/api/generated/model";
 import { sendTurn } from "~/api/generated/sessions/sessions";
 import { asMessage } from "~/api/notes";
 import { useDiff } from "~/data";
-import { fromPatch, isNew } from "~/patch";
+import { fromPatch } from "~/patch";
 import { why } from "~/data";
 import { Ship } from "~/ui/Ship";
 import { FileGlyph } from "~/ui/FileGlyph";
@@ -49,21 +49,40 @@ export function Inspector({
   onClose: () => void;
   width?: number;
 }) {
+  /* Committing, pushing a branch and opening a pull request all go out under
+     the *session owner's* git identity, so they are the owner's and not the
+     workspace's — `maySpeak`, not `mayWrite`. Somebody with writer here has
+     their own agent to push from. The diff and the file tree are what watching
+     the work means; this tab is not part of it. */
+  const mayAct = session.maySpeak !== false;
+  const tabs = useMemo(() => (mayAct ? TABS : TABS.filter((t) => t.id !== "ship")), [mayAct]);
+  /* A tab is remembered across sessions, so somebody who was last on Commit in
+     their own workspace must not open somebody else's to an empty panel. */
+  const shown: TabId = tab === "ship" && !mayAct ? "diff" : tab;
+
   const diff = useDiff(session);
-  const pending = useDiff(session, "Head");
+  /* Names only: the tree marks each file added or modified and reads nothing
+     else, and this was pulling every byte of every patch to do it. */
+  const pending = useDiff(session, "Head", true);
+  /* The patch is carried, not read. Turning one into rows costs about what it
+     is long, and only the open file's rows are drawn — so `Hunks` does it for
+     that one file and nothing does it for the other forty. */
   const files: Changed[] = useMemo(
-    () => diff.data.map((d) => ({ path: d.path, at: d.at, added: d.added, removed: d.removed, lines: fromPatch(d.patch), fresh: isNew(d.patch) })),
+    () => diff.data.map((d) => ({ path: d.path, at: d.at, added: d.added, removed: d.removed, patch: d.patch, fresh: d.fresh, truncated: d.truncated })),
     [diff.data],
   );
   /* The tree marks what is not committed yet — the editor's sense of "changed". */
-  const changed = useMemo(() => new Map(pending.data.map((d) => [d.at, isNew(d.patch)])), [pending.data]);
+  const changed = useMemo(() => new Map(pending.data.map((d) => [d.at, d.fresh === true])), [pending.data]);
+  /* The pane that scrolls. The diff draws only the rows in it, so the list
+     inside has to be able to ask where it has got to. */
+  const scroller = useRef<HTMLDivElement>(null);
 
   return (
     <aside style={{ width: width ?? 368 }} className="flex shrink-0 flex-col border-l border-line bg-panel">
       <div className="flex h-11 shrink-0 items-center gap-1 border-b border-line px-2">
         <div className="track">
-          {TABS.map((t) => (
-            <button key={t.id} data-on={tab === t.id} onClick={() => onTab(t.id)}>
+          {tabs.map((t) => (
+            <button key={t.id} data-on={shown === t.id} onClick={() => onTab(t.id)}>
               <span className="flex items-center gap-1.5">
                 <t.icon className="h-3.5 w-3.5" strokeWidth={1.75} />
                 {t.label}
@@ -77,10 +96,10 @@ export function Inspector({
         </button>
       </div>
 
-      <div className="scroll-slim min-h-0 flex-1 overflow-y-auto">
-        {tab === "diff" && <DiffList session={session} files={files} loading={diff.loading} error={diff.error} onOpenFile={onOpenFile} />}
-        {tab === "files" && <LiveTree sessionId={session.id} changed={changed} onOpenFile={onOpenFile} />}
-        {tab === "ship" && <Ship session={session} branch={branch} files={files} />}
+      <div ref={scroller} className="scroll-slim min-h-0 flex-1 overflow-y-auto">
+        {shown === "diff" && <DiffList session={session} files={files} loading={diff.loading} error={diff.error} onOpenFile={onOpenFile} scroller={scroller} />}
+        {shown === "files" && <LiveTree sessionId={session.id} changed={changed} onOpenFile={onOpenFile} />}
+        {shown === "ship" && <Ship session={session} branch={branch} files={files} />}
       </div>
     </aside>
   );
@@ -89,7 +108,10 @@ export function Inspector({
 /* ── Diff ──────────────────────────────────────────────────────────────── */
 
 /** `path` as the server names it (what the ship flow sends back); `at` where the file sits in the workspace tree. */
-export type Changed = { path: string; at: string; added: number; removed: number; lines: [string, string][]; fresh?: boolean };
+export type Changed = { path: string; at: string; added: number; removed: number; patch: string; fresh?: boolean; truncated?: boolean };
+
+/** A note being written against one line of one file. */
+type Note = { id: string; path: string; quote: string; text: string };
 
 function DiffList({
   session,
@@ -97,18 +119,20 @@ function DiffList({
   loading,
   error,
   onOpenFile,
+  scroller,
 }: {
   session: Session;
   files: Changed[];
   loading: boolean;
   error: string | null;
   onOpenFile: (p: string, keep?: boolean) => void;
+  scroller: React.RefObject<HTMLDivElement | null>;
 }) {
   const [open, setOpen] = useState<string | null>(null);
-  const [note, setNote] = useState<{ id: string; path: string; quote: string; text: string } | null>(null);
+  const [note, setNote] = useState<Note | null>(null);
 
   const send = useMutation({
-    mutationFn: (n: { id: string; path: string; quote: string; text: string }) =>
+    mutationFn: (n: Note) =>
       sendTurn(session.id, {
         text: `On \`${n.path}\`:\n\n${asMessage([{ id: n.id, item: n.path, quote: n.quote, note: n.text } as never])}`,
         images: [],
@@ -141,39 +165,188 @@ function DiffList({
             </button>
 
             {on && (
-              <div className="scroll-slim overflow-x-auto border-y border-line-soft bg-ground/50 font-mono text-code">
-                {d.lines.map(([kind, text], i) => {
-                  const id = `${d.path}:${i}`;
-                  return (
-                    <div key={i} className="group/line">
-                      <div className={`flex w-max min-w-full items-start gap-2 px-3 py-px ${kind === "add" ? "bg-sage-tint text-sage" : kind === "del" ? "bg-brick-tint text-brick" : kind === "hunk" ? "text-slate" : "text-dim"}`}>
-                        <span className="w-3 shrink-0 select-none opacity-60">{kind === "add" ? "+" : kind === "del" ? "−" : " "}</span>
-                        <span className="flex-1 whitespace-pre">{text}</span>
-                        {kind !== "hunk" && (
-                          <button onClick={() => setNote(note?.id === id ? null : { id, path: d.path, quote: text, text: "" })} title="Ask for a change here" className="shrink-0 text-mute opacity-0 transition-opacity group-hover/line:opacity-100 hover:text-bone">
-                            <MessageSquarePlus className="h-3.5 w-3.5" strokeWidth={1.75} />
-                          </button>
-                        )}
-                      </div>
-                      {note?.id === id && (
-                        <div className="border-y border-line bg-panel px-3 py-2.5">
-                          <input autoFocus value={note.text} onChange={(e) => setNote({ ...note, text: e.target.value })} onKeyDown={(e) => { if (e.key === "Enter" && note.text.trim()) send.mutate(note); if (e.key === "Escape") setNote(null); }} placeholder="What should change here?" className="w-full bg-transparent font-sans text-ui text-bone placeholder:text-mute focus:outline-none" />
-                          <div className="mt-2 flex items-center gap-1.5">
-                            <button disabled={!note.text.trim() || send.isPending} onClick={() => send.mutate(note)} className="control bg-raise text-ui text-bone hover:bg-overlay disabled:text-mute">{send.isPending ? "Sending…" : "Send to the agent"}</button>
-                            <button onClick={() => setNote(null)} className="control text-mute hover:text-dim">Cancel</button>
-                            {send.error && <span className="text-meta text-brick">{why(send.error)}</span>}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
+              <Hunks
+                path={d.path}
+                patch={d.patch}
+                truncated={d.truncated === true}
+                at={d.at}
+                onOpenFile={onOpenFile}
+                scroller={scroller}
+                note={note?.path === d.path ? note : null}
+                onNote={setNote}
+                onSend={(n) => send.mutate(n)}
+                sending={send.isPending}
+                failure={send.error ? why(send.error) : null}
+              />
             )}
           </div>
         );
       })}
     </div>
+  );
+}
+
+/**
+ * A row's height, in pixels, fixed rather than measured.
+ *
+ * Every row is one line of `whitespace-pre` that never wraps, so they are all
+ * the same height anyway — saying so in one number means the window is
+ * arithmetic, with no per-row measuring and no drift between what the spacers
+ * reserve and what the rows take. 21px of line box inside 1px of padding
+ * either side, which is what `text-code` was drawing before.
+ */
+const ROW = 23;
+
+/** Rows drawn beyond the pane, above and below. */
+const OVERSCAN = 24;
+
+/**
+ * One file's hunks, drawing only the rows the pane can show.
+ *
+ * A day's work on one file is thousands of lines, and drawing all of them was
+ * what made this pane expensive: a hundred and twenty thousand nodes, a hundred
+ * and seventy megabytes, and a third of a second of frozen main thread every
+ * time the poll came back while the agent was still editing — which is exactly
+ * when you have this open. Rows above and below the pane are two spacer divs.
+ *
+ * The note card is in the flow, so the rows below it are pushed down by about a
+ * card's height and the arithmetic is that much wrong for them. `OVERSCAN` is
+ * far more than a card is tall, so the error never reaches an edge.
+ */
+function Hunks({
+  path,
+  patch,
+  truncated,
+  at,
+  onOpenFile,
+  scroller,
+  note,
+  onNote,
+  onSend,
+  sending,
+  failure,
+}: {
+  path: string;
+  patch: string;
+  /** The server cut this one for length; what is here is the start of it. */
+  truncated: boolean;
+  at: string;
+  onOpenFile: (p: string, keep?: boolean) => void;
+  scroller: React.RefObject<HTMLDivElement | null>;
+  note: Note | null;
+  onNote: (n: Note | null) => void;
+  onSend: (n: Note) => void;
+  sending: boolean;
+  failure: string | null;
+}) {
+  /* Read here, for this file only. The sheet carries patches; this is the one
+     place that turns one into rows. */
+  const lines = useMemo(() => fromPatch(patch), [patch]);
+  /* Held so the pane does not change width as the window moves over it: the
+     widest line decides how far the diff scrolls sideways, and with only some
+     of the rows drawn that would otherwise be the widest line *in view*. Each
+     character is one `ch` in a monospace face; the rest is the row's gutter. */
+  const widest = useMemo(() => lines.reduce((n, [, text]) => Math.max(n, text.length), 0), [lines]);
+
+  const box = useRef<HTMLDivElement>(null);
+  const [[from, to], setSeen] = useState<[number, number]>([0, OVERSCAN * 2]);
+  /* One control for the pane rather than one per row. Drawn into whichever row
+     the pointer is over, which is where it has always appeared — the thirteen
+     thousand that were in the document waiting to be hovered were more than
+     half of everything in it. */
+  const [hover, setHover] = useState<number | null>(null);
+
+  useLayoutEffect(() => {
+    const pane = scroller.current;
+    const node = box.current;
+    if (!pane || !node) return;
+    const fit = () => {
+      /* How much of this block is above the top of the pane. Measured against
+         the pane rather than from `scrollTop`, so the file rows and the other
+         files' headers above it do not have to be accounted for. */
+      const above = Math.max(0, pane.getBoundingClientRect().top - node.getBoundingClientRect().top);
+      const first = Math.max(0, Math.floor(above / ROW) - OVERSCAN);
+      const last = Math.min(lines.length, Math.ceil((above + pane.clientHeight) / ROW) + OVERSCAN);
+      setSeen((held) => (held[0] === first && held[1] === last ? held : [first, last]));
+    };
+    fit();
+    pane.addEventListener("scroll", fit, { passive: true });
+    /* The pane is resizable by its edge, and the window it is in resizes. */
+    const watch = new ResizeObserver(fit);
+    watch.observe(pane);
+    return () => {
+      pane.removeEventListener("scroll", fit);
+      watch.disconnect();
+    };
+  }, [scroller, lines.length]);
+
+  return (
+    <>
+      <div
+        ref={box}
+        onMouseOver={(e) => {
+          const row = (e.target as HTMLElement).closest<HTMLElement>("[data-row]");
+          setHover(row ? Number(row.dataset.row) : null);
+        }}
+        onMouseLeave={() => setHover(null)}
+        /* `contain-layout` so that measuring something else on the page — the
+           composer sizing itself to its text on every keystroke — cannot be
+           made to lay these rows out again. */
+        className="scroll-slim contain-layout overflow-x-auto border-y border-line-soft bg-ground/50 font-mono text-code"
+      >
+      <div style={{ minWidth: `calc(${widest}ch + 3.5rem)` }}>
+        <div style={{ height: from * ROW }} aria-hidden />
+        {lines.slice(from, to).map(([kind, text], nth) => {
+          const i = from + nth;
+          const id = `${path}:${i}`;
+          return (
+            <div key={i}>
+              <div
+                data-row={i}
+                style={{ height: ROW }}
+                className={`flex items-start gap-2 px-3 py-px ${kind === "add" ? "bg-sage-tint text-sage" : kind === "del" ? "bg-brick-tint text-brick" : kind === "hunk" ? "text-slate" : "text-dim"}`}
+              >
+                <span className="w-3 shrink-0 select-none opacity-60">{kind === "add" ? "+" : kind === "del" ? "−" : " "}</span>
+                <span className="flex-1 whitespace-pre">{text}</span>
+                {kind !== "hunk" && hover === i && (
+                  <button onClick={() => onNote(note?.id === id ? null : { id, path, quote: text, text: "" })} title="Ask for a change here" className="shrink-0 text-mute hover:text-bone">
+                    <MessageSquarePlus className="h-3.5 w-3.5" strokeWidth={1.75} />
+                  </button>
+                )}
+              </div>
+              {note?.id === id && (
+                <div className="border-y border-line bg-panel px-3 py-2.5">
+                  <input autoFocus value={note.text} onChange={(e) => onNote({ ...note, text: e.target.value })} onKeyDown={(e) => { if (e.key === "Enter" && note.text.trim()) onSend(note); if (e.key === "Escape") onNote(null); }} placeholder="What should change here?" className="w-full bg-transparent font-sans text-ui text-bone placeholder:text-mute focus:outline-none" />
+                  <div className="mt-2 flex items-center gap-1.5">
+                    <button disabled={!note.text.trim() || sending} onClick={() => onSend(note)} className="control bg-raise text-ui text-bone hover:bg-overlay disabled:text-mute">{sending ? "Sending…" : "Send to the agent"}</button>
+                    <button onClick={() => onNote(null)} className="control text-mute hover:text-dim">Cancel</button>
+                    {failure && <span className="text-meta text-brick">{failure}</span>}
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
+        <div style={{ height: Math.max(0, lines.length - to) * ROW }} aria-hidden />
+      </div>
+      </div>
+
+      {/* Said at the foot, where the patch stops, rather than as a banner at
+          the top: what is above is real and worth reading, and the only thing
+          wrong with it is that it is not all of it.
+
+          Outside the scrolling box on purpose — inside, it would be as wide as
+          the widest line of code and the way out of it would be somewhere off
+          to the right. */}
+      {truncated && (
+        <div className="flex items-center gap-2 border-b border-line-soft bg-panel px-3 py-2.5">
+          <span className="min-w-0 flex-1 text-meta text-mute">Too much changed here to draw it all.</span>
+          <button onClick={() => onOpenFile(at, true)} className="control shrink-0 text-ui text-dim hover:bg-raise hover:text-bone">
+            Open the file
+          </button>
+        </div>
+      )}
+    </>
   );
 }
 

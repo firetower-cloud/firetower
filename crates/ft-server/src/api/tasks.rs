@@ -38,12 +38,11 @@ pub(super) async fn credential_for(
     tracker: &Tracker,
     why: &str,
 ) -> Result<zeroize::Zeroizing<String>, ApiError> {
+    let me = owner(principal)?;
+    let holder = whose(state, tracker, me).await?;
     state
         .vault
-        .get(
-            Key::of(tracker.vault_scope(), tracker.id, owner(principal)?),
-            why,
-        )
+        .get(Key::of(tracker.vault_scope(), tracker.id, &holder), why)
         .await?
         .ok_or_else(|| {
             ApiError::new(
@@ -51,6 +50,34 @@ pub(super) async fn credential_for(
                 format!("{} hasn't been connected yet", tracker.label),
             )
         })
+}
+
+/// Whose key answers for this person: their own, or one filed where they work.
+///
+/// **A key is not always the asker's.** A git host's is — a token that pushes
+/// commits has to be attributable to a human, so every person connects their
+/// own. An API key is frequently the organisation's: one Linear workspace key
+/// that a team shares, filed into a directory, is the arrangement the product
+/// should have rather than five people pasting the same string.
+///
+/// `owner_for` is the resolution, and it already prefers theirs — so somebody
+/// who has connected their own keeps using it, and somebody who has not falls
+/// through to whatever the directories they work in hold.
+pub(super) async fn whose(
+    state: &AppState,
+    tracker: &Tracker,
+    me: &str,
+) -> Result<String, ApiError> {
+    Ok(state
+        .vault
+        .owner_for(
+            tracker.vault_scope(),
+            tracker.id,
+            me,
+            crate::access::Level::Viewer,
+        )
+        .await?
+        .unwrap_or_else(|| me.to_string()))
 }
 
 /// One page from whichever tracker was asked for.
@@ -160,7 +187,7 @@ pub(super) async fn list_tasks(
     let connected = match tracker.scope_kind {
         trackers::ScopeKind::Repos => state
             .db
-            .repos()
+            .repos_of(owner(&principal)?)
             .await?
             .into_iter()
             .map(|r| r.slug)

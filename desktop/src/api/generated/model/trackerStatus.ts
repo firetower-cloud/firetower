@@ -22,6 +22,22 @@ export interface TrackerStatus {
   /** What this tracker can return, so the kind toggle offers no more. */
   kinds: TaskKind[];
   label: string;
+  /**
+     * Where that key is filed, and so who else it answers for. Set only
+     * alongside `secret`: the two describe the same shareable thing.
+     * @nullable
+     */
+  path?: string | null;
   /** Whether the scope picker offers repositories or teams. */
   scopeKind: ScopeKind;
+  /**
+     * The key that answers for this person, as the vault addresses it —
+     * `scope/name/owner`. Absent when nothing is held.
+     *
+     * A handle, so a screen can ask who can reach it and offer to file it
+     * somewhere. It is the *resolved* one: their own if they have connected
+     * one, otherwise whatever a directory they work in holds.
+     * @nullable
+     */
+  secret?: string | null;
 }

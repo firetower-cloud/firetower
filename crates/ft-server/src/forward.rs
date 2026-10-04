@@ -460,7 +460,7 @@ mod tests {
     async fn fleet() -> (Fleet, HostId) {
         let (db, _owner) = Db::open_for_test_owned().await.unwrap();
         let host = db
-            .ensure_host("fire-01", ft_core::Compute::Local)
+            .ensure_host("fire-01", ft_core::Compute::Local, _owner.as_str())
             .await
             .unwrap();
         let fleet = Fleet::new(db);

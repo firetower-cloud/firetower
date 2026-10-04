@@ -53,9 +53,31 @@ pub struct User {
     pub id: UserId,
     pub org_id: OrgId,
     pub username: String,
+    /// The label their own space is named with — the `kevin` in
+    /// `u/kevin/ledger_rounding`.
+    ///
+    /// Sent because a client cannot otherwise tell whether a path it is looking
+    /// at is *theirs*. "Is this mine" is the first half of "may I decide where
+    /// this goes", and a client that has to guess gets it wrong in the generous
+    /// direction: it offers a control that the server then refuses.
+    ///
+    /// Not the username. That is chosen by people and may yet become an email
+    /// address; this is derived once and never changes, so renaming somebody
+    /// never moves anything.
+    pub slug: String,
+    /// Where to write to them. Absent on accounts made before one was asked
+    /// for, and never filled in with a guess: a placeholder address cannot be
+    /// told apart from a real one that bounces.
+    pub email: Option<String>,
     pub role: String,
-    /// True while the password came from a file rather than from a person.
-    /// Nothing but replacing it is permitted until this clears.
+    /// True while the password in use was chosen by somebody other than its
+    /// owner: out of a file for the first administrator, and by an
+    /// administrator for everybody invited or reset since.
+    ///
+    /// Nothing but replacing it is permitted until this clears, and replacing
+    /// it is done on the control plane's own interface — the native clients
+    /// read this to send people there rather than offering a form of their
+    /// own.
     pub must_change_password: bool,
     /// Switched off by an administrator: cannot sign in, keeps what they made.
     #[serde(default)]
@@ -153,8 +175,22 @@ impl Accounts {
             .await?;
 
         let id = UserId::new();
+
+        // The identity first. `users.id` references `principals`, and the slug
+        // every path of theirs begins with lives there — so it is written
+        // before the account rather than patched onto it afterwards.
+        let slug = crate::access::Access::provision_principal(
+            &mut tx,
+            &org_id,
+            id.as_str(),
+            crate::access::SubjectKind::Person,
+            username,
+        )
+        .await?;
+
         sqlx::query(
-            "INSERT INTO users (id, org_id, username, password_hash, role, must_change_password)
+            "INSERT INTO users (id, org_id, username, password_hash, role,
+                                must_change_password)
              VALUES ($1, $2, $3, $4, 'admin', TRUE)",
         )
         .bind(id.as_str())
@@ -172,12 +208,23 @@ impl Accounts {
             .execute(&mut *tx)
             .await?;
 
+        // The team that is everybody and the directory they share, then this
+        // person's own label. In the same transaction as the organisation
+        // because an organisation without them cannot say "all of us" and has
+        // nowhere to share anything — a first boot that got halfway would leave
+        // a Firetower that looks set up and cannot share any work.
+        crate::access::Access::provision_organization(&mut tx, &org_id).await?;
+
         tx.commit().await?;
 
         Ok(User {
             id,
             org_id,
             username: username.to_string(),
+            slug,
+            // Made at first boot, before there is anybody to ask. They add one
+            // on the People screen, where the prompt is waiting.
+            email: None,
             role: "admin".into(),
             must_change_password: true,
             disabled: false,
@@ -205,7 +252,7 @@ impl Accounts {
     /// Everyone in the organisation, administrators first, then by name.
     pub async fn users_of(&self, org: &OrgId) -> Result<Vec<User>> {
         let rows = sqlx::query(
-            "SELECT * FROM users WHERE org_id = $1
+            "SELECT u.*, p.slug FROM users u JOIN principals p ON p.id = u.id WHERE u.org_id = $1
              ORDER BY (role = 'admin') DESC, lower(username)",
         )
         .bind(org.as_str())
@@ -232,6 +279,7 @@ impl Accounts {
         &self,
         org: &OrgId,
         username: &str,
+        email: &str,
         role: &str,
     ) -> Result<(User, String)> {
         let username = username.trim();
@@ -247,28 +295,74 @@ impl Accounts {
             matches!(role, "admin" | "member"),
             "a role is admin or member"
         );
+
+        // Shaped, not validated. Anything stricter rejects addresses that work
+        // — plus signs, dots, new top-level domains — and the only test that
+        // settles it is sending a message, which this installation may not yet
+        // be able to do.
+        let email = email.trim();
+        anyhow::ensure!(!email.is_empty(), "a person needs an email address");
+        anyhow::ensure!(email.chars().count() <= 254, "that address is too long");
+        anyhow::ensure!(
+            email.split_once('@').is_some_and(|(before, after)| {
+                !before.is_empty() && after.contains('.') && !after.starts_with('.')
+            }),
+            "that does not look like an email address"
+        );
         let password = temporary_password();
         let id = UserId::new();
+
+        // One transaction for the account and the label its paths are built
+        // from. Separately, a failure between them leaves somebody who can sign
+        // in and whose own space is named after their id — and nothing would
+        // ever retry it.
+        let mut tx = self.pool.begin().await?;
+        let slug = crate::access::Access::provision_principal(
+            &mut tx,
+            org,
+            id.as_str(),
+            crate::access::SubjectKind::Person,
+            username,
+        )
+        .await?;
+
         let done = sqlx::query(
-            "INSERT INTO users (id, org_id, username, password_hash, role, must_change_password)
-             VALUES ($1, $2, $3, $4, $5, TRUE)
+            "INSERT INTO users (id, org_id, username, email, password_hash, role,
+                                must_change_password)
+             VALUES ($1, $2, $3, $4, $5, $6, TRUE)
              ON CONFLICT (org_id, username) DO NOTHING",
         )
         .bind(id.as_str())
         .bind(org.as_str())
         .bind(username)
+        .bind(email)
         .bind(hash_password(&password)?)
         .bind(role)
-        .execute(&self.pool)
-        .await?;
+        .execute(&mut *tx)
+        .await;
+
+        // Two ways to already exist, and they are different sentences. The
+        // username collision is the `DO NOTHING` above; the address is a unique
+        // index, and a database error nobody translates reads as "that didn't
+        // work" to the person who typed it.
+        let done = match done {
+            Err(e) if is_duplicate_email(&e) => {
+                bail!("{email} is already somebody's here")
+            }
+            other => other?,
+        };
         if done.rows_affected() == 0 {
             bail!("there is already a user called {username}");
         }
+        tx.commit().await?;
+
         Ok((
             User {
                 id,
                 org_id: org.clone(),
                 username: username.to_string(),
+                slug,
+                email: Some(email.to_string()),
                 role: role.to_string(),
                 must_change_password: true,
                 disabled: false,
@@ -279,13 +373,46 @@ impl Accounts {
 
     /// Admin or member. The last administrator cannot be made a member —
     /// an organisation nobody can administer is a locked room.
+    /// Give somebody an address, or change the one they have.
+    ///
+    /// The same checks `create_user` makes, because an address added later is
+    /// the same thing as one added at the start. The only difference is that
+    /// nobody was asked for it at the time.
+    pub async fn set_email(&self, id: &UserId, email: &str) -> Result<User> {
+        let email = email.trim();
+        anyhow::ensure!(!email.is_empty(), "a person needs an email address");
+        anyhow::ensure!(email.chars().count() <= 254, "that address is too long");
+        anyhow::ensure!(
+            email.split_once('@').is_some_and(|(before, after)| {
+                !before.is_empty() && after.contains('.') && !after.starts_with('.')
+            }),
+            "that does not look like an email address"
+        );
+
+        let row = sqlx::query(
+            "UPDATE users u SET email = $2 FROM principals p
+              WHERE p.id = u.id AND u.id = $1
+          RETURNING u.*, p.slug",
+        )
+        .bind(id.as_str())
+        .bind(email)
+        .fetch_optional(&self.pool)
+        .await;
+        match row {
+            Err(e) if is_duplicate_email(&e) => bail!("{email} is already somebody's here"),
+            other => other?
+                .map(user_from_row)
+                .context("there is nobody here with that id"),
+        }
+    }
+
     pub async fn set_role(&self, id: &UserId, role: &str) -> Result<User> {
         anyhow::ensure!(
             matches!(role, "admin" | "member"),
             "a role is admin or member"
         );
         let mut tx = self.pool.begin().await?;
-        let user = sqlx::query("SELECT * FROM users WHERE id = $1 FOR UPDATE")
+        let user = sqlx::query("SELECT u.*, p.slug FROM users u JOIN principals p ON p.id = u.id WHERE u.id = $1 FOR UPDATE OF u")
             .bind(id.as_str())
             .fetch_optional(&mut *tx)
             .await?
@@ -313,7 +440,7 @@ impl Accounts {
     /// they made stays theirs. The last administrator cannot be switched off.
     pub async fn set_disabled(&self, id: &UserId, disabled: bool) -> Result<User> {
         let mut tx = self.pool.begin().await?;
-        let user = sqlx::query("SELECT * FROM users WHERE id = $1 FOR UPDATE")
+        let user = sqlx::query("SELECT u.*, p.slug FROM users u JOIN principals p ON p.id = u.id WHERE u.id = $1 FOR UPDATE OF u")
             .bind(id.as_str())
             .fetch_optional(&mut *tx)
             .await?
@@ -364,27 +491,124 @@ impl Accounts {
         Ok(password)
     }
 
-    /// Gone for good, with everything they owned — the database cascades.
+    /// Gone for good, with everything filed in their own space.
+    ///
+    /// Most of it the database cascades. What it cannot is dealt with below, and
+    /// the reason is the one thing to know here: a slug is freed when its row
+    /// goes, so anything left at `u/<their slug>` would be handed to the next
+    /// person who slugs the same way.
+    ///
     /// Refused for the last administrator.
     pub async fn delete_user(&self, id: &UserId) -> Result<()> {
         let mut tx = self.pool.begin().await?;
-        let user = sqlx::query("SELECT * FROM users WHERE id = $1 FOR UPDATE")
+        self.delete_user_in(&mut tx, id).await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
+    /// The same, inside somebody else's transaction.
+    ///
+    /// Offboarding hands things over first and removes the account second, and
+    /// a failure between the two would leave somebody's work transferred to a
+    /// colleague and the account still able to sign in — or, worse, the account
+    /// gone and half its work still at a root nobody can reach.
+    pub async fn delete_user_in(
+        &self,
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        id: &UserId,
+    ) -> Result<()> {
+        let user = sqlx::query("SELECT u.*, p.slug FROM users u JOIN principals p ON p.id = u.id WHERE u.id = $1 FOR UPDATE OF u")
             .bind(id.as_str())
-            .fetch_optional(&mut *tx)
+            .fetch_optional(&mut **tx)
             .await?
             .map(user_from_row)
             .context("no such user")?;
         if user.role == "admin"
             && !user.disabled
-            && Self::active_admins(&mut tx, &user.org_id).await? <= 1
+            && Self::active_admins(tx, &user.org_id).await? <= 1
         {
             bail!("{} is the only administrator", user.username);
         }
+        // Their grants go with them. `grants.subject_id` names a user or a
+        // team depending on the row, so it carries no foreign key and the
+        // database cannot cascade this — which left a grant naming somebody who
+        // no longer exists. It resolved to no access, because `directory_access`
+        // joins `users`, so nothing was reachable by it; what it did do was
+        // appear on the list of who can see a directory, as a row with no name.
+        sqlx::query("DELETE FROM grants WHERE subject_kind = 'person' AND subject_id = $1")
+            .bind(id.as_str())
+            .execute(&mut **tx)
+            .await?;
+
+        // What is still filed at `u/<their slug>` has to leave with them, and
+        // this is why.
+        //
+        // Their workspaces and subscriptions cascade — those rows carry
+        // `user_id`. Two kinds do not: a **machine** belongs to the
+        // organisation and a `created_by` that goes null does not move it, and a
+        // **secret** is keyed by an owner with no foreign key on it (the
+        // install's own owner is the empty string, which a null could not be).
+        //
+        // Left alone, both would sit at a root nobody can reach — and the slug
+        // is freed the moment the row goes, so the next person called `ana`
+        // would be given `u/ana` and inherit whatever was still under it. That
+        // is the failure: not an orphan, but somebody else's machine and
+        // somebody else's tokens quietly becoming a new colleague's.
+        //
+        // A machine goes to the shared directory, because compute is real and
+        // the organisation is still running on it. A secret goes, because it was
+        // that person's credential, nothing else can open it, and keeping it
+        // would be keeping a token nobody can rotate.
+        // Twice, and the second one is why this cannot fail: `hosts_path_unique`
+        // would refuse `d.shared.fire_01` if something were already filed there,
+        // and a delete that dies on a name collision is a person nobody can
+        // remove. The first pass takes the readable path where it is free; the
+        // second takes whatever is left and puts the machine's own id on the end,
+        // which nothing can collide with.
+        //
+        // This becomes the fallback rather than the rule once offboarding lands:
+        // an administrator reassigns what should survive, and whatever they
+        // leave takes this route.
+        // Deleted, not handed to the organisation.
+        //
+        // These used to be swept into `d/shared`, on the grounds that compute is
+        // real and somebody is still running on it. That is an unconsented
+        // transfer of something personal, and the rule is that what is at
+        // `u/<them>/…` is theirs: an administrator may destroy it along with the
+        // account, and may never pass it to anybody else. The machine itself is
+        // untouched — this is a row, and whoever wants it back adds it again.
+        sqlx::query(
+            "DELETE FROM hosts
+              WHERE path <@ ('u.' || (SELECT slug FROM principals WHERE id = $1))::ltree",
+        )
+        .bind(id.as_str())
+        .execute(&mut **tx)
+        .await
+        .context("removing the machines that were theirs")?;
+
+        sqlx::query(
+            "DELETE FROM secrets
+              WHERE owner = $1
+                 OR path <@ ('u.' || (SELECT slug FROM principals WHERE id = $1))::ltree",
+        )
+        .bind(id.as_str())
+        .execute(&mut **tx)
+        .await
+        .context("removing their credentials")?;
+
         sqlx::query("DELETE FROM users WHERE id = $1")
             .bind(id.as_str())
-            .execute(&mut *tx)
+            .execute(&mut **tx)
             .await?;
-        tx.commit().await?;
+
+        // The account goes; the identity stays, retired. That row is what keeps
+        // `kevin` from ever being issued again — so an exception somebody wrote
+        // on their own workspace, `{"u/kevin": "writer"}`, can never land on a
+        // new colleague who happens to have the same name. Sweeping those
+        // entries is hygiene; this is the guarantee.
+        crate::access::Access::forget_exceptions(tx, &format!("u/{}", user.slug)).await?;
+        crate::access::Access::retire_principal(tx, id.as_str()).await?;
+
         Ok(())
     }
 
@@ -429,7 +653,7 @@ impl Accounts {
     // ── signing in ─────────────────────────────────────────────────────
 
     pub async fn user_by_name(&self, username: &str) -> Result<Option<User>> {
-        let row = sqlx::query("SELECT * FROM users WHERE username = $1")
+        let row = sqlx::query("SELECT u.*, p.slug FROM users u JOIN principals p ON p.id = u.id WHERE u.username = $1")
             .bind(username.trim())
             .fetch_optional(&self.pool)
             .await
@@ -438,10 +662,12 @@ impl Accounts {
     }
 
     pub async fn user_by_id(&self, id: &UserId) -> Result<Option<User>> {
-        let row = sqlx::query("SELECT * FROM users WHERE id = $1")
-            .bind(id.as_str())
-            .fetch_optional(&self.pool)
-            .await?;
+        let row = sqlx::query(
+            "SELECT u.*, p.slug FROM users u JOIN principals p ON p.id = u.id WHERE u.id = $1",
+        )
+        .bind(id.as_str())
+        .fetch_optional(&self.pool)
+        .await?;
         Ok(row.map(user_from_row))
     }
 
@@ -451,7 +677,7 @@ impl Accounts {
     /// password" are the same answer to whoever is asking, because the
     /// difference is how you learn which usernames exist.
     pub async fn authenticate(&self, username: &str, password: &str) -> Result<Option<User>> {
-        let row = sqlx::query("SELECT * FROM users WHERE username = $1")
+        let row = sqlx::query("SELECT u.*, p.slug FROM users u JOIN principals p ON p.id = u.id WHERE u.username = $1")
             .bind(username.trim())
             .fetch_optional(&self.pool)
             .await?;
@@ -636,10 +862,19 @@ fn user_from_row(r: sqlx::postgres::PgRow) -> User {
         id: UserId::from_stored(r.get::<String, _>("id")),
         org_id: OrgId::from_stored(r.get::<String, _>("org_id")),
         username: r.get("username"),
+        slug: r.get("slug"),
+        email: r.try_get("email").ok().flatten(),
         role: r.get("role"),
         must_change_password: r.get("must_change_password"),
         disabled: r.try_get("disabled").unwrap_or(false),
     }
+}
+
+/// Whether a database error is the email index refusing a second copy.
+fn is_duplicate_email(e: &sqlx::Error) -> bool {
+    e.as_database_error()
+        .and_then(|d| d.constraint())
+        .is_some_and(|c| c == "users_by_email")
 }
 
 /// A password for somebody else to replace: long, from the same alphabet as a
@@ -712,6 +947,207 @@ mod tests {
     async fn accounts() -> Accounts {
         let db = Db::open_for_test().await.unwrap();
         Accounts::new(db.pool().clone())
+    }
+
+    /// The invariant `principals` exists for.
+    ///
+    /// An exception written on somebody else's workspace — `{"u/ana": "writer"}`
+    /// — outlives Ana entirely, because nothing in the database can reach into a
+    /// JSON blob to clean it up. If her slug were reissued, the next Ana would
+    /// inherit a stranger's access silently, and the workspace's owner would see
+    /// nothing change. The retired principal is what makes that impossible.
+    /// One mailbox, one account, whatever the capitalisation.
+    ///
+    /// `Kevin@westlabs.com` and `kevin@westlabs.com` are the same inbox, and
+    /// somebody signing up twice by shifting a key is a support ticket nobody
+    /// should have to answer.
+    #[tokio::test]
+    async fn an_address_belongs_to_one_person() {
+        let (db, _admin) = Db::open_for_test_owned().await.unwrap();
+        let accounts = Accounts::new(db.pool().clone());
+        let org = OrgId::from_stored(db.org().await.unwrap());
+
+        accounts
+            .create_user(&org, "ana", "ana@westlabs.com", "member")
+            .await
+            .unwrap();
+
+        let refused = accounts
+            .create_user(&org, "ana2", "Ana@Westlabs.com", "member")
+            .await
+            .expect_err("the same mailbox, shouted");
+        assert!(
+            refused.to_string().contains("already somebody's"),
+            "{refused}"
+        );
+
+        // And an address is still optional for whoever was here first.
+        let first = accounts.user_by_name("admin").await.unwrap().unwrap();
+        assert!(first.email.is_none(), "nothing was invented for them");
+
+        let now = accounts
+            .set_email(&first.id, "  kevin@westlabs.com ")
+            .await
+            .unwrap();
+        assert_eq!(now.email.as_deref(), Some("kevin@westlabs.com"), "trimmed");
+
+        let refused = accounts
+            .set_email(&first.id, "not-an-address")
+            .await
+            .expect_err("shaped like nothing");
+        assert!(refused.to_string().contains("email address"), "{refused}");
+    }
+
+    #[tokio::test]
+    async fn a_slug_is_never_issued_twice() {
+        let (db, _admin) = Db::open_for_test_owned().await.unwrap();
+        let accounts = Accounts::new(db.pool().clone());
+        let org = OrgId::from_stored(db.org().await.unwrap());
+
+        let first = accounts
+            .create_user(&org, "ana", "ana@example.test", "member")
+            .await
+            .unwrap()
+            .0;
+        assert_eq!(first.slug, "ana");
+
+        accounts.delete_user(&first.id).await.unwrap();
+
+        // The account is gone; the identity is not.
+        assert!(accounts.user_by_name("ana").await.unwrap().is_none());
+        let retired: (String, Option<chrono::DateTime<chrono::Utc>>) =
+            sqlx::query_as("SELECT slug, retired_at FROM principals WHERE id = $1")
+                .bind(first.id.as_str())
+                .fetch_one(db.pool())
+                .await
+                .unwrap();
+        assert_eq!(retired.0, "ana");
+        assert!(retired.1.is_some(), "retired, not deleted");
+
+        // So the next Ana is a different person, and is named like one.
+        let second = accounts
+            .create_user(&org, "ana", "ana@example.test", "member")
+            .await
+            .unwrap()
+            .0;
+        assert_eq!(second.slug, "ana_2");
+        assert_ne!(second.id.as_str(), first.id.as_str());
+    }
+
+    /// A grant naming somebody who has left resolves to nothing rather than to
+    /// access — the row survives, because it references a principal, but they
+    /// have no `users` row for `directory_access` to join.
+    #[tokio::test]
+    async fn a_grant_to_somebody_who_left_reaches_nothing() {
+        let (db, admin) = Db::open_for_test_owned().await.unwrap();
+        let accounts = Accounts::new(db.pool().clone());
+        let access = crate::access::Access::new(db.pool().clone());
+        let org = OrgId::from_stored(db.org().await.unwrap());
+        let admin = UserId::from_stored(admin);
+
+        let ana = accounts
+            .create_user(&org, "ana", "ana@example.test", "member")
+            .await
+            .unwrap()
+            .0;
+        let shelf = access
+            .create_directory(&org, "Shelf", &admin, &[])
+            .await
+            .unwrap();
+        access
+            .set_grant(
+                shelf.id.as_str(),
+                crate::access::SubjectKind::Person,
+                ana.id.as_str(),
+                crate::access::Level::Writer,
+                &admin,
+            )
+            .await
+            .unwrap();
+        assert!(access
+            .level_on(ana.id.as_str(), shelf.id.as_str())
+            .await
+            .unwrap()
+            .is_some());
+
+        accounts.delete_user(&ana.id).await.unwrap();
+
+        assert_eq!(
+            access
+                .level_on(ana.id.as_str(), shelf.id.as_str())
+                .await
+                .unwrap(),
+            None,
+            "the identity survives; the access does not"
+        );
+    }
+
+    /// A slug is freed when its row goes, so anything still filed at
+    /// `u/<their slug>` would be handed to the next person who slugs the same
+    /// way. This is the test for the sweep that stops that.
+    #[tokio::test]
+    async fn nothing_is_left_behind_at_a_deleted_persons_root() {
+        let (db, admin) = Db::open_for_test_owned().await.unwrap();
+        let accounts = Accounts::new(db.pool().clone());
+        let org = OrgId::from_stored(db.org().await.unwrap());
+        let ana = accounts
+            .create_user(&org, "ana", "ana@example.test", "member")
+            .await
+            .unwrap()
+            .0
+            .id;
+
+        // A machine she added, and a credential she authorized.
+        let host = db
+            .ensure_host("fire-01", ft_core::Compute::Local, ana.as_str())
+            .await
+            .unwrap();
+        assert_eq!(host.path.as_str(), "u/ana/fire_01");
+        let vault =
+            crate::vault::Vault::new(db.pool().clone(), crate::vault::crypto::RootKey::generate());
+        vault
+            .put(
+                crate::vault::Key::of(crate::vault::GIT, "github", ana.as_str()),
+                "a-token",
+                "test setup",
+            )
+            .await
+            .unwrap();
+
+        accounts.delete_user(&ana).await.unwrap();
+
+        // The machine was at her own root, so it goes with her. It used to be
+        // swept into `d/shared` on the grounds that compute is real — but that
+        // is handing something personal to the organisation without asking,
+        // and what is at `u/<them>/…` is theirs. The server itself is
+        // untouched; this is a row, and whoever wants it back adds it again.
+        assert!(db.host_by_name("fire-01").await.unwrap().is_none());
+
+        // Her token goes. Nothing else can open it, and a credential nobody can
+        // rotate is worse than no credential.
+        assert!(!vault
+            .holds(crate::vault::Key::of(
+                crate::vault::GIT,
+                "github",
+                ana.as_str()
+            ))
+            .await
+            .unwrap());
+
+        // And the next `ana` inherits nothing, which is the whole point.
+        let again = accounts
+            .create_user(&org, "ana", "ana@example.test", "member")
+            .await
+            .unwrap()
+            .0
+            .id;
+        assert!(db
+            .hosts_for(again.as_str(), crate::access::Level::Viewer)
+            .await
+            .unwrap()
+            .iter()
+            .all(|h| h.path.as_str() != "u/ana/fire_01"));
+        drop(admin);
     }
 
     #[test]

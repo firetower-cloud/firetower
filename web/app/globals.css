@@ -85,7 +85,11 @@
   --font-narrow: var(--font-archivo-narrow), ui-sans-serif, system-ui, sans-serif;
   --font-mono: var(--font-jetbrains), ui-monospace, "SF Mono", monospace;
 
-  /* ── Radii: three, plus pill ────────────────────────────────── */
+  /* ── Radii: four, plus pill ─────────────────────────────────── */
+  /* A checkbox, and nothing else. 6px on a 16px box is a circle, and a circle
+     is how every interface ever built says "one of these" — so a multiple
+     choice drawn at `sm` reads as a radio group until somebody ticks two. */
+  --radius-xs: 4px;
   --radius-sm: 6px;
   --radius-md: 8px;
   --radius-lg: 12px;

@@ -34,19 +34,20 @@ import { useProviders, useTrackers } from "~/data";
 import { why } from "~/data";
 import { openExternal } from "~/open";
 import { DeviceCode, Rows, Section, sleep } from "~/ui/config/bits";
+import { WhoCanAccess } from "~/ui/Sharing";
 import { useConfirm } from "~/ui/Confirm";
 
-export function Connections({ live }: { live: boolean }) {
+export function Integrations({ live }: { live: boolean }) {
   const providers = useProviders();
   const trackers = useTrackers();
   return (
     <>
-      <Section title="Connections" note="What Firetower may reach on your behalf. Authorised as you, and revocable.">
+      <Section title="Git hosts" note="Signed in as you, because a commit has to be attributable to a person. Everybody here connects their own.">
         <Rows feed={providers} empty="Nothing to connect to on this server.">
           {providers.data.map((p) => <Provider key={p.id} p={p} live={live} />)}
         </Rows>
       </Section>
-      <Section title="Trackers" note="Where the tasks list reads from.">
+      <Section title="Task trackers" note="Where the tasks list reads from. An API key can belong to a directory, so one key answers for a team.">
         <Rows feed={trackers} empty="No tracker is available on this server.">
           {trackers.data.map((t) => <Tracker key={t.id} t={t} live={live} />)}
         </Rows>
@@ -74,7 +75,21 @@ function Provider({ p, live }: { p: ProviderStatus; live: boolean }) {
      it still works, so an application that was deleted or had the device flow
      turned off left a Connect button that could not succeed and no field to
      correct. */
-  const application = <button onClick={() => setApp(!app)} className="control text-mute hover:bg-raise hover:text-bone">application</button>;
+  /* Only to somebody the server will take it from. The application is
+     install-wide and has no owner, so whoever sets it decides what everybody
+     here authorizes next — and a member who was shown the field filled it in
+     and was refused at the moment they pressed Save.
+
+     `maySetApplication` rather than a role read off `auth/me`: the rule is the
+     server's, and a copy of it here is a copy to keep in step.
+
+     A control plane older than this app does not send the field, so this reads
+     as false and an administrator loses the control until the server is
+     upgraded. That is the right way round: the web still has it, and the other
+     default would put the bug back for everybody. */
+  const application = p.maySetApplication ? (
+    <button onClick={() => setApp(!app)} className="control text-mute hover:bg-raise hover:text-bone">application</button>
+  ) : null;
 
   const start = () =>
     authorize.mutate(
@@ -114,11 +129,17 @@ function Provider({ p, live }: { p: ProviderStatus; live: boolean }) {
             {application}
             <button disabled={!live || authorize.isPending} onClick={start} className="control border border-line bg-raise text-ui text-text hover:bg-overlay disabled:opacity-50"><Icon of={Link2} size={12} />Connect</button>
           </>
-        ) : (
+        ) : p.maySetApplication ? (
           <div className="flex items-center gap-1.5">
             <input value={clientId} onChange={(e) => setClientId(e.target.value)} placeholder="OAuth client id" className="w-44 rounded-md border border-line bg-ground px-2 py-1 font-mono text-micro text-bone focus:outline-none" />
             <button disabled={!clientId.trim() || !live} onClick={() => setClient.mutate({ id: p.id, data: { clientId: clientId.trim() } }, { onSuccess: refresh })} className="control border border-line bg-raise text-bone hover:bg-overlay disabled:text-mute">Set</button>
           </div>
+        ) : (
+          /* Nothing to do here, and saying what has to happen beats a field
+             that refuses. Connecting an account of your own needs an
+             application registered for the whole installation first, and that
+             is not this person's to register. */
+          <span className="text-meta text-mute">An administrator has to set this up</span>
         )}
       </div>
       {/* What the host refused, in its own words. Without this the button is
@@ -204,6 +225,12 @@ function Tracker({ t, live }: { t: TrackerStatus; live: boolean }) {
       {t.connected ? (
         <>
           <span className="flex items-center gap-1.5 text-meta text-sage"><Icon of={Check} size={12} />connected</span>
+          {/* An API key is frequently the organisation's — one Linear workspace
+              key a team shares, rather than five people pasting the same
+              string. A git host's is not: its token pushes commits, and a
+              commit has to be attributable to a person, so the server hands
+              back no handle for one and nothing is drawn here. */}
+          {t.secret && <WhoCanAccess look="chip" kind="secret" id={t.secret} path={t.path} />}
           {t.auth === "apiKey" && <button disabled={!live} onClick={() => disconnect.mutate({ id: t.id }, { onSuccess: refresh })} className="control text-mute hover:text-brick"><Icon of={Unlink} size={12} /></button>}
         </>
       ) : t.auth === "gitProvider" ? (

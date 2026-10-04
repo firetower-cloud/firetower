@@ -297,23 +297,13 @@ impl Platform {
 
 // ── Claude Code ──────────────────────────────────────────────────────
 
-/// Where Claude Code publishes its native binaries.
+/// Where each of them publishes itself.
 ///
-/// The same service and the same layout its own installer reads: `latest` is
-/// a version, `<version>/manifest.json` carries a checksum per platform, and
-/// the binary is at `<version>/<platform>/claude`.
-const CLAUDE_RELEASES: &str = "https://downloads.claude.ai/claude-code-releases";
-/// Where Kimi Code publishes its native binaries.
-///
-/// The same service and the same layout its own `install.sh` reads: `latest`
-/// is a version, `binaries/<version>/manifest.json` carries a checksum per
-/// platform, and the binary is in `binaries/<version>/kimi-code-<platform>.tar.gz`.
-///
-/// `code.kimi.ai` is the global mirror of `code.kimi.com`; the two serve the
-/// same builds, and the checksum below is what decides whether to believe
-/// either of them. Which Kimi an *account* lives on is a separate question,
-/// settled per sign-in by [`crate::kimi`]'s `--region`.
-const KIMI_RELEASES: &str = "https://code.kimi.ai/kimi-code";
+/// In `ft-core` rather than here because the control plane asks the same
+/// services what the newest version is, so it can say when a host is behind
+/// one — and two copies of an address is how the two come to disagree about
+/// where an agent comes from. The layout each one serves is documented there.
+use ft_core::releases::{looks_like_a_version, version_in, CLAUDE_RELEASES, KIMI_RELEASES};
 
 /// Pinned official CLI build. Cursor does not publish a signed checksum
 /// manifest, so only platform archives whose digest we verified are offered.
@@ -508,8 +498,7 @@ async fn fetch_claude(bin: &Path, platform: &Platform, version: Option<&str>) ->
 
 // ── Codex ────────────────────────────────────────────────────────────
 
-/// Where Codex publishes its binaries: one tarball per target on each release.
-const CODEX_RELEASES: &str = "https://github.com/openai/codex/releases";
+use ft_core::releases::CODEX_RELEASES;
 
 /// The sidecar Codex runs its tools through, and the second half of Codex.
 ///
@@ -742,27 +731,6 @@ async fn version_of(binary: &Path) -> Option<String> {
         return None;
     }
     version_in(&String::from_utf8_lossy(&output.stdout))
-}
-
-fn version_in(said: &str) -> Option<String> {
-    said.split_whitespace()
-        .map(|word| word.trim_matches(|c: char| !c.is_ascii_alphanumeric() && c != '.'))
-        .map(|word| word.strip_prefix('v').unwrap_or(word))
-        .find(|word| looks_like_a_version(word))
-        .map(str::to_string)
-}
-
-fn looks_like_a_version(word: &str) -> bool {
-    let mut parts = word.split('.');
-    let mut count = 0;
-    for part in parts.by_ref() {
-        let digits: String = part.chars().take_while(|c| c.is_ascii_digit()).collect();
-        if digits.is_empty() {
-            return false;
-        }
-        count += 1;
-    }
-    count >= 2
 }
 
 #[cfg(test)]

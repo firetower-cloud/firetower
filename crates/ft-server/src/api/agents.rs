@@ -5,7 +5,9 @@
 //! the one machine it was signed in on. So "can this agent run" is a question
 //! about a particular host, never a global one.
 
+use super::access::may_share;
 use super::{ApiError, ApiResult, ErrorCode};
+use crate::access::FiledKind;
 use crate::auth::Principal;
 use crate::providers::PendingAuth;
 use crate::vault::Key;
@@ -97,13 +99,7 @@ pub(crate) async fn agent_credential(
         return Ok(Vec::new());
     };
 
-    let Some(secret) = vault
-        .get(
-            Key::of(crate::vault::AGENT, &account.credential_key, owner),
-            why,
-        )
-        .await?
-    else {
+    let Some(secret) = vault.get(account.credential(), why).await? else {
         return Ok(Vec::new());
     };
 
@@ -139,7 +135,7 @@ pub(super) async fn agent_home(
     let Some(secret) = state
         .vault
         .get(
-            Key::of(vault::AGENT, &account.credential_key, owner),
+            account.credential(),
             &format!("starting {session} with {}", kind.label()),
         )
         .await?
@@ -215,6 +211,13 @@ pub struct AgentView {
     /// Separate from `supported`: a credential is worth having before there is
     /// a driver to spend it, and it is the half that needs a person.
     pub signs_in_with_a_code: bool,
+    /// The newest version its publisher is serving, when the control plane has
+    /// managed to ask.
+    ///
+    /// One per kind rather than per host: what is published does not depend on
+    /// which machine is behind it. `None` means nobody has asked yet, or the
+    /// publisher could not be reached — neither of which is "up to date".
+    pub latest_version: Option<String>,
     pub hosts: Vec<AgentOnHost>,
 }
 
@@ -234,6 +237,24 @@ pub struct AgentOnHost {
     pub covered_by_token: bool,
     /// When we last asked. Absent means never.
     pub checked_at: Option<String>,
+    /// Whether what is installed here is older than what is published.
+    ///
+    /// False whenever that cannot be established — an unreadable version on
+    /// either side, or a publisher nobody has reached. Saying nothing beats
+    /// telling somebody to reinstall on a guess.
+    pub behind: bool,
+    /// Whether the person asking may actually move this one.
+    ///
+    /// Installing an agent is administrative and felt by everybody running on
+    /// the machine, so it is the same question `may_share` answers about a
+    /// machine's fate — see `api::hosts::to_administer`. Answered here rather
+    /// than in `status`, because this is the layer that knows who is asking;
+    /// the Updates screen settles `may_upgrade` the same way.
+    ///
+    /// Separate from `behind` on purpose. A colleague's machine being stale is
+    /// worth seeing; it is not yours to fix, and a button that 403s is worse
+    /// than no button.
+    pub may_update: bool,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -269,23 +290,52 @@ pub(super) async fn list_agents(
     let presence = state.db.presence().await?;
     let hosts = state.db.hosts().await?;
 
+    // Which of them this person may actually move an agent onto, settled once
+    // rather than per agent kind. Installing one is administrative and felt by
+    // everybody running on the machine, so it is `may_share` about the machine
+    // — the same question `api::hosts::to_administer` asks before draining or
+    // renaming one, and the same way `api::updates::as_seen_by` settles its
+    // own button.
+    let mut administers: std::collections::HashSet<String> = std::collections::HashSet::new();
+    match principal.user.as_ref() {
+        // Development mode, nobody to be, nothing to withhold.
+        None => administers.extend(hosts.iter().map(|h| h.id.as_str().to_string())),
+        Some(me) => {
+            for host in &hosts {
+                if may_share(&state, me, FiledKind::Machine, host.id.as_str())
+                    .await
+                    .is_ok()
+                {
+                    administers.insert(host.id.as_str().to_string());
+                }
+            }
+        }
+    }
+
     let mut views = Vec::new();
     for kind in Agent::all() {
         let configured = modes.iter().find(|(k, ..)| *k == kind);
+        // Read, never fetched: this is a GET, and a screen should not wait on
+        // three download services to draw. The six-hourly check and the Check
+        // all button are what fill this in.
+        let latest_version = state.updates.agent_releases.newest(kind).await;
         // The vault answers whether one is set without decrypting anything, so
         // rendering this screen never touches a credential.
         let default = super::accounts::default_account(&state.db, owner, kind).await?;
-        let credential_set = state
-            .vault
-            .holds(Key::of(
-                vault::AGENT,
-                default
-                    .as_ref()
-                    .map(|a| a.credential_key.as_str())
-                    .unwrap_or(&agent_key(kind)),
-                owner,
-            ))
-            .await?;
+        let credential_set = match default.as_ref() {
+            // Through the account, so that a subscription filed into a
+            // directory still reads as connected: its credential is sealed
+            // under the directory now, not under whoever connected it.
+            Some(a) => state.vault.holds(a.credential()).await?,
+            // Nothing selected: the pre-accounts row, which is still keyed by
+            // agent kind under the person.
+            None => {
+                state
+                    .vault
+                    .holds(Key::of(vault::AGENT, &agent_key(kind), owner))
+                    .await?
+            }
+        };
 
         views.push(AgentView {
             kind,
@@ -312,6 +362,7 @@ pub(super) async fn list_agents(
             // because that is where a browser is.
             token_command: kind.token_setup().map(|(cmd, _)| cmd.to_string()),
             signs_in_with_a_code: kind.signs_in_with_a_code(),
+            latest_version: latest_version.clone(),
             hosts: hosts
                 .iter()
                 .map(|h| {
@@ -333,6 +384,12 @@ pub(super) async fn list_agents(
                             .map(|(_, m, _)| *m == AgentMode::Subscription && credential_set)
                             .unwrap_or(false),
                         checked_at: seen.map(|p| p.checked_at.to_rfc3339()),
+                        behind: seen.is_some_and(|p| p.found.installed)
+                            && crate::updates::agents::behind(
+                                seen.and_then(|p| p.found.version.as_deref()),
+                                latest_version.as_deref(),
+                            ),
+                        may_update: administers.contains(h.id.as_str()),
                     }
                 })
                 .collect(),
@@ -507,7 +564,7 @@ pub(super) async fn sign_agent_in(
             "create the account first, then sign it in",
         )
     })?;
-    let account = super::accounts::find(&state.db, &owner, &account_id).await?;
+    let account = super::accounts::mine(&state.db, &owner, &account_id).await?;
     if account.kind != agent_key(kind) || account.mode != "Subscription" {
         return Err(ApiError::new(
             ErrorCode::InvalidRequest,
@@ -700,6 +757,26 @@ pub(super) async fn install_agent(
         .find(|h| h.id.as_str() == req.host_id)
         .ok_or_else(|| ApiError::not_found("host"))?;
 
+    // Whose machine it is. Putting a binary on one is felt by everybody running
+    // on it, so it is the same question `api::hosts::to_administer` asks before
+    // renaming or draining it — a machine became personal when paths arrived,
+    // and this handler did not notice.
+    //
+    // Gated here as well as on `update_agent`, or the gate there is decoration:
+    // the fleet-wide press and this button fetch the same binary onto the same
+    // machine, and a member refused the first would simply press the second.
+    if let Some(me) = principal.user.as_ref() {
+        may_share(&state, me, FiledKind::Machine, host.id.as_str())
+            .await
+            .map_err(|e| match e.code {
+                ErrorCode::NotFound => e,
+                _ => ApiError::new(
+                    ErrorCode::Forbidden,
+                    "that machine is somebody else's to change",
+                ),
+            })?;
+    }
+
     if !state.fleet.is_connected(&host.id).await {
         return Err(ApiError::new(
             ErrorCode::HostUnreachable,
@@ -726,6 +803,154 @@ pub(super) async fn install_agent(
     list_agents(State(state), Extension(principal)).await
 }
 
+/// What one host got out of an update, named so a partial run is readable.
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct Updated {
+    pub host_id: String,
+    pub host_name: String,
+    /// What it has now, when it worked.
+    pub version: Option<String>,
+    /// Why it did not, when it didn't.
+    pub error: Option<String>,
+}
+
+/// Bring every host that is behind onto the published version.
+///
+/// One press for a fleet, because the alternative is the same button once per
+/// machine and a list of which ones you have already done.
+///
+/// Three decisions worth stating:
+///
+/// * **The version is resolved once, here, and every host is given it by name.**
+///   Asking each of them for `latest` instead would split a fleet across two
+///   versions if a release landed in the middle of the run — the same reason the
+///   worker pins Codex's sidecar to the CLI that will spawn it.
+/// * **Only hosts that are behind.** A host already on it is not reinstalled,
+///   and a host with a build somebody pinned *ahead* of the feed is left alone:
+///   [`crate::updates::agents::behind`] refuses to call either one stale.
+/// * **One at a time, and a failure does not stop the rest.** Clearer about
+///   which host went wrong, and it keeps several hundred-megabyte downloads off
+///   one uplink. A run where two of five hosts failed is a useful answer.
+/// * **Only machines this person administers.** Installing an agent is felt by
+///   everybody running on the machine, so it is the question `may_share` answers
+///   about a machine's fate rather than about using one — see
+///   `api::hosts::to_administer`. Without this, "every host that is behind"
+///   would mean every host in the organisation, and one member could reinstall
+///   under a colleague's running sessions. Skipped rather than refused, so a
+///   fleet somebody part-owns still moves the part that is theirs.
+#[utoipa::path(
+    post, path = "/api/v1/agents/{kind}/update", tag = "agents",
+    params(("kind" = String, Path, description = "Agent kind")),
+    responses(
+        (status = 200, body = Vec<Updated>),
+        (status = 400, body = ApiError),
+        (status = 404, body = ApiError),
+    ),
+)]
+pub(super) async fn update_agent(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Path(kind): Path<String>,
+) -> ApiResult<Json<Vec<Updated>>> {
+    owner(&principal)?;
+    let kind = agent_from_path(&kind)?;
+    if !kind.installable() {
+        return Err(ApiError::new(
+            ErrorCode::InvalidRequest,
+            format!("{} is not something Firetower installs", kind.label()),
+        ));
+    }
+
+    // Asked again rather than taken from the cache: this is the one request
+    // where being a few hours out of date would send a fleet to the wrong
+    // version, and it costs one HTTP call.
+    state
+        .updates
+        .agent_releases
+        .refresh(&state.updates.http, &state.updates.agent_feeds)
+        .await;
+    let Some(version) = state.updates.agent_releases.newest(kind).await else {
+        return Err(ApiError::new(
+            ErrorCode::InvalidRequest,
+            format!(
+                "nobody could say what the newest {} is, so there is nothing to move to",
+                kind.label()
+            ),
+        ));
+    };
+
+    let presence = state.db.presence().await?;
+    let mut updated = Vec::new();
+    for host in state.db.hosts().await? {
+        // The same predicate the `mayUpdate` on the row came from, so the
+        // button and what it does can never disagree. `hosts_for` at admin
+        // level is a near miss rather than an equivalent — it reads grants and
+        // exceptions, where `may_share` also lets an administrator of the
+        // organisation act and keeps a personal root private from one. A list
+        // filtered one way and an action gated the other is a button that does
+        // nothing for exactly the people most likely to press it.
+        let may = match principal.user.as_ref() {
+            // Development mode, nobody to be, nothing to withhold.
+            None => true,
+            Some(me) => may_share(&state, me, FiledKind::Machine, host.id.as_str())
+                .await
+                .is_ok(),
+        };
+        if !may {
+            continue;
+        }
+        let seen = presence
+            .iter()
+            .find(|p| p.host == host.id && p.found.kind == kind);
+        let installed = seen.filter(|p| p.found.installed);
+        let Some(installed) = installed else { continue };
+        if !crate::updates::agents::behind(installed.found.version.as_deref(), Some(&version)) {
+            continue;
+        }
+        // Skipped rather than reported: a machine that is off is not a machine
+        // that failed to update, and the row keeps its last known version.
+        if !state.fleet.is_connected(&host.id).await {
+            continue;
+        }
+
+        let one = match state
+            .fleet
+            .install_agent(&host.id, kind, Some(&version))
+            .await
+        {
+            Ok(now) => {
+                tracing::info!(host = %host.name, "updated {} to {now}", kind.label());
+                // Ask rather than assume — see `install_agent`.
+                match state.fleet.probe_agents(&host.id).await {
+                    Ok(found) => state.db.record_presence(&host.id, &found).await?,
+                    Err(e) => {
+                        tracing::warn!(host = %host.name, "asking what it has now: {e:#}")
+                    }
+                }
+                Updated {
+                    host_id: host.id.to_string(),
+                    host_name: host.name.clone(),
+                    version: Some(now),
+                    error: None,
+                }
+            }
+            Err(e) => {
+                tracing::warn!(host = %host.name, "updating {}: {e:#}", kind.label());
+                Updated {
+                    host_id: host.id.to_string(),
+                    host_name: host.name.clone(),
+                    version: None,
+                    error: Some(format!("{e:#}")),
+                }
+            }
+        };
+        updated.push(one);
+    }
+
+    Ok(Json(updated))
+}
+
 /// Re-ask every reachable host what it has.
 ///
 /// Hosts we can't reach are skipped rather than failing the request: their last
@@ -738,6 +963,14 @@ pub(super) async fn check_agents(
     State(state): State<AppState>,
     Extension(principal): Extension<Principal>,
 ) -> ApiResult<Json<Vec<AgentView>>> {
+    // Both halves of the comparison this button is pressed to answer. Asking
+    // the hosts what they have and not asking the publishers what is newest
+    // would refresh the stale side and leave the other as it was at boot.
+    state
+        .updates
+        .agent_releases
+        .refresh(&state.updates.http, &state.updates.agent_feeds)
+        .await;
     for host in state.db.hosts().await? {
         if !state.fleet.is_connected(&host.id).await {
             continue;

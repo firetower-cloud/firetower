@@ -16,4 +16,8 @@ checkout?: string;
  * Measured from the base of the branch (the default) or from the last commit.
  */
 since?: DiffSince;
+/**
+ * Which files changed and by how much, with no hunks — for marking a tree rather than drawing a diff. Orders of magnitude smaller, and the worker never builds the patch.
+ */
+namesOnly?: boolean;
 };

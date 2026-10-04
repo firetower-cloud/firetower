@@ -77,6 +77,7 @@ export const ListHostsResponseItem = zod.object({
   "machine": zod.string().nullish().describe('Machine grouping; "local" means the machine hosting the control plane.'),
   "memoryMb": zod.int().min(listHostsResponseMemoryMbMin).nullish(),
   "name": zod.string().describe('What the user calls it. `localhost` is a real host, not a special case.'),
+  "path": zod.string().describe('Where this machine is filed, and therefore who may run on it.\n\n`u/kevin/fire-01` for a connection somebody added and kept;\n`d/shared/fire-01` once it has been handed to the organisation.'),
   "reconnecting": zod.boolean().optional().describe('Whether we are still trying to reach it.\n\nA fact about the running control plane rather than about the host, so it\nis answered per request and never stored. Distinguishes a machine on its\nway back from one nobody is looking for.'),
   "state": zod.enum(['Online', 'Unreachable', 'Draining']),
   "workerVersion": zod.string().nullish()
@@ -193,6 +194,7 @@ export const CreateHostResponse = zod.object({
   "machine": zod.string().nullish().describe('Machine grouping; "local" means the machine hosting the control plane.'),
   "memoryMb": zod.int().min(createHostResponseMemoryMbMin).nullish(),
   "name": zod.string().describe('What the user calls it. `localhost` is a real host, not a special case.'),
+  "path": zod.string().describe('Where this machine is filed, and therefore who may run on it.\n\n`u/kevin/fire-01` for a connection somebody added and kept;\n`d/shared/fire-01` once it has been handed to the organisation.'),
   "reconnecting": zod.boolean().optional().describe('Whether we are still trying to reach it.\n\nA fact about the running control plane rather than about the host, so it\nis answered per request and never stored. Distinguishes a machine on its\nway back from one nobody is looking for.'),
   "state": zod.enum(['Online', 'Unreachable', 'Draining']),
   "workerVersion": zod.string().nullish()
@@ -350,6 +352,7 @@ export const RenameHostResponse = zod.object({
   "machine": zod.string().nullish().describe('Machine grouping; "local" means the machine hosting the control plane.'),
   "memoryMb": zod.int().min(renameHostResponseMemoryMbMin).nullish(),
   "name": zod.string().describe('What the user calls it. `localhost` is a real host, not a special case.'),
+  "path": zod.string().describe('Where this machine is filed, and therefore who may run on it.\n\n`u/kevin/fire-01` for a connection somebody added and kept;\n`d/shared/fire-01` once it has been handed to the organisation.'),
   "reconnecting": zod.boolean().optional().describe('Whether we are still trying to reach it.\n\nA fact about the running control plane rather than about the host, so it\nis answered per request and never stored. Distinguishes a machine on its\nway back from one nobody is looking for.'),
   "state": zod.enum(['Online', 'Unreachable', 'Draining']),
   "workerVersion": zod.string().nullish()

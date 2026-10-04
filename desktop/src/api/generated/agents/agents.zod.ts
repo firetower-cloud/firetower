@@ -13,16 +13,19 @@ export const ListAgentsResponseItem = zod.object({
   "enabled": zod.boolean(),
   "hosts": zod.array(zod.object({
   "account": zod.string().nullish().describe('Which account this host spends against, when it will say.'),
+  "behind": zod.boolean().describe('Whether what is installed here is older than what is published.\n\nFalse whenever that cannot be established — an unreadable version on\neither side, or a publisher nobody has reached. Saying nothing beats\ntelling somebody to reinstall on a guess.'),
   "checkedAt": zod.string().nullish().describe('When we last asked. Absent means never.'),
   "coveredByToken": zod.boolean().describe('Whether the token we hold applies to this host.'),
   "hostId": zod.string(),
   "hostName": zod.string(),
   "installed": zod.boolean(),
   "loggedIn": zod.boolean().nullish().describe('`None` when this agent can\'t be asked without being started, which is\nnot the same as being signed out.'),
+  "mayUpdate": zod.boolean().describe('Whether the person asking may actually move this one.\n\nInstalling an agent is administrative and felt by everybody running on\nthe machine, so it is the same question `may_share` answers about a\nmachine\'s fate — see `api::hosts::to_administer`. Answered here rather\nthan in `status`, because this is the layer that knows who is asking;\nthe Updates screen settles `may_upgrade` the same way.\n\nSeparate from `behind` on purpose. A colleague\'s machine being stale is\nworth seeing; it is not yours to fix, and a button that 403s is worse\nthan no button.'),
   "version": zod.string().nullish()
 })),
   "kind": zod.enum(['ClaudeCode', 'Codex', 'KimiCode', 'CursorAgent', 'Shell']).describe('Which agent runs inside a workspace.\n\nSerialised as the variant name — see the wire conventions in the brief: a\nfield takes the consumer\'s casing, an enum value stays the symbol it is.'),
   "label": zod.string(),
+  "latestVersion": zod.string().nullish().describe('The newest version its publisher is serving, when the control plane has\nmanaged to ask.\n\nOne per kind rather than per host: what is published does not depend on\nwhich machine is behind it. `None` means nobody has asked yet, or the\npublisher could not be reached — neither of which is "up to date".'),
   "mode": zod.union([zod.null(),zod.enum(['Subscription', 'ApiKey', 'NotNeeded']).describe('`None` until someone configures it.')]).optional(),
   "needsCredential": zod.boolean().describe('True when nothing needs configuring, which is only the plain shell.'),
   "signsInWithACode": zod.boolean().describe('Whether this one uses a worker-mediated browser sign-in, with or without a short code.\n\nSeparate from `supported`: a credential is worth having before there is\na driver to spend it, and it is the half that needs a person.'),
@@ -41,16 +44,19 @@ export const CheckAgentsResponseItem = zod.object({
   "enabled": zod.boolean(),
   "hosts": zod.array(zod.object({
   "account": zod.string().nullish().describe('Which account this host spends against, when it will say.'),
+  "behind": zod.boolean().describe('Whether what is installed here is older than what is published.\n\nFalse whenever that cannot be established — an unreadable version on\neither side, or a publisher nobody has reached. Saying nothing beats\ntelling somebody to reinstall on a guess.'),
   "checkedAt": zod.string().nullish().describe('When we last asked. Absent means never.'),
   "coveredByToken": zod.boolean().describe('Whether the token we hold applies to this host.'),
   "hostId": zod.string(),
   "hostName": zod.string(),
   "installed": zod.boolean(),
   "loggedIn": zod.boolean().nullish().describe('`None` when this agent can\'t be asked without being started, which is\nnot the same as being signed out.'),
+  "mayUpdate": zod.boolean().describe('Whether the person asking may actually move this one.\n\nInstalling an agent is administrative and felt by everybody running on\nthe machine, so it is the same question `may_share` answers about a\nmachine\'s fate — see `api::hosts::to_administer`. Answered here rather\nthan in `status`, because this is the layer that knows who is asking;\nthe Updates screen settles `may_upgrade` the same way.\n\nSeparate from `behind` on purpose. A colleague\'s machine being stale is\nworth seeing; it is not yours to fix, and a button that 403s is worse\nthan no button.'),
   "version": zod.string().nullish()
 })),
   "kind": zod.enum(['ClaudeCode', 'Codex', 'KimiCode', 'CursorAgent', 'Shell']).describe('Which agent runs inside a workspace.\n\nSerialised as the variant name — see the wire conventions in the brief: a\nfield takes the consumer\'s casing, an enum value stays the symbol it is.'),
   "label": zod.string(),
+  "latestVersion": zod.string().nullish().describe('The newest version its publisher is serving, when the control plane has\nmanaged to ask.\n\nOne per kind rather than per host: what is published does not depend on\nwhich machine is behind it. `None` means nobody has asked yet, or the\npublisher could not be reached — neither of which is "up to date".'),
   "mode": zod.union([zod.null(),zod.enum(['Subscription', 'ApiKey', 'NotNeeded']).describe('`None` until someone configures it.')]).optional(),
   "needsCredential": zod.boolean().describe('True when nothing needs configuring, which is only the plain shell.'),
   "signsInWithACode": zod.boolean().describe('Whether this one uses a worker-mediated browser sign-in, with or without a short code.\n\nSeparate from `supported`: a credential is worth having before there is\na driver to spend it, and it is the half that needs a person.'),
@@ -108,16 +114,19 @@ export const InstallAgentResponseItem = zod.object({
   "enabled": zod.boolean(),
   "hosts": zod.array(zod.object({
   "account": zod.string().nullish().describe('Which account this host spends against, when it will say.'),
+  "behind": zod.boolean().describe('Whether what is installed here is older than what is published.\n\nFalse whenever that cannot be established — an unreadable version on\neither side, or a publisher nobody has reached. Saying nothing beats\ntelling somebody to reinstall on a guess.'),
   "checkedAt": zod.string().nullish().describe('When we last asked. Absent means never.'),
   "coveredByToken": zod.boolean().describe('Whether the token we hold applies to this host.'),
   "hostId": zod.string(),
   "hostName": zod.string(),
   "installed": zod.boolean(),
   "loggedIn": zod.boolean().nullish().describe('`None` when this agent can\'t be asked without being started, which is\nnot the same as being signed out.'),
+  "mayUpdate": zod.boolean().describe('Whether the person asking may actually move this one.\n\nInstalling an agent is administrative and felt by everybody running on\nthe machine, so it is the same question `may_share` answers about a\nmachine\'s fate — see `api::hosts::to_administer`. Answered here rather\nthan in `status`, because this is the layer that knows who is asking;\nthe Updates screen settles `may_upgrade` the same way.\n\nSeparate from `behind` on purpose. A colleague\'s machine being stale is\nworth seeing; it is not yours to fix, and a button that 403s is worse\nthan no button.'),
   "version": zod.string().nullish()
 })),
   "kind": zod.enum(['ClaudeCode', 'Codex', 'KimiCode', 'CursorAgent', 'Shell']).describe('Which agent runs inside a workspace.\n\nSerialised as the variant name — see the wire conventions in the brief: a\nfield takes the consumer\'s casing, an enum value stays the symbol it is.'),
   "label": zod.string(),
+  "latestVersion": zod.string().nullish().describe('The newest version its publisher is serving, when the control plane has\nmanaged to ask.\n\nOne per kind rather than per host: what is published does not depend on\nwhich machine is behind it. `None` means nobody has asked yet, or the\npublisher could not be reached — neither of which is "up to date".'),
   "mode": zod.union([zod.null(),zod.enum(['Subscription', 'ApiKey', 'NotNeeded']).describe('`None` until someone configures it.')]).optional(),
   "needsCredential": zod.boolean().describe('True when nothing needs configuring, which is only the plain shell.'),
   "signsInWithACode": zod.boolean().describe('Whether this one uses a worker-mediated browser sign-in, with or without a short code.\n\nSeparate from `supported`: a credential is worth having before there is\na driver to spend it, and it is the half that needs a person.'),
@@ -149,4 +158,41 @@ export const SignAgentInResponse = zod.object({
   "userCode": zod.string().describe('The short code to type, or empty for a link-only agent login.'),
   "verificationUri": zod.string().describe('Where to type it.')
 }).describe('A device authorization waiting for someone to approve it in a browser.')
+
+/**
+ * One press for a fleet, because the alternative is the same button once per
+ * machine and a list of which ones you have already done.
+ *
+ * Three decisions worth stating:
+ *
+ * * **The version is resolved once, here, and every host is given it by name.**
+ *   Asking each of them for `latest` instead would split a fleet across two
+ *   versions if a release landed in the middle of the run — the same reason the
+ *   worker pins Codex's sidecar to the CLI that will spawn it.
+ * * **Only hosts that are behind.** A host already on it is not reinstalled,
+ *   and a host with a build somebody pinned *ahead* of the feed is left alone:
+ *   [`crate::updates::agents::behind`] refuses to call either one stale.
+ * * **One at a time, and a failure does not stop the rest.** Clearer about
+ *   which host went wrong, and it keeps several hundred-megabyte downloads off
+ *   one uplink. A run where two of five hosts failed is a useful answer.
+ * * **Only machines this person administers.** Installing an agent is felt by
+ *   everybody running on the machine, so it is the question `may_share` answers
+ *   about a machine's fate rather than about using one — see
+ *   `api::hosts::to_administer`. Without this, "every host that is behind"
+ *   would mean every host in the organisation, and one member could reinstall
+ *   under a colleague's running sessions. Skipped rather than refused, so a
+ *   fleet somebody part-owns still moves the part that is theirs.
+ * @summary Bring every host that is behind onto the published version.
+ */
+export const UpdateAgentParams = zod.object({
+  "kind": zod.string().describe('Agent kind')
+})
+
+export const UpdateAgentResponseItem = zod.object({
+  "error": zod.string().nullish().describe('Why it did not, when it didn\'t.'),
+  "hostId": zod.string(),
+  "hostName": zod.string(),
+  "version": zod.string().nullish().describe('What it has now, when it worked.')
+}).describe('What one host got out of an update, named so a partial run is readable.')
+export const UpdateAgentResponse = zod.array(UpdateAgentResponseItem)
 

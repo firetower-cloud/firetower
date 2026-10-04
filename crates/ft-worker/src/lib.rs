@@ -1784,7 +1784,11 @@ You are in the directory that holds them, not inside one of them.              P
             .await
             .unwrap_or_default();
         let after_line = previous_log.lines().count();
-        let mut opening = agent.opening(prompt, &path.to_string_lossy());
+        let mut opening = agent.opening(
+            prompt,
+            &path.to_string_lossy(),
+            &ft_core::controls::Preferred::from_env(),
+        );
         if agent == ft_core::Agent::Codex {
             let mut reader = ft_core::codex::CodexNormaliser::default();
             for line in previous_log.lines() {
@@ -1925,6 +1929,37 @@ You are in the directory that holds them, not inside one of them.              P
         self.store
             .record_workspace(&id, path.to_str().unwrap_or_default(), tmux.name())
             .await?;
+
+        // And its own checkout rows, copied from the session that made the
+        // place.
+        //
+        // The facts above are the workspace's, repeated because this store
+        // keeps a row per session. These are the workspace's too, and were the
+        // one kind left out — `record_checkout` is only ever called while
+        // *cutting* a workspace, so every agent added to one afterwards had
+        // none.
+        //
+        // What that cost: `summarize` reads them to know where each repository
+        // sits, and with none it falls back to "the workspace is the checkout"
+        // and runs git at the root. A workspace whose repository is in a named
+        // subdirectory — which is all of them with a slug — then answered
+        // `fatal: not a git repository`, and the screen reported the machine as
+        // unreachable while that same machine was streaming this log.
+        if let Some(first) = &spec.workspace_session {
+            for (position, c) in self.store.checkouts_of(first).await?.iter().enumerate() {
+                self.store
+                    .record_checkout(
+                        &id,
+                        position as i64,
+                        &c.slug,
+                        &c.remote,
+                        &c.base,
+                        &c.branch,
+                        &c.path,
+                    )
+                    .await?;
+            }
+        }
 
         // A tmux session already under this name is one of two quite different
         // things, and refusing both was the bug.
@@ -2486,8 +2521,18 @@ You are in the directory that holds them, not inside one of them.              P
                 })?)
             }
 
-            ft_proto::Action::Diff { checkout, since } => {
+            ft_proto::Action::Diff {
+                checkout,
+                since,
+                names_only,
+            } => {
                 let (dest, base) = self.checkout_diff_refs(session_id, &checkout).await?;
+                if names_only {
+                    // JSON, because there is no unified diff to send and the
+                    // caller would have nothing to split.
+                    let files = self.git.changed_since(&dest, &base, since).await?;
+                    return Ok(serde_json::to_string(&files)?);
+                }
                 self.git.diff_since(&dest, &base, since).await
             }
 
@@ -2543,13 +2588,37 @@ You are in the directory that holds them, not inside one of them.              P
             let Some((branch, base)) = self.store.refs_of(session_id).await? else {
                 return Ok(Vec::new());
             };
-            let summary = self.git.summary(&workspace, &branch, &base).await?;
-            return Ok(vec![ft_core::CheckoutSummary {
-                path: String::new(),
-                slug: self.store.repo_of(session_id).await?.unwrap_or_default(),
-                summary,
-                trouble: None,
-            }]);
+            let slug = self.store.repo_of(session_id).await?.unwrap_or_default();
+            // Reported, not fatal — the same choice the per-checkout loop below
+            // makes, and for the same reason. A `?` here failed the whole
+            // request for one unreadable worktree, the control plane called
+            // that `HostUnreachable`, and the screen said the machine was gone.
+            // One row carrying git's own sentence says what is true instead.
+            return Ok(vec![
+                match self.git.summary(&workspace, &branch, &base).await {
+                    Ok(summary) => ft_core::CheckoutSummary {
+                        path: String::new(),
+                        slug,
+                        summary,
+                        trouble: None,
+                    },
+                    Err(e) => {
+                        tracing::warn!(session = %session_id, "summarising the workspace: {e:#}");
+                        ft_core::CheckoutSummary {
+                            path: String::new(),
+                            slug,
+                            summary: ft_core::WorkSummary {
+                                branch,
+                                uncommitted: 0,
+                                ahead: 0,
+                                pushed: false,
+                                commits: None,
+                            },
+                            trouble: Some(format!("{e:#}")),
+                        }
+                    }
+                },
+            ]);
         }
 
         let mut out = Vec::new();
@@ -4141,6 +4210,145 @@ mod tests {
 
         cleanup(&id).await;
         assert_eq!(standing(&tmux, &id).await, Standing::Fresh);
+    }
+
+    /// A second agent in a workspace inherits where its repositories are.
+    ///
+    /// `record_checkout` only ever runs while a workspace is being *cut*, so
+    /// every agent added to one afterwards had no checkout rows of its own.
+    /// `summarize` reads those rows to know which directory each repository is
+    /// in; with none it falls back to "the workspace is the checkout" and runs
+    /// git at the workspace root. For a workspace whose repository sits in a
+    /// named subdirectory — which is every workspace with a slug — that is the
+    /// wrong directory, and git says `fatal: not a git repository`.
+    #[tokio::test]
+    async fn an_agent_added_to_a_workspace_knows_where_its_repositories_are() {
+        let home = TempDir::new().unwrap();
+        let worker = std::sync::Arc::new(Worker::open(home.path()).await.unwrap());
+
+        let first = recorded(&worker, "The one that cut it").await;
+        let workspace = home.path().join("workspace");
+        tokio::fs::create_dir_all(workspace.join("sandbox-firetower"))
+            .await
+            .unwrap();
+        worker
+            .store
+            .record_workspace(&first, workspace.to_str().unwrap(), first.as_str())
+            .await
+            .unwrap();
+        worker
+            .store
+            .record_checkout(
+                &first,
+                0,
+                "kevinpiac/sandbox-firetower",
+                "https://example.invalid/kevinpiac/sandbox-firetower.git",
+                "main",
+                "agent/test-3",
+                "sandbox-firetower",
+            )
+            .await
+            .unwrap();
+
+        let second = recorded(&worker, "The one that joined").await;
+        worker
+            .store
+            .record_workspace(&second, workspace.to_str().unwrap(), second.as_str())
+            .await
+            .unwrap();
+
+        // What `start_agent` does for a second agent, which it did not before.
+        for (position, c) in worker
+            .store
+            .checkouts_of(&first)
+            .await
+            .unwrap()
+            .iter()
+            .enumerate()
+        {
+            worker
+                .store
+                .record_checkout(
+                    &second,
+                    position as i64,
+                    &c.slug,
+                    &c.remote,
+                    &c.base,
+                    &c.branch,
+                    &c.path,
+                )
+                .await
+                .unwrap();
+        }
+
+        let mine = worker.store.checkouts_of(&second).await.unwrap();
+        assert_eq!(
+            mine.len(),
+            1,
+            "the joining agent has the workspace's repositories"
+        );
+        assert_eq!(
+            mine[0].path, "sandbox-firetower",
+            "and above all where it is — an empty path here is the workspace root, \
+             which is the wrong directory and the whole of this bug"
+        );
+
+        // The summary now reaches a real worktree rather than the root. It is
+        // not a git repository in this fixture either, but the difference is
+        // the one that matters: a row carrying git's sentence, not a failed
+        // request that the control plane reports as an unreachable machine.
+        let summaries = worker
+            .summarize(&second)
+            .await
+            .expect("reported, not fatal");
+        assert_eq!(summaries.len(), 1);
+        assert_eq!(summaries[0].slug, "kevinpiac/sandbox-firetower");
+        assert!(summaries[0].trouble.is_some());
+    }
+
+    /// The same tolerance for a workspace with no checkout rows at all.
+    ///
+    /// A `?` here failed the whole request, and `session_work` stamped that
+    /// `HostUnreachable` — so a machine that answered was reported as gone.
+    #[tokio::test]
+    async fn a_workspace_that_is_not_a_repository_is_reported_not_fatal() {
+        let home = TempDir::new().unwrap();
+        let worker = std::sync::Arc::new(Worker::open(home.path()).await.unwrap());
+        // With a branch and a base: `refs_of` reads them off the session row,
+        // and without them `summarize` answers "nothing here" long before it
+        // reaches the branch under test.
+        let session = SessionId::new();
+        worker
+            .store
+            .create_session(
+                &session,
+                None,
+                "No checkouts recorded",
+                "do a thing",
+                Some("agent/test-3"),
+                Some("main"),
+                "Shell",
+                WorkspaceSize::Small,
+            )
+            .await
+            .unwrap();
+
+        let workspace = home.path().join("workspace");
+        tokio::fs::create_dir_all(&workspace).await.unwrap();
+        worker
+            .store
+            .record_workspace(&session, workspace.to_str().unwrap(), session.as_str())
+            .await
+            .unwrap();
+        let summaries = worker
+            .summarize(&session)
+            .await
+            .expect("a workspace git cannot read is an answer, not an error");
+        assert_eq!(summaries.len(), 1);
+        assert!(
+            summaries[0].trouble.is_some(),
+            "carrying what git actually said"
+        );
     }
 
     /// A checkout git cannot read is news, not silence.

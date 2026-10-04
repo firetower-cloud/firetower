@@ -129,7 +129,10 @@ export async function signIn(
   url: string,
   username: string,
   password: string,
-): Promise<{ ok: true; token: string; user: string } | { ok: false; why: string }> {
+): Promise<
+  | { ok: true; token: string; user: string; mustChangePassword: boolean }
+  | { ok: false; why: string }
+> {
   let res: Response;
   try {
     res = await fetch(`${url}/api/v1/auth/login`, {
@@ -148,5 +151,14 @@ export async function signIn(
   const token = body?.token ?? body?.session?.token;
   if (!token) return { ok: false, why: "no token came back" };
 
-  return { ok: true, token, user: body?.user?.username ?? username };
+  // Carried out of here rather than asked for again. The password that was
+  // just accepted may be a temporary one, and the gate on the server refuses
+  // everything but four paths until it is replaced — so a client that threw
+  // this away would sign somebody in and then show them a broken app.
+  return {
+    ok: true,
+    token,
+    user: body?.user?.username ?? username,
+    mustChangePassword: !!body?.user?.mustChangePassword,
+  };
 }

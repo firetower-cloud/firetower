@@ -10,6 +10,7 @@ const host = (id: string, compute: Host["compute"], extra: Partial<Host> = {}): 
   name: id,
   compute,
   state: "Online",
+  path: "d/shared/localhost",
   drained: false,
   reconnecting: false,
   docker: { status: "Unknown" },
@@ -54,7 +55,7 @@ function draw(hosts: Host[], w: Where, readiness?: Readiness) {
     <QueryClientProvider client={cache}>
       <WhereItRuns
         hosts={hosts}
-        agents={[{ ...claude, hosts: hosts.map((h) => ({ hostId: h.id, hostName: h.name, installed: true, coveredByToken: true })) }]}
+        agents={[{ ...claude, hosts: hosts.map((h) => ({ hostId: h.id, hostName: h.name, installed: true, coveredByToken: true, behind: false, mayUpdate: true })) }]}
         where={w}
         onChange={() => {}}
         onAddMachine={() => {}}
@@ -119,7 +120,7 @@ it("Kimi needs a connected account, like every other agent that has a login", ()
   // It used to run on whatever `kimi login` had left on the worker. Its
   // credential is Firetower's to hold now, so an agent without one cannot
   // start — the same rule Claude and Codex have always had.
-  const kimi: AgentView = { ...claude, kind: "KimiCode", needsCredential: true, credentialSet: false, hosts: [{ hostId: "local", hostName: "Local", installed: true, coveredByToken: false, loggedIn: null }] };
+  const kimi: AgentView = { ...claude, kind: "KimiCode", needsCredential: true, credentialSet: false, hosts: [{ hostId: "local", hostName: "Local", installed: true, coveredByToken: false, loggedIn: null, behind: false, mayUpdate: true }] };
   expect(canRun(kimi, "local")).toBe(false);
   expect(canRun({ ...kimi, credentialSet: true }, "local")).toBe(true);
   expect(canRun({ ...kimi, credentialSet: true }, "absent")).toBe(false);
