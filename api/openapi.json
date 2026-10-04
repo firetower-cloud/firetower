@@ -737,6 +737,92 @@
         }
       }
     },
+    "/api/v1/consumption": {
+      "get": {
+        "tags": [
+          "consumption"
+        ],
+        "summary": "What was spent in a period.",
+        "operationId": "consumption",
+        "parameters": [
+          {
+            "name": "from",
+            "in": "query",
+            "description": "Inclusive.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "description": "Exclusive, so a day boundary belongs to one bucket and not two.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "bucket",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Bucket"
+            }
+          },
+          {
+            "name": "group",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Dimension"
+            }
+          },
+          {
+            "name": "then",
+            "in": "query",
+            "description": "A second level, cut from each row of the first.\n\nEither order gives the same totals — it is one more `GROUP BY` column,\nnot a different query — which is why the interface can offer to swap\nthem.",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/Dimension"
+            }
+          },
+          {
+            "name": "person",
+            "in": "query",
+            "description": "Narrow to one person. `me` means whoever is asking.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "team",
+            "in": "query",
+            "description": "Narrow to whoever is in one team.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Consumption"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/directories": {
       "get": {
         "tags": [
@@ -6887,6 +6973,32 @@
           }
         }
       },
+      "Bucket": {
+        "type": "string",
+        "description": "How wide a column on the chart is.",
+        "enum": [
+          "day",
+          "week",
+          "month"
+        ]
+      },
+      "ByModel": {
+        "type": "object",
+        "description": "One model's share of one bucket or one group.",
+        "required": [
+          "model",
+          "tokens"
+        ],
+        "properties": {
+          "model": {
+            "type": "string"
+          },
+          "tokens": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
       "Capacity": {
         "type": "object",
         "description": "What a machine has, and what of it is being used.\n\nReported by the worker rather than asked of the host record, for the same\nreason [`DockerState`] is: these are facts about the machine a worker is\nrunning on, and a container, a server and a server-with-a-container arrive\nat them differently. A worker in a container reports the container's\nceiling where it has one, which is what its sessions actually get.\n\nMegabytes throughout. Bytes would be exact and would also be a `u64` of\ndigits nobody reads; the interface rounds to gigabytes anyway, and a\nmegabyte is under a pixel of any meter drawn from this.",
@@ -7303,6 +7415,26 @@
           }
         }
       },
+      "Column": {
+        "type": "object",
+        "description": "One column of the chart.",
+        "required": [
+          "start",
+          "models"
+        ],
+        "properties": {
+          "models": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ByModel"
+            }
+          },
+          "start": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
       "Commit": {
         "type": "object",
         "properties": {
@@ -7418,6 +7550,32 @@
         "properties": {
           "account": {
             "type": "string"
+          }
+        }
+      },
+      "Consumption": {
+        "type": "object",
+        "description": "The whole page, in the terms the person asking may see it.",
+        "required": [
+          "totals",
+          "series",
+          "groups"
+        ],
+        "properties": {
+          "groups": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Group"
+            }
+          },
+          "series": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Column"
+            }
+          },
+          "totals": {
+            "$ref": "#/components/schemas/Totals"
           }
         }
       },
@@ -7723,6 +7881,21 @@
         "enum": [
           "Base",
           "Head"
+        ]
+      },
+      "Dimension": {
+        "type": "string",
+        "description": "Which way to cut the ledger.\n\nAn enum rather than a string from the query, because these become SQL. The\nshape of every one is the same — a key to group on and a name to draw — so\nadding the next dimension is two lines here and nothing anywhere else.",
+        "enum": [
+          "task",
+          "model",
+          "person",
+          "repository",
+          "tracker",
+          "directory",
+          "subscription",
+          "workspace",
+          "conversation"
         ]
       },
       "Directory": {
@@ -8565,6 +8738,89 @@
           "subjectName": {
             "type": "string",
             "description": "The person's username or the team's name, so a list needs one read."
+          }
+        }
+      },
+      "Group": {
+        "type": "object",
+        "description": "One row of the ledger.",
+        "required": [
+          "models",
+          "tokens",
+          "pricedRows",
+          "rows",
+          "turns",
+          "conversations",
+          "workspaces",
+          "people",
+          "tasks"
+        ],
+        "properties": {
+          "children": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Group"
+            },
+            "description": "The second level, when one was asked for.\n\n`no_recursion` because this type contains itself: without it the schema\nbuilder follows `children` forever and `gen-openapi` dies on a stack\noverflow. The nesting really is only two deep — past that the interface\ndrills rather than expands — so the contract describing one level of\nchildren and stopping is accurate rather than a concession."
+          },
+          "conversations": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "costUsd": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "key": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What was grouped on. NULL where the dimension does not apply — a turn\nwith no task, a model with no subscription — which is a real row and\nnot an omission."
+          },
+          "models": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ByModel"
+            }
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What to call it, where anything knows. A task nobody could read the\ntitle of has a key and no name, and the page draws that rather than\npretending."
+          },
+          "people": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "pricedRows": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "rows": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "tasks": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "tokens": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "turns": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "workspaces": {
+            "type": "integer",
+            "format": "int64"
           }
         }
       },
@@ -11370,6 +11626,77 @@
           "sessions",
           "conversation"
         ]
+      },
+      "Totals": {
+        "type": "object",
+        "description": "The totals a period adds up to.",
+        "required": [
+          "inputTokens",
+          "outputTokens",
+          "cacheReadTokens",
+          "cacheWriteTokens",
+          "tokens",
+          "pricedRows",
+          "rows",
+          "turns",
+          "conversations",
+          "workspaces",
+          "people"
+        ],
+        "properties": {
+          "cacheReadTokens": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "cacheWriteTokens": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "conversations": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "costUsd": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "The sum of what the agents reported, over the rows that reported any.\n\nPartial by construction: Codex reports no price. `pricedRows` against\n`rows` is how far to trust it, and the interface says so out loud."
+          },
+          "inputTokens": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "outputTokens": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "people": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "pricedRows": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "rows": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "tokens": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "turns": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "workspaces": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
       },
       "TrackerKey": {
         "type": "object",

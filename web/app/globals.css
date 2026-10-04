@@ -64,9 +64,28 @@
   --color-brick: #e5645a;
   --color-brick-tint: #2a1414;
   --color-brick-deep: #6e2f2b;
+  /* Approaching, which sage/brick/slate had no step for: "fine", "broken" and
+     "neutral" cannot say "still working, but not for much longer". Only a
+     quota meter uses it, and only while one is filling. */
+  --color-amber: #fab219;
+  --color-amber-tint: #2a2008;
+  --color-amber-deep: #7a5a0d;
   --color-slate: #7d95b0;
   --color-slate-tint: #161d26;
   --color-slate-deep: #35485c;
+
+  /* Series: one hue per model, and the only place data wears colour.
+     A namespace of its own because the signals above are semantic and the file
+     kinds below are deliberately too quiet to carry a chart — the one that
+     reads "below the ember in saturation" is exactly wrong for a stacked bar.
+     Taken from the same hue families and stepped until each clears its gates
+     against `--color-panel`: worst adjacent CVD dE 12.8, normal-vision 16.2,
+     all at or above 3:1. Ember is absent on purpose. It means something is
+     waiting on you, and a page about money has no business spending it. */
+  --color-series-1: #3f86cf;
+  --color-series-2: #1f9b74;
+  --color-series-3: #8b7ad8;
+  --color-series-4: #cc5c86;
 
   /* File kinds: what a file *is*, in the tree and nowhere else. A separate
      namespace from the signals above, and deliberately below them in

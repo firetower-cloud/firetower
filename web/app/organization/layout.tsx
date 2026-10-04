@@ -37,6 +37,11 @@ const TABS = [
     says: "Directories, what is filed in them, and who can see into them.",
   },
   {
+    href: "/organization/consumption",
+    label: "Consumption",
+    says: "What the agents spent, and on what.",
+  },
+  {
     href: "/organization/settings",
     label: "Settings",
     admin: true,

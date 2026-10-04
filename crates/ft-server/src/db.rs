@@ -430,6 +430,145 @@ impl Db {
     ///
     /// Oldest first, so a backlog is worked through in the order it built up
     /// rather than starving on whatever sorts lowest.
+    /// Write down what a finished turn cost.
+    ///
+    /// One row per model the turn used, because a turn is rarely one model:
+    /// something small names things and summarises alongside the one doing the
+    /// work, and it is on the bill. Where the agent gives no breakdown — Codex
+    /// reports one set of totals and nothing else — a single row is written
+    /// against whatever the session was last told to run, falling back to the
+    /// agent's own name rather than inventing a model.
+    ///
+    /// Everything the row needs is copied in here, from the session that is
+    /// still alive at this moment. Minutes later it may not be: `reclaim.rs`
+    /// takes a workspace within the minute of its last session ending, and
+    /// takes the sessions with it. That is why this is one statement — if the
+    /// session has already gone, it writes nothing and says so, rather than
+    /// failing.
+    ///
+    /// `ON CONFLICT DO NOTHING` against `(session_id, turn_id, model)`: a line
+    /// replayed after a reconnect reports a turn that was already billed, and
+    /// billing it twice would be worse than missing it.
+    pub async fn record_consumption(
+        &self,
+        session_id: &SessionId,
+        turn_id: &str,
+        usage: &ft_core::turn::Usage,
+        fallback_model: Option<&str>,
+    ) -> Result<u64> {
+        use ft_core::turn::ModelUsage;
+
+        // The agent's breakdown where there is one, otherwise the whole turn
+        // as a single line against the session's model.
+        let single;
+        let rows: &[ModelUsage] = if usage.models.is_empty() {
+            single = [ModelUsage {
+                model: String::new(), // filled by COALESCE below
+                input_tokens: usage.input_tokens,
+                output_tokens: usage.output_tokens,
+                cache_read_tokens: usage.cache_read_tokens.unwrap_or_default(),
+                cache_write_tokens: usage.cache_write_tokens.unwrap_or_default(),
+                context_window: usage.context_window,
+                cost_usd: usage.cost_usd,
+            }];
+            &single
+        } else {
+            &usage.models
+        };
+
+        let at = chrono::Utc::now();
+        let mut written = 0;
+        for row in rows {
+            // An empty name means the breakdown was absent, so the model is
+            // whatever the session is set to — and `s.agent` when even that is
+            // unknown, which is a true statement rather than a guess.
+            let named = (!row.model.is_empty())
+                .then_some(row.model.as_str())
+                .or(fallback_model);
+
+            let done = sqlx::query(
+                "INSERT INTO consumption_events (
+                     org_id, occurred_at, path, extra_perms, ran_as,
+                     workspace_id, workspace_name, session_id, session_title, turn_id,
+                     task_key, task_provider, repo_remote, branch,
+                     agent, account_id, account_name, model,
+                     input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,
+                     thinking_tokens, cost_usd, duration_ms)
+                 SELECT h.org_id, $2, w.path, w.extra_perms, s.user_id,
+                        w.id, w.name, s.id, s.title, $3,
+                        w.task_key, w.task_provider, w.repo, w.branch,
+                        s.agent, s.agent_account_id, a.name, COALESCE($4, s.agent),
+                        $5, $6, $7, $8,
+                        $9, $10::float8::numeric, $11
+                   FROM sessions s
+                   JOIN workspaces w ON w.id = s.workspace_id
+                   JOIN hosts h ON h.id = w.host_id
+                   LEFT JOIN agent_accounts a ON a.id = s.agent_account_id
+                  WHERE s.id = $1
+                 ON CONFLICT DO NOTHING",
+            )
+            .bind(session_id.as_str())
+            .bind(at)
+            .bind(turn_id)
+            .bind(named)
+            .bind(row.input_tokens as i64)
+            .bind(row.output_tokens as i64)
+            .bind(row.cache_read_tokens as i64)
+            .bind(row.cache_write_tokens as i64)
+            .bind(usage.thinking_tokens.map(|t| t as i64))
+            .bind(row.cost_usd)
+            .bind(usage.duration_ms.map(|d| d as i64))
+            .execute(&self.pool)
+            .await
+            .context("recording what a turn cost")?;
+            written += done.rows_affected();
+        }
+        Ok(written)
+    }
+
+    /// Keep what a tracker calls a task, the one time we manage to read it.
+    ///
+    /// The title is nobody's but the tracker's, and `workspaces` deliberately
+    /// stores only the key and the URL for that reason. But a key on its own is
+    /// a poor row on a page about spend, and the day somebody asks is often
+    /// long after the token was revoked or the issue deleted. So every view
+    /// that does succeed in reading one leaves it here, where it outlives all
+    /// of them.
+    ///
+    /// Overwrites, rather than keeping the first: an issue that was renamed is
+    /// best shown under the name it has now.
+    /// Named by the session that was looking at it, because that is who knows
+    /// which organisation is asking. A session already gone writes nothing.
+    pub async fn remember_task(
+        &self,
+        session_id: &SessionId,
+        task_key: &str,
+        url: Option<&str>,
+        title: Option<&str>,
+    ) -> Result<()> {
+        sqlx::query(
+            "INSERT INTO consumption_tasks (org_id, task_key, url, title, title_at)
+             SELECT h.org_id, $2, $3, $4,
+                    CASE WHEN $4 IS NULL THEN NULL ELSE now() END
+               FROM sessions s
+               JOIN workspaces w ON w.id = s.workspace_id
+               JOIN hosts h ON h.id = w.host_id
+              WHERE s.id = $1
+             ON CONFLICT (org_id, task_key) DO UPDATE
+                SET url      = COALESCE(EXCLUDED.url, consumption_tasks.url),
+                    title    = COALESCE(EXCLUDED.title, consumption_tasks.title),
+                    title_at = COALESCE(EXCLUDED.title_at, consumption_tasks.title_at)",
+        )
+        .bind(session_id.as_str())
+        .bind(task_key)
+        .bind(url)
+        .bind(title)
+        .execute(&self.pool)
+        .await
+        .context("remembering what a task is called")?;
+        Ok(())
+    }
+
     pub async fn workspaces_to_purge(&self, limit: i64) -> Result<Vec<WorkspaceId>> {
         let rows = sqlx::query_scalar::<_, String>(
             "SELECT w.id FROM workspaces w
@@ -5098,5 +5237,405 @@ mod tests {
 
         assert_eq!(hosts.len(), 1, "the readable host is still there");
         assert_eq!(hosts[0].id, keep.id);
+    }
+}
+
+// ── Consumption, read back ──────────────────────────────────────────────
+//
+// Every read goes through `filed_where`, the same predicate as hosts,
+// workspaces and secrets. That is the whole defence described in `access.rs`:
+// one function, and `grep` finds every caller. A page about money is exactly
+// the kind of new reader that would otherwise quietly return everybody's rows.
+
+/// Which way to cut the ledger.
+///
+/// An enum rather than a string from the query, because these become SQL. The
+/// shape of every one is the same — a key to group on and a name to draw — so
+/// adding the next dimension is two lines here and nothing anywhere else.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize, serde::Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum Dimension {
+    Task,
+    Model,
+    Person,
+    Repository,
+    Tracker,
+    Directory,
+    Subscription,
+    Workspace,
+    Conversation,
+}
+
+impl Dimension {
+    /// `(key, name)` as SQL. The key identifies the row; the name is what to
+    /// draw, and is NULL when nothing ever told us one.
+    fn columns(self) -> (&'static str, &'static str) {
+        match self {
+            Self::Task => ("c.task_key", "t.title"),
+            Self::Model => ("c.model", "c.model"),
+            Self::Person => ("c.ran_as", "p.name"),
+            Self::Repository => ("c.repo_remote", "c.repo_remote"),
+            Self::Tracker => ("c.task_provider", "c.task_provider"),
+            Self::Directory => ("c.path::text", "c.path::text"),
+            Self::Subscription => ("c.account_id", "c.account_name"),
+            Self::Workspace => ("c.workspace_id", "c.workspace_name"),
+            Self::Conversation => ("c.session_id", "c.session_title"),
+        }
+    }
+}
+
+/// How wide a column on the chart is.
+#[derive(Debug, Clone, Copy, serde::Deserialize, serde::Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum Bucket {
+    Day,
+    Week,
+    Month,
+}
+
+impl Bucket {
+    fn unit(self) -> &'static str {
+        match self {
+            Self::Day => "day",
+            Self::Week => "week",
+            Self::Month => "month",
+        }
+    }
+}
+
+/// What a request asked for, before access is applied to it.
+pub struct Slice {
+    pub from: chrono::DateTime<chrono::Utc>,
+    pub to: chrono::DateTime<chrono::Utc>,
+    /// Only this person's turns.
+    pub person: Option<String>,
+    /// Only the turns of whoever is in this team.
+    pub team: Option<String>,
+}
+
+/// The totals a period adds up to.
+#[derive(Debug, Default, serde::Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct Totals {
+    pub input_tokens: i64,
+    pub output_tokens: i64,
+    pub cache_read_tokens: i64,
+    pub cache_write_tokens: i64,
+    pub tokens: i64,
+    /// The sum of what the agents reported, over the rows that reported any.
+    ///
+    /// Partial by construction: Codex reports no price. `pricedRows` against
+    /// `rows` is how far to trust it, and the interface says so out loud.
+    pub cost_usd: Option<f64>,
+    pub priced_rows: i64,
+    pub rows: i64,
+    pub turns: i64,
+    pub conversations: i64,
+    pub workspaces: i64,
+    pub people: i64,
+}
+
+/// One model's share of one bucket or one group.
+#[derive(Debug, Clone, serde::Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ByModel {
+    pub model: String,
+    pub tokens: i64,
+}
+
+/// One column of the chart.
+#[derive(Debug, serde::Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct Column {
+    pub start: chrono::DateTime<chrono::Utc>,
+    pub models: Vec<ByModel>,
+}
+
+/// One row of the ledger.
+#[derive(Debug, serde::Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct Group {
+    /// What was grouped on. NULL where the dimension does not apply — a turn
+    /// with no task, a model with no subscription — which is a real row and
+    /// not an omission.
+    pub key: Option<String>,
+    /// What to call it, where anything knows. A task nobody could read the
+    /// title of has a key and no name, and the page draws that rather than
+    /// pretending.
+    pub name: Option<String>,
+    pub models: Vec<ByModel>,
+    pub tokens: i64,
+    pub cost_usd: Option<f64>,
+    pub priced_rows: i64,
+    pub rows: i64,
+    pub turns: i64,
+    pub conversations: i64,
+    pub workspaces: i64,
+    pub people: i64,
+    pub tasks: i64,
+    /// The second level, when one was asked for.
+    ///
+    /// `no_recursion` because this type contains itself: without it the schema
+    /// builder follows `children` forever and `gen-openapi` dies on a stack
+    /// overflow. The nesting really is only two deep — past that the interface
+    /// drills rather than expands — so the contract describing one level of
+    /// children and stopping is accurate rather than a concession.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[schema(no_recursion)]
+    pub children: Vec<Group>,
+}
+
+impl Db {
+    /// The shared tail of every consumption read: access, then the period, then
+    /// whatever the scope narrowed it to.
+    ///
+    /// `$1` is the person asking, `$2`/`$3` the period, `$4`/`$5` the scope.
+    /// Fixed positions so the fragment can be pasted into any of these queries
+    /// without each one counting its own placeholders.
+    fn consumption_where() -> String {
+        format!(
+            "{visible} \
+             AND c.occurred_at >= $2 AND c.occurred_at < $3 \
+             AND ($4::text IS NULL OR c.ran_as = $4) \
+             AND ($5::text IS NULL OR c.ran_as IN \
+                  (SELECT m.user_id FROM team_members m WHERE m.team_id = $5))",
+            visible = filed_where("c", 1, Level::Viewer)
+        )
+    }
+
+    /// What a period came to.
+    pub async fn consumption_totals(&self, person: &str, slice: &Slice) -> Result<Totals> {
+        let row = sqlx::query(&format!(
+            // `SUM` over a bigint widens to numeric, which will not decode as
+            // an i64 — so every total is cast back on the way out.
+            "SELECT COALESCE(SUM(c.input_tokens), 0)::bigint       AS input_tokens,
+                    COALESCE(SUM(c.output_tokens), 0)::bigint      AS output_tokens,
+                    COALESCE(SUM(c.cache_read_tokens), 0)::bigint  AS cache_read_tokens,
+                    COALESCE(SUM(c.cache_write_tokens), 0)::bigint AS cache_write_tokens,
+                    SUM(c.cost_usd)::float8                AS cost_usd,
+                    COUNT(c.cost_usd)                      AS priced_rows,
+                    COUNT(*)                               AS rows,
+                    COUNT(DISTINCT (c.session_id, c.turn_id)) AS turns,
+                    COUNT(DISTINCT c.session_id)           AS conversations,
+                    COUNT(DISTINCT c.workspace_id)         AS workspaces,
+                    COUNT(DISTINCT c.ran_as)               AS people
+               FROM consumption_events c
+              WHERE {tail}",
+            tail = Self::consumption_where()
+        ))
+        .bind(person)
+        .bind(slice.from)
+        .bind(slice.to)
+        .bind(slice.person.as_deref())
+        .bind(slice.team.as_deref())
+        .fetch_one(&self.pool)
+        .await
+        .context("adding up a period's consumption")?;
+
+        let input: i64 = row.get("input_tokens");
+        let output: i64 = row.get("output_tokens");
+        let cache_read: i64 = row.get("cache_read_tokens");
+        let cache_write: i64 = row.get("cache_write_tokens");
+        Ok(Totals {
+            input_tokens: input,
+            output_tokens: output,
+            cache_read_tokens: cache_read,
+            cache_write_tokens: cache_write,
+            // What the bill is made of: everything that was charged, including
+            // both kinds of cache. Not the context the model saw.
+            tokens: input + output + cache_read + cache_write,
+            cost_usd: row.get("cost_usd"),
+            priced_rows: row.get("priced_rows"),
+            rows: row.get("rows"),
+            turns: row.get("turns"),
+            conversations: row.get("conversations"),
+            workspaces: row.get("workspaces"),
+            people: row.get("people"),
+        })
+    }
+
+    /// The chart: one column per bucket, split by model.
+    ///
+    /// Buckets are made by Postgres rather than in Rust so that a month is a
+    /// month in the database's own calendar, and an empty one still has to be
+    /// filled in by the caller — `date_trunc` cannot invent a row for a week
+    /// when nothing ran.
+    pub async fn consumption_series(
+        &self,
+        person: &str,
+        slice: &Slice,
+        bucket: Bucket,
+    ) -> Result<Vec<Column>> {
+        let rows = sqlx::query(&format!(
+            "SELECT date_trunc('{unit}', c.occurred_at) AS start,
+                    c.model,
+                    SUM(c.input_tokens + c.output_tokens
+                        + c.cache_read_tokens + c.cache_write_tokens)::bigint AS tokens
+               FROM consumption_events c
+              WHERE {tail}
+              GROUP BY 1, 2
+              ORDER BY 1, 3 DESC",
+            unit = bucket.unit(),
+            tail = Self::consumption_where()
+        ))
+        .bind(person)
+        .bind(slice.from)
+        .bind(slice.to)
+        .bind(slice.person.as_deref())
+        .bind(slice.team.as_deref())
+        .fetch_all(&self.pool)
+        .await
+        .context("reading consumption over time")?;
+
+        let mut out: Vec<Column> = Vec::new();
+        for r in rows {
+            let start: chrono::DateTime<chrono::Utc> = r.get("start");
+            let entry = ByModel {
+                model: r.get("model"),
+                tokens: r.get("tokens"),
+            };
+            match out.last_mut() {
+                Some(last) if last.start == start => last.models.push(entry),
+                _ => out.push(Column {
+                    start,
+                    models: vec![entry],
+                }),
+            }
+        }
+        Ok(out)
+    }
+
+    /// The ledger, cut one way.
+    ///
+    /// Two queries rather than one: the measures add up per model, and the
+    /// counts do not. A turn spans several models, so counting it on each
+    /// model's row would report it several times — which is why `turns` is
+    /// counted once per group, apart from the tokens.
+    pub async fn consumption_groups(
+        &self,
+        person: &str,
+        slice: &Slice,
+        by: Dimension,
+    ) -> Result<Vec<Group>> {
+        let (key, name) = by.columns();
+        let joins = Self::consumption_joins(by);
+
+        let measured = sqlx::query(&format!(
+            "SELECT {key} AS key, MAX({name}) AS name, c.model,
+                    SUM(c.input_tokens + c.output_tokens
+                        + c.cache_read_tokens + c.cache_write_tokens)::bigint AS tokens,
+                    SUM(c.cost_usd)::float8 AS cost_usd,
+                    COUNT(c.cost_usd) AS priced_rows,
+                    COUNT(*) AS rows
+               FROM consumption_events c {joins}
+              WHERE {tail}
+              GROUP BY 1, 3",
+            tail = Self::consumption_where()
+        ))
+        .bind(person)
+        .bind(slice.from)
+        .bind(slice.to)
+        .bind(slice.person.as_deref())
+        .bind(slice.team.as_deref())
+        .fetch_all(&self.pool)
+        .await
+        .context("reading consumption by dimension")?;
+
+        let counted = sqlx::query(&format!(
+            "SELECT {key} AS key,
+                    COUNT(DISTINCT (c.session_id, c.turn_id)) AS turns,
+                    COUNT(DISTINCT c.session_id) AS conversations,
+                    COUNT(DISTINCT c.workspace_id) AS workspaces,
+                    COUNT(DISTINCT c.ran_as) AS people,
+                    COUNT(DISTINCT c.task_key) AS tasks
+               FROM consumption_events c {joins}
+              WHERE {tail}
+              GROUP BY 1",
+            tail = Self::consumption_where()
+        ))
+        .bind(person)
+        .bind(slice.from)
+        .bind(slice.to)
+        .bind(slice.person.as_deref())
+        .bind(slice.team.as_deref())
+        .fetch_all(&self.pool)
+        .await
+        .context("counting consumption by dimension")?;
+
+        let mut counts = std::collections::HashMap::new();
+        for r in counted {
+            counts.insert(
+                r.get::<Option<String>, _>("key"),
+                (
+                    r.get::<i64, _>("turns"),
+                    r.get::<i64, _>("conversations"),
+                    r.get::<i64, _>("workspaces"),
+                    r.get::<i64, _>("people"),
+                    r.get::<i64, _>("tasks"),
+                ),
+            );
+        }
+
+        let mut groups: std::collections::HashMap<Option<String>, Group> =
+            std::collections::HashMap::new();
+        for r in measured {
+            let key: Option<String> = r.get("key");
+            let tokens: i64 = r.get("tokens");
+            let cost: Option<f64> = r.get("cost_usd");
+            let g = groups.entry(key.clone()).or_insert_with(|| {
+                let (turns, conversations, workspaces, people, tasks) =
+                    counts.get(&key).copied().unwrap_or_default();
+                Group {
+                    key: key.clone(),
+                    name: r.get("name"),
+                    models: Vec::new(),
+                    tokens: 0,
+                    cost_usd: None,
+                    priced_rows: 0,
+                    rows: 0,
+                    turns,
+                    conversations,
+                    workspaces,
+                    people,
+                    tasks,
+                    children: Vec::new(),
+                }
+            });
+            g.models.push(ByModel {
+                model: r.get("model"),
+                tokens,
+            });
+            g.tokens += tokens;
+            // NULL is not zero: a group of nothing but Codex has no price at
+            // all, and a group with some has only part of one.
+            if let Some(c) = cost {
+                *g.cost_usd.get_or_insert(0.0) += c;
+            }
+            g.priced_rows += r.get::<i64, _>("priced_rows");
+            g.rows += r.get::<i64, _>("rows");
+        }
+
+        let mut out: Vec<Group> = groups.into_values().collect();
+        for g in &mut out {
+            g.models.sort_by_key(|m| std::cmp::Reverse(m.tokens));
+        }
+        out.sort_by_key(|g| std::cmp::Reverse(g.tokens));
+        Ok(out)
+    }
+
+    /// What a dimension has to reach for to find a name.
+    ///
+    /// Only two do. A task's title lives in `consumption_tasks` because the
+    /// tracker owns it and we only ever borrowed it; a person's name lives in
+    /// `principals`, which is never deleted, so somebody who left is still
+    /// drawn by name rather than as an id.
+    fn consumption_joins(by: Dimension) -> &'static str {
+        match by {
+            Dimension::Task => {
+                "LEFT JOIN consumption_tasks t ON t.org_id = c.org_id AND t.task_key = c.task_key"
+            }
+            Dimension::Person => "LEFT JOIN principals p ON p.id = c.ran_as",
+            _ => "",
+        }
     }
 }

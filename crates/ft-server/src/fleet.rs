@@ -129,6 +129,25 @@ struct Read {
     /// that can report it.
     asks: Vec<AgentSpeech>,
     resolved: Vec<String>,
+    /// What the turn that just ended cost, when the agent said.
+    ///
+    /// Read here and written by the caller, because `read` is synchronous and
+    /// holds a lock over every session's reader — a database round trip taken
+    /// inside it would stall the whole fleet's line handling behind one slow
+    /// query. ACP says nothing about usage, so it is always `None` there.
+    spent: Option<Spent>,
+}
+
+/// One finished turn's bill, on its way to `consumption_events`.
+struct Spent {
+    turn: String,
+    usage: ft_core::turn::Usage,
+    /// What to bill the turn to when the agent gave no per-model breakdown.
+    ///
+    /// Claude Code reports `modelUsage` and this goes unused. Codex reports one
+    /// set of totals and no breakdown at all, so the only statement of what ran
+    /// is what the session was last told to use.
+    fallback_model: Option<String>,
 }
 
 /// One session's lines, read for what they say about the session.
@@ -420,6 +439,7 @@ impl Progress {
         let mut moved = None;
         let mut asks = Vec::new();
         let mut resolved = Vec::new();
+        let mut spent = None;
         for event in self.reader.push(line) {
             match event {
                 // Assistant text only. A tool's output is not the agent
@@ -459,8 +479,23 @@ impl Progress {
                         }
                     }
                 }
-                E::TurnCompleted { status, detail, .. } => {
+                E::TurnCompleted {
+                    turn,
+                    status,
+                    detail,
+                    usage,
+                } => {
                     self.in_turn = false;
+                    // The only moment the whole turn's bill exists. Before this
+                    // it is partial, and a moment later the line is forwarded
+                    // on and nothing keeps it.
+                    if let Some(usage) = usage {
+                        spent = Some(Spent {
+                            turn: turn.to_string(),
+                            usage,
+                            fallback_model: self.model_now(),
+                        });
+                    }
                     let note = detail.or_else(|| summarise(&self.said));
                     // A turn we stopped is not a turn that broke, whatever the
                     // agent calls it on the way out.
@@ -529,6 +564,20 @@ impl Progress {
             send,
             asks,
             resolved,
+            spent,
+        }
+    }
+
+    /// What this session is running, as the agent or its settings last said.
+    ///
+    /// Only consulted when a turn reports no per-model breakdown, which in
+    /// practice means Codex. The resolved name where there is one, so
+    /// `claude-haiku-4-5-20251001` and `haiku` do not become two rows on a page
+    /// that groups by model.
+    fn model_now(&self) -> Option<String> {
+        match &self.reader {
+            ft_core::normalise::Reader::Claude(reader) => reader.model().map(str::to_string),
+            _ => self.settings.model.clone(),
         }
     }
 
@@ -2009,6 +2058,30 @@ impl Fleet {
                                     None => continue,
                                 }
                             };
+
+                            // What the turn cost, written down while the
+                            // session it belongs to still exists. Minutes
+                            // later the workspace may be reclaimed and every
+                            // name on the row with it.
+                            //
+                            // A warning rather than a `?`: a page missing one
+                            // turn is a smaller problem than a session that
+                            // stops reading its own transcript because a write
+                            // failed.
+                            if let Some(spent) = read.spent {
+                                if let Err(e) = db
+                                    .record_consumption(
+                                        &session_id,
+                                        &spent.turn,
+                                        &spent.usage,
+                                        spent.fallback_model.as_deref(),
+                                    )
+                                    .await
+                                {
+                                    tracing::warn!(session = %session_id,
+                                        "recording what a turn cost: {e:#}");
+                                }
+                            }
 
                             // What the agent has to be told before it will go
                             // on. Codex opens a conversation and then waits to
