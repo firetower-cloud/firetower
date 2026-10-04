@@ -14,6 +14,7 @@ pub(crate) mod accounts;
 pub(crate) mod agents;
 mod annotations;
 mod auth;
+mod consumption;
 mod conversation;
 mod events;
 mod forwards;
@@ -259,6 +260,8 @@ async fn credential_for(
     // /bootstrap, which is the real answer and is always current.
     info(title = "Firetower", version = "0"),
     components(schemas(
+        crate::db::Bucket,
+        crate::db::Dimension,
         Event,
         Agent,
         SessionStatus,
@@ -340,6 +343,7 @@ pub struct ApiDoc;
 pub fn router() -> OpenApiRouter<AppState> {
     OpenApiRouter::with_openapi(ApiDoc::openapi())
         .routes(routes!(bootstrap))
+        .routes(routes!(consumption::consumption))
         .routes(routes!(auth::login))
         .routes(routes!(auth::logout))
         .routes(routes!(auth::me))

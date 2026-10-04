@@ -2198,6 +2198,18 @@ async fn tracked(state: &AppState, session: &Session) -> Option<ft_proto::Tracke
         Err(e) => tracing::debug!(session = %session.id, "could not read {url}: {e:#}"),
     }
 
+    // Keep whatever was read. The consumption page outlives every workspace cut
+    // for this task, and by the time somebody asks what the work cost, this may
+    // be the only place its name still exists. Best effort on purpose: failing
+    // to remember a title is no reason to fail drawing the session.
+    if let Err(e) = state
+        .db
+        .remember_task(&session.id, &out.key, Some(&out.url), out.title.as_deref())
+        .await
+    {
+        tracing::debug!(session = %session.id, "remembering the task: {e:#}");
+    }
+
     Some(out)
 }
 
