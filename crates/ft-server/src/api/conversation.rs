@@ -1591,7 +1591,7 @@ mod tests {
 
         let (db, owner) = crate::db::Db::open_for_test_owned().await.unwrap();
         let host = db
-            .ensure_host("localhost", ft_core::Compute::Local)
+            .ensure_host("localhost", ft_core::Compute::Local, &owner)
             .await
             .unwrap();
         let id = SessionId::new();

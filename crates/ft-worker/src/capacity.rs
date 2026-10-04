@@ -103,6 +103,20 @@ fn memory() -> (u64, u64) {
 /// remain used. No subprocess is needed on the periodic reporting path.
 #[cfg(target_os = "macos")]
 fn memory() -> (u64, u64) {
+    // mach2 exposes task ports and deallocation, but not this host-port entry.
+    unsafe extern "C" {
+        fn mach_host_self() -> libc::mach_port_t;
+    }
+    // SAFETY: this kernel entry takes no arguments and returns our host port.
+    let host = unsafe { mach_host_self() };
+    let value = memory_for_host(host);
+    // SAFETY: release the send right acquired above, on this task.
+    unsafe { mach2::mach_port::mach_port_deallocate(mach2::traps::mach_task_self(), host) };
+    value
+}
+
+#[cfg(target_os = "macos")]
+fn memory_for_host(host: libc::mach_port_t) -> (u64, u64) {
     let mut bytes = 0_u64;
     let mut length = std::mem::size_of_val(&bytes);
     // SAFETY: hw.memsize writes a u64 into the initialized, correctly sized
@@ -124,12 +138,6 @@ fn memory() -> (u64, u64) {
     // count describes its size in the integer units host_statistics64 expects.
     let mut stats: libc::vm_statistics64 = unsafe { std::mem::zeroed() };
     let mut count = libc::HOST_VM_INFO64_COUNT;
-    // mach2 exposes task ports and deallocation, but not this host-port entry.
-    unsafe extern "C" {
-        fn mach_host_self() -> libc::mach_port_t;
-    }
-    // SAFETY: this kernel entry takes no arguments and returns our host port.
-    let host = unsafe { mach_host_self() };
     let result = unsafe {
         libc::host_statistics64(
             host,
@@ -138,15 +146,13 @@ fn memory() -> (u64, u64) {
             &mut count,
         )
     };
-    // SAFETY: release the send right acquired by mach_host_self, on this task.
-    unsafe { mach2::mach_port::mach_port_deallocate(mach2::traps::mach_task_self(), host) };
     if result != libc::KERN_SUCCESS {
-        return (total, 0);
+        return (0, 0);
     }
     // SAFETY: sysconf has no memory arguments; a failed lookup is nonpositive.
     let page_size = unsafe { libc::sysconf(libc::_SC_PAGESIZE) };
     if page_size <= 0 {
-        return (total, 0);
+        return (0, 0);
     }
     let reclaimable = u64::from(stats.free_count)
         + u64::from(stats.inactive_count)
@@ -252,6 +258,13 @@ async fn run(command: &mut Command) -> Option<std::process::Output> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn unavailable_kernel_stats_do_not_report_all_memory_free() {
+        // A null host port is rejected by the real kernel statistics call.
+        assert_eq!(memory_for_host(0), (0, 0));
+    }
 
     /// A daemon that never replies must not leave a process behind each tick.
     #[tokio::test]

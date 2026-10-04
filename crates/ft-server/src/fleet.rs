@@ -4328,7 +4328,7 @@ mod tests {
         use serde_json::json;
         let (db, owner) = Db::open_for_test_owned().await.unwrap();
         let host = db
-            .ensure_host("fire-01", ft_core::Compute::Local)
+            .ensure_host("fire-01", ft_core::Compute::Local, &owner)
             .await
             .unwrap();
         let session = SessionId::new();
