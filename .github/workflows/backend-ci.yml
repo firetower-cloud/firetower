@@ -150,6 +150,7 @@ jobs:
           cache-to: type=gha,mode=max,scope=firetower-pr
 
   native-macos:
+    if: ${{ !startsWith(github.head_ref, 'release-please--') }}
     runs-on: ${{ github.repository == 'firetower-cloud/firetower' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && 'depot-macos-latest' || 'macos-latest' }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5

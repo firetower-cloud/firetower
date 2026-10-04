@@ -115,7 +115,7 @@ mod tests {
 
     /// Only the agents Firetower fetches have somewhere to ask.
     #[test]
-    fn a_shell_has_no_publisher() {
+    fn only_agents_with_supported_latest_feeds_are_polled() {
         assert!(newest_url(Agent::Shell).is_none());
         assert!(newest_url(Agent::CursorAgent).is_none());
         for kind in [Agent::ClaudeCode, Agent::Codex, Agent::KimiCode] {

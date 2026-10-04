@@ -32,6 +32,7 @@ try {
   await page.getByPlaceholder("Password", { exact: true }).fill(password);
   await page.getByRole("button", { name: "Sign in" }).click();
   await page.getByText("Configuration", { exact: true }).click();
+  await page.getByText("Agents", { exact: true }).click();
   await page.getByText("Cursor Agent", { exact: true }).click();
   if (await page.getByRole("button", { name: "Install", exact: true }).isVisible()) {
     await page.getByRole("button", { name: "Install", exact: true }).click();
@@ -58,6 +59,7 @@ try {
   }
 
   if (process.env.FIRETOWER_E2E_RUN === "1") {
+    await page.getByText("Back", { exact: true }).click();
     const repository = process.env.FIRETOWER_E2E_REPOSITORY;
     if (!repository) throw new Error("Set FIRETOWER_E2E_REPOSITORY to a disposable local git repository");
     if (await page.getByText("firetower-cursor-pw-repo", { exact: false }).count() === 0) {
@@ -66,7 +68,7 @@ try {
       await page.getByPlaceholder("git@github.com:acme/web.git").fill(repository);
       await page.getByRole("button", { name: "Add it" }).click({ timeout: 30_000 });
     }
-    await page.getByRole("button", { name: /New workspace/ }).click();
+    await page.getByRole("button", { name: "New workspace", exact: true }).click();
     await page.getByPlaceholder("auth refactor").fill(`Cursor ACP Playwright ${Date.now()}`);
     await page.locator("button").filter({ hasText: "Choose a repository" }).click();
     await page.getByPlaceholder("Find a repository").fill("firetower-cursor-pw-repo");
