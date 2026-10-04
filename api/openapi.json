@@ -4576,6 +4576,96 @@
         }
       }
     },
+    "/api/v1/sessions/{id}/skills": {
+      "get": {
+        "tags": [
+          "skills"
+        ],
+        "operationId": "session_skills",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The session",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionSkills"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "skills"
+        ],
+        "operationId": "choose_skills",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The session",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChooseSkills"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionSkills"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/sessions/{id}/stop": {
       "post": {
         "tags": [
@@ -4798,6 +4888,338 @@
           },
           "409": {
             "description": "Already set up",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/skills": {
+      "get": {
+        "tags": [
+          "skills"
+        ],
+        "operationId": "list_skills",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Skill"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "skills"
+        ],
+        "operationId": "create_skill",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewSkill"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Skill"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/skills/{id}": {
+      "delete": {
+        "tags": [
+          "skills"
+        ],
+        "operationId": "delete_skill",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The skill",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "skills"
+        ],
+        "operationId": "rename_skill",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The skill",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SkillNaming"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Skill"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/skills/{id}/default": {
+      "put": {
+        "tags": [
+          "skills"
+        ],
+        "operationId": "set_default",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The skill",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DefaultIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/skills/{id}/detail": {
+      "get": {
+        "tags": [
+          "skills"
+        ],
+        "operationId": "skill_detail",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The skill",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkillDetail"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/skills/{id}/versions": {
+      "get": {
+        "tags": [
+          "skills"
+        ],
+        "operationId": "list_versions",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The skill",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SkillVersion"
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "skills"
+        ],
+        "operationId": "add_version",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The skill",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewSkill"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Skill"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
             "content": {
               "application/json": {
                 "schema": {
@@ -7084,6 +7506,21 @@
           }
         }
       },
+      "ChooseSkills": {
+        "type": "object",
+        "description": "The whole selection, never a delta.",
+        "required": [
+          "selected"
+        ],
+        "properties": {
+          "selected": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
       "Chosen": {
         "type": "object",
         "description": "What to change, and to what.",
@@ -7584,6 +8021,25 @@
         ],
         "description": "What the person decided, when they were asked."
       },
+      "DefaultIn": {
+        "type": "object",
+        "description": "Turning a default on or off, for one repository or for everywhere.",
+        "required": [
+          "on"
+        ],
+        "properties": {
+          "on": {
+            "type": "boolean"
+          },
+          "repoId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Absent means every workspace this person starts."
+          }
+        }
+      },
       "Diagnosis": {
         "type": "object",
         "description": "Why a connection didn't happen, in terms of what to do about it.\n\nEach cause has a different fix, and the failure they arrive as — a closed\nstream — distinguishes none of them.",
@@ -7638,7 +8094,8 @@
           "workspaces",
           "hosts",
           "agentAccounts",
-          "secrets"
+          "secrets",
+          "skills"
         ],
         "properties": {
           "agentAccounts": {
@@ -7667,6 +8124,10 @@
             "type": "string"
           },
           "secrets": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "skills": {
             "type": "integer",
             "format": "int64"
           },
@@ -8371,6 +8832,7 @@
           "machine",
           "agentAccount",
           "secret",
+          "skill",
           "repository"
         ]
       },
@@ -8705,6 +9167,27 @@
           }
         ],
         "description": "How somebody came by the access they have to a directory.\n\nNot `Route`, which is taken: the sharing sheet already has one, meaning\n*owner, directory or exception*. Two schemas of the same name do not\ncollide loudly — one silently replaces the other in every generated client,\nand the first sign is a field typed as something unrelated.\n\nFlattened, `directory_access` answers *what* they may do and loses *why* —\nwhich is the only thing that matters when the question is how to take it\naway. Revoking a grant that was never theirs to begin with changes nothing;\nthe team is what has to be left."
+      },
+      "IncomingFile": {
+        "type": "object",
+        "description": "A file arriving from a drop.",
+        "required": [
+          "path",
+          "contents"
+        ],
+        "properties": {
+          "contents": {
+            "type": "string",
+            "description": "base64, because a bundle may hold a font."
+          },
+          "executable": {
+            "type": "boolean"
+          },
+          "path": {
+            "type": "string",
+            "description": "Relative, inside the bundle. Never absolute and never climbing out."
+          }
+        }
       },
       "InstallAgent": {
         "type": "object",
@@ -9322,6 +9805,43 @@
                 "$ref": "#/components/schemas/WorkspaceId",
                 "description": "A workspace to start this agent in, instead of making one.\n\nThe place already exists — its host, its repositories, its branch and\nits directory — so all of those are read from it and anything sent\nalongside is ignored. What is left is the agent and what to ask it.\n\nThis is how a workspace comes to hold two agents: they are two sessions\nnaming one `workspace_id`, each with its own conversation."
               }
+            ]
+          }
+        }
+      },
+      "NewSkill": {
+        "type": "object",
+        "description": "A whole bundle somebody dropped.",
+        "required": [
+          "name",
+          "description",
+          "frontmatter",
+          "body",
+          "files"
+        ],
+        "properties": {
+          "body": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/IncomingFile"
+            }
+          },
+          "frontmatter": {
+            "description": "Parsed, for the library to read. The bytes are kept as they arrived in\n`files`, so nothing here is what gets written onto a worker."
+          },
+          "name": {
+            "type": "string"
+          },
+          "notes": {
+            "type": [
+              "string",
+              "null"
             ]
           }
         }
@@ -10695,6 +11215,22 @@
         "type": "string",
         "description": "Identifies a session — the unit of work you talk to."
       },
+      "SessionSkills": {
+        "type": "object",
+        "description": "What a session is reading, and what it would read if nothing was chosen.",
+        "required": [
+          "selected"
+        ],
+        "properties": {
+          "selected": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The skills this session has pinned."
+          }
+        }
+      },
       "SessionStatus": {
         "type": "string",
         "enum": [
@@ -10841,6 +11377,224 @@
             "$ref": "#/components/schemas/User"
           }
         }
+      },
+      "Skill": {
+        "type": "object",
+        "description": "One row of the library.\n\n`name` and `description` are copied down from the current version rather\nthan joined per row: this list is three hundred long and those two fields\nare what every one of them draws.",
+        "required": [
+          "id",
+          "path",
+          "name",
+          "slug",
+          "description",
+          "version",
+          "versionId",
+          "tokens",
+          "files",
+          "bytes",
+          "risk",
+          "updatedAt",
+          "mayWrite",
+          "defaultIn",
+          "alwaysOn"
+        ],
+        "properties": {
+          "alwaysOn": {
+            "type": "boolean",
+            "description": "On in every workspace this person starts."
+          },
+          "author": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Who wrote it. A fact that outlives them leaving."
+          },
+          "bytes": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "defaultIn": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The repositories this person has it on by default. Empty for most."
+          },
+          "description": {
+            "type": "string"
+          },
+          "files": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "id": {
+            "$ref": "#/components/schemas/SkillId"
+          },
+          "mayWrite": {
+            "type": "boolean",
+            "description": "Whether this person may make a version of it or rename it."
+          },
+          "name": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string",
+            "description": "`u/kevin/rust_review` — slashes on the wire, dots in the database."
+          },
+          "risk": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "What this skill does to a session, read from the bundle rather than\nfrom what its author said about it. See [`risk_of`]."
+          },
+          "slug": {
+            "type": "string"
+          },
+          "tokens": {
+            "type": "integer",
+            "format": "int32",
+            "description": "What the listing entry costs in the model's context, every turn."
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "version": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "versionId": {
+            "$ref": "#/components/schemas/SkillVersionId"
+          }
+        }
+      },
+      "SkillDetail": {
+        "type": "object",
+        "description": "What the instructions say, for the screen that shows them.",
+        "required": [
+          "body",
+          "frontmatter",
+          "files"
+        ],
+        "properties": {
+          "body": {
+            "type": "string"
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SkillFile"
+            }
+          },
+          "frontmatter": {}
+        }
+      },
+      "SkillFile": {
+        "type": "object",
+        "description": "One file of a bundle, without its bytes.",
+        "required": [
+          "path",
+          "size",
+          "executable",
+          "shared"
+        ],
+        "properties": {
+          "executable": {
+            "type": "boolean"
+          },
+          "path": {
+            "type": "string"
+          },
+          "shared": {
+            "type": "boolean",
+            "description": "Whether these bytes were already here under the same hash."
+          },
+          "size": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "SkillId": {
+        "type": "string",
+        "description": "Identifies a skill — a folder of instructions an agent loads when it needs one."
+      },
+      "SkillNaming": {
+        "type": "object",
+        "description": "What is being changed about a skill without making a version of it.",
+        "required": [
+          "name",
+          "description"
+        ],
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        }
+      },
+      "SkillVersion": {
+        "type": "object",
+        "description": "One version, which is a fact about the past and never updated.",
+        "required": [
+          "id",
+          "version",
+          "tokens",
+          "files",
+          "bytes",
+          "createdAt",
+          "pinnedBy"
+        ],
+        "properties": {
+          "author": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "bytes": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "files": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "id": {
+            "$ref": "#/components/schemas/SkillVersionId"
+          },
+          "notes": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "pinnedBy": {
+            "type": "integer",
+            "format": "int64",
+            "description": "How many sessions are still reading this one."
+          },
+          "tokens": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "version": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      },
+      "SkillVersionId": {
+        "type": "string",
+        "description": "Identifies one version of a skill. Append-only: a session pins one."
       },
       "SlashCommand": {
         "type": "object",

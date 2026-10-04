@@ -28,6 +28,7 @@ import { Machines } from "~/ui/config/Machines";
 import { Repos } from "~/ui/config/Repos";
 import { Integrations } from "~/ui/config/Integrations";
 import { Agents } from "~/ui/config/Agents";
+import { Skills } from "~/ui/config/Skills";
 import { Secrets } from "~/ui/config/Secrets";
 import { People } from "~/ui/config/People";
 import { Teams } from "~/ui/config/Teams";
@@ -56,6 +57,8 @@ function Pane({ at, backend, onForgot }: { at: string; backend: Backend; onForgo
       return <Machines live />;
     case "agents":
       return <Agents live />;
+    case "skills":
+      return <Skills />;
     case "people":
       return <People backend={backend} />;
     case "teams":

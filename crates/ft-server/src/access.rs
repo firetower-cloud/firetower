@@ -133,7 +133,8 @@ const DIRECTORY_COLUMNS: &str = "d.id, d.name, d.slug, \
      (SELECT count(*) FROM workspaces     x WHERE x.path <@ ('d.' || d.slug)::ltree) AS workspaces, \
      (SELECT count(*) FROM hosts          x WHERE x.path <@ ('d.' || d.slug)::ltree) AS hosts, \
      (SELECT count(*) FROM agent_accounts x WHERE x.path <@ ('d.' || d.slug)::ltree) AS agent_accounts, \
-     (SELECT count(*) FROM secrets        x WHERE x.path <@ ('d.' || d.slug)::ltree) AS secrets";
+     (SELECT count(*) FROM secrets        x WHERE x.path <@ ('d.' || d.slug)::ltree) AS secrets, \
+     (SELECT count(*) FROM skills         x WHERE x.path <@ ('d.' || d.slug)::ltree) AS skills";
 
 /// A named group of people.
 #[derive(Debug, Clone, Serialize, ToSchema)]
@@ -165,12 +166,13 @@ pub struct Directory {
     pub hosts: i64,
     pub agent_accounts: i64,
     pub secrets: i64,
+    pub skills: i64,
 }
 
 impl Directory {
     /// Whether anything at all is filed here.
     pub fn holds_anything(&self) -> bool {
-        self.workspaces + self.hosts + self.agent_accounts + self.secrets > 0
+        self.workspaces + self.hosts + self.agent_accounts + self.secrets + self.skills > 0
     }
 }
 
@@ -293,6 +295,8 @@ pub enum FiledKind {
     Machine,
     AgentAccount,
     Secret,
+    /// A folder of instructions an agent loads when it needs one.
+    Skill,
     /// The one kind that is never in a directory.
     ///
     /// It is in this enum because the screens that list what somebody owns,
@@ -309,6 +313,7 @@ impl FiledKind {
             "machine" => FiledKind::Machine,
             "agentAccount" => FiledKind::AgentAccount,
             "secret" => FiledKind::Secret,
+            "skill" => FiledKind::Skill,
             "repository" => FiledKind::Repository,
             other => bail!("{other} is not something a directory holds"),
         })
@@ -321,6 +326,7 @@ impl FiledKind {
             FiledKind::Machine => "machine",
             FiledKind::AgentAccount => "agent account",
             FiledKind::Secret => "secret",
+            FiledKind::Skill => "skill",
             FiledKind::Repository => "repository",
         }
     }
@@ -778,6 +784,7 @@ impl Access {
             workspaces: 0,
             hosts: 0,
             agent_accounts: 0,
+            skills: 0,
             secrets: 0,
         })
     }
@@ -841,6 +848,7 @@ impl Access {
             FiledKind::Machine => "hosts",
             FiledKind::AgentAccount => "agent_accounts",
             FiledKind::Secret => "secrets",
+            FiledKind::Skill => "skills",
             // Never reached by a move: `is_filable` refuses before this, and
             // `may_share` would refuse again on the personal path. Named
             // anyway, because the one place a kind becomes a table name should
@@ -890,6 +898,10 @@ impl Access {
                     u.name
                FROM secrets s LEFT JOIN principals u ON u.id = s.created_by
               WHERE s.path <@ $1::ltree
+             UNION ALL
+             SELECT 'skill', k.id, k.path::text, k.name, NULL, u.name
+               FROM skills k LEFT JOIN principals u ON u.id = k.created_by
+              WHERE k.path <@ $1::ltree
              UNION ALL
              SELECT 'repository', r.id, r.path::text, r.slug, r.remote, u.name
                FROM repos r LEFT JOIN principals u ON u.id = r.added_by
@@ -1162,7 +1174,10 @@ impl Access {
              UNION ALL
              SELECT 'secret', s.scope || '/' || s.name || '/' || s.owner, s.scope || '/' || s.name,
                     s.extra_perms ->> $1
-               FROM secrets s WHERE s.extra_perms ? $1",
+               FROM secrets s WHERE s.extra_perms ? $1
+             UNION ALL
+             SELECT 'skill', k.id, k.name, k.extra_perms ->> $1
+               FROM skills k WHERE k.extra_perms ? $1",
         )
         .bind(key)
         .fetch_all(&self.pool)
@@ -1659,7 +1674,7 @@ impl Access {
     /// is ever added and forgotten here, the cost is a dead entry rather than a
     /// stranger's access.
     pub async fn forget_exceptions(tx: &mut Transaction<'_, Postgres>, key: &str) -> Result<()> {
-        for table in ["workspaces", "hosts", "agent_accounts", "secrets"] {
+        for table in ["workspaces", "hosts", "agent_accounts", "secrets", "skills"] {
             sqlx::query(&format!(
                 "UPDATE {table} SET extra_perms = extra_perms - $1::text WHERE extra_perms ? $1"
             ))
@@ -1916,6 +1931,7 @@ fn directory_from_row(r: sqlx::postgres::PgRow) -> Result<Directory> {
         hosts: r.get("hosts"),
         agent_accounts: r.get("agent_accounts"),
         secrets: r.get("secrets"),
+        skills: r.get("skills"),
     })
 }
 
@@ -1927,6 +1943,7 @@ fn what_it_holds(directory: &Directory) -> String {
         (directory.hosts, "machine", "machines"),
         (directory.agent_accounts, "agent account", "agent accounts"),
         (directory.secrets, "secret", "secrets"),
+        (directory.skills, "skill", "skills"),
     ] {
         if n > 0 {
             parts.push(format!("{n} {}", if n == 1 { one } else { many }));

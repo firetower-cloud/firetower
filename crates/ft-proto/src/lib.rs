@@ -45,7 +45,11 @@ use serde::{Deserialize, Serialize};
 /// 15 — KimiCode and its ACP journal require an ACP-aware worker.
 /// 16 — ACP configuration commands require a worker that can apply them.
 /// 17 — signing in names its agent, so Kimi can use the device flow too.
-pub const PROTOCOL_VERSION: u32 = 17;
+/// 18 — skills travel with a session, and can be changed while it runs. A
+///      worker older than this would start an agent with none of them and
+///      silently ignore every later change, which reads as the feature being
+///      broken rather than as a worker needing an upgrade.
+pub const PROTOCOL_VERSION: u32 = 18;
 
 mod codec;
 pub use codec::{Codec, CodecError, FrameReader, FrameWriter};
@@ -232,6 +236,19 @@ pub enum ToWorker {
     /// End the turn in progress. The session stays.
     Interrupt {
         session_id: SessionId,
+    },
+    /// Replace the skills a running session reads with exactly this set.
+    ///
+    /// The **whole selection**, never a delta. A delta that arrives out of
+    /// order leaves a worker holding a set nobody chose, and there is no
+    /// cheap way for either end to notice.
+    ///
+    /// The worker writes what is new, removes what is gone, and leaves what is
+    /// unchanged alone — so a skill the agent is part-way through reading is
+    /// not pulled out from under it for no reason.
+    SetSkills {
+        session_id: SessionId,
+        skills: Vec<SkillBundle>,
     },
     /// Attach a terminal.
     PtyOpen {
@@ -564,6 +581,45 @@ pub struct CreateWorkspace {
     /// and writes nothing.
     #[serde(default)]
     pub agent_home: Vec<(String, String)>,
+    /// The skills this session reads, written into a directory of its own.
+    ///
+    /// The whole selection, never a delta — see [`ToWorker::SetSkills`].
+    #[serde(default)]
+    pub skills: Vec<SkillBundle>,
+}
+
+/// One file of a skill, on its way to a worker.
+///
+/// base64 because a bundle may hold a font — `canvas-design` is 54 of them —
+/// and a JSON frame carries text.
+#[derive(Clone, Serialize, Deserialize)]
+pub struct SkillFile {
+    /// Relative, inside the bundle. Never absolute and never climbing out; the
+    /// worker checks again before writing, because a path that escaped would
+    /// write into a workspace nothing cleans up.
+    pub path: String,
+    pub contents: String,
+    #[serde(default)]
+    pub executable: bool,
+}
+
+impl std::fmt::Debug for SkillFile {
+    /// Without the bytes. A frame holding a megabyte of base64 is not
+    /// something anybody wants in a log line.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SkillFile")
+            .field("path", &self.path)
+            .field("bytes", &self.contents.len())
+            .finish()
+    }
+}
+
+/// One skill, as a folder the worker writes out.
+#[derive(Clone, Serialize, Deserialize, Debug)]
+pub struct SkillBundle {
+    /// The folder's name, which is also the name the agent answers to.
+    pub name: String,
+    pub files: Vec<SkillFile>,
 }
 
 /// Another agent, in a workspace that already exists.
@@ -625,6 +681,10 @@ pub struct StartAgent {
     pub env: Vec<(String, String)>,
     #[serde(default)]
     pub agent_home: Vec<(String, String)>,
+    /// This run's own skills. A second agent in one workspace is a second
+    /// session, so it gets its own directory and its own selection.
+    #[serde(default)]
+    pub skills: Vec<SkillBundle>,
 }
 
 impl std::fmt::Debug for StartAgent {

@@ -109,6 +109,7 @@ async fn fixture() -> (
         updates: crate::updates::Updates::new(db.pool().clone()),
         policy: crate::auth::Policy::open(),
         access: crate::access::Access::new(db.pool().clone()),
+        skills: crate::skills::Skills::new(db.pool().clone()),
         db,
         accounts,
         fleet,

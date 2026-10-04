@@ -17,7 +17,7 @@
  */
 import { useEffect, useRef, useState } from "react";
 import type { RefObject } from "react";
-import { ArrowUp, Check, ChevronDown, FileText, ImageOff, Loader2, Paperclip, Square, X } from "lucide-react";
+import { ArrowUp, Check, ChevronDown, Diamond, FileText, ImageOff, Loader2, Paperclip, Square, X } from "lucide-react";
 import { interruptible, type Conversation } from "~/api/conversation";
 import type { Attached, Control, ControlKind, Session } from "~/api/generated/model";
 import { useAttachFile, useInterruptSession, useListFiles, useSendTurn } from "~/api/generated/sessions/sessions";
@@ -27,6 +27,8 @@ import { AccountLine, AccountNotice } from "~/ui/AccountSwitcher";
 import { Mic } from "~/ui/voice/Mic";
 import { VoiceDialog } from "~/ui/voice/Dialogs";
 import { useVoice } from "~/ui/voice/useVoice";
+import { SkillPicker } from "~/ui/SkillPicker";
+import { useSessionSkillIds } from "~/data";
 
 /**
  * One attached thing, from the moment it is dropped.
@@ -169,6 +171,11 @@ export function Composer({
   }, [model, askAgain]);
 
   const [text, setText] = useState(() => takeDraft(session.id) ?? "");
+  /* Which skills this session is reading. The chip is an indicator and the
+     modal is the control; the count is read from the server rather than kept
+     here, so two windows on one session agree. */
+  const [picking, setPicking] = useState(false);
+  const skills = useSessionSkillIds(session.id);
   const [chips, setChips] = useState<Chip[]>([]);
   const [refused, setRefused] = useState<string | null>(null);
   const nextId = useRef(0);
@@ -389,6 +396,7 @@ export function Composer({
         {voice.blocked && (
           <VoiceDialog blocked={voice.blocked} onDismiss={voice.dismiss} onConfigure={voice.configure} />
         )}
+        {picking && <SkillPicker session={session} onClose={() => setPicking(false)} />}
         {refused && (
           <div className="mb-2 flex items-center gap-2 text-meta text-brick">
             <X className="h-3.5 w-3.5" strokeWidth={2} />
@@ -500,6 +508,19 @@ export function Composer({
             </label>
 
             {voice.possible && <Mic state={voice.state} onStart={voice.start} onStop={voice.stop} />}
+
+            {/* Beside the model and the mode, because all three decide how the
+                next turn is answered. Not ember: ember means an agent is
+                waiting on somebody, and this is not that. */}
+            <button
+              onClick={() => setPicking(true)}
+              title="Which skills this agent is reading"
+              className="control shrink-0 gap-1.5 text-mute hover:bg-raise hover:text-bone"
+            >
+              <Diamond className="h-3.5 w-3.5" strokeWidth={1.75} />
+              <span className="tabular-nums">{skills.data.length}</span>
+              <span>{skills.data.length === 1 ? "skill" : "skills"}</span>
+            </button>
 
             {offered.map((c) => (
               <Picker

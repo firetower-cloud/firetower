@@ -46,6 +46,7 @@ rust-embed.workspace = true
 mime_guess.workspace = true
 
 lol_html = "=2.7.0"
+tiktoken-rs = { version = "0.12.1", default-features = false }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

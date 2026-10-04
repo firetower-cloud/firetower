@@ -10,6 +10,12 @@ import { useListAgents } from "~/api/generated/agents/agents";
 import { useListProviders } from "~/api/generated/providers/providers";
 import { useListAccounts } from "~/api/generated/accounts/accounts";
 import { useListDirectories } from "~/api/generated/access/access";
+import {
+  useListSkills,
+  useListVersions,
+  useSessionSkills,
+  useSkillDetail as useSkillDetailQuery,
+} from "~/api/generated/skills/skills";
 import { useMe } from "~/api/generated/auth/auth";
 import { useSetupState } from "~/api/generated/setup/setup";
 import { useGetUpdates } from "~/api/generated/updates/updates";
@@ -212,6 +218,29 @@ export function useAccounts() {
  * allowed to look at a directory is not being allowed to file your own work
  * there, where you could then not follow it.
  */
+/** Every skill this person can reach, with their own defaults folded in. */
+export function useSkills() {
+  const q = useListSkills();
+  return { data: q.data ?? [], loading: q.isPending, error: q.error ? why(q.error) : null };
+}
+
+/** The instructions and the file list of a skill's current version. */
+export function useSkillDetail(id: string) {
+  const q = useSkillDetailQuery(id);
+  return { data: q.data, loading: q.isPending, error: q.error ? why(q.error) : null };
+}
+
+export function useSkillVersions(id: string) {
+  const q = useListVersions(id);
+  return { data: q.data ?? [], loading: q.isPending, error: q.error ? why(q.error) : null };
+}
+
+/** What one session is reading. Empty until somebody chooses. */
+export function useSessionSkillIds(session: string) {
+  const q = useSessionSkills(session);
+  return { data: q.data?.selected ?? [], loading: q.isPending, error: q.error ? why(q.error) : null };
+}
+
 export function useDirectories() {
   const q = useListDirectories();
   return { data: q.data ?? [], loading: q.isPending, error: q.error ? why(q.error) : null };

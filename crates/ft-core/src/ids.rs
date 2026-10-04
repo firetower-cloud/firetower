@@ -82,6 +82,16 @@ id_type!(
     "d",
     "Identifies a directory — the things a grant is held over."
 );
+id_type!(
+    SkillId,
+    "sk",
+    "Identifies a skill — a folder of instructions an agent loads when it needs one."
+);
+id_type!(
+    SkillVersionId,
+    "skv",
+    "Identifies one version of a skill. Append-only: a session pins one."
+);
 
 #[cfg(test)]
 mod tests {

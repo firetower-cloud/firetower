@@ -12,6 +12,7 @@ export * from './repos/repos.ts';
 export * from './secrets/secrets.ts';
 export * from './sessions/sessions.ts';
 export * from './setup/setup.ts';
+export * from './skills/skills.ts';
 export * from './stream/stream.ts';
 export * from './tasks/tasks.ts';
 export * from './trackers/trackers.ts';
