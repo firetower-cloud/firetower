@@ -43,6 +43,9 @@ export type Found = {
   /** What the library already has under this name. Filled in after the drop
    *  has been read, by asking the server. */
   match?: SkillMatch;
+  /** For a same-name skill shared with you that you may edit: add this as its
+   *  next version (the default) rather than keeping a copy of your own. */
+  asVersion?: boolean;
 };
 
 /** What the server found under the same name, if anything. */

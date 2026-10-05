@@ -32,6 +32,24 @@ function importable(s: Found): boolean {
   return true;
 }
 
+/** A same-name skill shared with you that you may edit, so the row offers to
+ *  update it rather than fork it. */
+function sharedWritable(s: Found): boolean {
+  const m = s.match;
+  return !!m && !m.mine && m.mayWrite && !m.identical;
+}
+
+/** Whether Import adds a version to the matched skill rather than making one. */
+function asVersion(s: Found): boolean {
+  const m = s.match;
+  if (!m || m.identical) return false;
+  if (m.mine && m.mayWrite) return true;
+  return sharedWritable(s) && s.asVersion !== false;
+}
+
+/** The directory a path is filed in, `d/eng`. */
+const rootOf = (path: string) => path.split("/").slice(0, 2).join("/");
+
 /** What will happen to this bundle, in a few words. */
 function verdict(s: Found): { tone: "ok" | "wait" | "bad"; says: string } {
   if (s.errors.length > 0) return { tone: "bad", says: "cannot import" };
@@ -42,6 +60,10 @@ function verdict(s: Found): { tone: "ok" | "wait" | "bad"; says: string } {
   if (m.identicalToVersion !== undefined && m.identicalToVersion !== null)
     return { tone: "wait", says: `this is your v${m.identicalToVersion}, since superseded` };
   if (m.mine && m.mayWrite) return { tone: "ok", says: `new version — v${m.version + 1}` };
+  if (sharedWritable(s))
+    return s.asVersion === false
+      ? { tone: "ok", says: "your own copy" }
+      : { tone: "ok", says: `shared in ${rootOf(m.path)} — new version v${m.version + 1}` };
   if (!m.mine) return { tone: "wait", says: "a skill of this name is shared with you" };
   return { tone: "ok", says: "new" };
 }
@@ -132,7 +154,7 @@ export function AddSkill({
            version of it rather than a second row with the same name. Only
            when it is yours to write to: adding a version to a colleague's
            skill changes what everybody else reads. */
-        if (s.match && s.match.mine && s.match.mayWrite && !s.match.identical) {
+        if (s.match && asVersion(s)) {
           await addVersion(s.match.id, bundle);
         } else {
           await createSkill(bundle);
@@ -268,7 +290,7 @@ export function AddSkill({
                 <>
                   Importing <b className="font-semibold text-bone">{ready.length}</b>{" "}
                   {ready.length === 1 ? "skill" : "skills"}
-                  {found.some((s) => s.match?.mine && s.match.mayWrite && !s.match.identical)
+                  {ready.some((i) => asVersion(found[i]!))
                     ? ", some as new versions of skills you already have."
                     : " into your own space. Nobody else can see them until you file one into a directory."}
                 </>
@@ -375,12 +397,10 @@ function Entry({
               </span>
             </span>
           )}
-          {m && !m.mine && (
+          {m && !m.mine && !m.mayWrite && !m.identical && (
             <span className="mt-2 block max-w-prose border-l-2 border-slate-deep pl-3 text-meta leading-relaxed text-slate">
-              A skill called <span className="font-mono">{found.name}</span> is already shared with you
-              from <span className="font-mono">{m.path.split("/").slice(0, 2).join("/")}</span>. You can
-              keep your own copy, but the two cannot both be on in one session — give yours a name of its
-              own if you want that.
+              A skill of this name is shared with you from{" "}
+              <span className="font-mono">{rootOf(m.path)}</span>. Yours will be a separate copy.
             </span>
           )}
           <span className="mt-2 flex flex-wrap items-center gap-2">
@@ -396,6 +416,27 @@ function Entry({
         </button>
         <ChevronRight className={`mt-1 h-3.5 w-3.5 shrink-0 text-mute transition-transform ${open ? "rotate-90" : ""}`} strokeWidth={2} />
       </div>
+
+      {m && sharedWritable(found) && (
+        <div role="radiogroup" className="-mt-1 mb-3 ml-7 flex w-fit rounded-lg bg-ground p-0.5 shadow-[inset_0_1px_2px_rgb(0_0_0/0.35)]">
+          {[
+            { on: found.asVersion !== false, label: <>New version of <span className="font-mono">{m.path}</span></>, value: true },
+            { on: found.asVersion === false, label: <>Keep my own copy</>, value: false },
+          ].map((o) => (
+            <button
+              key={String(o.value)}
+              role="radio"
+              aria-checked={o.on}
+              onClick={() => onEdit({ asVersion: o.value })}
+              className={`rounded-md px-2.5 py-1 text-micro transition-colors ${
+                o.on ? "bg-raise text-bone shadow-raise" : "text-mute hover:text-bone"
+              }`}
+            >
+              {o.label}
+            </button>
+          ))}
+        </div>
+      )}
 
       {open && !broken && !skipped && (
         <div className="grid grid-cols-2 gap-5 pb-5 pl-7">

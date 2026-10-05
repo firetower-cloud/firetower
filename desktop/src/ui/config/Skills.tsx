@@ -19,14 +19,15 @@
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { ChevronLeft, FolderDown, Pencil, Plus, Search, X } from "lucide-react";
+import { ChevronLeft, FolderDown, Pencil, Plus, Search, Trash2, UserPlus, X } from "lucide-react";
 import { Rows, Section } from "~/ui/config/bits";
-import { WhoCanAccess } from "~/ui/Sharing";
+import { ShareMany, WhoCanAccess } from "~/ui/Sharing";
 import { AddSkill } from "~/ui/AddSkill";
 import { useSkills, useSkillDetail, useSkillVersions, why } from "~/data";
 import { useRepos } from "~/data";
 import { deleteSkill, setDefault } from "~/api/generated/skills/skills";
 import { useQueryClient } from "@tanstack/react-query";
+import { useMe } from "~/api/generated/auth/auth";
 import { getListSkillsQueryKey } from "~/api/generated/skills/skills";
 import type { Skill } from "~/api/generated/model";
 import { useConfirm } from "~/ui/Confirm";
@@ -45,7 +46,62 @@ export function Skills() {
   const seed = useRef<ReturnType<typeof readDrop> | null>(null);
   const feed = useSkills();
   const cache = useQueryClient();
+  const confirm = useConfirm();
+  const me = useMe();
+  // An organisation admin may move anything filed in a directory, so the
+  // first section holds more for them, and its note says why.
+  const orgAdmin = me.data?.user.role === "admin";
   const refresh = () => cache.invalidateQueries({ queryKey: getListSkillsQueryKey() });
+
+  /* Several at once. Only what this person may move can be ticked, so the
+     action bar never offers something the server would refuse. */
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [sharing, setSharing] = useState(false);
+  const [trouble, setTrouble] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const selected = feed.data.filter((s) => picked.has(s.id) && s.mayShare);
+  const clear = () => {
+    setPicked(new Set());
+    setTrouble(null);
+  };
+
+  useEffect(() => {
+    if (picked.size === 0 || sharing) return;
+    const esc = (e: KeyboardEvent) => e.key === "Escape" && clear();
+    window.addEventListener("keydown", esc);
+    return () => window.removeEventListener("keydown", esc);
+  }, [picked.size, sharing]);
+
+  const toggle = (id: string) =>
+    setPicked((was) => {
+      const next = new Set(was);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+
+  const removeAll = async () => {
+    const n = selected.length;
+    const ok = await confirm({
+      title: `Delete ${n === 1 ? selected[0]!.name : `${n} skills`}?`,
+      body: "Every version goes. Sessions using them lose them on their next turn.",
+      action: n === 1 ? "Delete skill" : `Delete ${n} skills`,
+      tone: "danger",
+    });
+    if (!ok) return;
+    setDeleting(true);
+    const failed: string[] = [];
+    for (const s of selected) {
+      try {
+        await deleteSkill(s.id);
+      } catch {
+        failed.push(s.name);
+      }
+    }
+    setDeleting(false);
+    await refresh();
+    setPicked(new Set(selected.filter((s) => failed.includes(s.name)).map((s) => s.id)));
+    setTrouble(failed.length ? `Could not delete ${failed.join(", ")}.` : null);
+  };
 
   const add = (dropped?: ReturnType<typeof readDrop>) => {
     seed.current = dropped ?? null;
@@ -77,6 +133,49 @@ export function Skills() {
           (s.author ?? "").toLowerCase().includes(q),
       )
     : feed.data;
+  const tickable = shown.filter((s) => s.mayShare);
+  const allOn = tickable.length > 0 && tickable.every((s) => picked.has(s.id));
+  const sharedWithMe = shown.filter((s) => !s.mayShare);
+
+  const row = (s: Skill, manage: boolean) => (
+    <div
+      key={s.id}
+      className={`flex w-full items-start gap-3 px-3.5 py-3 transition-colors ${picked.has(s.id) ? "bg-raise/60" : "hover:bg-raise"}`}
+    >
+      {manage && (
+        <span className="mt-3">
+          <Tick on={picked.has(s.id)} label={`Select ${s.name}`} onFlip={() => toggle(s.id)} />
+        </span>
+      )}
+      <button onClick={() => setOpen(s.id)} className="flex min-w-0 flex-1 items-start gap-3 text-left">
+        <Mark name={s.name} />
+        <span className="min-w-0 flex-1">
+          <span className="flex items-baseline gap-2">
+            <span className="truncate font-mono text-ui text-bone">{s.name}</span>
+            <span className="shrink-0 text-micro tabular-nums text-mute">v{s.version}</span>
+          </span>
+          <span className="mt-0.5 line-clamp-2 block text-meta text-mute">{s.description}</span>
+          <span className="mt-1.5 flex flex-wrap items-center gap-2">
+            {s.author && <Tag>{s.author}</Tag>}
+            <Tag>{s.tokens} tokens</Tag>
+            {s.defaultIn.map((r) => (
+              <Tag key={r}>{r}</Tag>
+            ))}
+            {s.alwaysOn && <Tag>always on</Tag>}
+            {!manage && <Tag>{s.mayWrite ? "editor" : "viewer"}</Tag>}
+            {s.risk.map((r) => (
+              <Tag key={r} tone="brick">
+                {r}
+              </Tag>
+            ))}
+          </span>
+        </span>
+      </button>
+      <span className="shrink-0">
+        <WhoCanAccess look="chip" kind="skill" id={s.id} path={s.path} />
+      </span>
+    </div>
+  );
 
   const surface = {
     onDragOver: (e: React.DragEvent) => {
@@ -103,8 +202,12 @@ export function Skills() {
   return (
     <div {...surface} className={over ? "rounded-xl ring-1 ring-slate" : undefined}>
     <Section
-      title="Skills"
-      note="Folders of instructions an agent loads when it needs them. Yours stay in your own space until you file one into a directory."
+      title="Skills you manage"
+      note={
+        orgAdmin
+          ? "Yours, or in any directory, since you're an organisation admin. Select several to share or delete them together."
+          : "Yours, or in a directory you administer. Select several to share or delete them together."
+      }
       action={
         <button className="control border border-line bg-raise text-ui text-dim hover:bg-overlay hover:text-bone" onClick={() => add()}>
           <Plus className="h-3.5 w-3.5" strokeWidth={2} />
@@ -112,56 +215,121 @@ export function Skills() {
         </button>
       }
     >
-      {feed.data.length > 6 && (
-        <div className="flex items-center gap-2 px-3.5 py-2">
-          <Search className="h-3.5 w-3.5 shrink-0 text-mute" strokeWidth={2} />
-          <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search by name, description or author"
-            className="min-w-0 flex-1 bg-transparent text-ui text-bone outline-none placeholder:text-mute"
-          />
-          <span className="shrink-0 text-micro tabular-nums text-mute">
-            {shown.length} of {feed.data.length}
-          </span>
+      {(feed.data.length > 6 || tickable.length > 0) && (
+        <div className="flex items-center gap-3 px-3.5 py-2">
+          {tickable.length > 0 && (
+            <Tick
+              on={allOn}
+              partly={!allOn && tickable.some((s) => picked.has(s.id))}
+              label="Select all"
+              onFlip={() => setPicked(allOn ? new Set() : new Set(tickable.map((s) => s.id)))}
+            />
+          )}
+          {feed.data.length > 6 ? (
+            <>
+              <Search className="h-3.5 w-3.5 shrink-0 text-mute" strokeWidth={2} />
+              <input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Search by name, description or author"
+                className="min-w-0 flex-1 bg-transparent text-ui text-bone outline-none placeholder:text-mute"
+              />
+              <span className="shrink-0 text-micro tabular-nums text-mute">
+                {shown.length} of {feed.data.length}
+              </span>
+            </>
+          ) : (
+            <span className="text-meta text-mute">Select all</span>
+          )}
         </div>
       )}
-      <Rows feed={{ ...feed, data: shown }} empty={`No skill matches “${query}”.`}>
-        {shown.map((s) => (
-          <button
-            key={s.id}
-            onClick={() => setOpen(s.id)}
-            className="flex w-full items-start gap-3 px-3.5 py-3 text-left transition-colors hover:bg-raise"
-          >
-            <Mark name={s.name} />
-            <span className="min-w-0 flex-1">
-              <span className="flex items-baseline gap-2">
-                <span className="truncate font-mono text-ui text-bone">{s.name}</span>
-                <span className="shrink-0 text-micro tabular-nums text-mute">v{s.version}</span>
-              </span>
-              <span className="mt-0.5 line-clamp-2 block text-meta text-mute">{s.description}</span>
-              <span className="mt-1.5 flex flex-wrap items-center gap-2">
-                {s.author && <Tag>{s.author}</Tag>}
-                <Tag>{s.tokens} tokens</Tag>
-                {s.defaultIn.map((r) => (
-                  <Tag key={r}>{r}</Tag>
-                ))}
-                {s.alwaysOn && <Tag>always on</Tag>}
-                {s.risk.map((r) => (
-                  <Tag key={r} tone="brick">
-                    {r}
-                  </Tag>
-                ))}
-              </span>
-            </span>
-            <span onClick={(e) => e.stopPropagation()} className="shrink-0">
-              <WhoCanAccess look="chip" kind="skill" id={s.id} path={s.path} />
-            </span>
-          </button>
-        ))}
+      <Rows
+        feed={{ ...feed, data: tickable }}
+        empty={query ? `No skill you manage matches “${query}”.` : "None yet. Add one to get started."}
+      >
+        {tickable.map((s) => row(s, true))}
       </Rows>
     </Section>
+
+    {sharedWithMe.length > 0 && (
+      <Section
+        title="Shared with you"
+        note="You can turn these on in your sessions. Their directory's admins decide who else gets them."
+      >
+        {sharedWithMe.map((s) => row(s, false))}
+      </Section>
+    )}
+
+    {selected.length > 0 && (
+      <div className="pointer-events-none sticky bottom-4 z-20 mt-3 flex justify-center">
+        <div className="pointer-events-auto flex items-center gap-2 rounded-xl border border-line bg-overlay py-1.5 pl-3.5 pr-1.5 shadow-float">
+          <span className="text-ui text-bone tabular-nums">{selected.length} selected</span>
+          {trouble && <span className="max-w-[16rem] truncate text-meta text-brick">{trouble}</span>}
+          <button onClick={clear} className="control text-ui text-mute hover:text-bone">
+            Clear
+          </button>
+          <button
+            disabled={deleting}
+            onClick={() => void removeAll()}
+            className="control border border-brick-deep text-ui text-brick hover:bg-brick-tint disabled:opacity-50"
+          >
+            <Trash2 className="h-3.5 w-3.5" strokeWidth={1.75} />
+            {deleting ? "Deleting…" : "Delete"}
+          </button>
+          <button
+            onClick={() => setSharing(true)}
+            className="control bg-bone text-ui font-medium text-ground hover:opacity-90"
+          >
+            <UserPlus className="h-3.5 w-3.5" strokeWidth={1.75} />
+            {selected.length === 1 ? "Share skill" : `Share ${selected.length} skills`}
+          </button>
+        </div>
+      </div>
+    )}
+
+    {sharing && (
+      <ShareMany
+        skills={selected}
+        onClose={() => setSharing(false)}
+        onDone={() => {
+          setSharing(false);
+          clear();
+        }}
+      />
+    )}
     </div>
+  );
+}
+
+/** A checkbox, drawn the way the import review draws one. */
+function Tick({
+  on,
+  partly = false,
+  disabled = false,
+  label,
+  onFlip,
+}: {
+  on: boolean;
+  partly?: boolean;
+  disabled?: boolean;
+  label: string;
+  onFlip: () => void;
+}) {
+  return (
+    <button
+      role="checkbox"
+      aria-checked={partly ? "mixed" : on}
+      aria-label={label}
+      title={label}
+      disabled={disabled}
+      onClick={onFlip}
+      className={`grid h-4 w-4 shrink-0 place-items-center rounded ${
+        on || partly ? "bg-raise shadow-[inset_0_0_0_1px_#4a4a54]" : "shadow-[inset_0_0_0_1px_#3a3a42]"
+      } ${disabled ? "cursor-not-allowed opacity-35" : ""}`}
+    >
+      {on && <span className="block h-1.5 w-2.5 -translate-y-px rotate-[-45deg] border-b-2 border-l-2 border-bone" />}
+      {partly && <span className="block h-0.5 w-2 rounded-full bg-bone" />}
+    </button>
   );
 }
 
