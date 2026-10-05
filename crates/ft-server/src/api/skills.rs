@@ -8,7 +8,9 @@
 use super::access::whoever;
 use super::{ApiError, ApiResult, ErrorCode};
 use crate::auth::Principal;
-use crate::skills::{Asking, Collision, Match, NewSkill, Resolve, Skill, SkillDetail, SkillVersion};
+use crate::skills::{
+    Asking, Collision, Match, NewSkill, Resolve, Skill, SkillDetail, SkillVersion,
+};
 use crate::AppState;
 use axum::{
     extract::{Path, State},
@@ -368,7 +370,11 @@ pub(super) async fn set_repo_defaults(
         .into_iter()
         .map(|s| s.id.as_str().to_string())
         .collect();
-    let skills: Vec<String> = body.skills.into_iter().filter(|s| reachable.contains(s)).collect();
+    let skills: Vec<String> = body
+        .skills
+        .into_iter()
+        .filter(|s| reachable.contains(s))
+        .collect();
     state
         .skills
         .replace_defaults_in(me.id.as_str(), &id, &skills)
@@ -385,7 +391,10 @@ async fn repo_defaults(
     let mut out = Vec::new();
     for c in &session.checkouts {
         let Some(repo) = &c.repo_id else { continue };
-        if out.iter().any(|r: &RepoDefaults| r.repo_id == repo.as_str()) {
+        if out
+            .iter()
+            .any(|r: &RepoDefaults| r.repo_id == repo.as_str())
+        {
             continue;
         }
         out.push(RepoDefaults {
@@ -570,7 +579,12 @@ pub(super) async fn skill_collisions(
         .await?
         .ok_or_else(|| ApiError::not_found("directory"))?;
     super::access::at_least(&state, me, &id, Level::Writer).await?;
-    Ok(Json(state.skills.collisions(&directory.slug, &body.skills).await?))
+    Ok(Json(
+        state
+            .skills
+            .collisions(&directory.slug, &body.skills)
+            .await?,
+    ))
 }
 
 /// One skill to move, and what to do if the directory has one of its name.
@@ -628,7 +642,10 @@ pub(super) async fn share_skills(
         if one.resolve != Some(Resolve::Keep) && !names.insert(skill.name.clone()) {
             return Err(ApiError::new(
                 ErrorCode::InvalidRequest,
-                format!("two of these are called {}; a directory holds one", skill.name),
+                format!(
+                    "two of these are called {}; a directory holds one",
+                    skill.name
+                ),
             ));
         }
         checked.push((one, from, skill));
@@ -680,7 +697,11 @@ pub(super) async fn share_skills(
     touched.sort();
     touched.dedup();
     for (session, host) in state.skills.hosts_of(&touched).await.unwrap_or_default() {
-        let bundles = state.skills.bundles_for_session(&session).await.unwrap_or_default();
+        let bundles = state
+            .skills
+            .bundles_for_session(&session)
+            .await
+            .unwrap_or_default();
         if let Err(e) = state
             .fleet
             .send(

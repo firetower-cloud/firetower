@@ -1140,7 +1140,12 @@ impl Skills {
     ///
     /// The whole set rather than additions, so a skill unticked in the picker
     /// stops being a default too, and the list can shrink as well as grow.
-    pub async fn replace_defaults_in(&self, person: &str, repo: &str, skills: &[String]) -> Result<()> {
+    pub async fn replace_defaults_in(
+        &self,
+        person: &str,
+        repo: &str,
+        skills: &[String],
+    ) -> Result<()> {
         let mut tx = self.pool.begin().await?;
         sqlx::query("DELETE FROM skill_defaults WHERE user_id = $1 AND repo_id = $2")
             .bind(person)
@@ -1180,10 +1185,10 @@ impl Skills {
     /// The skills a session is reading, in the version it pinned.
     pub async fn of_session(&self, session: &str) -> Result<Vec<String>> {
         sqlx::query_scalar("SELECT skill_id FROM skill_pins WHERE session_id = $1")
-                .bind(session)
-                .fetch_all(&self.pool)
-                .await
-                .context("reading a session's skills")
+            .bind(session)
+            .fetch_all(&self.pool)
+            .await
+            .context("reading a session's skills")
     }
 
     /// The bundles a session is reading, as the worker will write them.
@@ -1579,8 +1584,15 @@ mod tests {
         };
 
         // The team's copy, filed into the directory everybody works in.
-        let team = skills.create(&org, &admin, "admin", &bundle("v1")).await.unwrap();
-        let at = access.path_of(FiledKind::Skill, team.as_str()).await.unwrap().unwrap();
+        let team = skills
+            .create(&org, &admin, "admin", &bundle("v1"))
+            .await
+            .unwrap();
+        let at = access
+            .path_of(FiledKind::Skill, team.as_str())
+            .await
+            .unwrap()
+            .unwrap();
         access
             .transfer(
                 &vault,
@@ -1593,7 +1605,10 @@ mod tests {
             .unwrap();
 
         // Ana's identical copy, on in one of her sessions.
-        let hers = skills.create(&org, ana.as_str(), "ana", &bundle("v1")).await.unwrap();
+        let hers = skills
+            .create(&org, ana.as_str(), "ana", &bundle("v1"))
+            .await
+            .unwrap();
         let host = db
             .ensure_host("fire-01", ft_core::Compute::Local, ana.as_str())
             .await
@@ -1650,7 +1665,10 @@ mod tests {
         assert_eq!(left, 0, "her copy is gone");
 
         // A different copy, added as the team's next version.
-        let changed = skills.create(&org, ana.as_str(), "ana", &bundle("v2")).await.unwrap();
+        let changed = skills
+            .create(&org, ana.as_str(), "ana", &bundle("v2"))
+            .await
+            .unwrap();
         let found = skills
             .collisions("shared", &[changed.as_str().to_string()])
             .await
@@ -1670,7 +1688,11 @@ mod tests {
         .unwrap();
         assert_eq!(version, 2, "the team's copy moved on a version");
         let expected = Skills::digest_of_new(&bundle("v2")).unwrap();
-        assert_eq!(digest.as_deref(), Some(expected.as_str()), "holding her bytes");
+        assert_eq!(
+            digest.as_deref(),
+            Some(expected.as_str()),
+            "holding her bytes"
+        );
         let files: i64 = sqlx::query_scalar(
             "SELECT count(*) FROM skill_files f JOIN skills k ON k.current_version_id = f.version_id \
               WHERE k.id = $1",
