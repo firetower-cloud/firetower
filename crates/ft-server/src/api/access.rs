@@ -66,7 +66,7 @@ pub(super) fn org_admin(principal: &Principal) -> ApiResult<&User> {
 /// answering "no such directory" when they ask to rename it says something they
 /// know to be false, and the useful answer is that this needs more than they
 /// have. No grant at all is still absent rather than forbidden.
-async fn at_least(state: &AppState, me: &User, directory: &str, level: Level) -> ApiResult<Level> {
+pub(super) async fn at_least(state: &AppState, me: &User, directory: &str, level: Level) -> ApiResult<Level> {
     match state.access.level_on(me.id.as_str(), directory).await? {
         Some(held) if held >= level => Ok(held),
         Some(_) => Err(ApiError::new(
@@ -881,8 +881,13 @@ pub(super) async fn file_items(
         .ok_or_else(|| ApiError::not_found("directory"))?;
     at_least(&state, me, &id, Level::Writer).await?;
 
+    // Every item is checked before any moves, so a refusal on the seventh
+    // does not leave the first six filed and the rest not.
+    let mut checked = Vec::with_capacity(request.items.len());
     for item in &request.items {
-        let from = may_share(&state, me, item.kind, &item.id).await?;
+        checked.push((item, may_share(&state, me, item.kind, &item.id).await?));
+    }
+    for (item, from) in checked {
         let to = from.moved_to(ft_core::path::DIRECTORY, &target.slug);
         state
             .access

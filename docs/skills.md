@@ -344,6 +344,21 @@ should not make it hard.
 
 ---
 
+### Sharing several at once
+
+Sharing a skill is filing it into a directory. A directory holds one skill of
+each name, so `POST /directories/{id}/skills` checks every skill before moving
+any, and each name the directory already has needs a decision:
+
+- **Identical:** drop this copy and use the directory's. Sessions and defaults
+  that held it move to the directory's.
+- **Different:** keep this copy where it is, or make it the directory's next
+  version.
+
+The list splits into *Skills you manage* (yours, a directory you administer,
+or any directory for an organisation admin) and *Shared with you*. Only the
+first can be selected.
+
 ## 11. The interface
 
 Hundreds available, a handful selected, selection is per session, it changes

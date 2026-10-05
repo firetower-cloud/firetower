@@ -99,6 +99,10 @@ pub struct Skill {
     pub updated_at: DateTime<Utc>,
     /// Whether this person may make a version of it or rename it.
     pub may_write: bool,
+    /// Whether this person may move it to another directory or delete it.
+    /// The same rule as `api::access::may_share`, answered per row so a list
+    /// can say up front which skills it can act on.
+    pub may_share: bool,
     /// The repositories this person has it on by default. Empty for most.
     pub default_in: Vec<String>,
     /// On in every workspace this person starts.
@@ -160,6 +164,33 @@ pub struct Found {
     pub changed: i32,
     pub added: i32,
     pub removed: i32,
+}
+
+/// A skill that cannot simply move into a directory, because the directory
+/// already holds one of the same name.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct Collision {
+    /// The skill being moved.
+    pub skill_id: SkillId,
+    pub name: String,
+    /// The one already in the directory.
+    pub existing_id: SkillId,
+    pub existing_version: i32,
+    /// Whether both current versions hold the same bytes.
+    pub identical: bool,
+}
+
+/// What to do with a skill whose name the directory already has.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum Resolve {
+    /// Drop this copy; its sessions move to the directory's.
+    UseTheirs,
+    /// Make this copy the directory's next version, then drop it.
+    AddVersion,
+    /// Leave this copy where it is.
+    Keep,
 }
 
 /// One file of a bundle somebody is about to import, as the match asks about it.
@@ -531,10 +562,11 @@ impl Skills {
                  WHERE sd.skill_id = k.id AND sd.user_id = $1 AND sd.repo_id IS NOT NULL) AS default_in, \
                EXISTS (SELECT 1 FROM skill_defaults sd \
                         WHERE sd.skill_id = k.id AND sd.user_id = $1 AND sd.repo_id IS NULL) AS always_on, \
-               {writable} AS may_write \
+               {writable} AS may_write, {shareable} AS may_share \
              {FROM} WHERE {visible} ORDER BY k.name",
             visible = filed_where("k", 1, at_least),
             writable = filed_where("k", 1, Level::Writer),
+            shareable = shareable("k", 1),
         );
         let rows = sqlx::query(&sql)
             .bind(person)
@@ -548,10 +580,11 @@ impl Skills {
     pub async fn one(&self, person: &str, id: &str, at_least: Level) -> Result<Option<Skill>> {
         let sql = format!(
             "SELECT {COLUMNS}, '{{}}'::text[] AS default_in, false AS always_on, \
-               {writable} AS may_write \
+               {writable} AS may_write, {shareable} AS may_share \
              {FROM} WHERE k.id = $2 AND {visible}",
             visible = filed_where("k", 1, at_least),
             writable = filed_where("k", 1, Level::Writer),
+            shareable = shareable("k", 1),
         );
         let row = sqlx::query(&sql)
             .bind(person)
@@ -747,6 +780,149 @@ impl Skills {
         .await
         .ok();
         Ok(())
+    }
+
+    /// Which of these skills the directory at `d.<slug>` already has a skill
+    /// of the same name for.
+    pub async fn collisions(&self, directory_slug: &str, ids: &[String]) -> Result<Vec<Collision>> {
+        let rows = sqlx::query(
+            "SELECT k.id, k.name, e.id AS existing_id, ev.version AS existing_version, \
+                    (kv.digest IS NOT NULL AND kv.digest = ev.digest) AS identical \
+               FROM skills k \
+               JOIN skills e ON e.org_id = k.org_id AND e.name = k.name AND e.id <> k.id \
+                            AND subpath(e.path, 0, 2) = ('d.' || $1)::ltree \
+               LEFT JOIN skill_versions kv ON kv.id = k.current_version_id \
+               LEFT JOIN skill_versions ev ON ev.id = e.current_version_id \
+              WHERE k.id = ANY($2) \
+                AND subpath(k.path, 0, 2) <> ('d.' || $1)::ltree",
+        )
+        .bind(directory_slug)
+        .bind(ids)
+        .fetch_all(&self.pool)
+        .await
+        .context("looking for skills of the same name in a directory")?;
+        Ok(rows
+            .into_iter()
+            .map(|r| Collision {
+                skill_id: SkillId::from_stored(r.get::<String, _>("id")),
+                name: r.get("name"),
+                existing_id: SkillId::from_stored(r.get::<String, _>("existing_id")),
+                existing_version: r.try_get("existing_version").unwrap_or(0),
+                identical: r.try_get("identical").unwrap_or(false),
+            })
+            .collect())
+    }
+
+    /// Fold one skill into another of the same name, and drop the first.
+    ///
+    /// With `as_version`, the first one's current bundle becomes the second
+    /// one's next version; otherwise the second stays as it is. Either way
+    /// every session and default that held the first now holds the second, so
+    /// nobody loses a skill they had on. Returns the sessions that changed,
+    /// so their workers can be told.
+    pub async fn merge_into(
+        &self,
+        from: &str,
+        into: &str,
+        person: &str,
+        as_version: bool,
+    ) -> Result<Vec<String>> {
+        let mut tx = self.pool.begin().await?;
+
+        let target: String = if as_version {
+            let next: i32 = sqlx::query_scalar(
+                "SELECT coalesce(max(version), 0) + 1 FROM skill_versions WHERE skill_id = $1",
+            )
+            .bind(into)
+            .fetch_one(&mut *tx)
+            .await?;
+            let vid = SkillVersionId::new();
+            // Files are content-addressed, so a version is copied by its rows
+            // and no bytes move.
+            sqlx::query(
+                "INSERT INTO skill_versions \
+                   (id, skill_id, version, frontmatter, body, notes, tokens, files, bytes, digest, created_by) \
+                 SELECT $1, $2, $3, v.frontmatter, v.body, v.notes, v.tokens, v.files, v.bytes, v.digest, $4 \
+                   FROM skills k JOIN skill_versions v ON v.id = k.current_version_id \
+                  WHERE k.id = $5",
+            )
+            .bind(vid.as_str())
+            .bind(into)
+            .bind(next)
+            .bind(person)
+            .bind(from)
+            .execute(&mut *tx)
+            .await
+            .context("copying a version")?;
+            sqlx::query(
+                "INSERT INTO skill_files (version_id, path, hash, executable, size) \
+                 SELECT $1, f.path, f.hash, f.executable, f.size \
+                   FROM skills k JOIN skill_files f ON f.version_id = k.current_version_id \
+                  WHERE k.id = $2",
+            )
+            .bind(vid.as_str())
+            .bind(from)
+            .execute(&mut *tx)
+            .await
+            .context("copying a version's files")?;
+            sqlx::query(
+                "UPDATE skills t SET current_version_id = $2, description = f.description, \
+                        updated_at = now() \
+                   FROM skills f WHERE t.id = $1 AND f.id = $3",
+            )
+            .bind(into)
+            .bind(vid.as_str())
+            .bind(from)
+            .execute(&mut *tx)
+            .await?;
+            vid.as_str().to_string()
+        } else {
+            sqlx::query_scalar("SELECT current_version_id FROM skills WHERE id = $1")
+                .bind(into)
+                .fetch_one(&mut *tx)
+                .await?
+        };
+
+        // Sessions that had this copy now have the other one. A session that
+        // already had both keeps the one it had.
+        let moved: Vec<String> = sqlx::query_scalar(
+            "UPDATE skill_pins p SET skill_id = $2, version_id = $3 \
+              WHERE p.skill_id = $1 \
+                AND NOT EXISTS (SELECT 1 FROM skill_pins o \
+                                 WHERE o.session_id = p.session_id AND o.skill_id = $2) \
+             RETURNING p.session_id",
+        )
+        .bind(from)
+        .bind(into)
+        .bind(&target)
+        .fetch_all(&mut *tx)
+        .await
+        .context("moving sessions to the other copy")?;
+        let mut touched: Vec<String> =
+            sqlx::query_scalar("SELECT session_id FROM skill_pins WHERE skill_id = $1")
+                .bind(from)
+                .fetch_all(&mut *tx)
+                .await?;
+        touched.extend(moved);
+
+        sqlx::query(
+            "INSERT INTO skill_defaults (user_id, repo_id, skill_id, at) \
+             SELECT user_id, repo_id, $2, at FROM skill_defaults WHERE skill_id = $1 \
+             ON CONFLICT DO NOTHING",
+        )
+        .bind(from)
+        .bind(into)
+        .execute(&mut *tx)
+        .await
+        .context("moving defaults to the other copy")?;
+
+        sqlx::query("DELETE FROM skills WHERE id = $1")
+            .bind(from)
+            .execute(&mut *tx)
+            .await
+            .context("dropping the merged copy")?;
+        tx.commit().await?;
+        Ok(touched)
     }
 
     /// What this person already has, for each bundle they are about to import.
@@ -976,6 +1152,20 @@ impl Skills {
     /// agent answers to and what the standard says a folder is called — not
     /// the slug, which exists so two skills of one name can be told apart in
     /// a database.
+    /// The machine each of these sessions runs on, for telling its worker.
+    pub async fn hosts_of(&self, sessions: &[String]) -> Result<Vec<(String, String)>> {
+        Ok(sqlx::query(
+            "SELECT s.id, w.host_id FROM sessions s JOIN workspaces w ON w.id = s.workspace_id \
+              WHERE s.id = ANY($1)",
+        )
+        .bind(sessions)
+        .fetch_all(&self.pool)
+        .await?
+        .into_iter()
+        .map(|r| (r.get("id"), r.get("host_id")))
+        .collect())
+    }
+
     pub async fn bundles_for_session(&self, session: &str) -> Result<Vec<ft_proto::SkillBundle>> {
         let rows = sqlx::query(
             "SELECT k.name, f.path, f.executable, b.bytes \
@@ -1129,6 +1319,24 @@ async fn write_version(
     Ok(())
 }
 
+/// Whether the person in parameter `person` may move or delete a skill: its
+/// owner while it is in their own space, an admin of the directory it is in,
+/// or an organisation admin for anything not in somebody's own space. The
+/// same rule as `api::access::may_share`, as SQL.
+fn shareable(alias: &str, person: usize) -> String {
+    let admin = Level::Admin.rank();
+    format!(
+        "(EXISTS (SELECT 1 FROM principals me \
+                   WHERE me.id = ${person} AND {alias}.path <@ ('u.' || me.slug)::ltree) \
+          OR EXISTS (SELECT 1 FROM directories dd \
+                       JOIN directory_access da ON da.directory_id = dd.id \
+                      WHERE da.user_id = ${person} AND da.rank >= {admin} \
+                        AND {alias}.path <@ ('d.' || dd.slug)::ltree) \
+          OR (subpath({alias}.path, 0, 1) = 'd'::ltree \
+              AND EXISTS (SELECT 1 FROM users uu WHERE uu.id = ${person} AND uu.role = 'admin')))"
+    )
+}
+
 /// Stands in for "there is something under `scripts/`", which the query
 /// answered so that a list of three hundred does not read three hundred
 /// bundles to find out.
@@ -1173,6 +1381,7 @@ fn read_skill(r: sqlx::postgres::PgRow) -> Result<Skill> {
         author: r.try_get("author").ok().flatten(),
         updated_at: r.get("updated_at"),
         may_write: r.try_get("may_write").unwrap_or(false),
+        may_share: r.try_get("may_share").unwrap_or(false),
         default_in: r.try_get("default_in").unwrap_or_default(),
         always_on: r.try_get("always_on").unwrap_or(false),
         name,
@@ -1283,5 +1492,149 @@ mod tests {
         );
         // Tokens, not characters: the entry is ~75 characters.
         assert!(n > 5 && n < 40, "{n} tokens is not a plausible count");
+    }
+
+    /// The same skill, imported by two people, meeting in one directory.
+    ///
+    /// The team's copy is in `d/shared`; Ana has her own. Moving hers in
+    /// collides on the name. Dropping hers hands her session to the team's;
+    /// adding hers as a version makes it the team's next one.
+    #[tokio::test]
+    async fn the_same_skill_from_two_people_merges_into_the_directorys() {
+        use crate::access::{Access, FiledKind};
+        use crate::accounts::Accounts;
+        use crate::db::Db;
+        use crate::vault::{crypto::RootKey, Vault};
+
+        let (db, admin) = Db::open_for_test_owned().await.unwrap();
+        let pool = db.pool().clone();
+        let skills = Skills::new(pool.clone());
+        let access = Access::new(pool.clone());
+        let accounts = Accounts::new(pool.clone());
+        let vault = Vault::new(pool.clone(), RootKey::generate());
+        let org = db.org().await.unwrap();
+        let org_id = ft_core::OrgId::from_stored(org.clone());
+        let ana = accounts
+            .create_user(&org_id, "ana", "ana@example.test", "member")
+            .await
+            .unwrap()
+            .0
+            .id;
+
+        let bundle = |body: &str| NewSkill {
+            name: "code-review".into(),
+            description: "Review a diff.".into(),
+            frontmatter: serde_json::json!({"name": "code-review"}),
+            body: body.into(),
+            files: vec![IncomingFile {
+                path: "SKILL.md".into(),
+                contents: ft_proto::encode(body.as_bytes()),
+                executable: false,
+            }],
+            notes: None,
+        };
+
+        // The team's copy, filed into the directory everybody works in.
+        let team = skills.create(&org, &admin, "admin", &bundle("v1")).await.unwrap();
+        let at = access.path_of(FiledKind::Skill, team.as_str()).await.unwrap().unwrap();
+        access
+            .transfer(
+                &vault,
+                FiledKind::Skill,
+                team.as_str(),
+                &at.moved_to(ft_core::path::DIRECTORY, "shared"),
+                "admin",
+            )
+            .await
+            .unwrap();
+
+        // Ana's identical copy, on in one of her sessions.
+        let hers = skills.create(&org, ana.as_str(), "ana", &bundle("v1")).await.unwrap();
+        let host = db
+            .ensure_host("fire-01", ft_core::Compute::Local, ana.as_str())
+            .await
+            .unwrap();
+        let session = ft_core::SessionId::new();
+        db.insert_session(
+            &session,
+            &host.id,
+            ana.as_str(),
+            None,
+            "Reviewing",
+            "",
+            None,
+            None,
+            "Shell",
+            ft_core::WorkspaceSize::Medium,
+            ft_core::Share::Equal,
+            &[],
+            None,
+        )
+        .await
+        .unwrap();
+        skills
+            .set_for_session(session.as_str(), ana.as_str(), &[hers.as_str().to_string()])
+            .await
+            .unwrap();
+
+        let found = skills
+            .collisions("shared", &[hers.as_str().to_string()])
+            .await
+            .unwrap();
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].existing_id, team);
+        assert!(found[0].identical, "same bytes on both sides");
+
+        // Drop hers: the session now holds the team's, and hers is gone.
+        let touched = skills
+            .merge_into(hers.as_str(), team.as_str(), ana.as_str(), false)
+            .await
+            .unwrap();
+        assert_eq!(touched, vec![session.as_str().to_string()]);
+        let pinned: Vec<String> =
+            sqlx::query_scalar("SELECT skill_id FROM skill_pins WHERE session_id = $1")
+                .bind(session.as_str())
+                .fetch_all(&pool)
+                .await
+                .unwrap();
+        assert_eq!(pinned, vec![team.as_str().to_string()]);
+        let left: i64 = sqlx::query_scalar("SELECT count(*) FROM skills WHERE id = $1")
+            .bind(hers.as_str())
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(left, 0, "her copy is gone");
+
+        // A different copy, added as the team's next version.
+        let changed = skills.create(&org, ana.as_str(), "ana", &bundle("v2")).await.unwrap();
+        let found = skills
+            .collisions("shared", &[changed.as_str().to_string()])
+            .await
+            .unwrap();
+        assert!(!found[0].identical);
+        skills
+            .merge_into(changed.as_str(), team.as_str(), ana.as_str(), true)
+            .await
+            .unwrap();
+        let (version, digest): (i32, Option<String>) = sqlx::query_as(
+            "SELECT v.version, v.digest FROM skills k \
+               JOIN skill_versions v ON v.id = k.current_version_id WHERE k.id = $1",
+        )
+        .bind(team.as_str())
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(version, 2, "the team's copy moved on a version");
+        let expected = Skills::digest_of_new(&bundle("v2")).unwrap();
+        assert_eq!(digest.as_deref(), Some(expected.as_str()), "holding her bytes");
+        let files: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM skill_files f JOIN skills k ON k.current_version_id = f.version_id \
+              WHERE k.id = $1",
+        )
+        .bind(team.as_str())
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(files, 1);
     }
 }

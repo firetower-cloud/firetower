@@ -8,7 +8,7 @@
 use super::access::whoever;
 use super::{ApiError, ApiResult, ErrorCode};
 use crate::auth::Principal;
-use crate::skills::{Asking, Match, NewSkill, Skill, SkillDetail, SkillVersion};
+use crate::skills::{Asking, Collision, Match, NewSkill, Resolve, Skill, SkillDetail, SkillVersion};
 use crate::AppState;
 use axum::{
     extract::{Path, State},
@@ -451,4 +451,162 @@ pub(super) async fn choose_skills(
     }
 
     Ok(Json(SessionSkills { selected: chosen }))
+}
+
+/// Skills to look at before moving them into a directory.
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillIds {
+    pub skills: Vec<String>,
+}
+
+/// Which of these skills the directory already has one of the same name for.
+///
+/// Asked by the share window before anything moves, so each collision can be
+/// shown with a choice rather than discovered as a refusal.
+#[utoipa::path(
+    post, path = "/api/v1/directories/{id}/skills/collisions", tag = "skills",
+    params(("id" = String, Path, description = "The directory")),
+    request_body = SkillIds,
+    responses((status = 200, body = Vec<Collision>), (status = 403, body = ApiError)),
+)]
+pub(super) async fn skill_collisions(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Path(id): Path<String>,
+    Json(body): Json<SkillIds>,
+) -> ApiResult<Json<Vec<Collision>>> {
+    let me = whoever(&principal)?;
+    let directory = state
+        .access
+        .directory(&id)
+        .await?
+        .ok_or_else(|| ApiError::not_found("directory"))?;
+    super::access::at_least(&state, me, &id, Level::Writer).await?;
+    Ok(Json(state.skills.collisions(&directory.slug, &body.skills).await?))
+}
+
+/// One skill to move, and what to do if the directory has one of its name.
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ShareOne {
+    pub id: String,
+    #[serde(default)]
+    pub resolve: Option<Resolve>,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ShareSkills {
+    pub skills: Vec<ShareOne>,
+}
+
+/// Move several skills into a directory.
+///
+/// Everything is checked before anything moves: that each skill is this
+/// person's to move, that no two of them share a name, and that every name
+/// the directory already has comes with a decision. A skill merged into the
+/// directory's copy hands its sessions over, and their workers are told.
+#[utoipa::path(
+    post, path = "/api/v1/directories/{id}/skills", tag = "skills",
+    params(("id" = String, Path, description = "The directory")),
+    request_body = ShareSkills,
+    responses((status = 204), (status = 400, body = ApiError), (status = 403, body = ApiError)),
+)]
+pub(super) async fn share_skills(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Path(id): Path<String>,
+    Json(body): Json<ShareSkills>,
+) -> ApiResult<StatusCode> {
+    use crate::access::FiledKind;
+    let me = whoever(&principal)?;
+    let directory = state
+        .access
+        .directory(&id)
+        .await?
+        .ok_or_else(|| ApiError::not_found("directory"))?;
+    super::access::at_least(&state, me, &id, Level::Writer).await?;
+
+    let mut checked = Vec::with_capacity(body.skills.len());
+    let mut names = std::collections::HashSet::new();
+    for one in &body.skills {
+        let from = super::access::may_share(&state, me, FiledKind::Skill, &one.id).await?;
+        let skill = state
+            .skills
+            .one(me.id.as_str(), &one.id, Level::Viewer)
+            .await?
+            .ok_or_else(|| ApiError::not_found("skill"))?;
+        // Two going in under one name would collide with each other.
+        if one.resolve != Some(Resolve::Keep) && !names.insert(skill.name.clone()) {
+            return Err(ApiError::new(
+                ErrorCode::InvalidRequest,
+                format!("two of these are called {}; a directory holds one", skill.name),
+            ));
+        }
+        checked.push((one, from, skill));
+    }
+
+    let ids: Vec<String> = body.skills.iter().map(|s| s.id.clone()).collect();
+    let collisions = state.skills.collisions(&directory.slug, &ids).await?;
+    for c in &collisions {
+        let asked = body.skills.iter().find(|s| s.id == c.skill_id.as_str());
+        if asked.and_then(|s| s.resolve).is_none() {
+            return Err(ApiError::new(
+                ErrorCode::InvalidRequest,
+                format!("{} already has a skill called {}", directory.name, c.name),
+            ));
+        }
+    }
+
+    let mut touched: Vec<String> = Vec::new();
+    for (one, from, _) in checked {
+        match collisions.iter().find(|c| c.skill_id.as_str() == one.id) {
+            None => {
+                let to = from.moved_to(ft_core::path::DIRECTORY, &directory.slug);
+                state
+                    .access
+                    .transfer(&state.vault, FiledKind::Skill, &one.id, &to, &me.username)
+                    .await
+                    .map_err(|e| ApiError::new(ErrorCode::InvalidRequest, format!("{e:#}")))?;
+            }
+            Some(c) => match one.resolve {
+                Some(Resolve::Keep) | None => {}
+                Some(r) => touched.extend(
+                    state
+                        .skills
+                        .merge_into(
+                            &one.id,
+                            c.existing_id.as_str(),
+                            me.id.as_str(),
+                            r == Resolve::AddVersion,
+                        )
+                        .await?,
+                ),
+            },
+        }
+    }
+
+    // Sessions that held a merged copy now hold the directory's. Their
+    // workers get the whole selection again; best effort, like a choice made
+    // in the picker, because the pins are what the next start reads.
+    touched.sort();
+    touched.dedup();
+    for (session, host) in state.skills.hosts_of(&touched).await.unwrap_or_default() {
+        let bundles = state.skills.bundles_for_session(&session).await.unwrap_or_default();
+        if let Err(e) = state
+            .fleet
+            .send(
+                &ft_core::HostId::from_stored(host),
+                ft_proto::ToWorker::SetSkills {
+                    session_id: SessionId::from_stored(session.clone()),
+                    skills: bundles,
+                },
+            )
+            .await
+        {
+            tracing::warn!(%session, "telling the worker its skills changed: {e:#}");
+        }
+    }
+    Ok(StatusCode::NO_CONTENT)
 }
