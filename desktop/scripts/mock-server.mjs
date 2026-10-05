@@ -99,18 +99,75 @@ const HOSTS = [
   },
 ];
 
+/* `latestVersion` and `behind` are the published-against-installed pair the
+   control plane now works out for itself — see `updates::agents`. The numbers
+   here are the ones a real check produced: Claude Code 2.1.273 installed
+   against 2.1.285 published, which is a host that has quietly been behind
+   since the day it was added. Codex is left current, so both states can be
+   looked at on one screen. */
 const AGENTS = [
   {
     kind: "ClaudeCode",
     label: "Claude Code",
     enabled: true,
-    hosts: [{ hostId: "h_1", hostName: "this Mac", installed: true, coveredByToken: true, loggedIn: true, account: "kevin@acme.com", version: "2.1.273" }],
+    supported: true,
+    needsCredential: true,
+    credentialSet: true,
+    latestVersion: "2.1.285",
+    hosts: [{ hostId: "h_1", hostName: "this Mac", installed: true, coveredByToken: true, loggedIn: true, account: "kevin@acme.com", version: "2.1.273 (Claude Code)", behind: true, mayUpdate: true }],
   },
   {
     kind: "Codex",
     label: "Codex",
     enabled: true,
-    hosts: [{ hostId: "h_1", hostName: "this Mac", installed: true, coveredByToken: true, loggedIn: true, account: "kevin@acme.com", version: "0.155.1" }],
+    supported: true,
+    needsCredential: true,
+    credentialSet: true,
+    latestVersion: "0.159.2",
+    hosts: [{ hostId: "h_1", hostName: "this Mac", installed: true, coveredByToken: true, loggedIn: true, account: "kevin@acme.com", version: "0.159.2", behind: false, mayUpdate: true }],
+  },
+];
+
+/* What a Claude Code session's pickers hold. The agent lists none of this —
+   it is told rather than asked — so the choices are Firetower's own and the
+   current value is the model it reported, mapped back onto the choice it
+   answers to by `controls::claude_choice_for`. Before that mapping the picker
+   matched nothing and drew the word "Model" over a running session. */
+const CLAUDE_CONTROLS = [
+  {
+    kind: "model",
+    fallback: "Model",
+    current: "opus[1m]",
+    choices: [
+      { label: "Opus", value: "opus[1m]", note: "The flagship, long context" },
+      { label: "Fable", value: "fable[1m]", note: "More capable, more expensive" },
+      { label: "Sonnet", value: "sonnet[1m]", note: "Quicker, cheaper" },
+      { label: "Haiku", value: "haiku", note: "Fastest, for small things" },
+      { label: "Opus plan", value: "opusplan", note: "Plans with Opus, works with Sonnet" },
+    ],
+  },
+  {
+    kind: "mode",
+    fallback: "Permissions",
+    current: "auto",
+    choices: [
+      { label: "Auto", value: "auto", note: "Approves the ordinary, asks about the rest" },
+      { label: "Ask everything", value: "default", note: "Nothing runs unasked" },
+      { label: "Plan", value: "plan", note: "Explores and proposes, changes nothing" },
+      { label: "Accept edits", value: "acceptEdits", note: "Writes files without asking. Commands still ask", grave: true },
+      { label: "Never ask", value: "dontAsk", note: "Refuses anything not already allowed, rather than asking", grave: true },
+    ],
+  },
+  {
+    kind: "effort",
+    fallback: "Effort",
+    choices: [
+      { label: "Low", value: "low", note: "Quick, for small things" },
+      { label: "Medium", value: "medium" },
+      { label: "High", value: "high" },
+      { label: "Extra high", value: "xhigh", note: "The usual, for work like this" },
+      { label: "Max", value: "max", note: "Slow, and as good as it gets" },
+    ],
   },
 ];
 
@@ -231,6 +288,72 @@ const conversation = () => ({
               ],
 });
 
+/**
+ * A diff the size of a real day's work, for looking at what the inspector
+ * costs to draw.
+ *
+ * `FT_MOCK_DIFF=<files>x<lines>` — so `FT_MOCK_DIFF=12x900` is twelve files of
+ * nine hundred changed lines each. Off unless asked for, because every other
+ * scene here wants the empty sheet.
+ */
+const BIG = (() => {
+  const asked = process.env.FT_MOCK_DIFF;
+  if (!asked) return null;
+  const [files, lines] = asked.split("x").map(Number);
+  return { files: files || 12, lines: lines || 900 };
+})();
+
+/* An agent that is still working changes the diff under the poll, which is the
+   state the app was reported slow in. `FT_MOCK_DIFF_CHURN=1` moves one line
+   every answer, so no two responses are equal. */
+let churn = 0;
+
+/** What `ft_core::MOST_OF_A_PATCH` cuts a single file's patch to. */
+const MOST_OF_A_PATCH = 256 * 1024;
+
+const bigDiff = (namesOnly = false) => {
+  if (!BIG) return [];
+  if (process.env.FT_MOCK_DIFF_CHURN) churn++;
+  const out = [];
+  for (let f = 0; f < BIG.files; f++) {
+    const path = `web/src/auth/module-${String(f).padStart(2, "0")}.ts`;
+    const body = [`diff --git a/${path} b/${path}`, `index 1111111..2222222 100644`, `--- a/${path}`, `+++ b/${path}`];
+    let added = 0;
+    let removed = 0;
+    // Hunks of forty, the way a rewrite of a file actually prints.
+    for (let h = 0; h * 40 < BIG.lines; h++) {
+      const at = h * 44 + 1;
+      body.push(`@@ -${at},42 +${at},42 @@ export function signingKey(id: string) {`);
+      for (let i = 0; i < 40 && h * 40 + i < BIG.lines; i++) {
+        const n = h * 40 + i;
+        if (n % 5 === 0) {
+          body.push(`-  const legacy = keyring.lookup(id, { generation: ${n} });`);
+          removed++;
+        }
+        body.push(`+  const key = await keyring.current(id, { generation: ${n + churn}, rotateAfter: 30 });`);
+        added++;
+        body.push(`   return sign(payload, key, { alg: "EdDSA", kid: id, line: ${n} });`);
+      }
+    }
+    // `namesOnly` is what the file tree asks for: the counts and whether the
+    // file is new, and not one byte of hunk. Everything else is cut the way
+    // the control plane cuts it, on a line boundary, so the client's own
+    // "there is more of this" state is reachable here.
+    const whole = `${body.join("\n")}\n`;
+    const cut = whole.length > MOST_OF_A_PATCH;
+    const patch = cut ? whole.slice(0, whole.lastIndexOf("\n", MOST_OF_A_PATCH) + 1) : whole;
+    out.push({
+      path,
+      patch: namesOnly ? "" : patch,
+      added,
+      removed,
+      fresh: f % 2 === 1,
+      truncated: namesOnly ? false : cut,
+    });
+  }
+  return out;
+};
+
 const json = (res, body, status = 200) => {
   res.writeHead(status, {
     "content-type": "application/json",
@@ -289,10 +412,10 @@ const server = createServer(async (req, res) => {
     "/api/v1/sessions/s_1": session(),
     "/api/v1/sessions/w_1": session(),
     "/api/v1/sessions/s_1/work": work(),
-    "/api/v1/sessions/s_1/diff": [],
-    "/api/v1/sessions/s_1/files": [],
+    "/api/v1/sessions/s_1/diff": bigDiff(url.searchParams.get("namesOnly") === "true"),
+    "/api/v1/sessions/s_1/files": BIG ? listing(url.searchParams.get("path") ?? "") : [],
     "/api/v1/sessions/s_1/conversation": conversation(),
-    "/api/v1/sessions/s_1/controls": [],
+    "/api/v1/sessions/s_1/controls": scene.startsWith("codex") ? [] : CLAUDE_CONTROLS,
     "/api/v1/sessions/s_1/account": { account: ACCOUNTS[0], limits: [], switches: [] },
     "/api/v1/sessions/s_1/annotations": [],
     "/api/v1/repos": REPOS,
@@ -317,6 +440,25 @@ const server = createServer(async (req, res) => {
  * refused, so refusing it would put a reconnect loop behind every screenshot.
  * Completing the handshake and sending nothing is what "quiet" looks like.
  */
+/**
+ * How often the mock agent reports having edited a file, in milliseconds.
+ *
+ * `FT_MOCK_EDITS=3000` is an agent writing a file every three seconds. Off by
+ * default: every other scene here wants the quiet socket.
+ */
+const EDITS = Number(process.env.FT_MOCK_EDITS ?? 0);
+
+/**
+ * What kind of item the edit is reported as.
+ *
+ * The refresh in `Chat.tsx` counts `FileChange` and `CommandExecution` only, and
+ * `classify` in `ft-core/src/normalise.rs` answers `McpToolCall` for anything
+ * whose name carries `mcp` *before* it asks whether the name is an edit — so a
+ * file written through an MCP server arrives as `McpToolCall` and that refresh
+ * never sees it. `FT_MOCK_EDITS_KIND=McpToolCall` is that case.
+ */
+const EDIT_KIND = process.env.FT_MOCK_EDITS_KIND ?? "FileChange";
+
 server.on("upgrade", (req, socket) => {
   const key = req.headers["sec-websocket-key"];
   const accept = createHash("sha1").update(`${key}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`).digest("base64");
@@ -325,6 +467,64 @@ server.on("upgrade", (req, socket) => {
   );
   socket.on("data", () => {});
   socket.on("error", () => {});
+
+  if (!EDITS) return;
+  /* An agent editing a file, on the stream, the way a real one reports it —
+     so what the diff poll is for can be compared against what the socket
+     already knows. See `FT_MOCK_EDITS` above. */
+  let n = 0;
+  const every = setInterval(() => {
+    n++;
+    push(socket, {
+      t: "line",
+      id: "s_1",
+      events: [
+        { lineNo: 100 + n * 2, type: "ItemStarted", item: `edit_${n}`, kind: EDIT_KIND, title: "changed", task: null },
+        { lineNo: 101 + n * 2, type: "ItemCompleted", item: `edit_${n}`, status: "Completed" },
+      ],
+    });
+  }, EDITS);
+  socket.on("close", () => clearInterval(every));
+  socket.on("error", () => clearInterval(every));
 });
+
+/**
+ * The workspace tree the generated diff implies, one directory at a time.
+ *
+ * `bigDiff` writes into `web/src/auth`, so this answers `web`, `web/src`,
+ * `web/src/auth` and nothing else — which is all the tree asks for.
+ */
+function listing(path) {
+  if (!BIG) return [];
+  const dirs = { "": "web", web: "src", "web/src": "auth" };
+  if (path in dirs) return [{ name: dirs[path], directory: true, link: false, bytes: 0 }];
+  if (path !== "web/src/auth") return [];
+  return bigDiff(true).map((f) => ({
+    name: f.path.split("/").pop(),
+    directory: false,
+    link: false,
+    bytes: 1024,
+  }));
+}
+
+/** One text frame, server to client — unmasked, which is the server's half. */
+function push(socket, frame) {
+  const body = Buffer.from(JSON.stringify(frame));
+  let head;
+  if (body.length < 126) {
+    head = Buffer.from([0x81, body.length]);
+  } else if (body.length < 65536) {
+    head = Buffer.alloc(4);
+    head[0] = 0x81;
+    head[1] = 126;
+    head.writeUInt16BE(body.length, 2);
+  } else {
+    head = Buffer.alloc(10);
+    head[0] = 0x81;
+    head[1] = 127;
+    head.writeBigUInt64BE(BigInt(body.length), 2);
+  }
+  socket.write(Buffer.concat([head, body]));
+}
 
 server.listen(PORT, () => console.log(`mock control plane on http://localhost:${PORT}`));

@@ -5,13 +5,13 @@
  * The Firetower control plane: API, scheduling, and worker transports.
  * OpenAPI spec version: 0
  */
+import type { Caution } from './caution';
 
 /**
  * One option in a picker.
  */
 export interface Choice {
-  /** Drawn apart, because it changes what the agent may do unsupervised. */
-  grave?: boolean;
+  caution?: null | Caution;
   /** What the picker shows when this is in force. */
   label: string;
   /**

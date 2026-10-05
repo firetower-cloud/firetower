@@ -514,6 +514,62 @@
         }
       }
     },
+    "/api/v1/agents/{kind}/update": {
+      "post": {
+        "tags": [
+          "agents"
+        ],
+        "summary": "Bring every host that is behind onto the published version.",
+        "description": "One press for a fleet, because the alternative is the same button once per\nmachine and a list of which ones you have already done.\n\nThree decisions worth stating:\n\n* **The version is resolved once, here, and every host is given it by name.**\n  Asking each of them for `latest` instead would split a fleet across two\n  versions if a release landed in the middle of the run — the same reason the\n  worker pins Codex's sidecar to the CLI that will spawn it.\n* **Only hosts that are behind.** A host already on it is not reinstalled,\n  and a host with a build somebody pinned *ahead* of the feed is left alone:\n  [`crate::updates::agents::behind`] refuses to call either one stale.\n* **One at a time, and a failure does not stop the rest.** Clearer about\n  which host went wrong, and it keeps several hundred-megabyte downloads off\n  one uplink. A run where two of five hosts failed is a useful answer.\n* **Only machines this person administers.** Installing an agent is felt by\n  everybody running on the machine, so it is the question `may_share` answers\n  about a machine's fate rather than about using one — see\n  `api::hosts::to_administer`. Without this, \"every host that is behind\"\n  would mean every host in the organisation, and one member could reinstall\n  under a colleague's running sessions. Skipped rather than refused, so a\n  fleet somebody part-owns still moves the part that is theirs.",
+        "operationId": "update_agent",
+        "parameters": [
+          {
+            "name": "kind",
+            "in": "path",
+            "description": "Agent kind",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Updated"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/auth/login": {
       "post": {
         "tags": [
@@ -3646,6 +3702,15 @@
             "required": false,
             "schema": {
               "$ref": "#/components/schemas/DiffSince"
+            }
+          },
+          {
+            "name": "namesOnly",
+            "in": "query",
+            "description": "Which files changed and by how much, with no hunks — for marking a tree rather than drawing a diff. Orders of magnitude smaller, and the worker never builds the patch.",
+            "required": false,
+            "schema": {
+              "type": "boolean"
             }
           }
         ],
@@ -6964,7 +7029,9 @@
           "hostId",
           "hostName",
           "installed",
-          "coveredByToken"
+          "coveredByToken",
+          "behind",
+          "mayUpdate"
         ],
         "properties": {
           "account": {
@@ -6973,6 +7040,10 @@
               "null"
             ],
             "description": "Which account this host spends against, when it will say."
+          },
+          "behind": {
+            "type": "boolean",
+            "description": "Whether what is installed here is older than what is published.\n\nFalse whenever that cannot be established — an unreadable version on\neither side, or a publisher nobody has reached. Saying nothing beats\ntelling somebody to reinstall on a guess."
           },
           "checkedAt": {
             "type": [
@@ -7000,6 +7071,10 @@
               "null"
             ],
             "description": "`None` when this agent can't be asked without being started, which is\nnot the same as being signed out."
+          },
+          "mayUpdate": {
+            "type": "boolean",
+            "description": "Whether the person asking may actually move this one.\n\nInstalling an agent is administrative and felt by everybody running on\nthe machine, so it is the same question `may_share` answers about a\nmachine's fate — see `api::hosts::to_administer`. Answered here rather\nthan in `status`, because this is the layer that knows who is asking;\nthe Updates screen settles `may_upgrade` the same way.\n\nSeparate from `behind` on purpose. A colleague's machine being stale is\nworth seeing; it is not yours to fix, and a button that 403s is worse\nthan no button."
           },
           "version": {
             "type": [
@@ -7078,6 +7153,13 @@
           },
           "label": {
             "type": "string"
+          },
+          "latestVersion": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The newest version its publisher is serving, when the control plane has\nmanaged to ask.\n\nOne per kind rather than per host: what is published does not depend on\nwhich machine is behind it. `None` means nobody has asked yet, or the\npublisher could not be reached — neither of which is \"up to date\"."
           },
           "mode": {
             "oneOf": [
@@ -7361,6 +7443,14 @@
           "Unknown"
         ]
       },
+      "Caution": {
+        "type": "string",
+        "description": "Why a choice is drawn apart, and they are not the same why.\n\nThis was one flag called `grave`, documented as \"changes what the agent may\ndo unsupervised\" and then used for two unrelated things. Both \"never ask\"\noptions were marked with it, and neither widens anything: Claude Code's\n*refuses* what it is not already allowed to do, and Codex's *fails* — the\nnotes beside them have always said so. They were painted the colour of a\nsandbox being taken down.\n\nTwo axes, which the Codex modes above already describe in prose: when it\ncomes to you, and what it can do without needing to. Colouring a point on\nthe first with the alarm reserved for the second spends the alarm in the\nwrong place, and an alarm spent in the wrong place is one people stop\nreading.",
+        "enum": [
+          "grants",
+          "neverAsks"
+        ]
+      },
       "ChangedWhat": {
         "type": "string",
         "description": "What changed in a workspace, when the socket says something did.",
@@ -7552,9 +7642,16 @@
           "value"
         ],
         "properties": {
-          "grave": {
-            "type": "boolean",
-            "description": "Drawn apart, because it changes what the agent may do unsupervised."
+          "caution": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Caution",
+                "description": "Why this one is drawn apart from the rest, when it is."
+              }
+            ]
           },
           "label": {
             "type": "string",
@@ -8783,9 +8880,13 @@
             "format": "int32",
             "minimum": 0
           },
+          "fresh": {
+            "type": "boolean",
+            "description": "Whether the file was created rather than changed.\n\nSaid here rather than left to be read back out of the patch, because a\nnames-only answer has no patch to read it out of — and because every\nclient was running the same regex over a megabyte of text to learn one\nbit that the header already knew."
+          },
           "patch": {
             "type": "string",
-            "description": "The hunks, as git printed them."
+            "description": "The hunks, as git printed them. Empty when only the names were asked\nfor, and cut short when [`FileDiff::truncated`] is set."
           },
           "path": {
             "type": "string"
@@ -8794,6 +8895,10 @@
             "type": "integer",
             "format": "int32",
             "minimum": 0
+          },
+          "truncated": {
+            "type": "boolean",
+            "description": "Set when the patch was cut for being too long — never merely because\nthe caller asked for names and got no patch at all.\n\n`added` and `removed` still count the whole file, because they are what\nthe sheet totals and a total that quietly stopped at a cut is a wrong\nnumber rather than a missing one."
           }
         }
       },
@@ -12980,6 +13085,36 @@
           },
           "title": {
             "type": "string"
+          }
+        }
+      },
+      "Updated": {
+        "type": "object",
+        "description": "What one host got out of an update, named so a partial run is readable.",
+        "required": [
+          "hostId",
+          "hostName"
+        ],
+        "properties": {
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why it did not, when it didn't."
+          },
+          "hostId": {
+            "type": "string"
+          },
+          "hostName": {
+            "type": "string"
+          },
+          "version": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What it has now, when it worked."
           }
         }
       },

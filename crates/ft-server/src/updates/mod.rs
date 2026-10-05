@@ -26,6 +26,7 @@
 //! Nothing here is automatic. A check every few hours says what is available;
 //! a person starts a run.
 
+pub mod agents;
 pub mod check;
 pub mod client;
 pub mod deploy;
@@ -44,6 +45,9 @@ pub struct Updates {
     pub store: store::Store,
     pub updater: Result<client::Updater, client::Absent>,
     pub feed: check::Feed,
+    /// Where each agent publishes itself, and what it last said.
+    pub agent_feeds: agents::Feeds,
+    pub agent_releases: agents::Releases,
     pub http: reqwest::Client,
     pub notify: crate::notify::Notifier,
     /// Runs this process is driving, so one is never driven twice.
@@ -73,6 +77,8 @@ impl Updates {
             store: store::Store::new(pool),
             updater,
             feed: check::Feed::from_env(),
+            agent_feeds: agents::Feeds::from_env(),
+            agent_releases: Default::default(),
             http: check::client(),
             notify: crate::notify::Notifier::from_env(),
             driving: Default::default(),

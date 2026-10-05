@@ -1,5 +1,58 @@
 # Changelog
 
+## [0.43.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.42.0...firetower-v0.43.0) (2026-10-03)
+
+
+### Features
+
+* **access:** a machine is somebody's, including the ones already here ([6b060d0](https://github.com/firetower-cloud/firetower/commit/6b060d0f768fa5da69ea90f116d16ab5fcb05125))
+* **access:** a place can be shared; a conversation cannot ([4410cdd](https://github.com/firetower-cloud/firetower/commit/4410cdd18d55e8179ef336c963d84226dbccd955))
+* **access:** an API key a team shares, and a subscription that comes home ([e2b76e3](https://github.com/firetower-cloud/firetower/commit/e2b76e3d9389c1da48389d78e54318c57b018ee7))
+* **access:** exceptions, so one person can be let into one thing ([28ca0c7](https://github.com/firetower-cloud/firetower/commit/28ca0c76c61a564f9282d0b1371067f26c7d83c7))
+* **access:** nothing of theirs is swept unseen ([9a22677](https://github.com/firetower-cloud/firetower/commit/9a226773273db3d17d39bb07bd8a5ed548bd69bd))
+* **access:** one identity table, so a slug is never issued twice ([0a56334](https://github.com/firetower-cloud/firetower/commit/0a56334089801bc9457899dc6ce9bd2ef5d4cd5d))
+* **access:** people, teams and directories, over paths ([07a371d](https://github.com/firetower-cloud/firetower/commit/07a371d15c85191b2c038ba1a724999d3e329d68))
+* **access:** the reads and writes the sharing sheet needs ([5367dea](https://github.com/firetower-cloud/firetower/commit/5367dea9013a6d26ee344d002875feda685c7950))
+* **access:** what is somebody's own, nobody else can be given ([048e2fb](https://github.com/firetower-cloud/firetower/commit/048e2fbb05141748db4fd1ef1e09dcff7b048f6c))
+* **access:** what one person reaches, for deciding about them ([8ff7cc2](https://github.com/firetower-cloud/firetower/commit/8ff7cc2c08d5b44e59f63e0115148e02f06039f9))
+* **access:** what somebody administers, and what they made and left behind ([2983227](https://github.com/firetower-cloud/firetower/commit/29832276ca0f743f71f62077d767c3b0f48d76cf))
+* **auth:** passwords are replaced on the web, and only there ([b035698](https://github.com/firetower-cloud/firetower/commit/b035698532284f1b0299a10d59bcd67cdbcb5057))
+* **desktop:** one sharing sheet for everything, not just workspaces ([92368ff](https://github.com/firetower-cloud/firetower/commit/92368ff7940d04209ab9ed28c39a159ebb5986c2))
+* **desktop:** the sharing sheet, and directories you can make from here ([3ad8318](https://github.com/firetower-cloud/firetower/commit/3ad8318e3b22e495fa211346d94edb5c1d26822a))
+* **mutliplayer:** comprehensive support for permissions and multi accounts ([a5a1f42](https://github.com/firetower-cloud/firetower/commit/a5a1f42b40845628b9f72936a61006bf4a6d27bb))
+* **organization:** everybody added from now on has an email ([542fa3e](https://github.com/firetower-cloud/firetower/commit/542fa3e0d53fa5082c7a9502cdec97b304d7d9b8))
+* remember agent settings per session ([#206](https://github.com/firetower-cloud/firetower/issues/206)) ([f24c902](https://github.com/firetower-cloud/firetower/commit/f24c902e699d3f5cd4a29155a697029e134ca392))
+* **repos:** a repository belongs to whoever connected it ([7d9ef1f](https://github.com/firetower-cloud/firetower/commit/7d9ef1f8f8e44f3fca00f7c385b391dae9e1ed87))
+* **sessions:** ending an agent ends that agent ([0599977](https://github.com/firetower-cloud/firetower/commit/05999778d46d35b36b1faab5d6c46c1ad370e8f5))
+* **updates:** reading is not upgrading, and a machine is its administrator's ([1bf125a](https://github.com/firetower-cloud/firetower/commit/1bf125a1ba85b4367b520f25ba4de0d8007f548c))
+* **web:** decide what happens to somebody's work before they go ([c7c92ff](https://github.com/firetower-cloud/firetower/commit/c7c92ff761e6a4784201f0325ccf5fe8cc5148ad))
+* **web:** the People actions ask first ([3b2fc83](https://github.com/firetower-cloud/firetower/commit/3b2fc83dc09734f15895d3fed98e7ef06a2547fb))
+
+
+### Bug Fixes
+
+* **access:** a secret is addressed by its whole key, owner included ([d8f2b6d](https://github.com/firetower-cloud/firetower/commit/d8f2b6d5087a004735991927f31d8e828c101d06))
+* **access:** a viewer may read a session and may not steer it ([1853117](https://github.com/firetower-cloud/firetower/commit/1853117246d06314e4cd7e39bf63a603b861bde4))
+* **access:** an agent account's path is a path, not raw ltree text ([d521640](https://github.com/firetower-cloud/firetower/commit/d52164079185dc6cdd76da383d2ff684d469841c))
+* **access:** filing one secret no longer files its namesakes ([b219200](https://github.com/firetower-cloud/firetower/commit/b219200b15bc27e6ff145876af22c3d89255e22f))
+* **access:** something filed nowhere says so, rather than failing to decode ([f6d3030](https://github.com/firetower-cloud/firetower/commit/f6d3030855bb604136f0b624f5ed58b30b861eae))
+* an agent added to a workspace inherits its checkouts, and a chip that ends everything says so ([d11aae3](https://github.com/firetower-cloud/firetower/commit/d11aae351c7d14657f550b4afaef42c1b11af195))
+* **composer:** controls that fit, and no box for a viewer ([7cf8a0f](https://github.com/firetower-cloud/firetower/commit/7cf8a0f231b65e0108800f73b9602a35f57eca71))
+* **hosts:** a machine is somebody's, and these endpoints now know it ([427f47c](https://github.com/firetower-cloud/firetower/commit/427f47c88f936f49c6f305b5ec8f0efe0c0da581))
+* **migrations:** an upgrade must survive two accounts on one mailbox ([0c3791a](https://github.com/firetower-cloud/firetower/commit/0c3791a9d2cf388bad69e9d39dec7773937444b8))
+* **providers:** the application is only offered to whoever may set it ([8d12907](https://github.com/firetower-cloud/firetower/commit/8d129077b3a678b794d5b1ca379a62c445c8a9ba))
+* **web:** a real picker, and it says what it does ([f4cb567](https://github.com/firetower-cloud/firetower/commit/f4cb5671b933be4c7b84e6d755e8a5cf22087a50))
+* **web:** copying the password actually copies it ([c9d4d04](https://github.com/firetower-cloud/firetower/commit/c9d4d0470d99393761ec358d039d29d92cec9d93))
+* **web:** say less, and only what is true ([551d6e7](https://github.com/firetower-cloud/firetower/commit/551d6e7f28b488e2a84d5716e68d8e549b0007fa))
+* **web:** the copy button answers, and sits beside the eye ([83843c2](https://github.com/firetower-cloud/firetower/commit/83843c24a6638050c8e5453faa2f229d3912d81c))
+* **web:** the destroyed rows show where they are filed ([3087baf](https://github.com/firetower-cloud/firetower/commit/3087baf1b10b3a03a2169185b054b954cb3ed8cc))
+* **web:** the sign-in link comes from the server, not from the tab ([5c4e4c8](https://github.com/firetower-cloud/firetower/commit/5c4e4c88ff5bc00d8411fe823a3ce3676e0585f2))
+
+
+### Performance Improvements
+
+* optimize inspector diff by capping patches and querying names ([#205](https://github.com/firetower-cloud/firetower/issues/205)) ([4b023f3](https://github.com/firetower-cloud/firetower/commit/4b023f3d726e7eb1daf852e3fdf995ce0a24d883))
+
 ## [0.42.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.41.1...firetower-v0.42.0) (2026-09-27)
 
 

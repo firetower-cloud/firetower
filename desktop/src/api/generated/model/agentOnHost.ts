@@ -13,6 +13,14 @@ export interface AgentOnHost {
      */
   account?: string | null;
   /**
+     * Whether what is installed here is older than what is published.
+     *
+     * False whenever that cannot be established — an unreadable version on
+     * either side, or a publisher nobody has reached. Saying nothing beats
+     * telling somebody to reinstall on a guess.
+     */
+  behind: boolean;
+  /**
      * When we last asked. Absent means never.
      * @nullable
      */
@@ -28,6 +36,20 @@ export interface AgentOnHost {
      * @nullable
      */
   loggedIn?: boolean | null;
+  /**
+     * Whether the person asking may actually move this one.
+     *
+     * Installing an agent is administrative and felt by everybody running on
+     * the machine, so it is the same question `may_share` answers about a
+     * machine's fate — see `api::hosts::to_administer`. Answered here rather
+     * than in `status`, because this is the layer that knows who is asking;
+     * the Updates screen settles `may_upgrade` the same way.
+     *
+     * Separate from `behind` on purpose. A colleague's machine being stale is
+     * worth seeing; it is not yours to fix, and a button that 403s is worse
+     * than no button.
+     */
+  mayUpdate: boolean;
   /** @nullable */
   version?: string | null;
 }

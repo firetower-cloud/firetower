@@ -45,11 +45,14 @@ use serde::{Deserialize, Serialize};
 /// 15 — KimiCode and its ACP journal require an ACP-aware worker.
 /// 16 — ACP configuration commands require a worker that can apply them.
 /// 17 — signing in names its agent, so Kimi can use the device flow too.
-/// 18 — skills travel with a session, and can be changed while it runs. A
+/// 18 — `Diff` can ask for the names alone. An older worker ignores the field
+/// and answers with a unified diff, which is not what the caller would then
+/// try to read — so the version moves rather than the reader guessing.
+/// 19 — skills travel with a session, and can be changed while it runs. A
 ///      worker older than this would start an agent with none of them and
 ///      silently ignore every later change, which reads as the feature being
 ///      broken rather than as a worker needing an upgrade.
-pub const PROTOCOL_VERSION: u32 = 18;
+pub const PROTOCOL_VERSION: u32 = 19;
 
 mod codec;
 pub use codec::{Codec, CodecError, FrameReader, FrameWriter};
@@ -475,6 +478,16 @@ pub enum Action {
         /// means) or since the last commit.
         #[serde(default)]
         since: ft_core::DiffSince,
+        /// Which files changed and by how much, without the hunks.
+        ///
+        /// The answer is then a JSON `Vec<FileDiff>` with empty patches rather
+        /// than a unified diff, and git is never asked to produce one — which
+        /// is most of the cost on both ends. What wants this is the file tree:
+        /// it marks each file added or modified and reads nothing else, and
+        /// was pulling every byte of every patch on an eight-second poll to
+        /// do it.
+        #[serde(default)]
+        names_only: bool,
     },
     /// Put a file somebody handed over into the workspace, and say where it
     /// landed.
@@ -1091,6 +1104,7 @@ mod tests {
             env: vec![("KEY".into(), "value".into())],
             agent_home: Vec::new(),
             workspace_session: None,
+            skills: Vec::new(),
         }));
 
         let wire = serde_json::to_string(&frame).expect("encoding");

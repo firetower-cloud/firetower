@@ -86,6 +86,50 @@ it lets go. Paths the agent writes in the conversation open the same way
 (`src/paths.ts`): found in the text, checked against the workspace with
 `find_files`, then opened.
 
+## Weighing the inspector
+
+`scripts/mock-server.mjs` answers with an empty diff unless `FT_MOCK_DIFF` asks
+for one: `FT_MOCK_DIFF=8x6000` is eight files of six thousand changed lines, and
+`FT_MOCK_DIFF_CHURN=1` moves a line every answer, which is what an agent that is
+still working does to the poll. The mock answers `?namesOnly=true` the way the
+control plane does — counts and `fresh`, no hunks — and cuts any one patch to
+`MOST_OF_A_PATCH`, so both halves of what the server now does are reachable
+without a worker. That is the state issue #198 was reported in, and
+these probes measure it rather than argue about it:
+
+    FT_MOCK_DIFF=8x6000 FT_MOCK_DIFF_CHURN=1 node scripts/mock-server.mjs 4471 &
+    pnpm build && pnpm preview --port 5374 &
+    MOCK_PORT=4471 DEV_PORT=5374 node scripts/<probe>.mjs
+
+- `weigh` — heap, node count and keystroke cost with the pane closed, open, and
+  after every file has been opened in turn.
+- `watch` — the same, sampled every second, so a freeze that lands between two
+  polls is still seen.
+- `churn` — typing for forty seconds while the diff moves underneath: keystroke
+  percentiles, frames over 100 ms, and the megabytes the poll pulled.
+- `reflow` — what the composer's autosize costs, which is a whole-document
+  layout, against a page with the diff open and with it closed.
+- `scrub` — correctness, not speed: scrubs the pane top to bottom and checks the
+  drawn rows are the ones the patch has at those positions, that the end of the
+  diff is reachable, and that exactly one "ask for a change" control exists.
+  Exits non-zero when it is not so, which is the one to run after touching the
+  window.
+- `stalls` / `profile` — the same run, attributed: `long-animation-frame`
+  entries by script, and a CPU profile by self time.
+- `when` — the poll against the socket, on one clock. Needs
+  `FT_MOCK_EDITS=<ms>`, which makes the mock report a `FileChange` on the
+  conversation stream that often; it prints when each edit was announced,
+  when each poll answered, and which polls came back byte-identical to the
+  one before. `TAB=file` runs it with a file open instead of the
+  conversation, which is where the refresh in `Chat.tsx` stops happening.
+  `FT_MOCK_EDITS_KIND=McpToolCall` reports the same edit the way a file
+  written through an MCP server arrives, which that refresh does not count —
+  the poll is what finds those, so it is not redundant.
+
+Measure against `pnpm preview`, not `pnpm dev`: the development build's
+`jsxDEV` and prop validation are most of its render cost and none of the
+shipped app's.
+
 ## Installers
 
 `scripts/build-mac.sh` builds the `.dmg` on this Mac (`--universal` for one

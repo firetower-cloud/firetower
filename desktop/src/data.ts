@@ -277,9 +277,17 @@ export type ChangedFile = FileDiff & { at: string };
  * front. The tree and the tabs are workspace-relative either way, so `at` is
  * the path with the directory always in front.
  */
-export function useDiff(session: Pick<Session, "id" | "checkouts"> | null, since: DiffSince = "Base") {
+export function useDiff(
+  session: Pick<Session, "id" | "checkouts"> | null,
+  since: DiffSince = "Base",
+  /* For a caller that marks a tree rather than drawing a patch. The answer
+     carries `fresh` and the line counts and nothing else, which is a few
+     hundred bytes where the patches were megabytes — on an eight-second
+     poll — and the worker never runs `git diff` at all. */
+  namesOnly = false,
+) {
   const on = !!session;
-  const q = useSessionDiff(session?.id ?? "", { since }, { query: { enabled: on, refetchInterval: 8000 } });
+  const q = useSessionDiff(session?.id ?? "", { since, ...(namesOnly ? { namesOnly } : {}) }, { query: { enabled: on, refetchInterval: 8000 } });
   const data = useMemo<ChangedFile[]>(() => {
     const files = (q.data ?? []) as FileDiff[];
     const dirs = (session?.checkouts ?? []).map((c) => c.path).filter((p): p is string => !!p);

@@ -1,5 +1,67 @@
 # Changelog
 
+## [0.17.0](https://github.com/firetower-cloud/firetower/compare/desktop-v0.16.0...desktop-v0.17.0) (2026-10-03)
+
+
+### Features
+
+* **access:** a place can be shared; a conversation cannot ([4410cdd](https://github.com/firetower-cloud/firetower/commit/4410cdd18d55e8179ef336c963d84226dbccd955))
+* **access:** an API key a team shares, and a subscription that comes home ([e2b76e3](https://github.com/firetower-cloud/firetower/commit/e2b76e3d9389c1da48389d78e54318c57b018ee7))
+* **access:** nothing of theirs is swept unseen ([9a22677](https://github.com/firetower-cloud/firetower/commit/9a226773273db3d17d39bb07bd8a5ed548bd69bd))
+* **access:** one identity table, so a slug is never issued twice ([0a56334](https://github.com/firetower-cloud/firetower/commit/0a56334089801bc9457899dc6ce9bd2ef5d4cd5d))
+* **access:** people, teams and directories, over paths ([07a371d](https://github.com/firetower-cloud/firetower/commit/07a371d15c85191b2c038ba1a724999d3e329d68))
+* **access:** the reads and writes the sharing sheet needs ([5367dea](https://github.com/firetower-cloud/firetower/commit/5367dea9013a6d26ee344d002875feda685c7950))
+* **access:** what is somebody's own, nobody else can be given ([048e2fb](https://github.com/firetower-cloud/firetower/commit/048e2fbb05141748db4fd1ef1e09dcff7b048f6c))
+* **access:** what one person reaches, for deciding about them ([8ff7cc2](https://github.com/firetower-cloud/firetower/commit/8ff7cc2c08d5b44e59f63e0115148e02f06039f9))
+* **access:** what somebody administers, and what they made and left behind ([2983227](https://github.com/firetower-cloud/firetower/commit/29832276ca0f743f71f62077d767c3b0f48d76cf))
+* **auth:** passwords are replaced on the web, and only there ([b035698](https://github.com/firetower-cloud/firetower/commit/b035698532284f1b0299a10d59bcd67cdbcb5057))
+* **desktop:** an administrator runs People and Teams from here ([27ba6bc](https://github.com/firetower-cloud/firetower/commit/27ba6bcb6862d53476bd250d2246d8764a8afef5))
+* **desktop:** Configuration is an index and one pane at a time ([cd09fbb](https://github.com/firetower-cloud/firetower/commit/cd09fbb14a02591532eadc4f9535f0a89a6f180a))
+* **desktop:** grants are decided here too ([b685d27](https://github.com/firetower-cloud/firetower/commit/b685d27bdd571c14cfa9b3b99de60b68f7f7b233))
+* **desktop:** one sharing sheet for everything, not just workspaces ([92368ff](https://github.com/firetower-cloud/firetower/commit/92368ff7940d04209ab9ed28c39a159ebb5986c2))
+* **desktop:** the sharing sheet, and directories you can make from here ([3ad8318](https://github.com/firetower-cloud/firetower/commit/3ad8318e3b22e495fa211346d94edb5c1d26822a))
+* **mutliplayer:** comprehensive support for permissions and multi accounts ([a5a1f42](https://github.com/firetower-cloud/firetower/commit/a5a1f42b40845628b9f72936a61006bf4a6d27bb))
+* **organization:** everybody added from now on has an email ([542fa3e](https://github.com/firetower-cloud/firetower/commit/542fa3e0d53fa5082c7a9502cdec97b304d7d9b8))
+* **rail:** personal and shared workspaces, and a list that keeps up ([02e5cdc](https://github.com/firetower-cloud/firetower/commit/02e5cdc56ef21a1f32a02f7b8c5955e5c5f38a9b))
+* remember agent settings per session ([#206](https://github.com/firetower-cloud/firetower/issues/206)) ([f24c902](https://github.com/firetower-cloud/firetower/commit/f24c902e699d3f5cd4a29155a697029e134ca392))
+* **repos:** a repository belongs to whoever connected it ([7d9ef1f](https://github.com/firetower-cloud/firetower/commit/7d9ef1f8f8e44f3fca00f7c385b391dae9e1ed87))
+* **sessions:** ending an agent ends that agent ([0599977](https://github.com/firetower-cloud/firetower/commit/05999778d46d35b36b1faab5d6c46c1ad370e8f5))
+* **updates:** reading is not upgrading, and a machine is its administrator's ([1bf125a](https://github.com/firetower-cloud/firetower/commit/1bf125a1ba85b4367b520f25ba4de0d8007f548c))
+* **web:** decide what happens to somebody's work before they go ([c7c92ff](https://github.com/firetower-cloud/firetower/commit/c7c92ff761e6a4784201f0325ccf5fe8cc5148ad))
+
+
+### Bug Fixes
+
+* **access:** a secret is addressed by its whole key, owner included ([d8f2b6d](https://github.com/firetower-cloud/firetower/commit/d8f2b6d5087a004735991927f31d8e828c101d06))
+* **access:** a viewer may read a session and may not steer it ([1853117](https://github.com/firetower-cloud/firetower/commit/1853117246d06314e4cd7e39bf63a603b861bde4))
+* **access:** an agent account's path is a path, not raw ltree text ([d521640](https://github.com/firetower-cloud/firetower/commit/d52164079185dc6cdd76da383d2ff684d469841c))
+* an agent added to a workspace inherits its checkouts, and a chip that ends everything says so ([d11aae3](https://github.com/firetower-cloud/firetower/commit/d11aae351c7d14657f550b4afaef42c1b11af195))
+* **apps:** one refusal, said once ([5ddabb2](https://github.com/firetower-cloud/firetower/commit/5ddabb290aab64b7af79fbe277db9e7deac980d8))
+* **chat:** the composer asks maySpeak, which is what it meant to ask ([e2023a1](https://github.com/firetower-cloud/firetower/commit/e2023a118ef390a67a4efcc4870a59584971df42))
+* **composer:** controls that fit, and no box for a viewer ([7cf8a0f](https://github.com/firetower-cloud/firetower/commit/7cf8a0f231b65e0108800f73b9602a35f57eca71))
+* **desktop:** a disabled query has nothing to show either ([fac4d61](https://github.com/firetower-cloud/firetower/commit/fac4d61722178af5ea3533285e0b5c9774fcc80d))
+* **desktop:** a new directory is empty, whatever the workspace's list says ([2a53fdf](https://github.com/firetower-cloud/firetower/commit/2a53fdfee84069abba7483e3b9f4791be689473f))
+* **desktop:** a sheet that cannot load something says so ([3460dae](https://github.com/firetower-cloud/firetower/commit/3460dae98505d9c444801e3e58f64c6598e6869e))
+* **desktop:** a task list you may no longer read goes away ([800ad7e](https://github.com/firetower-cloud/firetower/commit/800ad7ed79237ce91d78a68f69d78f62862d7238))
+* **desktop:** a token that stops working asks for a password ([e13d98d](https://github.com/firetower-cloud/firetower/commit/e13d98d747db067b8c5c91f61b3297047b0eaed4))
+* **desktop:** filing something refreshes every screen that says where it is ([66e4eff](https://github.com/firetower-cloud/firetower/commit/66e4effc5b80f57aadd07b435d7f1a658c71cd3e))
+* **desktop:** just Back ([dc7b4e6](https://github.com/firetower-cloud/firetower/commit/dc7b4e6fe22a0d4ac4f4dbd75e6027fddf5d10b4))
+* **desktop:** moving gets a row of its own, not the corner of another one ([6249bf9](https://github.com/firetower-cloud/firetower/commit/6249bf93b441e40435cb1b14e8fb67376cabd74f))
+* **desktop:** one level menu open at a time ([a1fda76](https://github.com/firetower-cloud/firetower/commit/a1fda768a4b84e40d98779d17606680c12467ab2))
+* **desktop:** the back button says where it goes ([0992d0c](https://github.com/firetower-cloud/firetower/commit/0992d0c139b149811f575aeaac7df49ff8632b54))
+* **desktop:** the level menu leaves the sheet, and a move swaps the row ([14d0a38](https://github.com/firetower-cloud/firetower/commit/14d0a38f261dd0c9d3d07ac37710e2b1690ce508))
+* **desktop:** the way back goes before the count, not after it ([1b1eaf9](https://github.com/firetower-cloud/firetower/commit/1b1eaf9fe44c15260eb1829be40fe89b51aebd8d))
+* **inspector:** the Commit tab is not a viewer's ([b44437a](https://github.com/firetower-cloud/firetower/commit/b44437a958e413c2ee0feb057ceacb0dda7ff622))
+* **notes:** no notes is nothing to say ([c19ff9e](https://github.com/firetower-cloud/firetower/commit/c19ff9e8c7110a29d47c63879b0e1603ee36005e))
+* **providers:** the application is only offered to whoever may set it ([8d12907](https://github.com/firetower-cloud/firetower/commit/8d129077b3a678b794d5b1ca379a62c445c8a9ba))
+* **web:** the sign-in link comes from the server, not from the tab ([5c4e4c8](https://github.com/firetower-cloud/firetower/commit/5c4e4c88ff5bc00d8411fe823a3ce3676e0585f2))
+* **workbench:** ending the agent you were reading emptied the strip ([d8cbf00](https://github.com/firetower-cloud/firetower/commit/d8cbf0071b0b7a2950df50acd7591c218b98f512))
+
+
+### Performance Improvements
+
+* optimize inspector diff by capping patches and querying names ([#205](https://github.com/firetower-cloud/firetower/issues/205)) ([4b023f3](https://github.com/firetower-cloud/firetower/commit/4b023f3d726e7eb1daf852e3fdf995ce0a24d883))
+
 ## [0.16.0](https://github.com/firetower-cloud/firetower/compare/desktop-v0.15.0...desktop-v0.16.0) (2026-09-27)
 
 

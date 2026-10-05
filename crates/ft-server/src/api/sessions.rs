@@ -660,6 +660,7 @@ pub(super) async fn create_session(
     // there is nothing better to do: one process, one environment. What each
     // repository asked for in a *file* stays its own, inside its own checkout.
     let mut env: Vec<(String, String)> = Vec::new();
+    carry_preferences(&state, &mut env, &owner, req.agent).await;
     for vars in &per_repo_env {
         for v in vars {
             env.retain(|(existing, _)| *existing != v.name);
@@ -813,6 +814,38 @@ pub(super) async fn relaunch_session(
     }))
 }
 
+/// Carry what this person last chose about this agent into the session.
+///
+/// The rule: a session opens on the settings you were last working with. Both
+/// agents are launched by the worker, which inherits this environment, so this
+/// is where the preference crosses over — see [`ft_core::PREFERRED_ENV`].
+///
+/// Nothing chosen means nothing added, and the agent's own defaults apply. A
+/// read that fails is the same as nothing chosen: starting a session on the
+/// defaults is a small surprise, and refusing to start one is not.
+async fn carry_preferences(
+    state: &AppState,
+    env: &mut Vec<(String, String)>,
+    user_id: &str,
+    agent: ft_core::Agent,
+) {
+    let pairs = match state.db.preferred_controls(user_id, agent).await {
+        Ok(pairs) => pairs,
+        Err(e) => {
+            tracing::warn!("reading remembered settings for {}: {e:#}", agent.label());
+            return;
+        }
+    };
+    let preferred = ft_core::controls::Preferred::from_pairs(pairs);
+    if preferred.is_empty() {
+        return;
+    }
+    if let Ok(json) = serde_json::to_string(&preferred) {
+        env.retain(|(name, _)| name != ft_core::PREFERRED_ENV);
+        env.push((ft_core::PREFERRED_ENV.to_string(), json));
+    }
+}
+
 /// The work behind [`relaunch_session`], so a turn can do it without a request.
 ///
 /// Everything is resolved fresh rather than remembered: the credential comes
@@ -875,6 +908,7 @@ pub(crate) async fn relaunch(
     };
 
     let mut env: Vec<(String, String)> = Vec::new();
+    carry_preferences(state, &mut env, owner, session.agent).await;
     for (name, value) in agent_env(state, session.agent, &session.id, owner).await? {
         env.retain(|(existing, _)| *existing != name);
         env.push((name, value));
@@ -1049,6 +1083,7 @@ async fn start_another_agent(
     // Its own credential and its own environment, resolved against this session
     // so the vault's log names the run that spent it.
     let mut env: Vec<(String, String)> = Vec::new();
+    carry_preferences(&state, &mut env, &owner, req.agent).await;
     if let Some(account) = &req.account_id {
         super::accounts::pin(&state, &owner, &id, account, req.agent).await?;
     }
@@ -2571,6 +2606,7 @@ struct Held {
         ("id" = String, Path, description = "Session id"),
         ("checkout" = Option<String>, Query, description = "Which checkout, by its path in the workspace. Every one when omitted."),
         ("since" = Option<ft_core::DiffSince>, Query, description = "Measured from the base of the branch (the default) or from the last commit."),
+        ("namesOnly" = Option<bool>, Query, description = "Which files changed and by how much, with no hunks — for marking a tree rather than drawing a diff. Orders of magnitude smaller, and the worker never builds the patch."),
     ),
     responses((status = 200, body = Vec<ft_core::FileDiff>), (status = 404, body = ApiError)),
 )]
@@ -2596,6 +2632,7 @@ pub(super) async fn session_diff(
     };
 
     let many = wanted.len() > 1;
+    let names_only = which.names_only.unwrap_or(false);
     let mut files = Vec::new();
     let mut refused: Vec<String> = Vec::new();
     let asked = wanted.len();
@@ -2608,6 +2645,7 @@ pub(super) async fn session_diff(
                 ft_proto::Action::Diff {
                     checkout: c.path.clone(),
                     since: which.since.unwrap_or_default(),
+                    names_only,
                 },
                 None,
             )
@@ -2624,7 +2662,21 @@ pub(super) async fn session_diff(
             }
         };
 
-        for mut file in ft_core::split_diff(&diff) {
+        // A names-only answer is already the list; anything else is a unified
+        // diff to be split, with any one file's patch cut to a size a screen
+        // can actually be handed.
+        let listed = if names_only {
+            serde_json::from_str::<Vec<ft_core::FileDiff>>(&diff).map_err(|e| {
+                ApiError::new(
+                    ErrorCode::ActionFailed,
+                    format!("could not read what this session changed — {e}"),
+                )
+            })?
+        } else {
+            ft_core::split_diff(&diff, ft_core::MOST_OF_A_PATCH)
+        };
+
+        for mut file in listed {
             if many && !c.path.is_empty() {
                 file.path = format!("{}/{}", c.path, file.path);
             }
@@ -2650,6 +2702,7 @@ pub(super) async fn session_diff(
 
 /// Which checkout a diff means, and where it is measured from.
 #[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub(super) struct Which {
     /// The checkout's path inside the workspace. Absent means all of them.
     #[serde(default)]
@@ -2657,6 +2710,10 @@ pub(super) struct Which {
     /// From the base of the branch unless said otherwise.
     #[serde(default)]
     pub since: Option<ft_core::DiffSince>,
+    /// Which files changed, without the hunks — for a caller that only marks
+    /// the tree and never draws a patch.
+    #[serde(default)]
+    pub names_only: Option<bool>,
 }
 
 /// Open a pull request for this session's branch.
@@ -2934,6 +2991,14 @@ pub(super) async fn continue_with_account(
                 }
             }
         }
+        // Back to the alias it answers to, because what was replayed is the
+        // resolved name — and handing that back pins the session to one build
+        // of one model. `opus[1m]` follows the family; `claude-opus-5[1m]` is
+        // Opus 5 for as long as the session lives. Worse than that, a resolved
+        // name the installed CLI has never heard of is not refused: it warns
+        // and carries on assuming a 200k window. So an unmapped model sends
+        // nothing at all, and the launch flag stays in force.
+        claude_model = ft_core::controls::claude_choice_for(&claude_model).unwrap_or_default();
     }
     let stopped = state
         .fleet
@@ -2948,6 +3013,17 @@ pub(super) async fn continue_with_account(
         // its later usage to the previous account.
         relaunch(state, session, owner).await?;
         for control in controls {
+            // Claude Code's model is sent below instead, from the replay. Both
+            // say the same thing when this snapshot's reader has seen the log,
+            // and only the replay is certain to have — a reader rebuilt for a
+            // session that was already running is not fed the transcript. Sent
+            // from both, it arrives twice, and `/model` is an ordinary message:
+            // the transcript would grow two of them on every account change.
+            if session.agent == ft_core::Agent::ClaudeCode
+                && control.kind == ft_core::controls::ControlKind::Model
+            {
+                continue;
+            }
             if let Some(value) = control.current {
                 state
                     .fleet

@@ -19,6 +19,7 @@ mod ids;
 pub mod normalise;
 pub mod path;
 pub mod quota;
+pub mod releases;
 pub mod session;
 mod status;
 pub mod turn;
@@ -45,11 +46,20 @@ pub const SESSION_ENV: &str = "FIRETOWER_SESSION";
 /// Where the worker on this machine keeps its state.
 pub const WORKER_ROOT_ENV: &str = "FIRETOWER_WORKER_ROOT";
 
+/// What this person last chose about this agent, as JSON.
+///
+/// The session's environment rather than a field on the launch frame: both
+/// agents are started by the worker, the worker already inherits the session's
+/// environment, and a frame that predates the choice is a protocol version
+/// every worker in a fleet has to be upgraded past. Absent or unreadable means
+/// nobody has chosen anything, which is the ordinary state.
+pub const PREFERRED_ENV: &str = "FIRETOWER_AGENT_SETTINGS";
+
 /// Which agent runs inside a workspace.
 ///
 /// Serialised as the variant name — see the wire conventions in the brief: a
 /// field takes the consumer's casing, an enum value stays the symbol it is.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
 pub enum Agent {
     ClaudeCode,
     Codex,
@@ -141,6 +151,7 @@ impl Agent {
         session_id: &str,
         asking: &Asking,
         start: Start,
+        preferred: &crate::controls::Preferred,
     ) -> Option<Vec<String>> {
         let agent_session = agent_session_uuid(session_id);
         match self {
@@ -178,7 +189,19 @@ impl Agent {
                 // because usage-based switching is a thing and nothing said so.
                 // A session that takes an hour should not be run by whichever
                 // model was cheapest at the moment it started.
-                argv.extend(["--model".into(), BIGGEST.into()]);
+                argv.extend([
+                    "--model".into(),
+                    preferred.model.clone().unwrap_or_else(|| BIGGEST.into()),
+                ]);
+
+                // The same argument, and one more: this is the only setting
+                // Claude Code never reports back, so a session that was not
+                // told what to think with has no way of saying what it is
+                // thinking with. See [`EFFORT`].
+                argv.extend([
+                    "--effort".into(),
+                    preferred.effort.clone().unwrap_or_else(|| EFFORT.into()),
+                ]);
 
                 if let Start::Carrying(before) = &start {
                     argv.extend(["--append-system-prompt".into(), before.clone()]);
@@ -198,7 +221,7 @@ impl Agent {
                     // anybody is asked.
                     Asking::Ask { tool, config } => argv.extend([
                         "--permission-mode".into(),
-                        "auto".into(),
+                        preferred.mode.clone().unwrap_or_else(|| ASKING_MODE.into()),
                         "--permission-prompt-tool".into(),
                         tool.clone(),
                         "--mcp-config".into(),
@@ -229,7 +252,12 @@ impl Agent {
     /// arrange. Codex needs a conversation opened first, and its prompt cannot
     /// go out until that has answered — so the prompt is not here, and the
     /// control plane sends it when the thread exists.
-    pub fn opening(&self, prompt: &str, cwd: &str) -> Vec<serde_json::Value> {
+    pub fn opening(
+        &self,
+        prompt: &str,
+        cwd: &str,
+        preferred: &crate::controls::Preferred,
+    ) -> Vec<serde_json::Value> {
         match self {
             Agent::ClaudeCode => {
                 if prompt.trim().is_empty() {
@@ -238,7 +266,7 @@ impl Agent {
                     vec![crate::turn::user_message(prompt)]
                 }
             }
-            Agent::Codex => crate::codex::opening(cwd),
+            Agent::Codex => crate::codex::opening(cwd, preferred),
             Agent::KimiCode => {
                 if prompt.trim().is_empty() {
                     Vec::new()
@@ -285,8 +313,13 @@ impl Agent {
     /// tab a session gets, whether it is watched or attached to, and whether
     /// it is asked to report on itself.
     pub fn speaks_a_protocol(&self) -> bool {
-        self.launch_headless("probe", &Asking::CannotAsk, Start::Fresh)
-            .is_some()
+        self.launch_headless(
+            "probe",
+            &Asking::CannotAsk,
+            Start::Fresh,
+            &crate::controls::Preferred::default(),
+        )
+        .is_some()
     }
 }
 
@@ -926,6 +959,31 @@ pub enum SkillsHome {
 /// Changeable per session — see the composer — so this is a starting point
 /// rather than a policy.
 pub const BIGGEST: &str = "opus[1m]";
+
+/// How hard a session thinks unless somebody changes it.
+///
+/// Asked for rather than inherited, for the same reason as [`BIGGEST`]: left to
+/// itself the CLI picks, and what it picks is free to move between releases.
+///
+/// There is a second reason here. Claude Code reports the model and the
+/// permission mode it is running on every turn, so a picker showing either can
+/// be *told* what is true. It never reports an effort — the `init` line has no
+/// such field — so the only thing that can honestly fill that picker is the
+/// value this process passed on the command line. Not passing one left it
+/// permanently blank.
+///
+/// `xhigh` because this is unattended work on a repository, which is what the
+/// level is for.
+pub const EFFORT: &str = "xhigh";
+
+/// The permission mode a session is launched under.
+///
+/// `Asking::Ask` is the only arrangement a worker makes — see
+/// `ft_worker::entry::arrange_asking` — so this is what every driven session
+/// starts on. Named here because two places need to agree about it: the argv
+/// below, and the picker that has to show something before the agent has said
+/// anything.
+pub const ASKING_MODE: &str = "auto";
 
 /// Whether this agent is beginning a conversation or picking one back up.
 ///
@@ -1703,15 +1761,46 @@ pub struct FileDiff {
     pub path: String,
     pub added: u32,
     pub removed: u32,
-    /// The hunks, as git printed them.
+    /// The hunks, as git printed them. Empty when only the names were asked
+    /// for, and cut short when [`FileDiff::truncated`] is set.
     pub patch: String,
+    /// Whether the file was created rather than changed.
+    ///
+    /// Said here rather than left to be read back out of the patch, because a
+    /// names-only answer has no patch to read it out of — and because every
+    /// client was running the same regex over a megabyte of text to learn one
+    /// bit that the header already knew.
+    #[serde(default)]
+    pub fresh: bool,
+    /// Set when the patch was cut for being too long — never merely because
+    /// the caller asked for names and got no patch at all.
+    ///
+    /// `added` and `removed` still count the whole file, because they are what
+    /// the sheet totals and a total that quietly stopped at a cut is a wrong
+    /// number rather than a missing one.
+    #[serde(default)]
+    pub truncated: bool,
 }
 
-/// Split a unified diff into files.
+/// The most of one file's patch worth sending.
+///
+/// A generated file, a lockfile or a vendored drop is a single patch that runs
+/// to megabytes, and every client that receives one has to hold it, parse it
+/// and decide not to draw most of it — on a poll, repeatedly. A quarter of a
+/// megabyte is far more than anybody reads in a side panel and still enough
+/// that an ordinary file is never cut.
+pub const MOST_OF_A_PATCH: usize = 256 * 1024;
+
+/// Split a unified diff into files, cutting any one patch that runs too long.
 ///
 /// Done here rather than in the browser: it is a pure function over text, it is
 /// the sort of thing that gets subtly wrong, and a test is cheap.
-pub fn split_diff(diff: &str) -> Vec<FileDiff> {
+///
+/// `cap` is the most of any one file's patch to keep — [`MOST_OF_A_PATCH`] in
+/// production, `usize::MAX` where the whole thing is wanted. Cutting happens on
+/// a line boundary, so what arrives is always a patch that reads, and the file
+/// says so with [`FileDiff::truncated`].
+pub fn split_diff(diff: &str, cap: usize) -> Vec<FileDiff> {
     let mut files = Vec::new();
 
     for chunk in diff.split("\ndiff --git ") {
@@ -1736,15 +1825,46 @@ pub fn split_diff(diff: &str) -> Vec<FileDiff> {
             }
         }
 
+        // Above the first hunk, which is the only place git says so.
+        let fresh = chunk
+            .split("\n@@")
+            .next()
+            .unwrap_or(chunk)
+            .lines()
+            .any(|l| l.starts_with("new file mode"));
+
+        let whole = format!("diff --git {chunk}");
+        let (patch, truncated) = cut_to(whole, cap);
         files.push(FileDiff {
             path,
             added,
             removed,
-            patch: format!("diff --git {chunk}"),
+            patch,
+            fresh,
+            truncated,
         });
     }
 
     files
+}
+
+/// A patch no longer than `cap`, ending where a line ends.
+///
+/// Cut mid-line and the last row drawn is half a line of code presented as
+/// whole, which is worse than saying nothing: a reader cannot tell a cut from
+/// the file. So the cut walks back to the last newline inside the budget.
+fn cut_to(patch: String, cap: usize) -> (String, bool) {
+    if patch.len() <= cap {
+        return (patch, false);
+    }
+    // `cap` is a byte count and patches are text, so the boundary has to be a
+    // real one — a multi-byte character straddling it would not be a `str`.
+    let mut end = cap.min(patch.len());
+    while end > 0 && !patch.is_char_boundary(end) {
+        end -= 1;
+    }
+    let end = patch[..end].rfind('\n').map_or(end, |at| at + 1);
+    (patch[..end].to_string(), true)
 }
 
 /// The file a chunk is about, as a path the repository can act on.
@@ -1920,7 +2040,7 @@ index 3..4 100644\n\
 
     #[test]
     fn a_diff_splits_into_its_files() {
-        let files = split_diff(SAMPLE);
+        let files = split_diff(SAMPLE, usize::MAX);
         assert_eq!(files.len(), 2);
         assert_eq!(files[0].path, "README.md");
         assert_eq!(files[1].path, "src/main.rs");
@@ -1930,14 +2050,14 @@ index 3..4 100644\n\
     fn the_counts_ignore_the_header_lines() {
         // `---` and `+++` name the file; counting them would add one to every
         // file in every diff.
-        let files = split_diff(SAMPLE);
+        let files = split_diff(SAMPLE, usize::MAX);
         assert_eq!((files[0].added, files[0].removed), (1, 1));
         assert_eq!((files[1].added, files[1].removed), (1, 0));
     }
 
     #[test]
     fn each_file_keeps_a_patch_that_still_reads_as_a_diff() {
-        let files = split_diff(SAMPLE);
+        let files = split_diff(SAMPLE, usize::MAX);
         assert!(files[1].patch.starts_with("diff --git a/src/main.rs"));
         assert!(files[1].patch.contains("+fn extra() {}"));
     }
@@ -1955,7 +2075,7 @@ Binary files /dev/null and b/public/demo/demo.avif differ\n";
 
     #[test]
     fn a_new_binary_file_is_named_by_the_path_it_has_on_disk() {
-        let files = split_diff(NEW_BINARY);
+        let files = split_diff(NEW_BINARY, usize::MAX);
         assert_eq!(files.len(), 1);
         assert_eq!(files[0].path, "public/demo/demo.avif");
         assert_eq!((files[0].added, files[0].removed), (0, 0));
@@ -1966,7 +2086,7 @@ Binary files /dev/null and b/public/demo/demo.avif differ\n";
         let diff = "diff --git a/img/logo.png b/img/logo.png\n\
 index 510b42e..dce0f60 100644\n\
 Binary files a/img/logo.png and b/img/logo.png differ\n";
-        assert_eq!(split_diff(diff)[0].path, "img/logo.png");
+        assert_eq!(split_diff(diff, usize::MAX)[0].path, "img/logo.png");
     }
 
     #[test]
@@ -1975,7 +2095,7 @@ Binary files a/img/logo.png and b/img/logo.png differ\n";
 deleted file mode 100644\n\
 index bdc955b..0000000\n\
 Binary files a/img/old.png and /dev/null differ\n";
-        assert_eq!(split_diff(diff)[0].path, "img/old.png");
+        assert_eq!(split_diff(diff, usize::MAX)[0].path, "img/old.png");
     }
 
     #[test]
@@ -1984,7 +2104,7 @@ Binary files a/img/old.png and /dev/null differ\n";
 similarity index 100%\n\
 rename from docs/old.md\n\
 rename to docs/new.md\n";
-        assert_eq!(split_diff(diff)[0].path, "docs/new.md");
+        assert_eq!(split_diff(diff, usize::MAX)[0].path, "docs/new.md");
     }
 
     #[test]
@@ -1993,7 +2113,7 @@ rename to docs/new.md\n";
         let diff = "diff --git a/scripts/run.sh b/scripts/run.sh\n\
 old mode 100644\n\
 new mode 100755\n";
-        assert_eq!(split_diff(diff)[0].path, "scripts/run.sh");
+        assert_eq!(split_diff(diff, usize::MAX)[0].path, "scripts/run.sh");
     }
 
     #[test]
@@ -2006,7 +2126,7 @@ index 587be6b..b77b4eb 100644\n\
 +++ b/my docs/read me.md\t\n\
 @@ -1 +1,2 @@\n\
 +added\n";
-        assert_eq!(split_diff(diff)[0].path, "my docs/read me.md");
+        assert_eq!(split_diff(diff, usize::MAX)[0].path, "my docs/read me.md");
     }
 
     #[test]
@@ -2015,7 +2135,10 @@ index 587be6b..b77b4eb 100644\n\
 new file mode 100644\n\
 index 0000000..ba01f6b\n\
 Binary files /dev/null and b/demo files/clip one.mp4 differ\n";
-        assert_eq!(split_diff(diff)[0].path, "demo files/clip one.mp4");
+        assert_eq!(
+            split_diff(diff, usize::MAX)[0].path,
+            "demo files/clip one.mp4"
+        );
     }
 
     #[test]
@@ -2028,7 +2151,7 @@ index 587be6b..b77b4eb 100644\n\
 +++ \"b/docs/caf\\303\\251.md\"\t\n\
 @@ -1 +1,2 @@\n\
 +added\n";
-        assert_eq!(split_diff(diff)[0].path, "docs/café.md");
+        assert_eq!(split_diff(diff, usize::MAX)[0].path, "docs/café.md");
     }
 
     #[test]
@@ -2037,7 +2160,7 @@ index 587be6b..b77b4eb 100644\n\
 new file mode 100644\n\
 index 0000000..ba01f6b\n\
 Binary files /dev/null and \"b/m\\303\\251dia/clip.mp4\" differ\n";
-        assert_eq!(split_diff(diff)[0].path, "média/clip.mp4");
+        assert_eq!(split_diff(diff, usize::MAX)[0].path, "média/clip.mp4");
     }
 
     #[test]
@@ -2051,7 +2174,7 @@ index 587be6b..b77b4eb 100644\n\
 @@ -1,2 +1,2 @@\n\
 --- a/somewhere/else.rs\n\
 +++ b/another/place.rs\n";
-        assert_eq!(split_diff(diff)[0].path, "notes/patch.txt");
+        assert_eq!(split_diff(diff, usize::MAX)[0].path, "notes/patch.txt");
     }
 
     #[test]
@@ -2059,15 +2182,121 @@ index 587be6b..b77b4eb 100644\n\
         // The shape that started this: four media files added at once, next to
         // the source change that uses them.
         let whole = format!("{SAMPLE}{NEW_BINARY}");
-        let files = split_diff(&whole);
+        let files = split_diff(&whole, usize::MAX);
         let paths: Vec<&str> = files.iter().map(|f| f.path.as_str()).collect();
         assert_eq!(paths, ["README.md", "src/main.rs", "public/demo/demo.avif"]);
     }
 
     #[test]
     fn nothing_changed_is_no_files_rather_than_one_empty_one() {
-        assert!(split_diff("").is_empty());
-        assert!(split_diff("\n").is_empty());
+        assert!(split_diff("", usize::MAX).is_empty());
+        assert!(split_diff("\n", usize::MAX).is_empty());
+    }
+
+    #[test]
+    fn a_new_file_says_so_without_the_reader_having_to_look() {
+        let files = split_diff(NEW_BINARY, usize::MAX);
+        assert!(files[0].fresh);
+        let files = split_diff(SAMPLE, usize::MAX);
+        assert!(files.iter().all(|f| !f.fresh));
+    }
+
+    #[test]
+    fn a_hunk_that_talks_about_git_is_not_a_new_file() {
+        // The words below the first `@@` are somebody's content, not git's
+        // header — which is why `fresh` is read above it and nowhere else.
+        let diff = "diff --git a/notes.md b/notes.md\n\
+                    index 111..222 100644\n\
+                    --- a/notes.md\n\
+                    +++ b/notes.md\n\
+                    @@ -1 +1,2 @@\n \
+                    notes\n\
+                    +new file mode 100644\n";
+        assert!(!split_diff(diff, usize::MAX)[0].fresh);
+    }
+
+    #[test]
+    fn a_long_patch_is_cut_and_says_it_was() {
+        // Forty thousand lines of one file, which is what a generated file or
+        // a lockfile arrives as.
+        let body: String = (0..40_000).map(|n| format!("+line {n}\n")).collect();
+        let diff = format!(
+            "diff --git a/big.lock b/big.lock\nindex 111..222 100644\n--- a/big.lock\n+++ b/big.lock\n@@ -0,0 +1,40000 @@\n{body}"
+        );
+
+        let cut = &split_diff(&diff, 4096)[0];
+        assert!(cut.truncated);
+        assert!(cut.patch.len() <= 4096);
+        // Cut where a line ends, so the last row drawn is a whole one.
+        assert!(cut.patch.ends_with('\n'));
+        // The counts are the file's, not the fragment's: they are what the
+        // sheet totals, and a total that stopped at the cut would be wrong
+        // rather than missing.
+        assert_eq!(cut.added, 40_000);
+
+        let whole = &split_diff(&diff, usize::MAX)[0];
+        assert!(!whole.truncated);
+        assert_eq!(whole.added, 40_000);
+    }
+
+    #[test]
+    fn a_cut_lands_between_characters_rather_than_inside_one() {
+        // A budget that falls in the middle of a multi-byte character, which
+        // is a panic rather than a wrong answer if it is taken literally.
+        let diff = format!(
+            "diff --git a/café.md b/café.md\n--- a/café.md\n+++ b/café.md\n@@ -1 +1 @@\n{}",
+            "+café is a five byte line\n".repeat(200)
+        );
+        for cap in 60..200 {
+            let cut = &split_diff(&diff, cap)[0];
+            assert!(cut.patch.len() <= cap);
+        }
+    }
+
+    /// A names-only answer crosses the worker-to-server hop as JSON of this
+    /// type, written by `changed_since` and read back by `session_diff`. There
+    /// is no stub fleet to test that hop against, so what is pinned here is the
+    /// shape it depends on — including that a field added later without a
+    /// default would break a worker and a control plane of different ages.
+    #[test]
+    fn a_file_survives_the_trip_the_worker_sends_it_on() {
+        let sent = vec![FileDiff {
+            path: "src/café.rs".to_string(),
+            added: 12,
+            removed: 3,
+            patch: String::new(),
+            fresh: true,
+            truncated: false,
+        }];
+        let wire = serde_json::to_string(&sent).unwrap();
+        let back: Vec<FileDiff> = serde_json::from_str(&wire).unwrap();
+
+        assert_eq!(back[0].path, "src/café.rs");
+        assert_eq!((back[0].added, back[0].removed), (12, 3));
+        assert!(back[0].fresh);
+        assert!(!back[0].truncated);
+        // camelCase on the wire, which is what every client is generated from.
+        assert!(wire.contains("\"fresh\":true"), "{wire}");
+        assert!(wire.contains("\"truncated\":false"), "{wire}");
+
+        // And an answer from something that predates the two newer fields
+        // still reads, rather than failing the whole sheet.
+        let older = r#"[{"path":"a.rs","added":1,"removed":0,"patch":""}]"#;
+        let read: Vec<FileDiff> = serde_json::from_str(older).unwrap();
+        assert!(!read[0].fresh);
+        assert!(!read[0].truncated);
+    }
+
+    #[test]
+    fn a_patch_exactly_the_size_of_the_budget_is_left_alone() {
+        // The trailing newline is not in the patch — chunks are trimmed as
+        // they are split — so the budget to test against is what comes out.
+        let whole = split_diff("diff --git a/a b/a\n@@ -1 +1 @@\n+x\n", usize::MAX)[0]
+            .patch
+            .clone();
+        let files = split_diff("diff --git a/a b/a\n@@ -1 +1 @@\n+x\n", whole.len());
+        assert!(!files[0].truncated);
+        assert_eq!(files[0].patch, whole);
     }
 }
 
