@@ -40,7 +40,7 @@ export function Configuration({ backend, onForgot }: { backend: Backend; onForgo
 
   return (
     <div className="scroll-slim h-full overflow-y-auto">
-      <div className="mx-auto max-w-[48rem] px-6 py-6 pb-16">
+      <div className="mx-auto max-w-[48rem] px-6 py-6 pb-16 has-[[data-wide]]:flex has-[[data-wide]]:min-h-full has-[[data-wide]]:max-w-none has-[[data-wide]]:p-0">
         <Pane at={paneAt(path)} backend={backend} onForgot={onForgot} />
       </div>
     </div>

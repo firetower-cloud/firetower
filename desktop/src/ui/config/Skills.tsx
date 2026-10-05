@@ -18,8 +18,7 @@
  * control beside a fact invites somebody to change what they have no say over.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
-import { ChevronLeft, FolderDown, Pencil, Plus, Search, Trash2, UserPlus, X } from "lucide-react";
+import { ChevronLeft, FolderDown, Plus, Search, Trash2, UserPlus } from "lucide-react";
 import { Rows, Section } from "~/ui/config/bits";
 import { ShareMany, WhoCanAccess } from "~/ui/Sharing";
 import { AddSkill } from "~/ui/AddSkill";
@@ -122,7 +121,7 @@ export function Skills() {
 
   const chosen = feed.data.find((s) => s.id === open);
   if (chosen)
-    return <Detail skill={chosen} onBack={() => setOpen(null)} onChanged={refresh} onAdd={add} />;
+    return <Detail skill={chosen} onBack={() => setOpen(null)} onChanged={refresh} />;
 
   const q = query.trim().toLowerCase();
   const shown = q
@@ -413,16 +412,13 @@ function Detail({
   skill,
   onBack,
   onChanged,
-  onAdd,
 }: {
   skill: Skill;
   onBack: () => void;
   onChanged: () => void;
-  onAdd: (d?: ReturnType<typeof readDrop>) => void;
 }) {
   const [tab, setTab] = useState<(typeof TABS)[number]["at"]>("details");
   const [saving, setSaving] = useState<string | null>(null);
-  const [editing, setEditing] = useState(false);
   const confirm = useConfirm();
 
   const remove = async () => {
@@ -442,105 +438,120 @@ function Detail({
     }
   };
 
+  const [root, place] = skill.path.split("/");
+  const where = root === "d" ? `d/${place}` : "Only you";
+
   return (
-    <section>
+    <section data-wide className="flex min-w-0 flex-1 flex-col">
+      <div className="px-8 pt-6">
       <button onClick={onBack} className="flex items-center gap-1 text-meta text-mute hover:text-bone">
         <ChevronLeft className="h-3.5 w-3.5" strokeWidth={2} />
         All skills
       </button>
 
-      <div className="mt-3 flex items-start gap-3">
-        <span className="grid h-11 w-11 shrink-0 place-items-center rounded-lg border border-line bg-raise font-narrow text-title font-bold uppercase text-bone shadow-raise">
+      {/* Who it is and what can be done to it, all at the top. */}
+      <header className="mt-4 flex items-start gap-5">
+        <span className="grid h-16 w-16 shrink-0 place-items-center rounded-xl border border-line bg-raise font-narrow text-display font-bold uppercase text-bone shadow-raise">
           {skill.name.split("-").slice(0, 2).map((w) => w[0] ?? "").join("")}
         </span>
         <div className="min-w-0 flex-1">
-          <h2 className="truncate font-mono text-display text-bone">{skill.name}</h2>
-          <dl className="mt-1.5 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-meta">
-            <dt className="text-mute">Written by</dt>
-            <dd className="text-text">{skill.author ?? "somebody who has left"}</dd>
-            <dt className="text-mute">Costs</dt>
-            <dd className="text-text">
-              <span className="tabular-nums">{skill.tokens}</span> tokens of context, every turn
-            </dd>
-          </dl>
-        </div>
-        <div className="flex shrink-0 items-center gap-2">
-          {skill.mayWrite && (
-            <button className="control border border-line bg-raise text-ui text-dim hover:bg-overlay hover:text-bone" onClick={() => setEditing(true)}>
-              <Pencil className="h-3.5 w-3.5" strokeWidth={1.75} />
-              Edit skill
-            </button>
-          )}
-          <WhoCanAccess look="toolbar" kind="skill" id={skill.id} path={skill.path} />
-        </div>
-      </div>
-
-      <div className="mt-4 track w-fit">
-        {TABS.map((t) => (
-          <button key={t.at} data-on={tab === t.at} onClick={() => setTab(t.at)}>
-            {t.label}
-          </button>
-        ))}
-      </div>
-
-      {saving && <p className="mt-3 text-meta text-brick">{saving}</p>}
-
-      {tab === "details" && (
-        <div className="mt-4 flex flex-col gap-4">
-          <div className="flex flex-col gap-1.5">
-            <span className="text-meta text-dim">Description</span>
-            <p className="max-w-prose text-ui leading-relaxed text-text">{skill.description}</p>
+          <h1 className="truncate font-mono text-display text-bone">{skill.name}</h1>
+          <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-meta text-dim">
+            <span>{skill.author ?? "somebody who has left"}</span>
+            <span className="h-3 w-px bg-line" />
+            <span className="tabular-nums">v{skill.version}</span>
+            <span className="h-3 w-px bg-line" />
+            <span className="font-mono">{where}</span>
           </div>
-
-          <div>
-            <p className="text-meta text-dim">What it does to a session</p>
-            <div className="mt-1.5 flex flex-col gap-1">
-              {skill.risk.length === 0 ? (
-                <span className="flex items-center gap-2 text-micro text-dim">
-                  <span className="h-1.5 w-1.5 rounded-full bg-sage" />
-                  Reads and instructs only
-                </span>
-              ) : (
-                skill.risk.map((r) => (
-                  <span key={r} className="flex items-center gap-2 text-micro text-dim">
-                    <span className="h-1.5 w-1.5 rounded-full bg-brick" />
-                    {RISK_SAYS[r] ?? r}
-                  </span>
-                ))
-              )}
-            </div>
-            <p className="mt-1.5 max-w-prose text-micro leading-relaxed text-mute">
-              Read from the bundle, not from what its author wrote. Firetower strips none of it, so this
-              behaves here exactly as it does in Claude Code.
-            </p>
-          </div>
-
-          <Instructions id={skill.id} />
-
-          {skill.mayWrite && (
-            <div className="flex justify-end border-t border-line-soft pt-3">
+          <p className="mt-2 line-clamp-2 max-w-[80ch] text-ui leading-relaxed text-text">{skill.description}</p>
+          <div className="mt-3.5 flex flex-wrap items-center gap-2">
+            <WhoCanAccess look="toolbar" kind="skill" id={skill.id} path={skill.path} />
+            {skill.mayShare && (
               <button className="control border border-brick-deep text-ui text-brick hover:bg-brick-tint" onClick={remove}>
+                <Trash2 className="h-3.5 w-3.5" strokeWidth={1.75} />
                 Delete
               </button>
+            )}
+          </div>
+        </div>
+      </header>
+
+      </div>
+
+      <div className="mt-6 border-b border-line-soft px-8 pb-2">
+        <div className="track w-fit">
+          {TABS.map((t) => (
+            <button key={t.at} data-on={tab === t.at} onClick={() => setTab(t.at)}>
+              {t.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {saving && <p className="px-8 pt-3 text-meta text-brick">{saving}</p>}
+
+      {tab === "details" && (
+        <div className="grid flex-1 lg:grid-cols-[minmax(0,1fr)_19rem]">
+          <div className="min-w-0 px-8 py-6">
+            <Instructions id={skill.id} />
+          </div>
+
+          <aside className="flex flex-col gap-5 border-t border-line-soft px-6 py-6 text-meta lg:border-t-0 lg:border-l">
+            <Facts
+              title="About"
+              rows={[
+                ["Version", `v${skill.version}`],
+                ["Updated", new Date(skill.updatedAt).toLocaleDateString()],
+                ["Author", skill.author ?? "somebody who has left"],
+                ["Size", `${size(skill.bytes)}, ${skill.files} files`],
+                ["Context", `${skill.tokens} tokens a turn`],
+              ]}
+            />
+            <Facts
+              title="Access"
+              rows={[
+                ["Lives in", where],
+                ["You can", skill.mayShare ? "manage" : skill.mayWrite ? "edit" : "view"],
+              ]}
+            />
+            <div>
+              <h3 className="text-ui text-bone">What it does</h3>
+              <div className="mt-2 flex flex-col gap-1.5">
+                {skill.risk.length === 0 ? (
+                  <span className="flex items-center gap-2 text-dim">
+                    <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-sage" />
+                    Reads and instructs only
+                  </span>
+                ) : (
+                  skill.risk.map((r) => (
+                    <span key={r} className="flex items-center gap-2 text-dim">
+                      <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-brick" />
+                      {RISK_SAYS[r] ?? r}
+                    </span>
+                  ))
+                )}
+              </div>
             </div>
-          )}
+            {(skill.alwaysOn || skill.defaultIn.length > 0) && (
+              <div>
+                <h3 className="text-ui text-bone">On by default</h3>
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {skill.alwaysOn && <Tag>everywhere</Tag>}
+                  {skill.defaultIn.map((r) => (
+                    <Tag key={r}>{r}</Tag>
+                  ))}
+                </div>
+              </div>
+            )}
+          </aside>
         </div>
       )}
 
-      {editing && (
-        <NewVersion
-          skill={skill}
-          onClose={() => setEditing(false)}
-          onPicked={(d) => {
-            setEditing(false);
-            onAdd(d);
-          }}
-        />
-      )}
-
-      {tab === "bundle" && <Bundle id={skill.id} />}
-      {tab === "versions" && <Versions id={skill.id} />}
-      {tab === "defaults" && <Defaults skill={skill} onChanged={onChanged} />}
+      <div className="max-w-[56rem] px-8 pb-16">
+        {tab === "bundle" && <Bundle id={skill.id} />}
+        {tab === "versions" && <Versions id={skill.id} />}
+        {tab === "defaults" && <Defaults skill={skill} onChanged={onChanged} />}
+      </div>
     </section>
   );
 }
@@ -575,92 +586,20 @@ function Switch({ on, busy, onFlip }: { on: boolean; busy: boolean; onFlip: () =
   );
 }
 
-/**
- * Editing a skill is dropping its folder again. The window is mostly the
- * drop zone, because that is the whole instruction.
- */
-function NewVersion({
-  skill,
-  onClose,
-  onPicked,
-}: {
-  skill: Skill;
-  onClose: () => void;
-  onPicked: (d: ReturnType<typeof readDrop>) => void;
-}) {
-  const [over, setOver] = useState(false);
-  const picker = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    const esc = (e: KeyboardEvent) => e.key === "Escape" && onClose();
-    window.addEventListener("keydown", esc);
-    return () => window.removeEventListener("keydown", esc);
-  }, [onClose]);
-
-  return createPortal(
-    <div className="fixed inset-0 z-[60] grid place-items-start justify-center bg-ground/50 pt-[16vh] backdrop-blur-[2px]" onMouseDown={onClose}>
-      <div
-        onMouseDown={(e) => e.stopPropagation()}
-        role="dialog"
-        aria-modal
-        className="w-[min(28rem,93vw)] overflow-hidden rounded-xl border border-line bg-overlay p-2 shadow-float"
-      >
-        <div className="flex items-center gap-2 px-3 pb-2 pt-2">
-          <h2 className="min-w-0 truncate text-ui text-bone">
-            Update <span className="font-mono">{skill.name}</span>
-          </h2>
-          <span className="rounded-full border border-line-soft px-1.5 py-px text-micro tabular-nums text-mute">
-            v{skill.version} → v{skill.version + 1}
-          </span>
-          <button onClick={onClose} className="control ml-auto text-mute hover:bg-raise hover:text-bone">
-            <X className="h-4 w-4" strokeWidth={1.75} />
-          </button>
-        </div>
-        <div
-          onDragOver={(e) => {
-            if (![...(e.dataTransfer?.types ?? [])].includes("Files")) return;
-            e.preventDefault();
-            e.dataTransfer.dropEffect = "copy";
-            setOver(true);
-          }}
-          onDragLeave={() => setOver(false)}
-          onDrop={(e) => {
-            e.preventDefault();
-            onPicked(readDrop(e.dataTransfer));
-          }}
-          className={`grid place-items-center rounded-lg border border-dashed px-6 py-10 text-center transition-colors ${
-            over ? "border-slate bg-slate-tint" : "border-line bg-panel/60"
-          }`}
-        >
-          <span
-            className={`grid h-11 w-11 place-items-center rounded-lg bg-raise shadow-raise transition-transform ${
-              over ? "-translate-y-0.5 text-slate" : "text-mute"
-            }`}
-          >
-            <FolderDown className="h-5 w-5" strokeWidth={1.75} />
-          </span>
-          <p className="mt-3.5 text-lede text-bone">{over ? "Let go to update" : "Drop the updated folder"}</p>
-          <button
-            autoFocus
-            onClick={() => picker.current?.click()}
-            className="control mt-4 bg-raise text-ui font-semibold text-bone shadow-raise hover:bg-[#26262c]"
-          >
-            Choose folder
-          </button>
-        </div>
-        <input
-          ref={picker}
-          type="file"
-          multiple
-          // @ts-expect-error — webkitdirectory is not in the DOM types
-          webkitdirectory=""
-          directory=""
-          className="hidden"
-          onChange={(e) => onPicked(readFiles(e.target.files))}
-        />
-      </div>
-    </div>,
-    document.body,
+/** A small table of facts, for the sidebar. */
+function Facts({ title, rows }: { title: string; rows: [string, string][] }) {
+  return (
+    <div>
+      <h3 className="text-ui text-bone">{title}</h3>
+      <dl className="mt-2 grid grid-cols-[5.5rem_1fr] gap-x-3 gap-y-1.5">
+        {rows.map(([k, v]) => (
+          <div key={k} className="contents">
+            <dt className="text-mute">{k}</dt>
+            <dd className="min-w-0 truncate text-text">{v}</dd>
+          </div>
+        ))}
+      </dl>
+    </div>
   );
 }
 
@@ -669,11 +608,8 @@ function Instructions({ id }: { id: string }) {
   if (q.loading) return <p className="text-meta text-mute">Reading it off the server…</p>;
   if (!q.data) return null;
   return (
-    <div className="flex flex-col gap-1.5">
-      <span className="text-meta text-dim">Instructions</span>
-      <div className="prose-desk scroll-slim max-h-96 overflow-auto rounded-lg bg-ground px-4 py-1 shadow-[inset_0_1px_2px_rgb(0_0_0/0.35)]">
-        <Markdown>{q.data.body}</Markdown>
-      </div>
+    <div className="prose-desk min-w-0 max-w-[80ch]">
+      <Markdown>{q.data.body}</Markdown>
     </div>
   );
 }
