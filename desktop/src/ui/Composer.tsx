@@ -29,6 +29,7 @@ import { VoiceDialog } from "~/ui/voice/Dialogs";
 import { useVoice } from "~/ui/voice/useVoice";
 import { SkillPicker } from "~/ui/SkillPicker";
 import { useSessionSkillIds } from "~/data";
+import { fromDefaults } from "~/skills";
 
 /**
  * One attached thing, from the moment it is dropped.
@@ -514,7 +515,11 @@ export function Composer({
                 waiting on somebody, and this is not that. */}
             <button
               onClick={() => setPicking(true)}
-              title="Which skills this agent is reading"
+              title={
+                fromDefaults(skills.data, skills.repos, skills.alwaysOn)
+                  ? `Which skills this agent is reading: your ${fromDefaults(skills.data, skills.repos, skills.alwaysOn)}`
+                  : "Which skills this agent is reading"
+              }
               className="control shrink-0 gap-1.5 text-mute hover:bg-raise hover:text-bone"
             >
               <Diamond className="h-3.5 w-3.5" strokeWidth={1.75} />

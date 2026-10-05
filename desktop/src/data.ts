@@ -238,7 +238,15 @@ export function useSkillVersions(id: string) {
 /** What one session is reading. Empty until somebody chooses. */
 export function useSessionSkillIds(session: string) {
   const q = useSessionSkills(session);
-  return { data: q.data?.selected ?? [], loading: q.isPending, error: q.error ? why(q.error) : null };
+  return {
+    data: q.data?.selected ?? [],
+    // Each of the session's repositories with this person's defaults there,
+    // and what they have on everywhere: what "from defaults" is measured against.
+    repos: q.data?.repos ?? [],
+    alwaysOn: q.data?.alwaysOn ?? [],
+    loading: q.isPending,
+    error: q.error ? why(q.error) : null,
+  };
 }
 
 export function useDirectories() {

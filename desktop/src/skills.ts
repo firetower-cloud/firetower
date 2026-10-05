@@ -452,3 +452,27 @@ export function size(bytes: number): string {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / 1024 / 1024).toFixed(2)} MB`;
 }
+
+/** Whether two lists of ids hold the same set. */
+export const sameSet = (a: Iterable<string>, b: Iterable<string>) => {
+  const x = new Set(a);
+  const y = new Set(b);
+  return x.size === y.size && [...x].every((v) => y.has(v));
+};
+
+/**
+ * Where a session's selection came from, in a few words, or null when it is
+ * not simply its defaults: `firetower defaults`, `defaults from 2 repos`.
+ */
+export function fromDefaults(
+  selected: string[],
+  repos: { slug: string; defaults: string[] }[],
+  alwaysOn: string[],
+): string | null {
+  const giving = repos.filter((r) => r.defaults.length > 0);
+  const expected = [...giving.flatMap((r) => r.defaults), ...alwaysOn];
+  if (selected.length === 0 || expected.length === 0 || !sameSet(selected, expected)) return null;
+  if (giving.length === 0) return "always on";
+  if (giving.length === 1) return `${giving[0]!.slug.split("/").pop()} defaults`;
+  return `defaults from ${giving.length} repos`;
+}
