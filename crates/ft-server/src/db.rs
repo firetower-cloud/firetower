@@ -2640,7 +2640,189 @@ mod tests {
         Db::open_for_test_owned().await.unwrap()
     }
 
-    /// Every way of ordering the ledger returns the rows it was asked for.
+    /// A turn's bill, written down and read back.
+    ///
+    /// The half of the write path with a database in it. Everything on the
+    /// usage page until now was seeded straight into the table, which proves
+    /// the reading and nothing about the writing — so this drives
+    /// `record_consumption` the way `fleet` does and checks what landed.
+    ///
+    /// Four things it is here to hold:
+    ///   * the names are copied in, so the row survives the workspace;
+    ///   * a turn fans out to one row per model;
+    ///   * an agent that reports no breakdown still bills, against whatever it
+    ///     was last told to run;
+    ///   * the same turn arriving twice does not bill twice.
+    async fn a_session(db: &Db, who: &str) -> String {
+        let org = db.org().await.unwrap();
+        sqlx::query(
+            "INSERT INTO hosts (id, org_id, name, state, compute, path, created_by)
+             VALUES ('h_w', $1, 'mac', 'Online', '{}'::jsonb, 'u.admin'::ltree, $2)",
+        )
+        .bind(&org)
+        .bind(who)
+        .execute(db.pool())
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO workspaces (id, created_by, host_id, name, path, repo, branch,
+                                     task_key, task_provider, task_url)
+             VALUES ('w_w', $1, 'h_w', 'agent/usage', 'u.admin'::ltree, 'acme/web', 'main',
+                     'github:acme/web#5138', 'github', 'https://github.com/acme/web/issues/5138')",
+        )
+        .bind(who)
+        .execute(db.pool())
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO sessions (id, user_id, workspace_id, title, prompt, agent, status)
+             VALUES ('s_w', $1, 'w_w', 'Usage tracking', 'do it', 'claude', 'Working')",
+        )
+        .bind(who)
+        .execute(db.pool())
+        .await
+        .unwrap();
+        "s_w".to_string()
+    }
+
+    #[tokio::test]
+    async fn records_what_a_turn_cost() {
+        use ft_core::turn::{ModelUsage, Usage};
+        let (db, who) = db_with_user().await;
+        let session = SessionId::from_stored(a_session(&db, &who).await);
+
+        let model = |name: &str, input: u64, cost: f64| ModelUsage {
+            model: name.to_string(),
+            input_tokens: input,
+            output_tokens: input / 10,
+            cache_read_tokens: input * 2,
+            cache_write_tokens: 0,
+            context_window: None,
+            cost_usd: Some(cost),
+        };
+        let usage = Usage {
+            input_tokens: 1_100,
+            output_tokens: 110,
+            cost_usd: Some(0.061),
+            duration_ms: Some(4_200),
+            models: vec![model("claude-sonnet-5", 1_000, 0.06), model("claude-haiku-4-5", 100, 0.001)],
+            ..Default::default()
+        };
+
+        let wrote = db
+            .record_consumption(&session, "turn_1", &usage, None)
+            .await
+            .unwrap();
+        assert_eq!(wrote, 2, "one row per model that ran");
+
+        let rows = sqlx::query(
+            "SELECT model, input_tokens, cache_read_tokens, cost_usd::float8 AS cost,
+                    workspace_name, session_title, task_key, task_provider, repo_remote,
+                    branch, agent, ran_as, path::text AS path, duration_ms
+               FROM consumption_events WHERE session_id = 's_w' ORDER BY model",
+        )
+        .fetch_all(db.pool())
+        .await
+        .unwrap();
+        assert_eq!(rows.len(), 2);
+
+        let haiku = &rows[0];
+        assert_eq!(haiku.get::<String, _>("model"), "claude-haiku-4-5");
+        assert_eq!(haiku.get::<i64, _>("input_tokens"), 100);
+        assert_eq!(haiku.get::<i64, _>("cache_read_tokens"), 200);
+
+        // Every name copied in, because in a minute the workspace may be gone.
+        assert_eq!(haiku.get::<Option<String>, _>("workspace_name").as_deref(), Some("agent/usage"));
+        assert_eq!(haiku.get::<Option<String>, _>("session_title").as_deref(), Some("Usage tracking"));
+        assert_eq!(haiku.get::<Option<String>, _>("task_key").as_deref(), Some("github:acme/web#5138"));
+        assert_eq!(haiku.get::<Option<String>, _>("task_provider").as_deref(), Some("github"));
+        assert_eq!(haiku.get::<Option<String>, _>("repo_remote").as_deref(), Some("acme/web"));
+        assert_eq!(haiku.get::<String, _>("path"), "u.admin");
+        assert_eq!(haiku.get::<Option<String>, _>("ran_as").as_deref(), Some(who.as_str()));
+        // The turn's duration, not the model's share of it.
+        assert_eq!(haiku.get::<Option<i64>, _>("duration_ms"), Some(4_200));
+
+        // The same turn again: a line replayed after a reconnect must not bill
+        // a second time.
+        let again = db
+            .record_consumption(&session, "turn_1", &usage, None)
+            .await
+            .unwrap();
+        assert_eq!(again, 0, "a replayed turn is already paid for");
+        let total: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM consumption_events WHERE session_id = 's_w'")
+                .fetch_one(db.pool())
+                .await
+                .unwrap();
+        assert_eq!(total, 2);
+    }
+
+    #[tokio::test]
+    async fn an_agent_that_reports_no_breakdown_still_bills() {
+        use ft_core::turn::Usage;
+        let (db, who) = db_with_user().await;
+        let session = SessionId::from_stored(a_session(&db, &who).await);
+
+        // Codex reports one set of totals and no `modelUsage` at all, so the
+        // only statement of what ran is what the session was last told to use.
+        let usage = Usage {
+            input_tokens: 900,
+            output_tokens: 90,
+            cost_usd: None,
+            ..Default::default()
+        };
+        let wrote = db
+            .record_consumption(&session, "turn_c", &usage, Some("gpt-5-codex"))
+            .await
+            .unwrap();
+        assert_eq!(wrote, 1, "no breakdown is one row, not none");
+
+        let (model, cost): (String, Option<f64>) = sqlx::query_as(
+            "SELECT model, cost_usd::float8 FROM consumption_events WHERE turn_id = 'turn_c'",
+        )
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+        assert_eq!(model, "gpt-5-codex");
+        // NULL, not zero. Codex reports no price and a zero would read as free.
+        assert_eq!(cost, None);
+
+        // And with nothing known at all, the agent's own name is a true
+        // statement where a guessed model would not be.
+        db.record_consumption(&session, "turn_d", &usage, None)
+            .await
+            .unwrap();
+        let fell_back: String = sqlx::query_scalar(
+            "SELECT model FROM consumption_events WHERE turn_id = 'turn_d'",
+        )
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+        assert_eq!(fell_back, "claude", "the agent, since the model is unknown");
+    }
+
+    #[tokio::test]
+    async fn a_turn_whose_session_is_already_gone_writes_nothing() {
+        use ft_core::turn::Usage;
+        let (db, who) = db_with_user().await;
+        let session = SessionId::from_stored(a_session(&db, &who).await);
+        sqlx::query("DELETE FROM workspaces WHERE id = 'w_w'")
+            .execute(db.pool())
+            .await
+            .unwrap();
+
+        // `reclaim.rs` takes a workspace within the minute of its last session
+        // ending, and the last turn can land after that. It is one statement
+        // against the session, so this writes nothing and says so rather than
+        // failing — the caller logs it instead of tearing down the line reader.
+        let wrote = db
+            .record_consumption(&session, "turn_late", &Usage::default(), Some("claude-opus-5"))
+            .await
+            .unwrap();
+        assert_eq!(wrote, 0);
+    }
+
+    /// Every way of ordering the ledger returns the rows it was asked for.    /// Every way of ordering the ledger returns the rows it was asked for.
     ///
     /// Cheap to write and worth more than it looks. An `ORDER BY` naming a
     /// column the grouping does not select is a query that compiles, type

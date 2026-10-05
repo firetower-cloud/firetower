@@ -2069,7 +2069,7 @@ impl Fleet {
                             // stops reading its own transcript because a write
                             // failed.
                             if let Some(spent) = read.spent {
-                                if let Err(e) = db
+                                match db
                                     .record_consumption(
                                         &session_id,
                                         &spent.turn,
@@ -2078,8 +2078,22 @@ impl Fleet {
                                     )
                                     .await
                                 {
-                                    tracing::warn!(session = %session_id,
-                                        "recording what a turn cost: {e:#}");
+                                    // Nothing written, no error: the session is
+                                    // gone, so the workspace was reclaimed
+                                    // between the turn ending and this landing
+                                    // and there is nothing left to attribute it
+                                    // to. Said out loud because the alternative
+                                    // is a bill quietly short by a turn and no
+                                    // way to find out — and if this is ever
+                                    // more than rare, the reclaim is too eager.
+                                    Ok(0) => tracing::warn!(
+                                        session = %session_id, turn = %spent.turn,
+                                        "a turn finished after its workspace was reclaimed; \
+                                         its usage is lost"
+                                    ),
+                                    Ok(_) => {}
+                                    Err(e) => tracing::warn!(session = %session_id,
+                                        "recording what a turn cost: {e:#}"),
                                 }
                             }
 
@@ -4201,6 +4215,68 @@ mod tests {
     use super::*;
     use crate::db::Db;
     use crate::transport::Connection;
+
+    /// A real Claude Code session, read for what it cost.
+    ///
+    /// Against a recording rather than a line we wrote, for the reason
+    /// `ft-core`'s own fixtures give: a stream we invented would only prove we
+    /// agree with ourselves, and every interesting thing here is a fact about
+    /// somebody else's output format.
+    ///
+    /// This is the half of the write path that has no database in it — does a
+    /// finished turn hand back the bill, with the models separated. The other
+    /// half is `records_what_a_turn_cost` in `db`.
+    fn replay_into_progress(name: &str) -> Vec<Spent> {
+        let path = format!(
+            "{}/../ft-core/tests/streams/{name}.ndjson",
+            env!("CARGO_MANIFEST_DIR")
+        );
+        let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("reading {path}: {e}"));
+        let mut progress = Progress::for_agent(ft_core::Agent::ClaudeCode, String::new());
+        text.lines()
+            .filter_map(|line| progress.read(line).spent)
+            .collect()
+    }
+
+    #[test]
+    fn a_finished_turn_hands_back_what_it_cost() {
+        let spent = replay_into_progress("plain");
+        assert_eq!(spent.len(), 1, "one turn, one bill");
+        let bill = &spent[0];
+        assert!(!bill.turn.is_empty(), "a turn without an id cannot be billed");
+
+        // Two models ran, and the small one is on the bill as much as the
+        // large one. Totals would have hidden that.
+        //
+        // Named canonically, which is the point of the assertion: this stream
+        // says `claude-haiku-4-5-20251001` and the page must not end up with
+        // that beside a `claude-haiku-4-5` as two different models. The
+        // normaliser folds the date away and this is what holds it there.
+        let mut named: Vec<_> = bill.usage.models.iter().map(|m| m.model.as_str()).collect();
+        named.sort_unstable();
+        assert_eq!(named, ["claude-haiku-4-5", "claude-sonnet-5"]);
+
+        let sonnet = bill
+            .usage
+            .models
+            .iter()
+            .find(|m| m.model == "claude-sonnet-5")
+            .expect("sonnet ran");
+        assert_eq!(sonnet.cache_read_tokens, 26_176);
+        assert!(sonnet.cost_usd.is_some_and(|c| c > 0.06));
+
+        // What the whole turn came to, as the agent itself reported it.
+        assert!(bill.usage.cost_usd.is_some_and(|c| (c - 0.061_320_2).abs() < 1e-6));
+    }
+
+    #[test]
+    fn a_turn_that_failed_is_still_billed() {
+        // Work that went wrong was still work. A bill only on success would
+        // under-report exactly the sessions somebody is investigating.
+        let spent = replay_into_progress("failure");
+        assert_eq!(spent.len(), 1);
+        assert!(spent[0].usage.models.iter().any(|m| m.input_tokens > 0));
+    }
 
     /// A machine that is never there.
     struct Never;
