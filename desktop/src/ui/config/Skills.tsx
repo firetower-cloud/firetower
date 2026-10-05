@@ -17,18 +17,20 @@
  * it costs, and what it will do to a session are facts about the thing, and a
  * control beside a fact invites somebody to change what they have no say over.
  */
-import { useMemo, useRef, useState } from "react";
-import { ChevronLeft, FolderDown, Plus, Search } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { ChevronLeft, FolderDown, Pencil, Plus, Search, X } from "lucide-react";
 import { Rows, Section } from "~/ui/config/bits";
 import { WhoCanAccess } from "~/ui/Sharing";
 import { AddSkill } from "~/ui/AddSkill";
 import { useSkills, useSkillDetail, useSkillVersions, why } from "~/data";
 import { useRepos } from "~/data";
-import { deleteSkill, renameSkill, setDefault } from "~/api/generated/skills/skills";
+import { deleteSkill, setDefault } from "~/api/generated/skills/skills";
 import { useQueryClient } from "@tanstack/react-query";
 import { getListSkillsQueryKey } from "~/api/generated/skills/skills";
 import type { Skill } from "~/api/generated/model";
 import { useConfirm } from "~/ui/Confirm";
+import { Markdown } from "~/components/Markdown";
 import { readDrop, readFiles, size, RISK_SAYS, type Found } from "~/skills";
 
 export function Skills() {
@@ -64,7 +66,7 @@ export function Skills() {
 
   const chosen = feed.data.find((s) => s.id === open);
   if (chosen)
-    return <Detail skill={chosen} onBack={() => setOpen(null)} onChanged={refresh} />;
+    return <Detail skill={chosen} onBack={() => setOpen(null)} onChanged={refresh} onAdd={add} />;
 
   const q = query.trim().toLowerCase();
   const shown = q
@@ -166,10 +168,8 @@ export function Skills() {
 /**
  * Nothing here yet.
  *
- * An empty screen is an invitation to act, so it says what a skill is, offers
- * the one thing worth doing, and — because this pane really does take a drop —
- * says so where somebody can act on it rather than in a line of grey text that
- * turns out not to be true.
+ * An empty screen is an invitation to act: one button to choose a folder, and
+ * the pane itself takes a drop.
  */
 function Empty({ over, onAdd }: { over: boolean; onAdd: (d?: ReturnType<typeof readDrop>) => void }) {
   const picker = useRef<HTMLInputElement>(null);
@@ -184,21 +184,15 @@ function Empty({ over, onAdd }: { over: boolean; onAdd: (d?: ReturnType<typeof r
       </span>
       <h2 className="mt-3.5 text-lede text-bone">No skills yet</h2>
       <p className="mt-1.5 max-w-sm text-meta leading-relaxed text-mute">
-        A skill is a folder with a <span className="font-mono text-code">SKILL.md</span> in it — instructions
-        an agent loads when the work calls for them. Add one and you can turn it on for any session.
+        Import your skills by dropping one or many skills folders here.
       </p>
-      <div className="mt-5 flex items-center gap-2">
-        <button
-          onClick={() => onAdd()}
-          className="control bg-overlay text-ui font-semibold text-bone shadow-raise hover:bg-[#26262c]"
-        >
-          Add your first skill
-        </button>
-        <button className="control text-ui text-mute hover:bg-raise hover:text-bone" onClick={() => picker.current?.click()}>
-          Choose a folder
-        </button>
-      </div>
-      <p className="mt-4 text-micro text-mute">Or drop one here — a folder, a .zip, or a folder holding several.</p>
+      <button
+        onClick={() => picker.current?.click()}
+        className="control mt-5 bg-overlay text-ui font-semibold text-bone shadow-raise hover:bg-[#26262c]"
+      >
+        Choose a folder
+      </button>
+      <p className="mt-4 text-micro text-mute">Or drop them here</p>
       <input
         ref={picker}
         type="file"
@@ -242,23 +236,26 @@ const TABS = [
   { at: "defaults", label: "Defaults" },
 ] as const;
 
-function Detail({ skill, onBack, onChanged }: { skill: Skill; onBack: () => void; onChanged: () => void }) {
+/**
+ * A skill is read-only here. Its name, description and instructions all come
+ * from the folder, so the one way to change any of them is a new version of
+ * that folder — which the review turns into the next version of this skill.
+ */
+function Detail({
+  skill,
+  onBack,
+  onChanged,
+  onAdd,
+}: {
+  skill: Skill;
+  onBack: () => void;
+  onChanged: () => void;
+  onAdd: (d?: ReturnType<typeof readDrop>) => void;
+}) {
   const [tab, setTab] = useState<(typeof TABS)[number]["at"]>("details");
-  const [name, setName] = useState(skill.name);
-  const [description, setDescription] = useState(skill.description);
   const [saving, setSaving] = useState<string | null>(null);
+  const [editing, setEditing] = useState(false);
   const confirm = useConfirm();
-  const dirty = name !== skill.name || description !== skill.description;
-
-  const save = async () => {
-    setSaving(null);
-    try {
-      await renameSkill(skill.id, { name, description });
-      onChanged();
-    } catch (e) {
-      setSaving(why(e));
-    }
-  };
 
   const remove = async () => {
     const ok = await confirm({
@@ -300,6 +297,12 @@ function Detail({ skill, onBack, onChanged }: { skill: Skill; onBack: () => void
           </dl>
         </div>
         <div className="flex shrink-0 items-center gap-2">
+          {skill.mayWrite && (
+            <button className="control border border-line bg-raise text-ui text-dim hover:bg-overlay hover:text-bone" onClick={() => setEditing(true)}>
+              <Pencil className="h-3.5 w-3.5" strokeWidth={1.75} />
+              Edit skill
+            </button>
+          )}
           <WhoCanAccess look="toolbar" kind="skill" id={skill.id} path={skill.path} />
         </div>
       </div>
@@ -316,27 +319,10 @@ function Detail({ skill, onBack, onChanged }: { skill: Skill; onBack: () => void
 
       {tab === "details" && (
         <div className="mt-4 flex flex-col gap-4">
-          <Field label="Name" help="What you type as a command, and the folder written onto the worker. Two selected skills cannot share one.">
-            <input
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              disabled={!skill.mayWrite}
-              className="w-full rounded-lg bg-ground px-2.5 py-2 font-mono text-ui text-bone shadow-[inset_0_1px_2px_rgb(0_0_0/0.35)] outline-none disabled:text-mute"
-            />
-          </Field>
-          <Field
-            label="Description"
-            help="The only part of a skill always in the model's context, and what decides whether it is ever reached for. Say what it does and when to use it."
-            count={`${description.length} of 1024`}
-          >
-            <textarea
-              rows={4}
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              disabled={!skill.mayWrite}
-              className="w-full resize-y rounded-lg bg-ground px-2.5 py-2 text-ui leading-relaxed text-bone shadow-[inset_0_1px_2px_rgb(0_0_0/0.35)] outline-none disabled:text-mute"
-            />
-          </Field>
+          <div className="flex flex-col gap-1.5">
+            <span className="text-meta text-dim">Description</span>
+            <p className="max-w-prose text-ui leading-relaxed text-text">{skill.description}</p>
+          </div>
 
           <div>
             <p className="text-meta text-dim">What it does to a session</p>
@@ -363,26 +349,25 @@ function Detail({ skill, onBack, onChanged }: { skill: Skill; onBack: () => void
 
           <Instructions id={skill.id} />
 
-          <div className="flex items-center gap-2 border-t border-line-soft pt-3">
-            <span className="flex-1 text-micro text-mute">
-              Name and description save on their own. Everything else changes by dropping the folder again.
-            </span>
-            {skill.mayWrite && (
-              <>
-                <button className="control text-ui text-mute hover:text-bone" onClick={remove}>
-                  Delete
-                </button>
-                <button
-                  disabled={!dirty}
-                  onClick={save}
-                  className="control bg-overlay text-ui font-semibold text-bone shadow-raise disabled:bg-raise disabled:font-normal disabled:text-mute"
-                >
-                  Save changes
-                </button>
-              </>
-            )}
-          </div>
+          {skill.mayWrite && (
+            <div className="flex justify-end border-t border-line-soft pt-3">
+              <button className="control border border-brick-deep text-ui text-brick hover:bg-brick-tint" onClick={remove}>
+                Delete
+              </button>
+            </div>
+          )}
         </div>
+      )}
+
+      {editing && (
+        <NewVersion
+          skill={skill}
+          onClose={() => setEditing(false)}
+          onPicked={(d) => {
+            setEditing(false);
+            onAdd(d);
+          }}
+        />
       )}
 
       {tab === "bundle" && <Bundle id={skill.id} />}
@@ -422,24 +407,92 @@ function Switch({ on, busy, onFlip }: { on: boolean; busy: boolean; onFlip: () =
   );
 }
 
-function Field({
-  label,
-  help,
-  count,
-  children,
+/**
+ * Editing a skill is dropping its folder again. The window is mostly the
+ * drop zone, because that is the whole instruction.
+ */
+function NewVersion({
+  skill,
+  onClose,
+  onPicked,
 }: {
-  label: string;
-  help: string;
-  count?: string;
-  children: React.ReactNode;
+  skill: Skill;
+  onClose: () => void;
+  onPicked: (d: ReturnType<typeof readDrop>) => void;
 }) {
-  return (
-    <label className="flex flex-col gap-1.5">
-      <span className="text-meta text-dim">{label}</span>
-      {children}
-      {count && <span className="self-end text-micro tabular-nums text-mute">{count}</span>}
-      <span className="max-w-prose text-micro leading-relaxed text-mute">{help}</span>
-    </label>
+  const [over, setOver] = useState(false);
+  const picker = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    const esc = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", esc);
+    return () => window.removeEventListener("keydown", esc);
+  }, [onClose]);
+
+  return createPortal(
+    <div className="fixed inset-0 z-[60] grid place-items-start justify-center bg-ground/50 pt-[16vh] backdrop-blur-[2px]" onMouseDown={onClose}>
+      <div
+        onMouseDown={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal
+        className="w-[min(28rem,93vw)] overflow-hidden rounded-xl border border-line bg-overlay p-2 shadow-float"
+      >
+        <div className="flex items-center gap-2 px-3 pb-2 pt-2">
+          <h2 className="min-w-0 truncate text-ui text-bone">
+            Update <span className="font-mono">{skill.name}</span>
+          </h2>
+          <span className="rounded-full border border-line-soft px-1.5 py-px text-micro tabular-nums text-mute">
+            v{skill.version} → v{skill.version + 1}
+          </span>
+          <button onClick={onClose} className="control ml-auto text-mute hover:bg-raise hover:text-bone">
+            <X className="h-4 w-4" strokeWidth={1.75} />
+          </button>
+        </div>
+        <div
+          onDragOver={(e) => {
+            if (![...(e.dataTransfer?.types ?? [])].includes("Files")) return;
+            e.preventDefault();
+            e.dataTransfer.dropEffect = "copy";
+            setOver(true);
+          }}
+          onDragLeave={() => setOver(false)}
+          onDrop={(e) => {
+            e.preventDefault();
+            onPicked(readDrop(e.dataTransfer));
+          }}
+          className={`grid place-items-center rounded-lg border border-dashed px-6 py-10 text-center transition-colors ${
+            over ? "border-slate bg-slate-tint" : "border-line bg-panel/60"
+          }`}
+        >
+          <span
+            className={`grid h-11 w-11 place-items-center rounded-lg bg-raise shadow-raise transition-transform ${
+              over ? "-translate-y-0.5 text-slate" : "text-mute"
+            }`}
+          >
+            <FolderDown className="h-5 w-5" strokeWidth={1.75} />
+          </span>
+          <p className="mt-3.5 text-lede text-bone">{over ? "Let go to update" : "Drop the updated folder"}</p>
+          <button
+            autoFocus
+            onClick={() => picker.current?.click()}
+            className="control mt-4 bg-raise text-ui font-semibold text-bone shadow-raise hover:bg-[#26262c]"
+          >
+            Choose folder
+          </button>
+        </div>
+        <input
+          ref={picker}
+          type="file"
+          multiple
+          // @ts-expect-error — webkitdirectory is not in the DOM types
+          webkitdirectory=""
+          directory=""
+          className="hidden"
+          onChange={(e) => onPicked(readFiles(e.target.files))}
+        />
+      </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -450,10 +503,9 @@ function Instructions({ id }: { id: string }) {
   return (
     <div className="flex flex-col gap-1.5">
       <span className="text-meta text-dim">Instructions</span>
-      <pre className="max-h-72 overflow-auto whitespace-pre-wrap rounded-lg bg-ground px-3 py-2.5 font-mono text-code leading-relaxed text-dim shadow-[inset_0_1px_2px_rgb(0_0_0/0.35)]">
-        {q.data.body}
-      </pre>
-      <span className="text-micro text-mute">Read-only. Drop the folder again to change it.</span>
+      <div className="prose-desk scroll-slim max-h-96 overflow-auto rounded-lg bg-ground px-4 py-1 shadow-[inset_0_1px_2px_rgb(0_0_0/0.35)]">
+        <Markdown>{q.data.body}</Markdown>
+      </div>
     </div>
   );
 }

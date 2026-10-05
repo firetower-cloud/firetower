@@ -20,7 +20,8 @@
  */
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
-import { Search, X } from "lucide-react";
+import { Diamond, Search, X } from "lucide-react";
+import { navigate } from "~/shims/next-navigation";
 import { useQueryClient } from "@tanstack/react-query";
 import { chooseSkills, getSessionSkillsQueryKey } from "~/api/generated/skills/skills";
 import type { Session, Skill } from "~/api/generated/model";
@@ -61,6 +62,13 @@ export function SkillPicker({ session, onClose }: { session: Session; onClose: (
   }, [onClose]);
 
   const picked = draft ?? new Set<string>();
+  // An empty library has nothing to search, meter or confirm, so the window
+  // shrinks to the one thing worth doing: going to add a skill.
+  const empty = !all.loading && all.data.length === 0;
+  const openLibrary = () => {
+    onClose();
+    navigate("/configuration/skills");
+  };
   const budget = BUDGET[session.agent] ?? 3000;
 
   const spend = useMemo(
@@ -119,148 +127,176 @@ export function SkillPicker({ session, onClose }: { session: Session; onClose: (
     <div className="fixed inset-0 z-[60] grid place-items-start justify-center bg-ground/60 pt-[9vh] backdrop-blur-[2px]" onMouseDown={onClose}>
       <div
         onMouseDown={(e) => e.stopPropagation()}
-        className="grid max-h-[78vh] w-[min(44rem,93vw)] grid-rows-[auto_auto_minmax(0,1fr)_auto] overflow-hidden rounded-xl bg-overlay shadow-float"
+        className={`grid max-h-[78vh] overflow-hidden rounded-xl bg-overlay shadow-float ${
+          empty ? "w-[min(30rem,93vw)]" : "w-[min(44rem,93vw)] grid-rows-[auto_auto_minmax(0,1fr)_auto]"
+        }`}
       >
         <div className="flex items-start gap-3 px-5 pb-3 pt-4">
           <div className="min-w-0">
             <h2 className="text-title text-bone">Skills for this session</h2>
-            <p className="mt-1 max-w-prose text-meta leading-relaxed text-mute">
-              Every skill you turn on keeps its description in the model's context on every turn of this
-              conversation. That is the number at the foot of this window. Nothing changes until you confirm.
-            </p>
+            {!empty && (
+              <p className="mt-1 max-w-prose text-meta leading-relaxed text-mute">
+                Each skill you turn on keeps its description in the model's context on every turn. Nothing
+                changes until you confirm.
+              </p>
+            )}
           </div>
           <button onClick={onClose} className="control ml-auto shrink-0 text-mute hover:bg-raise hover:text-bone">
             <X className="h-4 w-4" strokeWidth={1.75} />
           </button>
         </div>
 
-        <div className="px-5 pb-3">
-          <div className="flex h-[30px] items-center gap-2 rounded-lg bg-ground px-2.5 shadow-[inset_0_1px_2px_rgb(0_0_0/0.35)]">
-            <Search className="h-3.5 w-3.5 shrink-0 text-mute" strokeWidth={2} />
-            <input
-              autoFocus
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search skills by name or description"
-              className="min-w-0 flex-1 bg-transparent text-ui text-bone outline-none placeholder:text-mute"
-            />
-            <span className="keycap shrink-0">esc</span>
-          </div>
-        </div>
-
-        <div className="min-h-0 overflow-y-auto px-3 pb-2 scroll-slim">
-          {all.loading && <p className="px-2 py-8 text-center text-meta text-mute">Reading the library…</p>}
-          {!all.loading && groups.length === 0 && (
-            <p className="px-2 py-10 text-center text-meta text-mute">
-              {query ? `No skill matches “${query}”.` : "No skills yet. Add one in Configuration → Skills."}
+        {empty ? (
+          <div className="flex flex-col items-center px-8 pb-8 pt-4 text-center">
+            <span className="grid h-10 w-10 place-items-center rounded-full bg-raise text-dim shadow-[inset_0_0_0_1px_#3a3a42]">
+              <Diamond className="h-4 w-4" strokeWidth={1.75} />
+            </span>
+            <p className="mt-4 text-ui text-bone">Your library has no skills yet</p>
+            <p className="mt-1 max-w-[22rem] text-meta leading-relaxed text-mute">
+              Import your skills first and then come back here.
             </p>
-          )}
-          {groups.map((g) => {
-            const capped = g.at === "all" && !query && !showAll;
-            const rows = capped ? g.rows.slice(0, 4) : g.rows;
-            return (
-              <div key={g.at}>
-                <div className="sticky top-0 z-10 flex items-baseline gap-2 bg-overlay px-2 pb-1 pt-3">
-                  <span className="font-narrow text-micro uppercase tracking-[0.18em] text-mute">{g.title}</span>
-                  {g.why && <span className="text-micro text-mute">{g.why}</span>}
-                  <span className="ml-auto text-micro tabular-nums text-mute/60">{g.rows.length}</span>
-                </div>
-                {rows.map((s) => (
-                  <Row
-                    key={s.id}
-                    skill={s}
-                    on={picked.has(s.id)}
-                    was={live.data.includes(s.id)}
-                    onToggle={() =>
-                      setDraft((d) => {
-                        const next = new Set(d ?? []);
-                        next.has(s.id) ? next.delete(s.id) : next.add(s.id);
-                        return next;
-                      })
-                    }
-                  />
-                ))}
-                {capped && g.rows.length > 4 && (
-                  <button
-                    onClick={() => setShowAll(true)}
-                    className="mx-2 mt-1.5 w-[calc(100%-1rem)] rounded-lg bg-raise/60 py-2 text-meta text-mute hover:text-bone"
-                  >
-                    Show the other {g.rows.length - 4}, or search for one
-                  </button>
-                )}
-              </div>
-            );
-          })}
-        </div>
-
-        <div className="grid grid-cols-[1fr_auto] items-center gap-4 border-t border-line-soft bg-panel px-5 py-3">
-          <div className="flex min-w-0 flex-col gap-1.5">
-            <div className="flex items-baseline gap-2 text-meta text-dim">
-              <span>Context</span>
-              <b className="font-semibold tabular-nums text-text">{spend.toLocaleString()}</b>
-              <span>
-                of <span className="tabular-nums">{budget.toLocaleString()}</span> tokens
-              </span>
-              <span className="ml-auto text-micro text-mute">{session.agent === "ClaudeCode" ? "Claude Code" : session.agent}</span>
-            </div>
-            <span className="h-1 overflow-hidden rounded-full bg-ground shadow-[inset_0_1px_2px_rgb(0_0_0/0.4)]">
-              <span
-                className={`block h-full rounded-full transition-[width] ${over ? "bg-brick" : spend > budget * 0.8 ? "bg-kind-data" : "bg-sage"}`}
-                style={{ width: `${Math.min(100, (spend / budget) * 100)}%` }}
-              />
-            </span>
-            <span className="text-meta text-mute">
-              {failed ? (
-                <span className="text-brick">{failed}</span>
-              ) : clash ? (
-                <span className="text-brick">
-                  Two of these are called <span className="font-mono">{clash}</span>. The agent answers
-                  to the name, so only one of them can be on.
-                </span>
-              ) : over ? (
-                <span className="text-brick">
-                  Over. Past the limit an agent drops every skill description rather than the last one.
-                </span>
-              ) : dirty ? (
-                <>
-                  <b className="font-semibold text-bone">
-                    {added.length > 0 && `+${added.length}`}
-                    {added.length > 0 && gone.length > 0 && " "}
-                    {gone.length > 0 && `−${gone.length}`}
-                  </b>{" "}
-                  — in effect from your next message
-                </>
-              ) : (
-                `${picked.size} on, in step with the session`
-              )}
-            </span>
-          </div>
-          <div className="flex shrink-0 items-center gap-2">
-            {dirty && (
-              <button className="control text-ui text-mute hover:text-bone" onClick={() => setDraft(new Set(live.data))}>
-                Reset
-              </button>
-            )}
-            <button className="control text-ui text-mute hover:text-bone" onClick={onClose}>
-              Cancel
-            </button>
             <button
-              disabled={!dirty || blocked || saving}
-              onClick={confirm}
-              className="control bg-overlay text-ui font-semibold text-bone shadow-raise disabled:bg-raise disabled:font-normal disabled:text-mute"
+              autoFocus
+              onClick={openLibrary}
+              className="control mt-5 bg-raise px-3 text-ui font-semibold text-bone shadow-raise hover:bg-overlay"
             >
-              {clash
-                ? "Two of one name"
-                : over
-                  ? "Over budget"
-                  : saving
-                    ? "Confirming…"
-                    : dirty
-                      ? `Confirm ${picked.size} skills`
-                      : "Nothing to confirm"}
+              Open Skills
             </button>
           </div>
-        </div>
+        ) : (
+          <>
+          <div className="px-5 pb-3">
+            <div className="flex h-[30px] items-center gap-2 rounded-lg bg-ground px-2.5 shadow-[inset_0_1px_2px_rgb(0_0_0/0.35)]">
+              <Search className="h-3.5 w-3.5 shrink-0 text-mute" strokeWidth={2} />
+              <input
+                autoFocus
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Search skills by name or description"
+                className="min-w-0 flex-1 bg-transparent text-ui text-bone outline-none placeholder:text-mute"
+              />
+              <span className="keycap shrink-0">esc</span>
+            </div>
+          </div>
+
+          <div className="min-h-0 overflow-y-auto px-3 pb-2 scroll-slim">
+            {all.loading && <p className="px-2 py-8 text-center text-meta text-mute">Reading the library…</p>}
+            {!all.loading && groups.length === 0 && (
+              <div className="px-2 py-10 text-center">
+                <p className="text-meta text-mute">No skill matches “{query}”.</p>
+                <button onClick={openLibrary} className="mt-2 text-meta text-dim underline-offset-2 hover:text-bone hover:underline">
+                  Add one on the Skills page
+                </button>
+              </div>
+            )}
+            {groups.map((g) => {
+              const capped = g.at === "all" && !query && !showAll;
+              const rows = capped ? g.rows.slice(0, 4) : g.rows;
+              return (
+                <div key={g.at}>
+                  <div className="sticky top-0 z-10 flex items-baseline gap-2 bg-overlay px-2 pb-1 pt-3">
+                    <span className="font-narrow text-micro uppercase tracking-[0.18em] text-mute">{g.title}</span>
+                    {g.why && <span className="text-micro text-mute">{g.why}</span>}
+                    <span className="ml-auto text-micro tabular-nums text-mute/60">{g.rows.length}</span>
+                  </div>
+                  {rows.map((s) => (
+                    <Row
+                      key={s.id}
+                      skill={s}
+                      on={picked.has(s.id)}
+                      was={live.data.includes(s.id)}
+                      onToggle={() =>
+                        setDraft((d) => {
+                          const next = new Set(d ?? []);
+                          next.has(s.id) ? next.delete(s.id) : next.add(s.id);
+                          return next;
+                        })
+                      }
+                    />
+                  ))}
+                  {capped && g.rows.length > 4 && (
+                    <button
+                      onClick={() => setShowAll(true)}
+                      className="mx-2 mt-1.5 w-[calc(100%-1rem)] rounded-lg bg-raise/60 py-2 text-meta text-mute hover:text-bone"
+                    >
+                      Show the other {g.rows.length - 4}, or search for one
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="grid grid-cols-[1fr_auto] items-center gap-4 border-t border-line-soft bg-panel px-5 py-3">
+            <div className="flex min-w-0 flex-col gap-1.5">
+              <div className="flex items-baseline gap-2 text-meta text-dim">
+                <span>Context</span>
+                <b className="font-semibold tabular-nums text-text">{spend.toLocaleString()}</b>
+                <span>
+                  of <span className="tabular-nums">{budget.toLocaleString()}</span> tokens
+                </span>
+                <span className="ml-auto text-micro text-mute">{session.agent === "ClaudeCode" ? "Claude Code" : session.agent}</span>
+              </div>
+              <span className="h-1 overflow-hidden rounded-full bg-ground shadow-[inset_0_1px_2px_rgb(0_0_0/0.4)]">
+                <span
+                  className={`block h-full rounded-full transition-[width] ${over ? "bg-brick" : spend > budget * 0.8 ? "bg-kind-data" : "bg-sage"}`}
+                  style={{ width: `${Math.min(100, (spend / budget) * 100)}%` }}
+                />
+              </span>
+              <span className="text-meta text-mute">
+                {failed ? (
+                  <span className="text-brick">{failed}</span>
+                ) : clash ? (
+                  <span className="text-brick">
+                    Two of these are called <span className="font-mono">{clash}</span>. The agent answers
+                    to the name, so only one of them can be on.
+                  </span>
+                ) : over ? (
+                  <span className="text-brick">
+                    Over. Past the limit an agent drops every skill description rather than the last one.
+                  </span>
+                ) : dirty ? (
+                  <>
+                    <b className="font-semibold text-bone">
+                      {added.length > 0 && `+${added.length}`}
+                      {added.length > 0 && gone.length > 0 && " "}
+                      {gone.length > 0 && `−${gone.length}`}
+                    </b>{" "}
+                    — in effect from your next message
+                  </>
+                ) : (
+                  `${picked.size} on, in step with the session`
+                )}
+              </span>
+            </div>
+            <div className="flex shrink-0 items-center gap-2">
+              {dirty && (
+                <button className="control text-ui text-mute hover:text-bone" onClick={() => setDraft(new Set(live.data))}>
+                  Reset
+                </button>
+              )}
+              <button className="control text-ui text-mute hover:text-bone" onClick={onClose}>
+                Cancel
+              </button>
+              <button
+                disabled={!dirty || blocked || saving}
+                onClick={confirm}
+                className="control bg-overlay text-ui font-semibold text-bone shadow-raise disabled:bg-raise disabled:font-normal disabled:text-mute"
+              >
+                {clash
+                  ? "Two of one name"
+                  : over
+                    ? "Over budget"
+                    : saving
+                      ? "Confirming…"
+                      : dirty
+                        ? `Confirm ${picked.size} skills`
+                        : "Nothing to confirm"}
+              </button>
+            </div>
+          </div>
+          </>
+        )}
       </div>
     </div>,
     document.body,
