@@ -42,7 +42,7 @@ import type {
   SkillVersion
 } from '../model';
 
-import { http } from '../../http';
+import { http } from '../../../client/http';
 
 
 type SecondParameter<T extends (...args: never) => unknown> = Parameters<T>[1];

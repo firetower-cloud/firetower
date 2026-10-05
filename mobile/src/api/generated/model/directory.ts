@@ -18,6 +18,7 @@ export interface Directory {
   level?: null | Level;
   name: string;
   secrets: number;
+  skills: number;
   /**
      * What appears in a path. Derived from the name once, and stable after —
      * renaming a directory must not rewrite every path underneath it.

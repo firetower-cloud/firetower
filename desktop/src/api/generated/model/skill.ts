@@ -29,6 +29,12 @@ export interface Skill {
   description: string;
   files: number;
   id: SkillId;
+  /**
+     * Whether this person may move it to another directory or delete it.
+     * The same rule as `api::access::may_share`, answered per row so a list
+     * can say up front which skills it can act on.
+     */
+  mayShare: boolean;
   /** Whether this person may make a version of it or rename it. */
   mayWrite: boolean;
   name: string;

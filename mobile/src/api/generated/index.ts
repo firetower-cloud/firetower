@@ -12,6 +12,7 @@ export * from './repos/repos';
 export * from './secrets/secrets';
 export * from './sessions/sessions';
 export * from './setup/setup';
+export * from './skills/skills';
 export * from './stream/stream';
 export * from './tasks/tasks';
 export * from './trackers/trackers';

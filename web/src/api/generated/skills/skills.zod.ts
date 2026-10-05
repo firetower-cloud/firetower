@@ -8,6 +8,48 @@
 import * as zod from 'zod';
 
 
+/**
+ * Everything is checked before anything moves: that each skill is this
+ * person's to move, that no two of them share a name, and that every name
+ * the directory already has comes with a decision. A skill merged into the
+ * directory's copy hands its sessions over, and their workers are told.
+ * @summary Move several skills into a directory.
+ */
+export const ShareSkillsParams = zod.object({
+  "id": zod.string().describe('The directory')
+})
+
+export const ShareSkillsBody = zod.object({
+  "skills": zod.array(zod.object({
+  "id": zod.string(),
+  "resolve": zod.union([zod.null(),zod.enum(['useTheirs', 'addVersion', 'keep']).describe('What to do with a skill whose name the directory already has.')]).optional()
+}).describe('One skill to move, and what to do if the directory has one of its name.'))
+})
+
+export const ShareSkillsResponse = zod.void()
+
+/**
+ * Asked by the share window before anything moves, so each collision can be
+ * shown with a choice rather than discovered as a refusal.
+ * @summary Which of these skills the directory already has one of the same name for.
+ */
+export const SkillCollisionsParams = zod.object({
+  "id": zod.string().describe('The directory')
+})
+
+export const SkillCollisionsBody = zod.object({
+  "skills": zod.array(zod.string())
+}).describe('Skills to look at before moving them into a directory.')
+
+export const SkillCollisionsResponseItem = zod.object({
+  "existingId": zod.string().describe('The one already in the directory.'),
+  "existingVersion": zod.int(),
+  "identical": zod.boolean().describe('Whether both current versions hold the same bytes.'),
+  "name": zod.string(),
+  "skillId": zod.string().describe('The skill being moved.')
+}).describe('A skill that cannot simply move into a directory, because the directory\nalready holds one of the same name.')
+export const SkillCollisionsResponse = zod.array(SkillCollisionsResponseItem)
+
 export const SessionSkillsParams = zod.object({
   "id": zod.string().describe('The session')
 })
@@ -36,6 +78,7 @@ export const ListSkillsResponseItem = zod.object({
   "description": zod.string(),
   "files": zod.int(),
   "id": zod.string().describe('Identifies a skill — a folder of instructions an agent loads when it needs one.'),
+  "mayShare": zod.boolean().describe('Whether this person may move it to another directory or delete it.\nThe same rule as `api::access::may_share`, answered per row so a list\ncan say up front which skills it can act on.'),
   "mayWrite": zod.boolean().describe('Whether this person may make a version of it or rename it.'),
   "name": zod.string(),
   "path": zod.string().describe('`u/kevin/rust_review` — slashes on the wire, dots in the database.'),
@@ -69,6 +112,7 @@ export const CreateSkillResponse = zod.object({
   "description": zod.string(),
   "files": zod.int(),
   "id": zod.string().describe('Identifies a skill — a folder of instructions an agent loads when it needs one.'),
+  "mayShare": zod.boolean().describe('Whether this person may move it to another directory or delete it.\nThe same rule as `api::access::may_share`, answered per row so a list\ncan say up front which skills it can act on.'),
   "mayWrite": zod.boolean().describe('Whether this person may make a version of it or rename it.'),
   "name": zod.string(),
   "path": zod.string().describe('`u/kevin/rust_review` — slashes on the wire, dots in the database.'),
@@ -137,6 +181,7 @@ export const RenameSkillResponse = zod.object({
   "description": zod.string(),
   "files": zod.int(),
   "id": zod.string().describe('Identifies a skill — a folder of instructions an agent loads when it needs one.'),
+  "mayShare": zod.boolean().describe('Whether this person may move it to another directory or delete it.\nThe same rule as `api::access::may_share`, answered per row so a list\ncan say up front which skills it can act on.'),
   "mayWrite": zod.boolean().describe('Whether this person may make a version of it or rename it.'),
   "name": zod.string(),
   "path": zod.string().describe('`u/kevin/rust_review` — slashes on the wire, dots in the database.'),
@@ -216,6 +261,7 @@ export const AddVersionResponse = zod.object({
   "description": zod.string(),
   "files": zod.int(),
   "id": zod.string().describe('Identifies a skill — a folder of instructions an agent loads when it needs one.'),
+  "mayShare": zod.boolean().describe('Whether this person may move it to another directory or delete it.\nThe same rule as `api::access::may_share`, answered per row so a list\ncan say up front which skills it can act on.'),
   "mayWrite": zod.boolean().describe('Whether this person may make a version of it or rename it.'),
   "name": zod.string(),
   "path": zod.string().describe('`u/kevin/rust_review` — slashes on the wire, dots in the database.'),

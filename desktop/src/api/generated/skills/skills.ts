@@ -29,12 +29,15 @@ import type {
   ApiError,
   Asking,
   ChooseSkills,
+  Collision,
   DefaultIn,
   Match,
   NewSkill,
   SessionSkills,
+  ShareSkills,
   Skill,
   SkillDetail,
+  SkillIds,
   SkillNaming,
   SkillVersion
 } from '../model';
@@ -61,7 +64,189 @@ const withQueryKey = <T extends object, K>(query: T, queryKey: K): T & { queryKe
   return result;
 };
 
-export const getSessionSkillsUrl = (id: string,) => {
+export const getShareSkillsUrl = (id: string,) => {
+
+
+
+
+  return `/api/v1/directories/${id}/skills`
+}
+
+/**
+ * Everything is checked before anything moves: that each skill is this
+ * person's to move, that no two of them share a name, and that every name
+ * the directory already has comes with a decision. A skill merged into the
+ * directory's copy hands its sessions over, and their workers are told.
+ * @summary Move several skills into a directory.
+ */
+export const shareSkills = async (id: string,
+    shareSkillsBody: ShareSkills, options?: Parameters<typeof http>[1]): Promise<void> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return http<void>(getShareSkillsUrl(id),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(shareSkillsBody)
+  }
+);}
+
+
+
+
+
+export const getShareSkillsMutationKey = () => ['shareSkills'] as const;
+
+export const getShareSkillsMutationOptions = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof shareSkills>>, TError,ShareSkillsMutationVariables, TContext>, request?: SecondParameter<typeof http>}
+): UseMutationOptions<Awaited<ReturnType<typeof shareSkills>>, TError,ShareSkillsMutationVariables, TContext> => {
+
+const mutationKey = getShareSkillsMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof shareSkills>>, ShareSkillsMutationVariables> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  shareSkills(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ShareSkillsMutationResult = NonNullable<Awaited<ReturnType<typeof shareSkills>>>
+    export type ShareSkillsMutationBody = ShareSkills
+    export type ShareSkillsMutationError = ApiError
+    export type ShareSkillsMutationVariables = {id: string;data: ShareSkills}
+
+    /**
+ * @summary Move several skills into a directory.
+ */
+export const useShareSkills = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof shareSkills>>, TError,ShareSkillsMutationVariables, TContext>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof shareSkills>>,
+        TError,
+        ShareSkillsMutationVariables,
+        TContext
+      > => {
+      return useMutation(getShareSkillsMutationOptions(options), queryClient);
+    }
+    export const getSkillCollisionsUrl = (id: string,) => {
+
+
+
+
+  return `/api/v1/directories/${id}/skills/collisions`
+}
+
+/**
+ * Asked by the share window before anything moves, so each collision can be
+ * shown with a choice rather than discovered as a refusal.
+ * @summary Which of these skills the directory already has one of the same name for.
+ */
+export const skillCollisions = async (id: string,
+    skillIds: SkillIds, options?: Parameters<typeof http>[1]): Promise<Collision[]> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return http<Collision[]>(getSkillCollisionsUrl(id),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(skillIds)
+  }
+);}
+
+
+
+
+
+export const getSkillCollisionsMutationKey = () => ['skillCollisions'] as const;
+
+export const getSkillCollisionsMutationOptions = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof skillCollisions>>, TError,SkillCollisionsMutationVariables, TContext>, request?: SecondParameter<typeof http>}
+): UseMutationOptions<Awaited<ReturnType<typeof skillCollisions>>, TError,SkillCollisionsMutationVariables, TContext> => {
+
+const mutationKey = getSkillCollisionsMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof skillCollisions>>, SkillCollisionsMutationVariables> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  skillCollisions(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SkillCollisionsMutationResult = NonNullable<Awaited<ReturnType<typeof skillCollisions>>>
+    export type SkillCollisionsMutationBody = SkillIds
+    export type SkillCollisionsMutationError = ApiError
+    export type SkillCollisionsMutationVariables = {id: string;data: SkillIds}
+
+    /**
+ * @summary Which of these skills the directory already has one of the same name for.
+ */
+export const useSkillCollisions = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof skillCollisions>>, TError,SkillCollisionsMutationVariables, TContext>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof skillCollisions>>,
+        TError,
+        SkillCollisionsMutationVariables,
+        TContext
+      > => {
+      return useMutation(getSkillCollisionsMutationOptions(options), queryClient);
+    }
+    export const getSessionSkillsUrl = (id: string,) => {
 
 
 

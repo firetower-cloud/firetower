@@ -1190,6 +1190,118 @@
         }
       }
     },
+    "/api/v1/directories/{id}/skills": {
+      "post": {
+        "tags": [
+          "skills"
+        ],
+        "summary": "Move several skills into a directory.",
+        "description": "Everything is checked before anything moves: that each skill is this\nperson's to move, that no two of them share a name, and that every name\nthe directory already has comes with a decision. A skill merged into the\ndirectory's copy hands its sessions over, and their workers are told.",
+        "operationId": "share_skills",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The directory",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ShareSkills"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/directories/{id}/skills/collisions": {
+      "post": {
+        "tags": [
+          "skills"
+        ],
+        "summary": "Which of these skills the directory already has one of the same name for.",
+        "description": "Asked by the share window before anything moves, so each collision can be\nshown with a choice rather than discovered as a refusal.",
+        "operationId": "skill_collisions",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The directory",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SkillIds"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Collision"
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/events": {
       "get": {
         "tags": [
@@ -7807,6 +7919,38 @@
           }
         }
       },
+      "Collision": {
+        "type": "object",
+        "description": "A skill that cannot simply move into a directory, because the directory\nalready holds one of the same name.",
+        "required": [
+          "skillId",
+          "name",
+          "existingId",
+          "existingVersion",
+          "identical"
+        ],
+        "properties": {
+          "existingId": {
+            "$ref": "#/components/schemas/SkillId",
+            "description": "The one already in the directory."
+          },
+          "existingVersion": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "identical": {
+            "type": "boolean",
+            "description": "Whether both current versions hold the same bytes."
+          },
+          "name": {
+            "type": "string"
+          },
+          "skillId": {
+            "$ref": "#/components/schemas/SkillId",
+            "description": "The skill being moved."
+          }
+        }
+      },
       "Commit": {
         "type": "object",
         "properties": {
@@ -11023,6 +11167,15 @@
           }
         }
       },
+      "Resolve": {
+        "type": "string",
+        "description": "What to do with a skill whose name the directory already has.",
+        "enum": [
+          "useTheirs",
+          "addVersion",
+          "keep"
+        ]
+      },
       "ResourcePath": {
         "type": "string",
         "description": "A path, as the wire and the interface spell it: `u/kevin/thing`."
@@ -11617,6 +11770,42 @@
           "takesMore"
         ]
       },
+      "ShareOne": {
+        "type": "object",
+        "description": "One skill to move, and what to do if the directory has one of its name.",
+        "required": [
+          "id"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "resolve": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Resolve"
+              }
+            ]
+          }
+        }
+      },
+      "ShareSkills": {
+        "type": "object",
+        "required": [
+          "skills"
+        ],
+        "properties": {
+          "skills": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ShareOne"
+            }
+          }
+        }
+      },
       "SignIn": {
         "type": "object",
         "description": "What a sign-in needs from the caller.",
@@ -11678,6 +11867,7 @@
           "risk",
           "updatedAt",
           "mayWrite",
+          "mayShare",
           "defaultIn",
           "alwaysOn"
         ],
@@ -11713,6 +11903,10 @@
           },
           "id": {
             "$ref": "#/components/schemas/SkillId"
+          },
+          "mayShare": {
+            "type": "boolean",
+            "description": "Whether this person may move it to another directory or delete it.\nThe same rule as `api::access::may_share`, answered per row so a list\ncan say up front which skills it can act on."
           },
           "mayWrite": {
             "type": "boolean",
@@ -11803,6 +11997,21 @@
       "SkillId": {
         "type": "string",
         "description": "Identifies a skill — a folder of instructions an agent loads when it needs one."
+      },
+      "SkillIds": {
+        "type": "object",
+        "description": "Skills to look at before moving them into a directory.",
+        "required": [
+          "skills"
+        ],
+        "properties": {
+          "skills": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
       },
       "SkillNaming": {
         "type": "object",
