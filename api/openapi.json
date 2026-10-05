@@ -2607,6 +2607,52 @@
         }
       }
     },
+    "/api/v1/repos/{id}/skill-defaults": {
+      "put": {
+        "tags": [
+          "skills"
+        ],
+        "summary": "Make this person's defaults in one repository exactly these skills.",
+        "description": "Set from the session picker, at the moment somebody has just decided what\na repository needs. Defaults belong to the person, so the only check is\nthat each skill is one they can see.",
+        "operationId": "set_repo_defaults",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The repository",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RepoSkillDefaults"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/secrets": {
       "get": {
         "tags": [
@@ -11119,9 +11165,47 @@
           }
         }
       },
+      "RepoDefaults": {
+        "type": "object",
+        "description": "One repository and the skills somebody has on by default in it.",
+        "required": [
+          "repoId",
+          "slug",
+          "defaults"
+        ],
+        "properties": {
+          "defaults": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "repoId": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          }
+        }
+      },
       "RepoId": {
         "type": "string",
         "description": "Identifies a connected repository."
+      },
+      "RepoSkillDefaults": {
+        "type": "object",
+        "description": "The whole set of defaults for one repository.",
+        "required": [
+          "skills"
+        ],
+        "properties": {
+          "skills": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
       },
       "RequestId": {
         "type": "string",
@@ -11658,6 +11742,20 @@
           "selected"
         ],
         "properties": {
+          "alwaysOn": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The skills this person has on in every workspace."
+          },
+          "repos": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RepoDefaults"
+            },
+            "description": "Each repository in the session, with this person's defaults there.\nWhat the picker's \"use these by default\" switch reads and compares."
+          },
           "selected": {
             "type": "array",
             "items": {

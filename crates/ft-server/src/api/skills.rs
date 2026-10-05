@@ -318,6 +318,83 @@ pub(super) async fn set_default(
 pub struct SessionSkills {
     /// The skills this session has pinned.
     pub selected: Vec<String>,
+    /// Each repository in the session, with this person's defaults there.
+    /// What the picker's "use these by default" switch reads and compares.
+    #[serde(default)]
+    pub repos: Vec<RepoDefaults>,
+    /// The skills this person has on in every workspace.
+    #[serde(default)]
+    pub always_on: Vec<String>,
+}
+
+/// One repository and the skills somebody has on by default in it.
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct RepoDefaults {
+    pub repo_id: String,
+    pub slug: String,
+    pub defaults: Vec<String>,
+}
+
+/// The whole set of defaults for one repository.
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct RepoSkillDefaults {
+    pub skills: Vec<String>,
+}
+
+/// Make this person's defaults in one repository exactly these skills.
+///
+/// Set from the session picker, at the moment somebody has just decided what
+/// a repository needs. Defaults belong to the person, so the only check is
+/// that each skill is one they can see.
+#[utoipa::path(
+    put, path = "/api/v1/repos/{id}/skill-defaults", tag = "skills",
+    params(("id" = String, Path, description = "The repository")),
+    request_body = RepoSkillDefaults,
+    responses((status = 204), (status = 401, body = ApiError)),
+)]
+pub(super) async fn set_repo_defaults(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Path(id): Path<String>,
+    Json(body): Json<RepoSkillDefaults>,
+) -> ApiResult<StatusCode> {
+    let me = whoever(&principal)?;
+    let reachable: std::collections::HashSet<String> = state
+        .skills
+        .visible(me.id.as_str(), Level::Viewer)
+        .await?
+        .into_iter()
+        .map(|s| s.id.as_str().to_string())
+        .collect();
+    let skills: Vec<String> = body.skills.into_iter().filter(|s| reachable.contains(s)).collect();
+    state
+        .skills
+        .replace_defaults_in(me.id.as_str(), &id, &skills)
+        .await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// The session's repositories with this person's defaults in each.
+async fn repo_defaults(
+    state: &AppState,
+    me: &str,
+    session: &ft_core::Session,
+) -> anyhow::Result<Vec<RepoDefaults>> {
+    let mut out = Vec::new();
+    for c in &session.checkouts {
+        let Some(repo) = &c.repo_id else { continue };
+        if out.iter().any(|r: &RepoDefaults| r.repo_id == repo.as_str()) {
+            continue;
+        }
+        out.push(RepoDefaults {
+            repo_id: repo.to_string(),
+            slug: c.slug.clone(),
+            defaults: state.skills.defaults_in(me, repo.as_str()).await?,
+        });
+    }
+    Ok(out)
 }
 
 /// The whole selection, never a delta.
@@ -338,13 +415,15 @@ pub(super) async fn session_skills(
     Path(id): Path<SessionId>,
 ) -> ApiResult<Json<SessionSkills>> {
     let me = whoever(&principal)?;
-    state
+    let session = state
         .db
         .session_of(me.id.as_str(), &id)
         .await?
         .ok_or_else(|| ApiError::not_found("session"))?;
     Ok(Json(SessionSkills {
         selected: state.skills.of_session(id.as_str()).await?,
+        repos: repo_defaults(&state, me.id.as_str(), &session).await?,
+        always_on: state.skills.always_on(me.id.as_str()).await?,
     }))
 }
 
@@ -450,7 +529,15 @@ pub(super) async fn choose_skills(
         }
     }
 
-    Ok(Json(SessionSkills { selected: chosen }))
+    let repos = match state.db.session_of(me.id.as_str(), &id).await? {
+        Some(session) => repo_defaults(&state, me.id.as_str(), &session).await?,
+        None => Vec::new(),
+    };
+    Ok(Json(SessionSkills {
+        selected: chosen,
+        repos,
+        always_on: state.skills.always_on(me.id.as_str()).await?,
+    }))
 }
 
 /// Skills to look at before moving them into a directory.

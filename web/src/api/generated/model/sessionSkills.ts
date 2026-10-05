@@ -5,11 +5,19 @@
  * The Firetower control plane: API, scheduling, and worker transports.
  * OpenAPI spec version: 0
  */
+import type { RepoDefaults } from './repoDefaults';
 
 /**
  * What a session is reading, and what it would read if nothing was chosen.
  */
 export interface SessionSkills {
+  /** The skills this person has on in every workspace. */
+  alwaysOn?: string[];
+  /**
+     * Each repository in the session, with this person's defaults there.
+     * What the picker's "use these by default" switch reads and compares.
+     */
+  repos?: RepoDefaults[];
   /** The skills this session has pinned. */
   selected: string[];
 }

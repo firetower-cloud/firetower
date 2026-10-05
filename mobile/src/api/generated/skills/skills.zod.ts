@@ -50,11 +50,33 @@ export const SkillCollisionsResponseItem = zod.object({
 }).describe('A skill that cannot simply move into a directory, because the directory\nalready holds one of the same name.')
 export const SkillCollisionsResponse = zod.array(SkillCollisionsResponseItem)
 
+/**
+ * Set from the session picker, at the moment somebody has just decided what
+ * a repository needs. Defaults belong to the person, so the only check is
+ * that each skill is one they can see.
+ * @summary Make this person's defaults in one repository exactly these skills.
+ */
+export const SetRepoDefaultsParams = zod.object({
+  "id": zod.string().describe('The repository')
+})
+
+export const SetRepoDefaultsBody = zod.object({
+  "skills": zod.array(zod.string())
+}).describe('The whole set of defaults for one repository.')
+
+export const SetRepoDefaultsResponse = zod.void()
+
 export const SessionSkillsParams = zod.object({
   "id": zod.string().describe('The session')
 })
 
 export const SessionSkillsResponse = zod.object({
+  "alwaysOn": zod.array(zod.string()).optional().describe('The skills this person has on in every workspace.'),
+  "repos": zod.array(zod.object({
+  "defaults": zod.array(zod.string()),
+  "repoId": zod.string(),
+  "slug": zod.string()
+}).describe('One repository and the skills somebody has on by default in it.')).optional().describe('Each repository in the session, with this person\'s defaults there.\nWhat the picker\'s "use these by default" switch reads and compares.'),
   "selected": zod.array(zod.string()).describe('The skills this session has pinned.')
 }).describe('What a session is reading, and what it would read if nothing was chosen.')
 
@@ -67,6 +89,12 @@ export const ChooseSkillsBody = zod.object({
 }).describe('The whole selection, never a delta.')
 
 export const ChooseSkillsResponse = zod.object({
+  "alwaysOn": zod.array(zod.string()).optional().describe('The skills this person has on in every workspace.'),
+  "repos": zod.array(zod.object({
+  "defaults": zod.array(zod.string()),
+  "repoId": zod.string(),
+  "slug": zod.string()
+}).describe('One repository and the skills somebody has on by default in it.')).optional().describe('Each repository in the session, with this person\'s defaults there.\nWhat the picker\'s "use these by default" switch reads and compares.'),
   "selected": zod.array(zod.string()).describe('The skills this session has pinned.')
 }).describe('What a session is reading, and what it would read if nothing was chosen.')
 

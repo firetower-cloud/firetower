@@ -405,6 +405,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(skills::session_skills, skills::choose_skills))
         .routes(routes!(skills::skill_collisions))
         .routes(routes!(skills::share_skills))
+        .routes(routes!(skills::set_repo_defaults))
         .routes(routes!(secrets::list_secrets))
         .routes(routes!(secrets::replace_secret, secrets::remove_secret))
         .routes(routes!(secrets::reveal_secret))

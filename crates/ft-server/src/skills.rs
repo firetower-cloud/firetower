@@ -1115,10 +1115,56 @@ impl Skills {
         Ok(())
     }
 
+    /// This person's defaults for one repository, without the always-on set.
+    pub async fn defaults_in(&self, person: &str, repo: &str) -> Result<Vec<String>> {
+        Ok(sqlx::query_scalar(
+            "SELECT skill_id FROM skill_defaults WHERE user_id = $1 AND repo_id = $2 ORDER BY skill_id",
+        )
+        .bind(person)
+        .bind(repo)
+        .fetch_all(&self.pool)
+        .await?)
+    }
+
+    /// The skills this person has on everywhere.
+    pub async fn always_on(&self, person: &str) -> Result<Vec<String>> {
+        Ok(sqlx::query_scalar(
+            "SELECT skill_id FROM skill_defaults WHERE user_id = $1 AND repo_id IS NULL ORDER BY skill_id",
+        )
+        .bind(person)
+        .fetch_all(&self.pool)
+        .await?)
+    }
+
+    /// Make this person's defaults for one repository exactly these skills.
+    ///
+    /// The whole set rather than additions, so a skill unticked in the picker
+    /// stops being a default too, and the list can shrink as well as grow.
+    pub async fn replace_defaults_in(&self, person: &str, repo: &str, skills: &[String]) -> Result<()> {
+        let mut tx = self.pool.begin().await?;
+        sqlx::query("DELETE FROM skill_defaults WHERE user_id = $1 AND repo_id = $2")
+            .bind(person)
+            .bind(repo)
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query(
+            "INSERT INTO skill_defaults (user_id, repo_id, skill_id) \
+             SELECT $1, $2, unnest($3::text[]) ON CONFLICT DO NOTHING",
+        )
+        .bind(person)
+        .bind(repo)
+        .bind(skills)
+        .execute(&mut *tx)
+        .await
+        .context("writing a repository's default skills")?;
+        tx.commit().await?;
+        Ok(())
+    }
+
     /// Which skills would be ticked for somebody starting work on these
     /// repositories: the union of their defaults, plus their always-on set.
     pub async fn defaults_for(&self, person: &str, repos: &[String]) -> Result<Vec<String>> {
-        Ok(sqlx::query_scalar(
+        sqlx::query_scalar(
             "SELECT DISTINCT sd.skill_id FROM skill_defaults sd \
               WHERE sd.user_id = $1 AND (sd.repo_id IS NULL OR sd.repo_id = ANY($2))",
         )
@@ -1126,20 +1172,18 @@ impl Skills {
         .bind(repos)
         .fetch_all(&self.pool)
         .await
-        .context("reading somebody's default skills")?)
+        .context("reading somebody's default skills")
     }
 
     // ── what a session is running ───────────────────────────────────────
 
     /// The skills a session is reading, in the version it pinned.
     pub async fn of_session(&self, session: &str) -> Result<Vec<String>> {
-        Ok(
-            sqlx::query_scalar("SELECT skill_id FROM skill_pins WHERE session_id = $1")
+        sqlx::query_scalar("SELECT skill_id FROM skill_pins WHERE session_id = $1")
                 .bind(session)
                 .fetch_all(&self.pool)
                 .await
-                .context("reading a session's skills")?,
-        )
+                .context("reading a session's skills")
     }
 
     /// The bundles a session is reading, as the worker will write them.
