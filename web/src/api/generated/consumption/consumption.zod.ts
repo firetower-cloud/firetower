@@ -15,18 +15,26 @@ export const ConsumptionQueryParams = zod.object({
   "from": zod.iso.datetime({"offset":true}).describe('Inclusive.'),
   "to": zod.iso.datetime({"offset":true}).describe('Exclusive, so a day boundary belongs to one bucket and not two.'),
   "bucket": zod.enum(['day', 'week', 'month']),
-  "group": zod.enum(['task', 'model', 'person', 'repository', 'tracker', 'directory', 'subscription', 'workspace', 'conversation']),
-  "then": zod.enum(['task', 'model', 'person', 'repository', 'tracker', 'directory', 'subscription', 'workspace', 'conversation']).optional().describe('A second level, cut from each row of the first.\n\nEither order gives the same totals — it is one more `GROUP BY` column,\nnot a different query — which is why the interface can offer to swap\nthem.'),
+  "group": zod.enum(['task', 'model', 'person', 'repository', 'directory', 'subscription', 'workspace']),
+  "then": zod.enum(['task', 'model', 'person', 'repository', 'directory', 'subscription', 'workspace']).optional().describe('A second level, cut from each row of the first.\n\nEither order gives the same totals — it is one more `GROUP BY` column,\nnot a different query — which is why the interface can offer to swap\nthem.'),
   "person": zod.string().optional().describe('Narrow to one person. `me` means whoever is asking.'),
-  "team": zod.string().optional().describe('Narrow to whoever is in one team.')
+  "team": zod.string().optional().describe('Narrow to whoever is in one team.'),
+  "find": zod.string().optional().describe('Only groups whose name or key contains this.'),
+  "sort": zod.enum(['tokens', 'recent', 'breadth', 'name']).optional(),
+  "direction": zod.enum(['asc', 'desc']).optional(),
+  "limit": zod.int().optional().describe('How many rows to draw. Capped, because a page that asks for everything\nis how the first version of this shipped 461 KB to draw nine rows.'),
+  "offset": zod.int().optional()
 })
 
 export const ConsumptionResponse = zod.object({
+  "groupCount": zod.int().describe('How many groups there are in total, so a page can say what it is part of.'),
   "groups": zod.array(zod.object({
   "children": zod.array(zod.unknown()).optional().describe('The second level, when one was asked for.\n\n`no_recursion` because this type contains itself: without it the schema\nbuilder follows `children` forever and `gen-openapi` dies on a stack\noverflow. The nesting really is only two deep — past that the interface\ndrills rather than expands — so the contract describing one level of\nchildren and stopping is accurate rather than a concession.'),
   "conversations": zod.int(),
   "costUsd": zod.number().nullish(),
+  "firstAt": zod.iso.datetime({"offset":true}).nullish().describe('When this was first and last worked on.\n\nAbsent on the folded remainder, which is not a thing that happened at a\ntime. Without these "recently active" cannot be offered at all.'),
   "key": zod.string().nullish().describe('What was grouped on. NULL where the dimension does not apply — a turn\nwith no task, a model with no subscription — which is a real row and\nnot an omission.'),
+  "lastAt": zod.iso.datetime({"offset":true}).nullish(),
   "models": zod.array(zod.object({
   "model": zod.string(),
   "tokens": zod.int()
@@ -40,6 +48,26 @@ export const ConsumptionResponse = zod.object({
   "turns": zod.int(),
   "workspaces": zod.int()
 }).describe('One row of the ledger.')),
+  "rest": zod.union([zod.null(),zod.object({
+  "children": zod.array(zod.unknown()).optional().describe('The second level, when one was asked for.\n\n`no_recursion` because this type contains itself: without it the schema\nbuilder follows `children` forever and `gen-openapi` dies on a stack\noverflow. The nesting really is only two deep — past that the interface\ndrills rather than expands — so the contract describing one level of\nchildren and stopping is accurate rather than a concession.'),
+  "conversations": zod.int(),
+  "costUsd": zod.number().nullish(),
+  "firstAt": zod.iso.datetime({"offset":true}).nullish().describe('When this was first and last worked on.\n\nAbsent on the folded remainder, which is not a thing that happened at a\ntime. Without these "recently active" cannot be offered at all.'),
+  "key": zod.string().nullish().describe('What was grouped on. NULL where the dimension does not apply — a turn\nwith no task, a model with no subscription — which is a real row and\nnot an omission.'),
+  "lastAt": zod.iso.datetime({"offset":true}).nullish(),
+  "models": zod.array(zod.object({
+  "model": zod.string(),
+  "tokens": zod.int()
+}).describe('One model\'s share of one bucket or one group.')),
+  "name": zod.string().nullish().describe('What to call it, where anything knows. A task nobody could read the\ntitle of has a key and no name, and the page draws that rather than\npretending.'),
+  "people": zod.int(),
+  "pricedRows": zod.int(),
+  "rows": zod.int(),
+  "tasks": zod.int(),
+  "tokens": zod.int(),
+  "turns": zod.int(),
+  "workspaces": zod.int()
+}).describe('Everything past this page, added together.\n\nDeliberately not called "smaller": once the order can be reversed, or by\nname, or by date, the rest is not smaller — it is only the rest.')]).optional(),
   "series": zod.array(zod.object({
   "models": zod.array(zod.object({
   "model": zod.string(),

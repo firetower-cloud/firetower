@@ -13,7 +13,10 @@ import type { Totals } from './totals';
  * The whole page, in the terms the person asking may see it.
  */
 export interface Consumption {
+  /** How many groups there are in total, so a page can say what it is part of. */
+  groupCount: number;
   groups: Group[];
+  rest?: null | Group;
   series: Column[];
   totals: Totals;
 }

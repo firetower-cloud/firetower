@@ -11,6 +11,16 @@
   --color-raise: #17171a;
   --color-overlay: #1e1e22;
   --color-line: #26262b;
+
+  /* A block standing in for a value that has not arrived yet.
+     Its own step rather than one of the surfaces: `--color-raise` was the
+     obvious reuse and measured 1.04:1 over `--color-ground` — fainter than a
+     gridline at 1.16:1, which is the most recessive thing on the page by
+     design, so a loading chart was indistinguishable from a black rectangle.
+     This sits between a gridline and the dimmest text: 1.86:1 at the top of
+     the breath and 1.32:1 at the bottom. Legibly there, without competing with
+     anything that carries meaning. */
+  --color-settling: #3e3e46;
   --color-line-soft: #1a1a1e;
 
   /* ── Text: four tiers, a real gap between each ──────────────
@@ -445,6 +455,34 @@
 .spine-nested {
   --rail: 5px;
   --gap: 13px;
+}
+
+/* ── Waiting, on a first load only ──────────────────────────
+   A block where a value is going to be, breathing just enough to say the page
+   is working rather than broken.
+
+   Not a gradient travelling left to right. That is the shimmer every loading
+   state has, it is louder than anything else on these screens is allowed to
+   be, and it spends attention on the one thing that is not there yet.
+
+   **Only before there is an answer.** A refetch holds the previous one at
+   reduced opacity instead — see `Consumption.tsx`. Replacing a chart somebody
+   is reading with a grey box is a worse answer than a slightly stale one, and
+   it moves the page under them while they are looking at it. */
+@keyframes settling {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
+}
+
+.settling {
+  background: var(--color-settling);
+  border-radius: var(--radius-xs);
+  animation: settling 1.6s ease-in-out infinite;
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -21,9 +21,7 @@ export const Dimension = {
   model: 'model',
   person: 'person',
   repository: 'repository',
-  tracker: 'tracker',
   directory: 'directory',
   subscription: 'subscription',
   workspace: 'workspace',
-  conversation: 'conversation',
 } as const;

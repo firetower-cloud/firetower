@@ -25,12 +25,22 @@ export interface Group {
   /** @nullable */
   costUsd?: number | null;
   /**
+     * When this was first and last worked on.
+     *
+     * Absent on the folded remainder, which is not a thing that happened at a
+     * time. Without these "recently active" cannot be offered at all.
+     * @nullable
+     */
+  firstAt?: string | null;
+  /**
      * What was grouped on. NULL where the dimension does not apply — a turn
      * with no task, a model with no subscription — which is a real row and
      * not an omission.
      * @nullable
      */
   key?: string | null;
+  /** @nullable */
+  lastAt?: string | null;
   models: ByModel[];
   /**
      * What to call it, where anything knows. A task nobody could read the

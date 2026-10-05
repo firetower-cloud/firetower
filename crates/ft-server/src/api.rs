@@ -262,6 +262,8 @@ async fn credential_for(
     components(schemas(
         crate::db::Bucket,
         crate::db::Dimension,
+        crate::db::Direction,
+        crate::db::Sort,
         Event,
         Agent,
         SessionStatus,

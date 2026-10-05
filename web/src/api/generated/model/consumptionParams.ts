@@ -7,6 +7,8 @@
  */
 import type { Bucket } from './bucket';
 import type { Dimension } from './dimension';
+import type { Direction } from './direction';
+import type { Sort } from './sort';
 
 export type ConsumptionParams = {
 /**
@@ -35,4 +37,16 @@ person?: string;
  * Narrow to whoever is in one team.
  */
 team?: string;
+/**
+ * Only groups whose name or key contains this.
+ */
+find?: string;
+sort?: Sort;
+direction?: Direction;
+/**
+ * How many rows to draw. Capped, because a page that asks for everything
+ * is how the first version of this shipped 461 KB to draw nine rows.
+ */
+limit?: number;
+offset?: number;
 };

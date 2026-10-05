@@ -20,13 +20,16 @@
  * never the palette — a reader who learned that violet is Codex keeps it. Past
  * nine rows the tail is folded together rather than given a tenth hue.
  */
-import { useMemo, useState } from "react";
-import { ChevronRight, Search } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { keepPreviousData } from "@tanstack/react-query";
+import { ArrowDown, ArrowDownUp, ArrowUp, ChevronRight, Search } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import { useConsumption } from "@/src/api/generated/consumption/consumption";
 import { useListAccounts } from "@/src/api/generated/accounts/accounts";
 import { useListColleagues, useListTeams } from "@/src/api/generated/access/access";
-import type { Account, ByModel, Group, Limit } from "@/src/api/generated/model";
-import { PageHead } from "@/components/ui";
+import type { Account, ByModel, Direction, Group, Limit, Sort } from "@/src/api/generated/model";
+import { Choose, Icon, PageHead, useAnchor } from "@/components/ui";
 
 /* ── the vocabulary ───────────────────────────────────────────────────── */
 
@@ -42,13 +45,113 @@ const GROUPS = {
   model: "model",
   person: "person",
   repository: "repository",
-  tracker: "tracker",
   directory: "directory",
   subscription: "subscription",
   workspace: "workspace",
-  conversation: "conversation",
 } as const;
 type GroupKey = keyof typeof GROUPS;
+
+/**
+ * How to order the ledger.
+ *
+ * Five mean the same thing whatever is grouped. `breadth` is the one that
+ * changes with it — a task sprawling across worktrees and a model reaching
+ * people are both breadth, and neither is the other's column — so its label is
+ * written per dimension below.
+ *
+ * `perTurn` is here because it answers a different question from `tokens`: a
+ * task of forty cheap turns and one of four enormous ones look identical by
+ * total, and only one of them is worth looking at.
+ */
+/**
+ * `starts` is which way round a sort is worth reading first.
+ *
+ * Every other one answers "which is the biggest", so it opens descending. Name
+ * does not — nobody looks up a list alphabetically from Z — so choosing it
+ * starts at A, and the arrow beside it still reverses either.
+ */
+const SORTS: { value: Sort; field: string; up: string; down: string; starts: Direction }[] = [
+  { value: "tokens",  field: "tokens",        down: "most tokens", up: "fewest tokens", starts: "desc" },
+  { value: "recent",  field: "last activity", down: "most recent", up: "oldest",        starts: "desc" },
+  { value: "breadth", field: "",              down: "widest",      up: "narrowest",     starts: "desc" },
+  { value: "name",    field: "name",          down: "Z to A",      up: "A to Z",        starts: "asc" },
+];
+
+/** What "breadth" counts, for each way of grouping. */
+const BREADTH: Record<GroupKey, string> = {
+  task: "workspaces",
+  person: "tasks",
+  model: "people",
+  subscription: "people",
+  repository: "tasks",
+  directory: "tasks",
+  workspace: "turns",
+};
+
+/** What a sort is called, in a sentence, for the direction button's label. */
+function labelFor(sort: Sort, by: GroupKey, way: "up" | "down") {
+  const o = SORTS.find((x) => x.value === sort);
+  if (!o) return sort;
+  if (sort === "breadth") return `${way === "down" ? "most" : "fewest"} ${BREADTH[by]}`;
+  return o[way];
+}
+
+/** Where a list is long enough that finding beats ranking. */
+const SEARCHABLE: GroupKey[] = ["task", "workspace"];
+
+/**
+ * Waits for typing to stop.
+ *
+ * A request per keystroke is a dozen queries to answer one question, each
+ * racing the last — and on a table of millions the one that wins is whichever
+ * finishes last, not whichever was asked last.
+ */
+function useDebounced<T>(value: T, ms: number) {
+  const [settled, setSettled] = useState(value);
+  const first = useRef(true);
+  useEffect(() => {
+    // The first value is already settled; waiting on it would delay the page.
+    if (first.current) {
+      first.current = false;
+      return;
+    }
+    const t = setTimeout(() => setSettled(value), ms);
+    return () => clearTimeout(t);
+  }, [value, ms]);
+  return settled;
+}
+
+/** A small action beside a control: one icon, no label of its own. */
+function Nudge({
+  icon,
+  text,
+  label,
+  disabled,
+  onClick,
+}: {
+  icon: LucideIcon;
+  /** Said out loud beside the arrow, for the one where an arrow alone is a guess. */
+  text?: string;
+  label: string;
+  disabled?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      title={label}
+      aria-label={label}
+      disabled={disabled}
+      onClick={onClick}
+      className={`flex h-8 items-center justify-center gap-1.5 rounded-md border border-line text-dim transition-colors duration-150 hover:border-mute/60 hover:text-bone disabled:cursor-not-allowed disabled:border-line disabled:text-mute/50 ${
+        text ? "px-2.5" : "w-8"
+      }`}
+    >
+      <Icon of={icon} size={12} />
+      {text && <span className="text-meta font-semibold tracking-wide">{text}</span>}
+    </button>
+  );
+}
 
 /** Which hue a model wears, decided once and kept. */
 const SERIES = [
@@ -90,11 +193,25 @@ export function Consumption() {
   const [scope, setScope] = useState<Scope>({ kind: "all" });
   const [picking, setPicking] = useState(false);
   const [open, setOpen] = useState<string | null>(null);
-  const [table, setTable] = useState(false);
+  const [tip, setTip] = useState<Tip | null>(null);
+  const [sort, setSort] = useState<Sort>("tokens");
+  const [direction, setDirection] = useState<Direction>("desc");
+  // What is typed, and what has been asked for. Two states because they are
+  // two things: the field has to answer every keystroke, and the server does
+  // not — a request per character is a dozen queries to answer one question,
+  // each one racing the last.
+  const [typed, setTyped] = useState("");
+  const find = useDebounced(typed, 300);
+  const [limit, setLimit] = useState(25);
 
+  // Measured from the trigger and drawn on `body`, the way every other menu in
+  // the app is. Absolutely positioned inside the page, it scrolled away with
+  // the paragraph it sat in — and because its own list hands the wheel back to
+  // the page at either end, scrolling to look at it carried it off screen.
+  const anchor = useAnchor(picking);
   const { data: colleagues } = useListColleagues();
   const { data: teams } = useListTeams();
-  const { data: accounts } = useListAccounts();
+  const { data: accounts, isPending: limitsPending } = useListAccounts();
 
   // Rounded to the day so the query key is stable across renders — otherwise
   // every tick of the clock is a new request for the same answer.
@@ -107,7 +224,7 @@ export function Consumption() {
     return { from: start.toISOString(), to: end.toISOString() };
   }, [range]);
 
-  const { data, isPending, isError } = useConsumption({
+  const { data, isPending, isFetching, isError, refetch } = useConsumption({
     from,
     to,
     bucket: RANGES[range].bucket,
@@ -116,6 +233,16 @@ export function Consumption() {
     ...(scope.kind === "me" ? { person: "me" } : {}),
     ...(scope.kind === "person" ? { person: scope.id } : {}),
     ...(scope.kind === "team" ? { team: scope.id } : {}),
+    sort,
+    direction,
+    limit,
+    ...(find.trim() ? { find: find.trim() } : {}),
+  }, {
+    // Changing the period, the sort or the grouping is a new query key, which
+    // would otherwise empty the page and show skeletons again on every click.
+    // Holding the last answer means the only blank state anybody sees is the
+    // first one — after that the page dims and swaps, and never jumps.
+    query: { placeholderData: keepPreviousData },
   });
 
   // One hue per model, assigned by how much it did over the whole period, so a
@@ -148,19 +275,43 @@ export function Consumption() {
       [...list].sort((a, b) => (rank.get(a.model) ?? 99) - (rank.get(b.model) ?? 99));
   }, [models]);
 
+  /* ── which of five states the page is in ──────────────────────────────
+     Nothing below may draw a chart with no data in it. An axis labelled "1"
+     with no columns is what a failure looked like, and it reads as a product
+     that is broken rather than one that is waiting or empty. */
+  const scopeKey = `${scope.kind}:${"id" in scope ? scope.id : ""}`;
+  const wants = `${range}|${scopeKey}`;
+  const showing = useRef("");
+  useEffect(() => {
+    if (data && !isFetching) showing.current = wants;
+  }, [data, isFetching, wants]);
+
+  // The chart and the figures depend on the period and the scope, and on
+  // nothing else — so a new sort keeps them, and a new period replaces them.
+  // Holding the old ones would be worse than a skeleton: the sentence above
+  // already says the new period, and a chart of the old one under it is a lie
+  // rather than a stale answer.
+  const staleReading = isFetching && !!data && showing.current !== wants;
+  const empty = !!data && data.totals.rows === 0;
+
+  // Any change to what is being listed starts again at the top. Keeping the
+  // page number across a new sort shows somebody rows 26–50 of a list they
+  // have not seen the beginning of.
+  const reset = () => setLimit(25);
   const t = data?.totals;
   const everyone = scopeName(scope);
 
   return (
     <div className="pb-16">
-      <PageHead eyebrow="Organization" title="Consumption">
+      <PageHead eyebrow="Organization" title="Usage">
         What the agents spent, and on what. Figures are for the period and scope below.
       </PageHead>
 
       {/* The sentence is the control. One word opens a search, because a row of
           buttons stops working at the second team. */}
-      <p className="relative mb-7 text-title text-dim">
+      <p className="mb-7 text-title text-dim">
         <button
+          ref={anchor.trigger}
           type="button"
           className="border-b border-dotted border-mute pb-px text-bone transition-colors hover:border-bone"
           onClick={() => setPicking((p) => !p)}
@@ -169,8 +320,9 @@ export function Consumption() {
         >
           {everyone}
         </button>
-        {picking && (
+        {picking && anchor.at && (
           <ScopePicker
+            at={anchor.at}
             colleagues={colleagues ?? []}
             teams={teams ?? []}
             onPick={(s) => {
@@ -193,53 +345,69 @@ export function Consumption() {
         </button>
       </p>
 
-      {isError && (
-        <p className="text-ui text-brick">
-          That didn&apos;t load. Reload the page, or narrow the period if it is a long one.
-        </p>
-      )}
-
       {/* ── the reading ────────────────────────────────────────────────── */}
-      <section className={isPending ? "opacity-50 transition-opacity" : "transition-opacity"}>
-        <div className="flex items-end justify-end">
-          <div>
-            <div className="font-narrow text-[64px] font-semibold leading-[0.86] tracking-[-0.025em] text-bone">
-              {t ? tokens(t.tokens) : "—"}
+      <section
+        className={`transition-opacity duration-200 ${
+          isFetching && !isPending && !staleReading ? "opacity-50" : ""
+        }`}
+      >
+        {isError ? (
+          <Trouble onRetry={() => void refetch()} />
+        ) : isPending || staleReading ? (
+          <ReadingSkeleton />
+        ) : empty ? (
+          <Nothing
+            why={
+              find.trim()
+                ? `Nothing matches “${find.trim()}” in this period.`
+                : "Nothing ran in this period."
+            }
+            what="Widen the range above, or change who it covers."
+          />
+        ) : (
+          <>
+            <div className="flex items-end justify-end">
+              <div>
+                <div className="font-narrow text-[64px] font-semibold leading-[0.86] tracking-[-0.025em] text-bone">
+                  {t ? tokens(t.tokens) : "—"}
+                </div>
+                <div className="mt-1.5 text-right text-ui text-dim">billed tokens</div>
+              </div>
             </div>
-            <div className="mt-1.5 text-right text-ui text-dim">billed tokens</div>
-          </div>
-        </div>
 
-        <Trace columns={data?.series ?? []} bucket={RANGES[range].bucket} hue={hue} order={inOrder} />
+            <Trace columns={data?.series ?? []} bucket={RANGES[range].bucket} hue={hue}
+              order={inOrder} onTip={setTip} />
 
-        <div className="mt-6 flex flex-wrap border-t border-line">
-          <Figure
-            label="Estimated cost"
-            value={t?.costUsd != null ? `~${money(t.costUsd)}` : "Not reported"}
-            note={
-              t && t.rows > 0
-                ? `Known for ${count(t.pricedRows)} of ${count(t.rows)} rows. Codex reports no price.`
-                : ""
-            }
-          />
-          <Figure
-            label="Read from cache"
-            value={t && t.tokens > 0 ? `${Math.round((t.cacheReadTokens / t.tokens) * 100)}%` : "—"}
-            note="Of everything billed. Cheap tokens, but tokens."
-          />
-          <Figure
-            label="Turns"
-            value={t ? count(t.turns) : "—"}
-            note={
-              t
-                ? `Across ${plural(t.conversations, "conversation")} in ${plural(t.workspaces, "workspace")}.`
-                : ""
-            }
-          />
-        </div>
+            <div className="mt-6 flex flex-wrap border-t border-line">
+              <Figure
+                label="Estimated cost"
+                value={t?.costUsd != null ? `~${money(t.costUsd)}` : "Not reported"}
+                note={
+                  t && t.rows > 0
+                    ? `Known for ${count(t.pricedRows)} of ${count(t.rows)} rows. Codex reports no price.`
+                    : ""
+                }
+              />
+              <Figure
+                label="Read from cache"
+                value={t && t.tokens > 0 ? `${Math.round((t.cacheReadTokens / t.tokens) * 100)}%` : "—"}
+                note="Of everything billed. Cheap tokens, but tokens."
+              />
+              <Figure
+                label="Turns"
+                value={t ? count(t.turns) : "—"}
+                note={
+                  t
+                    ? `Across ${plural(t.conversations, "conversation")} in ${plural(t.workspaces, "workspace")}.`
+                    : ""
+                }
+              />
+            </div>
+          </>
+        )}
       </section>
 
-      <Limits accounts={accounts ?? []} />
+      <Limits accounts={accounts ?? []} pending={limitsPending} />
 
       {/* ── the ledger ─────────────────────────────────────────────────── */}
       <section className="mt-12">
@@ -249,40 +417,43 @@ export function Consumption() {
               Where it went, by {GROUPS[group]}
               {then ? ` and then by ${GROUPS[then]}` : ""}
             </h2>
-            <p className="mt-0.5 text-meta text-mute">
-              One ledger, sliced. Colour always means the model, whatever the rows are.
-            </p>
           </div>
-          <div className="flex items-center gap-2 pb-4">
-            <Picker
+          <div className="flex flex-wrap items-center gap-2 pb-4">
+            <Choose
+              label="Group by"
               value={group}
-              exclude={then}
-              prefix="by"
+              options={(Object.keys(GROUPS) as GroupKey[])
+                .filter((k) => k !== then)
+                .map((k) => ({ value: k, label: `by ${GROUPS[k]}` }))}
               onChange={(v) => {
-                // The outer picker never offers "nothing", but the shared type
-                // allows it, so the guard is said once here rather than cast.
-                if (!v) return;
                 setGroup(v);
                 if (v === then) setThen("");
+                if (!SEARCHABLE.includes(v)) setTyped("");
                 setOpen(null);
+                reset();
               }}
             />
-            <Picker
+            <Choose
+              label="Then by"
               value={then}
-              exclude={group}
-              prefix="then by"
-              allowNone
+              options={[
+                { value: "" as GroupKey | "", label: "then by nothing" },
+                // Directory is a place, not a thing that happens inside
+                // another row: "this task, broken down by directory" is one
+                // directory every time.
+                ...(Object.keys(GROUPS) as GroupKey[])
+                  .filter((k) => k !== group && k !== "directory")
+                  .map((k) => ({ value: k as GroupKey | "", label: `then by ${GROUPS[k]}` })),
+              ]}
               onChange={(v) => {
                 setThen(v);
                 setOpen(null);
               }}
             />
-            <button
-              type="button"
-              className="rounded-sm bg-raise px-2.5 py-1.5 text-ui text-dim transition-colors hover:bg-overlay hover:text-bone disabled:opacity-35"
+            <Nudge
+              icon={ArrowDownUp}
+              label="Swap the two levels. The totals do not move."
               disabled={!then}
-              title="Swap the two levels. The totals do not move."
-              aria-label="Swap the two levels"
               onClick={() => {
                 if (!then) return;
                 const outer = group;
@@ -290,11 +461,56 @@ export function Consumption() {
                 setThen(outer);
                 setOpen(null);
               }}
-            >
-              ⇅
-            </button>
+            />
+
+            <span className="mx-1 h-5 w-px bg-line" aria-hidden />
+
+            {/* The menu names what is being measured and nothing else; the
+                button beside it names the direction, in words as well as an
+                arrow. Both halves said a direction before, and there was no
+                telling which one won. */}
+            <Choose
+              label="Sort by"
+              value={sort}
+              options={SORTS.map((o) => ({
+                value: o.value,
+                label: `sort by ${o.field || BREADTH[group]}`,
+              }))}
+              onChange={(v) => {
+                setSort(v);
+                setDirection(SORTS.find((o) => o.value === v)?.starts ?? "desc");
+                setOpen(null);
+                reset();
+              }}
+            />
+            <Nudge
+              icon={direction === "desc" ? ArrowDown : ArrowUp}
+              text={direction === "desc" ? "DESC" : "ASC"}
+              label={`${labelFor(sort, group, direction === "desc" ? "down" : "up")} first — click for ${labelFor(sort, group, direction === "desc" ? "up" : "down")}`}
+              onClick={() => {
+                setDirection((d) => (d === "desc" ? "asc" : "desc"));
+                setOpen(null);
+                reset();
+              }}
+            />
           </div>
         </div>
+
+        {SEARCHABLE.includes(group) && (
+          <div className="relative mb-4 max-w-[340px]">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-mute" />
+            <input
+              value={typed}
+              onChange={(e) => {
+                setTyped(e.target.value);
+                reset();
+              }}
+              placeholder={`Find a ${GROUPS[group]}`}
+              aria-label={`Find a ${GROUPS[group]}`}
+              className="w-full rounded-sm bg-raise py-1.5 pl-8 pr-2.5 text-ui text-bone placeholder:text-mute"
+            />
+          </div>
+        )}
 
         <Key models={models} hue={hue} />
 
@@ -305,27 +521,219 @@ export function Consumption() {
           <div className="text-right">Cost</div>
         </div>
 
+        <div className={`transition-opacity duration-200 ${isFetching && !isPending ? "opacity-50" : ""}`}>
+        {isError ? null : isPending ? (
+          <LedgerSkeleton />
+        ) : (
         <Ledger
           groups={data?.groups ?? []}
+          rest={data?.rest ?? undefined}
+          total={data?.groupCount ?? 0}
+          periodTokens={t?.tokens ?? 0}
           by={group}
           nested={!!then}
           open={open}
           onOpen={setOpen}
           hue={hue}
           order={inOrder}
+          onTip={setTip}
         />
+        )}
+        </div>
 
-        <button
-          type="button"
-          className="mt-6 border-b border-dotted border-mute text-meta text-dim transition-colors hover:border-bone hover:text-bone"
-          onClick={() => setTable((v) => !v)}
-          aria-expanded={table}
-        >
-          {table ? "Hide the table" : "Show every value as a table"}
-        </button>
-        {table && <Table groups={data?.groups ?? []} by={group} models={models} />}
+        {!isPending && (data?.groupCount ?? 0) > limit && (
+          <button
+            type="button"
+            className="mt-4 rounded-sm bg-raise px-3 py-1.5 text-ui text-text transition-colors hover:bg-overlay hover:text-bone"
+            onClick={() => setLimit((n) => n + 25)}
+          >
+            Show 25 more
+          </button>
+        )}
+
       </section>
+
+      <TipLayer tip={tip} hue={hue} order={inOrder} />
     </div>
+  );
+}
+
+/* ── the states that are not a chart ──────────────────────────────────── */
+
+/**
+ * The read failed.
+ *
+ * Drawn in the chart's place rather than above it. A line of red over an axis
+ * with no columns on it says "broken" twice and offers nothing to do about it;
+ * this says what happened once and gives you the button.
+ *
+ * It keeps the block's height so the page below does not jump up to meet it.
+ */
+function Trouble({ onRetry }: { onRetry: () => void }) {
+  return (
+    <div className="flex min-h-[320px] flex-col items-start justify-center gap-3 border-b border-line">
+      <p className="text-ui text-text">That didn&apos;t load.</p>
+      <p className="max-w-[46ch] text-meta text-mute">
+        A long period over a lot of history can take longer than the connection will wait. Try
+        again, or narrow the period above.
+      </p>
+      <button
+        type="button"
+        onClick={onRetry}
+        className="mt-1 rounded-md border border-line px-3 py-1.5 text-ui text-text transition-colors duration-150 hover:border-mute/60 hover:text-bone"
+      >
+        Try again
+      </button>
+    </div>
+  );
+}
+
+/**
+ * The read worked and there is nothing in it.
+ *
+ * A real answer, and a different one from a failure — so it says so in words
+ * rather than drawing an empty chart and letting somebody wonder whether it is
+ * still loading.
+ */
+function Nothing({ why, what }: { why: string; what: string }) {
+  return (
+    <div className="flex min-h-[320px] flex-col items-start justify-center gap-2 border-b border-line">
+      <p className="text-ui text-text">{why}</p>
+      <p className="max-w-[46ch] text-meta text-mute">{what}</p>
+    </div>
+  );
+}
+
+/* ── waiting ──────────────────────────────────────────────────────────── */
+
+/**
+ * What a page looks like before it has an answer.
+ *
+ * The shapes are the real ones: the figure sits where the figure sits, the
+ * columns stand on the baseline, the rows are the row grid. A skeleton whose
+ * geometry does not match what replaces it is a layout jump with extra steps,
+ * and the jump is the thing it was supposed to prevent.
+ *
+ * Column heights are fixed rather than random, so a re-render does not make the
+ * placeholder dance while somebody waits.
+ */
+const Block = ({ className = "", style }: { className?: string; style?: React.CSSProperties }) => (
+  <div className={`settling ${className}`} style={style} aria-hidden />
+);
+
+const BARS = [34, 52, 41, 68, 57, 79, 62, 88, 71, 96, 83, 100];
+
+function ReadingSkeleton() {
+  return (
+    <div role="status" aria-label="Loading usage">
+      <div className="flex items-end justify-end">
+        <div className="flex flex-col items-end">
+          <Block className="h-[56px] w-[180px] rounded-md" />
+          <Block className="mt-2.5 h-3 w-[86px]" />
+        </div>
+      </div>
+
+      {/* Standing on the baseline the real chart uses, so nothing moves. */}
+      <div className="mt-1 flex h-[196px] items-end gap-[3.5%] border-b border-line pb-0">
+        {BARS.map((h, i) => (
+          <Block key={i} className="flex-1 rounded-t-[3px]" style={{ height: `${h}%` }} />
+        ))}
+      </div>
+      <div className="mt-2.5 flex gap-[3.5%]">
+        {BARS.map((_, i) => (
+          <div key={i} className="flex flex-1 justify-center">
+            <Block className="h-2.5 w-[70%]" />
+          </div>
+        ))}
+      </div>
+
+      <div className="mt-6 flex flex-wrap border-t border-line">
+        {[0, 1, 2].map((i) => (
+          <div key={i} className="min-w-0 flex-1 basis-56 px-5 pb-0.5 pt-3 first:pl-0 [&+&]:border-l [&+&]:border-line">
+            <Block className="h-3 w-[96px]" />
+            <Block className="mt-2 h-[22px] w-[124px] rounded-sm" />
+            <Block className="mt-2.5 h-2.5 w-[86%]" />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function LedgerSkeleton() {
+  return (
+    <div role="status" aria-label="Loading the ledger">
+      {Array.from({ length: 8 }, (_, i) => (
+        <div
+          key={i}
+          className="grid grid-cols-[minmax(0,1fr)_150px_78px_90px] items-center gap-5 border-b border-line-soft py-3"
+        >
+          <div className="min-w-0">
+            {/* Varied widths, because eight identical bars read as a table of
+                one repeated thing rather than a list of different ones. */}
+            <Block className="h-3.5" style={{ width: `${34 + ((i * 13) % 42)}%` }} />
+            <Block className="mt-2 h-2.5" style={{ width: `${22 + ((i * 7) % 20)}%` }} />
+          </div>
+          <Block className="h-[7px] rounded-sm" style={{ width: `${100 - i * 9}%` }} />
+          <Block className="ml-auto h-3.5 w-[52px]" />
+          <Block className="ml-auto h-3.5 w-[64px]" />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/* ── the hover layer ──────────────────────────────────────────────────── */
+
+type Tip = { x: number; y: number; head: string; models: ByModel[] };
+
+/**
+ * What a column or a row is made of, without having to open anything.
+ *
+ * On `body` and `fixed`, for the reason `Menu` gives: a tooltip opened from
+ * inside a scrolling panel has to be placed against the viewport or it is drawn
+ * in the wrong place the moment anything above it moves.
+ *
+ * It enhances and never gates — every number in here is also in the table
+ * view, which is one click away and reachable without a pointer at all.
+ */
+function TipLayer({
+  tip,
+  hue,
+  order,
+}: {
+  tip: Tip | null;
+  hue: (m: string) => string;
+  order: (list: ByModel[]) => ByModel[];
+}) {
+  if (!tip || typeof document === "undefined") return null;
+  const rows = order(tip.models).filter((m) => m.tokens > 0);
+  const total = rows.reduce((a, m) => a + m.tokens, 0);
+
+  return createPortal(
+    <div
+      role="status"
+      aria-live="polite"
+      style={{
+        left: Math.min(Math.max(tip.x, 100), window.innerWidth - 100),
+        top: Math.max(tip.y - 14, 96),
+      }}
+      className="pointer-events-none fixed z-[70] min-w-[186px] -translate-x-1/2 -translate-y-full rounded-md bg-overlay p-2.5 shadow-float"
+    >
+      <h3 className="mb-2 text-meta font-semibold text-bone">{tip.head}</h3>
+      {rows.map((m) => (
+        <div key={m.model} className="mt-1 grid grid-cols-[13px_1fr_auto] items-center gap-2.5">
+          <i className="block h-0.5 rounded-sm" style={{ background: hue(m.model) }} />
+          <span className="truncate text-meta text-dim">{m.model}</span>
+          <span className="text-meta font-semibold tabular-nums text-bone">{tokens(m.tokens)}</span>
+        </div>
+      ))}
+      <div className="mt-2 flex justify-between gap-3.5 border-t border-line pt-2">
+        <span className="text-meta text-mute">Total</span>
+        <span className="text-meta font-semibold tabular-nums text-text">{tokens(total)}</span>
+      </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -351,55 +759,117 @@ function scopeName(scope: Scope) {
  * Claude Code reports no percentage, so those rows get no meter. The empty
  * space is the finding, not a gap to fill with a word-shaped box.
  */
-function Limits({ accounts }: { accounts: Account[] }) {
-  const [all, setAll] = useState(false);
+/**
+ * How full a window is, for ordering.
+ *
+ * A blocked window with no percentage is counted as full, because it is: the
+ * provider has stopped answering. Anything else without a number has none —
+ * Claude Code reports no percentage at all — and sorts last either way rather
+ * than being called empty, which would put "we do not know" at the top of
+ * "least used".
+ */
+function fullness(l: Limit): number | null {
+  if (l.usedPercent != null) return l.usedPercent;
+  return l.status === "blocked" || l.status === "rejected" ? 100 : null;
+}
 
-  const rows = accounts.flatMap((a) =>
-    (a.limits ?? []).map((l) => ({ account: a, limit: l })),
-  );
-  if (!rows.length) return null;
+function Limits({ accounts, pending }: { accounts: Account[]; pending: boolean }) {
+  const [shown, setShown] = useState(10);
+  const [order, setOrder] = useState<Direction>("desc");
 
-  const pressing = (l: Limit) => l.status !== "allowed";
-  // Everything in trouble, plus your own. On an installation with a dozen
-  // subscriptions the rest is a sentence, not fourteen rows nobody reads.
-  const shown = all ? rows : rows.filter((r) => pressing(r.limit) || r.account.isDefault);
-  const hidden = rows.length - shown.length;
+  const rows = accounts
+    .flatMap((a) => (a.limits ?? []).map((l) => ({ account: a, limit: l })))
+    .sort((x, y) => {
+      const a = fullness(x.limit);
+      const b = fullness(y.limit);
+      if (a == null && b == null) return 0;
+      if (a == null) return 1;
+      if (b == null) return -1;
+      return order === "desc" ? b - a : a - b;
+    });
+  // Nothing at all is a real answer — no subscription has reported a limit —
+  // and it is drawn as nothing. Not knowing yet is a different thing.
+  if (!pending && !rows.length) return null;
+
+  const page = rows.slice(0, shown);
 
   return (
     <section className="mt-12">
-      <h2 className="text-title font-semibold text-bone">Limits</h2>
-      <p className="mb-4 mt-0.5 text-meta text-mute">
-        What each provider last told us. Not something we can work out from the tokens above, and
-        not affected by the period.
-      </p>
-
-      <div className="grid gap-x-10 gap-y-4 sm:grid-cols-2">
-        {(shown.length ? shown : rows).map(({ account, limit }) => (
-          <Gauge key={`${account.id}:${limit.scope}`} account={account} limit={limit} />
-        ))}
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <h2 className="mb-4 text-title font-semibold text-bone">Limits</h2>
+        </div>
+        {!pending && rows.length > 1 && (
+          <div className="pb-4">
+            <Choose
+              label="Order limits by"
+              value={order}
+              options={[
+                { value: "desc" as Direction, label: "most used" },
+                { value: "asc" as Direction, label: "least used" },
+              ]}
+              onChange={(v) => {
+                setOrder(v);
+                setShown(10);
+              }}
+            />
+          </div>
+        )}
       </div>
 
-      {(hidden > 0 || all) && (
+      <div className="grid gap-x-10 gap-y-4 sm:grid-cols-2">
+        {pending
+          ? Array.from({ length: 4 }, (_, i) => (
+              <div key={i} className="min-w-0 max-w-[430px]" role="status" aria-label="Loading limits">
+                <div className="flex items-baseline gap-2">
+                  <Block className="h-3.5 w-[116px]" />
+                  <Block className="h-2.5 w-[82px]" />
+                  <span className="flex-1" />
+                  <Block className="h-2.5 w-[64px]" />
+                </div>
+                {i % 2 === 1 && <Block className="mt-2 h-[3px] rounded-sm" />}
+                <Block className="mt-2 h-2.5 w-[62%]" />
+              </div>
+            ))
+          : page.map(({ account, limit }) => (
+              <Gauge key={`${account.id}:${limit.scope}`} account={account} limit={limit} />
+            ))}
+      </div>
+
+      {!pending && rows.length > shown && (
         <button
           type="button"
-          className="mt-5 border-b border-dotted border-mute text-meta text-dim transition-colors hover:border-bone hover:text-bone"
-          onClick={() => setAll((v) => !v)}
+          className="mt-5 rounded-md border border-line px-3 py-1.5 text-ui text-text transition-colors duration-150 hover:border-mute/60 hover:text-bone"
+          onClick={() => setShown((n) => n + 10)}
         >
-          {all
-            ? "Show only the ones that need attention"
-            : `${plural(hidden, "other window is", "other windows are")} allowed, with room to spare`}
+          Show more
+          <span className="ml-2 text-mute">{rows.length - shown} left</span>
         </button>
       )}
     </section>
   );
 }
 
-const TONE: Record<string, { text: string; bar: string }> = {
-  allowed: { text: "text-sage", bar: "var(--color-sage)" },
-  blocked: { text: "text-brick", bar: "var(--color-brick)" },
-  rejected: { text: "text-brick", bar: "var(--color-brick)" },
-};
+const SAGE = { text: "text-sage", bar: "var(--color-sage)" };
 const AMBER = { text: "text-amber", bar: "var(--color-amber)" };
+const BRICK = { text: "text-brick", bar: "var(--color-brick)" };
+
+/**
+ * What colour a window is, and why it is the percentage that decides.
+ *
+ * A provider says `allowed` right up until it says `blocked` — that is what the
+ * word means — so colouring by status drew a bar at 94% in green and one at 79%
+ * in red, which is the opposite of useful. Where there is a number, the number
+ * decides, because the number is what is on screen. The word only gets a say
+ * when it is the only thing we were told.
+ */
+function tone(l: Limit) {
+  if (l.status === "blocked" || l.status === "rejected") return BRICK;
+  if (l.usedPercent != null) {
+    return l.usedPercent >= 90 ? BRICK : l.usedPercent >= 75 ? AMBER : SAGE;
+  }
+  return l.status === "allowed" ? SAGE : AMBER;
+}
 
 /** `five_hour` is how an agent spells it; nobody says that out loud. */
 const window_ = (scope: string) =>
@@ -420,7 +890,7 @@ function resets(at?: number | null) {
 }
 
 function Gauge({ account, limit }: { account: Account; limit: Limit }) {
-  const tone = TONE[limit.status] ?? AMBER;
+  const shade = tone(limit);
   const pct = limit.usedPercent;
   const when = resets(limit.resetsAt);
 
@@ -430,16 +900,16 @@ function Gauge({ account, limit }: { account: Account; limit: Limit }) {
         <span className="truncate text-ui text-bone">{account.name}</span>
         <span className="whitespace-nowrap text-meta text-mute">{window_(limit.scope)}</span>
         <span className="flex-1" />
-        <span className={`whitespace-nowrap text-meta ${tone.text} ${pct != null ? "tabular-nums" : ""}`}>
+        <span className={`whitespace-nowrap text-meta ${shade.text} ${pct != null ? "tabular-nums" : ""}`}>
           {pct != null ? `${pct}% used` : capitalise(limit.status)}
         </span>
       </div>
 
       {pct != null && (
         <div className="mt-2 h-[3px] overflow-hidden rounded-[2px]"
-          style={{ background: `color-mix(in srgb, ${tone.bar} 20%, var(--color-ground))` }}>
+          style={{ background: `color-mix(in srgb, ${shade.bar} 20%, var(--color-ground))` }}>
           <div className="h-full rounded-[2px]"
-            style={{ width: `${Math.min(100, Math.max(0, pct))}%`, background: tone.bar }} />
+            style={{ width: `${Math.min(100, Math.max(0, pct))}%`, background: shade.bar }} />
         </div>
       )}
 
@@ -495,12 +965,17 @@ function Trace({
   bucket,
   hue,
   order,
+  onTip,
 }: {
   columns: { start: string; models: ByModel[] }[];
   bucket: string;
   hue: (m: string) => string;
   order: (list: ByModel[]) => ByModel[];
+  onTip: (t: Tip | null) => void;
 }) {
+  // Which column the pointer is on, so the others can step back. Held here
+  // rather than lifted: nothing outside the chart needs to know.
+  const [over, setOver] = useState<number | null>(null);
   const W = 1004;
   const TOP = 10;
   const BOTTOM = 196;
@@ -515,6 +990,13 @@ function Trace({
     const d = new Date(iso);
     if (bucket === "month") return MONTHS[d.getMonth()];
     return `${MONTHS[d.getMonth()]} ${String(d.getDate()).padStart(2, "0")}`;
+  };
+  /** What the axis has no room to say: the year, and which week it is. */
+  const full = (iso: string) => {
+    const d = new Date(iso);
+    if (bucket === "month") return `${MONTHS[d.getMonth()]} ${d.getFullYear()}`;
+    if (bucket === "week") return `Week of ${label(iso)}`;
+    return label(iso);
   };
 
   return (
@@ -536,9 +1018,24 @@ function Trace({
         const x = i * band + (band - bar) / 2;
         const live = order(column.models).filter((m) => m.tokens > 0);
         let cursor = y(0);
+        const show = (e: { clientX: number; clientY: number }) => {
+          setOver(i);
+          onTip({ x: e.clientX, y: e.clientY, head: full(column.start), models: column.models });
+        };
+        const away = () => {
+          setOver((at) => (at === i ? null : at));
+          onTip(null);
+        };
         return (
-          <g key={column.start}>
-            <title>{`${label(column.start)}: ${tokens(totals[i])} tokens`}</title>
+          <g
+            key={column.start}
+            // The one being read keeps its colour and the rest step back, so a
+            // stack of four hues in the middle of a year is findable at all.
+            // Opacity rather than a highlight: dimming the others changes
+            // nothing about the one you are looking at, which is the point.
+            opacity={over === null || over === i ? 1 : 0.35}
+            style={{ transition: "opacity 120ms var(--ease-swift)" }}
+          >
             {live.map((m, n) => {
               const h = (m.tokens / max) * (BOTTOM - TOP);
               const bottom = cursor;
@@ -554,11 +1051,45 @@ function Trace({
                   rx={r} ry={r} fill={hue(m.model)} />
               );
             })}
-            {(!sparse || i % 2 === 1) && (
-              <text x={x + bar / 2} y={BOTTOM + 19} textAnchor="middle" className="fill-mute text-[11px] tabular-nums">
+            {/* Its own label comes with it, including the ones the axis is too
+                crowded to print — on a year of months that is how you know
+                which column you are on. */}
+            {(!sparse || i % 2 === 1 || over === i) && (
+              <text
+                x={x + bar / 2}
+                y={BOTTOM + 19}
+                textAnchor="middle"
+                className={`text-[11px] tabular-nums ${over === i ? "fill-text" : "fill-mute"}`}
+              >
                 {label(column.start)}
               </text>
             )}
+            {/* The whole band, not the painted pixels: a 5px bar on a year of
+                months is a target nobody hits. Keyboard gets the same. */}
+            <rect
+              x={i * band}
+              y={TOP}
+              width={band}
+              height={BOTTOM - TOP}
+              fill="transparent"
+              tabIndex={0}
+              role="img"
+              aria-label={`${full(column.start)}: ${tokens(totals[i])} billed tokens`}
+              onPointerMove={show}
+              onPointerEnter={show}
+              onPointerLeave={away}
+              onFocus={(e) => {
+                const box = e.currentTarget.getBoundingClientRect();
+                setOver(i);
+                onTip({
+                  x: box.left + box.width / 2,
+                  y: box.top + box.height,
+                  head: full(column.start),
+                  models: column.models,
+                });
+              }}
+              onBlur={away}
+            />
           </g>
         );
       })}
@@ -577,7 +1108,6 @@ function detail(g: Group, by: GroupKey) {
     case "subscription":
       return `${plural(g.people, "person", "people")}, ${plural(g.turns, "turn")}`;
     case "workspace":
-    case "conversation":
       return plural(g.turns, "turn");
     default:
       return `${plural(g.tasks, "task")}, ${plural(g.people, "person", "people")}`;
@@ -586,20 +1116,28 @@ function detail(g: Group, by: GroupKey) {
 
 function Ledger({
   groups,
+  rest,
+  total,
+  periodTokens,
   by,
   nested,
   open,
   onOpen,
   hue,
   order,
+  onTip,
 }: {
   groups: Group[];
+  rest?: Group;
+  total: number;
+  periodTokens: number;
   by: GroupKey;
   nested: boolean;
   open: string | null;
   onOpen: (k: string | null) => void;
   hue: (m: string) => string;
   order: (list: ByModel[]) => ByModel[];
+  onTip: (t: Tip | null) => void;
 }) {
   if (!groups.length)
     return (
@@ -608,24 +1146,22 @@ function Ledger({
       </p>
     );
 
-  const top = groups.slice(0, 9);
-  const rest = groups.slice(9);
-  // The folded tail is a remainder, not an entity: it gets no bar, and it does
-  // not set the scale — nine folded rows would otherwise flatten every real one.
-  const max = Math.max(...top.map((g) => g.tokens), 1);
+  // The scale is the largest row on screen. The remainder is not a row — it is
+  // what is not on screen — so it neither draws a bar nor sets the scale.
+  const max = Math.max(...groups.map((g) => g.tokens), 1);
 
   return (
     <div>
-      {top.map((g) => {
+      {groups.map((g) => {
         const id = g.key ?? "∅";
         return (
           <div key={id}>
-            <Line g={g} by={by} scale={max} hue={hue} order={order} openable={nested}
+            <Line g={g} by={by} scale={max} hue={hue} order={order} onTip={onTip} openable={nested}
               expanded={open === id} onToggle={() => onOpen(open === id ? null : id)} />
             {nested && open === id && !!g.children?.length && (
               <div className="bg-panel">
                 {g.children.slice(0, 6).map((c) => (
-                  <Line key={c.key ?? "∅"} g={c} by={by} nested order={order}
+                  <Line key={c.key ?? "∅"} g={c} by={by} nested order={order} onTip={onTip}
                     scale={Math.max(...g.children!.map((x) => x.tokens), 1)} hue={hue} />
                 ))}
                 {g.children.length > 6 && (
@@ -644,21 +1180,25 @@ function Ledger({
           </div>
         );
       })}
-      {rest.length > 0 && (
+      {/* Not "smaller": once the order can be reversed, or by name, or by
+          date, what is left over is only what is left over. */}
+      {rest && (
         <div className="grid grid-cols-[minmax(0,1fr)_150px_78px_90px] items-center gap-5 border-b border-line-soft py-3">
           <div className="min-w-0">
-            <div className="truncate text-body italic text-dim">
-              {plural(rest.length, `smaller ${GROUPS[by]}`)}
+            <div className="truncate text-body text-dim">
+              {plural(total - groups.length, `more ${GROUPS[by]}`)}
             </div>
             <div className="mt-0.5 text-meta text-mute">
-              folded in rather than given a tenth colour
+              {periodTokens > 0
+                ? `${Math.round((rest.tokens / periodTokens) * 100)}% of the period`
+                : "not shown"}
             </div>
           </div>
           <div />
           <div className="text-right font-narrow text-[15px] font-medium tabular-nums text-text">
-            {tokens(rest.reduce((a, g) => a + g.tokens, 0))}
+            {tokens(rest.tokens)}
           </div>
-          <Cost g={{ costUsd: rest.reduce<number | null>((a, g) => (g.costUsd == null ? a : (a ?? 0) + g.costUsd), null) } as Group} />
+          <Cost g={rest} />
         </div>
       )}
     </div>
@@ -671,6 +1211,7 @@ function Line({
   scale,
   hue,
   order,
+  onTip,
   nested,
   openable,
   expanded,
@@ -681,6 +1222,7 @@ function Line({
   scale: number;
   hue: (m: string) => string;
   order: (list: ByModel[]) => ByModel[];
+  onTip: (t: Tip | null) => void;
   nested?: boolean;
   openable?: boolean;
   expanded?: boolean;
@@ -690,12 +1232,17 @@ function Line({
   // a child as long as its parent reads as equal to it.
   const span = nested ? 68 : 100;
   const width = Math.min(span, Math.max(4, (g.tokens / scale) * span));
+  const head = g.name ?? unnamed(g, by);
+  const show = (e: { clientX: number; clientY: number }) =>
+    onTip({ x: e.clientX, y: e.clientY, head, models: g.models });
 
   return (
     <div
       className={`grid grid-cols-[minmax(0,1fr)_150px_78px_90px] items-center gap-5 border-b py-3 ${
         nested ? "border-transparent pl-4" : "border-line-soft"
       } ${openable ? "cursor-pointer" : ""}`}
+      onPointerMove={show}
+      onPointerLeave={() => onTip(null)}
       onClick={openable ? onToggle : undefined}
       role={openable ? "button" : undefined}
       tabIndex={openable ? 0 : undefined}
@@ -768,93 +1315,11 @@ function Cost({ g, nested }: { g: Group; nested?: boolean }) {
 /** What to call a row the data could not name. */
 function unnamed(g: Group, by: GroupKey) {
   if (by === "task") return g.key ? "Title unavailable" : "No task assigned";
-  if (by === "tracker") return "No tracker";
   if (by === "subscription") return "No subscription";
   return g.key ?? "Unknown";
 }
 
-function Table({ groups, by, models }: { groups: Group[]; by: GroupKey; models: string[] }) {
-  return (
-    <div className="mt-6 overflow-x-auto">
-      <table className="w-full border-collapse text-meta">
-        <thead>
-          <tr>
-            <th className="border-b border-line pb-2 pr-3 text-left font-normal capitalize text-mute">
-              {GROUPS[by]}
-            </th>
-            <th className="border-b border-line pb-2 pr-3 text-left font-normal text-mute">Key</th>
-            {models.map((m) => (
-              <th key={m} className="border-b border-line pb-2 pr-3 text-right font-normal text-mute">{m}</th>
-            ))}
-            <th className="border-b border-line pb-2 pr-3 text-right font-normal text-mute">Total</th>
-            <th className="border-b border-line pb-2 text-right font-normal text-mute">Cost</th>
-          </tr>
-        </thead>
-        <tbody>
-          {groups.map((g) => (
-            <tr key={g.key ?? "∅"}>
-              <td className="border-b border-line-soft py-1.5 pr-3 text-bone">{g.name ?? unnamed(g, by)}</td>
-              <td className="border-b border-line-soft py-1.5 pr-3 font-mono text-[11px] text-dim">{g.key ?? "—"}</td>
-              {models.map((m) => {
-                const hit = g.models.find((x) => x.model === m);
-                return (
-                  <td key={m} className="border-b border-line-soft py-1.5 pr-3 text-right tabular-nums">
-                    {hit ? tokens(hit.tokens) : "—"}
-                  </td>
-                );
-              })}
-              <td className="border-b border-line-soft py-1.5 pr-3 text-right tabular-nums">{tokens(g.tokens)}</td>
-              <td className="border-b border-line-soft py-1.5 text-right tabular-nums">
-                {g.costUsd == null ? "not reported" : `~${money(g.costUsd)}`}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
 /* ── controls ─────────────────────────────────────────────────────────── */
-
-function Picker({
-  value,
-  exclude,
-  prefix,
-  allowNone,
-  onChange,
-}: {
-  value: GroupKey | "";
-  exclude: GroupKey | "";
-  prefix: string;
-  allowNone?: boolean;
-  onChange: (v: GroupKey | "") => void;
-}) {
-  return (
-    <select
-      className="appearance-none rounded-sm bg-raise py-1.5 pl-2.5 pr-6 text-ui text-text transition-colors hover:bg-overlay"
-      style={{
-        backgroundImage:
-          "linear-gradient(45deg,transparent 50%,var(--color-mute) 50%),linear-gradient(135deg,var(--color-mute) 50%,transparent 50%)",
-        backgroundPosition: "calc(100% - 13px) 53%, calc(100% - 9px) 53%",
-        backgroundSize: "4px 4px, 4px 4px",
-        backgroundRepeat: "no-repeat",
-      }}
-      value={value}
-      aria-label={prefix}
-      onChange={(e) => onChange(e.target.value as GroupKey | "")}
-    >
-      {allowNone && <option value="">then by nothing</option>}
-      {(Object.keys(GROUPS) as GroupKey[])
-        .filter((k) => k !== exclude)
-        .map((k) => (
-          <option key={k} value={k}>
-            {prefix} {GROUPS[k]}
-          </option>
-        ))}
-    </select>
-  );
-}
 
 /**
  * Who to narrow to.
@@ -865,11 +1330,13 @@ function Picker({
  * escape hatch for when you already know who you want.
  */
 function ScopePicker({
+  at,
   colleagues,
   teams,
   onPick,
   onClose,
 }: {
+  at: { left: number; top: number; flip: boolean };
   colleagues: { id: string; username: string }[];
   teams: { id: string; name: string }[];
   onPick: (s: Scope) => void;
@@ -886,10 +1353,16 @@ function ScopePicker({
     ...(hits("just me") ? [{ label: "Just me", scope: { kind: "me" } as Scope }] : []),
   ];
 
-  return (
+  return createPortal(
     <>
-      <div className="fixed inset-0 z-20" onClick={onClose} aria-hidden />
-      <div className="absolute left-[-11px] top-[calc(100%+9px)] z-30 w-[290px] rounded-md bg-overlay p-[7px] shadow-float">
+      <div className="fixed inset-0 z-[60]" onClick={onClose} aria-hidden />
+      <div
+        style={{
+          left: Math.min(at.left - 11, Math.max(8, window.innerWidth - 298)),
+          ...(at.flip ? { bottom: window.innerHeight - at.top + 13 } : { top: at.top + 5 }),
+        }}
+        className="fixed z-[61] w-[290px] rounded-md bg-overlay p-[7px] shadow-float"
+      >
         <div className="relative">
           <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-mute" />
           <input
@@ -902,7 +1375,10 @@ function ScopePicker({
             onKeyDown={(e) => e.key === "Escape" && onClose()}
           />
         </div>
-        <div className="max-h-[286px] overflow-y-auto" role="listbox">
+        {/* `overscroll-contain`: without it, reaching either end of this list
+            hands the wheel to the page behind, which then scrolls the trigger
+            — and the panel with it — off the screen. */}
+        <div className="max-h-[286px] overflow-y-auto overscroll-contain" role="listbox">
           {wide.length > 0 && <Heading>Scope</Heading>}
           {wide.map((w) => (
             <Option key={w.label} label={w.label} onPick={() => onPick(w.scope)} />
@@ -922,7 +1398,8 @@ function ScopePicker({
           )}
         </div>
       </div>
-    </>
+    </>,
+    document.body,
   );
 }
 

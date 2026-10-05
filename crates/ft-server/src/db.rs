@@ -4,7 +4,7 @@
 //! sessions and events are a projection of what workers reported, rebuildable by
 //! reconnecting and replaying from sequence zero.
 
-use crate::access::{filed_where, Level};
+use crate::access::{filed_where, filed_within, reachable, Level};
 use anyhow::{Context, Result};
 use ft_core::{
     path::ResourcePath, session::Checkout, Agent, AgentMode, AgentPresence, Compute, Event,
@@ -2640,6 +2640,88 @@ mod tests {
         Db::open_for_test_owned().await.unwrap()
     }
 
+    /// Every way of ordering the ledger returns the rows it was asked for.
+    ///
+    /// Cheap to write and worth more than it looks. An `ORDER BY` naming a
+    /// column the grouping does not select is a query that compiles, type
+    /// checks, passes review and then fails at run time — and only for the one
+    /// option nobody clicked. That is exactly how "costliest turns" shipped
+    /// returning an empty page while the other five were fine.
+    ///
+    /// So: every dimension, every sort, both directions. 108 queries against
+    /// four rows, which is seconds, and it fails loudly the next time a sort
+    /// is added that needs something the grouping does not have.
+    #[tokio::test]
+    async fn every_sort_returns_rows() {
+        let (db, who) = db_with_user().await;
+        let org = db.org().await.unwrap();
+
+        for n in 0..4 {
+            sqlx::query(
+                "INSERT INTO consumption_events (
+                     org_id, occurred_at, path, ran_as, workspace_id, workspace_name,
+                     session_id, session_title, turn_id, task_key, task_provider,
+                     repo_remote, agent, account_id, account_name, model,
+                     input_tokens, output_tokens, cost_usd)
+                 VALUES ($1, now() - ($2 || ' hours')::interval, 'u.admin'::ltree, $3,
+                         'w' || $2, 'agent/thing' || $2, 's' || $2, 'Thing ' || $2,
+                         't' || $2, 'github:acme/web#' || $2, 'github', 'acme/web',
+                         'claude', 'acc', 'An account', $4, 1000, 100, 0.5)",
+            )
+            .bind(&org)
+            .bind(n.to_string())
+            .bind(&who)
+            .bind(if n % 2 == 0 { "claude-opus-5" } else { "gpt-5-codex" })
+            .execute(db.pool())
+            .await
+            .unwrap();
+        }
+
+        let slice = Slice {
+            from: chrono::Utc::now() - chrono::Duration::days(1),
+            to: chrono::Utc::now() + chrono::Duration::days(1),
+            person: None,
+            team: None,
+            find: None,
+        };
+
+        for by in [
+            Dimension::Task,
+            Dimension::Model,
+            Dimension::Person,
+            Dimension::Repository,
+            Dimension::Directory,
+            Dimension::Subscription,
+            Dimension::Workspace,
+        ] {
+            for sort in [Sort::Tokens, Sort::Recent, Sort::Breadth, Sort::Name] {
+                for dir in [Direction::Desc, Direction::Asc] {
+                    let cut = Ledger {
+                        by,
+                        sort,
+                        direction: dir,
+                        limit: 25,
+                        offset: 0,
+                    };
+                    let (groups, _, total) = db
+                        .consumption_groups(&who, &slice, cut, None)
+                        .await
+                        .unwrap_or_else(|e| panic!("{by:?} by {sort:?} {dir:?}: {e:#}"));
+                    assert!(
+                        !groups.is_empty() && total > 0,
+                        "{by:?} sorted by {sort:?} {dir:?} came back empty"
+                    );
+                    // The detail queries run off the page's keys, so an empty
+                    // breakdown means the keying is wrong rather than the sort.
+                    assert!(
+                        groups.iter().any(|g| !g.models.is_empty()),
+                        "{by:?} by {sort:?} {dir:?}: no row carried a model split"
+                    );
+                }
+            }
+        }
+    }
+
     /// Move a session's status the way production does.
     ///
     /// Through the event log, because that is now the only way a status
@@ -5259,11 +5341,9 @@ pub enum Dimension {
     Model,
     Person,
     Repository,
-    Tracker,
     Directory,
     Subscription,
     Workspace,
-    Conversation,
 }
 
 impl Dimension {
@@ -5275,11 +5355,54 @@ impl Dimension {
             Self::Model => ("c.model", "c.model"),
             Self::Person => ("c.ran_as", "p.name"),
             Self::Repository => ("c.repo_remote", "c.repo_remote"),
-            Self::Tracker => ("c.task_provider", "c.task_provider"),
             Self::Directory => ("c.path::text", "c.path::text"),
             Self::Subscription => ("c.account_id", "c.account_name"),
             Self::Workspace => ("c.workspace_id", "c.workspace_name"),
-            Self::Conversation => ("c.session_id", "c.session_title"),
+        }
+    }
+}
+
+/// What to put at the top.
+///
+/// Five of these mean the same thing whatever is being grouped; `breadth` is
+/// the one that changes, because the count worth ranking by depends on what a
+/// row is — a task sprawling across worktrees, a model reaching people.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize, serde::Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum Sort {
+    Tokens,
+    /// When something was last worked on.
+    Recent,
+    /// Whichever count means something for this grouping.
+    Breadth,
+    Name,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize, serde::Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum Direction {
+    Asc,
+    Desc,
+}
+
+impl Sort {
+    /// The `ORDER BY`, against the aliases the grouping query selects.
+    ///
+    /// Cost puts NULLs last in **both** directions on purpose. Codex reports no
+    /// price, so ascending by cost would otherwise rank "we do not know" as
+    /// cheapest — which is not a smaller number, it is no number.
+    fn order(self, dir: Direction, breadth: &str) -> String {
+        let d = match dir {
+            Direction::Asc => "ASC",
+            Direction::Desc => "DESC",
+        };
+        match self {
+            Self::Tokens => format!("tokens {d}"),
+            Self::Recent => format!("last_at {d}"),
+            Self::Breadth => format!("{breadth} {d}"),
+            // Groups with nothing to call them sort last either way rather than
+            // forming a block of blanks at the top.
+            Self::Name => format!("name {d} NULLS LAST"),
         }
     }
 }
@@ -5311,6 +5434,26 @@ pub struct Slice {
     pub person: Option<String>,
     /// Only the turns of whoever is in this team.
     pub team: Option<String>,
+    /// Only groups whose name or key contains this.
+    ///
+    /// The thing that makes a thousand tasks usable: at that size finding the
+    /// one you mean matters more than ranking all of them.
+    pub find: Option<String>,
+}
+
+/// How to cut the ledger, and how much of it to hand back.
+///
+/// A struct rather than five more parameters: these travel together, they are
+/// all about the shape of one list, and a call site passing
+/// `(by, sort, dir, 25, 0)` positionally is one transposition away from
+/// silently paging the wrong way.
+#[derive(Debug, Clone, Copy)]
+pub struct Ledger {
+    pub by: Dimension,
+    pub sort: Sort,
+    pub direction: Direction,
+    pub limit: i64,
+    pub offset: i64,
 }
 
 /// The totals a period adds up to.
@@ -5336,7 +5479,7 @@ pub struct Totals {
 }
 
 /// One model's share of one bucket or one group.
-#[derive(Debug, Clone, serde::Serialize, utoipa::ToSchema)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ByModel {
     pub model: String,
@@ -5373,6 +5516,12 @@ pub struct Group {
     pub workspaces: i64,
     pub people: i64,
     pub tasks: i64,
+    /// When this was first and last worked on.
+    ///
+    /// Absent on the folded remainder, which is not a thing that happened at a
+    /// time. Without these "recently active" cannot be offered at all.
+    pub first_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub last_at: Option<chrono::DateTime<chrono::Utc>>,
     /// The second level, when one was asked for.
     ///
     /// `no_recursion` because this type contains itself: without it the schema
@@ -5386,41 +5535,65 @@ pub struct Group {
 }
 
 impl Db {
-    /// The shared tail of every consumption read: access, then the period, then
-    /// whatever the scope narrowed it to.
+    /// The prelude every consumption read opens with: the person's reach,
+    /// resolved once. See [`crate::access::reachable`] for why.
+    fn consumption_with() -> String {
+        format!("WITH {}", reachable(1, Level::Viewer))
+    }
+
+    /// The shared tail: access, then the period, then whatever narrowed it.
     ///
-    /// `$1` is the person asking, `$2`/`$3` the period, `$4`/`$5` the scope.
-    /// Fixed positions so the fragment can be pasted into any of these queries
-    /// without each one counting its own placeholders.
+    /// `$1` is the person asking, `$2`/`$3` the period, `$4`/`$5` the scope,
+    /// `$6` the search. Fixed positions so the fragment can be pasted into any
+    /// of these queries without each one counting its own placeholders.
     fn consumption_where() -> String {
+        Self::consumption_where_on("c")
+    }
+
+    /// The same, for a second copy of the table inside the one statement.
+    fn consumption_where_on(a: &str) -> String {
         format!(
             "{visible} \
-             AND c.occurred_at >= $2 AND c.occurred_at < $3 \
-             AND ($4::text IS NULL OR c.ran_as = $4) \
-             AND ($5::text IS NULL OR c.ran_as IN \
+             AND {a}.occurred_at >= $2 AND {a}.occurred_at < $3 \
+             AND ($4::text IS NULL OR {a}.ran_as = $4) \
+             AND ($5::text IS NULL OR {a}.ran_as IN \
                   (SELECT m.user_id FROM team_members m WHERE m.team_id = $5))",
-            visible = filed_where("c", 1, Level::Viewer)
+            visible = filed_within(a, Level::Viewer)
         )
     }
 
     /// What a period came to.
     pub async fn consumption_totals(&self, person: &str, slice: &Slice) -> Result<Totals> {
         let row = sqlx::query(&format!(
-            // `SUM` over a bigint widens to numeric, which will not decode as
-            // an i64 — so every total is cast back on the way out.
-            "SELECT COALESCE(SUM(c.input_tokens), 0)::bigint       AS input_tokens,
-                    COALESCE(SUM(c.output_tokens), 0)::bigint      AS output_tokens,
-                    COALESCE(SUM(c.cache_read_tokens), 0)::bigint  AS cache_read_tokens,
-                    COALESCE(SUM(c.cache_write_tokens), 0)::bigint AS cache_write_tokens,
-                    SUM(c.cost_usd)::float8                AS cost_usd,
-                    COUNT(c.cost_usd)                      AS priced_rows,
-                    COUNT(*)                               AS rows,
-                    COUNT(DISTINCT (c.session_id, c.turn_id)) AS turns,
-                    COUNT(DISTINCT c.session_id)           AS conversations,
-                    COUNT(DISTINCT c.workspace_id)         AS workspaces,
-                    COUNT(DISTINCT c.ran_as)               AS people
-               FROM consumption_events c
-              WHERE {tail}",
+            // Counted by `GROUP BY` in a subquery rather than `COUNT(DISTINCT)`.
+            //
+            // They are the same answer and not the same query: `COUNT(DISTINCT)`
+            // always sorts, and on a year of 2.06 M rows that was an external
+            // merge spilling 300 MB to disk across four of them — 5.3 s.
+            // `GROUP BY` is free to hash, which it does, and runs in 2.0 s.
+            // Raising `work_mem` instead made it *slower*: a sort big enough to
+            // fit in memory loses the parallel workers that were splitting it.
+            //
+            // `SUM` over a bigint also widens to numeric, which will not decode
+            // as an i64, so every total is cast back on the way out.
+            "{with_}, rows AS MATERIALIZED (\
+                 SELECT c.session_id, c.turn_id, c.workspace_id, c.ran_as, \
+                        c.input_tokens, c.output_tokens, c.cache_read_tokens, \
+                        c.cache_write_tokens, c.cost_usd \
+                   FROM consumption_events c WHERE {tail}) \
+             SELECT COALESCE(SUM(input_tokens), 0)::bigint       AS input_tokens, \
+                    COALESCE(SUM(output_tokens), 0)::bigint      AS output_tokens, \
+                    COALESCE(SUM(cache_read_tokens), 0)::bigint  AS cache_read_tokens, \
+                    COALESCE(SUM(cache_write_tokens), 0)::bigint AS cache_write_tokens, \
+                    SUM(cost_usd)::float8                        AS cost_usd, \
+                    COUNT(cost_usd)                              AS priced_rows, \
+                    COUNT(*)                                     AS rows, \
+                    (SELECT count(*) FROM (SELECT session_id, turn_id FROM rows GROUP BY 1, 2) a) AS turns, \
+                    (SELECT count(*) FROM (SELECT session_id FROM rows GROUP BY 1) b)             AS conversations, \
+                    (SELECT count(*) FROM (SELECT workspace_id FROM rows GROUP BY 1) c)           AS workspaces, \
+                    (SELECT count(*) FROM (SELECT ran_as FROM rows WHERE ran_as IS NOT NULL GROUP BY 1) d) AS people \
+               FROM rows",
+            with_ = Self::consumption_with(),
             tail = Self::consumption_where()
         ))
         .bind(person)
@@ -5428,6 +5601,7 @@ impl Db {
         .bind(slice.to)
         .bind(slice.person.as_deref())
         .bind(slice.team.as_deref())
+        .bind(slice.find.as_deref())
         .fetch_one(&self.pool)
         .await
         .context("adding up a period's consumption")?;
@@ -5467,7 +5641,7 @@ impl Db {
         bucket: Bucket,
     ) -> Result<Vec<Column>> {
         let rows = sqlx::query(&format!(
-            "SELECT date_trunc('{unit}', c.occurred_at) AS start,
+            "{with_} SELECT date_trunc('{unit}', c.occurred_at) AS start,
                     c.model,
                     SUM(c.input_tokens + c.output_tokens
                         + c.cache_read_tokens + c.cache_write_tokens)::bigint AS tokens
@@ -5475,6 +5649,7 @@ impl Db {
               WHERE {tail}
               GROUP BY 1, 2
               ORDER BY 1, 3 DESC",
+            with_ = Self::consumption_with(),
             unit = bucket.unit(),
             tail = Self::consumption_where()
         ))
@@ -5483,6 +5658,7 @@ impl Db {
         .bind(slice.to)
         .bind(slice.person.as_deref())
         .bind(slice.team.as_deref())
+        .bind(slice.find.as_deref())
         .fetch_all(&self.pool)
         .await
         .context("reading consumption over time")?;
@@ -5505,122 +5681,326 @@ impl Db {
         Ok(out)
     }
 
-    /// The ledger, cut one way.
+    /// Which count is worth ranking a row by, for this grouping.
     ///
-    /// Two queries rather than one: the measures add up per model, and the
-    /// counts do not. A turn spans several models, so counting it on each
-    /// model's row would report it several times — which is why `turns` is
-    /// counted once per group, apart from the tokens.
+    /// "Breadth" is not one number: a task that sprawled across many worktrees
+    /// and a model that reached many people are both breadth, and neither is
+    /// the other's column.
+    fn breadth_of(by: Dimension) -> &'static str {
+        match by {
+            Dimension::Task => "workspaces",
+            Dimension::Person => "tasks",
+            Dimension::Model | Dimension::Subscription => "people",
+            Dimension::Repository | Dimension::Directory => "tasks",
+            Dimension::Workspace => "turns",
+        }
+    }
+
+    /// Everything the ledger reads from.
+    ///
+    /// **The counts are asked only for the rows that will be drawn.** Folding
+    /// them into the grouping meant computing five `COUNT(DISTINCT)` for every
+    /// group to display twenty-five: on 2.06 M rows that was 2.4 s against
+    /// 0.55 s for the sums alone, and the difference was 47,166 answers nobody
+    /// was going to see. They are laterals against the page instead, each one
+    /// an index lookup on its grouping key.
+    ///
+    /// The exception is sorting *by* a count — there the whole set has to be
+    /// counted to know what the top of it is, so the column joins the grouping
+    /// and only then.
+    fn ledger_sql(by: Dimension, sort: Sort, dir: Direction, tail_select: bool) -> String {
+        let (key, name) = by.columns();
+        let joins = Self::consumption_joins(by);
+        let breadth = Self::breadth_of(by);
+        let order = sort.order(dir, breadth);
+        let tok = "(c.input_tokens + c.output_tokens + c.cache_read_tokens + c.cache_write_tokens)";
+
+        // Two of the orders divide by, or rank on, a count — and the counts
+        // were moved off the grouping because computing them for every group
+        // to draw twenty-five was most of the query. So the one the order
+        // actually needs comes back, and only that one.
+        //
+        // This is deliberately the single place that decides it. Ordering by a
+        // column the grouping does not select is a query that fails at run
+        // time and nowhere else, which is how `perTurn` shipped returning
+        // nothing at all — see `every_sort_returns_rows`.
+        let extra = match sort {
+            Sort::Breadth => format!(", COUNT(DISTINCT {}) AS {breadth}", Self::breadth_source(by)),
+            _ => String::new(),
+        };
+
+        let body = format!(
+            "{with_}, \
+             grouped AS (\
+                 SELECT {key} AS key, MAX({name}) AS name, \
+                        SUM{tok}::bigint AS tokens, SUM(c.cost_usd)::float8 AS cost_usd, \
+                        COUNT(c.cost_usd) AS priced_rows, COUNT(*) AS rows, \
+                        MIN(c.occurred_at) AS first_at, MAX(c.occurred_at) AS last_at\
+                        {extra} \
+                   FROM consumption_events c {joins} \
+                  WHERE {tail} \
+                    AND ($6::text IS NULL \
+                         OR COALESCE({name}, '') || ' ' || COALESCE({key}, '') ILIKE '%' || $6 || '%') \
+                  GROUP BY 1), \
+             ranked AS (\
+                 SELECT g.*, row_number() OVER (ORDER BY {order}) AS rn, \
+                        COUNT(*) OVER () AS total \
+                   FROM grouped g)",
+            with_ = Self::consumption_with(),
+            tail = Self::consumption_where(),
+        );
+
+        if tail_select {
+            return format!(
+                "{body} SELECT COUNT(*) AS groups, COALESCE(SUM(tokens), 0)::bigint AS tokens, \
+                        SUM(cost_usd)::float8 AS cost_usd, \
+                        COALESCE(SUM(priced_rows), 0)::bigint AS priced_rows, \
+                        COALESCE(SUM(rows), 0)::bigint AS rows, \
+                        MAX(total) AS total \
+                   FROM ranked WHERE rn > $7 + $8"
+            );
+        }
+
+        // The page's own rows, and nothing else. Detail is fetched separately,
+        // keyed by an array of what came back — see `ledger_detail_sql`.
+        format!("{body} SELECT * FROM ranked WHERE rn > $7 AND rn <= $7 + $8 ORDER BY rn")
+    }
+
+    /// Everything about the rows that will be drawn, and nothing about the rest.
+    ///
+    /// Keyed by `= ANY($9)` rather than a lateral per row. A correlated
+    /// `key = p.key OR (p.key IS NULL AND key IS NULL)` cannot use an index —
+    /// whether the NULL branch applies is not known until the row is read — and
+    /// twenty-five of those cost ten seconds on 2.06 M rows. An array
+    /// comparison is one indexed scan for all of them.
+    ///
+    /// `$10` says whether the page included the group with no key at all — work
+    /// filed against no task — because `= ANY` can never match a NULL.
+    fn ledger_detail_sql(by: Dimension) -> String {
+        let (key, _) = by.columns();
+        format!(
+            "{with_} \
+             SELECT {key} AS key, \
+                    COUNT(DISTINCT (c.session_id, c.turn_id)) AS turns, \
+                    COUNT(DISTINCT c.session_id) AS conversations, \
+                    COUNT(DISTINCT c.workspace_id) AS workspaces, \
+                    COUNT(DISTINCT c.ran_as) AS people, \
+                    COUNT(DISTINCT c.task_key) AS tasks \
+               FROM consumption_events c \
+              WHERE {tail} AND ({key} = ANY($9) OR ($10 AND {key} IS NULL)) \
+              GROUP BY 1",
+            with_ = Self::consumption_with(),
+            tail = Self::consumption_where(),
+        )
+    }
+
+    /// The per-model split for the drawn rows, same keying as the detail.
+    fn ledger_models_sql(by: Dimension) -> String {
+        let (key, _) = by.columns();
+        format!(
+            "{with_} \
+             SELECT {key} AS key, c.model, \
+                    SUM(c.input_tokens + c.output_tokens \
+                        + c.cache_read_tokens + c.cache_write_tokens)::bigint AS tokens \
+               FROM consumption_events c \
+              WHERE {tail} AND ({key} = ANY($9) OR ($10 AND {key} IS NULL)) \
+              GROUP BY 1, 2 ORDER BY 3 DESC",
+            with_ = Self::consumption_with(),
+            tail = Self::consumption_where(),
+        )
+    }
+
+    /// The column `breadth` counts, as opposed to what the page calls it.
+    fn breadth_source(by: Dimension) -> &'static str {
+        match by {
+            Dimension::Task => "c.workspace_id",
+            Dimension::Person => "c.task_key",
+            Dimension::Model | Dimension::Subscription => "c.ran_as",
+            Dimension::Repository | Dimension::Directory => "c.task_key",
+            // A turn is a session and a turn id together, which is why this
+            // returns an expression rather than a column name.
+            Dimension::Workspace => "(c.session_id, c.turn_id)",
+        }
+    }
+
+    /// The ledger, cut one way, sorted and paged.
+    ///
+    /// Sorting happens here rather than after the fact. It has to: a page of a
+    /// list the client sorted is a page of nothing in particular, and the
+    /// remainder underneath it would be wrong too.
     pub async fn consumption_groups(
         &self,
         person: &str,
         slice: &Slice,
-        by: Dimension,
-    ) -> Result<Vec<Group>> {
-        let (key, name) = by.columns();
-        let joins = Self::consumption_joins(by);
-
-        let measured = sqlx::query(&format!(
-            "SELECT {key} AS key, MAX({name}) AS name, c.model,
-                    SUM(c.input_tokens + c.output_tokens
-                        + c.cache_read_tokens + c.cache_write_tokens)::bigint AS tokens,
-                    SUM(c.cost_usd)::float8 AS cost_usd,
-                    COUNT(c.cost_usd) AS priced_rows,
-                    COUNT(*) AS rows
-               FROM consumption_events c {joins}
-              WHERE {tail}
-              GROUP BY 1, 3",
-            tail = Self::consumption_where()
-        ))
-        .bind(person)
-        .bind(slice.from)
-        .bind(slice.to)
-        .bind(slice.person.as_deref())
-        .bind(slice.team.as_deref())
-        .fetch_all(&self.pool)
-        .await
-        .context("reading consumption by dimension")?;
-
-        let counted = sqlx::query(&format!(
-            "SELECT {key} AS key,
-                    COUNT(DISTINCT (c.session_id, c.turn_id)) AS turns,
-                    COUNT(DISTINCT c.session_id) AS conversations,
-                    COUNT(DISTINCT c.workspace_id) AS workspaces,
-                    COUNT(DISTINCT c.ran_as) AS people,
-                    COUNT(DISTINCT c.task_key) AS tasks
-               FROM consumption_events c {joins}
-              WHERE {tail}
-              GROUP BY 1",
-            tail = Self::consumption_where()
-        ))
-        .bind(person)
-        .bind(slice.from)
-        .bind(slice.to)
-        .bind(slice.person.as_deref())
-        .bind(slice.team.as_deref())
-        .fetch_all(&self.pool)
-        .await
-        .context("counting consumption by dimension")?;
-
-        let mut counts = std::collections::HashMap::new();
-        for r in counted {
-            counts.insert(
-                r.get::<Option<String>, _>("key"),
-                (
-                    r.get::<i64, _>("turns"),
-                    r.get::<i64, _>("conversations"),
-                    r.get::<i64, _>("workspaces"),
-                    r.get::<i64, _>("people"),
-                    r.get::<i64, _>("tasks"),
-                ),
-            );
+        cut: Ledger,
+        totals: Option<&Totals>,
+    ) -> Result<(Vec<Group>, Option<Group>, i64)> {
+        let Ledger {
+            by,
+            sort,
+            direction: dir,
+            limit,
+            offset,
+        } = cut;
+        // A macro rather than a closure: every query here binds the same eight
+        // values in the same order, and a closure cannot hand back a borrowed
+        // `Query` without naming a lifetime it does not have.
+        macro_rules! bound {
+            ($sql:expr) => {
+                sqlx::query($sql)
+                    .bind(person)
+                    .bind(slice.from)
+                    .bind(slice.to)
+                    .bind(slice.person.as_deref())
+                    .bind(slice.team.as_deref())
+                    .bind(slice.find.as_deref())
+                    .bind(offset)
+                    .bind(limit)
+            };
         }
 
-        let mut groups: std::collections::HashMap<Option<String>, Group> =
-            std::collections::HashMap::new();
-        for r in measured {
-            let key: Option<String> = r.get("key");
-            let tokens: i64 = r.get("tokens");
-            let cost: Option<f64> = r.get("cost_usd");
-            let g = groups.entry(key.clone()).or_insert_with(|| {
-                let (turns, conversations, workspaces, people, tasks) =
-                    counts.get(&key).copied().unwrap_or_default();
-                Group {
-                    key: key.clone(),
-                    name: r.get("name"),
-                    models: Vec::new(),
-                    tokens: 0,
-                    cost_usd: None,
-                    priced_rows: 0,
-                    rows: 0,
-                    turns,
-                    conversations,
-                    workspaces,
-                    people,
-                    tasks,
-                    children: Vec::new(),
+        let page = Self::ledger_sql(by, sort, dir, false);
+        let rows = bound!(&page)
+            .fetch_all(&self.pool)
+            .await
+            .context("reading the ledger")?;
+
+        let mut total = 0i64;
+        let mut groups: Vec<Group> = Vec::with_capacity(rows.len());
+        for r in rows {
+            total = r.get("total");
+            groups.push(Group {
+                key: r.get("key"),
+                name: r.get("name"),
+                models: Vec::new(),
+                tokens: r.get("tokens"),
+                cost_usd: r.get("cost_usd"),
+                priced_rows: r.get("priced_rows"),
+                rows: r.get("rows"),
+                turns: 0,
+                conversations: 0,
+                workspaces: 0,
+                people: 0,
+                tasks: 0,
+                first_at: r.get("first_at"),
+                last_at: r.get("last_at"),
+                children: Vec::new(),
+            });
+        }
+
+        // Detail for the drawn rows only, keyed by what came back.
+        if !groups.is_empty() {
+            let keys: Vec<String> = groups.iter().filter_map(|g| g.key.clone()).collect();
+            let has_null = groups.iter().any(|g| g.key.is_none());
+            let at = |g: &Group| g.key.clone();
+
+            let detail = Self::ledger_detail_sql(by);
+            for r in bound!(&detail)
+                .bind(&keys)
+                .bind(has_null)
+                .fetch_all(&self.pool)
+                .await
+                .context("counting what the drawn rows are made of")?
+            {
+                let k: Option<String> = r.get("key");
+                if let Some(g) = groups.iter_mut().find(|g| at(g) == k) {
+                    g.turns = r.get("turns");
+                    g.conversations = r.get("conversations");
+                    g.workspaces = r.get("workspaces");
+                    g.people = r.get("people");
+                    g.tasks = r.get("tasks");
                 }
-            });
-            g.models.push(ByModel {
-                model: r.get("model"),
-                tokens,
-            });
-            g.tokens += tokens;
-            // NULL is not zero: a group of nothing but Codex has no price at
-            // all, and a group with some has only part of one.
-            if let Some(c) = cost {
-                *g.cost_usd.get_or_insert(0.0) += c;
             }
-            g.priced_rows += r.get::<i64, _>("priced_rows");
-            g.rows += r.get::<i64, _>("rows");
+
+            let models = Self::ledger_models_sql(by);
+            for r in bound!(&models)
+                .bind(&keys)
+                .bind(has_null)
+                .fetch_all(&self.pool)
+                .await
+                .context("splitting the drawn rows by model")?
+            {
+                let k: Option<String> = r.get("key");
+                if let Some(g) = groups.iter_mut().find(|g| at(g) == k) {
+                    g.models.push(ByModel {
+                        model: r.get("model"),
+                        tokens: r.get("tokens"),
+                    });
+                }
+            }
         }
 
-        let mut out: Vec<Group> = groups.into_values().collect();
-        for g in &mut out {
-            g.models.sort_by_key(|m| std::cmp::Reverse(m.tokens));
+        // Every row belongs to exactly one group, so the groups add up to the
+        // period. On the first page that makes the remainder arithmetic —
+        // what the period came to, less what is on screen — and saves grouping
+        // two million rows a second time to learn something already known.
+        //
+        // Only on the first page: past it there are earlier pages between the
+        // total and the remainder, and those are not "the rest".
+        if offset == 0 && total > limit {
+            if let Some(t) = totals {
+                let shown: i64 = groups.iter().map(|g| g.tokens).sum();
+                let shown_cost: f64 = groups.iter().filter_map(|g| g.cost_usd).sum();
+                let shown_priced: i64 = groups.iter().map(|g| g.priced_rows).sum();
+                let shown_rows: i64 = groups.iter().map(|g| g.rows).sum();
+                return Ok((
+                    groups,
+                    Some(Group {
+                        key: None,
+                        name: None,
+                        models: Vec::new(),
+                        tokens: t.tokens - shown,
+                        // NULL stays NULL: a remainder of nothing but Codex has
+                        // no price, and zero would claim it was free.
+                        cost_usd: t
+                            .cost_usd
+                            .map(|c| c - shown_cost)
+                            .filter(|_| t.priced_rows > shown_priced),
+                        priced_rows: t.priced_rows - shown_priced,
+                        rows: t.rows - shown_rows,
+                        turns: 0,
+                        conversations: 0,
+                        workspaces: 0,
+                        people: 0,
+                        tasks: total - limit,
+                        first_at: None,
+                        last_at: None,
+                        children: Vec::new(),
+                    }),
+                    total,
+                ));
+            }
         }
-        out.sort_by_key(|g| std::cmp::Reverse(g.tokens));
-        Ok(out)
+
+        // Only worth asking when something was left out.
+        let rest = if total > offset + limit {
+            let tail = Self::ledger_sql(by, sort, dir, true);
+            let r = bound!(&tail)
+                .fetch_one(&self.pool)
+                .await
+                .context("adding up the rest of the ledger")?;
+            Some(Group {
+                key: None,
+                name: None,
+                models: Vec::new(),
+                tokens: r.get("tokens"),
+                cost_usd: r.get("cost_usd"),
+                priced_rows: r.get("priced_rows"),
+                rows: r.get("rows"),
+                turns: 0,
+                conversations: 0,
+                workspaces: 0,
+                people: 0,
+                tasks: r.get::<i64, _>("groups"),
+                first_at: None,
+                last_at: None,
+                children: Vec::new(),
+            })
+        } else {
+            None
+        };
+
+        Ok((groups, rest, total))
     }
 
     /// What a dimension has to reach for to find a name.

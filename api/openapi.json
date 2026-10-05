@@ -807,6 +807,50 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "find",
+            "in": "query",
+            "description": "Only groups whose name or key contains this.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/Sort"
+            }
+          },
+          {
+            "name": "direction",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/Direction"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "How many rows to draw. Capped, because a page that asks for everything\nis how the first version of this shipped 461 KB to draw nine rows.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
           }
         ],
         "responses": {
@@ -7559,14 +7603,31 @@
         "required": [
           "totals",
           "series",
-          "groups"
+          "groups",
+          "groupCount"
         ],
         "properties": {
+          "groupCount": {
+            "type": "integer",
+            "format": "int64",
+            "description": "How many groups there are in total, so a page can say what it is part of."
+          },
           "groups": {
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/Group"
             }
+          },
+          "rest": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Group",
+                "description": "Everything past this page, added together.\n\nDeliberately not called \"smaller\": once the order can be reversed, or by\nname, or by date, the rest is not smaller — it is only the rest."
+              }
+            ]
           },
           "series": {
             "type": "array",
@@ -7891,11 +7952,16 @@
           "model",
           "person",
           "repository",
-          "tracker",
           "directory",
           "subscription",
-          "workspace",
-          "conversation"
+          "workspace"
+        ]
+      },
+      "Direction": {
+        "type": "string",
+        "enum": [
+          "asc",
+          "desc"
         ]
       },
       "Directory": {
@@ -8774,12 +8840,27 @@
             ],
             "format": "double"
           },
+          "firstAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When this was first and last worked on.\n\nAbsent on the folded remainder, which is not a thing that happened at a\ntime. Without these \"recently active\" cannot be offered at all."
+          },
           "key": {
             "type": [
               "string",
               "null"
             ],
             "description": "What was grouped on. NULL where the dimension does not apply — a turn\nwith no task, a model with no subscription — which is a real row and\nnot an omission."
+          },
+          "lastAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
           },
           "models": {
             "type": "array",
@@ -11220,6 +11301,16 @@
             "type": "string"
           }
         }
+      },
+      "Sort": {
+        "type": "string",
+        "description": "What to put at the top.\n\nFive of these mean the same thing whatever is being grouped; `breadth` is\nthe one that changes, because the count worth ranking by depends on what a\nrow is — a task sprawling across worktrees, a model reaching people.",
+        "enum": [
+          "tokens",
+          "recent",
+          "breadth",
+          "name"
+        ]
       },
       "SshKey": {
         "oneOf": [

@@ -11,7 +11,7 @@
 
 use super::ApiResult;
 use crate::auth::Principal;
-use crate::db::{Bucket, Column, Dimension, Group, Slice, Totals};
+use crate::db::{Bucket, Column, Dimension, Direction, Group, Ledger, Slice, Sort, Totals};
 use crate::AppState;
 use axum::{
     extract::{Query, State},
@@ -44,6 +44,29 @@ pub struct Ask {
     /// Narrow to whoever is in one team.
     #[serde(default)]
     pub team: Option<String>,
+    /// Only groups whose name or key contains this.
+    #[serde(default)]
+    pub find: Option<String>,
+    #[serde(default = "by_tokens")]
+    pub sort: Sort,
+    #[serde(default = "descending")]
+    pub direction: Direction,
+    /// How many rows to draw. Capped, because a page that asks for everything
+    /// is how the first version of this shipped 461 KB to draw nine rows.
+    #[serde(default = "a_page")]
+    pub limit: i64,
+    #[serde(default)]
+    pub offset: i64,
+}
+
+fn by_tokens() -> Sort {
+    Sort::Tokens
+}
+fn descending() -> Direction {
+    Direction::Desc
+}
+fn a_page() -> i64 {
+    25
 }
 
 /// The whole page, in the terms the person asking may see it.
@@ -53,6 +76,14 @@ pub struct Consumption {
     pub totals: Totals,
     pub series: Vec<Column>,
     pub groups: Vec<Group>,
+    /// Everything past this page, added together.
+    ///
+    /// Deliberately not called "smaller": once the order can be reversed, or by
+    /// name, or by date, the rest is not smaller — it is only the rest.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rest: Option<Group>,
+    /// How many groups there are in total, so a page can say what it is part of.
+    pub group_count: i64,
 }
 
 /// What was spent in a period.
@@ -78,11 +109,28 @@ pub(super) async fn consumption(
             other => other.map(str::to_string),
         },
         team: ask.team.clone(),
+        find: ask.find.clone().filter(|f| !f.trim().is_empty()),
     };
+    let limit = ask.limit.clamp(1, 200);
+    let offset = ask.offset.max(0);
 
     let totals = state.db.consumption_totals(&me, &slice).await?;
     let series = state.db.consumption_series(&me, &slice, ask.bucket).await?;
-    let mut groups = state.db.consumption_groups(&me, &slice, ask.group).await?;
+    let (mut groups, rest, group_count) = state
+        .db
+        .consumption_groups(
+            &me,
+            &slice,
+            Ledger {
+                by: ask.group,
+                sort: ask.sort,
+                direction: ask.direction,
+                limit,
+                offset,
+            },
+            Some(&totals),
+        )
+        .await?;
 
     // The second level, cut from each row of the first. Only for the rows that
     // will be drawn: a hundred groups each fanning out again is a query nobody
@@ -94,6 +142,7 @@ pub(super) async fn consumption(
                 to: slice.to,
                 person: slice.person.clone(),
                 team: slice.team.clone(),
+                find: None,
             };
             // Grouping by person and then by something else is the same as
             // asking for that person. Every other dimension needs its own
@@ -102,7 +151,22 @@ pub(super) async fn consumption(
             // wrong.
             if ask.group == Dimension::Person {
                 narrowed.person = group.key.clone();
-                group.children = state.db.consumption_groups(&me, &narrowed, then).await?;
+                group.children = state
+                    .db
+                    .consumption_groups(
+                        &me,
+                        &narrowed,
+                        Ledger {
+                            by: then,
+                            sort: ask.sort,
+                            direction: ask.direction,
+                            limit: 6,
+                            offset: 0,
+                        },
+                        None,
+                    )
+                    .await?
+                    .0;
             }
         }
     }
@@ -111,5 +175,7 @@ pub(super) async fn consumption(
         totals,
         series,
         groups,
+        rest,
+        group_count,
     }))
 }
