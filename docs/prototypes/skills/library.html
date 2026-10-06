@@ -1,0 +1,329 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Firetower — Skills</title>
+<link rel="stylesheet" href="desk.css">
+<style>
+#body{grid-template-columns:196px 384px 1fr}
+.list{display:flex;flex-direction:column;min-height:0;border-right:1px solid var(--line-soft);background:var(--panel)}
+.list .scroll{flex:1;min-height:0;overflow:auto;padding:4px 6px 10px}
+.sk{display:grid;grid-template-columns:26px 1fr;gap:9px;padding:8px 9px;border-radius:var(--r-md);cursor:default;
+  transition:background var(--dur) var(--swift)}
+.sk:hover{background:color-mix(in srgb,var(--raise) 70%,transparent)}
+.sk[data-on=true]{background:var(--overlay);box-shadow:var(--raised)}
+.sk .top{display:flex;align-items:baseline;gap:7px}
+.sk .nm{font-size:var(--ui);color:var(--text);font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sk[data-on=true] .nm{color:var(--bone)}
+.sk .ver{font-size:var(--micro);color:var(--mute);font-variant-numeric:tabular-nums;margin-left:auto;flex:none}
+.sk .desc{font-size:var(--meta);color:var(--mute);margin-top:2px;line-height:1.45;
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.sk .foot{display:flex;align-items:center;gap:8px;margin-top:5px}
+.sk .who{font-size:var(--micro);color:var(--mute);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sect{padding:13px 10px 5px;display:flex;align-items:baseline;gap:9px}
+.sect .n{font-size:var(--micro);color:#44444c;font-variant-numeric:tabular-nums;margin-left:auto}
+
+.detail{display:flex;flex-direction:column;min-height:0;min-width:0}
+.dhead{padding:16px 22px 0;flex:none;display:flex;gap:14px;align-items:flex-start}
+.dhead h1{font-size:var(--display);line-height:1.25;letter-spacing:-.02em;color:var(--bone);font-weight:600}
+.dhead .acts{margin-left:auto;display:flex;gap:7px;align-items:center;flex:none}
+.dtabs{padding:14px 22px 0;flex:none}
+.dscroll{flex:1;min-height:0;overflow:auto;padding:16px 22px 26px}
+.cols{display:grid;grid-template-columns:1fr 272px;gap:26px;align-items:start}
+.side{display:flex;flex-direction:column;gap:16px;font-size:var(--meta)}
+.side section{display:flex;flex-direction:column;gap:7px}
+.vrow{display:grid;grid-template-columns:42px 1fr auto;gap:11px;padding:8px 10px;border-radius:var(--r-sm);align-items:start}
+.vrow:hover{background:color-mix(in srgb,var(--raise) 70%,transparent)}
+.vrow[data-on=true]{background:var(--overlay);box-shadow:var(--raised)}
+.vrow .v{font-variant-numeric:tabular-nums;color:var(--text);font-weight:600;font-size:var(--meta)}
+.vrow .what{font-size:var(--meta);color:var(--dim);line-height:1.5}
+.vrow .when{font-size:var(--micro);color:var(--mute);margin-top:2px}
+.defrow{display:flex;align-items:center;gap:10px;height:var(--row-tight);padding:0 10px;border-radius:var(--r-sm);font-size:var(--meta)}
+.defrow:hover{background:color-mix(in srgb,var(--raise) 70%,transparent)}
+.defrow .s{flex:1;color:var(--text)}
+.sheet{position:fixed;inset:0;z-index:50;display:none;place-items:start center;
+  background:rgb(4 4 5/.5);backdrop-filter:blur(2px);padding-top:14vh}
+.sheet.show{display:grid}
+.sheet .inner{width:min(560px,92vw);background:var(--overlay);border-radius:var(--r-lg);box-shadow:var(--float);
+  display:flex;flex-direction:column;overflow:hidden}
+.sheet .sb{padding:18px 20px;display:flex;flex-direction:column;gap:15px}
+.sheet .sf{padding:12px 20px;display:flex;gap:8px;align-items:center;border-top:1px solid var(--line-soft)}
+</style></head><body>
+
+<div id="win">
+  <div class="titlebar">
+    <div class="lights"><i></i><i></i><i></i></div>
+    <span class="where"><b>westlabs</b></span>
+    <span class="sep">/</span><span class="where">Configuration</span>
+    <span class="sep">/</span><span class="where"><b>Skills</b></span>
+    <div class="right">
+      <button class="control plain sm">Documentation</button>
+    </div>
+  </div>
+
+  <div id="body">
+    <!-- configuration sidebar -->
+    <aside class="sidebar">
+      <div class="legend">Yours</div>
+      <div class="row">Agents</div>
+      <div class="row">Repositories</div>
+      <div class="row" data-on="true"><span style="color:var(--bone)">Skills</span><span style="margin-left:auto;font-size:var(--micro);color:var(--mute)" class="num">312</span></div>
+      <div class="row">Secrets</div>
+      <div class="row">Machines</div>
+      <div class="legend">Organisation</div>
+      <div class="row">People</div>
+      <div class="row">Teams</div>
+      <div class="row">Directories</div>
+      <div class="row">Integrations</div>
+    </aside>
+
+    <!-- the library list -->
+    <section class="list">
+      <div class="toolbar">
+        <div class="search" style="flex:1"><span style="color:var(--mute);font-size:11px">⌕</span>
+          <input id="q" placeholder="Search skills"><span class="keycap">⌘F</span></div>
+        <button class="control go sm" id="addbtn">Add</button>
+      </div>
+      <div class="toolbar" style="height:34px">
+        <div class="track" id="scope">
+          <button data-f="all" data-on="true">All</button>
+          <button data-f="mine">Yours</button>
+          <button data-f="shared">Shared</button>
+          <button data-f="defaults">Default</button>
+        </div>
+        <span class="right" style="font-size:var(--micro);color:var(--mute)" id="count"></span>
+      </div>
+      <div class="scroll" id="rows"></div>
+    </section>
+
+    <!-- the detail -->
+    <section class="detail" id="detail"></section>
+  </div>
+
+  <div class="statusbar">
+    <span id="sb1"></span>
+    <span class="right">
+      <span>Content-addressed</span>
+      <span id="sb2"></span>
+      <span class="keycap">⌘F</span><span>search</span>
+    </span>
+  </div>
+</div>
+
+<div class="sheet" id="sheet"><div class="inner">
+  <div class="sb">
+    <div style="font-size:var(--title);color:var(--bone);font-weight:600">Edit <span class="mono" id="ename"></span></div>
+    <div class="aside note">These two are the only fields you can change here. Everything else — the instructions, the bundled files — changes by dropping the folder again, which makes a new version.</div>
+    <div class="field"><label>Name</label><input class="mono" id="einput" value="">
+      <div class="help">What you type as a command, and the folder written onto the worker. Two selected skills cannot share one.</div></div>
+    <div class="field"><label>Description</label><textarea rows="4" id="edesc"></textarea>
+      <span class="count"><span id="elen">0</span> of 1024</span>
+      <div class="help">The only part of a skill always in the model's context. It decides whether the skill is ever used, so say what it does and when to reach for it.</div></div>
+  </div>
+  <div class="sf"><span style="flex:1"></span>
+    <button class="control plain" onclick="document.getElementById('sheet').classList.remove('show')">Cancel</button>
+    <button class="control go" onclick="document.getElementById('sheet').classList.remove('show')">Save changes</button></div>
+</div></div>
+
+<script src="data.js"></script>
+<script>
+const $=(s,r=document)=>r.querySelector(s), $$=(s,r=document)=>[...r.querySelectorAll(s)];
+let sel="rust-review", tab="details", scope="all", query="";
+const of=s=>SKILLS.find(x=>x.slug===s);
+const mono=n=>n.split("-").slice(0,2).map(w=>w[0]).join("");
+const PINS={"house-prose":{others:3,mine:1},"rust-review":{others:1,mine:2},"release-checklist":{others:0,mine:1}};
+const BUNDLE={"rust-review":[["SKILL.md","3.2 KB",0,0],["references/predicate.md","9.1 KB",0,1],
+  ["references/levels.md","3.4 KB",0,0],["scripts/grep-predicates.sh","640 B",1,0]]};
+
+function visible(){
+  const q=query.trim().toLowerCase();
+  return SKILLS.filter(s=>{
+    if(q && !(s.name.includes(q)||s.desc.toLowerCase().includes(q)||s.author.includes(q))) return false;
+    if(scope==="mine") return s.owner.startsWith("u/");
+    if(scope==="shared") return s.owner.startsWith("d/");
+    if(scope==="defaults") return s.defaults.length>0;
+    return true;
+  });
+}
+function groups(){
+  const v=visible();
+  return [["In use by your repositories",v.filter(s=>s.defaults.length)],
+          ["Yours",v.filter(s=>!s.defaults.length&&s.owner.startsWith("u/"))],
+          ["Shared with you",v.filter(s=>!s.defaults.length&&s.owner.startsWith("d/"))]]
+         .filter(g=>g[1].length);
+}
+function renderList(){
+  const v=visible();
+  $("#count").innerHTML=`<span class="num">${v.length}</span> of <span class="num">${SKILLS.length}</span>`;
+  $("#rows").innerHTML=groups().map(([t,rows])=>`
+    <div class="sect"><span class="legend">${t}</span><span class="n">${rows.length}</span></div>
+    ${rows.map(s=>`
+      <div class="sk" data-slug="${s.slug}" data-on="${sel===s.slug}">
+        <span class="mark" data-on="${sel===s.slug}">${mono(s.name)}</span>
+        <div style="min-width:0">
+          <div class="top"><span class="nm mono">${s.name}</span><span class="ver">v${s.v}</span></div>
+          <div class="desc">${s.desc}</div>
+          <div class="foot">
+            <span class="who">${s.author}</span>
+            ${s.owner.startsWith("d/")?`<span class="tag info">${s.ownerLabel}</span>`:""}
+            ${s.risk.length?`<span class="tag warnish">${s.risk.length===1?RISK_LABEL[s.risk[0]].short:s.risk.length+" risks"}</span>`:""}
+            ${s.defaults.length?`<span class="tag">on in ${s.defaults.length}</span>`:""}
+          </div>
+        </div>
+      </div>`).join("")}`).join("")
+    || `<div style="padding:40px 14px;text-align:center;color:var(--mute);font-size:var(--meta)">No skill matches “${query}”.<br>312 are reachable — try a word from a description.</div>`;
+  $("#sb1").innerHTML=`<span class="num">${SKILLS.length}</span> skills reachable &nbsp;&nbsp; <span class="num">${SKILLS.filter(s=>s.owner.startsWith("d/")).length}</span> shared with you`;
+}
+
+const DETAILS=`<h2>When to use this</h2>
+<p>Use when reviewing Rust in this repository, or when writing a handler, a migration or a list query that has to obey the access model.</p>
+<h2>Steps</h2>
+<ol><li>Grep for hand-written path predicates. <code>path &lt;@</code> is the tell — every read that enforces access pastes <code>filed_where</code> into its <code>WHERE</code> instead.</li>
+<li>Check that every mutation asks the <code>Writer</code> method rather than the <code>Viewer</code> one. A handler that changes something and reads through <code>session_of</code> is the bug this catches.</li>
+<li>Optional-by-query columns are read with <code>try_get</code>. <code>get</code> panics, and the request dies with an empty reply.</li></ol>
+<h2>What good looks like</h2>
+<pre>let sql = format!(
+    "SELECT {COLUMNS} FROM widgets w WHERE {visible}",
+    visible = filed_where("w", 1, Level::Viewer),
+);</pre>
+<p>See <code>references/predicate.md</code> for why the predicate is generated rather than written, and <code>references/levels.md</code> for what each level may do.</p>`;
+
+function renderDetail(){
+  const s=of(sel), p=PINS[s.slug]||{others:0,mine:0};
+  const shared=s.owner.startsWith("d/");
+  const files=BUNDLE[s.slug]||[["SKILL.md","4.1 KB",0,0],["references/guide.md","11.8 KB",0,1],["scripts/run.sh","812 B",1,0]];
+
+  let main="";
+  if(tab==="details") main=`<div class="read">${DETAILS}</div>`;
+  if(tab==="bundle") main=`
+    <div style="display:flex;flex-direction:column;gap:14px">
+      <div class="files">
+        <div class="f head"><span class="p" style="font-family:inherit">Path</span><span></span><span class="sz">Size</span></div>
+        ${files.map(([f,z,x,d])=>`<div class="f"><span class="p">${f}</span><span></span>
+          <span class="sz">${z}${d?` <span style="color:var(--sage)" title="stored once, shared with another version or skill">↺</span>`:""}</span></div>`).join("")}
+      </div>
+      <p class="aside note">Written into the session's own skills directory exactly as they arrived, and destroyed with the workspace. Stored once under a hash of their contents. Two versions that share a reference file share the bytes, and so do two people who dropped the same folder. The <span style="color:var(--sage)">↺</span> marks one that was already here.</p>
+      <div class="target" style="padding:20px;text-align:center">
+        <div style="font-size:var(--ui);color:var(--text)">Drop the folder again to make version ${s.v+1}</div>
+        <div style="font-size:var(--meta);color:var(--mute);margin-top:4px">Everything in it is kept. What changed between two versions is a comparison of hashes.</div>
+      </div>
+    </div>`;
+  if(tab==="versions"){
+    const notes=["Said which columns are read with try_get.","Split the long part into references/ so the body stops costing context on every turn.","Narrowed the description so it stops firing on TypeScript reviews.","First version."];
+    main=`<div style="display:flex;flex-direction:column;gap:14px">
+      <div>${[0,1,2,3].map(i=>`
+        <div class="vrow" data-on="${i===0}">
+          <span class="v">v${s.v-i}</span>
+          <div><div class="what">${notes[i]}</div><div class="when">${i===0?s.author+", "+s.changed:"kevin, "+(i*9)+" days ago"}</div></div>
+          <div style="display:flex;gap:6px;align-items:center">
+            ${i===0?'<span class="sig ok">current</span>':""}
+            ${i===1&&p.others?`<span class="tag info">${p.others} sessions still on it</span>`:""}
+            ${i>0?'<button class="control plain sm">Restore</button>':""}
+          </div>
+        </div>`).join("")}</div>
+      <p class="aside note"><b>A new version is taken by whoever starts next.</b> A session already running keeps the version it pinned and is told a newer one exists. Changing the instructions underneath a live conversation is the thing this avoids.</p>
+    </div>`;
+  }
+  if(tab==="defaults"){
+    const repos=[["acme/backend",s.defaults.includes("acme/backend")],["acme/web",s.defaults.includes("acme/web")],
+                 ["acme/infra",false],["westlabs/ledger",false]];
+    main=`<div style="display:flex;flex-direction:column;gap:16px;max-width:620px">
+      <div class="field"><label>Ticked when you start work</label>
+        <div>
+          <div class="defrow"><span class="s">In every workspace of yours</span><span class="sw" role="switch" aria-checked="false"></span></div>
+          <hr class="rule" style="margin:6px 10px">
+          ${repos.map(([r,on])=>`<div class="defrow"><span class="s mono">${r}</span><span class="sw" role="switch" aria-checked="${on}"></span></div>`).join("")}
+        </div>
+        <div class="help">Choose two repositories when starting work and you get the union of their defaults, already ticked and still removable before the first message.</div></div>
+      <p class="aside note">These are <b>yours alone</b>. Two people working on <span class="mono">acme/backend</span> already have their own row for it, with their own setup script, so nobody can set your defaults for you.</p>
+      <p class="aside care">Your always-on skills would spend <b>620 of Codex's 8,000 characters</b> before you choose anything. Past roughly 25 skills Codex stops listing any of them, so this set has to stay small.</p>
+    </div>`;
+  }
+  if(tab==="access") main=`<div style="display:flex;flex-direction:column;gap:16px;max-width:620px">
+      <div class="field"><label>Filed at</label><input class="mono" value="${s.owner}/${s.slug}" readonly>
+        <div class="help">${shared?"In a directory, so whoever holds a grant there can see and select it. That directory's administrators decide what becomes of it.":"Your own space. Nobody else can see it, and there is no grant that would let them."}</div></div>
+      <div class="field"><label>Move it</label>
+        <select><option ${shared?"":"selected"}>Your own space</option>
+        <option ${s.owner==="d/backend"?"selected":""}>Backend</option>
+        <option ${s.owner==="d/frontend"?"selected":""}>Frontend</option>
+        <option ${s.owner==="d/shared"?"selected":""}>Shared</option></select>
+        <div class="help">Filing it into a directory hands it over. You keep access only as somebody that directory grants — possibly none at all.</div></div>
+      <div class="field"><label>Let one person in</label>
+        <div>
+          <div class="defrow"><span class="s">lisa</span><span class="tag">can read</span><button class="control plain sm">Change</button></div>
+          <div class="defrow"><span class="s">Backend</span><span class="tag">can read</span><button class="control plain sm">Change</button></div>
+          <div class="defrow"><button class="control plain sm">Add somebody</button></div>
+        </div>
+        <div class="help">An exception on top of where the skill lives. Never administrator — share the directory instead.</div></div>
+      <p class="aside care">If you leave the organisation, a skill in your own space goes with you. One filed in a directory stays, because filing it there already handed it over.</p>
+    </div>`;
+
+  const aside = tab==="details" ? `
+    <div class="side">
+      <section><span class="legend">What it does to a session</span>
+        ${s.risk.length?s.risk.map(r=>`<div class="sig bad">${RISK_LABEL[r].long}</div>`).join("")
+          :`<div class="sig ok">Reads and instructs only</div>`}
+        <p class="help" style="font-size:var(--micro);color:var(--mute);line-height:1.55;margin-top:2px">
+          Read from the bundle, not from what the author wrote. Firetower strips none of it, so this behaves here exactly as it does in Claude Code.</p>
+      </section>
+      <hr class="rule">
+      <section><span class="legend">Works with</span>
+        <div style="display:flex;gap:6px">${[["ClaudeCode","Claude Code"],["Codex","Codex"],["KimiCode","Kimi"]]
+          .map(([k,l])=>`<span class="tag" style="${s.agents.includes(k)?"color:var(--text)":"opacity:.35"}">${l}</span>`).join("")}</div>
+      </section>
+      <hr class="rule">
+      <section><span class="legend">Costs</span>
+        <dl class="facts">
+          <dt>In context</dt><dd><span class="num">${cost(s)}</span> characters, every turn</dd>
+          <dt>Bundle</dt><dd><span class="num">${s.files}</span> files</dd>
+          <dt>Body</dt><dd>Loaded only when used</dd>
+        </dl>
+      </section>
+      <hr class="rule">
+      <section><span class="legend">In use</span>
+        <dl class="facts">
+          <dt>Your sessions</dt><dd><span class="num">${p.mine}</span></dd>
+          <dt>Others</dt><dd><span class="num">${p.others}</span></dd>
+          <dt>Default in</dt><dd>${s.defaults.length?s.defaults.map(d=>`<div class="mono" style="font-size:var(--micro)">${d}</div>`).join(""):"nothing yet"}</dd>
+        </dl>
+      </section>
+    </div>` : "";
+
+  $("#detail").innerHTML=`
+    <div class="dhead">
+      <span class="mark lg" data-on="true">${mono(s.name)}</span>
+      <div style="min-width:0">
+        <h1 class="mono" style="font-size:var(--display)">${s.name}</h1>
+        <dl class="facts" style="margin-top:7px">
+          <dt>Written by</dt><dd>${s.author}, updated ${s.changed}</dd>
+          <dt>Filed at</dt><dd><span class="mono" style="font-size:var(--micro)">${s.owner}/${s.slug}</span>${shared?` <span class="tag info">${s.ownerLabel} can reach it</span>`:` <span class="tag">only you</span>`}</dd>
+        </dl>
+      </div>
+      <div class="acts">
+        <span class="tag good">v${s.v} current</span>
+        <button class="control" id="edit">Edit name and description</button>
+        <button class="control">Share…</button>
+        <button class="control plain">⋯</button>
+      </div>
+    </div>
+    <div class="dtabs"><div class="track" id="dtabs">
+      ${[["details","Details"],["bundle","Bundle"],["versions","Versions"],["defaults","Defaults"],["access","Access"]]
+        .map(([k,l])=>`<button data-t="${k}" data-on="${tab===k}">${l}</button>`).join("")}
+    </div></div>
+    <div class="dscroll">${aside?`<div class="cols"><div style="min-width:0">${main}</div>${aside}</div>`:main}</div>`;
+  $("#sb2").innerHTML=`<span class="num">${s.files}</span> files in ${s.name}`;
+}
+
+document.addEventListener("click",e=>{
+  const r=e.target.closest(".sk"); if(r){sel=r.dataset.slug;renderList();renderDetail();return;}
+  const t=e.target.closest("#dtabs button"); if(t){tab=t.dataset.t;renderDetail();return;}
+  const f=e.target.closest("#scope button");
+  if(f){scope=f.dataset.f;$$("#scope button").forEach(b=>b.setAttribute("data-on",String(b.dataset.f===scope)));renderList();return;}
+  const sw=e.target.closest(".sw"); if(sw){sw.setAttribute("aria-checked",sw.getAttribute("aria-checked")==="true"?"false":"true");return;}
+  if(e.target.closest("#edit")){const s=of(sel);
+    $("#ename").textContent=s.name;$("#einput").value=s.name;$("#edesc").value=s.desc;$("#elen").textContent=s.desc.length;
+    $("#sheet").classList.add("show");return;}
+  if(e.target.closest("#addbtn")) location.href="import.html";
+  if(e.target.id==="sheet") $("#sheet").classList.remove("show");
+});
+$("#q").addEventListener("input",e=>{query=e.target.value;renderList();});
+$("#edesc").addEventListener("input",e=>$("#elen").textContent=e.target.value.length);
+renderList();renderDetail();
+</script></body></html>

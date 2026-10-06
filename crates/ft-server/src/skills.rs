@@ -1,0 +1,1706 @@
+//! Skills: folders of instructions an agent loads when it needs them.
+//!
+//! A skill is **Placed** — see `docs/paths-and-ownership.md`. It has a path,
+//! it can be filed into a directory, and every read of one pastes
+//! [`filed_where`] into its `WHERE`. Nothing here invents a second way to
+//! decide who can see something.
+//!
+//! What this module owns is the part that is specific to skills: validating a
+//! bundle somebody dropped, counting what its listing entry will cost in the
+//! model's context, and saying what the bundle will *do* to a session.
+//!
+//! **Bytes are content-addressed.** Re-dropping a folder is how a version is
+//! made, so a file that has not changed is not stored again — and two people
+//! who dropped the same folder share one copy. See `blobs`.
+
+use anyhow::{Context, Result};
+use chrono::{DateTime, Utc};
+use ft_core::{SkillId, SkillVersionId};
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+use sqlx::{PgPool, Postgres, Row, Transaction};
+use std::collections::BTreeSet;
+use utoipa::ToSchema;
+
+use crate::access::{filed_where, Level};
+
+// ── limits ──────────────────────────────────────────────────────────────
+//
+// Taken from the published libraries rather than guessed. `canvas-design` is
+// 5.55 MB over 83 files and `claude-api`'s own SKILL.md is 102 KB over 603
+// lines, so a cap of 50 files or 64 KB — the first draft's — would have
+// refused five of Anthropic's six largest skills on the day they were tried.
+
+/// The most files one version may hold.
+pub const MOST_FILES: usize = 100;
+/// The most one file may be.
+pub const BIGGEST_FILE: usize = 2 * 1024 * 1024;
+/// The most one version may be, across every file in it.
+pub const BIGGEST_VERSION: usize = 25 * 1024 * 1024;
+/// The most the instructions may be. Guidance says 5,000 words; this is the
+/// refusal, which is deliberately far above it.
+pub const BIGGEST_BODY: usize = 256 * 1024;
+/// What the standard allows a description to be, and what every agent reads.
+pub const BIGGEST_DESCRIPTION: usize = 1024;
+
+/// Names an agent ships itself, which a skill of the same name would shadow.
+const RESERVED: &[&str] = &[
+    "code-review",
+    "review",
+    "doctor",
+    "debug",
+    "batch",
+    "run",
+    "verify",
+    "loop",
+    "init",
+    "security-review",
+    "simplify",
+    "compact",
+    "clear",
+    "config",
+    "model",
+    "help",
+    "imagegen",
+    "plan",
+    "skill-creator",
+    "skill-installer",
+    "plugin-creator",
+    "review-agent",
+];
+
+// ── what a skill is, on the wire ────────────────────────────────────────
+
+/// One row of the library.
+///
+/// `name` and `description` are copied down from the current version rather
+/// than joined per row: this list is three hundred long and those two fields
+/// are what every one of them draws.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct Skill {
+    pub id: SkillId,
+    /// `u/kevin/rust_review` — slashes on the wire, dots in the database.
+    pub path: String,
+    pub name: String,
+    pub slug: String,
+    pub description: String,
+    pub version: i32,
+    pub version_id: SkillVersionId,
+    /// What the listing entry costs in the model's context, every turn.
+    pub tokens: i32,
+    pub files: i32,
+    pub bytes: i64,
+    /// What this skill does to a session, read from the bundle rather than
+    /// from what its author said about it. See [`risk_of`].
+    pub risk: Vec<String>,
+    /// Who wrote it. A fact that outlives them leaving.
+    pub author: Option<String>,
+    pub updated_at: DateTime<Utc>,
+    /// Whether this person may make a version of it or rename it.
+    pub may_write: bool,
+    /// Whether this person may move it to another directory or delete it.
+    /// The same rule as `api::access::may_share`, answered per row so a list
+    /// can say up front which skills it can act on.
+    pub may_share: bool,
+    /// The repositories this person has it on by default. Empty for most.
+    pub default_in: Vec<String>,
+    /// On in every workspace this person starts.
+    pub always_on: bool,
+}
+
+/// One version, which is a fact about the past and never updated.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillVersion {
+    pub id: SkillVersionId,
+    pub version: i32,
+    pub notes: Option<String>,
+    pub tokens: i32,
+    pub files: i32,
+    pub bytes: i64,
+    pub author: Option<String>,
+    pub created_at: DateTime<Utc>,
+    /// How many sessions are still reading this one.
+    pub pinned_by: i64,
+}
+
+/// What an import found already here, for one bundle somebody dropped.
+///
+/// Answered before anything is written, so the review screen can say what
+/// will happen rather than finding out afterwards.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct Match {
+    /// The name that was asked about, so a batch can be read in any order.
+    pub name: String,
+    /// Absent when nothing of this name is reachable: it is simply new.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub found: Option<Found>,
+}
+
+/// The skill an imported bundle turned out to be another copy of.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct Found {
+    pub id: SkillId,
+    pub path: String,
+    /// The version it is on now.
+    pub version: i32,
+    /// Whether the bundle is byte-for-byte what that version already holds.
+    pub identical: bool,
+    /// Or an older one, which is worth saying differently: this was yours
+    /// once and has been superseded.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub identical_to_version: Option<i32>,
+    /// Whether this person may add a version to it. False for somebody else's,
+    /// shared into a directory they can only read.
+    pub may_write: bool,
+    /// Whether it is in this person's own space, which decides whether a new
+    /// skill of this name could be made at all.
+    pub mine: bool,
+    /// How the two bundles differ, for a row that has to say what changes.
+    pub unchanged: i32,
+    pub changed: i32,
+    pub added: i32,
+    pub removed: i32,
+}
+
+/// A skill that cannot simply move into a directory, because the directory
+/// already holds one of the same name.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct Collision {
+    /// The skill being moved.
+    pub skill_id: SkillId,
+    pub name: String,
+    /// The one already in the directory.
+    pub existing_id: SkillId,
+    pub existing_version: i32,
+    /// Whether both current versions hold the same bytes.
+    pub identical: bool,
+}
+
+/// What to do with a skill whose name the directory already has.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum Resolve {
+    /// Drop this copy; its sessions move to the directory's.
+    UseTheirs,
+    /// Make this copy the directory's next version, then drop it.
+    AddVersion,
+    /// Leave this copy where it is.
+    Keep,
+}
+
+/// One file of a bundle somebody is about to import, as the match asks about it.
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct FileAt {
+    pub path: String,
+    /// sha256 of the contents, as the client computed it.
+    pub hash: String,
+    #[serde(default)]
+    pub executable: bool,
+}
+
+/// What is about to be imported, named and fingerprinted but not yet sent.
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct Asking {
+    pub name: String,
+    pub files: Vec<FileAt>,
+}
+
+/// One file of a bundle, without its bytes.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillFile {
+    pub path: String,
+    pub size: i64,
+    pub executable: bool,
+    /// Whether these bytes were already here under the same hash.
+    pub shared: bool,
+}
+
+/// What the instructions say, for the screen that shows them.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillDetail {
+    pub body: String,
+    pub frontmatter: serde_json::Value,
+    pub files: Vec<SkillFile>,
+}
+
+/// A file arriving from a drop.
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct IncomingFile {
+    /// Relative, inside the bundle. Never absolute and never climbing out.
+    pub path: String,
+    /// base64, because a bundle may hold a font.
+    pub contents: String,
+    #[serde(default)]
+    pub executable: bool,
+}
+
+/// A whole bundle somebody dropped.
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct NewSkill {
+    pub name: String,
+    pub description: String,
+    /// Parsed, for the library to read. The bytes are kept as they arrived in
+    /// `files`, so nothing here is what gets written onto a worker.
+    pub frontmatter: serde_json::Value,
+    pub body: String,
+    pub files: Vec<IncomingFile>,
+    #[serde(default)]
+    pub notes: Option<String>,
+}
+
+/// Why a bundle was refused, in a sentence somebody can act on.
+#[derive(Debug)]
+pub struct Refused(pub String);
+
+impl std::fmt::Display for Refused {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+// ── counting what it costs ──────────────────────────────────────────────
+
+/// What a skill's listing entry costs in the model's context, in tokens.
+///
+/// Tokens rather than characters because that is the unit the agents
+/// themselves use — Codex's own knob is `skills.max_context_tokens`. Counted
+/// once, when a version is made, and stored: a picker redrawing on every
+/// keystroke must not be running a tokenizer.
+///
+/// `o200k_base` is a byte-pair encoder and not Claude's, so this is an
+/// estimate — close enough for a budget meter, and wrong for billing. It is
+/// local, deterministic and needs no network, which a count used this often
+/// has to be.
+pub fn tokens_for(name: &str, description: &str) -> i32 {
+    // Name, description, and the path the agent is told to read it from, which
+    // is what every agent renders into the system prompt per skill.
+    let entry = format!("{name}: {description} (skills/{name}/SKILL.md)");
+    match tiktoken_rs::o200k_base() {
+        Ok(bpe) => bpe.encode_ordinary(&entry).len() as i32,
+        // A tokenizer that will not load must not stop somebody importing a
+        // skill. Four characters a token is the usual English ratio.
+        Err(_) => (entry.len() / 4) as i32,
+    }
+}
+
+/// A fingerprint for a bundle: every path, the hash of its contents, and
+/// whether it runs.
+///
+/// Over the manifest rather than over the bytes, because the bytes are already
+/// hashed one file at a time — so two versions that differ in one file are
+/// told apart without reading any of them.
+///
+/// **The format is pinned and the migration computes the identical string.**
+/// `path:hash:1|0` per file, joined with commas, sorted by path as bytes.
+/// Change either side and every stored digest silently stops matching, which
+/// would read as every skill suddenly being new.
+pub fn digest_of(files: &[(String, String, bool)]) -> String {
+    let mut lines: Vec<String> = files
+        .iter()
+        .map(|(path, hash, runs)| format!("{path}:{hash}:{}", if *runs { '1' } else { '0' }))
+        .collect();
+    lines.sort();
+    format!("{:x}", Sha256::digest(lines.join(",").as_bytes()))
+}
+
+/// What this bundle will do to a session, read from the bundle itself.
+///
+/// Never from what the author claims. Four things, and all four are ordinary
+/// parts of the format rather than abuses of it — which is exactly why they
+/// are worth saying out loud on the row. Firetower strips none of them: a
+/// skill behaves here as it does in Claude Code, and a half-protection that
+/// stopped `hooks` while leaving `scripts/` would read as safety without being
+/// any.
+pub fn risk_of(frontmatter: &serde_json::Value, body: &str, paths: &[String]) -> Vec<String> {
+    let mut out = Vec::new();
+    // `` !`cmd` `` runs before the model ever sees the skill, and its output is
+    // pasted into the context.
+    if body.contains("!`") {
+        out.push("shell".to_string());
+    }
+    if frontmatter.get("allowed-tools").is_some() {
+        out.push("tools".to_string());
+    }
+    if frontmatter.get("hooks").is_some() {
+        out.push("hooks".to_string());
+    }
+    if paths.iter().any(|p| p.starts_with("scripts/")) {
+        out.push("scripts".to_string());
+    }
+    out
+}
+
+/// Whether a name is one the agents already answer to.
+pub fn is_reserved(name: &str) -> bool {
+    RESERVED.contains(&name)
+}
+
+/// Check a name against the standard's rules.
+///
+/// 1–64 characters, lowercase letters, digits and hyphens, no leading or
+/// trailing hyphen. Anthropic additionally reserves anything containing
+/// `claude` or `anthropic`, and forbids `<` and `>` anywhere in the
+/// frontmatter — it is rendered into the system prompt, so an angle bracket is
+/// an injection route rather than a style question.
+pub fn check_name(name: &str) -> Result<(), Refused> {
+    if name.is_empty() || name.len() > 64 {
+        return Err(Refused("a name is 1 to 64 characters".into()));
+    }
+    if !name
+        .chars()
+        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+    {
+        return Err(Refused(
+            "a name holds lowercase letters, digits and hyphens".into(),
+        ));
+    }
+    if name.starts_with('-') || name.ends_with('-') {
+        return Err(Refused("a name does not start or end with a hyphen".into()));
+    }
+    if name.contains("claude") || name.contains("anthropic") {
+        return Err(Refused(
+            "`claude` and `anthropic` are reserved in a skill name".into(),
+        ));
+    }
+    Ok(())
+}
+
+/// Check the whole bundle before any of it is written.
+pub fn check(new: &NewSkill) -> Result<(), Refused> {
+    check_name(&new.name)?;
+
+    // The file has to *declare* a name. Claude Code falls back to the folder
+    // when the key is missing, and that fallback is what lets a misspelled
+    // `nae:` through — the skill lands in a shared library under a name
+    // nothing in the file ever said, and the bundle written onto a worker
+    // still says `nae`. The standard requires the field; so does this.
+    //
+    // Not required to *equal* `new.name`: the review step exists so that a
+    // name colliding with one an agent already ships can be changed, and that
+    // is a legitimate difference rather than a malformed file.
+    match new.frontmatter.get("name").and_then(|v| v.as_str()) {
+        Some(declared) if !declared.trim().is_empty() => {}
+        _ => {
+            let typo = new
+                .frontmatter
+                .as_object()
+                .and_then(|m| m.keys().find(|k| one_edit_from(k, "name")).cloned());
+            return Err(Refused(match typo {
+                Some(k) => format!(
+                    "its SKILL.md has no `name` field — there is a `{k}:`, which nothing reads"
+                ),
+                None => "its SKILL.md has no `name` field, and the standard requires one".into(),
+            }));
+        }
+    }
+    match new.frontmatter.get("description").and_then(|v| v.as_str()) {
+        Some(d) if !d.trim().is_empty() => {}
+        _ => {
+            let typo = new
+                .frontmatter
+                .as_object()
+                .and_then(|m| m.keys().find(|k| one_edit_from(k, "description")).cloned());
+            return Err(Refused(match typo {
+                Some(k) => format!("its SKILL.md has no `description` field — there is a `{k}:`, which nothing reads"),
+                None => "its SKILL.md has no `description` field, and it is what the model decides on".into(),
+            }));
+        }
+    }
+
+    if new.description.trim().is_empty() {
+        return Err(Refused(
+            "a description is what the model decides on, so it cannot be empty".into(),
+        ));
+    }
+    if new.description.chars().count() > BIGGEST_DESCRIPTION {
+        return Err(Refused(format!(
+            "a description is at most {BIGGEST_DESCRIPTION} characters"
+        )));
+    }
+    if new.body.len() > BIGGEST_BODY {
+        return Err(Refused(format!(
+            "the instructions are at most {} KB",
+            BIGGEST_BODY / 1024
+        )));
+    }
+    // The frontmatter is rendered into the system prompt, so an angle bracket
+    // in it is a way to inject a tag rather than a matter of taste.
+    if serde_json::to_string(&new.frontmatter)
+        .map(|t| t.contains('<') || t.contains('>'))
+        .unwrap_or(false)
+    {
+        return Err(Refused(
+            "`<` and `>` are not allowed in frontmatter — it is read as part of the system prompt"
+                .into(),
+        ));
+    }
+    if !new.files.iter().any(|f| f.path == "SKILL.md") {
+        return Err(Refused(
+            "a skill folder holds a SKILL.md, spelled exactly that way".into(),
+        ));
+    }
+    if new.files.len() > MOST_FILES {
+        return Err(Refused(format!("a skill holds at most {MOST_FILES} files")));
+    }
+
+    let mut seen = BTreeSet::new();
+    let mut total = 0usize;
+    for f in &new.files {
+        if !seen.insert(f.path.clone()) {
+            return Err(Refused(format!("{} is in the bundle twice", f.path)));
+        }
+        check_path(&f.path)?;
+        let bytes = ft_proto::decode(&f.contents)
+            .ok_or_else(|| Refused(format!("{} did not arrive intact", f.path)))?;
+        if bytes.len() > BIGGEST_FILE {
+            return Err(Refused(format!(
+                "{} is larger than the {} MB a file may be",
+                f.path,
+                BIGGEST_FILE / 1024 / 1024
+            )));
+        }
+        total += bytes.len();
+    }
+    if total > BIGGEST_VERSION {
+        return Err(Refused(format!(
+            "a skill is at most {} MB",
+            BIGGEST_VERSION / 1024 / 1024
+        )));
+    }
+    Ok(())
+}
+
+/// Whether one word is a single edit away from another — a misspelled key.
+///
+/// Stopped at two, because the only question is "did they mean this one".
+fn one_edit_from(a: &str, b: &str) -> bool {
+    if a == b || a.len().abs_diff(b.len()) > 1 {
+        return false;
+    }
+    let (a, b): (Vec<char>, Vec<char>) = (a.chars().collect(), b.chars().collect());
+    let mut row: Vec<usize> = (0..=b.len()).collect();
+    for i in 1..=a.len() {
+        let mut next = vec![i];
+        for j in 1..=b.len() {
+            next.push(
+                (row[j] + 1)
+                    .min(next[j - 1] + 1)
+                    .min(row[j - 1] + usize::from(a[i - 1] != b[j - 1])),
+            );
+        }
+        row = next;
+    }
+    row[b.len()] == 1
+}
+
+/// A path inside a bundle, and nothing else.
+fn check_path(path: &str) -> Result<(), Refused> {
+    if path.is_empty() {
+        return Err(Refused("a file needs a name".into()));
+    }
+    if path.starts_with('/') || path.contains('\\') || path.contains("..") {
+        return Err(Refused(format!(
+            "{path} is not a name inside the skill's own folder"
+        )));
+    }
+    if path.split('/').any(|seg| seg.is_empty() || seg == ".") {
+        return Err(Refused(format!("{path} is not a usable path")));
+    }
+    Ok(())
+}
+
+/// `rust-review` → `rust_review`, which is what an `ltree` label may hold.
+pub fn slug_of(name: &str) -> String {
+    ft_core::slug(name)
+}
+
+// ── the store ───────────────────────────────────────────────────────────
+
+/// Skills over the control plane's pool.
+#[derive(Clone)]
+pub struct Skills {
+    pool: PgPool,
+}
+
+/// Columns every list of skills reads.
+const COLUMNS: &str = "k.id, k.path::text AS path, k.name, k.slug, k.description, \
+     k.current_version_id, k.updated_at, \
+     v.version, v.tokens, v.files, v.bytes, v.frontmatter, v.body, \
+     EXISTS (SELECT 1 FROM skill_files f \
+              WHERE f.version_id = v.id AND f.path LIKE 'scripts/%') AS has_scripts, \
+     u.name AS author";
+
+const FROM: &str = "FROM skills k \
+     LEFT JOIN skill_versions v ON v.id = k.current_version_id \
+     LEFT JOIN principals u ON u.id = k.created_by";
+
+impl Skills {
+    pub fn new(pool: PgPool) -> Self {
+        Self { pool }
+    }
+
+    /// Every skill this person may see, with their own defaults folded in.
+    ///
+    /// `filed_where` is the only definition of "may see this" and this pastes
+    /// it rather than writing a predicate of its own.
+    pub async fn visible(&self, person: &str, at_least: Level) -> Result<Vec<Skill>> {
+        let sql = format!(
+            "SELECT {COLUMNS}, \
+               (SELECT coalesce(array_agg(r.slug) FILTER (WHERE r.slug IS NOT NULL), '{{}}') \
+                  FROM skill_defaults sd LEFT JOIN repos r ON r.id = sd.repo_id \
+                 WHERE sd.skill_id = k.id AND sd.user_id = $1 AND sd.repo_id IS NOT NULL) AS default_in, \
+               EXISTS (SELECT 1 FROM skill_defaults sd \
+                        WHERE sd.skill_id = k.id AND sd.user_id = $1 AND sd.repo_id IS NULL) AS always_on, \
+               {writable} AS may_write, {shareable} AS may_share \
+             {FROM} WHERE {visible} ORDER BY k.name",
+            visible = filed_where("k", 1, at_least),
+            writable = filed_where("k", 1, Level::Writer),
+            shareable = shareable("k", 1),
+        );
+        let rows = sqlx::query(&sql)
+            .bind(person)
+            .fetch_all(&self.pool)
+            .await
+            .context("reading the skills somebody can see")?;
+        rows.into_iter().map(read_skill).collect()
+    }
+
+    /// One skill, if this person may see it.
+    pub async fn one(&self, person: &str, id: &str, at_least: Level) -> Result<Option<Skill>> {
+        let sql = format!(
+            "SELECT {COLUMNS}, '{{}}'::text[] AS default_in, false AS always_on, \
+               {writable} AS may_write, {shareable} AS may_share \
+             {FROM} WHERE k.id = $2 AND {visible}",
+            visible = filed_where("k", 1, at_least),
+            writable = filed_where("k", 1, Level::Writer),
+            shareable = shareable("k", 1),
+        );
+        let row = sqlx::query(&sql)
+            .bind(person)
+            .bind(id)
+            .fetch_optional(&self.pool)
+            .await
+            .context("reading a skill")?;
+        row.map(read_skill).transpose()
+    }
+
+    /// The instructions and the file list of a skill's current version.
+    pub async fn detail(&self, person: &str, id: &str) -> Result<Option<SkillDetail>> {
+        let sql = format!(
+            "SELECT v.id AS version_id, v.body, v.frontmatter \
+             {FROM} WHERE k.id = $2 AND {visible}",
+            visible = filed_where("k", 1, Level::Viewer),
+        );
+        let Some(row) = sqlx::query(&sql)
+            .bind(person)
+            .bind(id)
+            .fetch_optional(&self.pool)
+            .await?
+        else {
+            return Ok(None);
+        };
+        let version_id: Option<String> = row.try_get("version_id").ok().flatten();
+        let Some(version_id) = version_id else {
+            return Ok(None);
+        };
+        Ok(Some(SkillDetail {
+            body: row.get("body"),
+            frontmatter: row.get("frontmatter"),
+            files: self.files_of(&version_id).await?,
+        }))
+    }
+
+    /// What is in one version, without the bytes.
+    pub async fn files_of(&self, version_id: &str) -> Result<Vec<SkillFile>> {
+        Ok(sqlx::query(
+            "SELECT f.path, f.size, f.executable, \
+                    (SELECT count(*) FROM skill_files o WHERE o.hash = f.hash) > 1 AS shared \
+               FROM skill_files f WHERE f.version_id = $1 ORDER BY f.path",
+        )
+        .bind(version_id)
+        .fetch_all(&self.pool)
+        .await
+        .context("reading a bundle")?
+        .into_iter()
+        .map(|r| SkillFile {
+            path: r.get("path"),
+            size: r.get("size"),
+            executable: r.get("executable"),
+            shared: r.get("shared"),
+        })
+        .collect())
+    }
+
+    /// Every version of a skill, newest first.
+    pub async fn versions(&self, person: &str, id: &str) -> Result<Vec<SkillVersion>> {
+        let sql = format!(
+            "SELECT v.id, v.version, v.notes, v.tokens, v.files, v.bytes, v.created_at, \
+                    u.name AS author, \
+                    (SELECT count(*) FROM skill_pins p WHERE p.version_id = v.id) AS pinned_by \
+               FROM skill_versions v \
+               JOIN skills k ON k.id = v.skill_id \
+               LEFT JOIN principals u ON u.id = v.created_by \
+              WHERE k.id = $2 AND {visible} ORDER BY v.version DESC",
+            visible = filed_where("k", 1, Level::Viewer),
+        );
+        Ok(sqlx::query(&sql)
+            .bind(person)
+            .bind(id)
+            .fetch_all(&self.pool)
+            .await
+            .context("reading a skill's versions")?
+            .into_iter()
+            .map(|r| SkillVersion {
+                id: SkillVersionId::from_stored(r.get::<String, _>("id")),
+                version: r.get("version"),
+                notes: r.try_get("notes").ok().flatten(),
+                tokens: r.get("tokens"),
+                files: r.get("files"),
+                bytes: r.get("bytes"),
+                author: r.try_get("author").ok().flatten(),
+                created_at: r.get("created_at"),
+                pinned_by: r.get("pinned_by"),
+            })
+            .collect())
+    }
+
+    /// Write a bundle as a new skill in somebody's own space.
+    pub async fn create(
+        &self,
+        org: &str,
+        person: &str,
+        person_slug: &str,
+        new: &NewSkill,
+    ) -> Result<SkillId> {
+        let id = SkillId::new();
+        // A discriminator, because two people may well both have a
+        // `code-review` and the unique index on `path` would refuse the second.
+        let slug = format!(
+            "{}_{}",
+            slug_of(&new.name),
+            &id.as_str()[id.as_str().len().saturating_sub(8)..]
+        );
+        let path = format!("u.{person_slug}.{slug}");
+
+        let mut tx = self.pool.begin().await?;
+        sqlx::query(
+            "INSERT INTO skills (id, org_id, path, created_by, name, slug, description) \
+             VALUES ($1, $2, $3::ltree, $4, $5, $6, $7)",
+        )
+        .bind(id.as_str())
+        .bind(org)
+        .bind(&path)
+        .bind(person)
+        .bind(&new.name)
+        .bind(&slug)
+        .bind(&new.description)
+        .execute(&mut *tx)
+        .await
+        .context("writing a skill")?;
+
+        write_version(&mut tx, id.as_str(), person, new, 1).await?;
+        tx.commit().await?;
+        Ok(id)
+    }
+
+    /// Add a version to a skill that already exists.
+    pub async fn add_version(&self, id: &str, person: &str, new: &NewSkill) -> Result<i32> {
+        let mut tx = self.pool.begin().await?;
+        let last: Option<i32> =
+            sqlx::query_scalar("SELECT max(version) FROM skill_versions WHERE skill_id = $1")
+                .bind(id)
+                .fetch_one(&mut *tx)
+                .await?;
+        let version = last.unwrap_or(0) + 1;
+        write_version(&mut tx, id, person, new, version).await?;
+        // The two editable fields follow the version that introduced them.
+        sqlx::query(
+            "UPDATE skills SET name = $2, description = $3, updated_at = now() WHERE id = $1",
+        )
+        .bind(id)
+        .bind(&new.name)
+        .bind(&new.description)
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        Ok(version)
+    }
+
+    /// Rename a skill, or rewrite what it says it is for.
+    ///
+    /// The only two fields that change without a new version. Everything else
+    /// about a skill is its bundle, and a bundle changes by being dropped
+    /// again.
+    pub async fn rename(&self, id: &str, name: &str, description: &str) -> Result<()> {
+        sqlx::query(
+            "UPDATE skills SET name = $2, description = $3, updated_at = now() WHERE id = $1",
+        )
+        .bind(id)
+        .bind(name)
+        .bind(description)
+        .execute(&self.pool)
+        .await
+        .context("renaming a skill")?;
+        // The listing entry just changed size, so what it costs did too.
+        sqlx::query(
+            "UPDATE skill_versions SET tokens = $2 \
+              WHERE id = (SELECT current_version_id FROM skills WHERE id = $1)",
+        )
+        .bind(id)
+        .bind(tokens_for(name, description))
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn delete(&self, id: &str) -> Result<()> {
+        sqlx::query("DELETE FROM skills WHERE id = $1")
+            .bind(id)
+            .execute(&self.pool)
+            .await
+            .context("deleting a skill")?;
+        // Bytes nothing points at any more. Cheap, and it runs where the
+        // deletion happened rather than on a timer nobody remembers exists.
+        sqlx::query(
+            "DELETE FROM blobs b WHERE NOT EXISTS \
+               (SELECT 1 FROM skill_files f WHERE f.hash = b.hash)",
+        )
+        .execute(&self.pool)
+        .await
+        .ok();
+        Ok(())
+    }
+
+    /// Which of these skills the directory at `d.<slug>` already has a skill
+    /// of the same name for.
+    pub async fn collisions(&self, directory_slug: &str, ids: &[String]) -> Result<Vec<Collision>> {
+        let rows = sqlx::query(
+            "SELECT k.id, k.name, e.id AS existing_id, ev.version AS existing_version, \
+                    (kv.digest IS NOT NULL AND kv.digest = ev.digest) AS identical \
+               FROM skills k \
+               JOIN skills e ON e.org_id = k.org_id AND e.name = k.name AND e.id <> k.id \
+                            AND subpath(e.path, 0, 2) = ('d.' || $1)::ltree \
+               LEFT JOIN skill_versions kv ON kv.id = k.current_version_id \
+               LEFT JOIN skill_versions ev ON ev.id = e.current_version_id \
+              WHERE k.id = ANY($2) \
+                AND subpath(k.path, 0, 2) <> ('d.' || $1)::ltree",
+        )
+        .bind(directory_slug)
+        .bind(ids)
+        .fetch_all(&self.pool)
+        .await
+        .context("looking for skills of the same name in a directory")?;
+        Ok(rows
+            .into_iter()
+            .map(|r| Collision {
+                skill_id: SkillId::from_stored(r.get::<String, _>("id")),
+                name: r.get("name"),
+                existing_id: SkillId::from_stored(r.get::<String, _>("existing_id")),
+                existing_version: r.try_get("existing_version").unwrap_or(0),
+                identical: r.try_get("identical").unwrap_or(false),
+            })
+            .collect())
+    }
+
+    /// Fold one skill into another of the same name, and drop the first.
+    ///
+    /// With `as_version`, the first one's current bundle becomes the second
+    /// one's next version; otherwise the second stays as it is. Either way
+    /// every session and default that held the first now holds the second, so
+    /// nobody loses a skill they had on. Returns the sessions that changed,
+    /// so their workers can be told.
+    pub async fn merge_into(
+        &self,
+        from: &str,
+        into: &str,
+        person: &str,
+        as_version: bool,
+    ) -> Result<Vec<String>> {
+        let mut tx = self.pool.begin().await?;
+
+        let target: String = if as_version {
+            let next: i32 = sqlx::query_scalar(
+                "SELECT coalesce(max(version), 0) + 1 FROM skill_versions WHERE skill_id = $1",
+            )
+            .bind(into)
+            .fetch_one(&mut *tx)
+            .await?;
+            let vid = SkillVersionId::new();
+            // Files are content-addressed, so a version is copied by its rows
+            // and no bytes move.
+            sqlx::query(
+                "INSERT INTO skill_versions \
+                   (id, skill_id, version, frontmatter, body, notes, tokens, files, bytes, digest, created_by) \
+                 SELECT $1, $2, $3, v.frontmatter, v.body, v.notes, v.tokens, v.files, v.bytes, v.digest, $4 \
+                   FROM skills k JOIN skill_versions v ON v.id = k.current_version_id \
+                  WHERE k.id = $5",
+            )
+            .bind(vid.as_str())
+            .bind(into)
+            .bind(next)
+            .bind(person)
+            .bind(from)
+            .execute(&mut *tx)
+            .await
+            .context("copying a version")?;
+            sqlx::query(
+                "INSERT INTO skill_files (version_id, path, hash, executable, size) \
+                 SELECT $1, f.path, f.hash, f.executable, f.size \
+                   FROM skills k JOIN skill_files f ON f.version_id = k.current_version_id \
+                  WHERE k.id = $2",
+            )
+            .bind(vid.as_str())
+            .bind(from)
+            .execute(&mut *tx)
+            .await
+            .context("copying a version's files")?;
+            sqlx::query(
+                "UPDATE skills t SET current_version_id = $2, description = f.description, \
+                        updated_at = now() \
+                   FROM skills f WHERE t.id = $1 AND f.id = $3",
+            )
+            .bind(into)
+            .bind(vid.as_str())
+            .bind(from)
+            .execute(&mut *tx)
+            .await?;
+            vid.as_str().to_string()
+        } else {
+            sqlx::query_scalar("SELECT current_version_id FROM skills WHERE id = $1")
+                .bind(into)
+                .fetch_one(&mut *tx)
+                .await?
+        };
+
+        // Sessions that had this copy now have the other one. A session that
+        // already had both keeps the one it had.
+        let moved: Vec<String> = sqlx::query_scalar(
+            "UPDATE skill_pins p SET skill_id = $2, version_id = $3 \
+              WHERE p.skill_id = $1 \
+                AND NOT EXISTS (SELECT 1 FROM skill_pins o \
+                                 WHERE o.session_id = p.session_id AND o.skill_id = $2) \
+             RETURNING p.session_id",
+        )
+        .bind(from)
+        .bind(into)
+        .bind(&target)
+        .fetch_all(&mut *tx)
+        .await
+        .context("moving sessions to the other copy")?;
+        let mut touched: Vec<String> =
+            sqlx::query_scalar("SELECT session_id FROM skill_pins WHERE skill_id = $1")
+                .bind(from)
+                .fetch_all(&mut *tx)
+                .await?;
+        touched.extend(moved);
+
+        sqlx::query(
+            "INSERT INTO skill_defaults (user_id, repo_id, skill_id, at) \
+             SELECT user_id, repo_id, $2, at FROM skill_defaults WHERE skill_id = $1 \
+             ON CONFLICT DO NOTHING",
+        )
+        .bind(from)
+        .bind(into)
+        .execute(&mut *tx)
+        .await
+        .context("moving defaults to the other copy")?;
+
+        sqlx::query("DELETE FROM skills WHERE id = $1")
+            .bind(from)
+            .execute(&mut *tx)
+            .await
+            .context("dropping the merged copy")?;
+        tx.commit().await?;
+        Ok(touched)
+    }
+
+    /// What this person already has, for each bundle they are about to import.
+    ///
+    /// Asked before anything is written, so the review screen can say what
+    /// *will* happen. The server refuses an exact duplicate on write as well,
+    /// because this answer can be a second old — somebody else may add a
+    /// version in between, and a screen deciding on its own is how two rows of
+    /// one name appear.
+    ///
+    /// Matched on **name, among what this person can reach**, then content
+    /// decides the rest. Not on content alone: two skills with identical bytes
+    /// under different names are a fork, and somebody kept them apart.
+    pub async fn matching(&self, person: &str, asking: &[Asking]) -> Result<Vec<Match>> {
+        let mut out = Vec::with_capacity(asking.len());
+        for one in asking {
+            out.push(Match {
+                name: one.name.clone(),
+                found: self.first_of_that_name(person, one).await?,
+            });
+        }
+        Ok(out)
+    }
+
+    /// The skill of this name this person would be adding to, if any.
+    ///
+    /// Theirs first. A skill in their own space is the one a new version would
+    /// go to; one merely shared with them is somebody else's, and worth
+    /// reporting for a different reason — the names will collide in a picker.
+    async fn first_of_that_name(&self, person: &str, asking: &Asking) -> Result<Option<Found>> {
+        let sql = format!(
+            "SELECT k.id, k.path::text AS path, v.version, v.digest, v.id AS version_id, \
+                    (k.path <@ ('u.' || me.slug)::ltree) AS mine, \
+                    {writable} AS may_write \
+               FROM skills k \
+               JOIN principals me ON me.id = $1 \
+               LEFT JOIN skill_versions v ON v.id = k.current_version_id \
+              WHERE k.name = $2 AND {visible} \
+              ORDER BY (k.path <@ ('u.' || me.slug)::ltree) DESC, k.created_at \
+              LIMIT 1",
+            visible = filed_where("k", 1, Level::Viewer),
+            writable = filed_where("k", 1, Level::Writer),
+        );
+        let Some(row) = sqlx::query(&sql)
+            .bind(person)
+            .bind(&asking.name)
+            .fetch_optional(&self.pool)
+            .await
+            .context("looking for a skill of that name")?
+        else {
+            return Ok(None);
+        };
+
+        let files: Vec<(String, String, bool)> = asking
+            .files
+            .iter()
+            .map(|f| (f.path.clone(), f.hash.clone(), f.executable))
+            .collect();
+        let digest = digest_of(&files);
+        let current: Option<String> = row.try_get("digest").ok().flatten();
+        let version_id: Option<String> = row.try_get("version_id").ok().flatten();
+
+        // An older version holding exactly these bytes is worth saying
+        // differently: this was yours once and has been superseded since.
+        let older: Option<i32> = sqlx::query_scalar(
+            "SELECT version FROM skill_versions \
+              WHERE skill_id = $1 AND digest = $2 AND id <> coalesce($3, '') \
+              ORDER BY version DESC LIMIT 1",
+        )
+        .bind(row.get::<String, _>("id"))
+        .bind(&digest)
+        .bind(&version_id)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        let (unchanged, changed, added, removed) = match &version_id {
+            Some(id) => self.difference(id, &files).await?,
+            None => (0, 0, files.len() as i32, 0),
+        };
+
+        Ok(Some(Found {
+            id: SkillId::from_stored(row.get::<String, _>("id")),
+            path: ft_core::ResourcePath::from_stored(row.get::<String, _>("path")).to_string(),
+            version: row.try_get("version").unwrap_or(0),
+            identical: current.as_deref() == Some(digest.as_str()),
+            identical_to_version: older,
+            may_write: row.try_get("may_write").unwrap_or(false),
+            mine: row.try_get("mine").unwrap_or(false),
+            unchanged,
+            changed,
+            added,
+            removed,
+        }))
+    }
+
+    /// How a bundle differs from what a version already holds, by path.
+    ///
+    /// Hashes only. Nothing is read, and the answer is what a row needs to
+    /// say: three files the same, two rewritten, one new.
+    async fn difference(
+        &self,
+        version_id: &str,
+        files: &[(String, String, bool)],
+    ) -> Result<(i32, i32, i32, i32)> {
+        let here: std::collections::HashMap<String, String> =
+            sqlx::query("SELECT path, hash FROM skill_files WHERE version_id = $1")
+                .bind(version_id)
+                .fetch_all(&self.pool)
+                .await?
+                .into_iter()
+                .map(|r| (r.get("path"), r.get("hash")))
+                .collect();
+
+        let (mut unchanged, mut changed, mut added) = (0, 0, 0);
+        for (path, hash, _) in files {
+            match here.get(path) {
+                Some(was) if was == hash => unchanged += 1,
+                Some(_) => changed += 1,
+                None => added += 1,
+            }
+        }
+        let removed = here
+            .keys()
+            .filter(|path| !files.iter().any(|(p, _, _)| p == *path))
+            .count() as i32;
+        Ok((unchanged, changed, added, removed))
+    }
+
+    /// The fingerprint a skill's current version holds, for refusing a
+    /// duplicate at the moment of writing rather than a moment before it.
+    pub async fn current_digest(&self, skill: &str) -> Result<Option<String>> {
+        Ok(sqlx::query_scalar(
+            "SELECT v.digest FROM skills k \
+               JOIN skill_versions v ON v.id = k.current_version_id \
+              WHERE k.id = $1",
+        )
+        .bind(skill)
+        .fetch_optional(&self.pool)
+        .await?
+        .flatten())
+    }
+
+    /// The fingerprint a bundle on its way in will have.
+    pub fn digest_of_new(new: &NewSkill) -> Result<String> {
+        let mut files = Vec::with_capacity(new.files.len());
+        for f in &new.files {
+            let bytes = ft_proto::decode(&f.contents)
+                .with_context(|| format!("{} did not arrive intact", f.path))?;
+            files.push((
+                f.path.clone(),
+                format!("{:x}", Sha256::digest(&bytes)),
+                f.executable,
+            ));
+        }
+        Ok(digest_of(&files))
+    }
+
+    // ── defaults ────────────────────────────────────────────────────────
+
+    /// Turn a default on or off. A null repository means every workspace.
+    pub async fn set_default(
+        &self,
+        person: &str,
+        skill: &str,
+        repo: Option<&str>,
+        on: bool,
+    ) -> Result<()> {
+        if on {
+            sqlx::query(
+                "INSERT INTO skill_defaults (user_id, repo_id, skill_id) VALUES ($1, $2, $3) \
+                 ON CONFLICT DO NOTHING",
+            )
+            .bind(person)
+            .bind(repo)
+            .bind(skill)
+            .execute(&self.pool)
+            .await?;
+        } else {
+            sqlx::query(
+                "DELETE FROM skill_defaults \
+                  WHERE user_id = $1 AND skill_id = $3 \
+                    AND coalesce(repo_id, '') = coalesce($2, '')",
+            )
+            .bind(person)
+            .bind(repo)
+            .bind(skill)
+            .execute(&self.pool)
+            .await?;
+        }
+        Ok(())
+    }
+
+    /// This person's defaults for one repository, without the always-on set.
+    pub async fn defaults_in(&self, person: &str, repo: &str) -> Result<Vec<String>> {
+        Ok(sqlx::query_scalar(
+            "SELECT skill_id FROM skill_defaults WHERE user_id = $1 AND repo_id = $2 ORDER BY skill_id",
+        )
+        .bind(person)
+        .bind(repo)
+        .fetch_all(&self.pool)
+        .await?)
+    }
+
+    /// The skills this person has on everywhere.
+    pub async fn always_on(&self, person: &str) -> Result<Vec<String>> {
+        Ok(sqlx::query_scalar(
+            "SELECT skill_id FROM skill_defaults WHERE user_id = $1 AND repo_id IS NULL ORDER BY skill_id",
+        )
+        .bind(person)
+        .fetch_all(&self.pool)
+        .await?)
+    }
+
+    /// Make this person's defaults for one repository exactly these skills.
+    ///
+    /// The whole set rather than additions, so a skill unticked in the picker
+    /// stops being a default too, and the list can shrink as well as grow.
+    pub async fn replace_defaults_in(
+        &self,
+        person: &str,
+        repo: &str,
+        skills: &[String],
+    ) -> Result<()> {
+        let mut tx = self.pool.begin().await?;
+        sqlx::query("DELETE FROM skill_defaults WHERE user_id = $1 AND repo_id = $2")
+            .bind(person)
+            .bind(repo)
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query(
+            "INSERT INTO skill_defaults (user_id, repo_id, skill_id) \
+             SELECT $1, $2, unnest($3::text[]) ON CONFLICT DO NOTHING",
+        )
+        .bind(person)
+        .bind(repo)
+        .bind(skills)
+        .execute(&mut *tx)
+        .await
+        .context("writing a repository's default skills")?;
+        tx.commit().await?;
+        Ok(())
+    }
+
+    /// Which skills would be ticked for somebody starting work on these
+    /// repositories: the union of their defaults, plus their always-on set.
+    pub async fn defaults_for(&self, person: &str, repos: &[String]) -> Result<Vec<String>> {
+        sqlx::query_scalar(
+            "SELECT DISTINCT sd.skill_id FROM skill_defaults sd \
+              WHERE sd.user_id = $1 AND (sd.repo_id IS NULL OR sd.repo_id = ANY($2))",
+        )
+        .bind(person)
+        .bind(repos)
+        .fetch_all(&self.pool)
+        .await
+        .context("reading somebody's default skills")
+    }
+
+    // ── what a session is running ───────────────────────────────────────
+
+    /// The skills a session is reading, in the version it pinned.
+    pub async fn of_session(&self, session: &str) -> Result<Vec<String>> {
+        sqlx::query_scalar("SELECT skill_id FROM skill_pins WHERE session_id = $1")
+            .bind(session)
+            .fetch_all(&self.pool)
+            .await
+            .context("reading a session's skills")
+    }
+
+    /// The bundles a session is reading, as the worker will write them.
+    ///
+    /// Read from the version each one *pinned*, not from whatever is current:
+    /// a version made after this conversation started must not change what it
+    /// is reading. That is the whole point of `skill_pins`.
+    ///
+    /// The folder on disk is the skill's `name`, because that is what the
+    /// agent answers to and what the standard says a folder is called — not
+    /// the slug, which exists so two skills of one name can be told apart in
+    /// a database.
+    /// The machine each of these sessions runs on, for telling its worker.
+    pub async fn hosts_of(&self, sessions: &[String]) -> Result<Vec<(String, String)>> {
+        Ok(sqlx::query(
+            "SELECT s.id, w.host_id FROM sessions s JOIN workspaces w ON w.id = s.workspace_id \
+              WHERE s.id = ANY($1)",
+        )
+        .bind(sessions)
+        .fetch_all(&self.pool)
+        .await?
+        .into_iter()
+        .map(|r| (r.get("id"), r.get("host_id")))
+        .collect())
+    }
+
+    pub async fn bundles_for_session(&self, session: &str) -> Result<Vec<ft_proto::SkillBundle>> {
+        let rows = sqlx::query(
+            "SELECT k.name, f.path, f.executable, b.bytes \
+               FROM skill_pins p \
+               JOIN skills k ON k.id = p.skill_id \
+               JOIN skill_files f ON f.version_id = p.version_id \
+               JOIN blobs b ON b.hash = f.hash \
+              WHERE p.session_id = $1 \
+              ORDER BY k.name, f.path",
+        )
+        .bind(session)
+        .fetch_all(&self.pool)
+        .await
+        .context("reading a session's skill bundles")?;
+
+        let mut out: Vec<ft_proto::SkillBundle> = Vec::new();
+        for row in rows {
+            let name: String = row.get("name");
+            let file = ft_proto::SkillFile {
+                path: row.get("path"),
+                contents: ft_proto::encode(&row.get::<Vec<u8>, _>("bytes")),
+                executable: row.get("executable"),
+            };
+            match out.last_mut() {
+                Some(bundle) if bundle.name == name => bundle.files.push(file),
+                _ => out.push(ft_proto::SkillBundle {
+                    name,
+                    files: vec![file],
+                }),
+            }
+        }
+        Ok(out)
+    }
+
+    /// Replace what a session is reading with exactly this set.
+    ///
+    /// The whole selection rather than a delta: a delta that arrives out of
+    /// order leaves a session holding a set nobody chose. Each one pins the
+    /// version that is current *now*, so a version made later does not change
+    /// what this conversation reads.
+    pub async fn set_for_session(
+        &self,
+        session: &str,
+        person: &str,
+        skills: &[String],
+    ) -> Result<()> {
+        let mut tx = self.pool.begin().await?;
+        sqlx::query("DELETE FROM skill_pins WHERE session_id = $1 AND NOT (skill_id = ANY($2))")
+            .bind(session)
+            .bind(skills)
+            .execute(&mut *tx)
+            .await?;
+        for skill in skills {
+            sqlx::query(
+                "INSERT INTO skill_pins (session_id, skill_id, version_id, added_by) \
+                 SELECT $1, k.id, k.current_version_id, $3 FROM skills k \
+                  WHERE k.id = $2 AND k.current_version_id IS NOT NULL \
+                 ON CONFLICT (session_id, skill_id) DO NOTHING",
+            )
+            .bind(session)
+            .bind(skill)
+            .bind(person)
+            .execute(&mut *tx)
+            .await?;
+        }
+        tx.commit().await?;
+        Ok(())
+    }
+}
+
+/// Write one version and its files, and point the skill at it.
+async fn write_version(
+    tx: &mut Transaction<'_, Postgres>,
+    skill: &str,
+    person: &str,
+    new: &NewSkill,
+    version: i32,
+) -> Result<()> {
+    let vid = SkillVersionId::new();
+    let paths: Vec<String> = new.files.iter().map(|f| f.path.clone()).collect();
+    let mut total: i64 = 0;
+    // Path, hash and whether it runs — what the fingerprint is taken over.
+    let mut written: Vec<(String, String, bool)> = Vec::new();
+
+    sqlx::query(
+        "INSERT INTO skill_versions \
+           (id, skill_id, version, frontmatter, body, notes, tokens, files, bytes, created_by) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 0, $9)",
+    )
+    .bind(vid.as_str())
+    .bind(skill)
+    .bind(version)
+    .bind(&new.frontmatter)
+    .bind(&new.body)
+    .bind(&new.notes)
+    .bind(tokens_for(&new.name, &new.description))
+    .bind(paths.len() as i32)
+    .bind(person)
+    .execute(&mut **tx)
+    .await
+    .context("writing a skill version")?;
+
+    for f in &new.files {
+        let bytes = ft_proto::decode(&f.contents)
+            .with_context(|| format!("{} did not arrive intact", f.path))?;
+        let hash = format!("{:x}", Sha256::digest(&bytes));
+        total += bytes.len() as i64;
+        written.push((f.path.clone(), hash.clone(), f.executable));
+
+        // The bytes once, under a hash of themselves. A file that has not
+        // changed between two versions is one row here, not two.
+        sqlx::query(
+            "INSERT INTO blobs (hash, bytes, size) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING",
+        )
+        .bind(&hash)
+        .bind(&bytes)
+        .bind(bytes.len() as i64)
+        .execute(&mut **tx)
+        .await
+        .context("storing a file")?;
+
+        sqlx::query(
+            "INSERT INTO skill_files (version_id, path, hash, executable, size) \
+             VALUES ($1, $2, $3, $4, $5)",
+        )
+        .bind(vid.as_str())
+        .bind(&f.path)
+        .bind(&hash)
+        .bind(f.executable)
+        .bind(bytes.len() as i64)
+        .execute(&mut **tx)
+        .await
+        .context("recording a file")?;
+    }
+
+    // The fingerprint, once every file's hash is known. Same string the
+    // migration builds, so a backfilled version and a freshly written one are
+    // comparable.
+    sqlx::query("UPDATE skill_versions SET bytes = $2, digest = $3 WHERE id = $1")
+        .bind(vid.as_str())
+        .bind(total)
+        .bind(digest_of(&written))
+        .execute(&mut **tx)
+        .await?;
+
+    sqlx::query("UPDATE skills SET current_version_id = $2, updated_at = now() WHERE id = $1")
+        .bind(skill)
+        .bind(vid.as_str())
+        .execute(&mut **tx)
+        .await?;
+    Ok(())
+}
+
+/// Whether the person in parameter `person` may move or delete a skill: its
+/// owner while it is in their own space, an admin of the directory it is in,
+/// or an organisation admin for anything not in somebody's own space. The
+/// same rule as `api::access::may_share`, as SQL.
+fn shareable(alias: &str, person: usize) -> String {
+    let admin = Level::Admin.rank();
+    format!(
+        "(EXISTS (SELECT 1 FROM principals me \
+                   WHERE me.id = ${person} AND {alias}.path <@ ('u.' || me.slug)::ltree) \
+          OR EXISTS (SELECT 1 FROM directories dd \
+                       JOIN directory_access da ON da.directory_id = dd.id \
+                      WHERE da.user_id = ${person} AND da.rank >= {admin} \
+                        AND {alias}.path <@ ('d.' || dd.slug)::ltree) \
+          OR (subpath({alias}.path, 0, 1) = 'd'::ltree \
+              AND EXISTS (SELECT 1 FROM users uu WHERE uu.id = ${person} AND uu.role = 'admin')))"
+    )
+}
+
+/// Stands in for "there is something under `scripts/`", which the query
+/// answered so that a list of three hundred does not read three hundred
+/// bundles to find out.
+static SCRIPTS: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| "scripts/".to_string());
+
+/// One row of a skills query.
+///
+/// Columns the query may not have selected are read with `try_get`. A reader
+/// that panicked over a missing column once took down every request that
+/// reached it.
+fn read_skill(r: sqlx::postgres::PgRow) -> Result<Skill> {
+    let frontmatter: serde_json::Value =
+        r.try_get("frontmatter").unwrap_or(serde_json::Value::Null);
+    let body: String = r.try_get("body").unwrap_or_default();
+    // Whether the bundle ships anything under `scripts/`, answered by the
+    // query rather than by loading every path of every skill in the list.
+    let scripts: bool = r.try_get("has_scripts").unwrap_or(false);
+    let name: String = r.get("name");
+    let description: String = r.get("description");
+    let version_id: Option<String> = r.try_get("current_version_id").ok().flatten();
+
+    Ok(Skill {
+        id: SkillId::from_stored(r.get::<String, _>("id")),
+        path: ft_core::ResourcePath::from_stored(r.get::<String, _>("path")).to_string(),
+        slug: r.get("slug"),
+        version: r.try_get("version").unwrap_or(0),
+        version_id: SkillVersionId::from_stored(version_id.unwrap_or_default()),
+        tokens: r
+            .try_get("tokens")
+            .unwrap_or_else(|_| tokens_for(&name, &description)),
+        files: r.try_get("files").unwrap_or(0),
+        bytes: r.try_get("bytes").unwrap_or(0),
+        risk: risk_of(
+            &frontmatter,
+            &body,
+            if scripts {
+                std::slice::from_ref(&SCRIPTS)
+            } else {
+                &[]
+            },
+        ),
+        author: r.try_get("author").ok().flatten(),
+        updated_at: r.get("updated_at"),
+        may_write: r.try_get("may_write").unwrap_or(false),
+        may_share: r.try_get("may_share").unwrap_or(false),
+        default_in: r.try_get("default_in").unwrap_or_default(),
+        always_on: r.try_get("always_on").unwrap_or(false),
+        name,
+        description,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The two sides of the fingerprint have to agree, so the format is
+    /// pinned here as a literal rather than as whatever the code happens to
+    /// build. The migration computes the identical string in SQL.
+    #[test]
+    fn the_fingerprint_is_over_the_manifest() {
+        let bundle = |runs: bool| {
+            vec![
+                ("SKILL.md".to_string(), "aaa".to_string(), false),
+                ("scripts/go.sh".to_string(), "bbb".to_string(), runs),
+            ]
+        };
+        // Order of the files does not change it; their contents do.
+        let mut shuffled = bundle(true);
+        shuffled.reverse();
+        assert_eq!(digest_of(&bundle(true)), digest_of(&shuffled));
+        // Whether a file runs is part of what a bundle is.
+        assert_ne!(digest_of(&bundle(true)), digest_of(&bundle(false)));
+        // And it is the hash of exactly this string.
+        assert_eq!(
+            digest_of(&bundle(true)),
+            format!(
+                "{:x}",
+                Sha256::digest("SKILL.md:aaa:0,scripts/go.sh:bbb:1".as_bytes())
+            )
+        );
+    }
+
+    #[test]
+    fn a_name_follows_the_standard() {
+        assert!(check_name("rust-review").is_ok());
+        assert!(check_name("").is_err());
+        assert!(check_name("Rust-Review").is_err());
+        assert!(check_name("rust_review").is_err());
+        assert!(check_name("-review").is_err());
+        assert!(check_name("review-").is_err());
+        // Reserved by the people who wrote the standard.
+        assert!(check_name("claude-helper").is_err());
+        assert!(check_name("anthropic-docs").is_err());
+    }
+
+    /// The bug this caught: `nae: webapp-testing` left no `name` at all, the
+    /// client filled one in from the folder, and a malformed bundle was
+    /// accepted under a name its own file never used.
+    #[test]
+    fn a_misspelled_key_is_not_a_name() {
+        let bundle = |fm: serde_json::Value| NewSkill {
+            name: "webapp-testing".into(),
+            description: "Toolkit for testing local web applications.".into(),
+            frontmatter: fm,
+            body: "do the thing".into(),
+            files: vec![IncomingFile {
+                path: "SKILL.md".into(),
+                contents: ft_proto::encode(b"---\n---\n"),
+                executable: false,
+            }],
+            notes: None,
+        };
+
+        let refused = check(&bundle(serde_json::json!({
+            "nae": "webapp-testing",
+            "description": "Toolkit for testing local web applications.",
+        })))
+        .unwrap_err();
+        assert!(refused.0.contains("`nae:`"), "{}", refused.0);
+
+        // Renaming in the review is legitimate: the file declares a name, and
+        // the one being saved differs on purpose.
+        assert!(check(&bundle(serde_json::json!({
+            "name": "code-review",
+            "description": "Toolkit for testing local web applications.",
+        })))
+        .is_ok());
+    }
+
+    #[test]
+    fn a_path_cannot_climb_out_of_the_bundle() {
+        assert!(check_path("scripts/run.sh").is_ok());
+        assert!(check_path("/etc/passwd").is_err());
+        assert!(check_path("../outside").is_err());
+        assert!(check_path("scripts/../../x").is_err());
+        assert!(check_path("").is_err());
+    }
+
+    #[test]
+    fn risk_is_read_from_the_bundle() {
+        let fm = serde_json::json!({"allowed-tools": "Bash(git *)", "hooks": {}});
+        let got = risk_of(&fm, "run !`whoami` first", &["scripts/x.sh".into()]);
+        assert_eq!(got, vec!["shell", "tools", "hooks", "scripts"]);
+        assert!(risk_of(&serde_json::json!({}), "just prose", &[]).is_empty());
+    }
+
+    #[test]
+    fn a_listing_entry_is_counted_in_tokens() {
+        let n = tokens_for(
+            "rust-review",
+            "Review Rust for the conventions this codebase uses.",
+        );
+        // Tokens, not characters: the entry is ~75 characters.
+        assert!(n > 5 && n < 40, "{n} tokens is not a plausible count");
+    }
+
+    /// The same skill, imported by two people, meeting in one directory.
+    ///
+    /// The team's copy is in `d/shared`; Ana has her own. Moving hers in
+    /// collides on the name. Dropping hers hands her session to the team's;
+    /// adding hers as a version makes it the team's next one.
+    #[tokio::test]
+    async fn the_same_skill_from_two_people_merges_into_the_directorys() {
+        use crate::access::{Access, FiledKind};
+        use crate::accounts::Accounts;
+        use crate::db::Db;
+        use crate::vault::{crypto::RootKey, Vault};
+
+        let (db, admin) = Db::open_for_test_owned().await.unwrap();
+        let pool = db.pool().clone();
+        let skills = Skills::new(pool.clone());
+        let access = Access::new(pool.clone());
+        let accounts = Accounts::new(pool.clone());
+        let vault = Vault::new(pool.clone(), RootKey::generate());
+        let org = db.org().await.unwrap();
+        let org_id = ft_core::OrgId::from_stored(org.clone());
+        let ana = accounts
+            .create_user(&org_id, "ana", "ana@example.test", "member")
+            .await
+            .unwrap()
+            .0
+            .id;
+
+        let bundle = |body: &str| NewSkill {
+            name: "code-review".into(),
+            description: "Review a diff.".into(),
+            frontmatter: serde_json::json!({"name": "code-review"}),
+            body: body.into(),
+            files: vec![IncomingFile {
+                path: "SKILL.md".into(),
+                contents: ft_proto::encode(body.as_bytes()),
+                executable: false,
+            }],
+            notes: None,
+        };
+
+        // The team's copy, filed into the directory everybody works in.
+        let team = skills
+            .create(&org, &admin, "admin", &bundle("v1"))
+            .await
+            .unwrap();
+        let at = access
+            .path_of(FiledKind::Skill, team.as_str())
+            .await
+            .unwrap()
+            .unwrap();
+        access
+            .transfer(
+                &vault,
+                FiledKind::Skill,
+                team.as_str(),
+                &at.moved_to(ft_core::path::DIRECTORY, "shared"),
+                "admin",
+            )
+            .await
+            .unwrap();
+
+        // Ana's identical copy, on in one of her sessions.
+        let hers = skills
+            .create(&org, ana.as_str(), "ana", &bundle("v1"))
+            .await
+            .unwrap();
+        let host = db
+            .ensure_host("fire-01", ft_core::Compute::Local, ana.as_str())
+            .await
+            .unwrap();
+        let session = ft_core::SessionId::new();
+        db.insert_session(
+            &session,
+            &host.id,
+            ana.as_str(),
+            None,
+            "Reviewing",
+            "",
+            None,
+            None,
+            "Shell",
+            ft_core::WorkspaceSize::Medium,
+            ft_core::Share::Equal,
+            &[],
+            None,
+        )
+        .await
+        .unwrap();
+        skills
+            .set_for_session(session.as_str(), ana.as_str(), &[hers.as_str().to_string()])
+            .await
+            .unwrap();
+
+        let found = skills
+            .collisions("shared", &[hers.as_str().to_string()])
+            .await
+            .unwrap();
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].existing_id, team);
+        assert!(found[0].identical, "same bytes on both sides");
+
+        // Drop hers: the session now holds the team's, and hers is gone.
+        let touched = skills
+            .merge_into(hers.as_str(), team.as_str(), ana.as_str(), false)
+            .await
+            .unwrap();
+        assert_eq!(touched, vec![session.as_str().to_string()]);
+        let pinned: Vec<String> =
+            sqlx::query_scalar("SELECT skill_id FROM skill_pins WHERE session_id = $1")
+                .bind(session.as_str())
+                .fetch_all(&pool)
+                .await
+                .unwrap();
+        assert_eq!(pinned, vec![team.as_str().to_string()]);
+        let left: i64 = sqlx::query_scalar("SELECT count(*) FROM skills WHERE id = $1")
+            .bind(hers.as_str())
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(left, 0, "her copy is gone");
+
+        // A different copy, added as the team's next version.
+        let changed = skills
+            .create(&org, ana.as_str(), "ana", &bundle("v2"))
+            .await
+            .unwrap();
+        let found = skills
+            .collisions("shared", &[changed.as_str().to_string()])
+            .await
+            .unwrap();
+        assert!(!found[0].identical);
+        skills
+            .merge_into(changed.as_str(), team.as_str(), ana.as_str(), true)
+            .await
+            .unwrap();
+        let (version, digest): (i32, Option<String>) = sqlx::query_as(
+            "SELECT v.version, v.digest FROM skills k \
+               JOIN skill_versions v ON v.id = k.current_version_id WHERE k.id = $1",
+        )
+        .bind(team.as_str())
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(version, 2, "the team's copy moved on a version");
+        let expected = Skills::digest_of_new(&bundle("v2")).unwrap();
+        assert_eq!(
+            digest.as_deref(),
+            Some(expected.as_str()),
+            "holding her bytes"
+        );
+        let files: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM skill_files f JOIN skills k ON k.current_version_id = f.version_id \
+              WHERE k.id = $1",
+        )
+        .bind(team.as_str())
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(files, 1);
+    }
+}

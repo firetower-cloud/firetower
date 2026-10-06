@@ -600,6 +600,50 @@ pub(super) async fn create_session(
 
     state.db.record_checkouts(&id, &checkouts).await?;
 
+    // What this person has ticked by default for these repositories, plus
+    // their always-on set.
+    //
+    // Seeded on the server rather than sent by the form. "On by default" is a
+    // fact about a person and a repository, so every surface that starts work
+    // gets the same answer without each of them having to carry it — and the
+    // composer reads what the session *is* running rather than what a screen
+    // decided a moment ago. They are still removable before the first message,
+    // which is what the picker is for.
+    //
+    // Each pins the version that is current now, so a version made later does
+    // not change what this conversation reads.
+    //
+    // Best effort. A workspace that starts with no skills is a workspace
+    // somebody can fix in one click; one that refuses to start because a
+    // default could not be read is not.
+    let on_these: Vec<String> = repos.iter().map(|(r, _)| r.id.to_string()).collect();
+    match state.skills.defaults_for(&owner, &on_these).await {
+        Ok(wanted) if !wanted.is_empty() => {
+            if let Err(e) = state
+                .skills
+                .set_for_session(id.as_str(), &owner, &wanted)
+                .await
+            {
+                tracing::warn!("seeding this session's skills: {e:#}");
+            }
+        }
+        Ok(_) => {}
+        Err(e) => tracing::warn!("reading default skills: {e:#}"),
+    }
+
+    // The bundles themselves, each from the version its pin names. Best
+    // effort for the same reason the seeding is: a workspace that comes up
+    // without them is one somebody can fix, and one that refuses to start is
+    // not.
+    let skills = state
+        .skills
+        .bundles_for_session(id.as_str())
+        .await
+        .unwrap_or_else(|e| {
+            tracing::warn!("reading this session's skill bundles: {e:#}");
+            Vec::new()
+        });
+
     // Each repository's own variables, opened once. Every read is a line in the
     // vault's log naming the session it was for.
     let mut per_repo_env: Vec<Vec<ft_core::dotenv::Variable>> = Vec::new();
@@ -638,7 +682,6 @@ pub(super) async fn create_session(
     // The same credential, for the agents that read one out of a file rather
     // than out of the environment.
     let agent_home = agent_home(&state, req.agent, &id, &owner).await?;
-
     // The identity the agent's *own* commits carry.
     //
     // `Action::Commit` covers what Firetower commits for you and reaches the
@@ -714,6 +757,7 @@ pub(super) async fn create_session(
                 share: req.share,
                 env,
                 agent_home,
+                skills,
             })),
         )
         .await?;
@@ -870,6 +914,14 @@ pub(crate) async fn relaunch(
         env.push((name, value));
     }
     let agent_home = agent_home(state, session.agent, &session.id, owner).await?;
+    // What it was already reading. A restart is the same conversation, so it
+    // comes back with the versions it pinned rather than with whatever is
+    // current now.
+    let skills = state
+        .skills
+        .bundles_for_session(session.id.as_str())
+        .await
+        .unwrap_or_default();
 
     state
         .fleet
@@ -898,6 +950,7 @@ pub(crate) async fn relaunch(
                 share: session.share,
                 env,
                 agent_home,
+                skills,
             },
         )
         .await;
@@ -1044,6 +1097,25 @@ async fn start_another_agent(
     }
     let agent_home = agent_home(&state, req.agent, &id, &owner).await?;
 
+    // A second agent in a workspace is a second session, so it chooses for
+    // itself — seeded from this person's always-on set, in a directory of its
+    // own. Not from repository defaults: the checkouts belong to the place,
+    // and this run did not pick them.
+    let everywhere: Vec<String> = Vec::new();
+    if let Ok(wanted) = state.skills.defaults_for(&owner, &everywhere).await {
+        if !wanted.is_empty() {
+            let _ = state
+                .skills
+                .set_for_session(id.as_str(), &owner, &wanted)
+                .await;
+        }
+    }
+    let skills = state
+        .skills
+        .bundles_for_session(id.as_str())
+        .await
+        .unwrap_or_default();
+
     state
         .fleet
         .start_agent(
@@ -1062,6 +1134,7 @@ async fn start_another_agent(
                 share: place.share,
                 env,
                 agent_home,
+                skills,
             },
         )
         .await?;

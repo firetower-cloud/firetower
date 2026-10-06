@@ -35,6 +35,7 @@ import {
   RotateCcw,
   Search,
   Send,
+  Diamond,
   Terminal,
   Users,
   X,
@@ -62,6 +63,7 @@ import { AddAgent } from "~/ui/AddAgent";
 
 const DID: Partial<Record<ItemKind, string>> = {
   CommandExecution: "ran",
+  SkillUse: "used",
   FileChange: "changed",
   FileRead: "read",
   McpToolCall: "called",
@@ -71,6 +73,7 @@ const DID: Partial<Record<ItemKind, string>> = {
 
 const GLYPH: Partial<Record<ItemKind, typeof Terminal>> = {
   CommandExecution: Terminal,
+  SkillUse: Diamond,
   FileRead: FileText,
   FileChange: Pencil,
   WebSearch: Search,
@@ -505,11 +508,39 @@ function Node({
   if (item.kind === "AssistantMessage") return <Said item={item} onOpenFile={onOpenFile} />;
 
   if (item.kind === "Reasoning") return <Thought item={item} />;
+  if (item.kind === "SkillUse") return <Reached item={item} />;
   if (item.kind === "Question") return <Answered item={item} />;
   if (item.kind === "SubagentCall") return <Delegated item={item} items={items} tasks={tasks} onOpenDiff={onOpenDiff} onOpenFile={onOpenFile} />;
   if (item.kind === "FileChange" && editFrom(item.input)) return <Edited item={item} onOpenDiff={onOpenDiff} />;
 
   return <ToolRow item={item} onOpenDiff={onOpenDiff} onOpenFile={onOpenFile} />;
+}
+
+/**
+ * The agent reaching for a skill.
+ *
+ * One line, not a card with a fold. Nothing happened to the repository — the
+ * agent read the instructions it had been given and went on — so it belongs
+ * beside the greps and the reads rather than above them, and the only fact
+ * worth the width is *which* skill.
+ *
+ * The name comes from `input.skill`, which every reader writes whatever its
+ * agent called the tool: Claude Code has a `Skill` tool, Codex has
+ * `skills.read`, and Kimi has no skill tool at all and simply reads the
+ * `SKILL.md`. Three spellings, one key — see `normalise::skill_reached_for`.
+ */
+function Reached({ item }: { item: Item }) {
+  const named =
+    (item.input as { skill?: string } | undefined)?.skill ??
+    (item.title && item.title !== "Skill" ? item.title : null);
+
+  return (
+    <div className="flex items-baseline gap-2 py-0.5 text-meta text-mute">
+      <Diamond className="h-3 w-3 shrink-0 translate-y-px text-slate" strokeWidth={2} />
+      <span>skill</span>
+      <span className="font-mono text-code text-text">{named ?? "one of yours"}</span>
+    </div>
+  );
 }
 
 /** Which session the turns belong to — for the paths in them. */

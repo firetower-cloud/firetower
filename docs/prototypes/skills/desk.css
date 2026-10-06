@@ -1,0 +1,209 @@
+/* The desk layer, taken from desktop/STYLE.md and desktop/src/styles.css.
+   Three habits that doc names as the tells of a generated interface are
+   deliberately absent here: an all-caps eyebrow above every heading, meta
+   strings joined with middle dots, and a rounded card around everything. */
+
+@font-face{font-family:"Archivo";src:url("../../../desktop/src/fonts/archivo.woff2") format("woff2");font-weight:100 900;font-display:swap}
+@font-face{font-family:"Archivo Narrow";src:url("../../../desktop/src/fonts/archivo-narrow.woff2") format("woff2");font-weight:100 900;font-display:swap}
+@font-face{font-family:"JetBrains Mono";src:url("../../../desktop/src/fonts/jetbrains-mono.woff2") format("woff2");font-weight:100 800;font-display:swap}
+
+:root{
+  --ground:#0b0b0c; --panel:#111113; --raise:#17171a; --overlay:#1e1e22;
+  --line:#26262b; --line-soft:#1a1a1e;
+  --bone:#f4f4f5; --text:#c8c8ce; --dim:#8b8b93; --mute:#5e5e67;
+  /* Signals, and there is no fourth. Ember means one thing and is unused here. */
+  --ember:#ff6b2c; --ember-tint:#2a1509; --ember-deep:#7a3417;
+  --sage:#6ec08a; --sage-tint:#12251a; --sage-deep:#2c5b3d;
+  --brick:#e5645a; --brick-tint:#2a1414; --brick-deep:#6e2f2b;
+  --slate:#7d95b0; --slate-tint:#161d26; --slate-deep:#35485c;
+  --syn-comment:#6a6a74; --syn-string:#8fb99a; --syn-keyword:#9a8cc4;
+  --syn-type:#7d95b0; --syn-number:#c2ab63; --syn-fn:#b8845f;
+
+  --read:.9375rem; --lede:1.0625rem; --ui:.84375rem; --meta:.75rem;
+  --micro:.6875rem; --code:.8125rem; --title:1.0625rem; --display:1.75rem;
+
+  --row:40px; --row-tight:32px; --control:30px;
+  --chrome-title:38px; --chrome-lights:78px; --strip:22px;
+  --r-sm:6px; --r-md:8px; --r-lg:12px;
+  --raised:inset 0 1px 0 rgb(255 255 255/.04), 0 1px 2px rgb(0 0 0/.4);
+  --float:inset 0 1px 0 rgb(255 255 255/.05), 0 16px 40px -16px rgb(0 0 0/.7);
+  --swift:cubic-bezier(.16,1,.3,1); --dur:140ms;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;overflow:hidden}
+body{background:var(--ground);color:var(--text);
+  font:var(--ui)/1.45 Archivo,ui-sans-serif,-apple-system,system-ui,sans-serif;
+  -webkit-font-smoothing:antialiased;font-feature-settings:"cv05" 1}
+.mono{font-family:"JetBrains Mono",ui-monospace,"SF Mono",monospace;font-size:var(--code)}
+.narrow{font-family:"Archivo Narrow",Archivo,sans-serif}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+input,textarea,select{font:inherit;color:inherit}
+::selection{background:#2a2a30;color:var(--bone)}
+::-webkit-scrollbar{width:11px;height:11px}
+::-webkit-scrollbar-thumb{background:#2a2a30;border-radius:99px;border:3px solid transparent;background-clip:padding-box}
+::-webkit-scrollbar-thumb:hover{background:#35353d;background-clip:padding-box}
+::-webkit-scrollbar-track{background:transparent}
+
+/* ── window ───────────────────────────────────────────────────── */
+#win{height:100%;display:grid;grid-template-rows:var(--chrome-title) 1fr var(--strip)}
+.titlebar{display:flex;align-items:center;gap:10px;padding-right:12px;
+  background:rgb(11 11 12/.9);border-bottom:1px solid var(--line-soft)}
+.lights{width:var(--chrome-lights);display:flex;align-items:center;gap:8px;padding-left:20px;flex:none}
+.lights i{width:12px;height:12px;border-radius:99px;display:block}
+.lights i:nth-child(1){background:#ff5f57}
+.lights i:nth-child(2){background:#febc2e}
+.lights i:nth-child(3){background:#28c840}
+.titlebar .where{font-size:var(--meta);color:var(--dim)}
+.titlebar .where b{color:var(--text);font-weight:600}
+.titlebar .sep{color:#303038}
+.titlebar .right{margin-left:auto;display:flex;align-items:center;gap:8px}
+.statusbar{display:flex;align-items:center;gap:12px;padding:0 12px;background:rgb(11 11 12/.86);
+  border-top:1px solid var(--line-soft);font-size:var(--micro);color:var(--mute)}
+.statusbar .right{margin-left:auto;display:flex;gap:12px;align-items:center}
+
+/* ── structure ────────────────────────────────────────────────── */
+#body{display:grid;min-height:0;overflow:hidden}
+.sidebar{background:rgb(17 17 19/.72);border-right:1px solid var(--line-soft);
+  padding:8px 8px 0;display:flex;flex-direction:column;min-height:0;overflow:auto}
+.pane{display:flex;flex-direction:column;min-height:0;min-width:0;overflow:hidden}
+.toolbar{height:var(--row);display:flex;align-items:center;gap:8px;padding:0 12px;
+  border-bottom:1px solid var(--line-soft);flex:none}
+.toolbar .right{margin-left:auto;display:flex;align-items:center;gap:8px}
+
+/* ── rows: selection fills, no edge marker ────────────────────── */
+.row{display:flex;align-items:center;gap:8px;min-height:var(--row-tight);
+  padding-inline:10px;border-radius:var(--r-md);color:var(--dim);
+  transition:background var(--dur) var(--swift),color var(--dur) var(--swift);cursor:default}
+.row:hover{background:color-mix(in srgb,var(--raise) 70%,transparent)}
+.row[data-on=true]{background:var(--overlay);box-shadow:var(--raised);color:var(--bone)}
+.sidebar .legend{font-family:"Archivo Narrow";font-size:var(--micro);letter-spacing:.18em;
+  text-transform:uppercase;color:var(--mute);padding:14px 10px 5px}
+
+/* ── controls: one height ─────────────────────────────────────── */
+.control{height:var(--control);display:inline-flex;align-items:center;gap:6px;padding-inline:10px;
+  border-radius:var(--r-md);font-size:var(--ui);white-space:nowrap;color:var(--text);
+  background:var(--raise);box-shadow:var(--raised);
+  transition:background var(--dur) var(--swift)}
+.control:hover{background:var(--overlay)}
+.control.plain{background:none;box-shadow:none;color:var(--dim)}
+.control.plain:hover{background:var(--raise);color:var(--text)}
+/* The default action is heavier, not coloured. Colour is spent. */
+.control.go{background:var(--overlay);color:var(--bone);font-weight:600;
+  box-shadow:inset 0 1px 0 rgb(255 255 255/.07),0 1px 3px rgb(0 0 0/.5)}
+.control.go:hover{background:#26262c}
+.control[disabled]{color:var(--mute);background:var(--raise);box-shadow:none;cursor:default;font-weight:400}
+.control.quiet{background:none;box-shadow:none;color:var(--mute)}
+.control.quiet:hover{color:var(--text)}
+.control.sm{height:24px;font-size:var(--meta);padding-inline:8px}
+.control.harm{color:#eb8a82}
+
+.track{display:inline-flex;gap:2px;padding:2px;border-radius:var(--r-md);
+  background:var(--ground);box-shadow:inset 0 1px 2px rgb(0 0 0/.35)}
+.track>button{padding:4px 10px;border-radius:6px;font-size:var(--ui);color:var(--mute);
+  transition:background var(--dur) var(--swift),color var(--dur) var(--swift);white-space:nowrap}
+.track>button:hover{color:var(--dim)}
+.track>button[data-on=true]{background:var(--overlay);color:var(--bone);box-shadow:var(--raised)}
+
+.keycap{display:inline-grid;place-items:center;min-width:18px;height:18px;padding-inline:4px;
+  border:1px solid var(--line);border-radius:4px;background:var(--ground);
+  font-size:var(--micro);color:var(--mute)}
+
+.search{height:var(--control);display:flex;align-items:center;gap:7px;padding:0 10px;
+  border-radius:var(--r-md);background:var(--ground);box-shadow:inset 0 1px 2px rgb(0 0 0/.35);min-width:0}
+.search input{flex:1;background:none;border:0;outline:0;color:var(--bone);min-width:0;font-size:var(--ui)}
+.search input::placeholder{color:var(--mute)}
+
+/* ── the mark: identity by shape, never a hue ─────────────────── */
+.mark{font-family:"Archivo Narrow";font-weight:700;letter-spacing:.04em;color:var(--dim);
+  background:var(--raise);border:1px solid var(--line);border-radius:var(--r-sm);
+  box-shadow:var(--raised);display:grid;place-items:center;flex:none;
+  width:26px;height:26px;font-size:var(--meta);text-transform:uppercase}
+.mark.lg{width:44px;height:44px;font-size:var(--title);border-radius:var(--r-md)}
+[data-on=true]>.mark,.mark[data-on=true]{color:var(--bone);background:var(--overlay)}
+
+/* ── fields: sentence-case labels, never an eyebrow ───────────── */
+.field{display:flex;flex-direction:column;gap:6px}
+.field>label{font-size:var(--meta);color:var(--dim)}
+.field .help{font-size:var(--meta);color:var(--mute);line-height:1.55;max-width:72ch}
+.field input,.field textarea,.field select{background:var(--ground);border:0;
+  box-shadow:inset 0 1px 2px rgb(0 0 0/.35);border-radius:var(--r-md);
+  padding:8px 10px;outline:0;color:var(--bone);width:100%;font-size:var(--ui)}
+.field textarea{resize:vertical;line-height:1.6}
+.field input:focus,.field textarea:focus{box-shadow:inset 0 1px 2px rgb(0 0 0/.35),0 0 0 2px #2f2f37}
+.field .count{font-size:var(--micro);color:var(--mute);font-variant-numeric:tabular-nums;align-self:flex-end}
+
+/* ── facts: a labelled grid, not a dotted string ──────────────── */
+.facts{display:grid;grid-template-columns:auto 1fr;gap:3px 14px;font-size:var(--meta);align-items:baseline}
+.facts dt{color:var(--mute)}
+.facts dd{color:var(--text)}
+
+/* ── state, by signal only ────────────────────────────────────── */
+.sig{display:inline-flex;align-items:center;gap:5px;font-size:var(--micro);color:var(--dim)}
+.sig::before{content:"";width:6px;height:6px;border-radius:99px;background:var(--mute);flex:none}
+.sig.ok::before{background:var(--sage)}
+.sig.bad::before{background:var(--brick)}
+.sig.you::before{background:var(--slate)}
+.tag{font-size:var(--micro);color:var(--mute);padding:1px 6px;border-radius:99px;
+  border:1px solid var(--line-soft);white-space:nowrap}
+.tag.warnish{color:#eb8a82;border-color:var(--brick-deep)}
+.tag.info{color:#a9bed4;border-color:var(--slate-deep)}
+.tag.good{color:var(--sage);border-color:var(--sage-deep)}
+.num{font-variant-numeric:tabular-nums}
+
+/* ── hairline sections, not cards ─────────────────────────────── */
+.rule{height:1px;background:var(--line-soft);border:0}
+.legend{font-family:"Archivo Narrow";font-size:var(--micro);letter-spacing:.18em;
+  text-transform:uppercase;color:var(--mute)}
+.aside{border-left:2px solid var(--line);padding-left:11px;font-size:var(--meta);
+  color:var(--dim);line-height:1.6;max-width:76ch}
+.aside.care{border-left-color:var(--brick-deep);color:#d79a94}
+.aside.note{border-left-color:var(--slate-deep);color:#a3b4c6}
+.aside b{color:var(--bone);font-weight:600}
+
+/* ── the one object allowed a card: a drop target ─────────────── */
+.target{border:1.5px dashed #33333b;border-radius:var(--r-lg);background:rgb(23 23 26/.5);
+  transition:border-color var(--dur) var(--swift),background var(--dur) var(--swift)}
+.target.over{border-color:var(--slate);background:var(--slate-tint)}
+
+/* ── reading ──────────────────────────────────────────────────── */
+.read{font-size:var(--read);line-height:1.7;color:var(--text);max-width:68ch}
+.read h2{font-size:var(--read);color:var(--bone);font-weight:600;margin:18px 0 6px}
+.read h3{font-size:var(--ui);color:var(--bone);font-weight:600;margin:16px 0 4px}
+.read p{margin:0 0 10px}
+.read ol,.read ul{margin:0 0 10px 20px}
+.read li{margin:3px 0}
+.read code{font-family:"JetBrains Mono";font-size:var(--code);color:var(--syn-string)}
+.read pre{background:var(--ground);box-shadow:inset 0 1px 2px rgb(0 0 0/.35);border-radius:var(--r-md);
+  padding:10px 12px;overflow-x:auto;margin:10px 0;font-family:"JetBrains Mono";font-size:var(--code);line-height:1.65}
+
+/* ── file list ────────────────────────────────────────────────── */
+.files{font-size:var(--meta)}
+.files .f{display:grid;grid-template-columns:1fr auto auto;gap:12px;align-items:center;
+  height:var(--row-tight);padding:0 10px;border-radius:var(--r-sm)}
+.files .f:hover{background:color-mix(in srgb,var(--raise) 70%,transparent)}
+.files .f .p{color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  font-family:"JetBrains Mono";font-size:var(--code)}
+.files .f .sz{color:var(--mute);font-variant-numeric:tabular-nums;text-align:right;min-width:62px}
+.files .head{height:22px;color:var(--mute);font-family:"Archivo Narrow";font-size:var(--micro);
+  letter-spacing:.18em;text-transform:uppercase}
+.files .head:hover{background:none}
+
+/* ── toggle ───────────────────────────────────────────────────── */
+.sw{width:28px;height:16px;border-radius:99px;background:var(--ground);position:relative;flex:none;
+  box-shadow:inset 0 1px 2px rgb(0 0 0/.4);cursor:pointer;transition:background var(--dur) var(--swift)}
+.sw::after{content:"";position:absolute;top:2px;left:2px;width:12px;height:12px;border-radius:99px;
+  background:var(--mute);transition:transform var(--dur) var(--swift),background var(--dur) var(--swift)}
+.sw[aria-checked=true]{background:#2b3a31}
+.sw[aria-checked=true]::after{transform:translateX(12px);background:var(--sage)}
+.check{width:15px;height:15px;border-radius:4px;background:transparent;flex:none;
+  box-shadow:inset 0 0 0 1px #3a3a42;display:grid;place-items:center;cursor:pointer}
+.check[aria-checked=true]{background:var(--raise);box-shadow:inset 0 0 0 1px #4a4a54,var(--raised)}
+.check[aria-checked=true]::after{content:"";width:7px;height:4px;
+  border-left:1.6px solid var(--bone);border-bottom:1.6px solid var(--bone);transform:rotate(-45deg) translateY(-1px)}
+.check[aria-disabled=true]{opacity:.35;cursor:default}
+
+/* ── meter ────────────────────────────────────────────────────── */
+.meter{height:4px;border-radius:99px;background:var(--ground);overflow:hidden;box-shadow:inset 0 1px 2px rgb(0 0 0/.4)}
+.meter i{display:block;height:100%;background:var(--sage);transition:width .2s var(--swift),background .2s}
+.meter.near i{background:var(--syn-number)}
+.meter.over i{background:var(--brick)}

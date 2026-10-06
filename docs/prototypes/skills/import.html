@@ -1,0 +1,312 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Firetower — Add a skill</title>
+<link rel="stylesheet" href="desk.css">
+<style>
+#body{grid-template-columns:196px 1fr}
+.pane>.scroll{flex:1;min-height:0;overflow:auto}
+.sheetcol{max-width:880px;margin:0 auto;padding:22px 26px 30px;display:flex;flex-direction:column;gap:20px}
+.hero{display:flex;flex-direction:column;gap:8px}
+.hero h1{font-size:var(--display);line-height:1.25;letter-spacing:-.02em;color:var(--bone);font-weight:600}
+.hero p{font-size:var(--read);line-height:1.6;color:var(--dim);max-width:62ch}
+
+.drop{padding:52px 30px;text-align:center;display:flex;flex-direction:column;align-items:center;gap:7px}
+.drop .glyph{width:46px;height:46px;border-radius:var(--r-md);background:var(--raise);box-shadow:var(--raised);
+  display:grid;place-items:center;color:var(--mute);font-size:19px;margin-bottom:5px;
+  transition:color var(--dur) var(--swift),background var(--dur) var(--swift)}
+.target.over .glyph{color:var(--slate);background:var(--slate-tint)}
+.drop .t{font-size:var(--lede);color:var(--bone);font-weight:600}
+.drop .s{font-size:var(--meta);color:var(--mute);line-height:1.6;max-width:50ch}
+.drop .alt{display:flex;gap:7px;margin-top:14px}
+
+.ways{display:grid;grid-template-columns:repeat(3,1fr);gap:0}
+.way{padding:0 16px;border-left:1px solid var(--line-soft);display:flex;flex-direction:column;gap:5px}
+.way:first-child{border-left:0;padding-left:0}
+.way .h{font-size:var(--ui);color:var(--text);font-weight:600}
+.way .d{font-size:var(--meta);color:var(--mute);line-height:1.55}
+
+.reading{padding:60px 20px;display:flex;flex-direction:column;align-items:center;gap:12px}
+.spin{width:20px;height:20px;border-radius:99px;border:2px solid #24242a;border-top-color:var(--slate);animation:sp .8s linear infinite}
+@keyframes sp{to{transform:rotate(360deg)}}
+
+.found{display:flex;flex-direction:column}
+.found .hd{display:flex;align-items:baseline;gap:12px;padding-bottom:9px}
+.found .hd h2{font-size:var(--title);color:var(--bone);font-weight:600}
+.found .hd .sigs{margin-left:auto;display:flex;gap:12px}
+
+.entry{border-top:1px solid var(--line-soft)}
+.entry:last-child{border-bottom:1px solid var(--line-soft)}
+.entry .bar{display:grid;grid-template-columns:16px 26px 1fr auto;gap:11px;align-items:start;padding:13px 2px;cursor:default}
+.entry .bar:hover{background:color-mix(in srgb,var(--raise) 50%,transparent)}
+.entry .nm{font-size:var(--ui);color:var(--bone);font-weight:600}
+.entry .src{font-size:var(--micro);color:var(--mute)}
+.entry .d{font-size:var(--meta);color:var(--dim);margin-top:3px;line-height:1.5;max-width:76ch}
+.entry .tags{display:flex;gap:7px;align-items:center;margin-top:7px;flex-wrap:wrap}
+.entry .caret{color:#44444c;font-size:var(--meta);transition:transform var(--dur) var(--swift);padding-top:3px}
+.entry[data-open=true] .caret{transform:rotate(90deg)}
+.entry .more{display:none;padding:2px 2px 22px 53px;gap:26px;grid-template-columns:minmax(0,1fr) 352px}
+.entry[data-open=true] .more{display:grid}
+.entry.skip .nm{color:var(--dim)}
+
+.fm{font-family:"JetBrains Mono";font-size:var(--code);line-height:1.7;color:var(--dim);
+  background:var(--ground);box-shadow:inset 0 1px 2px rgb(0 0 0/.35);border-radius:var(--r-md);
+  padding:11px 13px;white-space:pre-wrap;overflow:auto;max-height:200px}
+.fm .k{color:var(--syn-type)} .fm .v{color:var(--text)} .fm .bad{color:#eb8a82}
+.fm .add{color:var(--syn-string)}
+
+.actionbar{position:sticky;bottom:0;background:linear-gradient(transparent,var(--ground) 30%);
+  padding-top:22px;margin-top:4px}
+.actionbar .inner{display:flex;align-items:center;gap:9px;padding-top:13px;border-top:1px solid var(--line)}
+.actionbar .n{flex:1;font-size:var(--meta);color:var(--dim)}
+.actionbar .n b{color:var(--bone);font-weight:600}
+.done{padding:64px 20px;display:flex;flex-direction:column;align-items:center;gap:9px;text-align:center}
+.done .glyph{width:40px;height:40px;border-radius:99px;background:var(--sage-tint);color:var(--sage);
+  display:grid;place-items:center;font-size:17px;margin-bottom:6px}
+</style></head><body>
+
+<div id="win">
+  <div class="titlebar">
+    <div class="lights"><i></i><i></i><i></i></div>
+    <span class="where"><b>westlabs</b></span>
+    <span class="sep">/</span><span class="where">Configuration</span>
+    <span class="sep">/</span><span class="where">Skills</span>
+    <span class="sep">/</span><span class="where"><b>Add</b></span>
+    <div class="right">
+      <div class="track" id="sim">
+        <button data-s="empty" data-on="true">Empty</button>
+        <button data-s="over">Dragging</button>
+        <button data-s="one">One folder</button>
+        <button data-s="many">A folder of skills</button>
+        <button data-s="zip">A .zip</button>
+        <button data-s="done">Imported</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="body">
+    <aside class="sidebar">
+      <div class="legend">Yours</div>
+      <div class="row">Agents</div><div class="row">Repositories</div>
+      <div class="row" data-on="true"><span style="color:var(--bone)">Skills</span><span style="margin-left:auto;font-size:var(--micro);color:var(--mute)" class="num">312</span></div>
+      <div class="row">Secrets</div><div class="row">Machines</div>
+      <div class="legend">Organisation</div>
+      <div class="row">People</div><div class="row">Teams</div><div class="row">Directories</div>
+    </aside>
+
+    <section class="pane">
+      <div class="toolbar">
+        <a href="library.html" class="control plain sm" style="text-decoration:none">‹ All skills</a>
+        <span style="font-size:var(--meta);color:var(--dim)">Add a skill</span>
+        <span class="right"><span class="keycap">esc</span><span style="font-size:var(--micro);color:var(--mute)">cancel</span></span>
+      </div>
+      <div class="scroll"><div class="sheetcol" id="col"></div></div>
+    </section>
+  </div>
+
+  <div class="statusbar"><span id="sb"></span>
+    <span class="right"><span>Nothing is written until you import</span></span></div>
+</div>
+
+<script>
+const $=(s,r=document)=>r.querySelector(s), $$=(s,r=document)=>[...r.querySelectorAll(s)];
+let state="empty";
+const mono=n=>n.split("-").slice(0,2).map(w=>w[0]).join("").toUpperCase();
+
+const F={
+ release:[["SKILL.md","4.1 KB",0,0],["references/checklist.md","11.8 KB",0,0],["references/rollback.md","6.4 KB",0,0],
+          ["scripts/tag-release.sh","812 B",1,0],["scripts/notes-from-log.py","2.4 KB",1,0],["assets/notes.tmpl.md","1.1 KB",0,0]],
+ review:[["SKILL.md","3.2 KB",0,0],["references/predicate.md","9.1 KB",0,1],["scripts/grep-predicates.sh","640 B",1,0]],
+ broken:[["readme.txt","1.2 KB",0,0],["notes/ideas.md","3.0 KB",0,0]],
+ canvas:[["SKILL.md","12.0 KB",0,0],["canvas-fonts/WorkSans-Bold.ttf","187 KB",0,1],["canvas-fonts/WorkSans-Regular.ttf","184 KB",0,1],
+         ["canvas-fonts/IBMPlexSerif-Bold.ttf","161 KB",0,1],["canvas-fonts/Jura-Light.ttf","154 KB",0,0],["78 more files","5.0 MB",0,0]],
+};
+const SETS={
+ one:[{k:"ok",name:"release-checklist",src:"release-checklist",count:6,size:"26.6 KB",reused:0,risk:["ships executable scripts"],files:F.release,
+   desc:"Walk a release: changelog, version bump, tag, release notes, and the post-deploy checks. Use when shipping to production."}],
+ many:[
+  {k:"ok",name:"release-checklist",src:"skills/release-checklist",count:6,size:"26.6 KB",reused:0,risk:["ships executable scripts"],files:F.release,
+   desc:"Walk a release: changelog, version bump, tag, release notes, and the post-deploy checks. Use when shipping to production."},
+  {k:"you",name:"code-review",rename:"rust-review",src:"skills/code-review",count:3,size:"12.9 KB",reused:1,risk:["pre-approves tools for the turn"],files:F.review,
+   desc:"Review Rust for the conventions this codebase actually uses: no hand-written path predicates, Writer for mutations, try_get for optional columns.",
+   issue:"Claude Code ships a skill called code-review, and yours would be shadowed by it. Give it a name of its own."},
+  {k:"bad",name:"scratch-notes",src:"skills/scratch-notes",count:2,size:"4.2 KB",reused:0,risk:[],files:F.broken,desc:"",
+   issue:"No SKILL.md. A skill folder has to hold one, spelled exactly that way. This folder is skipped; the rest still import."}],
+ zip:[{k:"ok",name:"canvas-design",src:"canvas-design.zip",count:83,size:"5.55 MB",reused:3,risk:["ships executable scripts"],files:F.canvas,
+   desc:"Create distinctive, production-grade visual compositions with typographic range. Use when building posters, covers, diagrams, or anything where the type has to carry the design.",
+   big:"The largest skill you would have, and 54 of its files are fonts. Within every limit, but worth knowing before it travels to a worker on every session."}],
+};
+
+const EMPTY=`
+<div class="hero">
+  <h1>Add a skill</h1>
+  <p>A skill is a folder with a <span class="mono">SKILL.md</span> inside it. Drop one here and Firetower reads it,
+  checks it and shows you what it found. Nothing reaches the library until you say so.</p>
+</div>
+<div class="target" id="dz">
+  <div class="drop">
+    <span class="glyph">⤓</span>
+    <span class="t">Drop a skill folder</span>
+    <span class="s">Or a <span class="mono">.zip</span> of one, or a folder holding several — your
+      <span class="mono">~/.claude/skills</span> works as it is.</span>
+    <span class="alt">
+      <button class="control">Choose a folder</button>
+      <button class="control">Choose a .zip</button>
+    </span>
+  </div>
+</div>
+<div class="ways">
+  <div class="way"><span class="h">Several at once</span>
+    <span class="d">Drop a folder of folders and each is reviewed separately. Untick the ones you do not want.</span></div>
+  <div class="way"><span class="h">However you have it</span>
+    <span class="d">A zip is how skills are published, so a download imports untouched. So does a folder you already keep.</span></div>
+  <div class="way"><span class="h">Nothing is shared yet</span>
+    <span class="d">A skill lands in your own space. Sharing it with a directory is a separate, deliberate act.</span></div>
+</div>
+<p class="aside">Limits are 100 files, 2 MB a file and 25 MB a skill — about four times the largest skill Anthropic publishes.</p>`;
+
+const READING=`
+<div class="reading">
+  <span class="spin"></span>
+  <div style="font-size:var(--ui);color:var(--bone)">Reading <span class="mono">skills</span></div>
+  <div style="font-size:var(--meta);color:var(--mute)">Parsing frontmatter, hashing contents, checking names</div>
+</div>`;
+
+function fmBlock(s){
+  if(s.k==="bad") return `<div class="fm">No <span class="bad">SKILL.md</span> in this folder.</div>`;
+  return `<div class="fm">---
+<span class="k">name</span>: ${s.k==="you"?`<span class="bad">${s.name}</span>  <span style="color:var(--mute)">taken</span>`:`<span class="v">${s.name}</span>`}
+<span class="k">description</span>: <span class="v">${s.desc.slice(0,72)}…</span>
+<span class="k">license</span>: <span class="v">MIT</span>
+<span class="k">metadata</span>:
+  <span class="k">author</span>: <span class="v">kevin</span>
+  <span class="k">version</span>: <span class="v">2.1</span>${s.name==="code-review"?`
+<span class="k">allowed-tools</span>: <span class="v">Bash(cargo *) Read Grep</span>`:""}
+---</div>`;
+}
+
+function entry(s,i){
+  const sig = s.k==="ok" ? `<span class="sig ok">ready</span>`
+            : s.k==="you"? `<span class="sig you">needs a name</span>`
+            :              `<span class="sig bad">cannot import</span>`;
+  return `
+<div class="entry ${s.k==="bad"?"skip":""}" data-i="${i}" data-open="false">
+  <div class="bar">
+    <span class="check" role="checkbox" aria-checked="${s.k!=="bad"}" aria-disabled="${s.k==="bad"}"></span>
+    <span class="mark">${mono(s.name)}</span>
+    <div style="min-width:0">
+      <div style="display:flex;align-items:baseline;gap:9px;flex-wrap:wrap">
+        <span class="nm mono">${s.name}</span>${sig}
+        <span class="src">from <span class="mono" style="font-size:var(--micro)">${s.src}</span></span>
+      </div>
+      ${s.desc?`<div class="d">${s.desc}</div>`:""}
+      ${s.issue?`<p class="aside ${s.k==="bad"?"care":"note"}" style="margin-top:9px">${s.issue}</p>`:""}
+      ${s.big?`<p class="aside note" style="margin-top:9px">${s.big}</p>`:""}
+      <div class="tags">
+        <span class="tag"><span class="num">${s.count}</span> files</span>
+        <span class="tag"><span class="num">${s.size}</span></span>
+        ${s.reused?`<span class="tag good"><span class="num">${s.reused}</span> already stored</span>`:""}
+        ${s.risk.map(r=>`<span class="tag warnish">${r}</span>`).join("")}
+        ${s.risk.length||s.k==="bad"?"":'<span class="tag">reads only</span>'}
+      </div>
+    </div>
+    <span class="caret">›</span>
+  </div>
+
+  <div class="more">
+    <div style="display:flex;flex-direction:column;gap:15px;min-width:0">
+      ${s.k==="bad"?`
+        <div class="field"><label>What is in the folder</label>
+          <div class="files">${s.files.map(f=>`<div class="f"><span class="p">${f[0]}</span><span></span><span class="sz">${f[1]}</span></div>`).join("")}</div>
+          <div class="help">Add a <span class="mono">SKILL.md</span> with a name and a description, then drop it again.</div></div>`
+      :`
+        <div class="field"><label>Name</label>
+          <input class="mono" value="${s.rename||s.name}">
+          <div class="help">${s.rename?`Suggested, because <span class="mono">${s.name}</span> is already taken by the agent itself.`:"What you type as a command, and the folder written onto the worker."}</div></div>
+        <div class="field"><label>Description</label>
+          <textarea rows="3">${s.desc}</textarea>
+          <span class="count"><span class="num">${s.desc.length}</span> of 1024</span>
+          <div class="help">The only part of a skill always in the model's context. It is what decides whether the skill is ever reached for.</div></div>
+        <div class="field"><label>File it in</label>
+          <select><option selected>Your own space</option><option>Backend</option><option>Frontend</option><option>Shared</option></select>
+          <div class="help">Filing it into a directory hands it over: whoever holds a grant there can select it from then on.</div></div>`}
+    </div>
+    <div style="display:flex;flex-direction:column;gap:15px;min-width:0">
+      <div class="field"><label>Frontmatter, as written</label>${fmBlock(s)}
+        <div class="help">Kept byte for byte. Fields only one agent reads are preserved and labelled, never rewritten.</div></div>
+      ${s.k==="bad"?"":`
+      <div class="field"><label>Files</label>
+        <div class="files">
+          <div class="f head"><span class="p" style="font-family:inherit">Path</span><span></span><span class="sz">Size</span></div>
+          ${s.files.map(f=>`<div class="f"><span class="p">${f[0]}</span><span></span>
+            <span class="sz">${f[1]}${f[3]?' <span style="color:var(--sage)" title="already stored under this hash">↺</span>':""}</span></div>`).join("")}
+        </div>
+        <div class="help">Every file is kept, exactly as it was. Nothing here is a choice — this is what gets written into the session's own skills directory.</div></div>`}
+    </div>
+  </div>
+</div>`;
+}
+
+function review(set){
+  const ok=set.filter(s=>s.k!=="bad").length;
+  return `
+<div class="hero"><h1>${set.length===1?"One skill found":set.length+" skills found"}</h1>
+  <p>Read and checked, nothing written. Look over the names and descriptions, then import.</p></div>
+<div class="found">
+  <div class="hd"><h2>${set.length===1?"What was in it":"What was in the folder"}</h2>
+    <span class="sigs">
+      <span class="sig ok"><span class="num">${ok}</span> ready</span>
+      ${set.some(s=>s.k==="you")?'<span class="sig you">1 needs a name</span>':""}
+      ${set.some(s=>s.k==="bad")?'<span class="sig bad">1 skipped</span>':""}
+    </span></div>
+  ${set.map(entry).join("")}
+</div>
+<div class="actionbar"><div class="inner">
+  <span class="n">Importing <b>${ok}</b> ${ok===1?"skill":"skills"} into your own space. Nobody else can see them until you file one into a directory.</span>
+  <button class="control plain">Cancel</button>
+  <button class="control go">Import ${ok===1?"skill":ok+" skills"}</button>
+</div></div>`;
+}
+
+const DONE=`
+<div class="done">
+  <span class="glyph">✓</span>
+  <div style="font-size:var(--display);color:var(--bone);font-weight:600;letter-spacing:-.02em">Two skills added</div>
+  <p style="font-size:var(--read);line-height:1.6;color:var(--dim);max-width:54ch">
+    They are in your own space. Share one by filing it into a directory, or set it as a default on a repository
+    so it is ticked whenever you start work there.</p>
+  <div style="display:flex;gap:8px;margin-top:10px">
+    <a href="library.html" class="control go" style="text-decoration:none">Open the library</a>
+    <button class="control">Set repository defaults</button>
+    <button class="control plain">Add another</button>
+  </div>
+</div>`;
+
+function render(){
+  const c=$("#col");
+  if(state==="empty"||state==="over"){ c.innerHTML=EMPTY; if(state==="over") $("#dz").classList.add("over"); }
+  else if(state==="reading") c.innerHTML=READING;
+  else if(state==="done") c.innerHTML=DONE;
+  else c.innerHTML=review(SETS[state]);
+  const n={empty:"Waiting for a folder",over:"Release to read it",reading:"Reading…",
+    one:"1 skill found",many:"3 skills found, 1 skipped",zip:"1 skill found",done:"2 skills added"}[state];
+  $("#sb").textContent=n;
+}
+function go(s){
+  $$("#sim button").forEach(b=>b.setAttribute("data-on",String(b.dataset.s===s)));
+  if(["one","many","zip"].includes(s)){state="reading";render();setTimeout(()=>{state=s;render();},850);}
+  else {state=s;render();}
+}
+$$("#sim button").forEach(b=>b.onclick=()=>go(b.dataset.s));
+document.addEventListener("click",e=>{
+  const ck=e.target.closest(".check");
+  if(ck){ if(ck.getAttribute("aria-disabled")!=="true") ck.setAttribute("aria-checked",ck.getAttribute("aria-checked")==="true"?"false":"true"); return;}
+  const bar=e.target.closest(".entry .bar");
+  if(bar){const en=bar.parentElement;en.setAttribute("data-open",en.getAttribute("data-open")==="true"?"false":"true");}
+});
+const pane=$("#body");
+pane.addEventListener("dragover",e=>{e.preventDefault(); if(state==="empty"){state="over";render();}});
+pane.addEventListener("dragleave",()=>{ if(state==="over"){state="empty";render();}});
+pane.addEventListener("drop",e=>{e.preventDefault(); go("many");});
+const start=location.hash.slice(1);
+if(["one","many","zip","done","over"].includes(start)){ $$("#sim button").forEach(b=>b.setAttribute("data-on",String(b.dataset.s===start))); state=start; }
+render();
+</script></body></html>

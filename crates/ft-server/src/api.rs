@@ -9,7 +9,7 @@
 //! only what every one of them needs: the error type, the document, and the
 //! router that puts them in order.
 
-mod access;
+pub(crate) mod access;
 pub(crate) mod accounts;
 pub(crate) mod agents;
 mod annotations;
@@ -23,6 +23,7 @@ mod repos;
 mod secrets;
 mod sessions;
 mod setup;
+mod skills;
 mod stream;
 mod tasks;
 mod terminal;
@@ -395,6 +396,16 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(agents::sign_agent_in))
         .routes(routes!(agents::install_agent))
         .routes(routes!(agents::update_agent))
+        .routes(routes!(skills::list_skills, skills::create_skill))
+        .routes(routes!(skills::match_skills))
+        .routes(routes!(skills::rename_skill, skills::delete_skill))
+        .routes(routes!(skills::skill_detail))
+        .routes(routes!(skills::list_versions, skills::add_version))
+        .routes(routes!(skills::set_default))
+        .routes(routes!(skills::session_skills, skills::choose_skills))
+        .routes(routes!(skills::skill_collisions))
+        .routes(routes!(skills::share_skills))
+        .routes(routes!(skills::set_repo_defaults))
         .routes(routes!(secrets::list_secrets))
         .routes(routes!(secrets::replace_secret, secrets::remove_secret))
         .routes(routes!(secrets::reveal_secret))

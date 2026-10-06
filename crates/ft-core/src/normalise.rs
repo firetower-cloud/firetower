@@ -42,6 +42,13 @@ use crate::turn::{
 pub fn classify(tool_name: &str) -> ItemKind {
     let name = tool_name.to_ascii_lowercase();
 
+    // Before everything, including MCP: `skills.read` would otherwise be read
+    // as a file read, and a skill being loaded is not work done to the
+    // workspace. Claude Code calls the tool `Skill`; Codex namespaces its two
+    // as `skills.read` and `skills.list`.
+    if name == "skill" || name.starts_with("skills.") {
+        return ItemKind::SkillUse;
+    }
     if name.starts_with("mcp__") || name.contains("mcp") {
         return ItemKind::McpToolCall;
     }
@@ -79,6 +86,125 @@ pub fn classify(tool_name: &str) -> ItemKind {
     ItemKind::Unknown
 }
 
+/// Which skill a call is reaching for, if it is reaching for one.
+///
+/// Three agents spell the same act three ways, and the interface should not
+/// have to know that. Every reader runs this and writes the answer into the
+/// item's data under one key, so a client reads `skill` and nothing else.
+///
+/// * **Claude Code** calls a tool named `Skill` with `{"skill": "<name>"}`.
+///   Verified against a real session: `{"type":"tool_use","name":"Skill",
+///   "input":{"skill":"frontend-design"}}`.
+/// * **Codex** has a `skills.read` tool in the binary and does not use it.
+///   What it actually does — verified in a live session — is run
+///   `cat …/skills/frontend-design/SKILL.md` in a shell. So the evidence is a
+///   *command*, and anything that only looked at tool names would never see
+///   a Codex skill at all.
+/// * **Kimi, over ACP**, has a tool and announces it in three stages: a call
+///   titled `Skill` with no name, then the arguments streaming as text, and
+///   only at the end `rawInput: {"skill": "frontend-design"}` with the title
+///   rewritten to `Invoke skill frontend-design`. So the name is not there
+///   when the item opens, and whatever reads it has to cope with that.
+///
+/// Which leaves one rule doing most of the work: **a path ending in
+/// `SKILL.md` under a `skills/` directory**, wherever it turns up — a tool's
+/// argument, a read's location, or a word inside a shell command. The folder
+/// holding it is the skill, which is what the standard says a folder is.
+pub fn skill_reached_for(tool_name: &str, input: &Value) -> Option<String> {
+    let at = |key: &str| input.get(key).and_then(Value::as_str);
+    let name = tool_name.to_ascii_lowercase();
+
+    // Arguments one level down, which is where ACP puts them once they have
+    // finished arriving.
+    for nested in ["rawInput", "arguments", "input"] {
+        if let Some(found) = input
+            .get(nested)
+            .and_then(|o| o.get("skill"))
+            .and_then(Value::as_str)
+            .filter(|s| !s.is_empty())
+        {
+            return Some(skill_from(found));
+        }
+    }
+    // `Invoke skill frontend-design`, which is Kimi's title once it knows.
+    if let Some(found) = at("title").and_then(|t| t.strip_prefix("Invoke skill ")) {
+        return Some(found.trim().to_string());
+    }
+
+    if name == "skill" || name.starts_with("skills.") {
+        // `package` is Codex's word for which skill a read belongs to.
+        if let Some(found) = at("skill").or_else(|| at("package")).or_else(|| at("name")) {
+            return Some(skill_from(found));
+        }
+        // Listing them is not using one, and `skills.read` with nothing to go
+        // on is better unnamed than wrongly named.
+        return (name == "skill").then(|| "a skill".to_string());
+    }
+
+    // A read of a SKILL.md, whatever the agent called the tool that did it.
+    for key in ["path", "file_path", "filePath", "resource", "title"] {
+        if let Some(path) = at(key) {
+            if let Some(found) = skill_from_path(path) {
+                return Some(found);
+            }
+        }
+    }
+    // Or a shell command that opens one, which is how Codex does it.
+    for key in ["command", "parsedCmd", "cmd"] {
+        if let Some(found) = input.get(key).and_then(skill_in_command) {
+            return Some(found);
+        }
+    }
+    None
+}
+
+/// A `SKILL.md` named anywhere inside a shell command.
+///
+/// `cat '…/skills/frontend-design/SKILL.md'`, and the quoting is whatever the
+/// agent felt like — so this splits on whitespace and strips the punctuation a
+/// shell leaves behind rather than trying to parse the line.
+fn skill_in_command(command: &Value) -> Option<String> {
+    let text = match command {
+        Value::String(s) => s.clone(),
+        Value::Array(parts) => parts
+            .iter()
+            .filter_map(Value::as_str)
+            .collect::<Vec<_>>()
+            .join(" "),
+        _ => return None,
+    };
+    text.split_whitespace()
+        .map(|word| word.trim_matches(|c| matches!(c, '\'' | '"' | '`' | ';' | '(' | ')')))
+        .find_map(skill_from_path)
+}
+
+/// `skill://rust-review/SKILL.md` or `rust-review` → `rust-review`.
+fn skill_from(raw: &str) -> String {
+    raw.trim_start_matches("skill://")
+        .split('/')
+        .find(|part| !part.is_empty() && *part != "SKILL.md")
+        .unwrap_or(raw)
+        .to_string()
+}
+
+/// The folder a `SKILL.md` sits in, which is the skill's name.
+///
+/// Only under a `skills/` directory. Without that, an agent reading the
+/// `SKILL.md` it is *writing* — which is a perfectly ordinary thing to do in
+/// this repository — would be reported as having used a skill, and a label
+/// that is wrong some of the time is worse than no label.
+fn skill_from_path(path: &str) -> Option<String> {
+    if !path.ends_with("SKILL.md") || !path.contains("skills/") {
+        return None;
+    }
+    path.trim_end_matches("SKILL.md")
+        .trim_end_matches('/')
+        .rsplit('/')
+        .next()
+        .filter(|s| !s.is_empty() && *s != "skills")
+        .map(str::to_string)
+}
+
 /// What a person is actually being asked to allow.
 ///
 /// Coarser than [`classify`], because the question is "may this run", not
@@ -98,6 +224,9 @@ fn title_for(kind: ItemKind, tool_name: &str) -> Option<String> {
     match kind {
         ItemKind::AssistantMessage | ItemKind::UserMessage => None,
         ItemKind::Reasoning => Some("Thinking".into()),
+        // Named once the arguments arrive, which for a streamed call is after
+        // this. "Skill" alone is what a card says in the meantime.
+        ItemKind::SkillUse => Some("Skill".into()),
         _ => Some(tool_name.to_string()),
     }
 }
@@ -607,9 +736,20 @@ impl ClaudeNormaliser {
             let Some(input) = block.get("input") else {
                 continue;
             };
+            // One key for every agent: whichever tool this was, if it was the
+            // agent reaching for a skill, say which one here. A client that
+            // had to know Claude Code's spelling as well as Codex's and
+            // Kimi's would be three rules that drift apart.
+            let mut data = input.clone();
+            let tool = str_at(block, "name").unwrap_or_default();
+            if let (Some(found), Some(fields)) =
+                (skill_reached_for(tool, input), data.as_object_mut())
+            {
+                fields.insert("skill".into(), Value::String(found));
+            }
             out.push(TurnEvent::ItemUpdated {
                 item: ItemId::new(id),
-                data: input.clone(),
+                data,
             });
 
             // Some tools carry structure worth lifting out of the generic
@@ -1225,6 +1365,131 @@ pub fn questions_from_input(input: &Value) -> Option<Vec<Question>> {
             })
             .collect(),
     )
+}
+
+#[cfg(test)]
+mod skill_tests {
+    use super::*;
+
+    /// The three spellings of one act, each taken from a real session.
+    #[test]
+    fn every_agent_says_which_skill_it_reached_for() {
+        // Claude Code, verified in a live transcript.
+        assert_eq!(classify("Skill"), ItemKind::SkillUse);
+        assert_eq!(
+            skill_reached_for("Skill", &serde_json::json!({"skill": "frontend-design"})),
+            Some("frontend-design".into())
+        );
+
+        // Codex names its two `skills.read` and `skills.list`.
+        assert_eq!(classify("skills.read"), ItemKind::SkillUse);
+        assert_eq!(
+            skill_reached_for(
+                "skills.read",
+                &serde_json::json!({"package": "rust-review"})
+            ),
+            Some("rust-review".into())
+        );
+
+        // Codex runs a shell command. Taken verbatim from a live session —
+        // it never touches its own `skills.read` tool.
+        assert_eq!(
+            skill_reached_for(
+                "",
+                &serde_json::json!({"type": "commandExecution", "command":
+                    "/bin/zsh -lc 'cat .firetower/agent-home-s_1/skills/frontend-design/SKILL.md'"})
+            ),
+            Some("frontend-design".into())
+        );
+
+        // Kimi has no skill tool at all: it reads the file, so the path is
+        // the only evidence there is.
+        assert_eq!(
+            skill_reached_for(
+                "read",
+                &serde_json::json!({"path": "/w/.firetower/skills-s_1/skills/house-prose/SKILL.md"})
+            ),
+            Some("house-prose".into())
+        );
+    }
+
+    /// The real item, copied out of the journal of the Codex session that
+    /// prompted this — not a hand-written approximation of one.
+    #[test]
+    fn the_item_codex_actually_sent() {
+        let item: Value = serde_json::from_str(
+            r#"{"type":"commandExecution","id":"exec-39b5dc9f",
+                "pluginId":null,"scriptPath":null,
+                "command":"/bin/zsh -lc 'cat .firetower/agent-home-s_01m43dpm7cf5ycvqegfdhkcex5/skills/frontend-design/SKILL.md'"}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            skill_reached_for("", &item),
+            Some("frontend-design".into()),
+            "the one thing a Codex skill looks like has to be recognised"
+        );
+    }
+
+    /// Kimi's three stages, copied out of the journal of the session that
+    /// prompted this. The item opens before the name exists, which is the
+    /// whole difficulty.
+    #[test]
+    fn the_three_updates_kimi_actually_sent() {
+        let opening: Value = serde_json::from_str(
+            r#"{"kind":"other","sessionUpdate":"tool_call","status":"pending",
+                "title":"Skill","toolCallId":"1:tool_5JaTlacj"}"#,
+        )
+        .unwrap();
+        // Nothing to name yet — and it still has to be a skill, because an
+        // item cannot change what it is halfway through.
+        assert_eq!(skill_reached_for("", &opening), None);
+
+        let named: Value = serde_json::from_str(
+            r#"{"kind":"other","status":"in_progress",
+                "title":"Invoke skill frontend-design",
+                "rawInput":{"args":"analyze the website","skill":"frontend-design"},
+                "toolCallId":"1:tool_5JaTlacj"}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            skill_reached_for("", &named),
+            Some("frontend-design".into())
+        );
+
+        // The title alone is enough, for the update that carries no rawInput.
+        let by_title: Value =
+            serde_json::from_str(r#"{"title":"Invoke skill house-prose"}"#).unwrap();
+        assert_eq!(skill_reached_for("", &by_title), Some("house-prose".into()));
+    }
+
+    /// A read is still a read. Treating every file as a skill would put the
+    /// whole transcript under the wrong heading.
+    #[test]
+    fn an_ordinary_read_is_left_alone() {
+        assert_eq!(classify("Read"), ItemKind::FileRead);
+        assert_eq!(
+            skill_reached_for("read", &serde_json::json!({"path": "src/main.rs"})),
+            None
+        );
+        // Listing what is available is not using one.
+        assert_eq!(
+            skill_reached_for("skills.list", &serde_json::json!({})),
+            None
+        );
+        // And a SKILL.md that is not in a skills directory is a file somebody
+        // is writing, which is an ordinary thing to do in this repository.
+        assert_eq!(
+            skill_reached_for("read", &serde_json::json!({"path": "docs/SKILL.md"})),
+            None
+        );
+        assert_eq!(
+            skill_reached_for(
+                "",
+                &serde_json::json!({"command": "cat README.md && ls skills/"})
+            ),
+            None
+        );
+    }
 }
 
 #[cfg(test)]

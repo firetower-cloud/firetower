@@ -53,7 +53,8 @@ import {
   useListGrants,
 } from "~/api/generated/access/access";
 import { useMe } from "~/api/generated/auth/auth";
-import type { FiledKind, Level, Reaches } from "~/api/generated/model";
+import { shareSkills, skillCollisions } from "~/api/generated/skills/skills";
+import type { Collision, FiledKind, Level, Reaches, Resolve, Skill } from "~/api/generated/model";
 import { useDirectories, why } from "~/data";
 import { destinations, pathSlug, rootOf, where } from "~/filing";
 import { PickPeople, Face, type Pickable } from "~/ui/PickPeople";
@@ -89,6 +90,7 @@ type Somewhere = {
   hosts: number;
   agentAccounts: number;
   secrets: number;
+  skills: number;
 };
 
 /** Somewhere it could go. There is no row for a personal root, hence `mine`. */
@@ -105,6 +107,7 @@ const KINDS: Record<FiledKind, string> = {
   machine: "machine",
   agentAccount: "subscription",
   secret: "secret",
+  skill: "skill",
   // Here for completeness and never drawn: this sheet is how something is
   // filed into a directory, and a repository cannot be. The server refuses it
   // by name, and nothing opens the sheet for one.
@@ -601,6 +604,381 @@ export function Sharing({
   );
 }
 
+/**
+ * Who can access several skills, decided once for all of them.
+ *
+ * The same sheet as for one thing — directory access, individual access, the
+ * same steps to move and to make a directory — so sharing ten skills looks
+ * and reads like sharing one. Two differences, both forced by "several":
+ * individual access shows only what is being added, because each skill has
+ * its own list and ten lists are not one answer; and a directory holds one
+ * skill of each name, so a move that would collide stops at one more step
+ * that asks what to do with each before anything is saved.
+ */
+export function ShareMany({ skills, onClose, onDone }: { skills: Skill[]; onClose: () => void; onDone: () => void }) {
+  const cache = useQueryClient();
+  const confirm = useConfirm();
+  const { data: directories } = useDirectories();
+  const me = useMe();
+
+  const [step, setStep] = useState<"main" | "places" | "new" | "names">("main");
+  const [busy, setBusy] = useState(false);
+  const [trouble, setTrouble] = useState<string | null>(null);
+  const [pending, setPending] = useState<Record<string, Level | null>>({});
+  const [named, setNamed] = useState<Record<string, Pickable>>({});
+  const [place, setPlace] = useState<Place | null>(null);
+  const [newName, setNewName] = useState("");
+  const [newWith, setNewWith] = useState<{ who: Pickable; level: Level }[]>([]);
+  const [collisions, setCollisions] = useState<Collision[]>([]);
+  const [resolve, setResolve] = useState<Record<string, Resolve>>({});
+
+  useEffect(() => {
+    const k = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      if (step === "new") setStep("places");
+      else if (step === "places" || step === "names") setStep("main");
+      else onClose();
+    };
+    window.addEventListener("keydown", k);
+    return () => window.removeEventListener("keydown", k);
+  }, [onClose, step]);
+
+  const n = skills.length;
+  const items = skills.map((s) => ({ kind: "skill" as const, id: s.id }));
+
+  /* Where they are now, when that is one place. Freshly imported skills all
+     sit in your own space, which is the case worth drawing exactly; a mixed
+     selection has no single answer and says so. */
+  const roots = [...new Set(skills.map((s) => s.path.split("/").slice(0, 2).join("/")))];
+  const one = roots.length === 1 ? roots[0]! : null;
+  const here = one?.startsWith("d/") ? (directories.find((d) => `d/${d.slug}` === one) ?? null) : null;
+  const root = one?.startsWith("d/") ? "d" : "u";
+  const { data: grants } = useListGrants(here?.id ?? "", { query: { enabled: here !== null } });
+  const fromDirectory: Reaches[] = (grants ?? []).map((g) => ({
+    subjectKind: g.subjectKind,
+    subjectId: g.subjectId,
+    name: g.subjectName,
+    level: g.level,
+    route: "directory" as const,
+  }));
+  const owner: Reaches | undefined =
+    one && !here && me.data
+      ? {
+          subjectKind: "person",
+          subjectId: me.data.user.id,
+          name: me.data.user.username,
+          level: "admin",
+          route: "owner",
+        }
+      : undefined;
+
+  const exceptions = Object.entries(pending)
+    .filter(([, lv]) => lv)
+    .map(([id, lv]) => ({
+      subjectKind: (named[id]?.kind === "team" ? "team" : "person") as Reaches["subjectKind"],
+      subjectId: id,
+      name: named[id]?.name ?? id,
+      level: lv as Level,
+      route: "exception" as const,
+      pendingLevel: lv as Level,
+    }));
+
+  const moving = place !== null && !(one && samePlace(place, here?.id ?? null, root));
+  const changes = exceptions.length + (moving ? 1 : 0);
+
+  const goingTo = moving && place?.kind === "directory" ? place.id : null;
+  const { data: waiting } = useListGrants(goingTo ?? "", { query: { enabled: goingTo !== null } });
+  const to = place?.kind === "directory" ? directories.find((d) => d.id === place.id) : undefined;
+  const toName = place?.kind === "new" ? newName.trim() : (to?.name ?? "");
+
+  const destination = (): Landing | null => {
+    if (!moving || !place) return null;
+    if (place.kind === "mine")
+      return { name: "Only you", note: `u/${me.data?.user.slug ?? ""}`, count: "just you", personal: true, who: null };
+    if (place.kind === "new") {
+      const inside = [
+        { subjectId: "you", subjectKind: "person", name: "You", level: "admin" as Level },
+        ...newWith.map((g) => ({ subjectId: g.who.id, subjectKind: g.who.kind, name: g.who.name, level: g.level })),
+      ];
+      return { name: newName.trim() || "A new directory", note: `d/${pathSlug(newName)}`, count: counted(inside), personal: false, who: inside };
+    }
+    const inside = (waiting ?? []).map((g) => ({
+      subjectId: g.subjectId,
+      subjectKind: g.subjectKind,
+      name: g.subjectName,
+      level: g.level,
+    }));
+    return { name: to?.name ?? "somewhere", note: to ? `d/${to.slug}` : "", count: counted(inside), personal: false, who: inside };
+  };
+
+  const they = n === 1 ? "it" : "they";
+  const handingOver = () => {
+    if (place?.kind === "mine")
+      return {
+        title: `Take ${n === 1 ? "this skill" : `these ${n} skills`} back?`,
+        body: <>Only you will have {n === 1 ? "it" : "them"}.</>,
+        action: "Take back",
+        tone: "danger" as const,
+      };
+    const admin = place?.kind === "new" || to?.level === "admin";
+    return {
+      title: `Move ${n === 1 ? "this skill" : `${n} skills`} to ${toName}?`,
+      body: (
+        <>
+          Everyone in <b className="text-bone">{toName}</b> can use {n === 1 ? "it" : "them"}.
+          {!admin && <> You don't administer {toName}, so you can't move {n === 1 ? "it" : "them"} back.</>}
+        </>
+      ),
+      action: "Move",
+      tone: admin ? ("plain" as const) : ("danger" as const),
+    };
+  };
+
+  /* Save, in the order the server needs: where they live first, so an
+     exception lands on the row in its new place; then who else is let in. */
+  const commit = async () => {
+    setBusy(true);
+    setTrouble(null);
+    try {
+      if (moving && place) {
+        if (place.kind === "mine" && here) await unfileItems(here.id, { items });
+        let id = place.kind === "directory" ? place.id : null;
+        if (place.kind === "new") {
+          const made = await createDirectory({
+            name: newName.trim(),
+            grants: newWith.map((g) => ({
+              subjectKind: g.who.kind === "team" ? "team" : "person",
+              subjectId: g.who.id,
+              level: g.level,
+            })),
+          });
+          id = made.id;
+        }
+        if (id) await shareSkills(id, { skills: skills.map((s) => ({ id: s.id, resolve: resolve[s.id] ?? null })) });
+      }
+      // A skill folded into the directory's copy no longer exists to let anybody into.
+      const gone = new Set(
+        Object.entries(resolve)
+          .filter(([, r]) => r === "useTheirs" || r === "addVersion")
+          .map(([id]) => id),
+      );
+      for (const s of skills.filter((s) => !gone.has(s.id)))
+        for (const [subjectId, level] of Object.entries(pending))
+          if (level) await setException({ item: { kind: "skill", id: s.id }, subjectId, level });
+      await cache.invalidateQueries();
+      onDone();
+    } catch (e) {
+      setTrouble(why(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const save = async () => {
+    if (moving && place?.kind === "directory" && step === "main") {
+      setBusy(true);
+      try {
+        const found = await skillCollisions(place.id, { skills: skills.map((s) => s.id) });
+        setBusy(false);
+        if (found.length) {
+          setCollisions(found);
+          // Identical is safe to fold in; different keeps both until somebody says otherwise.
+          setResolve(Object.fromEntries(found.map((c) => [c.skillId, c.identical ? "useTheirs" : "keep"])));
+          return setStep("names");
+        }
+      } catch (e) {
+        setBusy(false);
+        return setTrouble(why(e));
+      }
+    }
+    if (moving && place && !(await confirm(handingOver()))) return;
+    await commit();
+  };
+
+  const title =
+    step === "places" ? "Where they live" : step === "new" ? "A new directory" : step === "names" ? `Already in ${toName}` : "Who can access them";
+  const subtitle =
+    step === "new" ? `${n === 1 ? "This skill" : `These ${n} skills`} will go in it` : skills.map((s) => s.name).join(", ");
+
+  return (
+    <div
+      className="fixed inset-0 z-[60] grid place-items-start justify-center bg-ground/40 pt-[12vh] backdrop-blur-[2px]"
+      onMouseDown={onClose}
+    >
+      <div
+        onMouseDown={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal
+        className="flex max-h-[76vh] w-[27rem] flex-col overflow-hidden rounded-xl border border-line bg-overlay shadow-(--shadow-float)"
+      >
+        <div className="flex items-start gap-2 border-b border-line px-3.5 py-2.5">
+          <span className="min-w-0 flex-1">
+            <span className="block text-ui text-bone">{title}</span>
+            <span className={`block truncate text-micro text-mute ${step === "new" ? "" : "font-mono"}`}>{subtitle}</span>
+          </span>
+          <button
+            onClick={onClose}
+            aria-label="Close"
+            className="grid h-7 w-7 shrink-0 place-items-center rounded-md text-mute hover:bg-raise hover:text-bone"
+          >
+            <Icon of={X} size={14} />
+          </button>
+        </div>
+
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          {step === "main" && (
+            <>
+              <Main
+                here={here}
+                owner={owner}
+                fromDirectory={fromDirectory}
+                exceptions={exceptions}
+                mayShare
+                taken={[...fromDirectory.map((r) => r.subjectId), ...Object.keys(pending).filter((k) => pending[k])]}
+                onLevel={(id, lv) => setPending((p) => ({ ...p, [id]: lv }))}
+                onAdd={(w) => {
+                  setNamed((x) => ({ ...x, [w.id]: w }));
+                  setPending((p) => ({ ...p, [w.id]: "writer" }));
+                }}
+                destination={destination()}
+                onUndoMove={() => setPlace(null)}
+                onChange={() => setStep("places")}
+              />
+              {!one && !moving && (
+                <p className="px-3.5 pb-2 text-micro text-mute">
+                  These are in {roots.length} different places now.
+                </p>
+              )}
+            </>
+          )}
+
+          {step === "places" && (
+            <Places
+              mine={!!here}
+              chosen={place ?? (here ? { kind: "directory", id: here.id } : null)}
+              hereId={here?.id ?? null}
+              directories={destinations(directories) as Somewhere[]}
+              onPick={(p) => {
+                setPlace(p);
+                setStep(p.kind === "new" ? "new" : "main");
+              }}
+            />
+          )}
+
+          {step === "new" && (
+            <NewDirectory
+              name={newName}
+              onName={setNewName}
+              people={newWith}
+              onPeople={setNewWith}
+              one={n === 1 ? "skill" : "skills"}
+              meId={me.data?.user.id}
+            />
+          )}
+
+          {step === "names" && (
+            <>
+              <p className="px-3.5 pt-2.5 pb-1 text-micro text-mute">
+                {toName} already has a skill with {collisions.length === 1 ? "this name" : "these names"}.
+              </p>
+              {collisions.map((c) => (
+                <div key={c.skillId} className="px-3.5 py-2">
+                  <div className="flex items-center gap-2">
+                    <span className="min-w-0 flex-1 truncate font-mono text-ui text-bone">{c.name}</span>
+                    <span className="shrink-0 text-micro text-mute">{c.identical ? "identical" : "different"}</span>
+                  </div>
+                  <div className="mt-1 flex flex-col">
+                    {(c.identical
+                      ? ([
+                          ["useTheirs", `Use ${toName}'s`],
+                          ["keep", "Keep mine where it is"],
+                        ] as const)
+                      : ([
+                          ["keep", "Keep mine where it is"],
+                          ["addVersion", `Replace ${toName}'s with mine, as v${c.existingVersion + 1}`],
+                        ] as const)
+                    ).map(([value, label]) => (
+                      <button
+                        key={value}
+                        onClick={() => setResolve((r) => ({ ...r, [c.skillId]: value }))}
+                        className="flex items-center gap-2.5 py-1 text-left text-meta text-dim hover:text-bone"
+                      >
+                        <span
+                          className={`grid h-[15px] w-[15px] shrink-0 place-items-center rounded-full border ${
+                            resolve[c.skillId] === value ? "border-bone" : "border-line"
+                          }`}
+                        >
+                          {resolve[c.skillId] === value && <span className="h-[7px] w-[7px] rounded-full bg-bone" />}
+                        </span>
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </>
+          )}
+        </div>
+
+        {trouble && <p className="border-t border-line px-3.5 py-2.5 text-micro text-brick">{trouble}</p>}
+
+        {step === "main" && (
+          <Footer left={changes === 0 ? "no change yet" : `${changes} change${changes === 1 ? "" : "s"}`}>
+            <button onClick={onClose} className="control text-dim hover:text-bone">
+              Cancel
+            </button>
+            <button
+              disabled={changes === 0 || busy}
+              onClick={() => void save()}
+              className="control bg-bone font-medium text-ground disabled:bg-raise disabled:text-mute"
+            >
+              {busy ? "Saving…" : moving ? handingOver().action : "Save"}
+            </button>
+          </Footer>
+        )}
+
+        {step === "places" && (
+          <Footer left="nothing is saved until you do">
+            <button onClick={() => setStep("main")} className="control text-dim hover:text-bone">
+              Back
+            </button>
+          </Footer>
+        )}
+
+        {step === "new" && (
+          <Footer left={newName.trim() ? `d/${pathSlug(newName)}` : "name it to continue"}>
+            <button onClick={() => setStep("places")} className="control text-dim hover:text-bone">
+              Back
+            </button>
+            <button
+              disabled={!newName.trim()}
+              onClick={() => setStep("main")}
+              className="control bg-bone font-medium text-ground disabled:bg-raise disabled:text-mute"
+            >
+              Use this
+            </button>
+          </Footer>
+        )}
+
+        {step === "names" && (
+          <Footer left="nothing is saved until you do">
+            <button onClick={() => setStep("main")} className="control text-dim hover:text-bone">
+              Back
+            </button>
+            <button
+              disabled={busy}
+              onClick={() => void (async () => (await confirm(handingOver())) && commit())()}
+              className="control bg-bone font-medium text-ground disabled:bg-raise disabled:text-mute"
+            >
+              {busy ? "Saving…" : "Move"}
+            </button>
+          </Footer>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function Footer({ left, children }: { left: string; children: React.ReactNode }) {
   return (
     <div className="flex items-center gap-2 border-t border-line px-3.5 py-2.5">
@@ -1019,29 +1397,35 @@ function Places({
   hereId,
   directories,
   onPick,
+  mine = true,
 }: {
-  chosen: Place;
+  chosen: Place | null;
   hereId: string | null;
   directories: Somewhere[];
   onPick: (p: Place) => void;
+  /** Whether "Only you" is offered. Sharing several skills is only ever
+   *  towards a directory, so it is not. */
+  mine?: boolean;
 }) {
   const holds = (d: Somewhere) => {
-    const n = d.workspaces + d.hosts + d.agentAccounts + d.secrets;
+    const n = d.workspaces + d.hosts + d.agentAccounts + d.secrets + d.skills;
     return n === 0 ? "empty" : `${n} thing${n === 1 ? "" : "s"}`;
   };
 
   return (
     <>
-      <Option
-        on={chosen.kind === "mine"}
-        onPick={() => onPick({ kind: "mine" })}
-        title="Only you"
-        note="Nobody else."
-      />
+      {mine && (
+        <Option
+          on={chosen?.kind === "mine"}
+          onPick={() => onPick({ kind: "mine" })}
+          title="Only you"
+          note="Nobody else."
+        />
+      )}
       {directories.map((d) => (
         <Option
           key={d.id}
-          on={chosen.kind === "directory" && chosen.id === d.id}
+          on={chosen?.kind === "directory" && chosen.id === d.id}
           onPick={() => onPick({ kind: "directory", id: d.id })}
           title={d.name}
           note={`${holds(d)}${d.id === hereId ? " · where it is now" : ""}`}
@@ -1049,7 +1433,7 @@ function Places({
       ))}
       <div className="mx-3.5 my-1 h-px bg-line" />
       <Option
-        on={chosen.kind === "new"}
+        on={chosen?.kind === "new"}
         onPick={() => onPick({ kind: "new" })}
         title="A new directory…"
         note="For people who are not together anywhere yet"

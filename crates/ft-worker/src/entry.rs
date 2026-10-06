@@ -51,6 +51,22 @@ pub async fn run_agent(session: &str, workspace: PathBuf, agent: &str) -> Result
         // see `ft_core::PREFERRED_ENV`.
         let preferred = ft_core::controls::Preferred::from_env();
         kind.launch_headless(session, &asking, start, &preferred)
+            .map(|mut argv| {
+                // Claude Code has no home of its own here, so the directory
+                // holding this session's skills is named on the command line.
+                // Per launch, which is what makes it per *session*: a second
+                // agent in the same workspace gets its own.
+                if kind.skills_home() == Some(ft_core::SkillsHome::AddedDirectory) {
+                    let id = ft_core::SessionId::from_stored(session);
+                    argv.push("--add-dir".into());
+                    argv.push(
+                        crate::skills::added_dir(&workspace, &id)
+                            .to_string_lossy()
+                            .into_owned(),
+                    );
+                }
+                argv
+            })
             .map(|argv| crate::agentd::Launch {
                 session_id: session.to_string(),
                 workspace: workspace.clone(),

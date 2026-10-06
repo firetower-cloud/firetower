@@ -12,6 +12,7 @@ export * from './repos/repos.zod';
 export * from './secrets/secrets.zod';
 export * from './sessions/sessions.zod';
 export * from './setup/setup.zod';
+export * from './skills/skills.zod';
 export * from './stream/stream.zod';
 export * from './tasks/tasks.zod';
 export * from './trackers/trackers.zod';
