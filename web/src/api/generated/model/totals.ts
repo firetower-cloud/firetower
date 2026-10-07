@@ -36,5 +36,16 @@ export interface Totals {
      */
   tokens: number;
   turns: number;
+  /**
+     * Turns whose agent reported no token counts at all.
+     *
+     * Not a share of `turns` that happened to be cheap — these are turns we
+     * were told nothing about, and everything above is a total over the rest.
+     * Every ACP agent is in here today: Kimi answers a finished prompt with a
+     * stop reason and nothing else, and says in its own source that its engine
+     * has no cost data. A page that silently left them out would report a
+     * smaller fleet than the one that ran.
+     */
+  unreportedTurns: number;
   workspaces: number;
 }

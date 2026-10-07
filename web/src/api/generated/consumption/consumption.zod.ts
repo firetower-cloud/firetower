@@ -89,6 +89,7 @@ export const ConsumptionResponse = zod.object({
   "rows": zod.int(),
   "tokens": zod.int().describe('Everything processed. Not a bill: a cache read is about a tenth of an\ninput token and a one-hour write about twice one, so this tracks volume\nand `cost_usd` tracks money.'),
   "turns": zod.int(),
+  "unreportedTurns": zod.int().describe('Turns whose agent reported no token counts at all.\n\nNot a share of `turns` that happened to be cheap — these are turns we\nwere told nothing about, and everything above is a total over the rest.\nEvery ACP agent is in here today: Kimi answers a finished prompt with a\nstop reason and nothing else, and says in its own source that its engine\nhas no cost data. A page that silently left them out would report a\nsmaller fleet than the one that ran.'),
   "workspaces": zod.int()
 }).describe('The totals a period adds up to.')
 }).describe('The whole page, in the terms the person asking may see it.')

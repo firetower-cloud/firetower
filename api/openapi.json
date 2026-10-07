@@ -11732,6 +11732,7 @@
           "tokens",
           "pricedRows",
           "rows",
+          "unreportedTurns",
           "turns",
           "conversations",
           "workspaces",
@@ -11795,6 +11796,11 @@
           "turns": {
             "type": "integer",
             "format": "int64"
+          },
+          "unreportedTurns": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Turns whose agent reported no token counts at all.\n\nNot a share of `turns` that happened to be cheap — these are turns we\nwere told nothing about, and everything above is a total over the rest.\nEvery ACP agent is in here today: Kimi answers a finished prompt with a\nstop reason and nothing else, and says in its own source that its engine\nhas no cost data. A page that silently left them out would report a\nsmaller fleet than the one that ran."
           },
           "workspaces": {
             "type": "integer",

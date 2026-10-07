@@ -476,6 +476,14 @@ impl Db {
             &usage.models
         };
 
+        // Whether the agent said anything at all about tokens. The columns are
+        // `not null default 0` so a turn that reported nothing lands as zeros,
+        // and a zero is a claim that it was free. This is the row saying which
+        // it is — see the migration for why it is a boolean and not a NULL.
+        let known = rows.iter().any(|m| {
+            m.input_tokens + m.output_tokens + m.cache_read_tokens + m.cache_write_tokens > 0
+        });
+
         // The TTL split is reported per turn and the rows are per model, so
         // each model takes the share of it that matches its share of the
         // write. Exact when one model did all the writing, which is the
@@ -507,14 +515,14 @@ impl Db {
                      agent, account_id, account_name, model,
                      input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,
                      cache_write_1h_tokens, cache_write_5m_tokens,
-                     thinking_tokens, cost_usd, duration_ms)
+                     thinking_tokens, cost_usd, duration_ms, tokens_known)
                  SELECT h.org_id, $2, w.path, w.extra_perms, s.user_id,
                         w.id, w.name, s.id, s.title, $3,
                         w.task_key, w.task_provider, w.repo, w.branch,
                         s.agent, s.agent_account_id, a.name, COALESCE($4, s.agent),
                         $5, $6, $7, $8,
                         $9, $10,
-                        $11, $12::float8::numeric, $13
+                        $11, $12::float8::numeric, $13, $14
                    FROM sessions s
                    JOIN workspaces w ON w.id = s.workspace_id
                    JOIN hosts h ON h.id = w.host_id
@@ -535,6 +543,7 @@ impl Db {
             .bind(usage.thinking_tokens.map(|t| t as i64))
             .bind(row.cost_usd)
             .bind(usage.duration_ms.map(|d| d as i64))
+            .bind(known)
             .execute(&self.pool)
             .await
             .context("recording what a turn cost")?;
@@ -2842,6 +2851,85 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(said, (None, None));
+    }
+
+    /// A turn nobody told us the cost of is recorded as exactly that.
+    ///
+    /// Every ACP agent today reports how full its context is and nothing about
+    /// what it spent — Kimi answers a finished prompt with a stop reason alone
+    /// and says in its own source that its engine has no cost data. Dropping
+    /// those turns made the sessions invisible rather than unknown: one ran,
+    /// finished, was reclaimed, and the page showed no trace of it.
+    ///
+    /// So the row is written and the zeros in it are disowned by
+    /// `tokens_known`. A total is unaffected either way — adding zero changes
+    /// no sum — and what is gained is that the page can say how much of the
+    /// period it cannot account for.
+    #[tokio::test]
+    async fn a_turn_whose_agent_reported_no_tokens_is_recorded_as_unknown() {
+        use ft_core::turn::Usage;
+        let (db, who) = db_with_user().await;
+        let session = SessionId::from_stored(a_session(&db, &who).await);
+
+        // What an ACP turn hands back: how full the window is, and nothing else.
+        let gauge = Usage {
+            context_used: Some(20_237),
+            context_window: Some(1_048_576),
+            ..Default::default()
+        };
+        let wrote = db
+            .record_consumption(&session, "turn_acp", &gauge, Some("kimi-code/kimi-for-coding"))
+            .await
+            .unwrap();
+        assert_eq!(wrote, 1, "a turn that happened is a turn that is recorded");
+
+        let (model, known, tokens): (String, bool, i64) = sqlx::query_as(
+            "SELECT model, tokens_known, input_tokens + output_tokens
+                  + cache_read_tokens + cache_write_tokens
+               FROM consumption_events WHERE turn_id = 'turn_acp'",
+        )
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+        // Named for what ran, not for the agent that ran it.
+        assert_eq!(model, "kimi-code/kimi-for-coding");
+        assert!(!known, "the agent said nothing about tokens");
+        assert_eq!(tokens, 0, "and the zeros are placeholders, which is why");
+
+        // A turn that did report is not tarred with it.
+        let real = Usage {
+            input_tokens: 900,
+            output_tokens: 90,
+            ..Default::default()
+        };
+        db.record_consumption(&session, "turn_real", &real, Some("gpt-5-codex"))
+            .await
+            .unwrap();
+        let known: bool = sqlx::query_scalar(
+            "SELECT tokens_known FROM consumption_events WHERE turn_id = 'turn_real'",
+        )
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+        assert!(known);
+
+        // And the period says how much of itself it cannot speak for.
+        let totals = db
+            .consumption_totals(
+                who.as_str(),
+                &Slice {
+                    from: chrono::Utc::now() - chrono::Duration::hours(1),
+                    to: chrono::Utc::now() + chrono::Duration::hours(1),
+                    person: None,
+                    team: None,
+                    find: None,
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(totals.turns, 2);
+        assert_eq!(totals.unreported_turns, 1);
+        assert_eq!(totals.tokens, 990, "the gauge adds nothing to the bill");
     }
 
     #[tokio::test]
@@ -5754,6 +5842,15 @@ pub struct Totals {
     pub cost_usd: Option<f64>,
     pub priced_rows: i64,
     pub rows: i64,
+    /// Turns whose agent reported no token counts at all.
+    ///
+    /// Not a share of `turns` that happened to be cheap — these are turns we
+    /// were told nothing about, and everything above is a total over the rest.
+    /// Every ACP agent is in here today: Kimi answers a finished prompt with a
+    /// stop reason and nothing else, and says in its own source that its engine
+    /// has no cost data. A page that silently left them out would report a
+    /// smaller fleet than the one that ran.
+    pub unreported_turns: i64,
     pub turns: i64,
     pub conversations: i64,
     pub workspaces: i64,
@@ -5862,7 +5959,7 @@ impl Db {
                  SELECT c.session_id, c.turn_id, c.workspace_id, c.ran_as, \
                         c.input_tokens, c.output_tokens, c.cache_read_tokens, \
                         c.cache_write_tokens, c.cache_write_1h_tokens, \
-                        c.cache_write_5m_tokens, c.cost_usd \
+                        c.cache_write_5m_tokens, c.cost_usd, c.tokens_known \
                    FROM consumption_events c WHERE {tail}) \
              SELECT COALESCE(SUM(input_tokens), 0)::bigint       AS input_tokens, \
                     COALESCE(SUM(output_tokens), 0)::bigint      AS output_tokens, \
@@ -5874,6 +5971,8 @@ impl Db {
                     COUNT(cost_usd)                              AS priced_rows, \
                     COUNT(*)                                     AS rows, \
                     (SELECT count(*) FROM (SELECT session_id, turn_id FROM rows GROUP BY 1, 2) a) AS turns, \
+                    (SELECT count(*) FROM (SELECT session_id, turn_id FROM rows \
+                        WHERE NOT tokens_known GROUP BY 1, 2) e)                                  AS unreported_turns, \
                     (SELECT count(*) FROM (SELECT session_id FROM rows GROUP BY 1) b)             AS conversations, \
                     (SELECT count(*) FROM (SELECT workspace_id FROM rows GROUP BY 1) c)           AS workspaces, \
                     (SELECT count(*) FROM (SELECT ran_as FROM rows WHERE ran_as IS NOT NULL GROUP BY 1) d) AS people \
@@ -5908,6 +6007,7 @@ impl Db {
             cost_usd: row.get("cost_usd"),
             priced_rows: row.get("priced_rows"),
             rows: row.get("rows"),
+            unreported_turns: row.get("unreported_turns"),
             turns: row.get("turns"),
             conversations: row.get("conversations"),
             workspaces: row.get("workspaces"),

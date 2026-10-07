@@ -151,22 +151,6 @@ struct Spent {
     fallback_model: Option<String>,
 }
 
-/// Whether a turn's usage says anything a bill could be made of.
-///
-/// `context_used` alone does not: it is how full the window is, which every ACP
-/// agent reports and which counts a cached prefix once however many times it
-/// was re-read. A row built from it would be all zeros under a real model name,
-/// and a page that sums those reports a fleet working for free.
-fn counted(usage: &ft_core::turn::Usage) -> bool {
-    usage.input_tokens > 0
-        || usage.output_tokens > 0
-        || usage.cache_read_tokens.unwrap_or(0) > 0
-        || usage.cache_write_tokens.unwrap_or(0) > 0
-        || usage.models.iter().any(|m| {
-            m.input_tokens + m.output_tokens + m.cache_read_tokens + m.cache_write_tokens > 0
-        })
-}
-
 /// One session's lines, read for what they say about the session.
 struct Progress {
     reader: ft_core::normalise::Reader,
@@ -507,12 +491,12 @@ impl Progress {
                     // it is partial, and a moment later the line is forwarded
                     // on and nothing keeps it.
                     //
-                    // A usage block that counts no tokens is not a free turn,
-                    // it is a turn whose agent did not say — which is every ACP
-                    // one today, where the only thing reported is how full the
-                    // context is. Billing it would put a row of zeros on the
-                    // page, and "0 tokens" is a claim we cannot make.
-                    if let Some(usage) = usage.filter(counted) {
+                    // Recorded whether or not the agent said what it cost. A
+                    // turn that reported nothing is still a turn that happened,
+                    // and dropping it made Kimi sessions invisible rather than
+                    // unknown — see `tokens_known`, which is how the row says
+                    // which of the two it is.
+                    if let Some(usage) = usage {
                         spent = Some(Spent {
                             turn: turn.to_string(),
                             usage,
@@ -4360,46 +4344,6 @@ mod tests {
             .remember(ft_core::controls::ControlKind::Model, "gpt-5.6-mini")
             .unwrap();
         assert_eq!(progress.model_now().as_deref(), Some("gpt-5.6-mini"));
-    }
-
-    /// A gauge is not a bill, and the page must not be told otherwise.
-    ///
-    /// Every ACP agent today reports how full its context is and nothing about
-    /// what it spent. Handing that back as a turn's usage would write a row of
-    /// zeros under a real model name, and a page summing those says the fleet
-    /// worked for free — which is worse than the session not appearing, because
-    /// it is wrong rather than absent.
-    #[test]
-    fn a_turn_that_only_reported_its_context_is_not_billed() {
-        use ft_core::turn::Usage;
-
-        let gauge = Usage {
-            context_used: Some(20_237),
-            context_window: Some(1_048_576),
-            ..Default::default()
-        };
-        assert!(!counted(&gauge), "a context gauge buys nothing");
-
-        // One real token anywhere is enough, including inside a breakdown whose
-        // top-level totals are empty — which is every Claude turn.
-        let spent = Usage {
-            output_tokens: 1,
-            ..Default::default()
-        };
-        assert!(counted(&spent));
-        let only_in_the_breakdown = Usage {
-            models: vec![ft_core::turn::ModelUsage {
-                model: "claude-opus-5".into(),
-                input_tokens: 0,
-                output_tokens: 0,
-                cache_read_tokens: 11_474,
-                cache_write_tokens: 0,
-                context_window: None,
-                cost_usd: None,
-            }],
-            ..Default::default()
-        };
-        assert!(counted(&only_in_the_breakdown), "the bill is in `models`");
     }
 
     #[test]

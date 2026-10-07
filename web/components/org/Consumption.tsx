@@ -403,6 +403,20 @@ export function Consumption() {
                 }
               />
             </div>
+
+            {/* Said once, plainly, rather than left for somebody to notice the
+                numbers are short. These turns ran and are counted as turns;
+                what they spent is the thing nobody can tell us. */}
+            {t && t.unreportedTurns > 0 && (
+              <p className="mt-5 max-w-[68ch] text-ui text-mute">
+                <span className="text-dim">
+                  {plural(t.unreportedTurns, "turn")} above {t.unreportedTurns === 1 ? "has" : "have"} no
+                  tokens counted.
+                </span>{" "}
+                Kimi and other agents reached over ACP report how full their context is and nothing
+                about what they spent, so those turns are in the count and not in the totals.
+              </p>
+            )}
           </>
         )}
       </section>
