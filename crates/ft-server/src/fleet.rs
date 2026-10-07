@@ -574,9 +574,23 @@ impl Progress {
     /// practice means Codex. The resolved name where there is one, so
     /// `claude-haiku-4-5-20251001` and `haiku` do not become two rows on a page
     /// that groups by model.
+    ///
+    /// The same order of precedence `controls` draws the pickers from, and for
+    /// the same reason: what somebody chose on this session, then what the
+    /// agent answered when its thread opened, then the account's preference.
+    /// Asking only the first used to bill a session's opening turns to the word
+    /// "Codex" — nobody picks a model to accept the default, and Codex says
+    /// which one it took before any turn runs, so the answer was there to be
+    /// read and we were not reading it.
     fn model_now(&self) -> Option<String> {
         match &self.reader {
             ft_core::normalise::Reader::Claude(reader) => reader.model().map(str::to_string),
+            ft_core::normalise::Reader::Codex(reader) => self
+                .settings
+                .model
+                .clone()
+                .or_else(|| reader.reported().model.clone())
+                .or_else(|| self.preferred.model.clone()),
             _ => self.settings.model.clone(),
         }
     }
@@ -4267,6 +4281,57 @@ mod tests {
 
         // What the whole turn came to, as the agent itself reported it.
         assert!(bill.usage.cost_usd.is_some_and(|c| (c - 0.061_320_2).abs() < 1e-6));
+    }
+
+    /// Codex reports no per-model breakdown, so the name on its rows is
+    /// whatever `model_now` says — and that used to be only what somebody had
+    /// picked. Nobody picks a model to accept the default, so an untouched
+    /// session billed its turns to the word "Codex" while a session where
+    /// somebody had opened the picker billed to `gpt-5.6-sol`. Same agent, same
+    /// model, two rows on a page that groups by model.
+    #[test]
+    fn codex_bills_the_model_it_said_it_was_running() {
+        let mut progress = Progress::for_agent(ft_core::Agent::Codex, String::new());
+
+        // Codex answers `thread/start` with what it took, before any turn runs.
+        // Nobody has touched the picker: `settings.model` is still None.
+        progress.read(&format!(
+            r#"{{"id":{},"result":{{"thread":{{"id":"th_1"}},"model":"gpt-5.6-sol",
+                "approvalPolicy":"on-request","reasoningEffort":"medium"}}}}"#,
+            ft_core::codex::THREAD_START_ID
+        ));
+        assert_eq!(progress.settings.model, None, "nobody chose anything");
+
+        progress.read(
+            r#"{"method":"turn/started","params":{"threadId":"th_1",
+               "turn":{"id":"turn_1","items":[],"status":"inProgress"}}}"#,
+        );
+        progress.read(
+            r#"{"method":"thread/tokenUsage/updated","params":{"threadId":"th_1","turnId":"turn_1",
+               "tokenUsage":{"modelContextWindow":200000,
+               "last":{"inputTokens":120,"outputTokens":45,"cachedInputTokens":900,"totalTokens":1065},
+               "total":{"inputTokens":120,"outputTokens":45,"cachedInputTokens":900,"totalTokens":1065}}}}"#,
+        );
+        let spent = progress
+            .read(
+                r#"{"method":"turn/completed","params":{"threadId":"th_1",
+                   "turn":{"id":"turn_1","items":[],"status":"completed"}}}"#,
+            )
+            .spent
+            .expect("a finished turn is billed");
+
+        assert_eq!(
+            spent.fallback_model.as_deref(),
+            Some("gpt-5.6-sol"),
+            "the model it told us about, not the agent's own name",
+        );
+
+        // And what somebody chooses still wins over what it opened on, because
+        // choosing is the later statement of the two.
+        progress
+            .remember(ft_core::controls::ControlKind::Model, "gpt-5.6-mini")
+            .unwrap();
+        assert_eq!(progress.model_now().as_deref(), Some("gpt-5.6-mini"));
     }
 
     #[test]
