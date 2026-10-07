@@ -378,18 +378,7 @@ export function Consumption() {
           />
         ) : (
           <>
-            {/* The total and the four numbers it is made of, as one object: the
-                parts sit under the whole they are parts of, and the block is
-                right-aligned so the chart underneath keeps the width. */}
-            <div className="mb-7 flex justify-end">
-              <div>
-                <div className="text-right font-narrow text-[64px] font-semibold leading-[0.86] tracking-[-0.025em] text-bone">
-                  {t ? tokens(t.tokens) : "—"}
-                </div>
-                <div className="mt-1.5 text-right text-ui text-dim">tokens processed</div>
-                {t && t.tokens > 0 && <Composition t={t} />}
-              </div>
-            </div>
+            <Headline t={t} />
 
             <Trace columns={data?.series ?? []} bucket={RANGES[range].bucket} hue={hue}
               order={inOrder} onTip={setTip} />
@@ -641,16 +630,6 @@ function ReadingSkeleton() {
         <div className="flex flex-col items-end">
           <Block className="h-[56px] w-[180px] rounded-md" />
           <Block className="mt-2.5 h-3 w-[86px]" />
-          {/* The four parts, in their places. Widths differ because the numbers
-              do — four identical bars promise a table rather than a list. */}
-          <div className="mt-4 grid grid-cols-[auto_auto] gap-x-3 gap-y-2.5 border-t border-line pt-4">
-            {[46, 54, 68, 62].map((n, i) => (
-              <Fragment key={i}>
-                <Block className="h-3.5 justify-self-end" style={{ width: n }} />
-                <Block className="h-3.5" style={{ width: [38, 70, 112, 164][i] }} />
-              </Fragment>
-            ))}
-          </div>
         </div>
       </div>
 
@@ -947,17 +926,89 @@ const capitalise = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
 /* ── pieces ───────────────────────────────────────────────────────────── */
 
-/* The headline taken apart.
+/**
+ * The total, with what it is made of behind a hover.
  *
- * The sum on its own misleads, and badly: a session re-reads its cached prefix
- * on every tool call, so one that said two words can report a hundred thousand
- * tokens. The four numbers it is made of are the only way to see that — and
- * they are four different prices, which is the other reason to keep them apart.
+ * The number on its own misleads: a session re-reads its cached prefix on every
+ * tool call, so one that said two words reports tens of thousands of tokens.
+ * The breakdown is the correction, and it is held back rather than printed
+ * because the headline is the headline.
  *
- * Numbers in full rather than abbreviated, deliberately. The headline is the one
- * that gets rounded to 17.8K; the point of these is that 2 and 11,474 are not
- * the same kind of thing, and `11.5K` beside `0` hides exactly that. */
-function Composition({ t }: { t: Totals }) {
+ * Held back is not hidden. It opens on focus as well as hover, so a keyboard
+ * reaches it, and the dashed rule under the label is there to say something is
+ * behind it — a number that rewards hovering with no sign that it does is a
+ * secret. Escape closes it, and so does anything that moves the page, because a
+ * tooltip pinned to where its anchor used to be is worse than no tooltip.
+ */
+function Headline({ t }: { t?: Totals }) {
+  const [at, setAt] = useState<DOMRect | null>(null);
+  const el = useRef<HTMLDivElement>(null);
+  const has = !!t && t.tokens > 0;
+
+  const show = () => {
+    if (has) setAt(el.current?.getBoundingClientRect() ?? null);
+  };
+  const hide = () => setAt(null);
+
+  useEffect(() => {
+    if (!at) return;
+    const off = () => setAt(null);
+    const esc = (e: KeyboardEvent) => e.key === "Escape" && setAt(null);
+    window.addEventListener("scroll", off, true);
+    window.addEventListener("resize", off);
+    window.addEventListener("keydown", esc);
+    return () => {
+      window.removeEventListener("scroll", off, true);
+      window.removeEventListener("resize", off);
+      window.removeEventListener("keydown", esc);
+    };
+  }, [at]);
+
+  return (
+    <div className="mb-7 flex justify-end">
+      <div
+        ref={el}
+        tabIndex={has ? 0 : undefined}
+        aria-describedby={at ? "usage-composition" : undefined}
+        onPointerEnter={show}
+        onPointerLeave={hide}
+        onFocus={show}
+        onBlur={hide}
+        className="rounded-md outline-none focus-visible:ring-1 focus-visible:ring-mute"
+      >
+        <div className="text-right font-narrow text-[64px] font-semibold leading-[0.86] tracking-[-0.025em] text-bone">
+          {t ? tokens(t.tokens) : "—"}
+        </div>
+        <div className="mt-1.5 text-right text-ui text-dim">
+          <span
+            className={
+              has
+                ? `border-b border-dashed pb-0.5 transition-colors duration-150 ${
+                    at ? "border-dim text-text" : "border-line"
+                  }`
+                : ""
+            }
+          >
+            tokens processed
+          </span>
+        </div>
+      </div>
+      {has && at && <Composition t={t} at={at} />}
+    </div>
+  );
+}
+
+/* The four numbers the headline is the sum of.
+ *
+ * Four rather than three because they are four different prices: an output
+ * token costs several times an input one, a cache read about a tenth, and a
+ * one-hour write about twice. Lumping any of them together would hide the part
+ * that decides the bill.
+ *
+ * Figures in full rather than abbreviated. The headline is the one that gets
+ * rounded to 35.6K; the point of these is that 4 and 29,176 are not the same
+ * kind of thing, which `29.2K` beside `4` hides exactly. */
+function Composition({ t, at }: { t: Totals; at: DOMRect }) {
   const parts: { of: string; n: number; also?: string }[] = [
     { of: "sent", n: t.inputTokens },
     { of: "generated", n: t.outputTokens },
@@ -977,23 +1028,36 @@ function Composition({ t }: { t: Totals }) {
             : `${count(t.cacheWrite1hTokens)} of it for an hour`,
     },
   ];
-  return (
-    <dl className="mt-4 grid grid-cols-[auto_auto_auto] items-baseline gap-x-3 gap-y-2 border-t border-line pt-3.5">
-      {parts.map((p) => (
-        <Fragment key={p.of}>
-          <dd className="justify-self-end font-narrow text-[17px] font-semibold leading-none tracking-[-0.01em] text-bone tabular-nums">
-            {count(p.n)}
-          </dd>
-          <dt className="text-ui text-dim">
-            {p.of}
-            {p.also && <span className="text-mute"> — {p.also}</span>}
-          </dt>
-          <dd className="justify-self-end text-meta text-mute tabular-nums">
-            {share(p.n, t.tokens)}
-          </dd>
-        </Fragment>
-      ))}
-    </dl>
+  if (typeof document === "undefined") return null;
+
+  // On `body` and `fixed`, for the reason `Menu` gives: anchored from inside a
+  // scrolling panel it would otherwise be drawn in the wrong place. Right edges
+  // flush with the number's, which is itself against the right of the page.
+  return createPortal(
+    <div
+      id="usage-composition"
+      role="tooltip"
+      className="pointer-events-none fixed z-[70] rounded-md bg-overlay px-3.5 py-3 shadow-float"
+      style={{ right: Math.max(12, window.innerWidth - at.right), top: at.bottom + 10 }}
+    >
+      <dl className="grid grid-cols-[auto_auto_auto] items-baseline gap-x-3.5 gap-y-2">
+        {parts.map((p) => (
+          <Fragment key={p.of}>
+            <dd className="justify-self-end font-narrow text-[17px] font-semibold leading-none tracking-[-0.01em] text-bone tabular-nums">
+              {count(p.n)}
+            </dd>
+            <dt className="text-ui text-dim">
+              {p.of}
+              {p.also && <span className="text-mute"> — {p.also}</span>}
+            </dt>
+            <dd className="justify-self-end text-meta text-mute tabular-nums">
+              {share(p.n, t.tokens)}
+            </dd>
+          </Fragment>
+        ))}
+      </dl>
+    </div>,
+    document.body,
   );
 }
 
