@@ -20,7 +20,7 @@
  * never the palette — a reader who learned that violet is Codex keeps it. Past
  * nine rows the tail is folded together rather than given a tenth hue.
  */
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { keepPreviousData } from "@tanstack/react-query";
 import { ArrowDown, ArrowDownUp, ArrowUp, ChevronRight, Search } from "lucide-react";
@@ -28,7 +28,7 @@ import type { LucideIcon } from "lucide-react";
 import { useConsumption } from "@/src/api/generated/consumption/consumption";
 import { useListAccounts } from "@/src/api/generated/accounts/accounts";
 import { useListColleagues, useListTeams } from "@/src/api/generated/access/access";
-import type { Account, ByModel, Direction, Group, Limit, Sort } from "@/src/api/generated/model";
+import type { Account, ByModel, Direction, Group, Limit, Sort, Totals } from "@/src/api/generated/model";
 import { Choose, Icon, PageHead, useAnchor } from "@/components/ui";
 
 /* ── the vocabulary ───────────────────────────────────────────────────── */
@@ -180,6 +180,17 @@ const money = (n: number) =>
 const count = (n: number) => n.toLocaleString("en-US");
 const plural = (n: number, one: string, many = `${one}s`) =>
   `${count(n)} ${n === 1 ? one : many}`;
+
+// A part of a whole. Rounding is kept away from the two ends: a part that is
+// there at all does not read as 0%, and one that is short of everything does
+// not read as 100%, because either would deny what the breakdown is for.
+const share = (n: number, of: number) => {
+  if (of <= 0 || n === 0) return "";
+  const pct = (n / of) * 100;
+  if (pct < 1) return "<1%";
+  if (pct > 99 && n < of) return ">99%";
+  return `${Math.round(pct)}%`;
+};
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
@@ -367,12 +378,16 @@ export function Consumption() {
           />
         ) : (
           <>
-            <div className="flex items-end justify-end">
+            {/* The total and the four numbers it is made of, as one object: the
+                parts sit under the whole they are parts of, and the block is
+                right-aligned so the chart underneath keeps the width. */}
+            <div className="mb-7 flex justify-end">
               <div>
-                <div className="font-narrow text-[64px] font-semibold leading-[0.86] tracking-[-0.025em] text-bone">
+                <div className="text-right font-narrow text-[64px] font-semibold leading-[0.86] tracking-[-0.025em] text-bone">
                   {t ? tokens(t.tokens) : "—"}
                 </div>
                 <div className="mt-1.5 text-right text-ui text-dim">tokens processed</div>
+                {t && t.tokens > 0 && <Composition t={t} />}
               </div>
             </div>
 
@@ -386,19 +401,6 @@ export function Consumption() {
                 note={
                   t && t.rows > 0
                     ? `Known for ${count(t.pricedRows)} of ${count(t.rows)} rows. Codex reports no price.`
-                    : ""
-                }
-              />
-              <Figure
-                label="What it was made of"
-                value={t ? count(t.inputTokens + t.outputTokens) : "—"}
-                note={
-                  t && t.tokens > 0
-                    ? `tokens of conversation. The other ${count(t.cacheReadTokens)} read from ` +
-                      `cache and ${count(t.cacheWriteTokens)} written to it` +
-                      (t.cacheWrite1hTokens > 0
-                        ? `, ${count(t.cacheWrite1hTokens)} of that for an hour.`
-                        : ".")
                     : ""
                 }
               />
@@ -635,10 +637,20 @@ const BARS = [34, 52, 41, 68, 57, 79, 62, 88, 71, 96, 83, 100];
 function ReadingSkeleton() {
   return (
     <div role="status" aria-label="Loading usage">
-      <div className="flex items-end justify-end">
+      <div className="mb-7 flex justify-end">
         <div className="flex flex-col items-end">
           <Block className="h-[56px] w-[180px] rounded-md" />
           <Block className="mt-2.5 h-3 w-[86px]" />
+          {/* The four parts, in their places. Widths differ because the numbers
+              do — four identical bars promise a table rather than a list. */}
+          <div className="mt-4 grid grid-cols-[auto_auto] gap-x-3 gap-y-2.5 border-t border-line pt-4">
+            {[46, 54, 68, 62].map((n, i) => (
+              <Fragment key={i}>
+                <Block className="h-3.5 justify-self-end" style={{ width: n }} />
+                <Block className="h-3.5" style={{ width: [38, 70, 112, 164][i] }} />
+              </Fragment>
+            ))}
+          </div>
         </div>
       </div>
 
@@ -657,7 +669,7 @@ function ReadingSkeleton() {
       </div>
 
       <div className="mt-6 flex flex-wrap border-t border-line">
-        {[0, 1, 2].map((i) => (
+        {[0, 1].map((i) => (
           <div key={i} className="min-w-0 flex-1 basis-56 px-5 pb-0.5 pt-3 first:pl-0 [&+&]:border-l [&+&]:border-line">
             <Block className="h-3 w-[96px]" />
             <Block className="mt-2 h-[22px] w-[124px] rounded-sm" />
@@ -934,6 +946,56 @@ function Gauge({ account, limit }: { account: Account; limit: Limit }) {
 const capitalise = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
 /* ── pieces ───────────────────────────────────────────────────────────── */
+
+/* The headline taken apart.
+ *
+ * The sum on its own misleads, and badly: a session re-reads its cached prefix
+ * on every tool call, so one that said two words can report a hundred thousand
+ * tokens. The four numbers it is made of are the only way to see that — and
+ * they are four different prices, which is the other reason to keep them apart.
+ *
+ * Numbers in full rather than abbreviated, deliberately. The headline is the one
+ * that gets rounded to 17.8K; the point of these is that 2 and 11,474 are not
+ * the same kind of thing, and `11.5K` beside `0` hides exactly that. */
+function Composition({ t }: { t: Totals }) {
+  const parts: { of: string; n: number; also?: string }[] = [
+    { of: "sent", n: t.inputTokens },
+    { of: "generated", n: t.outputTokens },
+    { of: "read from cache", n: t.cacheReadTokens },
+    {
+      of: "written to cache",
+      n: t.cacheWriteTokens,
+      // Which kind, where the agent said: an hour costs about twice an input
+      // token and five minutes about a quarter more, so it is most of what
+      // decides whether the write was expensive. "All of it" rather than the
+      // number again, which is the usual case and reads as a stutter.
+      also:
+        t.cacheWrite1hTokens === 0
+          ? undefined
+          : t.cacheWrite1hTokens >= t.cacheWriteTokens
+            ? "all of it for an hour"
+            : `${count(t.cacheWrite1hTokens)} of it for an hour`,
+    },
+  ];
+  return (
+    <dl className="mt-4 grid grid-cols-[auto_auto_auto] items-baseline gap-x-3 gap-y-2 border-t border-line pt-3.5">
+      {parts.map((p) => (
+        <Fragment key={p.of}>
+          <dd className="justify-self-end font-narrow text-[17px] font-semibold leading-none tracking-[-0.01em] text-bone tabular-nums">
+            {count(p.n)}
+          </dd>
+          <dt className="text-ui text-dim">
+            {p.of}
+            {p.also && <span className="text-mute"> — {p.also}</span>}
+          </dt>
+          <dd className="justify-self-end text-meta text-mute tabular-nums">
+            {share(p.n, t.tokens)}
+          </dd>
+        </Fragment>
+      ))}
+    </dl>
+  );
+}
 
 function Figure({ label, value, note }: { label: string; value: string; note: string }) {
   return (
