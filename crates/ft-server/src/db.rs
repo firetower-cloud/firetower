@@ -476,6 +476,19 @@ impl Db {
             &usage.models
         };
 
+        // The TTL split is reported per turn and the rows are per model, so
+        // each model takes the share of it that matches its share of the
+        // write. Exact when one model did all the writing, which is the
+        // ordinary case; a stated apportionment when several did.
+        let wrote: u64 = rows.iter().map(|m| m.cache_write_tokens).sum();
+        let share = |of: Option<u64>, mine: u64| -> Option<i64> {
+            let total = of?;
+            if wrote == 0 {
+                return Some(0);
+            }
+            Some((total as u128 * mine as u128 / wrote as u128) as i64)
+        };
+
         let at = chrono::Utc::now();
         let mut written = 0;
         for row in rows {
@@ -493,13 +506,15 @@ impl Db {
                      task_key, task_provider, repo_remote, branch,
                      agent, account_id, account_name, model,
                      input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,
+                     cache_write_1h_tokens, cache_write_5m_tokens,
                      thinking_tokens, cost_usd, duration_ms)
                  SELECT h.org_id, $2, w.path, w.extra_perms, s.user_id,
                         w.id, w.name, s.id, s.title, $3,
                         w.task_key, w.task_provider, w.repo, w.branch,
                         s.agent, s.agent_account_id, a.name, COALESCE($4, s.agent),
                         $5, $6, $7, $8,
-                        $9, $10::float8::numeric, $11
+                        $9, $10,
+                        $11, $12::float8::numeric, $13
                    FROM sessions s
                    JOIN workspaces w ON w.id = s.workspace_id
                    JOIN hosts h ON h.id = w.host_id
@@ -515,6 +530,8 @@ impl Db {
             .bind(row.output_tokens as i64)
             .bind(row.cache_read_tokens as i64)
             .bind(row.cache_write_tokens as i64)
+            .bind(share(usage.cache_write_1h_tokens, row.cache_write_tokens))
+            .bind(share(usage.cache_write_5m_tokens, row.cache_write_tokens))
             .bind(usage.thinking_tokens.map(|t| t as i64))
             .bind(row.cost_usd)
             .bind(usage.duration_ms.map(|d| d as i64))
@@ -2755,6 +2772,76 @@ mod tests {
                 .await
                 .unwrap();
         assert_eq!(total, 2);
+    }
+
+    #[tokio::test]
+    async fn the_two_kinds_of_cache_write_follow_who_wrote() {
+        use ft_core::turn::{ModelUsage, Usage};
+        let (db, who) = db_with_user().await;
+        let session = SessionId::from_stored(a_session(&db, &who).await);
+
+        let wrote_this = |name: &str, write: u64| ModelUsage {
+            model: name.to_string(),
+            input_tokens: 10,
+            output_tokens: 1,
+            cache_read_tokens: 0,
+            cache_write_tokens: write,
+            context_window: None,
+            cost_usd: None,
+        };
+        // The split is stated once for the turn — 4,000 written, four fifths of
+        // it for an hour — while the rows are per model. Three quarters of the
+        // writing was sonnet's, so three quarters of each kind is sonnet's.
+        let usage = Usage {
+            cache_write_tokens: Some(4_000),
+            cache_write_1h_tokens: Some(3_200),
+            cache_write_5m_tokens: Some(800),
+            models: vec![wrote_this("claude-sonnet-5", 3_000), wrote_this("claude-haiku-4-5", 1_000)],
+            ..Default::default()
+        };
+        db.record_consumption(&session, "turn_ttl", &usage, None)
+            .await
+            .unwrap();
+
+        let rows: Vec<(String, i64, Option<i64>, Option<i64>)> = sqlx::query_as(
+            "SELECT model, cache_write_tokens, cache_write_1h_tokens, cache_write_5m_tokens
+               FROM consumption_events WHERE turn_id = 'turn_ttl' ORDER BY model",
+        )
+        .fetch_all(db.pool())
+        .await
+        .unwrap();
+        assert_eq!(
+            rows,
+            vec![
+                ("claude-haiku-4-5".to_string(), 1_000, Some(800), Some(200)),
+                ("claude-sonnet-5".to_string(), 3_000, Some(2_400), Some(600)),
+            ],
+        );
+        // Whatever it is apportioned to, the turn's own total survives: a sum
+        // over the rows is still the figure the agent reported.
+        let (hour, minutes): (i64, i64) = sqlx::query_as(
+            "SELECT SUM(cache_write_1h_tokens)::bigint, SUM(cache_write_5m_tokens)::bigint
+               FROM consumption_events WHERE turn_id = 'turn_ttl'",
+        )
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+        assert_eq!((hour, minutes), (3_200, 800));
+
+        // Codex says nothing about either kind, and NULL says that where a zero
+        // would claim it wrote nothing for an hour.
+        let silent = Usage { input_tokens: 10, output_tokens: 1, ..Default::default() };
+        db.record_consumption(&session, "turn_mute", &silent, Some("gpt-5-codex"))
+            .await
+            .unwrap();
+        let said: (Option<i64>, Option<i64>) = sqlx::query_as(
+            "SELECT cache_write_1h_tokens, cache_write_5m_tokens
+               FROM consumption_events WHERE turn_id = 'turn_mute'",
+        )
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+        assert_eq!(said, (None, None));
     }
 
     #[tokio::test]
@@ -5553,6 +5640,10 @@ impl Dimension {
 #[serde(rename_all = "camelCase")]
 pub enum Sort {
     Tokens,
+    /// What the agent said it cost. Back, because the token sum turned out not
+    /// to rank by money at all — a turn with twice the tokens of another came
+    /// to 18% more.
+    Cost,
     /// When something was last worked on.
     Recent,
     /// Whichever count means something for this grouping.
@@ -5580,6 +5671,9 @@ impl Sort {
         };
         match self {
             Self::Tokens => format!("tokens {d}"),
+            // NULLs last either way: Codex reports no price, and ascending
+            // would otherwise rank "we do not know" as the cheapest.
+            Self::Cost => format!("cost_usd {d} NULLS LAST"),
             Self::Recent => format!("last_at {d}"),
             Self::Breadth => format!("{breadth} {d}"),
             // Groups with nothing to call them sort last either way rather than
@@ -5646,6 +5740,12 @@ pub struct Totals {
     pub output_tokens: i64,
     pub cache_read_tokens: i64,
     pub cache_write_tokens: i64,
+    /// The expensive half of the write, where the agent said which it was.
+    pub cache_write1h_tokens: i64,
+    pub cache_write5m_tokens: i64,
+    /// Everything processed. Not a bill: a cache read is about a tenth of an
+    /// input token and a one-hour write about twice one, so this tracks volume
+    /// and `cost_usd` tracks money.
     pub tokens: i64,
     /// The sum of what the agents reported, over the rows that reported any.
     ///
@@ -5761,12 +5861,15 @@ impl Db {
             "{with_}, rows AS MATERIALIZED (\
                  SELECT c.session_id, c.turn_id, c.workspace_id, c.ran_as, \
                         c.input_tokens, c.output_tokens, c.cache_read_tokens, \
-                        c.cache_write_tokens, c.cost_usd \
+                        c.cache_write_tokens, c.cache_write_1h_tokens, \
+                        c.cache_write_5m_tokens, c.cost_usd \
                    FROM consumption_events c WHERE {tail}) \
              SELECT COALESCE(SUM(input_tokens), 0)::bigint       AS input_tokens, \
                     COALESCE(SUM(output_tokens), 0)::bigint      AS output_tokens, \
                     COALESCE(SUM(cache_read_tokens), 0)::bigint  AS cache_read_tokens, \
                     COALESCE(SUM(cache_write_tokens), 0)::bigint AS cache_write_tokens, \
+                    COALESCE(SUM(cache_write_1h_tokens), 0)::bigint AS cache_write_1h, \
+                    COALESCE(SUM(cache_write_5m_tokens), 0)::bigint AS cache_write_5m, \
                     SUM(cost_usd)::float8                        AS cost_usd, \
                     COUNT(cost_usd)                              AS priced_rows, \
                     COUNT(*)                                     AS rows, \
@@ -5797,6 +5900,8 @@ impl Db {
             output_tokens: output,
             cache_read_tokens: cache_read,
             cache_write_tokens: cache_write,
+            cache_write1h_tokens: row.get("cache_write_1h"),
+            cache_write5m_tokens: row.get("cache_write_5m"),
             // What the bill is made of: everything that was charged, including
             // both kinds of cache. Not the context the model saw.
             tokens: input + output + cache_read + cache_write,

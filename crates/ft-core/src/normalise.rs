@@ -226,6 +226,21 @@ pub struct ClaudeNormaliser {
     /// A request, by contrast, states the whole window it saw in one number.
     /// Subagents are excluded — they read a window of their own.
     last_request: Option<Request>,
+    /// What every `result` so far added up to, per model.
+    ///
+    /// **`modelUsage` is cumulative for the session, not for the turn.** The
+    /// second `result` of a conversation repeats the first one's tokens and
+    /// adds the new ones, so recording it as the turn's own bill charges turn
+    /// one again on turn two — 49% high after two turns, and worse from there.
+    /// Only the top-level `usage` block is per-turn.
+    ///
+    /// So the running totals are kept and each turn reports the difference.
+    /// Keyed by the canonical name, which is also what the difference is
+    /// reported under.
+    billed: std::collections::HashMap<String, crate::turn::ModelUsage>,
+    /// The same problem for money: `total_cost_usd` is the session's bill so
+    /// far, not this turn's.
+    charged: f64,
     /// The model it last said it was running, as it spelled it.
     ///
     /// Kept because nothing else keeps it. Claude Code is told which model to
@@ -852,7 +867,7 @@ impl ClaudeNormaliser {
         out.push(TurnEvent::TurnCompleted {
             turn,
             status,
-            usage: usage(v, self.last_request.as_ref()),
+            usage: self.usage(v),
             detail,
         });
     }
@@ -1016,6 +1031,60 @@ fn tool_result_text(result: &Value) -> Option<String> {
     }
 }
 
+impl ClaudeNormaliser {
+    /// What *this* turn cost, out of what the session has spent so far.
+    ///
+    /// The per-model breakdown and the dollar figure both arrive as running
+    /// totals, so both are differenced against the last `result` and the new
+    /// totals kept for the next one. A model that did nothing this turn has a
+    /// difference of zero and is left out rather than reported as a row of
+    /// zeroes.
+    fn usage(&mut self, v: &Value) -> Option<Usage> {
+        let mut turn = usage(v, self.last_request.as_ref())?;
+
+        let mut fresh = Vec::new();
+        for total in std::mem::take(&mut turn.models) {
+            let before = self.billed.get(&total.model);
+            let since = |now: u64, then: fn(&crate::turn::ModelUsage) -> u64| {
+                now.saturating_sub(before.map(then).unwrap_or(0))
+            };
+            let delta = crate::turn::ModelUsage {
+                model: total.model.clone(),
+                input_tokens: since(total.input_tokens, |m| m.input_tokens),
+                output_tokens: since(total.output_tokens, |m| m.output_tokens),
+                cache_read_tokens: since(total.cache_read_tokens, |m| m.cache_read_tokens),
+                cache_write_tokens: since(total.cache_write_tokens, |m| m.cache_write_tokens),
+                context_window: total.context_window,
+                cost_usd: match (total.cost_usd, before.and_then(|m| m.cost_usd)) {
+                    (Some(now), Some(then)) => Some((now - then).max(0.0)),
+                    (now, _) => now,
+                },
+            };
+            self.billed.insert(total.model.clone(), total);
+            if delta.input_tokens
+                + delta.output_tokens
+                + delta.cache_read_tokens
+                + delta.cache_write_tokens
+                > 0
+            {
+                fresh.push(delta);
+            }
+        }
+        fresh.sort_by(|a, b| {
+            b.cost_usd
+                .unwrap_or(0.0)
+                .total_cmp(&a.cost_usd.unwrap_or(0.0))
+        });
+        turn.models = fresh;
+
+        if let Some(so_far) = turn.cost_usd {
+            turn.cost_usd = Some((so_far - self.charged).max(0.0));
+            self.charged = so_far;
+        }
+        Some(turn)
+    }
+}
+
 fn usage(v: &Value, last: Option<&Request>) -> Option<Usage> {
     let usage = v.get("usage")?;
     let (context_used, context_window) = context(v, last);
@@ -1031,6 +1100,16 @@ fn usage(v: &Value, last: Option<&Request>) -> Option<Usage> {
         cache_read_tokens: usage.get("cache_read_input_tokens").and_then(Value::as_u64),
         cache_write_tokens: usage
             .get("cache_creation_input_tokens")
+            .and_then(Value::as_u64),
+        // Per turn, like the block it sits in — `modelUsage` has no TTL split
+        // at all, so this is the only place the distinction exists.
+        cache_write_1h_tokens: usage
+            .get("cache_creation")
+            .and_then(|c| c.get("ephemeral_1h_input_tokens"))
+            .and_then(Value::as_u64),
+        cache_write_5m_tokens: usage
+            .get("cache_creation")
+            .and_then(|c| c.get("ephemeral_5m_input_tokens"))
             .and_then(Value::as_u64),
         thinking_tokens: usage
             .get("output_tokens_details")

@@ -204,6 +204,17 @@ pub struct Usage {
     /// is it having said something new and large.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cache_write_tokens: Option<u64>,
+    /// The two kinds of cache write, which are not the same price.
+    ///
+    /// A one-hour entry costs roughly twice what an input token does and a
+    /// five-minute one roughly a quarter more, so the split is most of what
+    /// decides whether a turn was expensive. The agent reports it per *turn*
+    /// and not per model, so anything stored at a finer grain than that is an
+    /// apportionment rather than a measurement.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_write_1h_tokens: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_write_5m_tokens: Option<u64>,
     /// Of the output, how much was reasoning rather than answer.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thinking_tokens: Option<u64>,

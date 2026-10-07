@@ -18,6 +18,7 @@ export type Sort = typeof Sort[keyof typeof Sort];
 
 export const Sort = {
   tokens: 'tokens',
+  cost: 'cost',
   recent: 'recent',
   breadth: 'breadth',
   name: 'name',

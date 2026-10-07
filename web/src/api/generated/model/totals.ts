@@ -11,6 +11,9 @@
  */
 export interface Totals {
   cacheReadTokens: number;
+  /** The expensive half of the write, where the agent said which it was. */
+  cacheWrite1hTokens: number;
+  cacheWrite5mTokens: number;
   cacheWriteTokens: number;
   conversations: number;
   /**
@@ -26,6 +29,11 @@ export interface Totals {
   people: number;
   pricedRows: number;
   rows: number;
+  /**
+     * Everything processed. Not a bill: a cache read is about a tenth of an
+     * input token and a one-hour write about twice one, so this tracks volume
+     * and `cost_usd` tracks money.
+     */
   tokens: number;
   turns: number;
   workspaces: number;

@@ -20,7 +20,7 @@ export const ConsumptionQueryParams = zod.object({
   "person": zod.string().optional().describe('Narrow to one person. `me` means whoever is asking.'),
   "team": zod.string().optional().describe('Narrow to whoever is in one team.'),
   "find": zod.string().optional().describe('Only groups whose name or key contains this.'),
-  "sort": zod.enum(['tokens', 'recent', 'breadth', 'name']).optional(),
+  "sort": zod.enum(['tokens', 'cost', 'recent', 'breadth', 'name']).optional(),
   "direction": zod.enum(['asc', 'desc']).optional(),
   "limit": zod.int().optional().describe('How many rows to draw. Capped, because a page that asks for everything\nis how the first version of this shipped 461 KB to draw nine rows.'),
   "offset": zod.int().optional()
@@ -77,6 +77,8 @@ export const ConsumptionResponse = zod.object({
 }).describe('One column of the chart.')),
   "totals": zod.object({
   "cacheReadTokens": zod.int(),
+  "cacheWrite1hTokens": zod.int().describe('The expensive half of the write, where the agent said which it was.'),
+  "cacheWrite5mTokens": zod.int(),
   "cacheWriteTokens": zod.int(),
   "conversations": zod.int(),
   "costUsd": zod.number().nullish().describe('The sum of what the agents reported, over the rows that reported any.\n\nPartial by construction: Codex reports no price. `pricedRows` against\n`rows` is how far to trust it, and the interface says so out loud.'),
@@ -85,7 +87,7 @@ export const ConsumptionResponse = zod.object({
   "people": zod.int(),
   "pricedRows": zod.int(),
   "rows": zod.int(),
-  "tokens": zod.int(),
+  "tokens": zod.int().describe('Everything processed. Not a bill: a cache read is about a tenth of an\ninput token and a one-hour write about twice one, so this tracks volume\nand `cost_usd` tracks money.'),
   "turns": zod.int(),
   "workspaces": zod.int()
 }).describe('The totals a period adds up to.')

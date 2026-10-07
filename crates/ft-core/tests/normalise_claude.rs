@@ -804,3 +804,80 @@ fn an_ordinary_tool_result_resolves_no_question() {
         "a command's result is not an answer to anything"
     );
 }
+
+/// Two turns of one conversation, each billed for itself.
+///
+/// `modelUsage` and `total_cost_usd` are **cumulative for the session**, not
+/// for the turn: the second `result` repeats the first one's tokens and adds
+/// the new ones. Recorded as-is, turn two re-bills turn one — 49% high after
+/// two turns on the recording this fixture is taken from, and worse with every
+/// turn after.
+///
+/// Only the top-level `usage` block is per-turn, which is what the difference
+/// is checked against here.
+#[test]
+fn a_second_turn_is_not_billed_for_the_first() {
+    let turns: Vec<_> = replay("two_turns")
+        .into_iter()
+        .filter_map(|e| match e {
+            TurnEvent::TurnCompleted { usage, .. } => usage,
+            _ => None,
+        })
+        .collect();
+    assert_eq!(turns.len(), 2, "the recording is two turns");
+
+    let opus = |u: &ft_core::turn::Usage| {
+        u.models
+            .iter()
+            .find(|m| m.model == "claude-opus-5")
+            .cloned()
+            .expect("opus ran in both turns")
+    };
+    let (first, second) = (opus(&turns[0]), opus(&turns[1]));
+
+    // The first turn is whatever the session had spent, because it is all of it.
+    assert_eq!(first.cache_read_tokens, 11_474);
+    assert_eq!(first.cache_write_tokens, 6_228);
+    assert_eq!(first.output_tokens, 14);
+
+    // The second is its own, not the running total — which the raw line gives
+    // as 29,176 read, 6,272 written, 126 out.
+    assert_eq!(second.cache_read_tokens, 17_702, "29,176 cumulative less 11,474");
+    assert_eq!(second.cache_write_tokens, 44, "6,272 cumulative less 6,228");
+    assert_eq!(second.output_tokens, 112, "126 cumulative less 14");
+
+    // Money the same way: 0.081429 so far, 0.068377 of it already charged.
+    assert!(
+        turns[1].cost_usd.is_some_and(|c| (c - 0.013_052).abs() < 1e-6),
+        "the turn's own cost, not the session's: {:?}",
+        turns[1].cost_usd
+    );
+
+    // A model that ran only in the second turn appears only there.
+    assert!(!turns[0].models.iter().any(|m| m.model == "claude-haiku-4-5"));
+    assert!(turns[1].models.iter().any(|m| m.model == "claude-haiku-4-5"));
+
+    // The kind of cache write, which `modelUsage` never says and the turn's own
+    // block does. Already per-turn there — 44 after 6,228 rather than 6,272 —
+    // so it is read straight across and not differenced.
+    assert_eq!(turns[0].cache_write_1h_tokens, Some(6_228));
+    assert_eq!(turns[0].cache_write_5m_tokens, Some(0));
+    assert_eq!(turns[1].cache_write_1h_tokens, Some(44));
+    assert_eq!(turns[1].cache_write_5m_tokens, Some(0));
+    // And it agrees with the total beside it, which is what lets a per-model
+    // share of one be taken as a share of the other.
+    for t in &turns {
+        assert_eq!(
+            t.cache_write_tokens,
+            Some(t.cache_write_1h_tokens.unwrap() + t.cache_write_5m_tokens.unwrap()),
+        );
+    }
+
+    // And the whole conversation adds up to what it actually cost.
+    let billed: u64 = turns
+        .iter()
+        .flat_map(|t| &t.models)
+        .map(|m| m.input_tokens + m.output_tokens + m.cache_read_tokens + m.cache_write_tokens)
+        .sum();
+    assert_eq!(billed, 36_485, "not 54,203, which is turn one counted twice");
+}

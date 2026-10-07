@@ -11307,6 +11307,7 @@
         "description": "What to put at the top.\n\nFive of these mean the same thing whatever is being grouped; `breadth` is\nthe one that changes, because the count worth ranking by depends on what a\nrow is — a task sprawling across worktrees, a model reaching people.",
         "enum": [
           "tokens",
+          "cost",
           "recent",
           "breadth",
           "name"
@@ -11726,6 +11727,8 @@
           "outputTokens",
           "cacheReadTokens",
           "cacheWriteTokens",
+          "cacheWrite1hTokens",
+          "cacheWrite5mTokens",
           "tokens",
           "pricedRows",
           "rows",
@@ -11736,6 +11739,15 @@
         ],
         "properties": {
           "cacheReadTokens": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "cacheWrite1hTokens": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The expensive half of the write, where the agent said which it was."
+          },
+          "cacheWrite5mTokens": {
             "type": "integer",
             "format": "int64"
           },
@@ -11777,7 +11789,8 @@
           },
           "tokens": {
             "type": "integer",
-            "format": "int64"
+            "format": "int64",
+            "description": "Everything processed. Not a bill: a cache read is about a tenth of an\ninput token and a one-hour write about twice one, so this tracks volume\nand `cost_usd` tracks money."
           },
           "turns": {
             "type": "integer",
@@ -12688,6 +12701,23 @@
             ],
             "format": "int64",
             "description": "Absent when the agent does not say.",
+            "minimum": 0
+          },
+          "cacheWrite1hTokens": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "The two kinds of cache write, which are not the same price.\n\nA one-hour entry costs roughly twice what an input token does and a\nfive-minute one roughly a quarter more, so the split is most of what\ndecides whether a turn was expensive. The agent reports it per *turn*\nand not per model, so anything stored at a finer grain than that is an\napportionment rather than a measurement.",
+            "minimum": 0
+          },
+          "cacheWrite5mTokens": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
             "minimum": 0
           },
           "cacheWriteTokens": {

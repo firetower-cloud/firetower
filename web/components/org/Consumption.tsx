@@ -72,6 +72,7 @@ type GroupKey = keyof typeof GROUPS;
  */
 const SORTS: { value: Sort; field: string; up: string; down: string; starts: Direction }[] = [
   { value: "tokens",  field: "tokens",        down: "most tokens", up: "fewest tokens", starts: "desc" },
+  { value: "cost",    field: "cost",          down: "most expensive", up: "least expensive", starts: "desc" },
   { value: "recent",  field: "last activity", down: "most recent", up: "oldest",        starts: "desc" },
   { value: "breadth", field: "",              down: "widest",      up: "narrowest",     starts: "desc" },
   { value: "name",    field: "name",          down: "Z to A",      up: "A to Z",        starts: "asc" },
@@ -371,7 +372,7 @@ export function Consumption() {
                 <div className="font-narrow text-[64px] font-semibold leading-[0.86] tracking-[-0.025em] text-bone">
                   {t ? tokens(t.tokens) : "—"}
                 </div>
-                <div className="mt-1.5 text-right text-ui text-dim">billed tokens</div>
+                <div className="mt-1.5 text-right text-ui text-dim">tokens processed</div>
               </div>
             </div>
 
@@ -389,9 +390,17 @@ export function Consumption() {
                 }
               />
               <Figure
-                label="Read from cache"
-                value={t && t.tokens > 0 ? `${Math.round((t.cacheReadTokens / t.tokens) * 100)}%` : "—"}
-                note="Of everything billed. Cheap tokens, but tokens."
+                label="What it was made of"
+                value={t ? count(t.inputTokens + t.outputTokens) : "—"}
+                note={
+                  t && t.tokens > 0
+                    ? `tokens of conversation. The other ${count(t.cacheReadTokens)} read from ` +
+                      `cache and ${count(t.cacheWriteTokens)} written to it` +
+                      (t.cacheWrite1hTokens > 0
+                        ? `, ${count(t.cacheWrite1hTokens)} of that for an hour.`
+                        : ".")
+                    : ""
+                }
               />
               <Figure
                 label="Turns"
