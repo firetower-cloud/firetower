@@ -37,6 +37,11 @@ const EXPIRES: Duration = Duration::from_secs(1800);
 /// code was reported as a worker that had gone quiet. A real login prints its
 /// code in about a second, so the headroom here is already generous.
 const TO_CODE: Duration = Duration::from_secs(20);
+/// How long to let the login process finish writing after it says it is done.
+///
+/// It exits of its own accord once the tokens are on disk; this is only the
+/// bound on waiting for a process that has stopped behaving like one.
+const SETTLE: Duration = Duration::from_secs(15);
 
 /// What to show somebody so they can approve this machine.
 #[derive(Debug, Clone)]
@@ -150,6 +155,19 @@ impl Waiting {
     /// shape is Kimi's to change and nothing here reads inside the files.
     pub async fn finish(mut self) -> Result<Vec<u8>> {
         let outcome = tokio::time::timeout(EXPIRES, self.completed()).await;
+
+        // "Logged in" is said before the tokens are on disk, and `kimi acp
+        // --login` exits once they are — so the word is the wrong moment to
+        // read and the exit is the right one. Killing at the word stored a
+        // credential that looked entirely correct and was not: Kimi writes the
+        // file as a skeleton when the flow starts and fills it in at the end,
+        // so what got vaulted was `access_token: ""`, `expires_at: 0`. The
+        // account then showed as connected and every session it ran failed with
+        // `OAuthUnauthorizedError`, which is the worst shape a bug can have —
+        // it looks like the agent's fault.
+        if matches!(outcome, Ok(Ok(()))) {
+            let _ = tokio::time::timeout(SETTLE, self.child.wait()).await;
+        }
         // Whatever happened, this process has no further use.
         let _ = self.child.start_kill();
 
@@ -220,13 +238,68 @@ async fn collect(home: &Path) -> Result<Vec<u8>> {
     if found == 0 {
         bail!("Kimi said it signed in but left no credential behind");
     }
+    // The one thing read inside a file here, against the rule stated above,
+    // because the alternative was proven worse: a skeleton credential vaults
+    // cleanly, reports the account as connected, and fails every session it
+    // runs with an error that reads like the agent's fault. If Kimi renames
+    // this field the login fails loudly, which is the better of the two.
+    if !signed(&bundle) {
+        bail!(
+            "Kimi wrote a credential with no token in it \u{2014} the sign-in did not finish. \
+             Try again, and approve the code before it expires."
+        );
+    }
 
     Ok(serde_json::to_vec(&json!(bundle))?)
+}
+
+/// Whether any collected credential actually carries a token.
+fn signed(bundle: &Map<String, Value>) -> bool {
+    bundle.iter().any(|(name, body)| {
+        name.starts_with("credentials/")
+            && body
+                .as_str()
+                .and_then(|text| serde_json::from_str::<Value>(text).ok())
+                .is_some_and(|json| {
+                    json["access_token"].as_str().is_some_and(|t| !t.is_empty())
+                })
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The skeleton Kimi writes when a login starts is not a credential.
+    ///
+    /// Read at the wrong moment it vaults perfectly: right filename, right
+    /// shape, every key present. Then the account shows connected and every
+    /// session it runs dies with `OAuthUnauthorizedError`, which reads like the
+    /// agent is broken rather than like the sign-in never finished.
+    #[tokio::test]
+    async fn a_credential_with_no_token_in_it_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path();
+        tokio::fs::write(home.join("config.toml"), "default_model = \"x\"")
+            .await
+            .unwrap();
+        tokio::fs::create_dir_all(home.join("credentials"))
+            .await
+            .unwrap();
+        // Verbatim from the one that was stored, tokens and all.
+        tokio::fs::write(
+            home.join("credentials/kimi-code-env-0e4f99c6.json"),
+            r#"{"access_token":"","refresh_token":"","expires_at":0,"scope":"user_info","token_type":"Bearer","expires_in":0}"#,
+        )
+        .await
+        .unwrap();
+
+        let refused = collect(home).await.unwrap_err().to_string();
+        assert!(
+            refused.contains("no token in it"),
+            "the reason has to name the sign-in, not the agent: {refused}",
+        );
+    }
 
     async fn code_from(said: &str) -> Result<Pending> {
         let mut lines = BufReader::new(said.as_bytes()).lines();
@@ -267,9 +340,12 @@ mod tests {
         tokio::fs::create_dir_all(home.join("credentials"))
             .await
             .unwrap();
-        tokio::fs::write(home.join("credentials/kimi-code-env-abc.json"), "{\"a\":1}")
-            .await
-            .unwrap();
+        tokio::fs::write(
+            home.join("credentials/kimi-code-env-abc.json"),
+            r#"{"access_token":"a-real-looking-token","refresh_token":"r","expires_at":1}"#,
+        )
+        .await
+        .unwrap();
         // Logs and session records live here too, and are not credentials.
         tokio::fs::write(home.join("kimi.log"), "noise")
             .await
@@ -281,7 +357,10 @@ mod tests {
 
         assert_eq!(bundle.len(), 2, "the log is not part of the credential");
         assert_eq!(bundle["config.toml"], "default_model = \"x\"");
-        assert_eq!(bundle["credentials/kimi-code-env-abc.json"], "{\"a\":1}");
+        assert_eq!(
+            bundle["credentials/kimi-code-env-abc.json"],
+            r#"{"access_token":"a-real-looking-token","refresh_token":"r","expires_at":1}"#,
+        );
     }
 
     /// The one thing the unit tests above cannot catch: *which stream* a real
