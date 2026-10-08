@@ -18,7 +18,45 @@ pub enum Record {
     Ready { session: String },
     Failed { detail: String },
     ConfigurationRejected { id: String, detail: String },
+    /// What the agent says the session has spent, as `/usage` reported it.
+    ///
+    /// Running totals, not a turn's own figures — see `AcpNormaliser::spent`.
+    /// Written by the worker just before the reply that ends a turn, so the
+    /// turn it belongs to is still open when this arrives.
+    ///
+    /// Not a `Received`, because the exchange that produced it is not part of
+    /// anybody's conversation: the worker asks, reads the answer and journals
+    /// this instead, so the transcript stays what the person actually said.
+    Metered { input: u64, output: u64 },
 }
+
+/// The two numbers out of what `/usage` prints.
+///
+/// Kimi builds this line from a template rather than a model, so it is parsed
+/// strictly and anything else is treated as nothing reported. Its own code:
+///
+/// ```text
+/// const input = total.inputOther + total.inputCacheRead + total.inputCacheCreation;
+/// lines.push(`Session total: ${input} input, ${total.output} output`);
+/// ```
+///
+/// Which is also why there is no cache split here to keep: the three kinds are
+/// added up before the sentence is written, and the structured object they came
+/// from never leaves the agent. A session with no turns yet says "no LLM calls
+/// yet" instead, and that is a `None` rather than a zero.
+pub fn metered(text: &str) -> Option<(u64, u64)> {
+    let line = text.lines().find_map(|l| l.trim().strip_prefix("Session total:"))?;
+    let (input, output) = line.split_once(',')?;
+    Some((
+        input.trim().strip_suffix("input")?.trim().parse().ok()?,
+        output.trim().strip_suffix("output")?.trim().parse().ok()?,
+    ))
+}
+
+/// What the worker sends to ask. A slash command is an ordinary prompt that the
+/// agent answers itself rather than passing to a model, which is why this costs
+/// no tokens to run — only the few its text adds to the context.
+pub const USAGE_COMMAND: &str = "/usage";
 
 /// Commands from Firetower to the ACP connection, not ACP wire methods.
 #[derive(Debug, Serialize, Deserialize)]
@@ -122,6 +160,14 @@ pub struct AcpNormaliser {
     /// billed. Behind the `unstable_end_turn_token_usage` feature in the
     /// protocol, so most agents send nothing and this stays `None`.
     billed: Usage,
+    /// The session's running totals as `/usage` last reported them.
+    ///
+    /// `(input, output)`, where input is all three kinds added together because
+    /// that is all the sentence carries. Set by `Record::Metered` just before
+    /// the turn it belongs to closes, and taken by `spent` when it does.
+    metered: Option<(u64, u64)>,
+    /// How much of that has already been billed to earlier turns.
+    charged: (u64, u64),
 }
 
 impl AcpNormaliser {
@@ -169,6 +215,26 @@ impl AcpNormaliser {
         };
 
         let Some(total) = parse_usage(usage) else {
+            // Nothing in the reply. What `/usage` said, if the worker asked —
+            // running totals again, so again the difference is this turn's.
+            if let Some((input, output)) = self.metered.take() {
+                let delta = Usage {
+                    input_tokens: input.saturating_sub(self.charged.0),
+                    output_tokens: output.saturating_sub(self.charged.1),
+                    // `/usage` adds the three kinds of input together before
+                    // printing, so there is no split to report. NULL rather
+                    // than zero: the agent knows, it just does not say.
+                    cache_read_tokens: None,
+                    cache_write_tokens: None,
+                    context_used: used,
+                    context_window: size,
+                    // It prints tokens and never a price.
+                    cost_usd: None,
+                    ..Default::default()
+                };
+                self.charged = (input, output);
+                return Some(delta);
+            }
             // Nothing billable was reported. A turn still carries how full the
             // window is, which is what the conversation view draws, and no
             // consumption row is written from it.
@@ -288,6 +354,9 @@ impl AcpNormaliser {
         let mut events = Vec::new();
         match record {
             Record::ConfigurationRejected { .. } => {}
+            // Held until the turn it belongs to closes, which is the next
+            // record the worker writes.
+            Record::Metered { input, output } => self.metered = Some((input, output)),
             Record::Started { epoch } => {
                 self.finish(
                     TurnStatus::Interrupted,

@@ -16,6 +16,12 @@ use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncWrite, AsyncWriteExt, BufRea
 use tokio::process::{ChildStdin, ChildStdout, Command};
 
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(30);
+/// How long to wait for `/usage` before giving up on billing a turn.
+///
+/// Short on purpose. The agent answers this one itself without calling a model,
+/// so a slow reply means something is wrong rather than something is thinking —
+/// and every turn waits on it before it can be reported finished.
+const METER_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[derive(Serialize, Deserialize)]
 struct Saved {
@@ -191,6 +197,74 @@ async fn reject_request<W: AsyncWrite + Unpin>(
     };
     send(stdin, out, reply).await
 }
+/// Ask the agent what the session has spent, without anybody seeing us ask.
+///
+/// ACP carries no usage on a finished prompt — Kimi resolves one with a stop
+/// reason and nothing else — but it does answer `/usage`, and a slash command
+/// is an ordinary prompt the agent handles itself rather than passing to a
+/// model. So this costs no tokens to run; only the few its own text adds to the
+/// context, which is about fifty a turn.
+///
+/// Nothing here is journalled. The question and its answer are bookkeeping, not
+/// conversation, and a transcript showing Firetower typing `/usage` after every
+/// reply would be a worse record of what happened than one without it. Only the
+/// two numbers are kept, as [`Record::Metered`].
+///
+/// Called while the turn's own reply is still in hand and written before it, so
+/// the normaliser has the figures by the time that reply closes the turn.
+///
+/// Best effort throughout: a timeout, an unparseable answer or an agent that
+/// has never heard of `/usage` all return `None`, and the turn completes
+/// unbilled exactly as it did before. Metering must never be the reason a
+/// session stops working.
+async fn meter<W: AsyncWrite + Unpin>(
+    stdin: &mut ChildStdin,
+    stdout: &mut Lines<BufReader<ChildStdout>>,
+    out: &mut W,
+    session: &str,
+    id: u64,
+) -> Option<Record> {
+    let request = rpc(
+        id,
+        "session/prompt",
+        json!({"sessionId":session, "prompt":[{"type":"text", "text":ft_core::acp::USAGE_COMMAND}]}),
+    );
+    // `write` rather than `send`: `send` journals, and this is the one request
+    // that must not appear.
+    write(stdin, &request).await.ok()?;
+
+    let said = tokio::time::timeout(METER_TIMEOUT, async {
+        let mut said = String::new();
+        loop {
+            let message = next(stdout).await.ok()?;
+            if message.get("method").is_none() && message["id"] == id {
+                return Some(said);
+            }
+            // The answer arrives as the agent "speaking". Collected rather than
+            // recorded, so it reaches us and not the conversation.
+            if message["method"] == "session/update"
+                && message["params"]["update"]["sessionUpdate"] == "agent_message_chunk"
+            {
+                if let Some(text) = message["params"]["update"]["content"]["text"].as_str() {
+                    said.push_str(text);
+                }
+                continue;
+            }
+            // Anything else during a probe is refused rather than answered: a
+            // built-in command asks nothing, so a request here is not ours to
+            // grant on somebody's behalf.
+            if message.get("method").is_some() && message.get("id").is_some() {
+                reject_request(stdin, out, &message).await.ok()?;
+            }
+        }
+    })
+    .await
+    .ok()??;
+
+    let (input, output) = ft_core::acp::metered(&said)?;
+    Some(Record::Metered { input, output })
+}
+
 async fn save(path: &Path, value: &Saved) -> Result<()> {
     let staging = path.with_extension("tmp");
     tokio::fs::write(&staging, serde_json::to_vec(value)?).await?;
@@ -361,6 +435,17 @@ where
                     } else {
                         reject_request(stdin, out, &message).await?;
                         continue;
+                    }
+                }
+                // Ask what it cost before the reply that ends the turn is
+                // written, so the figures are in hand when the turn closes.
+                // Held back rather than chased afterwards: once the turn is
+                // over there is nothing left to attach them to.
+                if message.get("method").is_none() && active.is_some_and(|id| message["id"] == id) {
+                    let probe = next_id;
+                    next_id += 1;
+                    if let Some(spent) = meter(stdin, stdout, out, &saved.session, probe).await {
+                        record(out, spent).await?;
                     }
                 }
                 record(out, Record::Received { message: message.clone(), replay: false }).await?;

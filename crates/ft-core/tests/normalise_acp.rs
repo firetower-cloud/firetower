@@ -411,3 +411,96 @@ fn an_acp_turn_is_billed_the_difference_rather_than_the_running_total() {
         32_000,
     );
 }
+
+/// The sentence `/usage` prints, and everything that is not it.
+#[test]
+fn only_the_sentence_kimi_actually_writes_is_read_as_usage() {
+    use ft_core::acp::metered;
+
+    // Verbatim from a real session, context line and all.
+    assert_eq!(
+        metered("Context: 20355 / 1048576 tokens (2%)\nSession total: 60793 input, 97 output"),
+        Some((60_793, 97)),
+    );
+    // A session that has not called a model yet says so, and that is not zero:
+    // zero would be a turn that cost nothing.
+    assert_eq!(
+        metered("Context: 7 / 1048576 tokens (0%)\nSession total: no LLM calls yet"),
+        None,
+    );
+    // Anything else at all is nothing reported rather than a number guessed at.
+    assert_eq!(metered(""), None);
+    assert_eq!(metered("Session total: 60793 input"), None);
+    assert_eq!(metered("Session total: lots input, some output"), None);
+    assert_eq!(metered("I used 60793 input, 97 output tokens"), None);
+}
+
+/// A metered ACP turn is billed its own share of a running total.
+///
+/// `/usage` reports the session, not the turn — "Session total: 60793 input" is
+/// every turn so far added up. Read as a turn's own figures it would bill turn
+/// one again on every turn after it, which is the bug that was found in Claude
+/// Code's `modelUsage` and is corrected here the same way, before it could be
+/// made twice.
+#[test]
+fn a_metered_turn_is_billed_the_difference_rather_than_the_session() {
+    let mut reader = AcpNormaliser::default();
+    let mut push = |record: Record| reader.push(&serde_json::to_string(&record).unwrap());
+    push(Record::Started { epoch: "e".into() });
+    push(Record::Ready { session: "s".into() });
+
+    let turn = |reader: &mut AcpNormaliser, id: u64, input: u64, output: u64| {
+        reader.push(
+            &serde_json::to_string(&Record::Sent {
+                message: json!({"id":id,"method":"session/prompt","params":{"sessionId":"s"}}),
+            })
+            .unwrap(),
+        );
+        // What the worker writes: the reading first, then the reply it was
+        // holding. The order is the whole mechanism — a reading that landed
+        // after the reply would have no open turn to belong to.
+        reader.push(&serde_json::to_string(&Record::Metered { input, output }).unwrap());
+        reader
+            .push(
+                &serde_json::to_string(&Record::Received {
+                    message: json!({"id":id,"result":{"stopReason":"end_turn"}}),
+                    replay: false,
+                })
+                .unwrap(),
+            )
+            .into_iter()
+            .find_map(|e| match e {
+                TurnEvent::TurnCompleted { usage, .. } => usage,
+                _ => None,
+            })
+            .expect("a metered turn is billed")
+    };
+
+    // Three turns of a real session: 20,275 then 20,360 then 20,158 of input.
+    let first = turn(&mut reader, 1, 20_275, 64);
+    assert_eq!((first.input_tokens, first.output_tokens), (20_275, 64));
+
+    let second = turn(&mut reader, 2, 40_635, 143);
+    assert_eq!(second.input_tokens, 20_360, "40,635 so far less 20,275");
+    assert_eq!(second.output_tokens, 79, "143 less 64");
+
+    let third = turn(&mut reader, 3, 60_793, 97 + 143);
+    assert_eq!(third.input_tokens, 20_158);
+    assert_eq!(third.output_tokens, 97);
+
+    // The three add back up to what the agent last said the session came to,
+    // which is the property the differencing exists to keep.
+    assert_eq!(
+        first.input_tokens + second.input_tokens + third.input_tokens,
+        60_793,
+    );
+
+    // And none of them claims a cache split. `/usage` adds the three kinds of
+    // input together before printing, so NULL is the honest answer — a zero
+    // would say the session read nothing from cache, which is false.
+    for t in [&first, &second, &third] {
+        assert_eq!(t.cache_read_tokens, None);
+        assert_eq!(t.cache_write_tokens, None);
+        assert_eq!(t.cost_usd, None, "it prints tokens and never a price");
+    }
+}
