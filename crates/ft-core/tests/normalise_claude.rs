@@ -881,3 +881,71 @@ fn a_second_turn_is_not_billed_for_the_first() {
         .sum();
     assert_eq!(billed, 36_485, "not 54,203, which is turn one counted twice");
 }
+
+/// A control plane that restarts mid-session does not re-bill what it has.
+///
+/// The differencing that makes a turn its own is memory: how much of the
+/// session's running totals has already been handed over. A fresh reader has
+/// none of it, so the first `result` line it sees after a restart carries
+/// figures for the whole session, and billing them as one turn would charge
+/// twenty turns' worth to the twenty-first.
+///
+/// It does not happen, and this is why: `fleet::resume` replays the whole
+/// journal — `agent_lines_since(session_id, 0)` — through the new reader before
+/// it is used, which rebuilds exactly this state. The test is that replaying
+/// turn one leaves a reader that bills turn two correctly, which is what
+/// restarting between them amounts to.
+#[test]
+fn a_reader_rebuilt_from_the_journal_bills_the_next_turn_as_its_own() {
+    let path = format!("{}/tests/streams/two_turns.ndjson", env!("CARGO_MANIFEST_DIR"));
+    let text = std::fs::read_to_string(&path).unwrap();
+    let lines: Vec<&str> = text.lines().filter(|l| !l.trim().is_empty()).collect();
+    // Line 14 is the first turn's `result`; everything after it is turn two.
+    let (before, after) = lines.split_at(14);
+
+    let mut reader = ft_core::normalise::ClaudeNormaliser::default();
+    let replayed: Vec<_> = before
+        .iter()
+        .flat_map(|line| reader.push(line))
+        .filter_map(|e| match e {
+            TurnEvent::TurnCompleted { usage, .. } => usage,
+            _ => None,
+        })
+        .collect();
+    assert_eq!(replayed.len(), 1, "the journal up to here is one finished turn");
+
+    // What the restart has to not forget.
+    let first = replayed[0]
+        .models
+        .iter()
+        .find(|m| m.model == "claude-opus-5")
+        .expect("opus ran");
+    assert_eq!(first.cache_read_tokens, 11_474);
+
+    // The turn that lands after the restart.
+    let second = after
+        .iter()
+        .flat_map(|line| reader.push(line))
+        .find_map(|e| match e {
+            TurnEvent::TurnCompleted { usage, .. } => usage,
+            _ => None,
+        })
+        .expect("turn two finished");
+    let opus = second
+        .models
+        .iter()
+        .find(|m| m.model == "claude-opus-5")
+        .expect("opus ran again");
+
+    assert_eq!(
+        opus.cache_read_tokens, 17_702,
+        "its own tokens — the raw line says 29,176, which is the session",
+    );
+    assert_eq!(opus.cache_write_tokens, 44, "not 6,272");
+    assert_eq!(opus.output_tokens, 112, "not 126");
+    assert!(
+        second.cost_usd.is_some_and(|c| (c - 0.013_052).abs() < 1e-6),
+        "and its own cost, not 0.081429: {:?}",
+        second.cost_usd,
+    );
+}

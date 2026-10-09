@@ -168,6 +168,26 @@ pub struct AcpNormaliser {
     metered: Option<(u64, u64)>,
     /// How much of that has already been billed to earlier turns.
     charged: (u64, u64),
+    /// Whether the turn now finishing actually reached a model.
+    ran: Ran,
+}
+
+/// Whether a model was called for a turn, where that can be known.
+///
+/// It can only be known where the agent was metered, which is the one good
+/// thing to come out of asking it what it spent: ACP reports a turn that failed
+/// before any request identically to one that succeeded — Kimi answers both
+/// with `{"stopReason":"end_turn"}` — so until there was a number to compare,
+/// a session whose credentials had expired looked perfectly healthy and
+/// silently did nothing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Ran {
+    /// Nobody asked, so nobody knows. Every unmetered agent is here.
+    #[default]
+    Unknown,
+    Yes,
+    /// Metered, and the session's input total did not move.
+    No,
 }
 
 impl AcpNormaliser {
@@ -218,6 +238,11 @@ impl AcpNormaliser {
             // Nothing in the reply. What `/usage` said, if the worker asked —
             // running totals again, so again the difference is this turn's.
             if let Some((input, output)) = self.metered.take() {
+                let grew = input > self.charged.0;
+                // Every request sends the whole context, so a turn that called
+                // a model always moves the input total. One that did not move
+                // it called nothing — see `Ran`.
+                self.ran = if grew { Ran::Yes } else { Ran::No };
                 let delta = Usage {
                     input_tokens: input.saturating_sub(self.charged.0),
                     output_tokens: output.saturating_sub(self.charged.1),
@@ -489,7 +514,38 @@ impl AcpNormaliser {
                     };
                     // The reply is where a per-turn breakdown rides, where the
                     // agent sends one at all.
+                    self.ran = Ran::Unknown;
                     let spent = self.spent(&message["result"]["usage"]);
+
+                    // A turn the agent says succeeded, having called no model.
+                    //
+                    // ACP gives failure no shape of its own: Kimi answers an
+                    // expired credential with `{"stopReason":"end_turn"}`, the
+                    // same words it uses for work it actually did, and puts the
+                    // reason only in a log file of its own. So a session whose
+                    // sign-in had lapsed reported every turn as finished, said
+                    // nothing, and looked entirely well — which is how one hid
+                    // here for a day.
+                    //
+                    // The meter is what tells them apart. Every request sends
+                    // the whole context, so a turn that reached a model always
+                    // moves the session's input total; one that did not move it
+                    // did not get that far. Only ever applied to a turn the
+                    // agent called successful — a cancellation is already
+                    // honestly reported, and overriding it would be a lie in
+                    // the other direction.
+                    let (status, detail) = match (status, self.ran) {
+                        (TurnStatus::Completed, Ran::No) => (
+                            TurnStatus::Failed,
+                            Some(
+                                "The agent ended this turn without calling a model. Its \
+                                 sign-in or its quota is the usual reason — reconnect the \
+                                 account and try again."
+                                    .to_string(),
+                            ),
+                        ),
+                        (status, _) => (status, detail),
+                    };
                     self.finish(status, detail, spent, &mut events);
                 } else {
                     events.push(TurnEvent::Raw {

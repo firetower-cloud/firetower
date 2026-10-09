@@ -504,3 +504,66 @@ fn a_metered_turn_is_billed_the_difference_rather_than_the_session() {
         assert_eq!(t.cost_usd, None, "it prints tokens and never a price");
     }
 }
+
+/// A turn that called no model is reported as failed, not as finished.
+///
+/// This is the bug the credential fix was hiding behind. Kimi answers an
+/// expired sign-in with `{"stopReason":"end_turn"}` — word for word what it
+/// says about work it really did — and writes the reason only to a log of its
+/// own. Firetower believed it, marked the session handed back, and showed
+/// somebody a healthy agent that was doing nothing at all.
+#[test]
+fn a_turn_that_never_reached_a_model_is_not_reported_as_finished() {
+    let mut reader = AcpNormaliser::default();
+    let mut push = |record: Record| reader.push(&serde_json::to_string(&record).unwrap());
+    push(Record::Started { epoch: "e".into() });
+    push(Record::Ready { session: "s".into() });
+
+    let turn = |reader: &mut AcpNormaliser, id: u64, meter: Option<(u64, u64)>| {
+        reader.push(
+            &serde_json::to_string(&Record::Sent {
+                message: json!({"id":id,"method":"session/prompt","params":{"sessionId":"s"}}),
+            })
+            .unwrap(),
+        );
+        if let Some((input, output)) = meter {
+            reader.push(&serde_json::to_string(&Record::Metered { input, output }).unwrap());
+        }
+        reader
+            .push(
+                &serde_json::to_string(&Record::Received {
+                    // The agent calls every one of these a success.
+                    message: json!({"id":id,"result":{"stopReason":"end_turn"}}),
+                    replay: false,
+                })
+                .unwrap(),
+            )
+            .into_iter()
+            .find_map(|e| match e {
+                TurnEvent::TurnCompleted { status, detail, .. } => Some((status, detail)),
+                _ => None,
+            })
+            .expect("the turn closes either way")
+    };
+
+    // A turn that worked: the session's input total moved.
+    let (status, _) = turn(&mut reader, 1, Some((20_192, 43)));
+    assert_eq!(status, TurnStatus::Completed);
+
+    // One that did not. Same words from the agent, different truth.
+    let (status, detail) = turn(&mut reader, 2, Some((20_192, 43)));
+    assert_eq!(status, TurnStatus::Failed);
+    let detail = detail.expect("and it says why, as far as anyone can know");
+    assert!(detail.contains("without calling a model"), "{detail}");
+    assert!(detail.contains("sign-in"), "the likely cause is named: {detail}");
+
+    // And work resumes being work once the account is good again.
+    let (status, _) = turn(&mut reader, 3, Some((40_453, 84)));
+    assert_eq!(status, TurnStatus::Completed);
+
+    // An agent nobody metered is left alone. Not knowing whether a model ran is
+    // not the same as knowing one did not, and calling every unmetered turn a
+    // failure would be a far worse bug than the one being fixed.
+    let (status, _) = turn(&mut reader, 4, None);
+    assert_eq!(status, TurnStatus::Completed);
+}
