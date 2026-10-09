@@ -30,6 +30,7 @@ import { useListAccounts } from "@/src/api/generated/accounts/accounts";
 import { useListColleagues, useListTeams } from "@/src/api/generated/access/access";
 import type { Account, ByModel, Direction, Group, Limit, Sort, Totals } from "@/src/api/generated/model";
 import { Choose, Icon, PageHead, useAnchor } from "@/components/ui";
+import { AGENT_SHORT } from "@/components/AgentMark";
 
 /* ── the vocabulary ───────────────────────────────────────────────────── */
 
@@ -910,9 +911,13 @@ function Gauge({ account, limit }: { account: Account; limit: Limit }) {
 
   return (
     <div className="min-w-0 max-w-[430px]">
+      {/* Which subscription this is: what it is called, what it runs, and where
+          it is filed. "perso" alone is ambiguous the moment somebody has one
+          per provider, which is the ordinary case. */}
       <div className="flex items-baseline gap-2">
         <span className="truncate text-ui text-bone">{account.name}</span>
-        <span className="whitespace-nowrap text-meta text-mute">{window_(limit.scope)}</span>
+        <span className="whitespace-nowrap text-meta text-dim">{provider(account.kind)}</span>
+        <span className="truncate text-meta text-mute">{folder(account.path)}</span>
         <span className="flex-1" />
         <span className={`whitespace-nowrap text-meta ${shade.text} ${pct != null ? "tabular-nums" : ""}`}>
           {pct != null ? `${pct}% used` : capitalise(limit.status)}
@@ -927,14 +932,33 @@ function Gauge({ account, limit }: { account: Account; limit: Limit }) {
         </div>
       )}
 
+      {/* The window and when it turns over, together: they are one fact said in
+          two halves, and they were on separate lines. */}
       <div className="mt-1.5 text-meta text-mute">
+        <span className="text-dim">{window_(limit.scope)}</span>
+        {" — "}
         {pct == null && limit.status === "allowed"
-          ? "This agent reports no percentage, so there is no meter to draw."
-          : when ?? "No reset time reported."}
+          ? "this agent reports no percentage, so there is no meter to draw"
+          : when ?? "no reset time reported"}
       </div>
     </div>
   );
 }
+
+/**
+ * Where a subscription is filed, which is its path without its own name on the
+ * end — `u/admin/perso_01m4anp7` is kept in `u/admin`.
+ *
+ * Not `filing.where`, which answers a different question. That one names the
+ * root and says "yours" for your own, which is right on a page about your own
+ * things. This page is a fleet seen from above, where "yours" beside four other
+ * people's subscriptions says less than `u/admin` does.
+ */
+const folder = (path: string) => path.split("/").slice(0, -1).join("/");
+
+/** What to call the engine, in the one word a crowded line has room for. */
+const provider = (kind: string) =>
+  AGENT_SHORT[kind as keyof typeof AGENT_SHORT] ?? kind.toLowerCase();
 
 const capitalise = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
