@@ -407,3 +407,145 @@ mod tests {
         assert!(collect(dir.path()).await.is_err());
     }
 }
+
+/// What a plan has left, asked of Kimi directly.
+///
+/// ACP does not carry this. Kimi's own `/usage` prints a "Plan usage" box with
+/// the 5-hour and monthly windows in it, but that is built in
+/// `src/tui/components/messages/usage-panel.ts` — terminal code that never
+/// crosses the wire. Over ACP the same command answers with two lines, context
+/// and session total, and nothing about the quota. So the only way to have the
+/// number is to go and ask for it.
+///
+/// **The token is borrowed, never refreshed.** Kimi's access tokens last
+/// fifteen minutes, and refreshing one means holding the other half of an OAuth
+/// dance that the agent is also dancing — rotate the refresh token and the
+/// agent's own copy dies. Instead this reads the credential out of the live
+/// session's home, which the agent itself keeps current, and uses it as found.
+/// Called right after a turn, it is as fresh as the request that turn just
+/// made. Expired is a 401, which is a `None` and not an error worth raising.
+pub async fn allowance(home: &Path) -> Option<Vec<Allowance>> {
+    let config = tokio::fs::read_to_string(home.join("config.toml")).await.ok()?;
+    // One key out of a TOML file, rather than a parser and a dependency for it.
+    // The file is Kimi's and this is the only line of it we have ever wanted.
+    let base = config
+        .lines()
+        .find_map(|l| l.trim().strip_prefix("base_url"))
+        .and_then(|rest| rest.split('"').nth(1))?
+        .trim_end_matches('/')
+        .to_owned();
+
+    let mut dir = tokio::fs::read_dir(home.join("credentials")).await.ok()?;
+    let mut token = None;
+    while let Ok(Some(entry)) = dir.next_entry().await {
+        let text = tokio::fs::read_to_string(entry.path()).await.ok()?;
+        let json: Value = serde_json::from_str(&text).ok()?;
+        if let Some(found) = json["access_token"].as_str().filter(|t| !t.is_empty()) {
+            token = Some(found.to_owned());
+            break;
+        }
+    }
+
+    let answer = reqwest::Client::new()
+        .get(format!("{base}/usages"))
+        .bearer_auth(token?)
+        .header("accept", "application/json")
+        .timeout(Duration::from_secs(8))
+        .send()
+        .await
+        .ok()?;
+    if !answer.status().is_success() {
+        return None;
+    }
+    Some(windows(&answer.json::<Value>().await.ok()?))
+}
+
+/// One quota window, as Firetower spells them.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Allowance {
+    pub window: String,
+    pub used_percent: u8,
+    /// Unix seconds, where Kimi gave a reset time.
+    pub resets_at: Option<i64>,
+}
+
+/// The windows out of a `/usages` body.
+///
+/// Kimi reports each as a ratio of one with an ISO reset time; Firetower keeps
+/// whole percents and unix seconds, which is what every other agent's limits
+/// are already stored as. Names are mapped rather than passed through, so a
+/// five-hour window from Kimi lands in the same bucket as one from Codex.
+fn windows(body: &Value) -> Vec<Allowance> {
+    let usages = &body["usages"];
+    [
+        ("limit_5h", "five_hour"),
+        ("limit_7d", "seven_day"),
+        ("limit_month_total", "month"),
+        ("limit_month_code", "month_code"),
+    ]
+    .iter()
+    .filter_map(|(theirs, ours)| {
+        let entry = usages.get(theirs)?;
+        let ratio = entry["used_ratio"].as_f64()?;
+        Some(Allowance {
+            window: (*ours).to_string(),
+            used_percent: (ratio * 100.0).round().clamp(0.0, 100.0) as u8,
+            resets_at: entry["reset_time"]
+                .as_str()
+                .and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok())
+                .map(|t| t.timestamp()),
+        })
+    })
+    .collect()
+}
+
+#[cfg(test)]
+mod quota_tests {
+    use super::*;
+
+    /// A real `/usages` body, in the shape Kimi's own parser describes.
+    #[test]
+    fn the_windows_kimi_reports_become_the_ones_firetower_stores() {
+        let body = serde_json::json!({
+            "usages": {
+                "limit_5h": { "used_ratio": 0.0, "reset_time": "2026-10-09T23:17:00Z" },
+                "limit_7d": { "used_ratio": 0.014, "reset_time": "2026-10-26T15:23:00Z" },
+                "limit_month_total": { "used_ratio": 0.5, "reset_time": "2026-11-01T00:00:00Z" },
+                // No reset time on this one, which is allowed and is a None.
+                "limit_month_code": { "used_ratio": 0.996 }
+            },
+            "boosterWallet": null
+        });
+
+        let found = windows(&body);
+        let named: Vec<_> = found.iter().map(|w| w.window.as_str()).collect();
+        assert_eq!(named, ["five_hour", "seven_day", "month", "month_code"]);
+
+        // Ratios of one become whole per cent, which is what every other
+        // agent's limits are already stored as.
+        let pct: Vec<_> = found.iter().map(|w| w.used_percent).collect();
+        assert_eq!(pct, [0, 1, 50, 100], "0.014 rounds to 1, 0.996 to 100");
+
+        assert_eq!(found[0].resets_at, Some(1_791_587_820));
+        assert_eq!(found[1].resets_at, Some(1_793_028_180));
+        assert_eq!(found[2].resets_at, Some(1_793_491_200));
+        assert_eq!(found[3].resets_at, None, "it did not say, so we do not");
+    }
+
+    /// Anything that is not that body reports nothing, rather than zero.
+    ///
+    /// A quota of 0% used and a quota nobody told us about look identical once
+    /// they are drawn as a bar, and only one of them is true.
+    #[test]
+    fn a_body_that_says_nothing_yields_no_windows() {
+        for body in [
+            serde_json::json!({}),
+            serde_json::json!({ "usages": {} }),
+            serde_json::json!({ "usages": { "limit_5h": {} } }),
+            serde_json::json!({ "usages": { "limit_5h": { "used_ratio": "lots" } } }),
+            serde_json::json!({ "error": { "message": "nope" } }),
+        ] {
+            assert!(windows(&body).is_empty(), "{body}");
+        }
+    }
+}

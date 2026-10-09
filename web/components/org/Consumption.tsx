@@ -887,12 +887,15 @@ function tone(l: Limit) {
 }
 
 /** `five_hour` is how an agent spells it; nobody says that out loud. */
-const window_ = (scope: string) =>
-  scope === "five_hour"
-    ? "5-hour window"
-    : scope === "account"
-      ? "this account"
-      : scope.replace(/_/g, " ");
+const WINDOWS: Record<string, string> = {
+  five_hour: "5-hour window",
+  seven_day: "7-day window",
+  month: "this month",
+  // Kimi meters coding separately from the rest of the plan, and says so.
+  month_code: "this month, coding",
+  account: "this account",
+};
+const window_ = (scope: string) => WINDOWS[scope] ?? scope.replace(/_/g, " ");
 
 /** "in 1 h 12 m", from the unix second an agent reported. */
 function resets(at?: number | null) {

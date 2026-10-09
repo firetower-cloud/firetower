@@ -667,7 +667,13 @@ pub(crate) async fn record_limits(
         sqlx::query("UPDATE agent_account_limits SET status='allowed',observed_at=now() WHERE scope='account' AND account_id=(SELECT agent_account_id FROM sessions WHERE id=$1)")
             .bind(id.as_str()).execute(db.pool()).await?;
     }
-    if !matches!(claude, Some("rate_limit_event" | "error"))
+    // An ACP journal line carries neither a `type` nor a `method`, so both of
+    // the guards above read `None` and every one of them used to stop here.
+    // The one that matters is the worker's own: it goes and asks Kimi what the
+    // plan has left, because ACP has no way to say.
+    let asked = value.get("acp").and_then(|v| v.as_str()) == Some("Allowed");
+    if !asked
+        && !matches!(claude, Some("rate_limit_event" | "error"))
         && !matches!(
             codex,
             Some("account/rateLimits/updated" | "error" | "turn/completed")
