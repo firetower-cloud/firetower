@@ -74,7 +74,6 @@ type GroupKey = keyof typeof GROUPS;
  */
 const SORTS: { value: Sort; field: string; up: string; down: string; starts: Direction }[] = [
   { value: "tokens",  field: "tokens",        down: "most tokens", up: "fewest tokens", starts: "desc" },
-  { value: "cost",    field: "cost",          down: "most expensive", up: "least expensive", starts: "desc" },
   { value: "recent",  field: "last activity", down: "most recent", up: "oldest",        starts: "desc" },
   { value: "breadth", field: "",              down: "widest",      up: "narrowest",     starts: "desc" },
   { value: "name",    field: "name",          down: "Z to A",      up: "A to Z",        starts: "asc" },
@@ -175,9 +174,6 @@ const tokens = (n: number) =>
       : n >= 1e3
         ? `${(n / 1e3).toFixed(1).replace(/\.0$/, "")}K`
         : `${Math.round(n)}`;
-
-const money = (n: number) =>
-  `$${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 const count = (n: number) => n.toLocaleString("en-US");
 
@@ -397,15 +393,6 @@ export function Consumption() {
 
             <div className="mt-6 flex flex-wrap border-t border-line">
               <Figure
-                label="Estimated cost"
-                value={t?.costUsd != null ? `~${money(t.costUsd)}` : "Not reported"}
-                note={
-                  t && t.rows > 0
-                    ? `Known for ${count(t.pricedRows)} of ${count(t.rows)} rows. Codex reports no price.`
-                    : ""
-                }
-              />
-              <Figure
                 label="Turns"
                 value={t ? count(t.turns) : "—"}
                 note={
@@ -416,17 +403,23 @@ export function Consumption() {
               />
             </div>
 
-            {/* Said once, plainly, rather than left for somebody to notice the
-                numbers are short. These turns ran and are counted as turns;
-                what they spent is the thing nobody can tell us. */}
+            {/* Said once, plainly, rather than left for somebody to notice
+                the numbers are short. These turns ran and are counted as
+                turns; what they spent is the thing nobody told us.
+
+                Naming the agent here was a mistake worth not repeating: it
+                read "Kimi and other agents reached over ACP report nothing
+                about what they spent", which was true for two days and then
+                was not. Which agents report is a moving fact, and a sentence
+                that states it goes stale facing the person it misleads. */}
             {t && t.unreportedTurns > 0 && (
               <p className="mt-5 max-w-[68ch] text-ui text-mute">
                 <span className="text-dim">
                   {plural(t.unreportedTurns, "turn")} above {t.unreportedTurns === 1 ? "has" : "have"} no
                   tokens counted.
                 </span>{" "}
-                Kimi and other agents reached over ACP report how full their context is and nothing
-                about what they spent, so those turns are in the count and not in the totals.
+                Their agent reported none — some do not, and some did not at the time. They are in
+                the turn count and not in the totals.
               </p>
             )}
           </>
@@ -540,11 +533,10 @@ export function Consumption() {
 
         <Key models={models} hue={hue} />
 
-        <div className="grid grid-cols-[minmax(0,1fr)_150px_78px_90px] gap-5 border-b border-line pb-2 text-meta text-mute">
+        <div className="grid grid-cols-[minmax(0,1fr)_150px_78px] gap-5 border-b border-line pb-2 text-meta text-mute">
           <div className="capitalize">{GROUPS[group]}</div>
           <div />
           <div className="text-right">Tokens</div>
-          <div className="text-right">Cost</div>
         </div>
 
         <div className={`transition-opacity duration-200 ${isFetching && !isPending ? "opacity-50" : ""}`}>
@@ -692,7 +684,7 @@ function LedgerSkeleton() {
       {Array.from({ length: 8 }, (_, i) => (
         <div
           key={i}
-          className="grid grid-cols-[minmax(0,1fr)_150px_78px_90px] items-center gap-5 border-b border-line-soft py-3"
+          className="grid grid-cols-[minmax(0,1fr)_150px_78px] items-center gap-5 border-b border-line-soft py-3"
         >
           <div className="min-w-0">
             {/* Varied widths, because eight identical bars read as a table of
@@ -702,7 +694,6 @@ function LedgerSkeleton() {
           </div>
           <Block className="h-[7px] rounded-sm" style={{ width: `${100 - i * 9}%` }} />
           <Block className="ml-auto h-3.5 w-[52px]" />
-          <Block className="ml-auto h-3.5 w-[64px]" />
         </div>
       ))}
     </div>
@@ -1439,7 +1430,7 @@ function Ledger({
       {/* Not "smaller": once the order can be reversed, or by name, or by
           date, what is left over is only what is left over. */}
       {rest && (
-        <div className="grid grid-cols-[minmax(0,1fr)_150px_78px_90px] items-center gap-5 border-b border-line-soft py-3">
+        <div className="grid grid-cols-[minmax(0,1fr)_150px_78px] items-center gap-5 border-b border-line-soft py-3">
           <div className="min-w-0">
             <div className="truncate text-body text-dim">
               {plural(total - groups.length, `more ${GROUPS[by]}`)}
@@ -1454,7 +1445,6 @@ function Ledger({
           <div className="text-right font-narrow text-[15px] font-medium tabular-nums text-text">
             {tokens(rest.tokens)}
           </div>
-          <Cost g={rest} />
         </div>
       )}
     </div>
@@ -1494,7 +1484,7 @@ function Line({
 
   return (
     <div
-      className={`grid grid-cols-[minmax(0,1fr)_150px_78px_90px] items-center gap-5 border-b py-3 ${
+      className={`grid grid-cols-[minmax(0,1fr)_150px_78px] items-center gap-5 border-b py-3 ${
         nested ? "border-transparent pl-4" : "border-line-soft"
       } ${openable ? "cursor-pointer" : ""}`}
       onPointerMove={show}
@@ -1545,25 +1535,6 @@ function Line({
       <div className={`text-right font-narrow font-medium tabular-nums text-text ${nested ? "text-[13px]" : "text-[15px]"}`}>
         {tokens(g.tokens)}
       </div>
-      <Cost g={g} nested={nested} />
-    </div>
-  );
-}
-
-/** NULL is not zero, and a figure that is partly known says which part. */
-function Cost({ g, nested }: { g: Group; nested?: boolean }) {
-  if (g.costUsd == null)
-    return <div className="text-right text-meta text-mute">not reported</div>;
-  return (
-    <div
-      className={`text-right font-narrow font-medium tabular-nums text-dim ${nested ? "text-[13px]" : "text-[15px]"}`}
-      title={
-        g.rows && g.pricedRows < g.rows
-          ? `Price known for ${count(g.pricedRows)} of ${count(g.rows)} rows`
-          : undefined
-      }
-    >
-      ~{money(g.costUsd)}
     </div>
   );
 }
