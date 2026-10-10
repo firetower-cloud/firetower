@@ -22,12 +22,6 @@ const STARTUP_TIMEOUT: Duration = Duration::from_secs(30);
 /// so a slow reply means something is wrong rather than something is thinking —
 /// and every turn waits on it before it can be reported finished.
 const METER_TIMEOUT: Duration = Duration::from_secs(5);
-/// How often to ask the provider what the plan has left.
-///
-/// Somebody else's API on a timer of our choosing, so the timer is slow. A
-/// five-hour window does not move enough in ten minutes to be worth a request,
-/// and the number is a standing position rather than a per-turn fact.
-const ALLOWANCE_EVERY: Duration = Duration::from_secs(600);
 
 #[derive(Serialize, Deserialize)]
 struct Saved {
@@ -363,11 +357,6 @@ where
     )
     .await?;
 
-    // Where the agent keeps the credential it refreshes for itself, which is
-    // the one this borrows rather than refreshing a second copy.
-    let home = crate::agentd::dir_for(workspace).join(format!("agent-home-{session}"));
-    let mut asked: Option<tokio::time::Instant> = None;
-
     let mut input = input.lines();
     let mut next_id = 4;
     let mut active: Option<u64> = None;
@@ -457,27 +446,6 @@ where
                     next_id += 1;
                     if let Some(spent) = meter(stdin, stdout, out, &saved.session, probe).await {
                         record(out, spent).await?;
-                    }
-                    // And what the plan has left, which ACP never mentions.
-                    // Asked here because the agent has just made a request, so
-                    // the token in its home is as fresh as it ever gets.
-                    if asked.is_none_or(|at: tokio::time::Instant| at.elapsed() >= ALLOWANCE_EVERY) {
-                        asked = Some(tokio::time::Instant::now());
-                        if let Some(windows) = crate::kimi::allowance(&home).await {
-                            if !windows.is_empty() {
-                                record(out, Record::Allowed {
-                                    windows: windows
-                                        .into_iter()
-                                        .map(|w| ft_core::acp::Window {
-                                            window: w.window,
-                                            used_percent: w.used_percent,
-                                            resets_at: w.resets_at,
-                                        })
-                                        .collect(),
-                                })
-                                .await?;
-                            }
-                        }
                     }
                 }
                 record(out, Record::Received { message: message.clone(), replay: false }).await?;

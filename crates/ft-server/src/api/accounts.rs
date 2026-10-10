@@ -266,7 +266,9 @@ pub(super) async fn list_accounts(
     .await?;
     for account in &mut rows {
         account.limits =
-            sqlx::query_as("SELECT * FROM agent_account_limits WHERE account_id=$1 ORDER BY scope")
+            sqlx::query_as("SELECT account_id, scope, status, resets_at, observed_at, \
+                 used_percent::float4 AS used_percent \
+            FROM agent_account_limits WHERE account_id=$1 ORDER BY scope")
                 .bind(&account.id)
                 .fetch_all(state.db.pool())
                 .await?;
@@ -416,6 +418,39 @@ pub(super) async fn connect(
     Ok(())
 }
 
+/// Write down what a provider said an account's plan has left.
+///
+/// The same upsert `record_limits` does for a limit an agent volunteered mid
+/// session — the difference is only that nobody volunteered this one, the
+/// worker went and asked. By the time it reaches the table the two are
+/// indistinguishable, which is the point: one Limits section, one shape.
+///
+/// Keyed by session for the same reason as everything else the worker reports:
+/// it is never told which account it is running.
+pub(crate) async fn note_limits(
+    db: &crate::db::Db,
+    session_id: &str,
+    windows: &[ft_proto::LimitWindow],
+) -> anyhow::Result<()> {
+    for w in windows {
+        sqlx::query(
+            "INSERT INTO agent_account_limits(account_id,scope,status,resets_at,used_percent) \
+             SELECT agent_account_id,$2,'allowed',$3,$4 FROM sessions \
+              WHERE id=$1 AND agent_account_id IS NOT NULL \
+             ON CONFLICT(account_id,scope) DO UPDATE SET \
+                status=excluded.status, resets_at=excluded.resets_at, \
+                used_percent=excluded.used_percent, observed_at=now()",
+        )
+        .bind(session_id)
+        .bind(&w.window)
+        .bind(w.resets_at)
+        .bind(f64::from(w.used_percent))
+        .execute(db.pool())
+        .await?;
+    }
+    Ok(())
+}
+
 /// Replace a vaulted credential with the one the agent rotated to.
 ///
 /// Narrower than [`connect`] on purpose. That one is a person attaching an
@@ -460,7 +495,7 @@ pub(crate) async fn rotated(
     // because this is the side that knows what was lent.
     let key = vault::Key::of(vault::AGENT, &credential_key, &owner);
     let held = vault
-        .get(key.clone(), "checking whether a credential really changed")
+        .get(key, "checking whether a credential really changed")
         .await?;
     if held.as_deref().map(String::as_str) == Some(bundle) {
         return Ok(());
@@ -556,7 +591,7 @@ pub struct Limit {
     pub scope: String,
     pub status: String,
     pub resets_at: Option<i64>,
-    pub used_percent: Option<i16>,
+    pub used_percent: Option<f32>,
 }
 #[derive(Serialize, ToSchema, sqlx::FromRow)]
 #[serde(rename_all = "camelCase")]
@@ -598,7 +633,9 @@ pub(super) async fn session_account(
     let limits = match &account {
         Some(account) => {
             sqlx::query_as::<_, Limit>(
-                "SELECT * FROM agent_account_limits WHERE account_id=$1 ORDER BY scope",
+                "SELECT account_id, scope, status, resets_at, observed_at, \
+                 used_percent::float4 AS used_percent \
+            FROM agent_account_limits WHERE account_id=$1 ORDER BY scope",
             )
             .bind(&account.id)
             .fetch_all(state.db.pool())
@@ -737,13 +774,7 @@ pub(crate) async fn record_limits(
         sqlx::query("UPDATE agent_account_limits SET status='allowed',observed_at=now() WHERE scope='account' AND account_id=(SELECT agent_account_id FROM sessions WHERE id=$1)")
             .bind(id.as_str()).execute(db.pool()).await?;
     }
-    // An ACP journal line carries neither a `type` nor a `method`, so both of
-    // the guards above read `None` and every one of them used to stop here.
-    // The one that matters is the worker's own: it goes and asks Kimi what the
-    // plan has left, because ACP has no way to say.
-    let asked = value.get("acp").and_then(|v| v.as_str()) == Some("Allowed");
-    if !asked
-        && !matches!(claude, Some("rate_limit_event" | "error"))
+    if !matches!(claude, Some("rate_limit_event" | "error"))
         && !matches!(
             codex,
             Some("account/rateLimits/updated" | "error" | "turn/completed")
@@ -764,7 +795,7 @@ pub(crate) async fn record_limits(
         } = event
         {
             sqlx::query("INSERT INTO agent_account_limits(account_id,scope,status,resets_at,used_percent) SELECT agent_account_id,$2,$3,$4,$5 FROM sessions WHERE id=$1 AND agent_account_id IS NOT NULL ON CONFLICT(account_id,scope) DO UPDATE SET status=excluded.status,resets_at=excluded.resets_at,used_percent=excluded.used_percent,observed_at=now()")
-                .bind(id.as_str()).bind(window).bind(status).bind(resets_at).bind(used_percent.map(i16::from)).execute(db.pool()).await?;
+                .bind(id.as_str()).bind(window).bind(status).bind(resets_at).bind(used_percent.map(f64::from)).execute(db.pool()).await?;
         }
     }
     Ok(())

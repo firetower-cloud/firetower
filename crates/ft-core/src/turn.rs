@@ -463,7 +463,7 @@ pub enum TurnEvent {
         /// Codex does, and a window is a far more useful thing to see as a
         /// proportion than as a word.
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        used_percent: Option<u8>,
+        used_percent: Option<f32>,
     },
 
     TaskStarted {

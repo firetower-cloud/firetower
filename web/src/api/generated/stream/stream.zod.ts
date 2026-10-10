@@ -67,8 +67,6 @@ export const streamResponseThreeEventsItemOneThreeUsageTwoOutputTokensMin = 0;
 
 export const streamResponseThreeEventsItemOneThreeUsageTwoThinkingTokensMin = 0;
 
-export const streamResponseThreeEventsItemOneOnethreeUsedPercentMin = 0;
-
 export const streamResponseThreeEventsItemTwoLineNoMin = 0;
 
 
@@ -233,7 +231,7 @@ export const StreamResponse = zod.union([zod.object({
   "resetsAt": zod.int().nullish().describe('Unix seconds.'),
   "status": zod.string().describe('`allowed`, and whatever else turns up.'),
   "type": zod.enum(['Limited']),
-  "usedPercent": zod.int().min(streamResponseThreeEventsItemOneOnethreeUsedPercentMin).nullish().describe('How much of the window is gone, when the agent says.\n\nClaude Code does not, which is why a bar was not worth drawing.\nCodex does, and a window is a far more useful thing to see as a\nproportion than as a word.'),
+  "usedPercent": zod.number().nullish().describe('How much of the window is gone, when the agent says.\n\nClaude Code does not, which is why a bar was not worth drawing.\nCodex does, and a window is a far more useful thing to see as a\nproportion than as a word.'),
   "window": zod.string().describe('`five_hour`, and whatever else turns up.')
 }).describe('What the account\'s own limits say.\n\nArrives on its own schedule rather than with a turn: a window, whether\nwe are inside it, and when it starts again. A proportion when the agent\nsends one, and nothing drawn from it when it does not — Claude Code\nsays none, which is why this is optional rather than a number somebody\nhas to trust.'),zod.object({
   "agent": zod.string().nullish(),

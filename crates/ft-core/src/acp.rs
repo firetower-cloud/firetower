@@ -28,13 +28,6 @@ pub enum Record {
     /// anybody's conversation: the worker asks, reads the answer and journals
     /// this instead, so the transcript stays what the person actually said.
     Metered { input: u64, output: u64 },
-    /// What the account's plan has left, asked of the provider directly.
-    ///
-    /// ACP has no notion of a quota, and Kimi's `/usage` prints its "Plan
-    /// usage" box only in the terminal — over the wire the same command says
-    /// nothing about it. So the worker goes and asks, and writes the answer
-    /// here, where it becomes `TurnEvent::Limited` like every other agent's.
-    Allowed { windows: Vec<Window> },
 }
 
 /// One quota window, on its way to `agent_account_limits`.
@@ -398,21 +391,6 @@ impl AcpNormaliser {
             // Held until the turn it belongs to closes, which is the next
             // record the worker writes.
             Record::Metered { input, output } => self.metered = Some((input, output)),
-            // Not about a turn at all: it is the account's standing position,
-            // which is why it is reported whether or not one is open.
-            Record::Allowed { windows } => {
-                for w in windows {
-                    events.push(TurnEvent::Limited {
-                        window: w.window,
-                        // Asking at all means the provider answered, and an
-                        // answer with a number in it is an account still being
-                        // served. Refusal arrives as a failed turn instead.
-                        status: "allowed".into(),
-                        resets_at: w.resets_at,
-                        used_percent: Some(w.used_percent),
-                    });
-                }
-            }
             Record::Started { epoch } => {
                 self.finish(
                     TurnStatus::Interrupted,

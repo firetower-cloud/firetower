@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { destinations, mayMove, pathSlug, where } from "@/src/filing";
+import { destinations, mayMove, pathSlug, untilText, where } from "@/src/filing";
 
 const me = { slug: "kevin", role: "member" };
 const admin = { slug: "root", role: "admin" };
@@ -113,5 +113,34 @@ describe("the label a name becomes", () => {
   it("never gives back nothing", () => {
     expect(pathSlug("")).toBe("untitled");
     expect(pathSlug("!!!")).toBe("untitled");
+  });
+});
+
+describe("untilText", () => {
+  const m = 60_000;
+  const h = 60 * m;
+  const d = 24 * h;
+
+  it("says days once there are days, rather than counting hours forever", () => {
+    // The one that prompted this: a monthly quota a fortnight out, which
+    // was being shown as "364 h 15 m".
+    expect(untilText(364 * h + 15 * m)).toBe("15d 4h 15m");
+    expect(untilText(2 * d)).toBe("2d");
+  });
+
+  it("leaves out the parts that are zero", () => {
+    expect(untilText(15 * d + 4 * h)).toBe("15d 4h");
+    expect(untilText(2 * d + 5 * m)).toBe("2d 5m");
+    expect(untilText(3 * h)).toBe("3h");
+  });
+
+  it("still reads normally below a day", () => {
+    expect(untilText(4 * h + 15 * m)).toBe("4h 15m");
+    expect(untilText(45 * m)).toBe("45m");
+  });
+
+  it("does not round a few seconds down to nothing at all", () => {
+    expect(untilText(20_000)).toBe("under a minute");
+    expect(untilText(0)).toBe("under a minute");
   });
 });

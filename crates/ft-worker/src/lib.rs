@@ -130,6 +130,11 @@ const REPORT_EVERY: std::time::Duration = std::time::Duration::from_secs(5);
 /// it well before the worktree can be reclaimed, and it is a hash of a small
 /// file rather than anything that costs.
 const CREDENTIALS_EVERY: std::time::Duration = std::time::Duration::from_secs(60);
+/// How often to ask a provider what an account's plan has left.
+///
+/// Somebody else's API on a timer of our choosing, so the timer is slow: a
+/// five-hour window does not move enough in ten minutes to be worth a request.
+const LIMITS_EVERY: std::time::Duration = std::time::Duration::from_secs(600);
 
 const OUTBOUND: usize = 1024;
 
@@ -366,6 +371,7 @@ impl Worker {
             let mut creds: std::collections::HashMap<String, String> =
                 std::collections::HashMap::new();
             let mut last_creds = std::time::Instant::now() - CREDENTIALS_EVERY;
+            let mut last_limits = std::time::Instant::now() - LIMITS_EVERY;
 
             loop {
                 tokio::select! {
@@ -400,6 +406,13 @@ impl Worker {
                         if last_creds.elapsed() >= CREDENTIALS_EVERY {
                             last_creds = std::time::Instant::now();
                             self.return_rotated_credentials(&out, &mut creds).await;
+                        }
+
+                        // What each plan has left. Nothing waits on this — not
+                        // a turn, and not this loop either.
+                        if last_limits.elapsed() >= LIMITS_EVERY {
+                            last_limits = std::time::Instant::now();
+                            self.ask_about_limits(&out).await;
                         }
                     }
 
@@ -2775,6 +2788,55 @@ You are in the directory that holds them, not inside one of them.              P
     /// has and drops the rest — none of which is a reason to disturb a session.
     /// The interface draws a workspace with no reading as one with no meters,
     /// which is honest: nothing is being measured there.
+    /// Ask each live session's provider what its plan has left.
+    ///
+    /// Off the turn's path on purpose. A quota is a standing fact about an
+    /// account, and this used to be asked as a turn was closing — so a turn
+    /// finished its work and then sat waiting on somebody else's API before it
+    /// could be reported done. That is our bookkeeping making an agent look
+    /// slow, which is never a trade worth making.
+    ///
+    /// Off *this* loop's path too. The request is spawned rather than awaited,
+    /// because the same tick forwards every agent's events every second and an
+    /// eight-second timeout here would stall all of them. Nothing downstream
+    /// waits for the answer: it arrives as a message whenever it arrives, or
+    /// never, and the page shows the previous reading until it does.
+    ///
+    /// Every failure is silence. No network, a refused token, a body in a
+    /// shape nobody expected, a provider that has no such endpoint — each ends
+    /// as no message sent, and the limits already on the page stay as they are.
+    async fn ask_about_limits(&self, out: &Out) {
+        let Ok(places) = self.store.live_workspaces().await else {
+            return;
+        };
+        for (session_id, path) in places {
+            let home = crate::agentd::dir_for(std::path::Path::new(&path))
+                .join(format!("agent-home-{session_id}"));
+            let out = out.clone();
+            tokio::spawn(async move {
+                let Some(windows) = crate::kimi::allowance(&home).await else {
+                    return;
+                };
+                if windows.is_empty() {
+                    return;
+                }
+                let _ = out
+                    .send(ToServer::AgentLimits {
+                        session_id: session_id.to_string(),
+                        windows: windows
+                            .into_iter()
+                            .map(|w| ft_proto::LimitWindow {
+                                window: w.window,
+                                used_percent: w.used_percent,
+                                resets_at: w.resets_at,
+                            })
+                            .collect(),
+                    })
+                    .await;
+            });
+        }
+    }
+
     /// Hand back any credential an agent has rewritten since we lent it one.
     ///
     /// Kimi issues a new refresh token every time it spends one and writes it

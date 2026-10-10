@@ -31,6 +31,7 @@ import { useListColleagues, useListTeams } from "@/src/api/generated/access/acce
 import type { Account, ByModel, Direction, Group, Limit, Sort, Totals } from "@/src/api/generated/model";
 import { Choose, Icon, PageHead, useAnchor } from "@/components/ui";
 import { AGENT_SHORT } from "@/components/AgentMark";
+import { untilText } from "@/src/filing";
 
 /* ── the vocabulary ───────────────────────────────────────────────────── */
 
@@ -179,6 +180,16 @@ const money = (n: number) =>
   `$${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 const count = (n: number) => n.toLocaleString("en-US");
+
+// A share of a quota, to a tenth where there is one. `1%` rather than `1.0%`,
+// because a decimal that is always zero is a decimal nobody reads — but `1.5%`
+// kept, because at the start of a cycle that is the only digit moving. Only
+// Kimi reports a fraction at all; Codex sends whole per cent and lands here
+// looking exactly as it did before.
+const percent = (n: number) => {
+  const tenth = Math.round(n * 10) / 10;
+  return `${Number.isInteger(tenth) ? tenth : tenth.toFixed(1)}%`;
+};
 const plural = (n: number, one: string, many = `${one}s`) =>
   `${count(n)} ${n === 1 ? one : many}`;
 
@@ -902,9 +913,7 @@ function resets(at?: number | null) {
   if (!at) return null;
   const left = at * 1000 - Date.now();
   if (left <= 0) return "due to reset";
-  const mins = Math.round(left / 60000);
-  if (mins < 60) return `resets in ${mins} m`;
-  return `resets in ${Math.floor(mins / 60)} h ${String(mins % 60).padStart(2, "0")} m`;
+  return `resets in ${untilText(left)}`;
 }
 
 function Gauge({ account, limit }: { account: Account; limit: Limit }) {
@@ -923,7 +932,7 @@ function Gauge({ account, limit }: { account: Account; limit: Limit }) {
         <span className="truncate text-meta text-mute">{folder(account.path)}</span>
         <span className="flex-1" />
         <span className={`whitespace-nowrap text-meta ${shade.text} ${pct != null ? "tabular-nums" : ""}`}>
-          {pct != null ? `${pct}% used` : capitalise(limit.status)}
+          {pct != null ? `${percent(pct)} used` : capitalise(limit.status)}
         </span>
       </div>
 

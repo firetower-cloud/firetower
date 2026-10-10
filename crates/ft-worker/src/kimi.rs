@@ -464,7 +464,7 @@ pub async fn allowance(home: &Path) -> Option<Vec<Allowance>> {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Allowance {
     pub window: String,
-    pub used_percent: u8,
+    pub used_percent: f32,
     /// Unix seconds, where Kimi gave a reset time.
     pub resets_at: Option<i64>,
 }
@@ -489,7 +489,10 @@ fn windows(body: &Value) -> Vec<Allowance> {
         let ratio = entry["used_ratio"].as_f64()?;
         Some(Allowance {
             window: (*ours).to_string(),
-            used_percent: (ratio * 100.0).round().clamp(0.0, 100.0) as u8,
+            // To a tenth, which is as far as the number means anything: the
+            // provider recomputes it on its own schedule and a second decimal
+            // would be precision we invented.
+            used_percent: ((ratio * 1000.0).round() / 10.0).clamp(0.0, 100.0) as f32,
             resets_at: entry["reset_time"]
                 .as_str()
                 .and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok())
@@ -521,10 +524,11 @@ mod quota_tests {
         let named: Vec<_> = found.iter().map(|w| w.window.as_str()).collect();
         assert_eq!(named, ["five_hour", "seven_day", "month", "month_code"]);
 
-        // Ratios of one become whole per cent, which is what every other
-        // agent's limits are already stored as.
+        // Ratios of one become per cent, to a tenth. The decimal is the whole
+        // point: 1.4% read as 1% is the difference between a quiet month and
+        // twice the burn rate, and Kimi is the only provider that reports it.
         let pct: Vec<_> = found.iter().map(|w| w.used_percent).collect();
-        assert_eq!(pct, [0, 1, 50, 100], "0.014 rounds to 1, 0.996 to 100");
+        assert_eq!(pct, [0.0, 1.4, 50.0, 99.6], "0.014 is 1.4%, not 1%");
 
         assert_eq!(found[0].resets_at, Some(1_791_587_820));
         assert_eq!(found[1].resets_at, Some(1_793_028_180));

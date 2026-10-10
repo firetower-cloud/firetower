@@ -1003,6 +1003,18 @@ pub enum ToServer {
         /// The same bundle shape a sign-in produces.
         bundle: String,
     },
+    /// What an account's plan has left, as the provider last answered.
+    ///
+    /// ACP carries no quota, so the worker asks the provider on its own timer
+    /// and reports what it hears. Off the turn's path deliberately: this is a
+    /// standing fact about an account, and a turn that waited on somebody
+    /// else's API to finish would be our bookkeeping making an agent look slow.
+    ///
+    /// Keyed by session because the worker is never told which account it runs.
+    AgentLimits {
+        session_id: String,
+        windows: Vec<LimitWindow>,
+    },
     /// The answer to [`ToWorker::ProbeRemote`].
     RemoteProbed {
         req: ReqId,
@@ -1018,6 +1030,18 @@ pub enum ToServer {
 }
 
 /// A device code somebody has to approve before Codex is signed in.
+/// One quota window of a plan, on its way to `agent_account_limits`.
+///
+/// Per cent to a tenth, and unix seconds: a provider that reports a ratio and
+/// an ISO timestamp is converted before it gets here rather than after, so
+/// every reader downstream sees one shape whoever it came from.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LimitWindow {
+    pub window: String,
+    pub used_percent: f32,
+    pub resets_at: Option<i64>,
+}
+
 ///
 /// The two things worth showing and nothing else: this is what a person reads
 /// off a screen and types somewhere else.

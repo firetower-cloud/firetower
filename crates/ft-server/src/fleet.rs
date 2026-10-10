@@ -2451,6 +2451,13 @@ impl Fleet {
                                 None => tracing::debug!("a Codex sign-in finished after its request gave up"),
                             }
                         }
+                        Ok(ToServer::AgentLimits { session_id, windows }) => {
+                            // Asked for rather than overheard, and from here on
+                            // indistinguishable from a limit an agent offered.
+                            if let Err(e) = crate::api::accounts::note_limits(&db, &session_id, &windows).await {
+                                tracing::debug!(session = %session_id, "noting what a plan has left: {e:#}");
+                            }
+                        }
                         Ok(ToServer::AgentCredentialRotated { session_id, bundle }) => {
                             // The agent spent the token we lent it and was
                             // given another. Keep it, or the next session is
