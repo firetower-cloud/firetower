@@ -407,19 +407,16 @@ export function Consumption() {
                 the numbers are short. These turns ran and are counted as
                 turns; what they spent is the thing nobody told us.
 
-                Naming the agent here was a mistake worth not repeating: it
-                read "Kimi and other agents reached over ACP report nothing
-                about what they spent", which was true for two days and then
-                was not. Which agents report is a moving fact, and a sentence
-                that states it goes stale facing the person it misleads. */}
+                No agent is named: which of them report is a moving fact, and
+                a sentence that states one goes stale facing the person it
+                misleads. */}
             {t && t.unreportedTurns > 0 && (
               <p className="mt-5 max-w-[68ch] text-ui text-mute">
                 <span className="text-dim">
                   {plural(t.unreportedTurns, "turn")} above {t.unreportedTurns === 1 ? "has" : "have"} no
                   tokens counted.
                 </span>{" "}
-                Their agent reported none — some do not, and some did not at the time. They are in
-                the turn count and not in the totals.
+                Their agent reported none, so they are in the turn count and not in the totals.
               </p>
             )}
           </>
